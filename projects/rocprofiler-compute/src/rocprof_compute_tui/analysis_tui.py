@@ -25,8 +25,10 @@
 
 import argparse
 import copy
+from collections import OrderedDict
+from collections.abc import Hashable
 from pathlib import Path
-from typing import Any, Hashable, Optional, OrderedDict
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -114,7 +116,7 @@ class tui_analysis(OmniAnalyze_Base):
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
         # Load system info and configure
-        sys_info = file_io.load_sys_info(f"{self.path}/sysinfo.csv")
+        sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
         arch = sys_info.iloc[0]["gpu_arch"]
 
         self.generate_configs(

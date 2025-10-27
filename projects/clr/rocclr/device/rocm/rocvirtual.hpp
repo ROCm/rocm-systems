@@ -579,8 +579,8 @@ class VirtualGPU : public device::VirtualDevice {
   amd::Command* command_;   //!< Current command
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;  //!< Active queue associated with a vgpu
-  hsa_barrier_and_packet_t barrier_packet_;
-  hsa_amd_barrier_value_packet_t barrier_value_packet_;
+  hsa_barrier_and_packet_t barrier_packet_ {};
+  hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 
   uint32_t dispatch_id_;  //!< This variable must be updated atomically.
   Device& roc_device_;    //!< roc device object
@@ -621,7 +621,7 @@ class VirtualGPU : public device::VirtualDevice {
                                        //!< but ROC profiler expects D2H or H2D detection
   int fence_state_;                    //!< Fence scope
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
-  bool fence_dirty_;                   //!< Fence modified flag
+  std::atomic<bool> fence_dirty_;      //!< Fence modified flag
 
   std::atomic<uint> lastUsedSdmaEngineMask_;  //!< Last Used SDMA Engine mask
   uint64_t last_write_index_ = 0;             //!< The last HW queue write index for any packet

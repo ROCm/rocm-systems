@@ -252,3 +252,26 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Negative_Parameters") {
                   make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice);
   }
 }
+
+TEST_CASE("Unit_hipDrvMemcpy3DAsync_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  constexpr hipExtent kExtent{128 * sizeof(int), 128, 8};
+
+  LinearAllocGuard3D<int> src_alloc(kExtent);
+  LinearAllocGuard3D<int> dst_alloc(kExtent);
+
+  auto memcpy_params =
+      GetDrvMemcpy3DParms(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
+                          make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipDrvMemcpy3DAsync(&memcpy_params, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+}

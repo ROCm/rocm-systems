@@ -30,11 +30,14 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <optional>
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/callback_tracing.h>
 #    include <rocprofiler-sdk/cxx/name_info.hpp>
 #endif
+#include <initializer_list>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdint.h>
@@ -54,6 +57,8 @@ struct process
     pid_t       pid;  // < Unique
     pid_t       ppid;
     std::string command;
+    uint32_t    start;
+    uint32_t    end;
 };
 
 template <typename Category>
@@ -166,7 +171,7 @@ struct kernel_symbol_less
         const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& rhs)
         const
     {
-        return lhs.kernel_object < rhs.kernel_object;
+        return lhs.kernel_id < rhs.kernel_id;
     }
 };
 #endif
@@ -195,6 +200,11 @@ struct metadata_registry
     std::vector<uint64_t>       get_stream_list() const;
     std::vector<std::string_view> get_string_list() const;
 
+    bool save_to_file(const std::string&                         filepath,
+                      const std::vector<std::shared_ptr<agent>>& _agents) const;
+    bool load_from_file(const std::string&                   filepath,
+                        std::vector<std::shared_ptr<agent>>& _agents);
+
 #if ROCPROFSYS_USE_ROCM > 0
     void add_code_object(
         const rocprofiler_callback_tracing_code_object_load_data_t& code_object);
@@ -215,7 +225,7 @@ struct metadata_registry
 
 private:
     friend class cache_manager;
-    metadata_registry() = default;
+    metadata_registry();
     common::synchronized<info::process> m_process;
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>
@@ -240,6 +250,14 @@ private:
     rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
+
+    using callback_rename_map_t =
+        std::map<rocprofiler_tracing_operation_t, std::string_view>;
+
+    void overwrite_callback_names(
+        std::initializer_list<
+            std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
+            rename_table);
 #endif
 };
 

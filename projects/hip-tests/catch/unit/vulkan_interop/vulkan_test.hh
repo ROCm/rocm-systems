@@ -300,14 +300,16 @@ VulkanTest::MappedBuffer<T> VulkanTest::CreateMappedStorage(uint32_t count,
   }
 
   VkExportMemoryAllocateInfoKHR vulkan_export_memory_allocate_info = {};
+#ifdef _WIN64
+  WindowsSecurityAttributes winSecurityAttributes;
+  VkExportMemoryWin32HandleInfoKHR vulkanExportMemoryWin32HandleInfoKHR = {};
+#endif
+
   if (external) {
     vulkan_export_memory_allocate_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR;
     vulkan_export_memory_allocate_info.handleTypes = _mem_handle_type;
 
 #ifdef _WIN64
-    WindowsSecurityAttributes winSecurityAttributes;
-
-    VkExportMemoryWin32HandleInfoKHR vulkanExportMemoryWin32HandleInfoKHR = {};
     vulkanExportMemoryWin32HandleInfoKHR.sType =
         VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
     vulkanExportMemoryWin32HandleInfoKHR.pNext = NULL;
@@ -321,6 +323,7 @@ VulkanTest::MappedBuffer<T> VulkanTest::CreateMappedStorage(uint32_t count,
         ? &vulkanExportMemoryWin32HandleInfoKHR
         : NULL;
 #endif
+
     allocate_info.pNext = &vulkan_export_memory_allocate_info;
   }
 

@@ -28,11 +28,10 @@ THE SOFTWARE.
  * string and compile using the api mentioned above.
  */
 
-#include <hip/hiprtc.h>
-#include <hip/hip_runtime.h>
-#include <hip/math_functions.h>
 #include <hip_test_common.hh>
 #include "hip_test_rtc.hh"
+#include <hip/hiprtc.h>
+#include <hip/math_functions.h>
 
 static constexpr auto mathFuntn_string{
     R"(

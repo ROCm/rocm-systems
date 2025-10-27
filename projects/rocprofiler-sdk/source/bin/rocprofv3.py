@@ -233,7 +233,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
 For attachment profiling of running processes:
 
     $ rocprofv3 --attach <PID> --hip-trace --kernel-trace
-    $ rocprofv3 --attach 1234 --attach-duration 10 --hsa-trace
+    $ rocprofv3 --attach 1234 --attach-duration-msec 10 --hsa-trace
 
 """
 
@@ -795,6 +795,13 @@ For attachment profiling of running processes:
     att_options.add_argument(
         "--att-simd-select",
         help="Bitmask of SIMDs to enable (gfx9) or SIMD ID (gfx10+). Default 0xF",
+        default=None,
+        type=str,
+    )
+
+    att_options.add_argument(
+        "--att-consecutive-kernels",
+        help="Consecutive kernels to profile with ATT. Default 0",
         default=None,
         type=str,
     )
@@ -1633,6 +1640,12 @@ def run(app_args, args, **kwargs):
             update_env(
                 "ROCPROF_ATT_PARAM_SIMD_SELECT",
                 int_auto(args.att_simd_select),
+                overwrite=True,
+            )
+        if args.att_consecutive_kernels:
+            update_env(
+                "ROCPROF_ATT_CONSECUTIVE_KERNELS",
+                int_auto(args.att_consecutive_kernels),
                 overwrite=True,
             )
         if args.att_serialize_all:

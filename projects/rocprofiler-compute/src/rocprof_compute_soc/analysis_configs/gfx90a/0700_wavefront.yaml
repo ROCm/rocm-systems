@@ -2,63 +2,6 @@
 Panel Config:
   id: 700
   title: Wavefront
-  metrics_description:
-    Grid Size: The total number of work-items (or, threads) launched as a part of
-      the kernel dispatch. In HIP, this is equivalent to the total grid size multiplied
-      by the total workgroup (or, block) size.
-    Workgroup Size: The total number of work-items (or, threads) in each workgroup
-      (or, block) launched as part of the kernel dispatch. In HIP, this is equivalent
-      to the total block size.
-    Total Wavefronts: "The total number of wavefronts launched as part of the kernel\
-      \ dispatch. On AMD Instinct\u2122 CDNA\u2122 accelerators and GCN\u2122 GPUs,\
-      \ the wavefront size is always 64 work-items. Thus, the total number of wavefronts\
-      \ should be equivalent to the ceiling of grid size divided by 64."
-    Saved Wavefronts: The total number of wavefronts saved at a context-save.
-    Restored Wavefronts: The total number of wavefronts restored from a context-save.
-    VGPRs: 'The number of architected vector general-purpose registers allocated for
-      the kernel, see VALU. Note: this may not exactly match the number of VGPRs requested
-      by the compiler due to allocation granularity.'
-    AGPRs: 'The number of accumulation vector general-purpose registers allocated
-      for the kernel, see AGPRs. Note: this may not exactly match the number of AGPRs
-      requested by the compiler due to allocation granularity.'
-    SGPRs: 'The number of scalar general-purpose registers allocated for the kernel,
-      see SALU. Note: this may not exactly match the number of SGPRs requested by
-      the compiler due to allocation granularity.'
-    LDS Allocation: 'The number of bytes of LDS memory (or, shared memory) allocated
-      for this kernel. Note: This may also be larger than what was requested at compile
-      time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
-    Scratch Allocation: The number of bytes of scratch memory requested per work-item
-      for this kernel. Scratch memory is used for stack memory on the accelerator,
-      as well as for register spills and restores.
-    Kernel Time: The total duration of the executed kernel.
-    Kernel Time (Cycles): The total duration of the executed kernel in cycles.
-    Instructions per wavefront: The average number of instructions (of all types)
-      executed per wavefront. This is averaged over all wavefronts in a kernel dispatch.
-    Wave Cycles: The number of cycles a wavefront in the kernel dispatch spent resident
-      on a compute unit per normalization unit. This is averaged over all wavefronts
-      in a kernel dispatch.
-    Dependency Wait Cycles: The number of cycles a wavefront in the kernel dispatch
-      spent resident on a compute unit per normalization unit. This is averaged over
-      all wavefronts in a kernel dispatch.
-    Issue Wait Cycles: The number of cycles a wavefront in the kernel dispatch was
-      unable to issue an instruction for any reason (e.g., execution pipe back-pressure,
-      arbitration loss, etc.) per normalization unit. This counter is incremented
-      at every cycle by all wavefronts on a CU unable to issue an instruction. As
-      such, it is most useful to get a sense of how waves were spending their time,
-      rather than identification of a precise limiter because another wave could be
-      actively executing while a wave is issue stalled. The sum of this metric, Dependency
-      Wait Cycles and Active Cycles should be equal to the total Wave Cycles metric.
-    Active Cycles: The average number of cycles a wavefront in the kernel dispatch
-      was actively executing instructions per normalization unit. This measurement
-      is made on a per-wavefront basis, and may include cycles that another wavefront
-      spent actively executing (on another execution unit, for example) or was stalled.
-      As such, it is most useful to get a sense of how waves were spending their time,
-      rather than identification of a precise limiter. The sum of this metric, Issue
-      Wait Cycles and Active Wait Cycles should be equal to the total Wave Cycles
-      metric.
-    Wavefront Occupancy: 'The time-averaged number of wavefronts resident on the accelerator
-      over the lifetime of the kernel. Note: this metric may be inaccurate for short-running
-      kernels (less than 1ms).'
   data source:
   - metric_table:
       id: 701
@@ -171,3 +114,66 @@ Panel Config:
           max: MAX((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
           unit: Wavefronts
           coll_level: SQ_LEVEL_WAVES
+  metrics_description:
+    Grid Size: The total number of work-items (or, threads) launched as a part of
+      the kernel dispatch. In HIP, this is equivalent to the total grid size multiplied
+      by the total workgroup (or, block) size.
+    Workgroup Size: The total number of work-items (or, threads) in each workgroup
+      (or, block) launched as part of the kernel dispatch. In HIP, this is equivalent
+      to the total block size.
+    Total Wavefronts: |-
+      The total number of wavefronts launched as part of the kernel dispatch.
+      On AMD Instinct\u2122 CDNA\u2122 accelerators and GCN\u2122 GPUs, the wavefront
+      size is always 64 work-items. Thus, the total number of wavefronts should
+      be equivalent to the ceiling of grid size divided by 64.
+    Saved Wavefronts: The total number of wavefronts saved at a context-save.
+    Restored Wavefronts: The total number of wavefronts restored from a context-save.
+    VGPRs: |-
+      The number of architected vector general-purpose registers allocated
+      for the kernel, see VALU. Note: this may not exactly match the number of VGPRs
+      requested by the compiler due to allocation granularity.
+    AGPRs: |-
+      The number of accumulation vector general-purpose registers allocated
+      for the kernel, see AGPRs. Note: this may not exactly match the number of
+      AGPRs requested by the compiler due to allocation granularity.
+    SGPRs: |-
+      The number of scalar general-purpose registers allocated for the kernel,
+      see SALU. Note: this may not exactly match the number of SGPRs requested by
+      the compiler due to allocation granularity.
+    LDS Allocation: |-
+      The number of bytes of LDS memory (or, shared memory) allocated for
+      this kernel. Note: This may also be larger than what was requested at compile
+      time due to both allocation granularity and dynamic per-dispatch LDS allocations.
+    Scratch Allocation: The number of bytes of scratch memory requested per work-item
+      for this kernel. Scratch memory is used for stack memory on the accelerator,
+      as well as for register spills and restores.
+    Kernel Time: The total duration of the executed kernel.
+    Kernel Time (Cycles): The total duration of the executed kernel in cycles.
+    Instructions per wavefront: The average number of instructions (of all types)
+      executed per wavefront. This is averaged over all wavefronts in a kernel dispatch.
+    Wave Cycles: The number of cycles a wavefront in the kernel dispatch spent resident
+      on a compute unit per normalization unit. This is averaged over all wavefronts
+      in a kernel dispatch.
+    Dependency Wait Cycles: The number of cycles a wavefront in the kernel dispatch
+      spent resident on a compute unit per normalization unit. This is averaged over
+      all wavefronts in a kernel dispatch.
+    Issue Wait Cycles: The number of cycles a wavefront in the kernel dispatch was
+      unable to issue an instruction for any reason (e.g., execution pipe back-pressure,
+      arbitration loss, etc.) per normalization unit. This counter is incremented
+      at every cycle by all wavefronts on a CU unable to issue an instruction. As
+      such, it is most useful to get a sense of how waves were spending their time,
+      rather than identification of a precise limiter because another wave could be
+      actively executing while a wave is issue stalled. The sum of this metric, Dependency
+      Wait Cycles and Active Cycles should be equal to the total Wave Cycles metric.
+    Active Cycles: The average number of cycles a wavefront in the kernel dispatch
+      was actively executing instructions per normalization unit. This measurement
+      is made on a per-wavefront basis, and may include cycles that another wavefront
+      spent actively executing (on another execution unit, for example) or was stalled.
+      As such, it is most useful to get a sense of how waves were spending their time,
+      rather than identification of a precise limiter. The sum of this metric, Issue
+      Wait Cycles and Active Wait Cycles should be equal to the total Wave Cycles
+      metric.
+    Wavefront Occupancy: |-
+      The time-averaged number of wavefronts resident on the accelerator over
+      the lifetime of the kernel. Note: this metric may be inaccurate for short-running
+      kernels (less than 1ms).

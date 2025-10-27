@@ -29,6 +29,8 @@ concurrency:
 
 env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+  ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
 
 jobs:
   build-docs:
@@ -71,8 +73,27 @@ jobs:
           ../scripts/update-docs.sh
 
   build-docs-from-source:
-    runs-on: rocprofiler-mi3xx
+    runs-on: linux-mi325-1gpu-ossci-rocm
+    container:
+      image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      options: --privileged
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      CORE_EXT_RUNNER: mi325
+      GPU_RUNNER: mi325
     steps:
+      - name: Install Latest Nightly ROCm
+        shell: bash
+        working-directory: /tmp
+        run: |
+          tar -xf ${{ env.ROCM_PATH }}-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
       - name: Install os essentials
         timeout-minutes: 10
         shell: bash
@@ -82,6 +103,7 @@ jobs:
           apt-add-repository ppa:git-core/ppa
           apt-get update
           apt-get install -y git
+          echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
       - name: Checkout
         uses: actions/checkout@v4
         with:

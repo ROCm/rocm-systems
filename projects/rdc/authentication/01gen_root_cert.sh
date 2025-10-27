@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 # This script should be called only once to generate a root
 # certificate
 
