@@ -59,7 +59,8 @@ To enable capturing of OMPT callbacks, the following parameter settings are requ
   ROCPROFSYS_USE_ROCM=ON
   ROCPROFSYS_USE_OMPT=ON
 
-These settings can be set as environment variables using ``export`` or can be saved in a configuration file. Here is an example of a complete configuration file, ``rocprofsys.cfg``:
+These settings can be set as environment variables using ``export`` or can be saved in a `configuration file <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/configuring-runtime-options.rst#use-the-configuration-file>`_.
+Below is an example of a a complete configuration file that can be used to instrument Fortran OpenMP programs:
 
 .. code-block:: shell
 
@@ -70,14 +71,6 @@ These settings can be set as environment variables using ``export`` or can be sa
   ROCPROFSYS_OUTPUT_PREFIX=foo/
   ROCPROFSYS_FILE_OUTPUT=ON
   ROCPROFSYS_TIME_OUTPUT=OFF
-
-To specify the configuration file, use the `ROCPROFSYS_CONFIG_FILE` setting:
-
-.. code-block:: shell
-
-  ROCPROFSYS_CONFIG_FILE=/path/to/rocprofsys.cfg
-
-This setting defines the location of the ROCm Systems Profiler configuration file.
 
 Instrumenting and running a Fortran program
 ===================================
