@@ -24,6 +24,7 @@ import json
 import logging
 import multiprocessing
 import os
+import signal
 import sys
 import threading
 import time
@@ -3544,15 +3545,42 @@ class AMDSMICommands():
             threads.append(x)
             x.start()
 
-        while True:
-            user_input = input()
-            if user_input == 'q':
-                print("Escape Sequence Detected; Exiting")
-                self.stop = True
-                break
+        previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+        system_exit_exc = None
+        signal.signal(signal.SIGTERM, self._event_sigterm_handler)
+        try:
+            while True:
+                try:
+                    user_input = input()
+                except EOFError:
+                    self.stop = True
+                    break
+                except KeyboardInterrupt:
+                    self.stop = True
+                    break
 
-        for thread in threads:
-            thread.join()
+                if self.stop:
+                    break
+
+                if user_input == 'q':
+                    print("Escape Sequence Detected; Exiting")
+                    self.stop = True
+                    break
+        except SystemExit as exc:
+            system_exit_exc = exc
+        finally:
+            self.stop = True
+            for thread in threads:
+                thread.join()
+            signal.signal(signal.SIGTERM, previous_sigterm_handler)
+
+        if system_exit_exc is not None:
+            raise system_exit_exc
+
+
+    def _event_sigterm_handler(self, signum, frame):
+        self.stop = True
+        raise SystemExit(128 + signum)
 
 
     def topology(self, args, multiple_devices=False, gpu=None, access=None,
