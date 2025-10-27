@@ -28,6 +28,7 @@
 #include "os_driver.h"
 
 #include <cstddef>
+#include <unordered_set>
 #include <vector>
 
 namespace amd::dbgapi
@@ -47,7 +48,9 @@ public:
   {
     amd_dbgapi_segment_address_t base;
     amd_dbgapi_segment_address_t limit;
-    const address_space_t &address_space;
+    const address_space_t &encoding;
+    const std::unordered_set<amd_dbgapi_address_space_id_t,
+                             hash<amd_dbgapi_address_space_id_t>> from;
   };
 
 private:
