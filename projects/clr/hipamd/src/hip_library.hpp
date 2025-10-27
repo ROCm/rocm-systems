@@ -77,10 +77,10 @@ class LibraryContainer {
   void Register(std::string name, int device, hipKernel_t k);
 
   // Get Global Varaible ptr
-  hipError_t GVaraible(const std::string& name, void** ptr, size_t* size);
+  hipError_t GVariable(const std::string& name, void** ptr, size_t* size);
 
   // Get Managed Varaible ptr
-  hipError_t MVaraible(const std::string& name, void** ptr, size_t* size);
+  hipError_t MVariable(const std::string& name, void** ptr, size_t* size);
 
  private:
   LibraryContainer() = delete;

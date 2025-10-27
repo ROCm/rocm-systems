@@ -31,7 +31,9 @@ THE SOFTWARE.
 #include "utils/debug.hpp"
 
 namespace hip {
+// Declare the functions that will be used for managed variable alloc
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
+
 hipError_t ihipFree(void* ptr);
 
 void LibraryContainer::Register(std::string name, int device, hipKernel_t k) {
@@ -64,7 +66,7 @@ hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
   return ret;
 }
 
-hipError_t LibraryContainer::GVaraible(const std::string& name, void** ptr, size_t* size) {
+hipError_t LibraryContainer::GVariable(const std::string& name, void** ptr, size_t* size) {
   if (name.size() == 0) {
     return hipErrorInvalidValue;
   }
@@ -79,7 +81,7 @@ hipError_t LibraryContainer::GVaraible(const std::string& name, void** ptr, size
   return hipSuccess;
 }
 
-hipError_t LibraryContainer::MVaraible(const std::string& name, void** ptr, size_t* size) {
+hipError_t LibraryContainer::MVariable(const std::string& name, void** ptr, size_t* size) {
   if (name.size() == 0) {
     return hipErrorInvalidValue;
   }
@@ -195,8 +197,7 @@ hipError_t LibraryContainer::BuildIt() {
     void* devicePtr;      // corresponding device ptr;
     size_t size;
     if (!program->createGlobalVarObj(&memory, &devicePtr, &size, name.c_str())) {
-      // TODO fix this error code
-      return hipErrorInvalidValue;
+      return hipErrorInvalidResourceHandle;
     }
     amd::MemObjMap::AddMemObj(devicePtr, memory);
     LogPrintfInfo("Parsing globals name: %s memory object: %p device ptr: %p size: %lld",
@@ -212,7 +213,7 @@ hipError_t LibraryContainer::BuildIt() {
     void *devicePtr{nullptr}, *managedDevicePtr{nullptr};   // corresponding device ptr;
     size_t size = 0, managedSize = 0;
     if (!program->createGlobalVarObj(&memory, &devicePtr, &size, name.c_str())) {
-      return hipErrorInvalidValue;
+      return hipErrorInvalidResourceHandle;
     }
     amd::MemObjMap::AddMemObj(devicePtr, memory);
     LogPrintfInfo(
@@ -223,9 +224,10 @@ hipError_t LibraryContainer::BuildIt() {
 
     if (!program->createGlobalVarObj(&managedMemory, &managedDevicePtr, &managedSize,
                                      managedName.c_str())) {
-      return hipErrorInvalidValue;
+      return hipErrorInvalidResourceHandle;
     }
     amd::MemObjMap::AddMemObj(managedDevicePtr, managedMemory);
+
     LogPrintfInfo(
         "Allocating managed variable name: %s memory object: %p device ptr: %p size: %lld",
         managedName.c_str(), managedMemory, managedDevicePtr, managedSize);
@@ -234,16 +236,16 @@ hipError_t LibraryContainer::BuildIt() {
 
     // Allocate managed pointers
     void* managedPointer = nullptr;
-    assert(ihipMallocManaged(&managedPointer, managedSize, 0, 0) == hipSuccess);
+    IHIP_RETURN_ONFAIL(ihipMallocManaged(&managedPointer, managedSize, 0, 0));
 
     // Copy initial values
     hip::Stream* stream = hip::getNullStream();
-    assert(ihipMemcpy(managedPointer, managedDevicePtr, managedSize, hipMemcpyDeviceToDevice,
-                      *stream) == hipSuccess);
+    IHIP_RETURN_ONFAIL(ihipMemcpy(managedPointer, managedDevicePtr, managedSize,
+                                  hipMemcpyDeviceToDevice, *stream));
 
     // initialize ptr with the allocated Ptr
-    assert(ihipMemcpy(devicePtr, &managedPointer, size, hipMemcpyHostToDevice, *stream) ==
-           hipSuccess);
+    IHIP_RETURN_ONFAIL(
+        ihipMemcpy(devicePtr, &managedPointer, size, hipMemcpyHostToDevice, *stream));
 
     // Track it
     managedVariables_.emplace(
@@ -327,28 +329,38 @@ hipError_t hipLibraryGetKernel(hipKernel_t* kernel, hipLibrary_t library, const 
 }
 
 hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) {
+  HIP_INIT_API(hipLibraryGetGlobal, dptr, bytes, library, name);
   if ((dptr == nullptr && bytes == nullptr) || name == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
   if (library == nullptr) {
-    return hipErrorInvalidResourceHandle;
+    HIP_RETURN(hipErrorInvalidResourceHandle);
   }
 
   auto l = reinterpret_cast<hip::LibraryContainer*>(library);
   auto ret = l->BuildIt();
-  return l->GVaraible(std::string{name}, dptr, bytes);
+  if (ret != hipSuccess) {
+    HIP_RETURN(ret);
+  }
+  ret = l->GVariable(std::string{name}, dptr, bytes);
+  HIP_RETURN(ret);
 }
 
 hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
                                 const char* name) {
+  HIP_INIT_API(hipLibraryGetManaged, dptr, bytes, library, name);
   if ((dptr == nullptr && bytes == nullptr) || name == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
   if (library == nullptr) {
-    return hipErrorInvalidResourceHandle;
+    HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   auto l = reinterpret_cast<hip::LibraryContainer*>(library);
   auto ret = l->BuildIt();
-  return l->MVaraible(std::string{name}, dptr, bytes);
+  if (ret != hipSuccess) {
+    HIP_RETURN(ret);
+  }
+  ret = l->MVariable(std::string{name}, dptr, bytes);
+  HIP_RETURN(ret);
 }
 }  // namespace hip

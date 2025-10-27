@@ -13,6 +13,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipLibraryGetKernel`     gets a kernel from library
     - `hipLibraryGetKernelCount` gets kernel count in library
     - `hipStreamCopyAttributes` copies attributes from source stream to destination stream
+    - `hipLibraryGetGlobal`     get global variable pointer from library
+    - `hipLibraryGetManaged`    get managed variable pointer from library
 
 ## HIP 7.1 for ROCm 7.1
 

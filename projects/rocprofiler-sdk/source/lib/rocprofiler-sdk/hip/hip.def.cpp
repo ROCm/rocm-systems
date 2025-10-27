@@ -631,6 +631,11 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 16
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamCopyAttributes, hipStreamCopyAttributes, hipStreamCopyAttributes_fn, dst, src);
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 17
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetGlobal, hipLibraryGetGlobal, hipLibraryGetGlobal_fn, dptr, bytes, library, name);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetManaged, hipLibraryGetManaged, hipLibraryGetManaged_fn, dptr, bytes, library, name);
+#endif
 // clang-format on
 
 #else
