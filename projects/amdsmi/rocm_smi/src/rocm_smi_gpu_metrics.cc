@@ -478,66 +478,53 @@ template<class T> struct is_vector : std::false_type {};
 template<class U, class A> struct is_vector<std::vector<U,A>> : std::true_type {};
 
 template<typename T>
-AMDGpuDynamicMetricTblValues_t format_metric_row(const T& metric, const std::string& value_title)
-{
+AMDGpuDynamicMetricTblValues_t format_metric_row(const T& metric, const std::string& value_title) {
   auto multi_values = AMDGpuDynamicMetricTblValues_t{};
 
-  auto get_data_type_info = [&]() {
-    auto data_type(AMDGpuMetricsDataType_t::kUInt64);
-    if constexpr (std::is_array_v<T>) {
-      const uint8_t  kCheckUint8[]={1};
-      const uint16_t kCheckUint16[]={2};
-      const uint32_t kCheckUint32[]={3};
-      const uint64_t kCheckUint64[]={4};
-      if constexpr (std::is_same_v<decltype(metric[0]), decltype(kCheckUint8[0])>) {
-        data_type = AMDGpuMetricsDataType_t::kUInt8;
-      }
-      if constexpr (std::is_same_v<decltype(metric[0]), decltype(kCheckUint16[0])>) {
-        data_type = AMDGpuMetricsDataType_t::kUInt16;
-      }
-      if constexpr (std::is_same_v<decltype(metric[0]), decltype(kCheckUint32[0])>) {
-        data_type = AMDGpuMetricsDataType_t::kUInt32;
-      }
-      if constexpr (std::is_same_v<decltype(metric[0]), decltype(kCheckUint64[0])>) {
-        data_type = AMDGpuMetricsDataType_t::kUInt64;
-      }
-      return std::make_tuple(data_type, static_cast<uint16_t>(std::end(metric) - std::begin(metric)));
-    }
+  // Determine data type and count inline
+  AMDGpuMetricsDataType_t inferred_data_type = AMDGpuMetricsDataType_t::kUInt64;
+  uint16_t num_values = 1;
 
-    const uint16_t kSingleValue(1);
-    if constexpr (std::is_same_v<T, std::uint8_t>) {
-      data_type = AMDGpuMetricsDataType_t::kUInt8;
+  if constexpr (std::is_array_v<T>) {
+    using ElementType = std::remove_extent_t<T>;
+    if constexpr (std::is_same_v<ElementType, uint8_t>) {
+      inferred_data_type = AMDGpuMetricsDataType_t::kUInt8;
+    } else if constexpr (std::is_same_v<ElementType, uint16_t>) {
+      inferred_data_type = AMDGpuMetricsDataType_t::kUInt16;
+    } else if constexpr (std::is_same_v<ElementType, uint32_t>) {
+      inferred_data_type = AMDGpuMetricsDataType_t::kUInt32;
+    } else if constexpr (std::is_same_v<ElementType, uint64_t>) {
+      inferred_data_type = AMDGpuMetricsDataType_t::kUInt64;
     }
-    if constexpr (std::is_same_v<T, std::uint16_t>) {
-      data_type = AMDGpuMetricsDataType_t::kUInt16;
+    num_values = static_cast<uint16_t>(std::extent_v<T>);
+  } else {
+    // Scalar case
+    if constexpr (std::is_same_v<T, uint8_t>) {
+      inferred_data_type = AMDGpuMetricsDataType_t::kUInt8;
+    } else if constexpr (std::is_same_v<T, uint16_t>) {
+      inferred_data_type = AMDGpuMetricsDataType_t::kUInt16;
+    } else if constexpr (std::is_same_v<T, uint32_t>) {
+      inferred_data_type = AMDGpuMetricsDataType_t::kUInt32;
+    } else if constexpr (std::is_same_v<T, uint64_t>) {
+      inferred_data_type = AMDGpuMetricsDataType_t::kUInt64;
     }
-    if constexpr (std::is_same_v<T, std::uint32_t>) {
-      data_type = AMDGpuMetricsDataType_t::kUInt32;
-    }
-    if constexpr (std::is_same_v<T, std::uint64_t>) {
-      data_type = AMDGpuMetricsDataType_t::kUInt64;
-    }
-    return std::make_tuple(data_type, kSingleValue);
-  };
+  }
 
-  const auto [data_type, num_values] = get_data_type_info();
-  for (auto idx = uint16_t(0); idx < num_values; ++idx) {
-    auto value = uint64_t(0);
+  // Populate the values
+  for (uint16_t idx = 0; idx < num_values; ++idx) {
+    uint64_t value = 0;
     if constexpr (std::is_array_v<T>) {
-      value = (metric[idx]);
+      value = static_cast<uint64_t>(metric[idx]);
     } else {
-      value = (metric);
+      value = static_cast<uint64_t>(metric);
     }
 
-    auto amdgpu_dynamic_metric_value = [&]() {
-      AMDGpuDynamicMetricsValue_t amdgpu_dynamic_metric_value_init{};
-      amdgpu_dynamic_metric_value_init.m_value = value;
-      amdgpu_dynamic_metric_value_init.m_info  = (value_title + " : " + std::to_string(idx));
-      amdgpu_dynamic_metric_value_init.m_original_type = data_type;
-      return amdgpu_dynamic_metric_value_init;
-    }();
+    AMDGpuDynamicMetricsValue_t amdgpu_dynamic_metric_value_init{};
+    amdgpu_dynamic_metric_value_init.m_value = value;
+    amdgpu_dynamic_metric_value_init.m_info = (value_title + " : " + std::to_string(idx));
+    amdgpu_dynamic_metric_value_init.m_original_type = inferred_data_type;
 
-    multi_values.emplace_back(amdgpu_dynamic_metric_value);
+    multi_values.emplace_back(amdgpu_dynamic_metric_value_init);
   }
 
   return multi_values;

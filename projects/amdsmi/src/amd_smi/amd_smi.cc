@@ -145,7 +145,7 @@ static amdsmi_status_t get_gpu_device_from_handle(amdsmi_processor_handle proces
 
 template <typename F, typename ...Args>
 amdsmi_status_t rsmi_wrapper(F && f,
-    amdsmi_processor_handle processor_handle, uint32_t increment_gpu_id = 0, Args &&... args) {
+    amdsmi_processor_handle processor_handle, uint32_t increment_gpu_id, Args &&... args) {
 
     AMDSMI_CHECK_INIT();
 
@@ -3057,8 +3057,8 @@ amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_h
               std::end(tokens),
               amd::smi::make_ostream_joiner(&ss_1, ", "));
 
-    constexpr uint32_t kCurrentPartitionSize = 5;
-    char current_partition[kCurrentPartitionSize];
+    constexpr uint32_t kCurrentPartitionSize = 16;
+    char current_partition[kCurrentPartitionSize] = {0};
     std::string current_partition_str = "N/A";
     amdsmi_status_t compute_status = amdsmi_get_gpu_compute_partition(processor_handle,
                                         current_partition, kCurrentPartitionSize);
