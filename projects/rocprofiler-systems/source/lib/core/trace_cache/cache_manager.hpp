@@ -23,7 +23,6 @@
 #pragma once
 
 #include "buffer_storage.hpp"
-#include "core/trace_cache/rocpd_post_processing.hpp"
 #include "metadata_registry.hpp"
 #include "storage_parser.hpp"
 
@@ -37,24 +36,22 @@ class cache_manager
 public:
     static cache_manager& get_instance();
     buffer_storage&       get_buffer_storage() { return m_storage; }
-    metadata_registry&    get_metadata_regsitry() { return m_metadata; }
+    metadata_registry&    get_metadata_registry() { return m_metadata; }
     void                  shutdown();
-    void                  post_process();
+    void                  post_process_bulk();
 
 private:
     void post_process_metadata();
-    cache_manager();
+    cache_manager() = default;
 
-    buffer_storage        m_storage{ getpid() };
-    metadata_registry     m_metadata;
-    storage_parser        m_parser{ getpid() };
-    rocpd_post_processing m_postprocessing;
+    buffer_storage    m_storage;
+    metadata_registry m_metadata;
 };
 
 inline metadata_registry&
 get_metadata_registry()
 {
-    return cache_manager::get_instance().get_metadata_regsitry();
+    return cache_manager::get_instance().get_metadata_registry();
 }
 
 inline buffer_storage&

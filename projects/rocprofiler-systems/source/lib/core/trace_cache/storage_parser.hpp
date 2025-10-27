@@ -49,10 +49,12 @@ public:
                                 const postprocessing_callback& callback);
 
     void consume_storage();
+    void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback);
 
 private:
     friend class cache_manager;
-    storage_parser(pid_t _pid);
+    storage_parser(std::string _filename);
+
     template <typename T>
     static void process_arg(const uint8_t*& data_pos, T& arg)
     {
@@ -82,10 +84,11 @@ private:
         (process_arg(data_pos, args), ...);
     }
 
-private:
-    pid_t m_pid;
-    void  invoke_callbacks(entry_type type, const storage_parsed_type_base& parsed);
+    void invoke_callbacks(entry_type type, const storage_parsed_type_base& parsed);
+
+    std::string                                                m_filename;
     std::map<entry_type, std::vector<postprocessing_callback>> m_callbacks;
+    std::unique_ptr<std::function<void()>> m_on_finished_callback{ nullptr };
 };
 
 }  // namespace trace_cache

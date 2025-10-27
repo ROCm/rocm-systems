@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #pragma once
+#include "library/runtime.hpp"
 #include "sample_type.hpp"
 #include <array>
 #include <string>
@@ -33,7 +34,18 @@ namespace trace_cache
 {
 constexpr size_t buffer_size     = 100 * tim::units::megabyte;
 constexpr size_t flush_threshold = 80 * tim::units::megabyte;
-const auto       filename = "/tmp/buffered_storage_" + std::to_string(getpid()) + ".bin";
+
+const auto tmp_directory = std::string{ "/tmp/" };
+
+const auto get_buffered_storage_filename = [](const int& ppid, const int& pid) {
+    return std::string{ tmp_directory + "buffered_storage_" + std::to_string(ppid) + "_" +
+                        std::to_string(pid) + ".bin" };
+};
+
+const auto get_metadata_filepath = [](const int& ppid, const int& pid) {
+    return std::string{ tmp_directory + "metadata_" + std::to_string(ppid) + "_" +
+                        std::to_string(pid) + ".json" };
+};
 
 constexpr size_t minimal_fragmented_memory_size = sizeof(entry_type) + sizeof(size_t);
 using buffer_array_t                            = std::array<uint8_t, buffer_size>;
