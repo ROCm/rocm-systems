@@ -70,6 +70,7 @@ typedef struct {
   uint32_t asic_revision;
   uint64_t local_visible_heap_size;
   uint64_t local_invisible_heap_size;
+  uint64_t non_local_heap_size;
   uint64_t private_aperture_base;
   uint64_t private_aperture_size;
   uint64_t shared_aperture_base;

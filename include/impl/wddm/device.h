@@ -119,6 +119,7 @@ public:
   uint64_t LocalHeapSize() { return device_info_.local_visible_heap_size + device_info_.local_invisible_heap_size; }
   uint64_t LocalVisibleHeapSize() { return device_info_.local_visible_heap_size; }
   uint64_t LocalInvisibleHeapSize() { return device_info_.local_invisible_heap_size; }
+  uint64_t NonLocalHeapSize() { return device_info_.non_local_heap_size; }
   uint64_t PrivateApertureBase() { return device_info_.private_aperture_base; }
   uint64_t PrivateApertureSize() { return device_info_.private_aperture_size; }
   uint64_t SharedApertureBase() { return device_info_.shared_aperture_base; }
