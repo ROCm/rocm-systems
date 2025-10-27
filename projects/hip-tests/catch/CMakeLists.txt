@@ -153,12 +153,14 @@ include(CTest)
 set(CATCH2_INCLUDE ${CATCH2_PATH}/cmake/Catch2/catch_include.cmake.in)
 
 include_directories(
-    ${CATCH2_PATH}
-    "./include"
-    "./kernels"
-    ${HIP_PATH}/include
-    ${JSON_PARSER}
-)
+  "./include"
+  "./kernels")
+
+# Treat these paths as system includes to suppress warnings from external code
+include_directories(SYSTEM
+  ${HIP_PATH}/include
+  ${JSON_PARSER}
+  ${CATCH2_PATH})
 
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 if (RTC_TESTING)
