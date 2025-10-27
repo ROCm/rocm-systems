@@ -1,3 +1,9 @@
+/*
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
+ * 
+ * SPDX-License-Identifier: MIT
+ */
+ 
 #include "common.hpp"
 
 void error_check(hsa_status_t hsa_error_code, int line_num, const char* str) {

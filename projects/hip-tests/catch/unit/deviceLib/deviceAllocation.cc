@@ -835,6 +835,7 @@ template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_
   }
   HIP_CHECK(hipStreamDestroy(streamForGraph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipFree(outputVec_d));
   free(outputVec_h);
   return bPassed;

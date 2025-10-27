@@ -38,7 +38,6 @@
 #include "device/pal/palappprofile.hpp"
 #include "device/pal/palcapturemgr.hpp"
 #include "device/pal/palsignal.hpp"
-#include "acl.h"
 #include "memory"
 
 #include <atomic>
@@ -58,16 +57,6 @@ namespace amd::pal {
 
 //! A nil device object
 class NullDevice : public amd::Device {
- protected:
-#if defined(WITH_COMPILER_LIB)
-  static Compiler* compiler_;
-#endif
-
- public:
-#if defined(WITH_COMPILER_LIB)
-  Compiler* compiler() const { return compiler_; }
-#endif
-
  public:
   static bool init(void);
 
@@ -135,6 +124,20 @@ class NullDevice : public amd::Device {
   //! Empty implementation on Null device
   virtual bool globalFreeMemory(size_t* freeMemory) const { return false; }
 
+  //! Empty implementation on Null device
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                        uint64_t* size_copied, int32_t* status) {
+    ShouldNotReachHere();
+    return false;
+  }
+
+  //! Empty implementation on Null device
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                         uint64_t* size_copied, int32_t* status) {
+    ShouldNotReachHere();
+    return false;
+  }
+
   //! Get GPU device settings
   const pal::Settings& settings() const { return reinterpret_cast<pal::Settings&>(*settings_); }
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
@@ -145,7 +148,10 @@ class NullDevice : public amd::Device {
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment) { return nullptr; };
   virtual bool virtualFree(void* addr) { return true; }
 
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) { return true; }
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice) {
+    return true;
+  }
 
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const { return true; }
 
@@ -440,6 +446,30 @@ class Device : public NullDevice {
   //! Retrieves information about free memory on a GPU device
   virtual bool globalFreeMemory(size_t* freeMemory) const;
 
+  /**
+   * @brief Read data from a file to device memory.
+   * @param[IN] handle: file descriptor of the file to read.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of read.
+   * @param[IN] file_offset: offset into fd where data has to be read.
+   * @param[IN/OUT] size_copied: actual size read.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                        uint64_t* size_copied, int32_t* status);
+
+  /**
+   * Write data from device memory to a file.
+   * @param[IN] handle: file descriptor of the file to write.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of write.
+   * @param[IN] file_offset: offset into fd where data has to written.
+   * @param[IN/OUT] size_copied: actual size copied.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                         uint64_t* size_copied, int32_t* status);
+
   //! Returns a GPU memory object from AMD memory object
   pal::Memory* getGpuMemory(amd::Memory* mem  //!< Pointer to AMD memory object
   ) const;
@@ -535,7 +565,8 @@ class Device : public NullDevice {
   ) const;
 
   //! host memory alloc
-  virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics) const;
+  virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics,
+                          const void* agentInfo = nullptr) const override;
 
   //! SVM allocation
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
@@ -554,7 +585,8 @@ class Device : public NullDevice {
   virtual bool virtualFree(void* addr);
 
   //! Set/Get memory access set by the app
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags);
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice);
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const;
 

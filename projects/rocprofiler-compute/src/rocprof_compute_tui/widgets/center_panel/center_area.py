@@ -28,6 +28,7 @@ Panel Widget Modules
 Contains the panel widgets used in the main layout.
 """
 
+from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import TabPane
 
@@ -44,13 +45,13 @@ class CenterPanel(Vertical):
         "border-title-status",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         self.default_tab = "center-analyze"
         self.kernel_view = KernelView()
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         with TabsTabbedContent(initial="tab-kernel"):
             with TabPane("Basic View", id="tab-kernel"):
                 yield self.kernel_view

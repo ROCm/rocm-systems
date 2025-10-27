@@ -40,6 +40,7 @@ class Memset2DAsyncBenchmark : public Benchmark<Memset2DAsyncBenchmark> {
       HIP_CHECK(hipMemset2DAsync(dst_.ptr(), dst_.pitch(), 17, dst_.width(), dst_.height(),
                                  stream_.stream()));
     }
+    HIP_CHECK(hipStreamSynchronize(stream_.stream()));
   }
 
  private:

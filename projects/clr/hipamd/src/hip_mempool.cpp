@@ -425,7 +425,7 @@ hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* sha
   }
 
   auto device = g_devices[0];
-  auto pool = new hip::MemoryPool(device);
+  auto pool = new hip::MemoryPool(device, nullptr, true);
   if (pool == nullptr) {
     HIP_RETURN(hipErrorOutOfMemory);
   }

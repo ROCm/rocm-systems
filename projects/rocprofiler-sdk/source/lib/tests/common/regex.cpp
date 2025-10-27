@@ -21,7 +21,9 @@ struct StdRes
     size_t e  = 0;
 };
 
-static std::optional<bool>
+namespace
+{
+std::optional<bool>
 TryStdMatch(std::string_view text, std::string_view pat)
 {
     try
@@ -34,7 +36,7 @@ TryStdMatch(std::string_view text, std::string_view pat)
     }
 }
 
-static std::optional<StdRes>
+std::optional<StdRes>
 TryStdSearch(std::string_view text, std::string_view pat)
 {
     try
@@ -55,7 +57,7 @@ TryStdSearch(std::string_view text, std::string_view pat)
     }
 }
 
-static std::optional<std::string>
+std::optional<std::string>
 TryStdReplace(std::string_view text, std::string_view pat, std::string_view repl)
 {
     try
@@ -67,6 +69,7 @@ TryStdReplace(std::string_view text, std::string_view pat, std::string_view repl
         return std::nullopt;
     }
 }
+}  // namespace
 
 // ----------------------------- Tests -------------------------------
 
@@ -107,7 +110,7 @@ TEST(regex_parity, literals_and_escapes)
 
 TEST(regex_parity, dot_and_anchors)
 {
-    auto cmp = [&](std::string s, std::string p) {
+    auto cmp = [&](const std::string& s, const std::string& p) {
         auto sm = TryStdMatch(s, p);
         if(!sm) return;
         EXPECT_EQ(R::regex_match(s, p), *sm);
@@ -279,7 +282,7 @@ TEST(regex_parity, env_patterns_from_issue)
         "(.*)%q\\{([A-Z0-9_]+)\\}(.*)"             // should NOT match here
     };
 
-    for(auto& p : pats)
+    for(const auto& p : pats)
     {
         auto ss = TryStdSearch(fpath, p);
         ASSERT_TRUE(ss.has_value());
@@ -650,7 +653,9 @@ TEST(regex_compatibility, thread_safety)
         }
     };
 
-    std::vector<std::thread> threads;
+    auto threads = std::vector<std::thread>{};
+    threads.reserve(4);
+
     for(int i = 0; i < 4; ++i)
     {
         threads.emplace_back(worker);

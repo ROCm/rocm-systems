@@ -42,13 +42,25 @@ TEST_CASE("Unit_hipHostFree_InvalidMemory") {
   }
 
   SECTION("Host registered memory") {
-    const size_t ptr_size = 1024;
-    char* ptr = new char[ptr_size];
+    constexpr size_t kPtrSize = 1024;
+    auto ptr = std::make_unique<char[]>(kPtrSize);
     auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
 
+    HIP_CHECK(hipHostRegister(ptr.get(), kPtrSize, flag));
+    HIP_CHECK_ERROR(hipHostFree(ptr.get()), hipErrorInvalidValue);
+    HIP_CHECK(hipHostUnregister(ptr.get()));
+  }
+
+#if (HT_AMD == 1) && (HT_LINUX == 1)
+  SECTION("Host registered memory AMD Linux") {
+    const size_t ptr_size = 1024;
+    char* ptr = new char[ptr_size];
+    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped, 
+                         hipHostRegisterIoMemory);
     HIP_CHECK(hipHostRegister(ptr, ptr_size, flag));
     HIP_CHECK_ERROR(hipHostFree(ptr), hipErrorInvalidValue);
   }
+#endif
 }
 
 /**
@@ -103,4 +115,16 @@ TEST_CASE("Unit_hipHostFree_Multithreading") {
     t.join();
   }
   HIP_CHECK_THREAD_FINALIZE();
+}
+
+TEST_CASE("Unit_hipHostFree_Capture") {
+  void* host_ptr = nullptr;
+  constexpr size_t kAllocSize = 1024;
+  HIP_CHECK(hipHostMalloc(&host_ptr, kAllocSize));
+
+  hipError_t capture_error = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostFree(host_ptr), capture_error);
+  END_CAPTURE_SYNC(capture_error);
 }

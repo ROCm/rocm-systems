@@ -1,0 +1,5 @@
+outs:
+- md5: 2394b7141b71f0b738dd3ad024dcbfc0
+  size: 661222
+  hash: md5
+  path: dd_common.lib

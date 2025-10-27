@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2024 Advanced Micro Devices, Inc.
+/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -83,7 +83,7 @@ class Event : public RuntimeObject {
 
  private:
   Monitor lock_;
-  Monitor notify_lock_;  //!< Lock used for notification with direct dispatch only
+  mutable Monitor notify_lock_;  //!< Lock used for notification with direct dispatch only
 
   std::atomic<CallBackEntry*> callbacks_;  //!< linked list of callback entries.
   std::atomic<int32_t> status_;            //!< current execution status.
@@ -219,7 +219,7 @@ class Event : public RuntimeObject {
   void* HwEvent() const { return hw_event_; }
 
   //! Returns notify even associated with the current command
-  Event* NotifyEvent() const { return notify_event_; }
+  Event* NotifyEvent() const {ScopedLock l(notify_lock_); return notify_event_; }
 
   //! Get entry scope of the event
   int32_t getCommandEntryScope() const {
@@ -248,7 +248,7 @@ union CopyMetadata {
 // Interface to callback to allocate kernel args from the graph kernel arg pool.
 class GraphKernelArgManager {
  public:
-  virtual address AllocKernArg(size_t size, size_t alignment) = 0;
+  virtual address AllocKernArg(size_t size, size_t alignment, int devId) = 0;
 };
 
 /*! \brief An operation that is submitted to a command queue.
@@ -341,8 +341,8 @@ class Command : public Event {
     return packet;
   }
 
-  address getKernArgOffset(int size, int alignment) {
-    return graphKernArgMgr_->AllocKernArg(size, alignment);
+  address getGraphKernArg(int size, int alignment, int devId) {
+    return graphKernArgMgr_->AllocKernArg(size, alignment, devId);
   }
 
   //! Overload new/delete for fast commands allocation/destruction
@@ -387,6 +387,12 @@ class Command : public Event {
 
   //! Release the resources associated with this event.
   virtual void releaseResources();
+
+  //! Empty function for pinned memory check
+  virtual bool IsMemoryPinned() const { return false; }
+
+  //! Empty function for release of pinned memory
+  virtual void ReleasePinnedMemory() {}
 
   //! Empty function for adding pinned memory
   virtual void AddPinnedMemory(Memory* pinned) {}
@@ -500,10 +506,18 @@ class OneMemoryArgCommand : public Command {
     memory_->release();
     DEBUG_ONLY(memory_ = NULL);
     Command::releaseResources();
+    ReleasePinnedMemory();
+  }
+
+  //! Release all pinned memory for this command
+  virtual void ReleasePinnedMemory() {
     for (auto it : pinned_memory_) {
       it->release();
     }
+    pinned_memory_.clear();
   }
+  //! Release all pinned memory for this command
+  virtual bool IsMemoryPinned() const { return !pinned_memory_.empty(); }
 
   //! Adds pinned memory, used in this command for later release
   virtual void AddPinnedMemory(Memory* pinned) override { pinned_memory_.push_back(pinned); }
@@ -1379,6 +1393,11 @@ class AccumulateCommand : public Command {
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string& kernelName) { kernelNames_.push_back(kernelName); }
+
+  //! Add multiple kernel names in bulk
+  void addKernelNames(const std::vector<std::string>& kernelNames) {
+    kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
+  }
 
   //! Add kernel timestamp to the list if available
   void addTimestamps(uint64_t startTs, uint64_t endTs) {

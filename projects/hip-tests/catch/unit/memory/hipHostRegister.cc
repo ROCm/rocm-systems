@@ -118,13 +118,17 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset", "", i
     HIP_CHECK(hipHostRegister(A, sizeBytes, hipHostRegisterDefault));
   }
 #if (HT_AMD == 1) && (HT_LINUX == 1)
-  SECTION("hipExtHostRegisterUncached") {
-    HIP_CHECK(hipHostRegister(A, sizeBytes, hipExtHostRegisterUncached));
-  }
-  SECTION("hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached") {
-    HIP_CHECK(hipHostRegister(
-        A, sizeBytes,
-        hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached));
+  if (!IsNavi4X()) {
+    SECTION("hipExtHostRegisterUncached") {
+      HIP_CHECK(hipHostRegister(A, sizeBytes, hipExtHostRegisterUncached));
+    }
+    SECTION("hipHostRegisterPortable | hipHostRegisterMapped | "
+            "hipExtHostRegisterUncached | hipHostRegisterIoMemory") {
+      HIP_CHECK(hipHostRegister(
+          A, sizeBytes,
+          hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached | 
+          hipHostRegisterIoMemory));
+    }
   }
 #endif
   for (int i = 0; i < LEN; i++) {
@@ -234,7 +238,9 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "", int, float
     HIP_CHECK(hipSetDevice(dev));
     HIP_CHECK(hipGetDeviceProperties(&prop, dev));
     std::string arch = prop.gcnArchName;
-    TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
+    if (arch.find("xnack+") == std::string::npos) {
+      continue;  // Skip if xnack is not supported
+    }
     // Register host memory for each device
     if (register_once == 0) {
       HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
@@ -921,11 +927,17 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
       FlagType{0x08, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | 0x08, true},
 #if (HT_AMD == 1) && (HT_LINUX == 1)
+      FlagType{hipHostRegisterIoMemory, true},
       FlagType{hipExtHostRegisterUncached, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached, true},
 #endif
       FlagType{0xF0, false}, FlagType{0xFFF2, false}, FlagType{0xFFFFFFFF, false});
 
+#if (HT_AMD == 1) && (HT_LINUX == 1)
+  if (IsNavi4X() && (flags.value & hipExtHostRegisterUncached)) {
+    return;
+  }
+#endif
   INFO("Testing hipHostRegister flag: " << flags.value);
   if (flags.valid) {
     HIP_CHECK(hipHostRegister(hostPtr, sizeBytes, flags.value));
@@ -935,7 +947,6 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
   }
   free(hostPtr);
 }
-
 /**
  * Test Description
  * ------------------------
@@ -977,6 +988,21 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
   free(hostPtr);
   SECTION("hipHostRegister Negative Test - freed memory") {
     HIP_CHECK_ERROR(hipHostRegister(hostPtr, 0, 0), hipErrorInvalidValue);
+  }
+}
+
+TEST_CASE("Unit_hipHostRegister_Capture") {
+  constexpr size_t kBufferSize = 1024;
+  auto buffer = std::make_unique<int[]>(kBufferSize);
+  hipError_t capture_error = hipSuccess;
+
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostRegister(buffer.get(), kBufferSize, 0), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (capture_error == hipSuccess) {
+    HIP_CHECK(hipHostUnregister(buffer.get()));
   }
 }
 

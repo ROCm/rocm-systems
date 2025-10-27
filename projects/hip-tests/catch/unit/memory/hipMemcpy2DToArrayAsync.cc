@@ -276,3 +276,29 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Negative_Parameters") {
 #endif
   }
 }
+
+static constexpr int kNumWidth = 10;
+static constexpr int kNumHeight = 10;
+
+TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  constexpr size_t kHostRowBytes = sizeof(float) * kNumWidth;
+  auto host_data = std::make_unique<float[]>(kNumWidth * kNumHeight);
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipArray_t device_array = nullptr;
+  const hipChannelFormatDesc channel_desc = hipCreateChannelDesc<float>();
+  HIP_CHECK(hipMallocArray(&device_array, &channel_desc, kNumWidth, kNumHeight, hipArrayDefault));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpy2DToArrayAsync(device_array, 0, 0, host_data.get(), kHostRowBytes,
+                                    kHostRowBytes, kNumHeight, hipMemcpyHostToDevice, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFreeArray(device_array));
+}

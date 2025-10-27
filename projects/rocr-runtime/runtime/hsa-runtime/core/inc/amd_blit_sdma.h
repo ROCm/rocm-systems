@@ -94,10 +94,8 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   ///
   /// @note: The call will block until all packets have executed.
   ///
-  /// @param agent Agent passed to Initialize.
-  ///
   /// @return hsa_status_t
-  virtual hsa_status_t Destroy(const core::Agent& agent) override;
+  virtual hsa_status_t Destroy() override;
 
   /// @brief Submit a linear copy command to the queue buffer.
   ///

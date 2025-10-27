@@ -1,0 +1,5 @@
+outs:
+- md5: 2b9f0af04b216527b49338cc1b8fa1a5
+  size: 264022
+  hash: md5
+  path: dd_libyaml.lib

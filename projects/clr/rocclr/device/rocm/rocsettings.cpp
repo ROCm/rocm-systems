@@ -18,8 +18,6 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "top.hpp"
 #include "os/os.hpp"
 #include "device/device.hpp"
@@ -73,8 +71,6 @@ Settings::Settings() {
   numDeviceEvents_ = 1024;
   numWaitEvents_ = 8;
 
-  useLightning_ = (!flagIsDefault(GPU_ENABLE_LC)) ? GPU_ENABLE_LC : true;
-
   lcWavefrontSize64_ = true;
   imageBufferWar_ = false;
 
@@ -118,7 +114,6 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     pinnedXferSize_ = std::max(pinnedXferSize_, pinnedMinXferSize_);
   }
   enableXNACK_ = enableXNACK;
-  hsailExplicitXnack_ = enableXNACK;
 
   // Enable extensions
   enableExtension(ClKhrByteAddressableStore);
@@ -148,17 +143,12 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   enableExtension(ClKhrFp16);
   supportDepthsRGB_ = true;
 
-  if (useLightning_) {
-    enableExtension(ClAmdAssemblyProgram);
-    // enable subnormals for gfx900 and later
-    if (gfxipMajor >= 9) {
-      singleFpDenorm_ = true;
-      enableCoopGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
-      enableCoopMultiDeviceGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
-    }
-  } else {
-    // Also enable AMD double precision extension?
-    enableExtension(ClAmdFp64);
+  enableExtension(ClAmdAssemblyProgram);
+  // enable subnormals for gfx900 and later
+  if (gfxipMajor >= 9) {
+    singleFpDenorm_ = true;
+    enableCoopGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
+    enableCoopMultiDeviceGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
   }
 
   if ((gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10) ||
@@ -279,5 +269,3 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", kernel_arg_impl_);
 }
 }  // namespace amd::roc
-
-#endif  // WITHOUT_HSA_BACKEND

@@ -96,6 +96,7 @@ TEST_CASE("Unit_hipStreamEndCapture_Positive_GraphDestroy") {
 
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 static void thread_func_neg(hipStream_t stream, hipGraph_t graph) {
@@ -128,7 +129,6 @@ TEST_CASE("Unit_hipStreamEndCapture_Negative_Thread") {
   hipStream_t stream = stream_guard.stream();
 
   const hipStreamCaptureMode captureMode = hipStreamCaptureModeGlobal;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
 
   HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
   captureSequenceSimple(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), N, stream);

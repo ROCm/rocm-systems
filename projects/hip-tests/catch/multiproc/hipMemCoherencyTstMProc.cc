@@ -102,7 +102,7 @@ bool static TstCoherency(int* Ptr, bool HmmMem) {
 // The following test is failing on Nvidia platform hence disabled it for now
 #if HT_AMD
 TEST_CASE("Unit_malloc_CoherentTst") {
-  CHECK_PCIE_ATOMICS_SUPPORT
+  CHECK_PCIE_ATOMIC_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
   char* p = NULL;
@@ -164,7 +164,7 @@ TEST_CASE("Unit_malloc_CoherentTstWthAdvise") {
 // The following test is failing on Nvidia platform hence disabling it for now
 #if HT_AMD
 TEST_CASE("Unit_mmap_CoherentTst") {
-  CHECK_PCIE_ATOMICS_SUPPORT
+  CHECK_PCIE_ATOMIC_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
   char* p = NULL;
@@ -408,7 +408,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1") {
   }
   int stat = 0;
   if (fork() == 0) {  // child process
-    CHECK_PCIE_ATOMICS_SUPPORT
+    CHECK_PCIE_ATOMIC_SUPPORT;
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
     // Allocating hipHostMalloc() memory
@@ -437,7 +437,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg1") {
   }
   int stat = 0;
   if (fork() == 0) {  // child process
-    CHECK_PCIE_ATOMICS_SUPPORT
+    CHECK_PCIE_ATOMIC_SUPPORT
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
     // Allocating hipHostMalloc() memory
@@ -465,7 +465,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg2") {
   }
   int stat = 0;
   if (fork() == 0) {  // child process
-    CHECK_PCIE_ATOMICS_SUPPORT
+    CHECK_PCIE_ATOMIC_SUPPORT
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
     // Allocating hipHostMalloc() memory
@@ -493,7 +493,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg3") {
   }
   int stat = 0;
   if (fork() == 0) {  // child process
-    CHECK_PCIE_ATOMICS_SUPPORT
+    CHECK_PCIE_ATOMIC_SUPPORT
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
     // Allocating hipHostMalloc() memory

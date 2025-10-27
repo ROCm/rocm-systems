@@ -213,6 +213,7 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
     }
   }
 
+  HIP_CHECK(hipSetDevice(0));
   HIP_CHECK(hipHostFree(pNodes));
   HIP_CHECK(hipHostFree(pAllocator));
   HIP_CHECK(hipHostFree(pNumCorrect));
@@ -297,16 +298,20 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_system") {
       {
         create_linked_lists_on_host(pNodes, numLists, ListLength);
       } else {
+        HIP_CHECK(hipSetDevice(ci));
         create_linked_lists_on_device(streams[ci], pNodes, pAllocator, numLists, ListLength);
       }
 
       if (vi == num_devices) {
         verify_linked_lists_on_host(pNodes, numLists, ListLength);
       } else {
+        HIP_CHECK(hipSetDevice(vi));
         verify_linked_lists_on_device(streams[vi], pNodes, pNumCorrect, numLists, ListLength);
       }
     }
   }
+
+  HIP_CHECK(hipSetDevice(0));
   align_free(pNodes);
   align_free(pAllocator);
   align_free(pNumCorrect);

@@ -165,7 +165,7 @@ struct SemaphoreGuard
     sem_t*      sem = nullptr;
     std::string name;
 
-    SemaphoreGuard(const std::string& sem_name)
+    SemaphoreGuard(const std::string& sem_name)  // NOLINT
     : name(sem_name)
     {}
 

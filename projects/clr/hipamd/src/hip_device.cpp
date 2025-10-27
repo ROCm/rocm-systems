@@ -20,6 +20,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_deprecated.h>
+#include <hip/amd_detail/hip_storage.h>
 
 #include "hip_internal.hpp"
 #include "hip_mempool_impl.hpp"
@@ -32,7 +33,7 @@ namespace hip {
 
 // ================================================================================================
 hip::Stream* Device::NullStream(bool wait) {
-  ClPrint(amd::LOG_DEBUG, amd::LOG_WAIT, "NullStream %p, wait %d", null_stream_, wait);
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "NullStream %p, wait %d", null_stream_, wait);
   if (null_stream_ == nullptr) {
     amd::ScopedLock lock(lock_);
     if (null_stream_ == nullptr) {
@@ -188,7 +189,7 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
 
   if (wait_null_stream) {
     if (null_stream_) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_WAIT, "Waiting on nullstream %p", null_stream_);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on nullstream %p", null_stream_);
       waitForStream(null_stream_);
     }
   } else {
@@ -199,7 +200,7 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
           ((active_stream->Flags() & hipStreamNonBlocking) == 0) &&
           // and it's not the current stream
           (active_stream != blocking_stream)) {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p", active_stream);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p", active_stream);
         // Get the last valid command
         waitForStream(active_stream);
       }
@@ -264,9 +265,9 @@ void Device::destroyAllStreams() {
 void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   // Make a local copy to avoid stalls for GPU finish with multiple threads
   std::vector<hip::Stream*> streams;
-  streams.reserve(streamSet.size());
   {
     std::shared_lock lock(streamSetLock);
+    streams.reserve(streamSet.size());
     if (wait_blocking_streams_only) {
       auto null_stream = GetNullStream();
       for (auto it : streamSet) {
@@ -770,6 +771,7 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
   HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
 
   std::string symbolString = symbol;
+
   if (symbol == nullptr || symbolString == "" || pfn == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -782,6 +784,18 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
     if (hipVersion >= 600) {
       symbolString = "hipChooseDeviceR0600";
     }
+  } else if (symbolString == "hipAmdFileRead") {
+    *pfn = reinterpret_cast<void*>(&hipAmdFileRead);
+    if (symbolStatus != nullptr) {
+      *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
+    }
+    HIP_RETURN(hipSuccess);
+  } else if (symbolString == "hipAmdFileWrite") {
+    *pfn = reinterpret_cast<void*>(&hipAmdFileWrite);
+    if (symbolStatus != nullptr) {
+      *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
+    }
+    HIP_RETURN(hipSuccess);
   }
 
   void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();

@@ -57,17 +57,13 @@ TEST_CASE("Unit_hipMemcpyParam2D_Positive_Synchronization_Behavior") {
     Memcpy2DDtoHPageableSyncBehavior(MemcpyParam2DAdapter<>(), true);
   }
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Device to Pinned Host") {
     Memcpy2DDtoHPinnedSyncBehavior(MemcpyParam2DAdapter<>(), true);
   }
-#endif
 
   SECTION("Device to Device") { Memcpy2DDtoDSyncBehavior(MemcpyParam2DAdapter<>(), false); }
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-232
   SECTION("Host to Host") { Memcpy2DHtoHSyncBehavior(MemcpyParam2DAdapter<>(), true); }
-#endif
 }
 
 TEST_CASE("Unit_hipMemcpyParam2D_Positive_Parameters") {

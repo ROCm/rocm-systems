@@ -107,10 +107,12 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_SameProc") {
   HIP_CHECK(hipMemcpyAsync(B_h.data(), ptrImp, byte_size, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
+  HIP_CHECK(hipFree(ptrImp));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipMemPoolDestroy(mempool));
+  HIP_CHECK(hipMemPoolDestroy(mempoolImp));
 }
 
 /**

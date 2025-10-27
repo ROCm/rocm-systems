@@ -99,3 +99,23 @@ TEST_CASE("Unit_hipMemcpy_Negative_Parameters") {
                                            hipMemcpyDeviceToDevice);
   }
 }
+
+TEST_CASE("Unit_hipMemcpyWithStream_Capture") {
+  constexpr size_t kNumElements = 1024;
+
+  LinearAllocGuard<int> host_data(LinearAllocs::malloc, kNumElements * sizeof(int));
+  LinearAllocGuard<int> device_data(LinearAllocs::hipMalloc, kNumElements * sizeof(int));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+
+  HIP_CHECK_ERROR(hipMemcpyWithStream(device_data.ptr(), host_data.ptr(),
+                                      kNumElements * sizeof(int), hipMemcpyHostToDevice, stream),
+                  hipErrorStreamCaptureUnsupported);
+
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, nullptr), hipErrorStreamCaptureInvalidated);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+}

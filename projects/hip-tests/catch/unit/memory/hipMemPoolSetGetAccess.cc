@@ -260,32 +260,41 @@ TEST_CASE("Unit_hipMemPoolSetAccess_Negative_Parameters") {
   SECTION("Mempool is nullptr") {
     HIP_CHECK_ERROR(hipMemPoolSetAccess(nullptr, &desc, 1), hipErrorInvalidValue);
   }
+
+  // Cuda segfaults here!
 #if HT_AMD
   SECTION("Desc is nullptr and count is > 0") {
     HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), nullptr, 1), hipErrorInvalidValue);
   }
 #endif
+
   SECTION("Count > num_device") {
+#if HT_AMD
     HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, (num_dev + 1)),
                     hipErrorInvalidDevice);
+#else
+    HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, (num_dev + 1)),
+                    hipErrorNotSupported);
+#endif
   }
 
   SECTION("Passing invalid desc location type") {
     desc.location.type = hipMemLocationTypeInvalid;
+#if HT_AMD
     HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1), hipErrorInvalidValue);
-    desc.location.type = hipMemLocationTypeDevice;
+#else
+    HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1), hipErrorNotSupported);
+#endif
   }
 
   SECTION("Passing invalid desc location id") {
     desc.location.id = num_dev;
     HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1), hipErrorInvalidDevice);
-    desc.location.id = device_id;
   }
 
   SECTION("Revoking access to own memory pool") {
     desc.flags = hipMemAccessFlagsProtNone;
     HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1), hipErrorInvalidDevice);
-    desc.flags = hipMemAccessFlagsProtReadWrite;
   }
 }
 

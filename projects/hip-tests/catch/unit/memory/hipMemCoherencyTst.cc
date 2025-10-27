@@ -106,13 +106,7 @@ static void TstCoherency(int* ptr, MemoryType type) {
    behavior is observed or not with memory allocated using hipHostMalloc()*/
 TEST_CASE("Unit_hipHostMalloc_CoherentTst") {
   HIP_CHECK(hipSetDevice(0));
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    fprintf(stderr, "Device doesn't support pcie atomic, Skipped\n");
-    REQUIRE(true);
-    return;
-  }
+  CHECK_PCIE_ATOMIC_SUPPORT;
 
   int *Ptr = nullptr, SIZE = sizeof(int);
   YES_COHERENT = false;
@@ -138,6 +132,8 @@ TEST_CASE("Unit_hipHostMalloc_CoherentTst") {
 #if HT_AMD
 TEST_CASE("Unit_hipMallocManaged_CoherentTst") {
   HIP_CHECK(hipSetDevice(0));
+  CHECK_PCIE_ATOMIC_SUPPORT;
+
   int *Ptr = nullptr, SIZE = sizeof(int), managed = 0;
   YES_COHERENT = false;
 

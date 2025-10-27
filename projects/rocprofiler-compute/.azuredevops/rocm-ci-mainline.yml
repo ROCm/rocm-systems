@@ -21,7 +21,6 @@ trigger:
     - '.*.y*ml'
     - '*.md'
     - AUTHORS
-    - LICENSE
     - VERSION
 
 pr:
@@ -36,7 +35,6 @@ pr:
     - '.*.y*ml'
     - '*.md'
     - AUTHORS
-    - LICENSE
     - VERSION
   drafts: false
 

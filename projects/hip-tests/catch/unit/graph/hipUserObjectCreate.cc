@@ -190,28 +190,35 @@ TEST_CASE("Unit_hipUserObjectCreate_Negative") {
     HIP_CHECK_ERROR(
         hipUserObjectCreate(nullptr, object, destroyIntObj, 1, hipUserObjectNoDestructorSync),
         hipErrorInvalidValue);
+    delete object;
   }
   SECTION("Pass object as nullptr") {
     HIP_CHECK(
         hipUserObjectCreate(&hObject, nullptr, destroyIntObj, 1, hipUserObjectNoDestructorSync));
+    HIP_CHECK(hipUserObjectRelease(hObject, 1));
+    delete object;
   }
   SECTION("Pass Callback function as nullptr") {
     HIP_CHECK_ERROR(
         hipUserObjectCreate(&hObject, object, nullptr, 1, hipUserObjectNoDestructorSync),
         hipErrorInvalidValue);
+    delete object;
   }
   SECTION("Pass initialRefcount as 0") {
     HIP_CHECK_ERROR(
         hipUserObjectCreate(&hObject, object, destroyIntObj, 0, hipUserObjectNoDestructorSync),
         hipErrorInvalidValue);
+    delete object;
   }
   SECTION("Pass initialRefcount as INT_MAX") {
     HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyIntObj, INT_MAX,
                                   hipUserObjectNoDestructorSync));
+    HIP_CHECK(hipUserObjectRelease(hObject, INT_MAX));
   }
   SECTION("Pass flag other than hipUserObjectNoDestructorSync") {
     HIP_CHECK_ERROR(hipUserObjectCreate(&hObject, object, destroyIntObj, 1, hipUserObjectFlags(9)),
                     hipErrorInvalidValue);
+    delete object;
   }
 }
 
@@ -225,9 +232,12 @@ TEST_CASE("Unit_hipUserObj_Negative_Test") {
   HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyIntObj, 2, hipUserObjectNoDestructorSync));
   REQUIRE(hObject != nullptr);
 
-  // Release more than created.
+  // Release more than created. Will not release the references.
   HIP_CHECK(hipUserObjectRelease(hObject, 4));
 
-  // Retain reference to a removed user object
+  // Retain reference
   HIP_CHECK(hipUserObjectRetain(hObject, 1));
+
+  // Release all the references pending
+  HIP_CHECK(hipUserObjectRelease(hObject, 3));
 }

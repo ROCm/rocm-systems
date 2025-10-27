@@ -200,16 +200,18 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
     mipFilterMode = hip::getCLFilterMode(pTexDesc->mipmapFilterMode);
   }
 
-  amd::Sampler* sampler = new amd::Sampler(
-      *hip::getCurrentDevice()->asContext(), pTexDesc->normalizedCoords, addressMode, filterMode,
-      mipFilterMode, pTexDesc->minMipmapLevelClamp, pTexDesc->maxMipmapLevelClamp);
+  auto sampler_deleter = [](amd::Sampler* s) { s->release(); };
+  std::unique_ptr<amd::Sampler, decltype(sampler_deleter)> sampler(
+      new amd::Sampler(*hip::getCurrentDevice()->asContext(), pTexDesc->normalizedCoords,
+                       addressMode, filterMode, mipFilterMode, pTexDesc->minMipmapLevelClamp,
+                       pTexDesc->maxMipmapLevelClamp),
+      sampler_deleter);
 
-  if (sampler == nullptr) {
+  if (sampler.get() == nullptr) {
     return hipErrorOutOfMemory;
   }
 
-  if (!sampler->create()) {
-    delete sampler;
+  if (!sampler.get()->create()) {
     return hipErrorOutOfMemory;
   }
 
@@ -370,7 +372,7 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
     return hipErrorOutOfMemory;
   }
   *pTexObject = new (texObjectBuffer)
-      __hip_texture{image, sampler, *pResDesc, *pTexDesc,
+      __hip_texture{image, sampler.release(), *pResDesc, *pTexDesc,
                     (pResViewDesc != nullptr) ? *pResViewDesc : hipResourceViewDesc{}};
 
   return hipSuccess;
@@ -1487,6 +1489,11 @@ hipError_t hipTexObjectCreate(hipTextureObject_t* pTexObject, const HIP_RESOURCE
 
   if ((pTexObject == nullptr) || (pResDesc == nullptr) || (pTexDesc == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (static_cast<hipResourceType>(pResDesc->resType) == hipResourceTypePitch2D &&
+      ((pResDesc->res.pitch2D.width == 0) || (pResDesc->res.pitch2D.height == 0))) {
+    HIP_RETURN(hipSuccess);
   }
 
   hipResourceDesc resDesc = hip::getResourceDesc(*pResDesc);

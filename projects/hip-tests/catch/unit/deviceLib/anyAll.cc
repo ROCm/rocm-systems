@@ -79,6 +79,8 @@ TEST_CASE("Unit_AnyAll_CompileTest") {
 
   HIP_CHECK(hipFree(device_any));
   HIP_CHECK(hipFree(device_all));
+  free(host_any);
+  free(host_all);
   REQUIRE(anycount == 0);
   REQUIRE(allcount == 1);
 }

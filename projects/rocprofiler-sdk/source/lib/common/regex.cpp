@@ -168,9 +168,11 @@ struct Parser
         {
             case 'd': return make_cls([](unsigned char x) { return std::isdigit(x) != 0; });
             case 'D': return make_cls([](unsigned char x) { return std::isdigit(x) == 0; });
-            case 'w': return make_cls([](unsigned char x) { return std::isalnum(x) || x == '_'; });
+            case 'w':
+                return make_cls([](unsigned char x) { return (std::isalnum(x) != 0) || x == '_'; });
             case 'W':
-                return make_cls([](unsigned char x) { return !(std::isalnum(x) || x == '_'); });
+                return make_cls(
+                    [](unsigned char x) { return !((std::isalnum(x) != 0) || x == '_'); });
             case 's': return make_cls([](unsigned char x) { return std::isspace(x) != 0; });
             case 'S': return make_cls([](unsigned char x) { return std::isspace(x) == 0; });
             case 'n': return Node('\n');
@@ -204,13 +206,30 @@ struct Parser
                 char e = get();
                 if(e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' || e == 'S')
                 {
-                    special_preds.push_back(
-                        e == 'd'   ? [](unsigned char x) { return std::isdigit(x) != 0; }
-                        : e == 'D' ? [](unsigned char x) { return std::isdigit(x) == 0; }
-                        : e == 'w' ? [](unsigned char x) { return std::isalnum(x) || x == '_'; }
-                        : e == 'W' ? [](unsigned char x) { return !(std::isalnum(x) || x == '_'); }
-                        : e == 's' ? [](unsigned char x) { return std::isspace(x) != 0; }
-                                   : [](unsigned char x) { return std::isspace(x) == 0; });
+                    switch(e)
+                    {
+                        case 'd':
+                            special_preds.emplace_back(
+                                [](unsigned char x) { return std::isdigit(x) != 0; });
+                            break;
+                        case 'D':
+                            special_preds.emplace_back(
+                                [](unsigned char x) { return std::isdigit(x) == 0; });
+                            break;
+                        case 'w':
+                            special_preds.emplace_back(
+                                [](unsigned char x) { return (std::isalnum(x) != 0) || x == '_'; });
+                            break;
+                        case 'W':
+                            special_preds.emplace_back([](unsigned char x) {
+                                return !((std::isalnum(x) != 0) || x == '_');
+                            });
+                            break;
+                        case 's':
+                            special_preds.emplace_back(
+                                [](unsigned char x) { return std::isspace(x) != 0; });
+                            break;
+                    }
                     continue;
                 }
                 else
@@ -250,7 +269,7 @@ struct Parser
         auto specials = std::move(special_preds);
         auto pred     = [rs, ss, specials, negate](unsigned char x) {
             bool in = false;
-            for(auto& r : rs)
+            for(const auto& r : rs)
             {
                 if(r.a <= x && x <= r.b)
                 {
@@ -271,7 +290,7 @@ struct Parser
             }
             if(!in)
             {
-                for(auto& sp : specials)
+                for(const auto& sp : specials)
                 {
                     if(sp(x))
                     {
@@ -918,7 +937,9 @@ struct CaptureMatcher
     }
 };
 
-static int
+namespace
+{
+int
 count_captures(const Node& n)
 {
     switch(n.kind)
@@ -938,7 +959,7 @@ count_captures(const Node& n)
 }
 
 // Expand replacement with captures for a single match span [b,e)
-static std::string
+std::string
 expand_replacement(std::string_view                              text,
                    const std::vector<std::pair<size_t, size_t>>& groups,
                    size_t                                        b,
@@ -983,12 +1004,12 @@ expand_replacement(std::string_view                              text,
         }
 
         // $1..$99 (ECMAScript semantics: if two digits are present, always consume both)
-        if(std::isdigit(static_cast<unsigned char>(n1)))
+        if(std::isdigit(static_cast<unsigned char>(n1)) != 0)
         {
             int    idx = n1 - '0';
             size_t j   = i + 2;
 
-            if(j < repl.size() && std::isdigit(static_cast<unsigned char>(repl[j])))
+            if(j < repl.size() && (std::isdigit(static_cast<unsigned char>(repl[j])) != 0))
             {
                 int d2 = repl[j] - '0';
                 idx    = idx * 10 + d2;  // ALWAYS consume the second digit if present
@@ -1014,6 +1035,7 @@ expand_replacement(std::string_view                              text,
 
     return out;
 }
+}  // namespace
 
 // ============================ Public API ===========================
 

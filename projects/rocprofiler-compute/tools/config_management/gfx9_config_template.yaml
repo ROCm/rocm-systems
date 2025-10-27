@@ -1,0 +1,260 @@
+latest_arch: gfx950
+panels:
+- file: top_stats.yaml
+  panel_id: 0
+  panel_title: Top Stats
+  panel_alias: topstats
+  data_sources:
+  - type: raw_csv_table
+    id: 1
+    title: Top Kernels
+  - type: raw_csv_table
+    id: 2
+    title: Dispatch List
+- file: system_info.yaml
+  panel_id: 1
+  panel_title: System Info
+  panel_alias: sysinfo
+  data_sources:
+  - type: raw_csv_table
+    id: 1
+    title: System Info
+- file: system_speed_of_light.yaml
+  panel_id: 2
+  panel_title: System Speed-of-Light
+  panel_alias: sol
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: System Speed-of-Light
+- file: memory_chart.yaml
+  panel_id: 3
+  panel_title: Memory Chart
+  panel_alias: memchart
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Memory Chart
+- file: roofline.yaml
+  panel_id: 4
+  panel_title: Roofline
+  panel_alias: roof
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Roofline Performance Rates
+  - type: metric_table
+    id: 2
+    title: Roofline Plot Points
+- file: command_processor_cpc_cpf.yaml
+  panel_id: 5
+  panel_title: Command Processor (CPC/CPF)
+  panel_alias: cpc
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Command processor fetcher (CPF)
+  - type: metric_table
+    id: 2
+    title: Command processor packet processor (CPC)
+- file: workgroup_manager_spi.yaml
+  panel_id: 6
+  panel_title: Workgroup Manager (SPI)
+  panel_alias: spi
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Workgroup manager utilizations
+  - type: metric_table
+    id: 2
+    title: Workgroup Manager - Resource Allocation
+- file: wavefront.yaml
+  panel_id: 7
+  panel_title: Wavefront
+  panel_alias: wavefront
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Wavefront Launch Stats
+  - type: metric_table
+    id: 2
+    title: Wavefront Runtime Stats
+- file: compute_units_instruction_mix.yaml
+  panel_id: 10
+  panel_title: Compute Units - Instruction Mix
+  panel_alias: cu_ins
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Overall Instruction Mix
+  - type: metric_table
+    id: 2
+    title: VALU Arithmetic Instruction Mix
+  - type: metric_table
+    id: 3
+    title: VMEM Instruction Mix
+  - type: metric_table
+    id: 4
+    title: MFMA Arithmetic Instruction Mix
+- file: compute_units_compute_pipeline.yaml
+  panel_id: 11
+  panel_title: Compute Units - Compute Pipeline
+  panel_alias: cu_pipe
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Compute Speed-of-Light
+  - type: metric_table
+    id: 2
+    title: Pipeline Statistics
+  - type: metric_table
+    id: 3
+    title: Arithmetic Operations
+- file: local_data_share_lds.yaml
+  panel_id: 12
+  panel_title: Local Data Share (LDS)
+  panel_alias: lds
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: LDS Speed-of-Light
+  - type: metric_table
+    id: 2
+    title: LDS Statistics
+- file: instruction_cache.yaml
+  panel_id: 13
+  panel_title: Instruction Cache
+  panel_alias: ins_cache
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: L1I Speed-of-Light
+  - type: metric_table
+    id: 2
+    title: L1I cache accesses
+  - type: metric_table
+    id: 3
+    title: L1I <-> L2 interface
+- file: scalar_l1_data_cache.yaml
+  panel_id: 14
+  panel_title: Scalar L1 Data Cache
+  panel_alias: sl1d
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Scalar L1D Speed-of-Light
+  - type: metric_table
+    id: 2
+    title: Scalar L1D cache accesses
+  - type: metric_table
+    id: 3
+    title: Scalar L1D Cache - L2 Interface
+- file: address_processing_unit_and_data_return_path_ta_td.yaml
+  panel_id: 15
+  panel_title: Address Processing Unit and Data Return Path (TA/TD)
+  panel_alias: tatd
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Busy and stall metrics
+  - type: metric_table
+    id: 2
+    title: Instruction counts
+  - type: metric_table
+    id: 3
+    title: Spill and stack metrics
+  - type: metric_table
+    id: 4
+    title: Vector L1 data-return path or Texture Data (TD)
+- file: vector_l1_data_cache.yaml
+  panel_id: 16
+  panel_title: Vector L1 Data Cache
+  panel_alias: vl1d
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: vL1D Speed-of-Light
+  - type: metric_table
+    id: 2
+    title: vL1D cache stall metrics
+  - type: metric_table
+    id: 3
+    title: vL1D cache access metrics
+  - type: metric_table
+    id: 4
+    title: L1D - L2 Transactions
+  - type: metric_table
+    id: 5
+    title: L1 Unified Translation Cache (UTCL1)
+  - type: metric_table
+    id: 6
+    title: L1D Addr Translation Stalls
+- file: l2_cache.yaml
+  panel_id: 17
+  panel_title: L2 Cache
+  panel_alias: l2
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: L2 Speed-of-Light
+  - type: metric_table
+    id: 2
+    title: L2-Fabric interface metrics
+  - type: metric_table
+    id: 3
+    title: L2 Cache Accesses
+  - type: metric_table
+    id: 4
+    title: L2 Cache Stalls
+  - type: metric_table
+    id: 5
+    title: L2 - Fabric Interface stalls
+  - type: metric_table
+    id: 6
+    title: L2 - Fabric interface detailed metrics
+- file: l2_cache_per_channel.yaml
+  panel_id: 18
+  panel_title: L2 Cache (per Channel)
+  panel_alias: l2_per_channel
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Aggregate Stats (All channels)
+  - type: metric_table
+    id: 2
+    title: L2 Cache Hit Rate (pct)
+  - type: metric_table
+    id: 3
+    title: L2 Requests (per normUnit)
+  - type: metric_table
+    id: 4
+    title: L2 Requests (per normUnit)
+  - type: metric_table
+    id: 5
+    title: L2-Fabric Requests (per normUnit)
+  - type: metric_table
+    id: 6
+    title: L2-Fabric Read Latency (Cycles)
+  - type: metric_table
+    id: 7
+    title: L2-Fabric Write and Atomic Latency (Cycles)
+  - type: metric_table
+    id: 8
+    title: L2-Fabric Atomic Latency (Cycles)
+  - type: metric_table
+    id: 9
+    title: L2-Fabric Read Stall (Cycles per normUnit)
+  - type: metric_table
+    id: 10
+    title: L2-Fabric Write and Atomic Stall (Cycles per normUnit)
+  - type: metric_table
+    id: 12
+    title: L2-Fabric (128B read requests per normUnit)
+- file: pc_sampling.yaml
+  panel_id: 21
+  panel_title: PC Sampling
+  panel_alias: pc_sampling
+  data_sources:
+  - type: pc_sampling_table
+    id: 1
+    title: PC Sampling

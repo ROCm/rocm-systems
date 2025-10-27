@@ -64,11 +64,9 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior") {
 
   SECTION("Host to Device") { Memcpy3DHtoDSyncBehavior(Memcpy3DWrapper<async>, false); }
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Device to Pageable Host") {
     Memcpy3DDtoHPageableSyncBehavior(Memcpy3DWrapper<async>, true);
   }
-#endif
 
   SECTION("Device to Pinned Host") {
     Memcpy3DDtoHPinnedSyncBehavior(Memcpy3DWrapper<async>, false);
@@ -76,9 +74,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior") {
 
   SECTION("Device to Device") { Memcpy3DDtoDSyncBehavior(Memcpy3DWrapper<async>, false); }
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(Memcpy3DWrapper<async>, true); }
-#endif
 }
 
 TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Parameters") {
@@ -246,4 +242,27 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Negative_Parameters") {
     NegativeTests(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
                   make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice);
   }
+}
+
+TEST_CASE("Unit_hipMemcpy3DAsync_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  constexpr hipExtent kExtent{128 * sizeof(int), 128, 8};
+
+  LinearAllocGuard3D<int> src_alloc(kExtent);
+  LinearAllocGuard3D<int> dst_alloc(kExtent);
+
+  auto memcpy_params =
+      GetMemcpy3DParms(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
+                       make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpy3DAsync(&memcpy_params, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
 }
