@@ -395,20 +395,6 @@ const void* Os::createOsThread(amd::Thread* thread) {
   return reinterpret_cast<const void*>(handle);
 }
 
-void Os::setThreadAffinity(const void* handle, const Os::ThreadAffinityMask& mask) {
-  if (pthread_setaffinity_fptr != NULL) {
-    pthread_setaffinity_fptr((pthread_t)handle, sizeof(cpu_set_t), &mask.mask_);
-  }
-}
-
-bool Os::setThreadAffinityToMainThread() {
-  if (AMD_CPU_AFFINITY) {
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Setting Affinity to the main thread's affinity");
-    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &nativeMask_);
-  }
-  return true;
-}
-
 void Os::yield() { ::sched_yield(); }
 
 uint64_t Os::timeNanos() {
@@ -682,19 +668,26 @@ uint64_t Os::offsetToEpochNanos() {
   return offset;
 }
 
-void Os::setCurrentStackPtr(address sp) {
-  sp -= sizeof(void*);
-  *(void**)sp = __builtin_return_address(0);
+address Os::currentStackPtr() {
+  intptr_t value;
 
-#if defined(ATI_ARCH_X86)
+#if defined(__GNUC__)
   __asm__ __volatile__(
-#if !defined(OMIT_FRAME_POINTER)
-      LP64_SWITCH("movl (%%ebp),%%ebp;", "movq (%%rbp),%%rbp;")
-#endif  // !OMIT_FRAME_POINTER
-          LP64_SWITCH("movl %0,%%esp; ret;", "movq %0,%%rsp; ret;")::"r"(sp));
+#if defined(ATI_ARCH_X86)
+      LP64_SWITCH("movl %%esp", "movq %%rsp") ",%0"
+      : "=r"(value)
+#elif defined(ATI_ARCH_ARM)
+      "mov %0,sp"
+      : "=r"(value)
 #else
-  assert(!"Unimplemented");
+      ""
 #endif
+  );
+#else   // !__GNUC__
+  __asm mov value, esp;
+#endif  // !__GNUC__
+
+  return (address)value;
 }
 
 size_t Os::getPhysicalMemSize() {
