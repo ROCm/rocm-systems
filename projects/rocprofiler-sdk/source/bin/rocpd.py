@@ -33,29 +33,21 @@ Simple Python executable script for invoking `python3 -m @ROCPD_EXE_MODULE@`
 def main(argv=sys.argv[1:], environ=dict(os.environ)):
     """
     Executes {sys.executable} -m @ROCPD_EXE_MODULE@ @ROCPD_EXE_MODULE_ARGS@
+
+    Pure Python implementation - works with all Python 3.6+ versions
     """
 
-    ROCPD_SUPPORTED_PYTHON_VERSIONS = [
-        ".".join(itr.split(".")[:2]) for itr in "@ROCPROFILER_PYTHON_VERSIONS@".split(";")
-    ]
     ROCPD_MODULE_ARGS = [f"{itr}" for itr in "@ROCPD_EXE_MODULE_ARGS@".split(" ") if itr]
 
     this_dir = os.path.dirname(os.path.realpath(__file__))
-    this_python_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
-    if this_python_ver not in ROCPD_SUPPORTED_PYTHON_VERSIONS:
-        raise ImportError(
-            "@ROCPD_EXE_NAME@ not supported for Python version {} (sys.executable='{}').\n@ROCPD_EXE_NAME@ supported python versions: {}".format(
-                this_python_ver,
-                sys.executable,
-                ", ".join(ROCPD_SUPPORTED_PYTHON_VERSIONS),
-            )
-        )
 
+    # Pure Python implementation: version-agnostic path
+    # No longer requires version-specific builds (python3.8, python3.9, etc.)
     module_path = os.path.join(
         this_dir,
         "..",
         "@CMAKE_INSTALL_LIBDIR@",
-        f"python{this_python_ver}",
+        "python",  # Version-agnostic: works with all Python 3.6+
         "site-packages",
     )
 
