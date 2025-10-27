@@ -39,13 +39,7 @@ ROCm Compute Profiler standalone GUI analyzer
 ---------------------------------------------
 
 ROCm Compute Profiler provides a :doc:`standalone GUI <how-to/analyze/standalone-gui>` to
-enable basic performance analysis without the need to import data into a
-database instance.
-
-.. image:: data/install/omniperf_server_vs_client_install.png
-   :align: center
-   :alt: Architectural design of ROCm Compute Profiler
-   :width: 800
+enable basic performance analysis.
 
 Features
 ========

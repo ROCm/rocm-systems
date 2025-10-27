@@ -7,24 +7,13 @@
 Installing and deploying ROCm Compute Profiler
 **********************************************
 
-ROCm Compute Profiler consists of two installation components.
-
-* :ref:`ROCm Compute Profiler core installation <core-install>` (client-side)
+* :ref:`ROCm Compute Profiler core installation <core-install>`
 
   * Provides the core application profiling capability.
   * Allows the collection of performance counters, filtering by hardware
     block, dispatch, kernel, and more.
   * Provides a CLI-based analysis mode.
   * Provides a standalone web interface for importing analysis metrics.
-
-Determine what you need to install based on how you would like to interact with
-ROCm Compute Profiler. See the following decision tree to help determine what installation is
-right for you.
-
-.. image:: ../data/install/install-decision-tree.png
-   :align: center
-   :alt: Decision tree for installing and deploying ROCm Compute Profiler
-   :width: 800
 
 .. _core-install:
 
