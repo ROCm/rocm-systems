@@ -207,8 +207,7 @@ hsa_status_t Memory::interopMapBuffer(amd::Os::FileDesc fdn) {
   size_t metadata_size = 0;
   void* metadata;
 #if IS_WINDOWS
-  int fd = 0;
-  assert(!"Unimplemented");
+  auto fd = reinterpret_cast<HANDLE>(fdn);
 #else
   auto fd = fdn;
 #endif
