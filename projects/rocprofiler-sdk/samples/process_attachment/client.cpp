@@ -31,6 +31,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -39,6 +40,18 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+// Global flag for signal handling
+static std::atomic<bool> g_interrupted{false};
+
+// Forward declarations
+class ProcessAttachmentClient;
+static ProcessAttachmentClient* g_client_ptr = nullptr;
+
+bool process_exists(uint32_t pid)
+{
+    return kill(pid, 0) == 0;
+}
 
 class ProcessAttachmentClient
 {
@@ -146,10 +159,30 @@ public:
 
         std::cout << "Detaching from process " << target_pid << "..." << std::endl;
 
+        // Check if process still exists before attempting detach
+        if(!process_exists(target_pid))
+        {
+            std::cerr << "Warning: Target process " << target_pid << " has already exited" << std::endl;
+            std::cerr << "Skipping detach operation (process no longer exists)" << std::endl;
+            attached = false;
+            target_pid = 0;
+            return true;  // Consider this success since we can't detach from a dead process
+        }
+
         int result = detach_func();
         if(result != 0)
         {
             std::cerr << "Detachment failed with code: " << result << std::endl;
+            
+            // Check again if process died during detach attempt
+            if(!process_exists(target_pid))
+            {
+                std::cerr << "Warning: Process exited during detach attempt" << std::endl;
+                attached = false;
+                target_pid = 0;
+                return true;  // Partial success - process is gone
+            }
+            
             return false;
         }
 
@@ -162,6 +195,21 @@ public:
     bool is_attached() const { return attached; }
     uint32_t get_target_pid() const { return target_pid; }
 };
+
+void signal_handler(int signum)
+{
+    if(signum == SIGINT || signum == SIGTERM)
+    {
+        std::cout << "\nReceived interrupt signal, detaching..." << std::endl;
+        g_interrupted.store(true);
+        
+        // Attempt graceful detach if client is available
+        if(g_client_ptr && g_client_ptr->is_attached())
+        {
+            g_client_ptr->detach();
+        }
+    }
+}
 
 void print_usage(const char* prog_name)
 {
@@ -178,11 +226,6 @@ void print_usage(const char* prog_name)
     std::cout << std::endl;
     std::cout << "Interactive mode commands:" << std::endl;
     std::cout << "  Press Enter to detach and exit" << std::endl;
-}
-
-bool process_exists(uint32_t pid)
-{
-    return kill(pid, 0) == 0;
 }
 
 int main(int argc, char* argv[])
@@ -285,7 +328,17 @@ int main(int argc, char* argv[])
     else
         std::cout << "Attachment Mode: timed (" << duration_seconds << " seconds)" << std::endl;
 
+    // Set up signal handlers for graceful shutdown
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
+
     ProcessAttachmentClient client;
+    g_client_ptr = &client;  // Set global pointer for signal handler
+    
     if(!client.initialize())
     {
         std::cerr << "Failed to initialize attachment client" << std::endl;
@@ -303,9 +356,9 @@ int main(int argc, char* argv[])
     {
         std::cout << "Profiling for " << duration_seconds << " seconds..." << std::endl;
         
-        // Monitor target process using async task for robust timing
-        auto monitor_task = std::async(std::launch::async, [target_pid, duration_seconds]() {
-            auto start_time = std::chrono::steady_clock::now();
+        // Launch async monitoring task that checks PID and reports progress
+        auto monitor_future = std::async(std::launch::async, [target_pid]() {
+            const auto start_time = std::chrono::steady_clock::now();
             auto next_progress_time = start_time + std::chrono::seconds(10);
             
             while(true)
@@ -313,18 +366,23 @@ int main(int argc, char* argv[])
                 // Check if target process still exists
                 if(!process_exists(target_pid))
                 {
-                    std::cout << "Target process " << target_pid << " has exited" << std::endl;
+                    std::cout << "\nTarget process " << target_pid << " has exited unexpectedly" << std::endl;
                     return false;  // Process exited
                 }
                 
-                // Check elapsed time and show progress
-                auto now = std::chrono::steady_clock::now();
-                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+                // Check for interrupt signal
+                if(g_interrupted.load())
+                {
+                    std::cout << "\nProfiling interrupted by user" << std::endl;
+                    return false;  // User interrupted
+                }
                 
                 // Show progress every 10 seconds
+                auto now = std::chrono::steady_clock::now();
                 if(now >= next_progress_time)
                 {
-                    std::cout << "Profiling... " << elapsed << "/" << duration_seconds << " seconds" << std::endl;
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+                    std::cout << "Profiling... " << elapsed << " seconds elapsed" << std::endl;
                     next_progress_time = now + std::chrono::seconds(10);
                 }
                 
@@ -333,18 +391,25 @@ int main(int argc, char* argv[])
             }
         });
         
-        // Wait for the specified duration or until the task completes
-        auto status = monitor_task.wait_for(std::chrono::seconds(duration_seconds));
+        // Use wait_for to enforce the total duration timeout
+        auto wait_status = monitor_future.wait_for(std::chrono::seconds(duration_seconds));
         
-        if(status == std::future_status::timeout)
+        if(wait_status == std::future_status::timeout)
         {
-            // Duration elapsed normally
-            std::cout << "Profiling duration completed" << std::endl;
+            // Duration completed - signal monitoring task to stop and wait for it
+            g_interrupted.store(true);
+            monitor_future.wait();
+            g_interrupted.store(false);  // Reset the flag
+            std::cout << "Profiling duration of " << duration_seconds << " seconds completed" << std::endl;
         }
         else
         {
-            // Task completed early (process likely exited)
-            monitor_task.get();  // Get result to ensure any exceptions are propagated
+            // Monitoring task completed early (process exited or interrupted)
+            bool completed_normally = monitor_future.get();
+            if(!completed_normally)
+            {
+                std::cout << "Profiling terminated early" << std::endl;
+            }
         }
     }
     else
@@ -353,18 +418,55 @@ int main(int argc, char* argv[])
         std::cout << std::endl;
         std::cout << "=== Interactive Mode ===" << std::endl;
         std::cout << "Profiling process " << target_pid << std::endl;
-        std::cout << "Press Enter to detach and exit..." << std::endl;
+        std::cout << "Press Enter to detach and exit (or Ctrl+C for immediate exit)..." << std::endl;
+        
+        // Use a separate thread to monitor process status while waiting for input
+        std::atomic<bool> input_received{false};
+        auto monitor_thread = std::thread([target_pid, &input_received]() {
+            while(!input_received.load() && !g_interrupted.load())
+            {
+                if(!process_exists(target_pid))
+                {
+                    std::cout << "\nTarget process " << target_pid << " has exited" << std::endl;
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+        });
         
         std::string input;
         std::getline(std::cin, input);
+        input_received.store(true);
+        
+        monitor_thread.join();
+    }
+
+    // Check for early termination
+    if(g_interrupted.load())
+    {
+        std::cout << "Session interrupted by user" << std::endl;
+        g_client_ptr = nullptr;
+        return 0;
     }
 
     // Detach from the process
     if(!client.detach())
     {
         std::cerr << "Warning: Failed to cleanly detach from process" << std::endl;
+        
+        // Additional diagnostics
+        if(!process_exists(target_pid))
+        {
+            std::cerr << "Note: Target process no longer exists - this may be expected if it terminated" << std::endl;
+            std::cout << "Process attachment session completed (target process exited)" << std::endl;
+            return 0;  // Exit successfully since we can't do more
+        }
+        
+        std::cerr << "Target process still exists - detachment failure is unexpected" << std::endl;
+        return 1;
     }
 
     std::cout << "Process attachment session completed" << std::endl;
+    g_client_ptr = nullptr;  // Clear global pointer
     return 0;
 }
