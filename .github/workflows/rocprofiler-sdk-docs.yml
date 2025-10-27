@@ -95,7 +95,9 @@ jobs:
           set-safe-directory: true
 
       - name: Init/Update submodules
-        run: git submodule update --init --recursive --jobs 16
+        run: |
+          git config --global --add safe.directory '*'
+          git submodule update --init --recursive --jobs 16
 
       - name: Create Docs Directory
         shell: bash
