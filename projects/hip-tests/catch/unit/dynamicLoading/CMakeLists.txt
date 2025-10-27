@@ -34,17 +34,12 @@ hip_add_exe_to_target(NAME dynamicLoading
 hip_add_library(
   NAME LazyLoad
   TYPE SHARED
-  SOURCES liblazyLoad.cc)
+  SOURCES liblazyLoad.cc
+  INSTALL)
 
 hip_add_device_code(
       TARGET bit_extract_kernel
       SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp)
-
-add_custom_target(vecadd.cc COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/vecadd.cc ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
-  ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc
-  ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so
-)
 
 if(HIP_PLATFORM MATCHES "amd")
 hip_add_exe_to_target(NAME Dynamic
@@ -52,5 +47,5 @@ hip_add_exe_to_target(NAME Dynamic
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS ${CMAKE_DL_LIBS})
 endif()
-add_dependencies(build_tests bit_extract_kernel LazyLoad vecadd.cc)
+add_dependencies(build_tests bit_extract_kernel LazyLoad)
 endif()

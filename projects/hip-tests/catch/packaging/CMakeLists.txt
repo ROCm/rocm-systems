@@ -60,10 +60,11 @@ else()
   set (CPACK_RPM_PACKAGE_REQUIRES "rocm-core, hip-static-devel")
 endif()
 
-# Get all the files that needs to be installed in the global property
+# Get all the files that need to be installed from global properties
 get_property(INSTALL_CTEST_INCLUDE_FILES GLOBAL PROPERTY G_INSTALL_CTEST_INCLUDE_FILES)
 get_property(INSTALL_EXE_TARGETS GLOBAL PROPERTY G_INSTALL_EXE_TARGETS)
-get_property(INSTALL_CUSTOM_TARGETS GLOBAL PROPERTY G_INSTALL_CUSTOM_TARGETS)
+get_property(INSTALL_LIB_TARGETS GLOBAL PROPERTY G_INSTALL_LIB_TARGETS)
+get_property(INSTALL_DEVICE_CODE_FILES GLOBAL PROPERTY G_INSTALL_DEVICE_CODE_FILES)
 get_property(INSTALL_SRC_FILES GLOBAL PROPERTY G_INSTALL_SRC_FILES)
 get_property(INSTALL_HEADER_FILES GLOBAL PROPERTY G_INSTALL_HEADER_FILES)
 # Create top level CTestTestfile.cmake
@@ -116,7 +117,7 @@ set(CPACK_SOURCE_GENERATOR "TGZ")
 # Install license file
 
 set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/../LICENSE.md" )
-install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${INSTALL_DIR})
+rocm_install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${INSTALL_DIR})
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 else()
@@ -134,42 +135,33 @@ set(INSTALL_DIR_SCRIPT ${INSTALL_DIR}/${CATCH_BUILD_DIR}/script)
 set(INSTALL_DIR_SRC ${INSTALL_DIR}/${CATCH_BUILD_DIR}/src)
 set(INSTALL_DIR_HEADERS ${INSTALL_DIR}/${CATCH_BUILD_DIR}/headers)
 # install catch scripts
-install(FILES
+rocm_install(FILES
         ${ADD_SCRIPT_PATH}
         ${CATCH_INCLUDE_PATH}
         DESTINATION ${INSTALL_DIR_SCRIPT})
 # install cmake include files
-foreach(CTEST_INCLUDE_FILE ${INSTALL_CTEST_INCLUDE_FILES})
-  install(FILES ${CTEST_INCLUDE_FILE} DESTINATION ${INSTALL_DIR_SCRIPT})
-endforeach()
-# install source files
-foreach(SRC_FILE ${INSTALL_SRC_FILES})
-  install(FILES ${SRC_FILE} DESTINATION ${INSTALL_DIR_SRC})
-endforeach()
-# install header files
-foreach(HEADER_FILES ${INSTALL_HEADER_FILES})
-  install(FILES ${HEADER_FILES} DESTINATION ${INSTALL_DIR_HEADERS})
-endforeach()
-# install executables
-foreach(EXE_TARGET ${INSTALL_EXE_TARGETS})
-  install(TARGETS ${EXE_TARGET}
-          RUNTIME DESTINATION ${INSTALL_DIR_TESTS} OPTIONAL)
-endforeach()
-# install custom targets
-foreach(CUSTOM_TARGET ${INSTALL_CUSTOM_TARGETS})
-  install(FILES ${CUSTOM_TARGET} DESTINATION ${INSTALL_DIR_TESTS})
-endforeach()
+rocm_install(FILES ${INSTALL_CTEST_INCLUDE_FILES} DESTINATION ${INSTALL_DIR_SCRIPT})
+
+# Temporarily override CMAKE_INSTALL_BINDIR to prevent rocm_install from adding /bin subdirectory
+set(_SAVED_BINDIR ${CMAKE_INSTALL_BINDIR})
+set(CMAKE_INSTALL_BINDIR ".")
+rocm_install(TARGETS ${INSTALL_EXE_TARGETS} PREFIX ${INSTALL_DIR_TESTS})
+rocm_install(TARGETS ${INSTALL_LIB_TARGETS} PREFIX ${INSTALL_DIR_TESTS})
+set(CMAKE_INSTALL_BINDIR ${_SAVED_BINDIR})
+rocm_install(FILES ${INSTALL_DEVICE_CODE_FILES} DESTINATION ${INSTALL_DIR_TESTS})
+rocm_install(FILES ${INSTALL_SRC_FILES} DESTINATION ${INSTALL_DIR_SRC})
+rocm_install(FILES ${INSTALL_HEADER_FILES} DESTINATION ${INSTALL_DIR_HEADERS})
 # install ctest file
-install(FILES
+rocm_install(FILES
         ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/CTestTestfile.cmake
         DESTINATION ${INSTALL_DIR_TESTS})
-install(FILES
+rocm_install(FILES
         ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/windows/CTestTestfile.cmake
         DESTINATION ${INSTALL_DIR})
 # install catchinfo
-install(FILES ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt DESTINATION ${INSTALL_DIR})
+rocm_install(FILES ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt DESTINATION ${INSTALL_DIR})
 # install hip test config
-install(DIRECTORY
+rocm_install(DIRECTORY
         ${HIP_TEST_CONFIG_BINARY_DIR}
         DESTINATION ${INSTALL_DIR_TESTS})
 include(CPack)

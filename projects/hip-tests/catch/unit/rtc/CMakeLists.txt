@@ -38,8 +38,8 @@ add_custom_target(copyRtcHeaders ALL
   ${CMAKE_CURRENT_BINARY_DIR}/headers)
 
 file(GLOB INSTALL_HEADER_FILES "./headers/*")
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_HEADER_FILES ${INSTALL_HEADER_FILES})
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/saxpy.h)
+hip_install_runtime_sources(FILES ${CMAKE_CURRENT_BINARY_DIR}/saxpy.h)
+hip_install_runtime_headers(FILES ${INSTALL_HEADER_FILES})
 
 if(UNIX)
    set(AMD_TEST_SRC ${AMD_TEST_SRC}

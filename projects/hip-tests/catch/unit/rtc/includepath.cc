@@ -22,7 +22,7 @@ TEST_CASE("Unit_hiprtc_includepath") {
 
   string saxpy = "";
   {
-    fstream f("saxpy.h", std::ios::in);
+    fstream f("src/saxpy.h", std::ios::in);
     if (f.is_open()) {
       size_t sizeFile;
       f.seekg(0, fstream::end);

@@ -48,9 +48,9 @@ endfunction()
 
 # hip_add_library: Create HIP library with EXCLUDE_FROM_ALL
 # Required: NAME, TYPE (STATIC/SHARED/OBJECT), SOURCES
-# Optional: LINKER_LIBS
+# Optional: LINKER_LIBS, INSTALL (flag to enable installation)
 function(hip_add_library)
-  cmake_parse_arguments(ARG "" "NAME;TYPE" "SOURCES;LINKER_LIBS" ${ARGN})
+  cmake_parse_arguments(ARG "INSTALL" "NAME;TYPE" "SOURCES;LINKER_LIBS" ${ARGN})
 
   if(NOT ARG_NAME OR NOT ARG_TYPE OR NOT ARG_SOURCES)
     message(FATAL_ERROR "hip_add_library: NAME, TYPE, and SOURCES required")
@@ -66,6 +66,11 @@ function(hip_add_library)
     set_source_files_properties(${ARG_SOURCES} PROPERTIES LANGUAGE HIP)
   elseif(HIP_PLATFORM STREQUAL "nvidia")
     set_source_files_properties(${ARG_SOURCES} PROPERTIES LANGUAGE CUDA)
+  endif()
+
+  # Optional installations for libraries
+  if(ARG_INSTALL)
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_LIB_TARGETS ${ARG_NAME})
   endif()
 endfunction()
 
@@ -102,7 +107,7 @@ function(hip_add_device_code)
       COMMENT "Generating ${ARG_OUTPUT_NAME}.fatbin"
       VERBATIM)
     add_custom_target(${ARG_TARGET} DEPENDS ${OUTPUT_PATH}.code)
-    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${OUTPUT_PATH}.fatbin ${OUTPUT_PATH}.code)
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_DEVICE_CODE_FILES ${OUTPUT_PATH}.fatbin ${OUTPUT_PATH}.code)
 
   elseif(HIP_PLATFORM STREQUAL "amd")
     set(OFFLOAD_ARCH ${ARG_OFFLOAD_ARCH_OVERRIDE})
@@ -136,6 +141,28 @@ function(hip_add_device_code)
       VERBATIM COMMAND_EXPAND_LISTS)
 
     add_custom_target(${ARG_TARGET} DEPENDS ${OUTPUT_PATH})
-    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${OUTPUT_PATH})
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_DEVICE_CODE_FILES ${OUTPUT_PATH})
   endif()
+endfunction()
+
+# hip_install_runtime_sources: Mark source files for installation to tests dir
+function(hip_install_runtime_sources)
+  cmake_parse_arguments(ARG "" "" "FILES" ${ARGN})
+
+  if(NOT ARG_FILES)
+    message(FATAL_ERROR "hip_install_runtime_sources: FILES required")
+  endif()
+
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${ARG_FILES})
+endfunction()
+
+# hip_install_runtime_headers: Mark header files for installation to headers dir
+function(hip_install_runtime_headers)
+  cmake_parse_arguments(ARG "" "" "FILES" ${ARGN})
+
+  if(NOT ARG_FILES)
+    message(FATAL_ERROR "hip_install_runtime_headers: FILES required")
+  endif()
+
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_HEADER_FILES ${ARG_FILES})
 endfunction()
