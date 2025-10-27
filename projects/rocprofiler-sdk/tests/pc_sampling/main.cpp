@@ -140,6 +140,11 @@ matrix_multiply_tile(float* A, float* B, float* Out, int m, int n, int k)
 void
 run_hip_app()
 {
+    hipDeviceProp_t device_props;
+    HIP_API_CALL(hipGetDeviceProperties(&device_props, 0));
+    // Check if the GPU architecture is gfx120*
+    std::string arch_name(device_props.gcnArchName);
+
     std::vector<float> A(M * K);
     std::vector<float> B(K * N);
     std::vector<float> Out(M * N);
@@ -170,8 +175,13 @@ run_hip_app()
     dim3 grid_size((M + block_size.x - 1) / block_size.x, (N + block_size.y - 1) / block_size.y);
     matrix_multiply<<<grid_size, block_size>>>(d_A, d_B, d_Out, M, N, K);
     check_hip_error();
-    matrix_multiply_tile<<<grid_size, block_size>>>(d_A, d_B, d_Out, M, N, K);
-    check_hip_error();
+    if(arch_name.find("gfx120") != 0)
+    {
+        // There are some issues with PC sampling when LDS is in use,
+        // so avoid running matmul with shared memory on Navi4x
+        matrix_multiply_tile<<<grid_size, block_size>>>(d_A, d_B, d_Out, M, N, K);
+        check_hip_error();
+    }
 
     // Copy data back to CPU
     HIP_API_CALL(hipMemcpy(Out.data(), d_Out, sizeof(float) * M * N, hipMemcpyDeviceToHost));

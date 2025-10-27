@@ -503,6 +503,16 @@ run_kernel()
     // Get device properties to retrieve GFXIP version
     uint32_t num_blocks = BLOCK_SIZE;
 
+    hipDeviceProp_t device_props;
+    HIP_API_CALL(hipGetDeviceProperties(&device_props, 0));
+    // Check if the GPU architecture is gfx120*
+    std::string arch_name(device_props.gcnArchName);
+    if(arch_name.find("gfx120") == 0)
+    {
+        // Reducing the workload size on Navi4x.
+        num_blocks /= 4;
+    }
+
     for(int i = 1; i <= wave_size; i++)
     {
         if(i % 2 == 1)
