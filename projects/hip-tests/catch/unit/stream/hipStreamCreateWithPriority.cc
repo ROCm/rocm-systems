@@ -934,7 +934,7 @@ TEST_CASE("Unit_hipStreamCreateWithPriority_CheckPriorityVal") {
 
   int priority_low = 0, priority_high = 0;
   HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
-  hipStream_t stream{nullptr};
+  hipStream_t stream{};
 
   SECTION("Setting high priority") {
     HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority_high));
