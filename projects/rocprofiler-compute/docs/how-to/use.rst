@@ -70,6 +70,13 @@ to view the metrics for current system architecture:
    $ rocprof-compute --list-metrics <sys_arch>
    $ rocprof-compute profile --list-available-metrics
 
+To view available aliases by hardware block, use the ``--list-blocks``
+option with a system architecture argument
+
+.. code-block:: shell
+
+   $ rocprof-compute --list-blocks <sys_arch>
+
 .. _basic-analyze-cli:
 
 Analyze in the command line

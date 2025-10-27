@@ -376,13 +376,17 @@ write_perfetto(
         {
             for(auto itr : region_gen.get(ditr))
             {
-                auto& track = thread_tracks.at(itr.tid);
-                auto  _name = itr.name;
+                auto& track      = thread_tracks.at(itr.tid);
+                auto  _name      = itr.name;
+                auto  _operation = itr.name;
 
                 if(itr.has_extdata())
                 {
-                    if(auto _extdata = itr.get_extdata(); !_extdata.message.empty())
-                        _name = _extdata.message;
+                    auto _extdata = itr.get_extdata();
+                    if(_extdata.message && !_extdata.message->empty())
+                        _name = _extdata.message.value();
+                    if(_extdata.operation && !_extdata.operation->empty())
+                        _operation = _extdata.operation.value();
                 }
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
@@ -402,7 +406,7 @@ write_perfetto(
                                   "kind",
                                   itr.category,
                                   "operation",
-                                  _name,
+                                  _operation,
                                   "corr_id",
                                   itr.stack_id,
                                   "ancestor_id",
@@ -419,13 +423,17 @@ write_perfetto(
         {
             for(auto itr : sample_gen.get(ditr))
             {
-                auto& track = thread_tracks.at(itr.tid);
-                auto  _name = itr.name;
+                auto& track      = thread_tracks.at(itr.tid);
+                auto  _name      = itr.name;
+                auto  _operation = itr.name;
 
                 if(itr.has_extdata())
                 {
-                    if(auto _extdata = itr.get_extdata(); !_extdata.message.empty())
-                        _name = _extdata.message;
+                    auto _extdata = itr.get_extdata();
+                    if(_extdata.message && !_extdata.message->empty())
+                        _name = _extdata.message.value();
+                    if(_extdata.operation && !_extdata.operation->empty())
+                        _operation = _extdata.operation.value();
                 }
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
@@ -445,7 +453,7 @@ write_perfetto(
                                     "kind",
                                     itr.category,
                                     "operation",
-                                    _name,
+                                    _operation,
                                     "corr_id",
                                     itr.stack_id,
                                     "ancestor_id",

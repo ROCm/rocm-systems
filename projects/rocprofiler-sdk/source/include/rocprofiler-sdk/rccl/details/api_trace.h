@@ -47,7 +47,7 @@
 #define RCCL_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define RCCL_API_TRACE_VERSION_PATCH 1
+#define RCCL_API_TRACE_VERSION_PATCH 2
 
 #if !defined(RCCL_EXTERN_C_INIT)
 #    ifdef __cplusplus
@@ -182,6 +182,13 @@ typedef ncclResult_t (*ncclCommDestroy_fn_t)(ncclComm_t comm);
 
 typedef ncclResult_t (*ncclCommAbort_fn_t)(ncclComm_t comm);
 
+typedef ncclResult_t (*ncclCommShrink_fn_t)(ncclComm_t    comm,
+                                            int*          excludeRanksList,
+                                            int           excludeRanksCount,
+                                            ncclComm_t*   newcomm,
+                                            ncclConfig_t* config,
+                                            int           shrinkFlags);
+
 typedef ncclResult_t (*ncclCommSplit_fn_t)(ncclComm_t    comm,
                                            int           color,
                                            int           key,
@@ -232,6 +239,14 @@ typedef ncclResult_t (*ncclCommRegister_fn_t)(const ncclComm_t comm,
 
 typedef ncclResult_t (*ncclCommDeregister_fn_t)(const ncclComm_t comm, void* handle);
 
+typedef ncclResult_t (*ncclCommWindowRegister_fn_t)(ncclComm_t    comm,
+                                                    void*         buff,
+                                                    size_t        size,
+                                                    ncclWindow_t* win,
+                                                    int           winFlags);
+
+typedef ncclResult_t (*ncclCommWindowDeregister_fn_t)(ncclComm_t comm, ncclWindow_t win);
+
 typedef struct rcclApiFuncTable
 {
     uint64_t                      size;
@@ -273,6 +288,9 @@ typedef struct rcclApiFuncTable
     ncclCommRegister_fn_t         ncclCommRegister_fn;
     ncclCommDeregister_fn_t       ncclCommDeregister_fn;
     ncclAllReduceWithBias_fn_t    ncclAllReduceWithBias_fn;
+    ncclCommShrink_fn_t           ncclCommShrink_fn;
+    ncclCommWindowRegister_fn_t   ncclCommWindowRegister_fn;
+    ncclCommWindowDeregister_fn_t ncclCommWindowDeregister_fn;
 } rcclApiFuncTable;
 
 RCCL_EXTERN_C_FINI

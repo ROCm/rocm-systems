@@ -32,7 +32,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
 
-import numpy as np
 import pandas as pd
 import yaml
 
@@ -466,7 +465,7 @@ class RocProfCompute_Base:
                     console_debug(output)
 
             console_log("profiling", f"Current input file: {fname}")
-            options = self.get_profiler_options(fname, self._soc)
+            options = self.get_profiler_options(str(fname), self._soc)
             start_time = time.time()
             if self.__profiler == "rocprofv3" or self.__profiler == "rocprofiler-sdk":
                 # Only 1-run case is permitted for attach/detach
@@ -504,8 +503,10 @@ class RocProfCompute_Base:
                 console_error("Profiler not supported")
 
         # PC sampling data is only collected when block "21" is specified
+        print(args.filter_blocks)
         if not (
             "21" in args.filter_blocks
+            and "pc_sampling" in args.filter_blocks
             and self.__profiler in ("rocprofv3", "rocprofiler-sdk")
         ):
             return
@@ -542,5 +543,5 @@ class RocProfCompute_Base:
         self._soc.post_profiling()
 
 
-def test_df_column_equality(df: pd.DataFrame) -> np.bool:
+def test_df_column_equality(df: pd.DataFrame) -> bool:
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()

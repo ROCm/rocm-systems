@@ -557,6 +557,8 @@ typedef enum hipDeviceAttribute_t {
                                             ///< hipHostRegister
   hipDeviceAttributeMemoryPoolSupportedHandleTypes,  ///< Supported handle mask for HIP Stream
                                                      ///< Ordered Memory Allocator
+  hipDeviceAttributeHostNumaId,             ///< NUMA ID of the cpu node closest to the device,
+                                            ///< or -1 when NUMA isn't supported
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -899,7 +901,10 @@ enum hipLimit_t {
  * can be obtained with #hipHostGetDevicePointer.*/
 #define hipHostRegisterMapped 0x2
 
-/** Not supported.*/
+/** The passed memory pointer is treated as pointing to some memory-mapped I/O space, e.g.
+ * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and 
+ * contiguous.
+ * */
 #define hipHostRegisterIoMemory 0x4
 
 /** This flag is ignored On AMD devices.*/
@@ -3047,6 +3052,14 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
  */
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
                                  hipStreamAttrValue* value_out);
+
+/**
+ *@brief Copies attributes from source stream to destination stream.
+ * @param[in] dst - Destination stream
+ * @param[in] src - Source stream
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src);
 
 // end doxygen Stream
 /**
@@ -6361,9 +6374,9 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
  * @param [in] numLibraryOptions Number of library options
  * @return #hipSuccess, #hipErrorInvalidValue,
  */
-hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption** jitOptions,
+hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption* jitOptions,
                               void** jitOptionsValues, unsigned int numJitOptions,
-                              hipLibraryOption** libraryOptions, void** libraryOptionValues,
+                              hipLibraryOption* libraryOptions, void** libraryOptionValues,
                               unsigned int numLibraryOptions);
 
 /**
@@ -6380,8 +6393,8 @@ hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOpt
  * @return #hipSuccess, #hipErrorInvalidValue
  */
 hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
-                                  hipJitOption** jitOptions, void** jitOptionsValues,
-                                  unsigned int numJitOptions, hipLibraryOption** libraryOptions,
+                                  hipJitOption* jitOptions, void** jitOptionsValues,
+                                  unsigned int numJitOptions, hipLibraryOption* libraryOptions,
                                   void** libraryOptionValues, unsigned int numLibraryOptions);
 
 /**
