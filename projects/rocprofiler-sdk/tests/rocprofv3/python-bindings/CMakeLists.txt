@@ -25,7 +25,7 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(tracing-env
     "${PRELOAD_ENV}"
-    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python/site-packages"
     )
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini marker.py COPY validate.py

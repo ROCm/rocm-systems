@@ -1,7 +1,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2023-2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,24 +22,28 @@
 # THE SOFTWARE.
 ###############################################################################
 
+"""
+ROCm Profiling Data (rocpd) - Pure Python Implementation
+
+This module provides a 100% pure Python implementation of rocpd functionality,
+eliminating the need for version-specific compiled extensions.
+
+Works with Python 3.6+ without any compilation required.
+"""
+
 import sys
 import os
 
-try:
-    import ctypes
-
-    sqlite3lib = ctypes.CDLL("libsqlite3.so")
-except Exception:
-    pass
-
+# Ensure sqlite3 is available (built-in to Python)
 try:
     import sqlite3
-
     sqlite3.connect(":memory:")  # Test if sqlite3 is available
-except Exception:
-    pass
+except Exception as e:
+    print(f"ERROR: sqlite3 not available: {e}", file=sys.stderr)
+    print("Python must be compiled with sqlite3 support", file=sys.stderr)
 
-from . import libpyrocpd
+# Use pure Python compatibility layer instead of libpyrocpd
+from . import libpyrocpd_compat as libpyrocpd
 from .importer import RocpdImportData
 
 __all__ = [
@@ -69,34 +73,51 @@ version_info = {
     "compiler_id": "@CMAKE_CXX_COMPILER_ID@",
     "compiler_version": "@CMAKE_CXX_COMPILER_VERSION@",
     "rocm_version": "@rocm_version_FULL_VERSION@",
+    "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+    "binding_type": "pure_python",
 }
 
 
 def format_path(path, tag=os.path.basename(sys.executable)):
+    """Format path with variable substitution"""
     return libpyrocpd.format_path(path, tag)
 
 
 def connect(input, *args, **kwargs):
+    """
+    Connect to rocpd database(s).
+
+    Args:
+        input: Path to database file, list of paths, or existing connection
+
+    Returns:
+        RocpdImportData instance
+    """
     return RocpdImportData(input, *args, **kwargs)
 
 
 def execute(data, *args, **kwargs):
+    """Execute SQL query on database"""
     return data.execute(*args, **kwargs)
 
 
 def read_agents(data, condition=""):
+    """Read agent information from database"""
     return libpyrocpd.read_agents(data, condition)
 
 
 def read_nodes(data, condition=""):
+    """Read node information from database"""
     return libpyrocpd.read_nodes(data, condition)
 
 
 def read_processes(data, condition=""):
+    """Read process information from database"""
     return libpyrocpd.read_processes(data, condition)
 
 
 def read_threads(data, condition=""):
+    """Read thread information from database"""
     return libpyrocpd.read_threads(data, condition)
 
 
@@ -137,20 +158,22 @@ def write_csv(connection, config=None, **kwargs):
     Returns:
         bool: returns True if successful
     """
-    from . import output_config
+    from . import csv as csv_module
 
-    config = (
-        output_config.output_config(**kwargs)
-        if config is None
-        else config.update(**kwargs)
-    )
+    config_obj = None
+    if config is None:
+        from . import output_config
+        config_obj = output_config.output_config(**kwargs)
+    else:
+        config_obj = config.update(**kwargs)
 
-    return libpyrocpd.write_csv(connection, config)
+    # Use the pure Python CSV writer
+    return csv_module.write_csv(connection, config_obj)
 
 
 def write_otf2(connection, config=None, **kwargs):
     """
-    Write OTF@ output file
+    Write OTF2 output file
 
     Args:
         connection (rocpd.RocpdImportData):

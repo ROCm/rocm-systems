@@ -13,7 +13,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(rocpd-env
     "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python/site-packages"
     )
 
 #########################################################################################

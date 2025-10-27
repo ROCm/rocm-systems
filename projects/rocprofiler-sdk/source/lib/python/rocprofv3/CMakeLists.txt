@@ -21,6 +21,25 @@
 # SOFTWARE.
 
 set(rocprofv3_PYTHON_SOURCES __init__.py avail.py)
-rocprofiler_rocprofv3_python(${rocprofv3_PYTHON_SOURCES})
 
-rocprofiler_reset_python3_cache()
+# rocprofv3 is pure Python (uses ctypes, no compilation needed)
+set(ROCPROFV3_INSTALL_DIR
+    "${CMAKE_INSTALL_LIBDIR}/python/site-packages/rocprofv3"
+    CACHE STRING "Installation directory for rocprofv3 Python package")
+
+set(ROCPROFV3_OUTPUT_DIR
+    "${PROJECT_BINARY_DIR}/${ROCPROFV3_INSTALL_DIR}")
+
+# Copy Python files to build directory
+foreach(_SOURCE ${rocprofv3_PYTHON_SOURCES})
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/${_SOURCE}
+        ${ROCPROFV3_OUTPUT_DIR}/${_SOURCE}
+        COPYONLY)
+endforeach()
+
+# Install Python files
+install(
+    FILES ${rocprofv3_PYTHON_SOURCES}
+    DESTINATION ${ROCPROFV3_INSTALL_DIR}
+    COMPONENT tools)

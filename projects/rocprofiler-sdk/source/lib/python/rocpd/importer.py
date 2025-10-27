@@ -1,7 +1,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2023-2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,37 +22,42 @@
 # THE SOFTWARE.
 ###############################################################################
 
-#
-# Utility classes to simplify generating rpd files
-#
-#
+"""
+Utility classes for importing and managing rocpd database files.
+Pure Python implementation.
+"""
 
 import sys
 import sqlite3
 
 from .schema import RocpdSchema
-from . import libpyrocpd
+from . import libpyrocpd_compat as libpyrocpd
 
 __all__ = ["RocpdImportData", "execute_statement"]
 
 
 class RocpdImportData(libpyrocpd.RocpdImportData):
+    """
+    Pure Python implementation of RocpdImportData.
+
+    Manages connections to one or more rocpd SQLite database files.
+    """
 
     def __init__(self, input):
         if isinstance(input, RocpdImportData):
-            super(RocpdImportData, self).__init__(input)
+            super(RocpdImportData, self).__init__(input.connection, input.databases)
             self.table_info = input.table_info
         else:
-
             if isinstance(input, sqlite3.Connection):
                 raise ValueError(
                     "RocpdImportData does not accept existing sqlite3 connections"
                 )
             elif isinstance(input, str):
-                _connection = libpyrocpd.connect(input)
+                _connection = sqlite3.connect(input)
                 _filenames = [input]
+                self.table_info = {}
             elif isinstance(input, list) and len(input) > 0 and isinstance(input[0], str):
-                _connection = libpyrocpd.connect(":memory:")
+                _connection = sqlite3.connect(":memory:")
                 _filenames = input[:]
                 _connection.execute("PRAGMA foreign_keys = ON")
                 self.table_info = _create_temp_views(_connection, input)
@@ -76,6 +81,7 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
 
 
 def execute_statement(conn, statement, is_script=False):
+    """Execute SQL statement on connection"""
     if isinstance(conn, RocpdImportData):
         _conn = conn.connection
     else:
@@ -161,6 +167,7 @@ def _create_temp_views(connection, input):
 
 
 def _create_meta_views(connection):
+    """Create metadata views"""
     schema = RocpdSchema()
     sql_script = schema.views.replace("CREATE VIEW", "CREATE TEMPORARY VIEW")
     execute_statement(connection, sql_script, is_script=True)
