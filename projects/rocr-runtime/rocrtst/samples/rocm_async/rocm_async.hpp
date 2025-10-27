@@ -1,3 +1,9 @@
+/*
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
+ * 
+ * SPDX-License-Identifier: MIT
+ */
+ 
 #ifndef __ROCM_ASYNC_BW_H__
 #define __ROCM_ASYNC_BW_H__
 

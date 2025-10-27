@@ -1,4 +1,4 @@
-/* Copyright (c) 2017 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2017 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -565,7 +565,7 @@ bool PerfCounterProfile::initialize() {
   }
 
   // create the completion signal
-  if (hsa_signal_create(1, 0, nullptr, &completionSignal_) != HSA_STATUS_SUCCESS) {
+  if (Hsa::signal_create(1, 0, nullptr, &completionSignal_) != HSA_STATUS_SUCCESS) {
     LogError("Failed to create signal for profile counter");
     return false;
   }
@@ -604,7 +604,7 @@ hsa_ext_amd_aql_pm4_packet_t* PerfCounterProfile::createStopPacket() {
 
 PerfCounterProfile::~PerfCounterProfile() {
   if (completionSignal_.handle != 0) {
-    hsa_signal_destroy(completionSignal_);
+    Hsa::signal_destroy(completionSignal_);
   }
 
   if (profile_.command_buffer.ptr) {

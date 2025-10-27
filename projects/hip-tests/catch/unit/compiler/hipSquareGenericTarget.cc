@@ -36,7 +36,7 @@ template <typename T> static __global__ void vector_square_generic(T* C_d, const
 #ifdef GENERIC_COMPRESSED
 TEST_CASE("Unit_test_generic_target_in_compressed_fatbin") {
 #else
-TEST_CASE("Unit_test_generic_target_in_regular_fatbin ") {
+TEST_CASE("Unit_test_generic_target_in_regular_fatbin") {
 #endif
   if (!isGenericTargetSupported()) {
     fprintf(stderr, "Generic target test is skipped\n");

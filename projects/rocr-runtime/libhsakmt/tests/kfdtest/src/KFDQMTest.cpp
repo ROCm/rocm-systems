@@ -1012,13 +1012,74 @@ bool adjustMask(uint32_t *pAdjMask, uint32_t *pMask, mask_config_t maskConfig) {
     int totalBits = maskConfig.numBits;
     bool nonZero = false;
 
-    memset(pAdjMask, 0, sizeof(uint32_t) * maskConfig.numDwords);
+    uint32_t tempInactiveMask[maskConfig.numDwords] = { 0 };
+    uint32_t tempAdjustMask[maskConfig.numDwords] = { 0 };
 
+    /*
+     * KFD encodes all the active WGP at the lowest bits in MQD registers.
+     *
+     * If WGP3 is inactive in a SA, it will be encoded by KFD as: 0x3f.
+     * If WGP1 is inactive in a SA, it will be encoded by KFD also as: 0x3f.
+     *
+     * We need to adjust for that.
+     *
+     * For each SA, we need to "compress" all the active WGP settings together.
+     * i.e. if WGP1 is inactive, we need to put: (x WGP3 WGP2 WGP0) in our CU mask array.
+     *
+     * Note that WGPs in same SA are not encoded consecutively in the CU mask array, we need to take into account that.
+     *
+     * Once this step is done, we need to remove any "inactive" entries from the CU mask array as they are skipped by KFD.
+     *
+     */
+
+    // Offset to get the next WGP in a SA.
+    // Ex: If WPG0 is at offset n, WGP1 is at offset n+nextWGPOffset in the CU mask array
+    const uint32_t nextWGPOffset = 2 * maskConfig.numSEs * maskConfig.numSAperSE;
+
+    for (int i = 0; i < maskConfig.numSEs; i++) {
+        for (int j = 0; j < maskConfig.numSAperSE; j++) {
+            // Location of WGP0 for (SE: i, SA: j)
+            uint32_t wgp0Loc = 2 * (j * maskConfig.numSEs + i);
+
+            // Location of last WGP
+            uint32_t wgpLastLoc = wgp0Loc + nextWGPOffset * (maskConfig.numWGPperSA - 1);
+
+            // Where to write the next active WGP
+            uint32_t activeWriteIndex = wgp0Loc;
+            // Where to write the next inactive WGP
+            uint32_t inactiveWriteIndex = wgpLastLoc;
+
+            /*
+             * Iterate over the WGPs for (SE: i, SA: j) and write all the active ones in tempAdjustMask, leaving the inactive ones.
+             * This condenses the WGPs for the (SE,SA) pair being processed.
+             *
+             * Generate temporary adjust mask with the inactive ones.
+             *
+             * At the end we have:
+             *   tempAdjustMask:   ( 0 WGP3 WGP2 WGP1 ) (2 bits per WGP)
+             *   tempInactiveMask: ( 3  0    0    0   ) (2 bits per WGP)
+             */
+            for (int k = wgp0Loc; k < totalBits; k += nextWGPOffset) {
+                if ((maskConfig.pInactiveMask[k / 32] & (0x3 << (k % 32))) != 0) {
+                    tempInactiveMask[inactiveWriteIndex / 32] |= (0x3 << (inactiveWriteIndex % 32));
+                    inactiveWriteIndex -= nextWGPOffset;
+                } else {
+                    uint32_t value = (pMask[k / 32] >> (k % 32)) & 0x3;
+                    uint32_t newValue = value << (activeWriteIndex % 32);
+                    tempAdjustMask[activeWriteIndex / 32] |= newValue;
+                    activeWriteIndex += nextWGPOffset;
+                }
+            }
+        }
+    }
+
+    // Now we remove all the inactive entries and generate the final adjusted mask.
+    memset(pAdjMask, 0, sizeof(uint32_t) * maskConfig.numDwords);
     for (int ri = 0; ri < totalBits; ri += 2) {
 
-        uint32_t value = (pMask[ri / 32] >> (ri % 32)) & 0x3;
+        uint32_t value = (tempAdjustMask[ri / 32] >> (ri % 32)) & 0x3;
 
-        if ((maskConfig.pInactiveMask[ri / 32] & (0x3 << (ri % 32))) != 0)
+        if ((tempInactiveMask[ri / 32] & (0x3 << (ri % 32))) != 0)
         {
             // skip that entry
         }
@@ -1036,16 +1097,16 @@ bool adjustMask(uint32_t *pAdjMask, uint32_t *pMask, mask_config_t maskConfig) {
 
 #if CUMASK_DEBUG
     printf("\nAdjusting mask:\n");
-    printMask("    mask: ", pMask, maskConfig.numDwords);
-    printMask("inactive: ", maskConfig.pInactiveMask, maskConfig.numDwords);
-    printMask("adjusted: ", pAdjMask, maskConfig.numDwords);
+    printMask("         mask: ", pMask, maskConfig.numDwords);
+    printMask("     inactive: ", maskConfig.pInactiveMask, maskConfig.numDwords);
+    printMask("temp adjusted: ", tempAdjustMask, maskConfig.numDwords);
+    printMask("temp inactive: ", tempInactiveMask, maskConfig.numDwords);
+    printMask("     adjusted: ", pAdjMask, maskConfig.numDwords);
     printf("\n");
 #endif //CUMASK_DEBUG
 
     return nonZero;
 }
-
-
 
 /*
  * Validates the result of a test.
@@ -1304,13 +1365,12 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
             maskConfig.pInactiveMask = inactiveMask;
 
             std::ostringstream logStr;
-            logStr << nodeStr << " Inactive WGP detected: " << inactiveCount << "  0x" << std::hex << std::setw(8);
+            logStr << nodeStr << " Inactive CUs detected: " << inactiveCount << "  0x" << std::hex << std::setfill('0');
             for (int i = maskNumDwords - 1; i >= 0; i--) {
-                logStr << inactiveMask[i];
+                logStr << std::setw(8) << inactiveMask[i];
             }
             LOG() << logStr.str() << std::endl;
         }
-
 
         /*
          * Generate symmetric test configuration for all (SE, SA, WGP) combinations, one level at a time.

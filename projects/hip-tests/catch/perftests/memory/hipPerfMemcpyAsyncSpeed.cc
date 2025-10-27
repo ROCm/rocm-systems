@@ -124,7 +124,6 @@ TEST_CASE("Perf_hipPerfMemcpyAsyncSpeed_test") {
       const char* strDst = "dM";
       // Double results when src and dst are both on device
       perf *= 2.0;
-      char buf[256];
       CONSOLE_PRINT(
           "hipMemcpyAsync[%d]\t(%8d bytes)\ts:%s d:%s\ti:%4d\t(GB/s) "
           "perf\t%.2f, time per iter(us):\t%.1f, time per iter CPU (us):\t%.1f",

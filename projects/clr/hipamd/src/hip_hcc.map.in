@@ -630,3 +630,15 @@ global:
 local:
     *;
 } hip_6.5;
+
+hip_7.2 {
+global:
+    hipLibraryLoadData;
+    hipLibraryLoadFromFile;
+    hipLibraryUnload;
+    hipLibraryGetKernel;
+    hipLibraryGetKernelCount;
+    hipStreamCopyAttributes;
+local:
+    *;
+} hip_7.1;

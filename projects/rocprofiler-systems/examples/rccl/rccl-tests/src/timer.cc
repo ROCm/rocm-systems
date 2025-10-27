@@ -1,3 +1,10 @@
+/*************************************************************************
+ * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
 #include "timer.h"
 
 // Make sure to compile this translation unit with the host compiler and not

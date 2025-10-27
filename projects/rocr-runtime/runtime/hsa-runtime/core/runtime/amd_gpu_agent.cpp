@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -491,6 +491,12 @@ void GpuAgent::InitRegionList() {
 }
 
 void GpuAgent::InitScratchPool() {
+
+  if (!core::Runtime::runtime_singleton_->flag().enable_scratch()) {
+    scratch_pool_. ~SmallHeap();
+    return;
+  }
+
   scratch_per_thread_ =
       core::Runtime::runtime_singleton_->flag().scratch_mem_size();
   if (scratch_per_thread_ == 0)
@@ -723,7 +729,11 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
       break;
     case 11:
     case 12:
-      sdma = new BlitSdmaV5();
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+        sdma = new BlitSdmaV4();
+      } else {
+        sdma = new BlitSdmaV5();
+      }
       copy_size_override = copy_size_overrides[1];
       break;
     default:
@@ -738,7 +748,7 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   rec_eng = uses_rec_sdma_eng_id_mask_ || !use_xgmi ? rec_eng : -1;
 
   if (sdma->Initialize(*this, use_xgmi, copy_size_override, rec_eng) != HSA_STATUS_SUCCESS) {
-    sdma->Destroy(*this);
+    sdma->Destroy();
     delete sdma;
     sdma = nullptr;
   }
@@ -750,7 +760,7 @@ core::Blit* GpuAgent::CreateBlitKernel(core::Queue* queue) {
   AMD::BlitKernel* kernl = new AMD::BlitKernel(queue);
 
   if (kernl->Initialize(*this) != HSA_STATUS_SUCCESS) {
-    kernl->Destroy(*this);
+    kernl->Destroy();
     delete kernl;
     kernl = NULL;
   }
@@ -912,7 +922,7 @@ void GpuAgent::ReleaseResources() {
     this->Disable();
     for (auto& blit : blits_) {
       if (!blit.empty()) {
-        hsa_status_t status = blit->Destroy(*this);
+        hsa_status_t status = blit->Destroy();
         assert(status == HSA_STATUS_SUCCESS);
       }
     }
@@ -1016,8 +1026,8 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
                                std::vector<core::Signal*>& dep_signals,
                                core::Signal& out_signal) {
   // Recommended SDMA engine copies only have gang factor 1
-  uint32_t rec_sdma_eng = ffs(rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle]);
-
+  uint32_t rec_sdma_eng =
+    rocr::os::Ffs(rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle]);
   if (rec_sdma_eng)
     return DmaCopyOnEngine(dst, dst_agent, src, src_agent, size,
                            dep_signals, out_signal, rec_sdma_eng, false);
@@ -1244,11 +1254,30 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
 
 hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                           uint32_t *recommended_ids_mask) {
-  assert(((src_agent.device_type() == core::Agent::kAmdGpuDevice) ||
-          (dst_agent.device_type() == core::Agent::kAmdGpuDevice)) &&
-         ("Both devices are CPU agents which is not expected"));
+  // From the collected data, gfx94x performance is better only for first 3 SDMA engines
+  bool isGfx94x = (isa_->GetMajorVersion() == 9 &&
+                  (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5));
 
-  *recommended_ids_mask = rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle];
+  if (isGfx94x &&
+      ((src_agent.device_type() == core::Agent::kAmdCpuDevice &&
+        dst_agent.device_type() == core::Agent::kAmdGpuDevice) ||
+        (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
+        dst_agent.device_type() == core::Agent::kAmdCpuDevice))) {
+
+    if (src_agent.device_type() == core::Agent::kAmdCpuDevice) {
+      // Host to Device: Use SDMA engine 0 if available
+      *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_0;
+    } else {
+      // Device to Host: Use SDMA engines 1 and 2 if available
+      *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_1;
+
+      if (properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines > 2) {
+        *recommended_ids_mask |= HSA_AMD_SDMA_ENGINE_2;
+      }
+    }
+  } else {
+    *recommended_ids_mask = rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle];
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -1738,6 +1767,8 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   const uint32_t num_cu = properties_.NumFComputeCores / properties_.NumSIMDPerCU;
   scratch.main_size = scratch.main_size_per_thread * properties_.MaxSlotsScratchCU *
       scratch.main_lanes_per_wave * num_cu;
+  scratch.main_size =
+      (core::Runtime::runtime_singleton_->flag().enable_scratch()) ? scratch.main_size : 0;
   scratch.main_queue_base = nullptr;
   scratch.main_queue_process_offset = 0;
 
@@ -1761,13 +1792,16 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   core::SharedQueue* shared_queue = nullptr;
 
   if (dev_mem_queue_descriptor) {
-    shared_queue = static_cast<core::SharedQueue*>(
-        finegrain_allocator()(sizeof(core::SharedQueue), core::MemoryRegion::AllocateUncached));
+    shared_queue = static_cast<core::SharedQueue*>(finegrain_allocator()(
+        sizeof(core::SharedQueue),
+        core::MemoryRegion::AllocateUncached | MemoryRegion::AllocateQueueObject));
   } else {
     shared_queue =
         static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
             sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
-            isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged) : 0,
+            isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged |
+                       MemoryRegion::AllocateQueueObject)
+                    : MemoryRegion::AllocateQueueObject,
             node_id()));
   }
 

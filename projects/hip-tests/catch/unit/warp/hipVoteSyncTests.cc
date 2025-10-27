@@ -49,6 +49,9 @@ static void runTestAny_1() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void any_2(int* Input, int* Output) {
@@ -83,6 +86,9 @@ static void runTestAny_2_w64() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 static void runTestAny_2_w32() {
@@ -112,6 +118,9 @@ static void runTestAny_2_w32() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void any_3(int* Input, int* Output) {
@@ -144,6 +153,9 @@ static void runTestAny_3() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void any_4(int* Input, int* Output) {
@@ -192,6 +204,9 @@ static void runTestAny_4() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void all_1(int* Input, int* Output) {
@@ -225,6 +240,9 @@ static void runTestAll_1_w64() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 static void runTestAll_1_w32() {
@@ -252,6 +270,9 @@ static void runTestAll_1_w32() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void all_2(int* Input, int* Output) {
@@ -284,6 +305,9 @@ static void runTestAll_2() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void all_3(int* Input, int* Output) {
@@ -316,6 +340,9 @@ static void runTestAll_3() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void all_4(int* Input, int* Output) {
@@ -363,6 +390,9 @@ static void runTestAll_4() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void ballot_1(int* Input, unsigned long long* Output) {
@@ -408,6 +438,9 @@ static void runTestBallot_1() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void ballot_2(int* Input, unsigned long long* Output) {
@@ -454,6 +487,9 @@ static void runTestBallot_2() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void ballot_3(int* Input, unsigned long long* Output) {
@@ -500,6 +536,9 @@ static void runTestBallot_3() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareMaskEqual(Output, Expected, i, warpSize));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 /**

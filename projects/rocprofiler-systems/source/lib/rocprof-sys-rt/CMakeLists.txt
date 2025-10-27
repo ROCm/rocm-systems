@@ -14,102 +14,37 @@ set(NEED_NATIVE_ASSEMBLER ON)
 
 include(cmake/platform.cmake)
 
-set(SRC_LIST src/RTcommon.c src/RTmemEmulator.c)
+set(_public_headers h/dyninstAPI_RT.h h/dyninstRTExport.h)
 
-if(PLATFORM MATCHES freebsd)
+set(_private_headers src/RTcommon.h src/RTheap.h src/RTthread.h)
+
+set(_sources src/RTcommon.c src/RTheap.c src/RTthread.c)
+
+if(PLATFORM MATCHES linux)
+    set(_static_sources src/RTstatic_ctors_dtors_begin.c src/RTstatic_ctors_dtors_end.c)
     list(
         APPEND
-        SRC_LIST
-        src/RTposix.c
-        src/RTfreebsd.c
-        src/RTheap.c
-        src/RTheap-freebsd.c
-        src/RTthread.c
-        src/RTspace.S
-        src/RTsignal.c
-    )
-elseif(PLATFORM MATCHES linux)
-    list(
-        APPEND
-        SRC_LIST
+        _sources
         src/RTposix.c
         src/RTlinux.c
-        src/RTheap.c
         src/RTheap-linux.c
-        src/RTthread.c
         src/RTspace.S
         src/RTsignal.c
-    )
-    list(
-        APPEND
-        RT_STATIC_ONLY_SRC_LIST
-        src/RTstatic_ctors_dtors_begin.c
-        src/RTstatic_ctors_dtors_end.c
-    )
-elseif(PLATFORM MATCHES nt OR PLATFORM MATCHES windows)
-    list(
-        APPEND
-        SRC_LIST
-        src/RTheap.c
-        src/RTheap-win.c
-        src/RTwinnt.c
-        src/RTthread.c
-        src/RTthread-x86.c
     )
 endif()
 
-set(SRC_LIST_i386 src/RTthread-x86.c src/RTtlsgetaddr-x86.S)
-set(RT_STATIC_ONLY_SRC_LIST_i386 src/RTstatic_ctors_dtors-x86.c)
-set(SRC_LIST_x86_64 src/RTthread-x86-64.c src/RTtlsgetaddr-x86.S)
-set(RT_STATIC_ONLY_SRC_LIST_x86_64 src/RTstatic_ctors_dtors-x86.c)
-set(SRC_LIST_ppc32 src/RTthread-powerpc.c src/RTthread-powerpc-asm.S)
-set(RT_STATIC_ONLY_SRC_LIST_ppc32 src/RTstatic_ctors_dtors-ppc32.c)
-set(SRC_LIST_ppc64 src/RTthread-powerpc.c src/RTthread-powerpc-asm.S)
-set(RT_STATIC_ONLY_SRC_LIST_ppc64 src/RTstatic_ctors_dtors-ppc64.c)
-set(SRC_LIST_aarch64
-    src/RTthread-aarch64.c
-    # src/RTthread-aarch64-asm.S
-)
-set(RT_STATIC_ONLY_SRC_LIST_aarch64 src/RTstatic_ctors_dtors-aarch64.c)
+list(APPEND _sources src/RTthread-x86-64.c src/RTtlsgetaddr-x86.S)
+list(APPEND _static_sources src/RTstatic_ctors_dtors-x86.c)
 
 # We use gcc to compile the various assembly files, but cmake doesn't default to knowing
 # that gcc can handle .S.
 enable_language(ASM)
-file(GLOB SRC_ASSEMBLY "src/*.S")
-if(NEED_NATIVE_ASSEMBLER)
-    set_source_files_properties(${SRC_ASSEMBLY} PROPERTIES LANGUAGE ASM)
-else()
-    set_source_files_properties(${SRC_ASSEMBLY} PROPERTIES LANGUAGE C)
-endif()
+file(GLOB _source_assembly "src/*.S")
 
-# The arch-specific files other than RTthread-x86 are Unix-only.
-if(UNIX)
-    if(PLATFORM MATCHES amd64 OR PLATFORM MATCHES x86_64)
-        set(SRC_LIST_mabi ${SRC_LIST} ${SRC_LIST_i386})
-        set(RT_STATIC_ONLY_SRC_LIST_mabi
-            ${RT_STATIC_ONLY_SRC_LIST}
-            ${RT_STATIC_ONLY_SRC_LIST_i386}
-        )
-        list(APPEND SRC_LIST ${SRC_LIST_x86_64})
-        list(APPEND RT_STATIC_ONLY_SRC_LIST ${RT_STATIC_ONLY_SRC_LIST_x86_64})
-    elseif(PLATFORM MATCHES ppc64)
-        set(SRC_LIST_mabi ${SRC_LIST} ${SRC_LIST_ppc32})
-        set(RT_STATIC_ONLY_SRC_LIST_mabi
-            ${RT_STATIC_ONLY_SRC_LIST}
-            ${RT_STATIC_ONLY_SRC_LIST_ppc32}
-        )
-        list(APPEND SRC_LIST ${SRC_LIST_ppc64})
-        list(APPEND RT_STATIC_ONLY_SRC_LIST ${RT_STATIC_ONLY_SRC_LIST_ppc64})
-    elseif(PLATFORM MATCHES i386)
-        list(APPEND SRC_LIST ${SRC_LIST_i386})
-        list(APPEND RT_STATIC_ONLY_SRC_LIST ${RT_STATIC_ONLY_SRC_LIST_i386})
-    elseif(PLATFORM MATCHES ppc32)
-        list(APPEND SRC_LIST ${SRC_LIST_ppc32})
-        list(APPEND RT_STATIC_ONLY_SRC_LIST ${RT_STATIC_ONLY_SRC_LIST_ppc32})
-    elseif(PLATFORM MATCHES aarch64)
-        list(APPEND SRC_LIST ${SRC_LIST_aarch64})
-        list(APPEND RT_STATIC_ONLY_SRC_LIST ${RT_STATIC_ONLY_SRC_LIST_aarch64})
-    endif()
+if(NEED_NATIVE_ASSEMBLER)
+    set_source_files_properties(${_source_assembly} PROPERTIES LANGUAGE ASM)
+else()
+    set_source_files_properties(${_source_assembly} PROPERTIES LANGUAGE C)
 endif()
 
 add_library(rocprofiler-systems-rt-library SHARED)
@@ -118,7 +53,7 @@ add_library(
     ALIAS rocprofiler-systems-rt-library
 )
 
-target_sources(rocprofiler-systems-rt-library PRIVATE ${SRC_LIST})
+target_sources(rocprofiler-systems-rt-library PRIVATE ${_sources})
 target_include_directories(
     rocprofiler-systems-rt-library
     PRIVATE

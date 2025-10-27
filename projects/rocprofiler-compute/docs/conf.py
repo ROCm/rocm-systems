@@ -60,7 +60,7 @@ exclude_patterns = ["archive", "*/includes"]
 html_static_path = ["sphinx/static/css"]
 html_css_files = ["o_custom.css"]
 
-with open("data/metrics_description.yaml", "r") as f:
+with open("data/metrics_description.yaml") as f:
     metrics_data = yaml.safe_load(f)
 jinja_contexts = {
     "wavefront-launch-stats": {
@@ -173,7 +173,7 @@ external_projects_current_project = "rocprofiler-compute"
 # frequently used external resources
 extlinks = {
     "dev-sample": (
-        "https://github.com/ROCm/rocprofiler-compute/blob/amd-mainline/sample/%s",
+        "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute/sample/%s",
         "%s",
     ),
     "prod-page": (

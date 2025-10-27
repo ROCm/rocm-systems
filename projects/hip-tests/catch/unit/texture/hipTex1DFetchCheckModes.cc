@@ -99,6 +99,7 @@ static void runTest(hipTextureAddressMode addressMode, hipTextureFilterMode filt
   HIP_CHECK(hipDestroyTextureObject(texObj));
   HIP_CHECK(hipFree(texBuf));
   HIP_CHECK(hipFree(texBufOut));
+  HIP_CHECK(hipCtxDestroy(HipContext));
 }
 
 

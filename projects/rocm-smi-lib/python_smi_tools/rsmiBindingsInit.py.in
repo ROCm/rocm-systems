@@ -23,7 +23,7 @@ def initRsmiBindings(silent=False):
             print(args)
 
     rocm_smi_lib_path = os.getenv('ROCM_SMI_LIB_PATH')
-    if (rocm_smi_lib_path != None):
+    if (rocm_smi_lib_path is not None):
         path_librocm = rocm_smi_lib_path
     else:
         path_librocm = os.path.dirname(os.path.realpath(__file__)) + '/../../@CMAKE_INSTALL_LIBDIR@/librocm_smi64.so.@VERSION_MAJOR@'

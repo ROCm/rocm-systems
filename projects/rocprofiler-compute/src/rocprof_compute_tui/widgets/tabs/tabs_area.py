@@ -28,6 +28,7 @@ Panel Widget Modules
 Contains the panel widgets used in the main layout.
 """
 
+from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import TabPane, TextArea
 
@@ -44,7 +45,7 @@ class TabsArea(Vertical):
         "border-title-status",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the bottom panel."""
 
         super().__init__()
@@ -56,7 +57,7 @@ class TabsArea(Vertical):
         # Set initial tab
         self.default_tab = "tab-output"
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         with TabsTabbedContent(initial="tab-output"):
             with TabPane("METRIC DESCRIPTION", id="tab-description"):
                 yield (self.description_area)

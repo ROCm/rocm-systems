@@ -33,7 +33,8 @@ __global__ void HmmMultiThread(int n, float* x, float* y) {
 
 __global__ void KrnlWth2MemTypes(int* Hmm, int* Dptr, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
-  for (size_t i = index; i < n; i++) {
+  size_t stride = blockDim.x * gridDim.x;
+  for (size_t i = index; i < n; i += stride) {
     Hmm[i] = Dptr[i] + 10;
   }
 }
@@ -81,6 +82,8 @@ static void LaunchKrnl(int* Hmm1, size_t NumElms, int InitVal, int GpuOrdnl, int
     WARN("Data Mismatch observed at line: " << __LINE__);
     IfTestPassed = false;
   }
+  HIPCHECK(hipFree(Hmm2));
+  HIPCHECK(hipStreamDestroy(strm));
 }
 
 static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
@@ -384,6 +387,7 @@ TEST_CASE("Unit_hipMallocManaged_MGpuMThread") {
       }
     }
   }
+  HIP_CHECK(hipFree(Hmm1));
   REQUIRE(IfTestPassed);
 }
 

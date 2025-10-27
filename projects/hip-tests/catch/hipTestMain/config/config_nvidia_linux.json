@@ -1,8 +1,5 @@
 {
     "DisabledTests": [
-        "=== Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/38 ===",
-        "Unit_hipFreeAsync_Negative_Parameters",
-        "Unit_hipStreamAttachMemAsync_Negative_Parameters",
         "Unit_atomicExch_Positive_Same_Address_Compile_Time - int",
         "Unit_atomicExch_Positive_Same_Address_Compile_Time - unsigned int",
         "Unit_atomicExch_Positive_Same_Address_Compile_Time - unsigned long long",
@@ -12,17 +9,9 @@
         "Unit_atomicExch_system_Positive_Host_And_GPU - unsigned long long",
         "Unit_atomicExch_system_Positive_Host_And_GPU - float",
         "Unit_hipModuleUnload_Negative_Double_Unload",
-        "=== Below 2 tests are disabled due to defect EXSWHTEC-342 ===",
-        "Unit_hipDeviceSetLimit_Negative_Parameters",
-        "Unit_hipDeviceGetLimit_Negative_Parameters",
         "=== Below tests are failing PSDB ===",
-        "Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3",
-        "Unit_hipMemPoolSetAccess_Negative_Parameters",
-        "Unit_hipMallocMipmappedArray_Negative_NumLevels",
-        "Unit_hipFreeMipmappedArray_Negative_Nullptr",
         "Unit_hipCreateSurfaceObject_Negative_Parameters",
         "Unit_hipDestroySurfaceObject_Negative_Parameters",
-        "Unit_hipFreeMipmappedArray_Negative_DoubleFree",
         "Unit_hipModuleLoad_Positive_Basic",
         "Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module",
         "Unit_hipModuleLoadData_Positive_Basic",
@@ -34,11 +23,7 @@
         "Unit_hipMemMapArrayAsync_Positive_Basic",
         "=== Disabling tests which no longer behave the same on nvidia platform ===",
         "Unit_hipGraphInstantiateWithParams_Negative",
-        "Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph",
-        "Unit_hipDeviceSynchronize_Positive_Nullstream",
-        "Unit_hipDeviceSynchronize_Functional",
         "Unit_hipDeviceReset_Positive_Basic",
         "Unit_hipDeviceReset_Positive_Threaded",
-        "Unit_hipModuleGetTexRef_Positive_Basic"
     ]
 }

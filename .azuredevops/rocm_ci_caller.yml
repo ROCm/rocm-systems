@@ -3,6 +3,8 @@ pr:
   branches:
     include:
       - develop
+      - release/rocm-rel-7.1
+      - release/rocm-rel-7.2
   drafts: false
 
 variables:
@@ -38,9 +40,9 @@ jobs:
         echo "shared/" >> .git/info/sparse-checkout
 
         git remote add origin https://github.com/$(REPOSITORY_NAME).git
-        git fetch --depth=50 origin $(BASE_REF)
+        git fetch --depth=250 origin $(BASE_REF)
 
-        git fetch --depth=50 origin $(HEAD_SHA)
+        git fetch --depth=250 origin $(HEAD_SHA)
 
         git checkout FETCH_HEAD
         
@@ -50,15 +52,32 @@ jobs:
         cat ../changed_files.txt
 
         MATCH_FOUND=false
+        WINDOWS_SKIP=true
         while read file; do
           if [[ "$file" == projects/* ]]; then
             MATCH_FOUND=true
+          fi
+          if [[ "$file" == projects/clr/* || "$file" == projects/hip/* || "$file" == projects/hip-tests/* ]]; then
+            WINDOWS_SKIP=false
+          fi
+          if [[ "$file" == projects/hip/docs/* || \
+                "$file" == projects/rdc/docs/* || \
+                "$file" == projects/rocm-smi-lib/docs/* || \
+                "$file" == projects/rocminfo/docs/* || \
+                "$file" == projects/rocprofiler-compute/docs/* || \
+                "$file" == projects/rocprofiler-systems/docs/* || \
+                "$file" == projects/rocr-runtime/runtime/docs/* ]]; then
+            WINDOWS_SKIP=true
+            MATCH_FOUND=false
+          fi
+          if [[ "$MATCH_FOUND" == true && "$WINDOWS_SKIP" == false ]]; then
             break
           fi
         done < ../changed_files.txt
 
         echo "Match found: $MATCH_FOUND"
         echo "##vso[task.setvariable variable=match_found;isOutput=true]$MATCH_FOUND"
+        echo "##vso[task.setvariable variable=windows_skip;isOutput=true]$WINDOWS_SKIP"
       name: detectChanges
       displayName: Detect path changes
 
@@ -69,6 +88,7 @@ jobs:
   pool: rocm-ci-caller
   variables:
     match_found: $[ dependencies.Determine_Changes.outputs['detectChanges.match_found'] ]
+    windows_skip: $[ dependencies.Determine_Changes.outputs['detectChanges.windows_skip'] ]
   steps:
     - checkout: none
     
@@ -76,6 +96,21 @@ jobs:
         echo "DEBUG: match_found = '$(match_found)'"
       displayName: 'Debug match_found variable'
 
+    - script: |
+        echo "DEBUG: windows_skip = '$(windows_skip)'"
+      displayName: 'Debug windows_skip variable'
+
+    - script: |
+        echo "Changes outside monitored paths (clr, hip, hip-tests). Skipping WindowsCI - Internal."
+        echo "Sending success status for WindowsCI - Internal..."
+        export GH_TOKEN=$(GH_PAT)
+        gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
+          -f state=success \
+          -f context="WindowsCI - Internal" \
+          -f description="Windows PSDB skipped"
+      displayName: 'Skip WindowsCI - Internal'
+      condition: eq(variables.windows_skip, 'true')
+    
     - script: |
         rm -rf $(repo_name)
         git clone $(gh_repo)

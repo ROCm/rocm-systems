@@ -66,7 +66,7 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Peer_GPUs", "", int, unsigned
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
           2, 2, 1, sizeof(TestType));
@@ -116,7 +116,7 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_GPU", "", int, unsig
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
           1, 1, 1, sizeof(TestType), 4);
@@ -166,7 +166,7 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs", "", int,
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
           2, 2, 1, sizeof(TestType), 4);

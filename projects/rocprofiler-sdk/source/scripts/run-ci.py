@@ -1,5 +1,27 @@
 #!/usr/bin/env python3
 
+# MIT License
+#
+# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 
 import os
 import re
@@ -14,8 +36,8 @@ import multiprocessing
 # and default value for CTEST_SUBMIT_URL
 # _PROJECT_NAME = "rocprofiler-v2-internal"
 # _BASE_URL = "10.194.116.31/cdash"
-_PROJECT_NAME = "rocprofiler-sdk"
-_BASE_URL = "cdash.rocprofiler.amd.com"
+_PROJECT_NAME = "rocprofiler-sdk-alt"
+_BASE_URL = "my.cdash.org"
 _GCOVR_GENERATE_CMD = None
 
 # these are various default values
@@ -193,9 +215,9 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_PROJECT_NAME "{_PROJECT_NAME}")
         set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
 
-        set(CTEST_DROP_METHOD "http")
+        set(CTEST_DROP_METHOD "https")
         set(CTEST_DROP_SITE_CDASH TRUE)
-        set(CTEST_SUBMIT_URL "http://{SUBMIT_URL}")
+        set(CTEST_SUBMIT_URL "https://{SUBMIT_URL}")
 
         set(CTEST_UPDATE_TYPE git)
         set(CTEST_UPDATE_VERSION_ONLY TRUE)

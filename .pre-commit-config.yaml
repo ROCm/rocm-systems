@@ -28,8 +28,8 @@ repos:
         entry: clang-format -i -style=file
         files: '\.(c|cpp|cc|h|hpp|m|mm)$'
 
-  - repo: https://github.com/cheshirekow/cmake-format-precommit
-    rev: v0.6.10
+  - repo: https://github.com/BlankSpruce/gersemi
+    # gersemi replaces cmake-format and cmake-lint
+    rev: 0.22.1
     hooks:
-      - id: cmake-format
-      - id: cmake-lint
+      - id: gersemi

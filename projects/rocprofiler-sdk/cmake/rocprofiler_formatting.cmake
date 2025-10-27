@@ -13,46 +13,93 @@
 
 include_guard(DIRECTORY)
 
+include(rocprofiler_utilities)
+
 if(ROCPROFILER_BUILD_DEVELOPER)
     set(_FMT_REQUIRED REQUIRED)
 else()
     set(_FMT_REQUIRED)
 endif()
 
-if(NOT ROCPROFILER_CLANG_FORMAT_EXE AND EXISTS $ENV{HOME}/.local/bin/clang-format)
+# checks that clang-format is version 11.x.x
+function(_rocprofiler_check_clang_format_version _OUT _EXE)
     execute_process(
-        COMMAND $ENV{HOME}/.local/bin/clang-format --version
+        COMMAND ${_EXE} --version
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
         OUTPUT_VARIABLE _CLANG_FMT_OUT
         RESULT_VARIABLE _CLANG_FMT_RET
         OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    if(_CLANG_FMT_RET EQUAL 0)
-        if("${_CLANG_FMT_OUT}" MATCHES "version 11\\.([0-9]+)\\.([0-9]+)")
-            set(ROCPROFILER_CLANG_FORMAT_EXE
-                "$ENV{HOME}/.local/bin/clang-format"
-                CACHE FILEPATH "clang-format exe")
-        endif()
+    if(_CLANG_FMT_RET EQUAL 0 AND "${_CLANG_FMT_OUT}" MATCHES
+                                  "version 11\\.([0-9]+)\\.([0-9]+)")
+        set(${_OUT}
+            ON
+            PARENT_SCOPE)
+    else()
+        set(${_OUT}
+            OFF
+            PARENT_SCOPE)
     endif()
+endfunction()
+
+_rocprofiler_get_python_user_bin(_PYTHON_USER_BIN)
+if(NOT ROCPROFILER_CLANG_FORMAT_EXE
+   AND _PYTHON_USER_BIN
+   AND EXISTS "${_PYTHON_USER_BIN}/clang-format")
+    _rocprofiler_check_clang_format_version(_IS_VALID_CLANG_FMT
+                                            "${_PYTHON_USER_BIN}/clang-format")
+    if(_IS_VALID_CLANG_FMT)
+        set(ROCPROFILER_CLANG_FORMAT_EXE
+            "${_PYTHON_USER_BIN}/clang-format"
+            CACHE FILEPATH "clang-format exe")
+    endif()
+endif()
+
+if(NOT ROCPROFILER_CMAKE_FORMAT_EXE
+   AND _PYTHON_USER_BIN
+   AND EXISTS "${_PYTHON_USER_BIN}/cmake-format")
+    set(ROCPROFILER_CMAKE_FORMAT_EXE
+        "${_PYTHON_USER_BIN}/cmake-format"
+        CACHE FILEPATH "cmake-format exe")
+endif()
+
+if(NOT ROCPROFILER_BLACK_FORMAT_EXE
+   AND _PYTHON_USER_BIN
+   AND EXISTS "${_PYTHON_USER_BIN}/black")
+    set(ROCPROFILER_BLACK_FORMAT_EXE
+        "${_PYTHON_USER_BIN}/black"
+        CACHE FILEPATH "black exe")
 endif()
 
 find_program(
     ROCPROFILER_CLANG_FORMAT_EXE ${_FMT_REQUIRED}
     NAMES clang-format-11 clang-format-mp-11 clang-format
-    PATHS $ENV{HOME}/.local
-    HINTS $ENV{HOME}/.local
+    PATHS ${_PYTHON_USER_BIN}
+    HINTS ${_PYTHON_USER_BIN}
     PATH_SUFFIXES bin)
 find_program(
     ROCPROFILER_CMAKE_FORMAT_EXE ${_FMT_REQUIRED}
     NAMES cmake-format
-    PATHS $ENV{HOME}/.local
-    HINTS $ENV{HOME}/.local
+    PATHS ${_PYTHON_USER_BIN}
+    HINTS ${_PYTHON_USER_BIN}
     PATH_SUFFIXES bin)
 find_program(
     ROCPROFILER_BLACK_FORMAT_EXE ${_FMT_REQUIRED}
     NAMES black
-    PATHS $ENV{HOME}/.local
-    HINTS $ENV{HOME}/.local
+    PATHS ${_PYTHON_USER_BIN}
+    HINTS ${_PYTHON_USER_BIN}
     PATH_SUFFIXES bin)
+
+_rocprofiler_check_clang_format_version(_IS_VALID_CLANG_FMT
+                                        "${ROCPROFILER_CLANG_FORMAT_EXE}")
+if(NOT _IS_VALID_CLANG_FMT)
+    if(ROCPROFILER_BUILD_DEVELOPER)
+        message(
+            AUTHOR_WARNING
+                "[rocprofiler] clang-format version 11 not found. Please see rocprofiler-sdk CONTRIBUTING.md for instructions on installing clang-format version 11."
+            )
+    endif()
+    unset(ROCPROFILER_CLANG_FORMAT_EXE CACHE)
+endif()
 
 add_custom_target(format-rocprofiler)
 if(NOT TARGET format)

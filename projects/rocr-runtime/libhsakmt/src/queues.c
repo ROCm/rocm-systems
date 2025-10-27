@@ -663,7 +663,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 		/* cu_mask_count counts bits. It must be multiple of 32 */
 		q->cu_mask_count = ALIGN_UP_32(cu_num, 32);
 		for (i = 0; i < cu_num; i++)
-			q->cu_mask[i/32] |= (1 << (i % 32));
+			q->cu_mask[i/32] |= (1U << (i % 32));
 	}
 
 	struct kfd_ioctl_create_queue_args args = {0};

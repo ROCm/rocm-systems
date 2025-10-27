@@ -20,8 +20,6 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 /*! \addtogroup HSA OCL Stub Implementation
  *  @{
  */
@@ -102,4 +100,3 @@ class Settings : public device::Settings {
 /*@}*/  // namespace amd::roc
 }  // namespace amd::roc
 
-#endif /*WITHOUT_HSA_BACKEND*/

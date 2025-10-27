@@ -67,6 +67,10 @@ template <typename T> static void runTestMatchAll_1() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Predicate[i] == ExpPredicate[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Predicate));
 }
 
 template <typename T>
@@ -123,6 +127,10 @@ template <typename T> static void runTestMatchAll_2() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Predicate[i] == ExpPredicate[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Predicate));
 }
 
 template <typename T>
@@ -242,6 +250,10 @@ template <typename T> static void runTestMatchAll_3() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(Predicate[i] == ExpPredicate[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
+  HIP_CHECK(hipFree(d_Predicate));
 }
 
 __global__ void matchAll_4(int* Input, int* Output) {
@@ -291,6 +303,9 @@ static void runTestMatchAll_4() {
   for (size_t i = 0; i < Output.size(); i++) {
     REQUIRE(Output[i] == Expected[i]);
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 /**

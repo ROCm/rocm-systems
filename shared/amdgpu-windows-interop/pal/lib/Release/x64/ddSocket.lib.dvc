@@ -1,0 +1,5 @@
+outs:
+- md5: f88897c7d989d95f0352cf6e1a21df99
+  size: 106228
+  hash: md5
+  path: ddSocket.lib

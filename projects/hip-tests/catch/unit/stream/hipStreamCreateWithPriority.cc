@@ -768,6 +768,8 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
 
   for (int i = 0; i < LOW_PRIORITY_STREAMCOUNT; i++) {
     if (enable_priority_low) {
+      HIP_CHECK(hipFree(src_d_low[i]));
+      HIP_CHECK(hipFree(dst_d_low[i]));
       HIP_CHECK(hipEventDestroy(event_start_low[i]));
       HIP_CHECK(hipEventDestroy(event_end_low[i]));
     }
@@ -777,6 +779,8 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
 
   for (int i = 0; i < NORMAL_PRIORITY_STREAMCOUNT; i++) {
     if (enable_priority_normal) {
+      HIP_CHECK(hipFree(src_d_normal[i]));
+      HIP_CHECK(hipFree(dst_d_normal[i]));
       HIP_CHECK(hipEventDestroy(event_start_normal[i]));
       HIP_CHECK(hipEventDestroy(event_end_normal[i]));
     }
@@ -786,6 +790,8 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
 
   for (int i = 0; i < HIGH_PRIORITY_STREAMCOUNT; i++) {
     if (enable_priority_high) {
+      HIP_CHECK(hipFree(src_d_high[i]));
+      HIP_CHECK(hipFree(dst_d_high[i]));
       HIP_CHECK(hipEventDestroy(event_start_high[i]));
       HIP_CHECK(hipEventDestroy(event_end_high[i]));
     }

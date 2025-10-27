@@ -191,7 +191,7 @@ rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
                                "Compiler specific language extensions" OFF
 )
 rocprofiler_systems_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH
-                               "Enable rpath to linked libraries" ON
+                               "Enable rpath to linked libraries" OFF
 )
 set(CMAKE_INSTALL_MESSAGE "LAZY" CACHE STRING "Installation message")
 mark_as_advanced(CMAKE_INSTALL_MESSAGE)
@@ -216,6 +216,9 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from subm
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
                                "Build libunwind from submodule" ON
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_NLOHMANN_JSON
+                               "Build nlohmann/json from submodule" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CODECOV "Build for code coverage" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
@@ -385,8 +388,8 @@ endif()
 # ------------------------------------------------------------------------------#
 
 configure_file(
-    ${PROJECT_SOURCE_DIR}/LICENSE
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE
+    ${PROJECT_SOURCE_DIR}/LICENSE.md
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE.md
     COPYONLY
 )
 
@@ -430,7 +433,8 @@ install(
 )
 
 install(
-    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE
+    FILES
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}
     COMPONENT setup
 )

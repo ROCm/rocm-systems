@@ -202,11 +202,9 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_ZeroSize") {
     HIP_CHECK(hipGetLastError());
 
     constexpr int expected_value = 20;
-    HIP_CHECK(hipSetDevice(dst_device));
     VectorSet<<<block_count, thread_count, 0, stream>>>(dst_alloc.ptr(), expected_value,
                                                         element_count);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipSetDevice(src_device));
 
     constexpr int set_value_h = 21;
     std::fill_n(result.host_ptr(), element_count, set_value_h);
@@ -310,6 +308,31 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Negative_Parameters") {
   } else {
     INFO("Peer access cannot be enabled between devices " << src_device << " " << dst_device);
   }
+}
+
+TEST_CASE("Unit_hipMemcpyPeerAsync_Capture") {
+  const int device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    return;
+  }
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  HIP_CHECK(hipSetDevice(0));
+  LinearAllocGuard<int> src_device_alloc(LinearAllocs::hipMalloc, kPageSize);
+  HIP_CHECK(hipSetDevice(1));
+  LinearAllocGuard<int> dst_device_alloc(LinearAllocs::hipMalloc, kPageSize);
+
+  HIP_CHECK(hipSetDevice(0));
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(
+      hipMemcpyPeerAsync(src_device_alloc.ptr(), 0, dst_device_alloc.ptr(), 1, kPageSize, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 /**

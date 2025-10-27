@@ -60,7 +60,7 @@ void hsakmt_fmm_print(uint32_t node);
 HSAKMT_STATUS hsakmt_fmm_release(void *address);
 HSAKMT_STATUS hsakmt_fmm_map_to_gpu(void *address, uint64_t size, uint64_t *gpuvm_address);
 int hsakmt_fmm_unmap_from_gpu(void *address);
-bool hsakmt_fmm_get_handle(void *address, uint64_t *handle);
+bool hsakmt_fmm_get_handle(void *address, uint64_t *handle, uint64_t *size_offset);
 HSAKMT_STATUS hsakmt_fmm_get_mem_info(const void *address, HsaPointerInfo *info);
 HSAKMT_STATUS hsakmt_fmm_set_mem_user_data(const void *mem, void *usr_data);
 #ifdef SANITIZER_AMDGPU
@@ -75,8 +75,7 @@ HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(aperture_type_e aperture_ty
 HSAKMT_STATUS hsakmt_fmm_register_memory(void *address, uint64_t size_in_bytes,
 								  uint32_t *gpu_id_array,
 								  uint32_t gpu_id_array_size,
-								  bool coarse_grain,
-								  bool ext_coherent);
+								  HsaMemFlags flags);
 HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HSAuint64 GraphicsResourceHandle,
 					   HsaGraphicsResourceInfo *GraphicsResourceInfo,
 					   uint32_t *gpu_id_array,

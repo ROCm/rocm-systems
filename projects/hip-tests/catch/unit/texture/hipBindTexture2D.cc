@@ -122,6 +122,8 @@ TEST_CASE("Unit_hipBindTexture2D_Negative") {
         hipBindTexture2D(&texture_offset, &tex, device_ptr, &tex.channelDesc, SIZE_W, SIZE_H, 0),
         hipErrorInvalidValue);
   }
+
+  HIP_CHECK(hipFree(device_ptr));
 }
 
 #endif  // __HIP_PLATFORM_AMD__ || CUDA_VERSION < CUDA_12000

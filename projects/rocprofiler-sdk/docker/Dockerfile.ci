@@ -1,0 +1,97 @@
+# Build a thin "base with deps" image atop the private runner image
+ARG BASE_TAG=ubuntu-22.04
+FROM rocm/rocprofiler-private:${BASE_TAG}
+ARG GPU_TYPE=gfx94X
+ARG GPU_TARBALL
+
+SHELL ["/bin/bash","-lc"]
+COPY projects/rocprofiler-sdk/requirements.txt /root/requirements.txt
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CMAKE_HIP_PLATFORM=amd
+ENV HIP_PLATFORM=amd
+ENV HIP_RUNTIME=rocclr
+ENV HIP_COMPILER=amdclang++
+ENV LLVM_PATH=/opt/rocm/llvm
+ENV CMAKE_PREFIX_PATH=/opt/rocm
+ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH}
+
+# Debian/Ubuntu
+RUN set-euo pipefail; \
+    if [ -f /etc/debian_version ]; then \
+        apt-get update && \
+        apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common git cmake g++-11 g++-12 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev && \
+        add-apt-repository ppa:git-core/ppa && \
+        mkdir -p /etc/apt/keyrings && \
+        wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb && \
+        apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb && \
+        apt-get update && \
+        apt-get install -y git rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev && \
+        python3 -m pip install -U awscli pipx && \
+        python3 -m pip install -U --user -r /root/requirements.txt; \
+    fi;
+
+# RHEL
+RUN set -euo pipefail; \
+    if [ $(grep -i "ID=.*rhel" /etc/os-release | wc -l) -gt 0 ]; then \
+        dnf clean all || true; \
+        dnf install -y perl-ExtUtils-MakeMaker python3-pip || true; \
+        if [ $(grep -i "VERSION_ID=\"8.8\"" /etc/os-release | wc -l) -gt 0 ]; then \
+            wget https://www.kernel.org/pub/software/scm/git/git-2.51.0.tar.xz; \
+            tar -xf git-2.51.0.tar.xz; \
+            cd git-2.51.0; \
+            rm -rf /etc/yum.repos.d/redhat-partner.repo || true; \
+            dnf clean all; \
+            dnf install -y perl-ExtUtils-MakeMaker || true; \
+            export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH; \
+            make prefix=/usr all -j 32; \
+            make prefix=/usr install; \
+            cd ..; rm -rf git-2.51.0*; \
+            echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/el8/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+            echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/rhel/8.10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
+        else \
+            rm -rf /etc/yum.repos.d/RHEL-partners.repo; \
+            dnf clean all; \
+            echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/el9/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+            echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/30.10/rhel/9.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
+        fi; \
+        dnf clean all; \
+        dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel elfutils-devel; \
+        python3 -m pip install -U awscli pipx; \
+        python3 -m venv rocprofiler-sdk; \
+        source rocprofiler-sdk/bin/activate; \
+        export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:${PATH}; \
+        python3 -m pip install --upgrade pip; \
+        python3 -m pip install --upgrade -r /root/requirements.txt; \
+    fi;
+
+# SLES
+RUN set -euo pipefail; \
+    if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
+        echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/zyp/7.0_rc1/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
+        echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/30.10_rc1/sle/15.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
+        zypper --gpg-auto-import-keys refresh; \
+        zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip; \
+        python3 -m venv rocprofiler-sdk; \
+        source rocprofiler-sdk/bin/activate; \
+        python3 -m pip install --upgrade pip pipx; \
+        python3 -m pipx install awscli; \
+        python3 -m pipx ensurepath; \
+        source ~/.bashrc; \
+        python3 -m pip install --upgrade pip || true; \
+        python3 -m pip install --upgrade -r /root/requirements.txt || true; \
+        cd /tmp; wget https://www.kernel.org/pub/software/scm/git/git-2.51.0.tar.xz; \
+        tar -xf git-2.51.0.tar.xz; cd git-2.51.0; make prefix=/usr all -j 32; make prefix=/usr install; \
+        cd /tmp; ln -s -f /usr/bin/git /usr/local/bin/git; rm -rf git-2.51.0*; \
+    fi;
+
+# Nightly Tarball
+RUN set -euo pipefail; \
+    if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
+        source rocprofiler-sdk/bin/activate; \
+        python3 -m pipx ensurepath; \
+        source ~/.bashrc; \
+    fi; \
+    aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${GPU_TYPE}.tar.gz --no-sign-request && \
+    mv rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz;

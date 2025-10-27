@@ -237,11 +237,6 @@ if(${BUILD_TYPE} STREQUAL "Debug")
 add_definitions(-DDEBUG)
 endif()
 
-if(${EMULATOR_BUILD})
-add_definitions(-DROCRTST_EMULATOR_BUILD=1)
-endif()
-
-
 #add_definitions(-D__linux__)
 add_definitions(-DLITTLEENDIAN_CPU=1)
 
@@ -376,6 +371,10 @@ set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/gpuReadWrite_kernels.cl")
 build_sample_for_devices("gpuReadWrite")
 
+# Vector Copy
+set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
+set(CL_FILE_LIST "${KERNELS_DIR}/vector_copy_kernel.cl")
+build_sample_for_devices("vector_copy")
 
 # Vector Add Debug Trap
 set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")

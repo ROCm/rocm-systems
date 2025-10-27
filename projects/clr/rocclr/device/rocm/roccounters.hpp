@@ -1,4 +1,4 @@
-/* Copyright (c) 2017 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2017 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,6 @@
 #include "top.hpp"
 #include "device/device.hpp"
 #include "device/rocm/rocdevice.hpp"
-#include "hsa/hsa_ven_amd_aqlprofile.h"
 
 namespace amd::roc {
 
@@ -108,19 +107,7 @@ class PerfCounterProfile : public amd::ReferenceCountedObject {
   //! Get the API tables
   bool Create() {
     hsa_agent_t agent = roc_device_.getBackendDevice();
-    bool system_support, agent_support;
-    hsa_system_extension_supported(HSA_EXTENSION_AMD_AQLPROFILE, 1, 0, &system_support);
-    if (!system_support) {
-      LogError("HSA system does not support profile counter");
-      return false;
-    }
-    hsa_agent_extension_supported(HSA_EXTENSION_AMD_AQLPROFILE, agent, 1, 0, &agent_support);
-    if (!agent_support) {
-      LogError("HSA agent does not support profile counter");
-      return false;
-    }
-
-    if (hsa_system_get_major_extension_table(
+    if (Hsa::system_get_major_extension_table(
             HSA_EXTENSION_AMD_AQLPROFILE, hsa_ven_amd_aqlprofile_VERSION_MAJOR,
             sizeof(hsa_ven_amd_aqlprofile_pfn_t), &api_) != HSA_STATUS_SUCCESS) {
       LogError("Failed to obtain aql profile extension function table");

@@ -20,4 +20,4 @@ _section_.text:
 .csect .data[RW],3
 	.llong _section_.text
 
-.section .note.GNU-stack,"",@progbits        
+.section .note.GNU-stack,"",@progbits

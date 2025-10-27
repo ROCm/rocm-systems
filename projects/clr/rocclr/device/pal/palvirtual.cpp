@@ -1441,25 +1441,25 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
   amd::Memory* bufferFromImageDst = nullptr;
 
   // Force buffer read for IMAGE1D_BUFFER
-  if ((srcMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+  if (srcMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
     bufferFromImageSrc = createBufferFromImage(srcMem);
     if (nullptr == bufferFromImageSrc) {
       LogError("We should not fail buffer creation from image_buffer!");
     } else {
-      type = CL_COMMAND_COPY_BUFFER;
       srcMemory = dev().getGpuMemory(bufferFromImageSrc);
     }
   }
   // Force buffer write for IMAGE1D_BUFFER
-  if ((dstMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+  if (dstMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
     bufferFromImageDst = createBufferFromImage(dstMem);
     if (nullptr == bufferFromImageDst) {
       LogError("We should not fail buffer creation from image_buffer!");
     } else {
-      type = CL_COMMAND_COPY_BUFFER;
       dstMemory = dev().getGpuMemory(bufferFromImageDst);
     }
   }
+
+  type = getCopyCommandType(type, srcMem.getType(), dstMem.getType());
 
   bool result = false;
 
@@ -1473,41 +1473,44 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       amd::Coord3D realSize(size.c[0], size.c[1], size.c[2]);
 
       if (nullptr != bufferFromImageSrc) {
-        size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
+        const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
         realSrcOrigin.c[0] *= elemSize;
         if (nullptr != bufferFromImageDst) {
           realDstOrigin.c[0] *= elemSize;
         }
         realSize.c[0] *= elemSize;
       } else if (nullptr != bufferFromImageDst) {
-        size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
+        const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
         realDstOrigin.c[0] *= elemSize;
         realSize.c[0] *= elemSize;
       }
 
       result = blitMgr().copyBuffer(*srcMemory, *dstMemory, realSrcOrigin, realDstOrigin, realSize,
                                     entire, copyMetadata);
-
-      if (nullptr != bufferFromImageSrc) {
-        bufferFromImageSrc->release();
-      }
-      if (nullptr != bufferFromImageDst) {
-        bufferFromImageDst->release();
-      }
     } break;
     case CL_COMMAND_COPY_BUFFER_RECT:
       result = blitMgr().copyBufferRect(*srcMemory, *dstMemory, srcRect, dstRect, size, entire,
                                         copyMetadata);
       break;
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER: {
+      amd::Coord3D realDstOrigin(dstOrigin);
+      if (nullptr != bufferFromImageDst) {
+        const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
+        realDstOrigin.c[0] *= elemSize;
+      }
       result =
-          blitMgr().copyImageToBuffer(*srcMemory, *dstMemory, srcOrigin, dstOrigin, size, entire,
+          blitMgr().copyImageToBuffer(*srcMemory, *dstMemory, srcOrigin, realDstOrigin, size, entire,
                                       dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
       break;
     }
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
+      amd::Coord3D realSrcOrigin(srcOrigin);
+      if (nullptr != bufferFromImageSrc) {
+        const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
+        realSrcOrigin.c[0] *= elemSize;
+      }
       result =
-          blitMgr().copyBufferToImage(*srcMemory, *dstMemory, srcOrigin, dstOrigin, size, entire,
+          blitMgr().copyBufferToImage(*srcMemory, *dstMemory, realSrcOrigin, dstOrigin, size, entire,
                                       srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);
       break;
     }
@@ -1519,7 +1522,12 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       LogError("Unsupported command type for memory copy!");
       break;
   }
-
+  if (nullptr != bufferFromImageSrc) {
+    bufferFromImageSrc->release();
+  }
+  if (nullptr != bufferFromImageDst) {
+    bufferFromImageDst->release();
+  }
   if (!result) {
     LogError("submitCopyMemory failed!");
     return false;
@@ -2285,7 +2293,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     constexpr bool kParent = false;
     vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
         phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
-        phys_mem_obj->getUserData().deviceId, kParent);
+        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
 
     // Calculate the offset from the original pointer.
     vaddr_offset = (reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
@@ -2338,7 +2346,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::PrintChildren(const HSAILKernel& hsaKernel, VirtualGPU* gpuDefQueue) {
+void VirtualGPU::PrintChildren(const pal::Kernel& hsaKernel, VirtualGPU* gpuDefQueue) {
   AmdAqlWrap* wraps = (AmdAqlWrap*)(&((AmdVQueueHeader*)gpuDefQueue->virtualQueue_->data())[1]);
   uint p = 0;
   for (uint i = 0; i < gpuDefQueue->vqHeader_->aql_slot_num; ++i) {
@@ -2373,11 +2381,11 @@ void VirtualGPU::PrintChildren(const HSAILKernel& hsaKernel, VirtualGPU* gpuDefQ
       print << wraps[i].aql.grid_size_y << ", ";
       print << wraps[i].aql.grid_size_z << "]\n";
 
-      HSAILKernel* child = nullptr;
+      pal::Kernel* child = nullptr;
       for (auto it = hsaKernel.prog().kernels().begin(); it != hsaKernel.prog().kernels().end();
            ++it) {
-        if (wraps[i].aql.kernel_object == static_cast<HSAILKernel*>(it->second)->gpuAqlCode()) {
-          child = static_cast<HSAILKernel*>(it->second);
+        if (wraps[i].aql.kernel_object == static_cast<pal::Kernel*>(it->second)->gpuAqlCode()) {
+          child = static_cast<pal::Kernel*>(it->second);
         }
       }
       if (child == nullptr) {
@@ -2441,7 +2449,7 @@ void VirtualGPU::PrintChildren(const HSAILKernel& hsaKernel, VirtualGPU* gpuDefQ
 }
 
 // ================================================================================================
-bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const HSAILKernel& hsaKernel,
+bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& hsaKernel,
                                   VirtualGPU** gpuDefQueue, uint64_t* vmDefQueue) {
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
   if (nullptr == defQueue) {
@@ -2474,7 +2482,7 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const HSAILKernel& 
 }
 
 // ================================================================================================
-void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const HSAILKernel& hsaKernel,
+void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& hsaKernel,
                                    VirtualGPU* gpuDefQueue, uint64_t vmDefQueue,
                                    uint64_t vmParentWrap, GpuEvent* gpuEvent) {
   uint32_t id = gpuEvent->id_;
@@ -2620,7 +2628,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   state_.anyOrder_ = anyOrder;
 
   // Get the HSA kernel object
-  const HSAILKernel& hsaKernel = static_cast<const HSAILKernel&>(*(kernel.getDeviceKernel(dev())));
+  const pal::Kernel& hsaKernel = static_cast<const pal::Kernel&>(*(kernel.getDeviceKernel(dev())));
 
   // If RGP capturing is enabled, then start SQTT trace
   if (rgpCaptureEna()) {
@@ -2688,7 +2696,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   assert((nullptr != aqlPkt) && "Couldn't load kernel arguments");
 
   // Dynamic call stack size is considered to calculate private segment size and scratch regs
-  // in LightningKernel::postLoad(). As it is not called during hipModuleLaunchKernel unlike
+  // in pal::Kernel::postLoad(). As it is not called during hipModuleLaunchKernel unlike
   // hipLaunchKernel/hipLaunchKernelGGL, Updated value is passed to dispatch packet.
   size_t privateMemSize = hsaKernel.spillSegSize();
   if ((hsaKernel.workGroupInfo()->usedStackSize_ & 0x1) == 0x1) {
@@ -2717,13 +2725,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   }
   dispatchParam.pCpuAqlCode = hsaKernel.cpuAqlKd();
   dispatchParam.hsaQueueVa = hsaQueueMem_->vmAddress();
-  if (!hsaKernel.prog().isLC() && hsaKernel.workGroupInfo()->wavesPerSimdHint_ != 0) {
-    constexpr uint32_t kWavesPerSimdLimit = 4;
-    dispatchParam.wavesPerSh =
-        kWavesPerSimdLimit * dev().info().cuPerShaderArray_ * dev().info().simdPerCU_;
-  } else {
-    dispatchParam.wavesPerSh = 0;
-  }
+  dispatchParam.wavesPerSh = 0;
   dispatchParam.useAtc = dev().settings().svmFineGrainSystem_ ? true : false;
   dispatchParam.kernargSegmentSize = hsaKernel.argsBufferSize();
   dispatchParam.aqlPacketIndex = aql_index;
@@ -3576,7 +3578,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
   bool srdResource = false;
   amd::Memory* const* memories =
       reinterpret_cast<amd::Memory* const*>(params + kernelParams.memoryObjOffset());
-  const HSAILKernel& hsaKernel = static_cast<const HSAILKernel&>(*(kernel.getDeviceKernel(dev())));
+  const pal::Kernel& hsaKernel = static_cast<const pal::Kernel&>(*(kernel.getDeviceKernel(dev())));
   const amd::KernelSignature& signature = kernel.signature();
   ldsAddress = hsaKernel.ldsSize();
 
@@ -3780,16 +3782,6 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
   memoryDependency().sync(*this);
 
   return true;
-}
-
-amd::Memory* VirtualGPU::createBufferFromImage(amd::Memory& amdImage) {
-  amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, 0, 0, amdImage.getSize());
-  mem->setVirtualDevice(this);
-  if ((mem != nullptr) && !mem->create()) {
-    mem->release();
-  }
-
-  return mem;
 }
 
 void VirtualGPU::writeVQueueHeader(VirtualGPU& hostQ, const Memory* kernelTable) {
