@@ -28,45 +28,51 @@ from typing import List, Optional, Any
 # For Python 3.6, we'll use a simple class-based approach
 try:
     from dataclasses import dataclass, field
+
     HAS_DATACLASSES = True
 except ImportError:
     HAS_DATACLASSES = False
+
     # Fallback decorator for Python 3.6
     def dataclass(cls):
         return cls
+
     def field(**kwargs):
         return None
 
+
 __all__ = [
-    'connect',
-    'RocpdImportData',
-    'output_config',
-    'metadata',
-    'agent',
-    'node',
-    'process',
-    'thread',
-    'agent_indexing',
-    'sql_engine',
-    'sql_schema',
-    'sql_option',
-    'schema_jinja_variables',
-    'format_path',
-    'load_schema',
-    'read_agents',
-    'read_nodes',
-    'read_processes',
-    'read_threads',
-    'write_perfetto',
-    'write_otf2',
+    "connect",
+    "RocpdImportData",
+    "output_config",
+    "metadata",
+    "agent",
+    "node",
+    "process",
+    "thread",
+    "agent_indexing",
+    "sql_engine",
+    "sql_schema",
+    "sql_option",
+    "schema_jinja_variables",
+    "format_path",
+    "load_schema",
+    "read_agents",
+    "read_nodes",
+    "read_processes",
+    "read_threads",
+    "write_perfetto",
+    "write_otf2",
 ]
 
 # ============================================================================
 # Enumerations
 # ============================================================================
 
+
 class agent_indexing(IntEnum):
     """Agent indexing mode enumeration"""
+
     node = 0
     logical_node = 1
     logical_node_type = 2
@@ -74,11 +80,13 @@ class agent_indexing(IntEnum):
 
 class sql_engine(IntEnum):
     """SQL engine enumeration"""
+
     sqlite3 = 0
 
 
 class sql_schema(IntEnum):
     """SQL schema kind enumeration"""
+
     rocpd_tables = 0
     rocpd_indexes = 1
     rocpd_views = 2
@@ -89,6 +97,7 @@ class sql_schema(IntEnum):
 
 class sql_option(IntEnum):
     """SQL options enumeration"""
+
     none = 0
     sqlite3_pragma_foreign_keys = 1
 
@@ -97,9 +106,11 @@ class sql_option(IntEnum):
 # Data Classes
 # ============================================================================
 
+
 @dataclass
 class agent:
     """ROCm agent information"""
+
     node_id: int = 0
     logical_node_id: int = 0
     gpu_index: int = 0
@@ -111,6 +122,7 @@ class agent:
 @dataclass
 class node:
     """Node information"""
+
     id: int = 0
     hash: int = 0
     machine_id: str = ""
@@ -123,6 +135,7 @@ class node:
 @dataclass
 class process:
     """Process information"""
+
     nid: int = 0
     machine_id: str = ""
     hostname: str = ""
@@ -141,6 +154,7 @@ class process:
 @dataclass
 class thread:
     """Thread information"""
+
     nid: int = 0
     machine_id: str = ""
     hostname: str = ""
@@ -158,6 +172,7 @@ class thread:
 @dataclass
 class output_config:
     """Output configuration for trace generation"""
+
     output_path: str = ""
     output_file: str = ""
     tmp_directory: str = "/tmp"
@@ -183,6 +198,7 @@ class output_config:
 @dataclass
 class metadata:
     """Metadata for profiling session"""
+
     process_id: int = 0
     parent_process_id: int = 0
     process_start_ns: int = 0
@@ -213,6 +229,7 @@ class metadata:
 @dataclass
 class schema_jinja_variables:
     """Variables for Jinja schema substitution"""
+
     uuid: Optional[str] = None
     guid: Optional[str] = None
 
@@ -220,6 +237,7 @@ class schema_jinja_variables:
 # ============================================================================
 # RocpdImportData - Core class for database access
 # ============================================================================
+
 
 class RocpdImportData:
     """
@@ -238,7 +256,9 @@ class RocpdImportData:
             databases: List of database file paths
         """
         if connection is not None and not isinstance(connection, sqlite3.Connection):
-            raise TypeError(f"connection must be sqlite3.Connection, got {type(connection)}")
+            raise TypeError(
+                f"connection must be sqlite3.Connection, got {type(connection)}"
+            )
 
         self.connection = connection
         self.databases = databases if databases is not None else []
@@ -266,6 +286,7 @@ class RocpdImportData:
 # ============================================================================
 # Database Operations
 # ============================================================================
+
 
 def connect(database_path, *args, **kwargs):
     """
@@ -304,14 +325,16 @@ def read_agents(data: RocpdImportData, condition: str = "") -> List[agent]:
     for row in cursor.fetchall():
         # Assuming specific column order from schema
         # Adjust indices based on actual schema
-        agents.append(agent(
-            node_id=row[0] if len(row) > 0 else 0,
-            logical_node_id=row[1] if len(row) > 1 else 0,
-            gpu_index=row[2] if len(row) > 2 else 0,
-            name=row[3] if len(row) > 3 else "",
-            user_name=row[4] if len(row) > 4 else "",
-            product_name=row[5] if len(row) > 5 else "",
-        ))
+        agents.append(
+            agent(
+                node_id=row[0] if len(row) > 0 else 0,
+                logical_node_id=row[1] if len(row) > 1 else 0,
+                gpu_index=row[2] if len(row) > 2 else 0,
+                name=row[3] if len(row) > 3 else "",
+                user_name=row[4] if len(row) > 4 else "",
+                product_name=row[5] if len(row) > 5 else "",
+            )
+        )
 
     return agents
 
@@ -326,15 +349,17 @@ def read_nodes(data: RocpdImportData, condition: str = "") -> List[node]:
 
     nodes = []
     for row in cursor.fetchall():
-        nodes.append(node(
-            id=row[0] if len(row) > 0 else 0,
-            hash=row[1] if len(row) > 1 else 0,
-            machine_id=row[2] if len(row) > 2 else "",
-            hostname=row[3] if len(row) > 3 else "",
-            system_name=row[4] if len(row) > 4 else "",
-            release=row[5] if len(row) > 5 else "",
-            version=row[6] if len(row) > 6 else "",
-        ))
+        nodes.append(
+            node(
+                id=row[0] if len(row) > 0 else 0,
+                hash=row[1] if len(row) > 1 else 0,
+                machine_id=row[2] if len(row) > 2 else "",
+                hostname=row[3] if len(row) > 3 else "",
+                system_name=row[4] if len(row) > 4 else "",
+                release=row[5] if len(row) > 5 else "",
+                version=row[6] if len(row) > 6 else "",
+            )
+        )
 
     return nodes
 
@@ -349,10 +374,12 @@ def read_processes(data: RocpdImportData, condition: str = "") -> List[process]:
 
     processes = []
     for row in cursor.fetchall():
-        processes.append(process(
-            nid=row[0] if len(row) > 0 else 0,
-            # Add other fields based on schema
-        ))
+        processes.append(
+            process(
+                nid=row[0] if len(row) > 0 else 0,
+                # Add other fields based on schema
+            )
+        )
 
     return processes
 
@@ -367,10 +394,12 @@ def read_threads(data: RocpdImportData, condition: str = "") -> List[thread]:
 
     threads = []
     for row in cursor.fetchall():
-        threads.append(thread(
-            nid=row[0] if len(row) > 0 else 0,
-            # Add other fields based on schema
-        ))
+        threads.append(
+            thread(
+                nid=row[0] if len(row) > 0 else 0,
+                # Add other fields based on schema
+            )
+        )
 
     return threads
 
@@ -378,6 +407,7 @@ def read_threads(data: RocpdImportData, condition: str = "") -> List[thread]:
 # ============================================================================
 # Utility Functions
 # ============================================================================
+
 
 def format_path(path: str, tag: str = "") -> str:
     """
@@ -403,6 +433,7 @@ def format_path(path: str, tag: str = "") -> str:
 
     if "%hostname%" in result:
         import socket
+
         result = result.replace("%hostname%", socket.gethostname())
 
     # Expand user home directory
@@ -414,8 +445,12 @@ def format_path(path: str, tag: str = "") -> str:
     return result
 
 
-def load_schema(engine: sql_engine, kind: sql_schema, options: sql_option,
-                variables: schema_jinja_variables) -> str:
+def load_schema(
+    engine: sql_engine,
+    kind: sql_schema,
+    options: sql_option,
+    variables: schema_jinja_variables,
+) -> str:
     """
     Load SQL schema from embedded resources.
 
@@ -438,6 +473,7 @@ def load_schema(engine: sql_engine, kind: sql_schema, options: sql_option,
 # Format Converters
 # ============================================================================
 
+
 def write_perfetto(data: RocpdImportData, config: output_config) -> bool:
     """
     Write Perfetto trace from database.
@@ -456,8 +492,10 @@ def write_perfetto(data: RocpdImportData, config: output_config) -> bool:
         try:
             import perfnetto
         except ImportError:
-            print("ERROR: perfnetto library not installed. Install with: pip install perfnetto",
-                  file=sys.stderr)
+            print(
+                "ERROR: perfnetto library not installed. Install with: pip install perfnetto",
+                file=sys.stderr,
+            )
             print("Alternative: pip install tg4perfetto", file=sys.stderr)
             return False
 
@@ -468,18 +506,23 @@ def write_perfetto(data: RocpdImportData, config: output_config) -> bool:
 
         print(f"Writing Perfetto trace to {config.output_file}", file=sys.stderr)
         print("NOTE: Perfetto writing is a stub in pure Python version", file=sys.stderr)
-        print("Full implementation requires integration with perfnetto library", file=sys.stderr)
+        print(
+            "Full implementation requires integration with perfnetto library",
+            file=sys.stderr,
+        )
 
         # Pure Python stub - full implementation requires perfnetto integration
-        print("WARNING: Perfetto export stub not fully implemented",
-              file=sys.stderr)
-        print("         Full implementation requires integration with perfnetto library",
-              file=sys.stderr)
+        print("WARNING: Perfetto export stub not fully implemented", file=sys.stderr)
+        print(
+            "         Full implementation requires integration with perfnetto library",
+            file=sys.stderr,
+        )
         return False
 
     except Exception as e:
         print(f"ERROR in write_perfetto: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -502,8 +545,10 @@ def write_otf2(data: RocpdImportData, config: output_config) -> bool:
         try:
             import otf2
         except ImportError:
-            print("ERROR: otf2 library not installed. Install with: pip install otf2",
-                  file=sys.stderr)
+            print(
+                "ERROR: otf2 library not installed. Install with: pip install otf2",
+                file=sys.stderr,
+            )
             return False
 
         # Implementation placeholder - actual implementation would:
@@ -513,17 +558,21 @@ def write_otf2(data: RocpdImportData, config: output_config) -> bool:
 
         print(f"Writing OTF2 trace to {config.output_file}", file=sys.stderr)
         print("NOTE: OTF2 writing is a stub in pure Python version", file=sys.stderr)
-        print("Full implementation requires integration with otf2 library", file=sys.stderr)
+        print(
+            "Full implementation requires integration with otf2 library", file=sys.stderr
+        )
 
         # Pure Python stub - full implementation requires otf2 integration
-        print("WARNING: OTF2 export stub not fully implemented",
-              file=sys.stderr)
-        print("         Full implementation requires integration with otf2 library",
-              file=sys.stderr)
+        print("WARNING: OTF2 export stub not fully implemented", file=sys.stderr)
+        print(
+            "         Full implementation requires integration with otf2 library",
+            file=sys.stderr,
+        )
         return False
 
     except Exception as e:
         print(f"ERROR in write_otf2: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return False

@@ -8,37 +8,37 @@ message(STATUS "===============================================")
 message(STATUS "rocpd Pure Python Package Configuration")
 message(STATUS "===============================================")
 
-# Set the installation directory - VERSION AGNOSTIC!
-# No more python3.8, python3.9, etc. - just one location for all Python versions
+# Set the installation directory - VERSION AGNOSTIC! No more python3.8, python3.9, etc. -
+# just one location for all Python versions
 set(ROCPD_INSTALL_DIR
     "${CMAKE_INSTALL_LIBDIR}/python/site-packages/rocpd"
     CACHE STRING "Installation directory for rocpd pure Python package")
 
 # Also set the build directory location for testing
-set(ROCPD_BUILD_DIR
-    "${CMAKE_BINARY_DIR}/${ROCPD_INSTALL_DIR}")
+set(ROCPD_BUILD_DIR "${CMAKE_BINARY_DIR}/${ROCPD_INSTALL_DIR}")
 
 # Configure the __init__.py file to substitute CMake variables
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/__init__.py
                ${CMAKE_CURRENT_BINARY_DIR}/__init__.py.in @ONLY)
 
-file(GENERATE
-     OUTPUT ${ROCPD_BUILD_DIR}/__init__.py
-     INPUT ${CMAKE_CURRENT_BINARY_DIR}/__init__.py.in)
+file(
+    GENERATE
+    OUTPUT ${ROCPD_BUILD_DIR}/__init__.py
+    INPUT ${CMAKE_CURRENT_BINARY_DIR}/__init__.py.in)
 
 # Copy all other Python files to build directory for testing
-file(COPY
-    ${CMAKE_CURRENT_SOURCE_DIR}/libpyrocpd_compat.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/importer.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/output_config.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/schema.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/csv.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/pftrace.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/otf2.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/query.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/time_window.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/summary.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/__main__.py
+file(
+    COPY ${CMAKE_CURRENT_SOURCE_DIR}/libpyrocpd_compat.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/importer.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/output_config.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/schema.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/csv.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/pftrace.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/otf2.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/query.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/time_window.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/summary.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/__main__.py
     DESTINATION ${ROCPD_BUILD_DIR})
 
 # List all Python files to install
@@ -54,11 +54,11 @@ set(ROCPD_PYTHON_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/query.py
     ${CMAKE_CURRENT_SOURCE_DIR}/time_window.py
     ${CMAKE_CURRENT_SOURCE_DIR}/summary.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/__main__.py
-)
+    ${CMAKE_CURRENT_SOURCE_DIR}/__main__.py)
 
 message(STATUS "  Installation directory: ${ROCPD_INSTALL_DIR}")
-message(STATUS "  Python files to install: ${CMAKE_CURRENT_LIST_FILE}(${ROCPD_PYTHON_FILES})")
+message(
+    STATUS "  Python files to install: ${CMAKE_CURRENT_LIST_FILE}(${ROCPD_PYTHON_FILES})")
 message(STATUS "  Python version agnostic: YES")
 message(STATUS "  Binding type: Pure Python (no compilation)")
 message(STATUS "  Dependencies: sqlite3 (built-in), otf2 (PyPI), perfnetto (PyPI)")
@@ -74,14 +74,8 @@ install(
 file(
     WRITE ${CMAKE_CURRENT_BINARY_DIR}/requirements.txt
     "# rocpd Pure Python Dependencies\n"
-    "# Install with: pip install -r requirements.txt\n"
-    "\n"
-    "# OTF2 trace export\n"
-    "otf2>=3.0\n"
-    "\n"
-    "# Perfetto trace export\n"
-    "perfnetto>=0.1\n"
-)
+    "# Install with: pip install -r requirements.txt\n" "\n" "# OTF2 trace export\n"
+    "otf2>=3.0\n" "\n" "# Perfetto trace export\n" "perfnetto>=0.1\n")
 
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/requirements.txt
@@ -160,8 +154,8 @@ except Exception as e:
 
         set_tests_properties(
             rocpd_basic_test
-            PROPERTIES
-                ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/lib/python/site-packages"
-                LABELS "python;rocpd;pure_python")
+            PROPERTIES ENVIRONMENT
+                       "PYTHONPATH=${CMAKE_BINARY_DIR}/lib/python/site-packages" LABELS
+                       "python;rocpd;pure_python")
     endif()
 endif()

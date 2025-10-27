@@ -29,10 +29,8 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-set(rocprofv3-rocpd-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python/site-packages"
-    )
+set(rocprofv3-rocpd-env "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+                        "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python/site-packages")
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
 

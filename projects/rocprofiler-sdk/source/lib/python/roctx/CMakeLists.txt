@@ -3,24 +3,24 @@
 # This creates a pure Python package that works across all Python 3.x versions
 #
 
-# Set the installation directory - version agnostic!
-# No more python3.8, python3.9, etc. - just one location
+# Set the installation directory - version agnostic! No more python3.8, python3.9, etc. -
+# just one location
 set(ROCTX_INSTALL_DIR
     "${CMAKE_INSTALL_LIBDIR}/python/site-packages/roctx"
     CACHE STRING "Installation directory for roctx ctypes Python package")
 
 # Also set the build directory location for testing
-set(ROCTX_BUILD_DIR
-    "${CMAKE_BINARY_DIR}/${ROCTX_INSTALL_DIR}")
+set(ROCTX_BUILD_DIR "${CMAKE_BINARY_DIR}/${ROCTX_INSTALL_DIR}")
 
 # Configure the __init__.py file to substitute CMake variables
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/__init__.py
                ${CMAKE_CURRENT_BINARY_DIR}/__init__.py.in @ONLY)
 
 # Copy the configured file to the build directory
-file(GENERATE
-     OUTPUT ${ROCTX_BUILD_DIR}/__init__.py
-     INPUT ${CMAKE_CURRENT_BINARY_DIR}/__init__.py.in)
+file(
+    GENERATE
+    OUTPUT ${ROCTX_BUILD_DIR}/__init__.py
+    INPUT ${CMAKE_CURRENT_BINARY_DIR}/__init__.py.in)
 
 # Copy other Python files to build directory for testing
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/context_decorators.py
@@ -35,13 +35,12 @@ message(STATUS "")
 
 # Install the pure Python files
 install(
-    FILES ${ROCTX_BUILD_DIR}/__init__.py
-          ${CMAKE_CURRENT_SOURCE_DIR}/context_decorators.py
+    FILES ${ROCTX_BUILD_DIR}/__init__.py ${CMAKE_CURRENT_SOURCE_DIR}/context_decorators.py
     DESTINATION ${ROCTX_INSTALL_DIR}
     COMPONENT roctx)
 
-# Create a symbolic link or install the shared library where Python can find it
-# Option 1: Install to the same directory as the Python package
+# Create a symbolic link or install the shared library where Python can find it Option 1:
+# Install to the same directory as the Python package
 install(
     TARGETS rocprofiler-sdk-roctx-shared-library
     DESTINATION ${ROCTX_INSTALL_DIR}
@@ -122,7 +121,7 @@ except Exception as e:
             PROPERTIES
                 ENVIRONMENT
                 "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH};PYTHONPATH=${CMAKE_BINARY_DIR}/lib/python/site-packages"
-            LABELS
+                LABELS
                 "python;roctx;ctypes")
     endif()
 endif()

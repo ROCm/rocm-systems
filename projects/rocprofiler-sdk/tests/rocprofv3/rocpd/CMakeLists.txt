@@ -28,12 +28,12 @@ endif()
 set(rocprofv3-rocpd-env
     "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python/site-packages"
-    "OMPI_ALLOW_RUN_AS_ROOT=1"
-    "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1")
+    "OMPI_ALLOW_RUN_AS_ROOT=1" "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1")
 
 # Add ROCm library path to LD_LIBRARY_PATH if found
 if(_ROCM_LIB_PATH)
-    list(APPEND rocprofv3-rocpd-env "LD_LIBRARY_PATH=${_ROCM_LIB_PATH}:$ENV{LD_LIBRARY_PATH}")
+    list(APPEND rocprofv3-rocpd-env
+         "LD_LIBRARY_PATH=${_ROCM_LIB_PATH}:$ENV{LD_LIBRARY_PATH}")
     message(STATUS "Adding ROCm library path to test environment: ${_ROCM_LIB_PATH}")
 endif()
 

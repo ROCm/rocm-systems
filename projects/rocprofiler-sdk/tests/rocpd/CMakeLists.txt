@@ -11,10 +11,8 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(rocpd-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python/site-packages"
-    )
+set(rocpd-env "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+              "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python/site-packages")
 
 #########################################################################################
 #

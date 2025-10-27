@@ -37,6 +37,7 @@ import os
 # Ensure sqlite3 is available (built-in to Python)
 try:
     import sqlite3
+
     sqlite3.connect(":memory:")  # Test if sqlite3 is available
 except Exception as e:
     print(f"ERROR: sqlite3 not available: {e}", file=sys.stderr)
@@ -163,6 +164,7 @@ def write_csv(connection, config=None, **kwargs):
     config_obj = None
     if config is None:
         from . import output_config
+
         config_obj = output_config.output_config(**kwargs)
     else:
         config_obj = config.update(**kwargs)

@@ -17,10 +17,8 @@ endif()
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(tracing-env
-    "${PRELOAD_ENV}"
-    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python/site-packages"
-    )
+set(tracing-env "${PRELOAD_ENV}"
+                "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python/site-packages")
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini marker.py COPY validate.py
                                                                     conftest.py)

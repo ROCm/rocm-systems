@@ -79,7 +79,9 @@ def _find_and_load_library():
     # Add ROCM_PATH if set
     if "ROCM_PATH" in os.environ:
         rocm_path = os.environ["ROCM_PATH"]
-        search_paths.insert(0, os.path.join(rocm_path, "lib", "librocprofiler-sdk-roctx.so"))
+        search_paths.insert(
+            0, os.path.join(rocm_path, "lib", "librocprofiler-sdk-roctx.so")
+        )
 
     # Try each path
     for lib_path in search_paths:
@@ -190,7 +192,7 @@ def mark(msg):
         >>> roctx.mark("Starting computation")
     """
     if msg is not None:
-        _libroctx.roctxMarkA(msg.encode('utf-8') if isinstance(msg, str) else msg)
+        _libroctx.roctxMarkA(msg.encode("utf-8") if isinstance(msg, str) else msg)
 
 
 def profilerPause(tid=0):
@@ -262,7 +264,7 @@ def rangePush(msg):
         >>> # ... do work ...
         >>> roctx.rangePop()
     """
-    return _libroctx.roctxRangePushA(msg.encode('utf-8') if isinstance(msg, str) else msg)
+    return _libroctx.roctxRangePushA(msg.encode("utf-8") if isinstance(msg, str) else msg)
 
 
 def rangePop():
@@ -301,7 +303,9 @@ def rangeStart(msg):
         >>> roctx.rangeStop(range_id)
     """
     if msg is not None:
-        return _libroctx.roctxRangeStartA(msg.encode('utf-8') if isinstance(msg, str) else msg)
+        return _libroctx.roctxRangeStartA(
+            msg.encode("utf-8") if isinstance(msg, str) else msg
+        )
     return None
 
 
@@ -338,7 +342,9 @@ def nameOsThread(name):
         >>> import roctx
         >>> roctx.nameOsThread("Worker Thread 1")
     """
-    return _libroctx.roctxNameOsThread(name.encode('utf-8') if isinstance(name, str) else name)
+    return _libroctx.roctxNameOsThread(
+        name.encode("utf-8") if isinstance(name, str) else name
+    )
 
 
 def nameHipDevice(name, device_id=0):
@@ -359,8 +365,7 @@ def nameHipDevice(name, device_id=0):
         >>> roctx.nameHipDevice("Primary GPU", 0)
     """
     return _libroctx.roctxNameHipDevice(
-        name.encode('utf-8') if isinstance(name, str) else name,
-        device_id
+        name.encode("utf-8") if isinstance(name, str) else name, device_id
     )
 
 

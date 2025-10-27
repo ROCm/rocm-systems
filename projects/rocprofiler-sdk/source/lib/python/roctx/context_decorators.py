@@ -30,7 +30,8 @@ from functools import wraps
 
 # Import from parent module (avoid circular import)
 import sys
-_module = sys.modules[__name__.rsplit('.', 1)[0]]
+
+_module = sys.modules[__name__.rsplit(".", 1)[0]]
 
 
 class RoctxRange:
@@ -71,6 +72,7 @@ class RoctxRange:
         Returns:
             The wrapped function.
         """
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             _module.rangePush(self.msg)
@@ -104,6 +106,7 @@ class RoctxRange:
 
         if exc_type is not None and exc_value is not None and tb is not None:
             import traceback
+
             traceback.print_exception(exc_type, exc_value, tb, limit=5)
 
 
@@ -146,6 +149,7 @@ class RoctxProfiler:
         Returns:
             The wrapped function.
         """
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             _module.profilerResume(self.tid)
@@ -176,4 +180,5 @@ class RoctxProfiler:
 
         if exc_type is not None and exc_value is not None and tb is not None:
             import traceback
+
             traceback.print_exception(exc_type, exc_value, tb, limit=5)
