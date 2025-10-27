@@ -449,6 +449,8 @@ hipError_t Test() {
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f07b8000000, 1369910892, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f07b8000000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f0714800000, 2739821784, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f0de7c00000, 68925576, stream));
@@ -949,6 +951,14 @@ hipError_t Test() {
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f05bca00000, 137851152, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0630400000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0c38400000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0cdb600000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f05de600000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f05b8600000, 68925576, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f05b8600000, stream));
@@ -962,6 +972,10 @@ hipError_t Test() {
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f0581c00000, 68925576, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0581c00000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f05c5000000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0d9a000000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f054f600000, 913273928, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
@@ -1009,9 +1023,7 @@ hipError_t Test() {
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0c38a00000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
-  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0c38400000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
-  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0682200000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f068e800000, 206776728, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
@@ -1037,7 +1049,11 @@ hipError_t Test() {
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f0597200000, 206776728, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0c38a00000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f05a3a00000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0bc9400000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0597200000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
@@ -1064,6 +1080,8 @@ hipError_t Test() {
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0536600000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0529e00000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0c39400000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f0687e00000, 68925576, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));

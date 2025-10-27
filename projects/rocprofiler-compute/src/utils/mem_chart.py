@@ -25,14 +25,12 @@
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Dict
+from typing import Any, Optional, Union
 
-from plotille import Canvas
-
-from .utils import format_scientific_notation_if_needed
+from plotille import Canvas  # type: ignore
 
 
-def make_format_spec(num, align=">"):
+def make_format_spec(num: Union[int, float], align: str = ">") -> str:
     """
     Generate alignment string for a given input
     """
@@ -44,6 +42,11 @@ def make_format_spec(num, align=">"):
     sign, digits, exponent = d.as_tuple()
 
     int_part = str(d.to_integral_value())
+
+    # Handle special cases where exponent is not an integer (NaN, Infinity, etc.)
+    if not isinstance(exponent, int):
+        # For special values, just return basic format
+        return f"{align}{str(num)}f"
 
     if exponent >= 0:
         # Pure integer, or float like 6.0, 6.00 (no decimal places)
@@ -60,7 +63,7 @@ def make_format_spec(num, align=">"):
         return f"{align}{num_str}f"
 
 
-def is_value_valid(value):
+def is_value_valid(value: Union[int, float, str, None]) -> bool:
     """
     Check if a value is valid and display N/A if not
     (to be valid, it needs to be not None, and be int or float)
@@ -75,15 +78,15 @@ def is_value_valid(value):
 
 
 def format_text(
-    value,
-    key=None,
+    value: Union[int, float, str, None],
+    key: Union[str, Union[int, float], None] = None,
     mark_between: str = ": ",
     post_description_with_space: str = "",
-    value_step_prec_rightalign=0,
-    key_step_prec_leftalign=0,
-    key_align="<",
-    value_align=">",
-):
+    value_step_prec_rightalign: Union[int, float] = 0,
+    key_step_prec_leftalign: Union[int, float] = 0,
+    key_align: str = "<",
+    value_align: str = ">",
+) -> str:
     """
     Format a text string for canvas to display according to
     input key-value pair and make proper alignment.
@@ -94,61 +97,25 @@ def format_text(
     # Step 1: Build format spec using make_format_spec
     value_format = make_format_spec(value_step_prec_rightalign, value_align)
 
-    # Step 2: Extract width and precision as integer
-    match = re.match(r"([<>=^])(\d+)(?:\.(\d+))?([a-zA-Z])?", value_format)
-    if match:
-        align_char = match.group(1)
-        width_align = int(match.group(2))
-        precision_digits = match.group(3)
-        fmt_type_align = match.group(4) or "f"
-        precision = int(precision_digits) if precision_digits else 0
-    else:
-        # Fallback to default values
-        align_char = value_align
-        width_align = 6
-        precision = 2
-        fmt_type_align = "f"
-
-    # Step 3: Format the key using make_format_spec
-    key_format = (
-        make_format_spec(key_step_prec_leftalign, key_align)
-        if key is not None
-        else None
-    )
-    key_str = (
-        "{key:{key_format}}".format(key=key, key_format=key_format)
-        if key is not None and isinstance(key, (int, float))
-        else str(key)
-        if key is not None
-        else None
-    )
-
-    # Step 4: Format the value or fallback to N/A
     if is_value_valid(value):
-        formatted_value = format_scientific_notation_if_needed(
-            value,
-            align=align_char,
-            width_align=width_align,
-            precision=precision,
-            fmt_type_align=fmt_type_align,
-            max_length=width_align,
-            sci_lower_bound=1e-3,
-            sci_upper_bound=1e3,
-        )
-        value_str = formatted_value
+        value_str = f"{value:{value_format}}"
     else:
-        value_str = f"{'N/A':{align_char}{width_align}}"
+        match = re.search(r"[<>=^](\d+)", value_format)
+        width = int(match.group(1)) if match else 6
 
-    # Step 5: Unit and Final Output
-    unit_string = post_description_with_space if "N/A" not in value_str else ""
+        # Use same alignment as in value_format (first char)
+        align = value_format[0]
+        value_str = f"{'N/A':{align}{width}}"
 
-    if key_str is not None:
+    if key is not None:
+        key_format = make_format_spec(key_step_prec_leftalign, key_align)
+        key_str = f"{key:{key_format}}" if isinstance(key, (int, float)) else str(key)
         result_str_no_unit = f"{key_str}{mark_between}{value_str}"
     else:
-        result_str_no_unit = value_str
+        result_str_no_unit = f"{value_str}"
 
-    result_str = result_str_no_unit + unit_string
-    return result_str
+    unit_string = post_description_with_space if "N/A" not in value_str else ""
+    return result_str_no_unit + unit_string
 
 
 # A basic rect frame for any block or group of wires where all its elements should
@@ -166,11 +133,10 @@ class RectFrame:
 # Instr Buff Block
 @dataclass
 class InstrBuff(RectFrame):
-    wave_occupancy: int = None
-    wave_life: int = None
+    wave_occupancy: Optional[int] = None
+    wave_life: Optional[int] = None
 
-    def draw(self, canvas):
-        # print("---------", self.x_min, self.y_min, self.x_max, self.y_max)
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
 
         canvas.rect(self.x_min, self.y_min, self.x_max - 2.0, self.y_max - 1.0)
@@ -208,8 +174,8 @@ class InstrBuff(RectFrame):
 # Wires between Instr Buff and Instr Dispatch
 @dataclass
 class Wire_InstrBuff_InstrDispatch(RectFrame):
-    def draw(self, canvas):
-        # Todo: finer wires for connections
+    def draw(self, canvas: Canvas) -> None:
+        # TODO: finer wires for connections
         canvas.line(self.x_min + 2, self.y_min, self.x_min + 2, self.y_max)
         canvas.line(self.x_max, self.y_min + 1.5, self.x_max, self.y_max - 1.5)
         canvas.line(self.x_min + 2, self.y_min, self.x_max, self.y_min + 1.5)
@@ -227,9 +193,9 @@ class InstrDispatch(RectFrame):
     text_y_offset: float = 0.5
     line_y_offset: float = 0.5
     rect_y_offset: float = 3.0
-    instrs: Dict[str, int] = field(default_factory=dict)
+    instrs: dict[str, int] = field(default_factory=dict)
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
 
         self.top_rect_x_min = self.x_min + 2.0
@@ -237,9 +203,7 @@ class InstrDispatch(RectFrame):
         self.top_rect_y_min = self.y_max - 1.5
         self.top_rect_y_max = self.y_max
 
-        i = 0
-        for k, v in self.instrs.items():
-            # print(k,v)
+        for i, (k, v) in enumerate(self.instrs.items()):
             text = format_text(
                 key=k,
                 value=v,
@@ -258,7 +222,6 @@ class InstrDispatch(RectFrame):
                 self.top_rect_y_min - self.rect_y_offset * i,
                 "------------------>",
             )
-            i = i + 1
 
 
 # Exec Block
@@ -273,7 +236,7 @@ class Exec(RectFrame):
     wavefronts: int = 0
     workgroups: int = 0
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
 
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
@@ -378,13 +341,13 @@ class Exec(RectFrame):
 class Wire_E_GLVS(RectFrame):
     text_x_offset: float = 3.0
 
-    lds_req: int = None
-    vl1_rd: int = None
-    vl1_wr: int = None
-    vl1_atomic: int = None
-    sl1_rd: int = None
+    lds_req: Optional[int] = None
+    vl1_rd: Optional[int] = None
+    vl1_wr: Optional[int] = None
+    vl1_atomic: Optional[int] = None
+    sl1_rd: Optional[int] = None
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(
             self.x_min + self.text_x_offset,
             self.y_max - 2.0,
@@ -459,7 +422,7 @@ class Wire_E_GLVS(RectFrame):
 class Wire_InstrBuff_IL1Cache(RectFrame):
     il1_fetch: int = 0
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         end_col = int(self.y_max - self.y_min)
         canvas.text(self.x_min, self.y_max - 1, "^")
         for i in range(2, end_col):
@@ -482,10 +445,10 @@ class Wire_InstrBuff_IL1Cache(RectFrame):
 # GDS Block
 @dataclass
 class GDS(RectFrame):
-    gws: int = None
-    latency: int = None
+    gws: Optional[int] = None
+    latency: Optional[int] = None
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
 
@@ -523,10 +486,10 @@ class GDS(RectFrame):
 # LDS Block
 @dataclass
 class LDS(RectFrame):
-    util: int = None
-    latency: int = None
+    util: Optional[int] = None
+    latency: Optional[int] = None
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(
@@ -556,12 +519,12 @@ class LDS(RectFrame):
 # Vector L1 Cache Block
 @dataclass
 class VectorL1Cache(RectFrame):
-    hit: int = None
-    latency: int = None
-    coales: int = None
-    stall: int = None
+    hit: Optional[int] = None
+    latency: Optional[int] = None
+    coales: Optional[int] = None
+    stall: Optional[int] = None
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
 
@@ -614,10 +577,10 @@ class VectorL1Cache(RectFrame):
 # Scalar L1D Cache
 @dataclass
 class ScalarL1DCache(RectFrame):
-    hit: int = None
-    latency: int = None
+    hit: Optional[int] = None
+    latency: Optional[int] = None
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
 
@@ -648,10 +611,10 @@ class ScalarL1DCache(RectFrame):
 # Instr L1 Cache
 @dataclass
 class InstrL1Cache(RectFrame):
-    hit: int = None
-    latency: int = None
+    hit: Optional[int] = None
+    latency: Optional[int] = None
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
 
@@ -684,15 +647,15 @@ class InstrL1Cache(RectFrame):
 class Wires_L1_L2(RectFrame):
     text_v_x_offset: float = 0.0
 
-    vl1_l2_rd: int = None
-    vl1_l2_wr: int = None
-    vl1_l2_atomic: int = None
-    sl1_l2_rd: int = None
-    sl1_l2_wr: int = None
-    sl1_l2_atomic: int = None
-    il1_l2_req: int = None
+    vl1_l2_rd: Optional[int] = None
+    vl1_l2_wr: Optional[int] = None
+    vl1_l2_atomic: Optional[int] = None
+    sl1_l2_rd: Optional[int] = None
+    sl1_l2_wr: Optional[int] = None
+    sl1_l2_atomic: Optional[int] = None
+    il1_l2_req: Optional[int] = None
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(
             self.x_min + self.text_v_x_offset,
             self.y_max - 2.0,
@@ -783,14 +746,14 @@ class Wires_L1_L2(RectFrame):
 # L2 Cache
 @dataclass
 class L2Cache(RectFrame):
-    rd: int = None
-    wr: int = None
-    atomic: int = None
-    hit: int = None
-    rd_lat: int = None
-    wr_lat: int = None
+    rd: Optional[int] = None
+    wr: Optional[int] = None
+    atomic: Optional[int] = None
+    hit: Optional[int] = None
+    rd_lat: Optional[int] = None
+    wr_lat: Optional[int] = None
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
 
@@ -876,11 +839,11 @@ class L2Cache(RectFrame):
 class Wire_L2_Fabric(RectFrame):
     text_x_offset: float = 3.0
 
-    rd: int = None
-    wr: int = None
-    atomic: int = None
+    rd: Optional[int] = None
+    wr: Optional[int] = None
+    atomic: Optional[int] = None
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(
             self.x_min + self.text_x_offset,
             self.y_max - 2.0,
@@ -925,7 +888,7 @@ class Wire_L2_Fabric(RectFrame):
 # xGMI/PCIe block with wires to fabric
 @dataclass
 class xGMI_PCIe(RectFrame):
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(self.x_min + 1.0, self.y_max - 2.0, self.label)
         canvas.text(self.x_min + 3.0, self.y_max - 5.0, "^   |")
@@ -937,9 +900,9 @@ class xGMI_PCIe(RectFrame):
 # Fabric Cache Block
 @dataclass
 class Fabric(RectFrame):
-    lat: Dict[str, int] = field(default_factory=dict)
+    lat: dict[str, int] = field(default_factory=dict)
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(self.x_min + 6.0, self.y_max - 2.0, "   " + self.label)
         canvas.text(self.x_min + 2.0, self.y_max - 4.0, "Latency (cycles)")
@@ -947,24 +910,20 @@ class Fabric(RectFrame):
             self.x_min + 2.0, self.y_max - 9, self.x_max - 2.0, self.y_max - 4.5
         )
 
-        i = 1
-        for k, v in self.lat.items():
-            # print(k,v)
+        for i, (k, v) in enumerate(self.lat.items(), 1):
             text = format_text(
                 key=k,
                 value=v,
                 key_step_prec_leftalign=6,
                 value_step_prec_rightalign=6.0,
             )
-
             canvas.text(self.x_min + 4.0, self.y_max - 4.5 - i, text)
-            i = i + 1
 
 
 # GMI block with wires to fabric
 @dataclass
 class GMI(RectFrame):
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min + 3.0, self.y_max + 4.0, "^   |")
         canvas.text(self.x_min + 3.0, self.y_max + 3.0, "|   |")
         canvas.text(self.x_min + 3.0, self.y_max + 2.0, "|   |")
@@ -981,7 +940,7 @@ class Wire_Fabric_HBM(RectFrame):
     rd: int = 0
     wr: int = 0
 
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.text(
             self.x_min + self.text_x_offset,
             self.y_max,
@@ -1013,30 +972,31 @@ class Wire_Fabric_HBM(RectFrame):
 # HBM
 @dataclass
 class HBM(RectFrame):
-    def draw(self, canvas):
+    def draw(self, canvas: Canvas) -> None:
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(self.x_min + 4.0, self.y_max - 2.0, self.label)
 
 
 # Memory chart pannel for 1 instance
 class MemChart:
-    def __init__(self, x_min, y_min, x_max, y_max):
+    def __init__(self, x_min: float, y_min: float, x_max: float, y_max: float) -> None:
         self.x_min = x_min
         self.x_max = x_max
         self.y_min = y_min
         self.y_max = y_max
 
-    def draw(self, canvas, normal_unit, metric_dict):
+    def draw(
+        self, canvas: Canvas, normal_unit: str, metric_dict: dict[str, Any]
+    ) -> None:
         # ----------------------------------------
         # Overall rect and title
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(
-            self.x_min + 2.0, self.y_max - 2.0, "(Normalization: " + normal_unit + ")"
+            self.x_min + 2.0, self.y_max - 2.0, f"(Normalization: {normal_unit})"
         )
 
-        # Fixme: this is temp solution to filter out non-numeric string
+        # FIXME: this is temp solution to filter out non-numeric string
         for k, v in metric_dict.items():
-            # print(k, type(v))
             metric_dict[k] = None if isinstance(v, str) else v
 
         # Typically, the drawing order would be: left->right, top->down
@@ -1317,20 +1277,18 @@ class MemChart:
         block_hbm.draw(canvas)
 
 
-def plot_mem_chart(arch, normal_unit, metric_dict):
-    """plot memory chart from an arch with given metrics dict"""
-
+def plot_mem_chart(arch: str, normal_unit: str, metric_dict: dict[str, Any]) -> str:
     # TODO: verify metrics dict for given arch first
 
     canvas = Canvas(width=234, height=42, xmax=234, ymax=42)
     mc = MemChart(0, 0, 233, 41)
     mc.draw(canvas, normal_unit, metric_dict)
 
-    # return the plot string stream
     return canvas.plot()
 
 
 if __name__ == "__main__":
+    # TODO: unit test should be moved to tests/*
     # Unit test
     metric_dict = {}
     metric_dict["Wavefront Occupancy"] = 1

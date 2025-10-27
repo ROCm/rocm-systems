@@ -86,7 +86,13 @@ function(_hip_clr_auto_detect_hip_platform)
         if(NOT DEFINED ENV{HIP_PLATFORM})
             execute_process(COMMAND ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE} --platform
                 OUTPUT_VARIABLE _detected_hip_platform
+                RESULT_VARIABLE result
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+	    if(result AND NOT result EQUAL 0)
+                message(FATAL_ERROR "Failure trying to auto-detect HIP_PLATFORM via command: ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE} --platform: ${result}")
+	    endif()
+
             set(HIP_PLATFORM "${_detected_hip_platform}" PARENT_SCOPE)
         else()
             set(HIP_PLATFORM "$ENV{HIP_PLATFORM}" PARENT_SCOPE)

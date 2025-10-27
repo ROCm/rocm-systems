@@ -58,7 +58,7 @@ static void hostNodeCallback(void* data) {
 TEST_CASE("Unit_hipLaunchHostFunc_Negative_Parameters") {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
-
+  hipGraph_t graph{nullptr};
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
 #if HT_NVIDIA  // EXSWHTEC-228
   SECTION("Pass stream as nullptr") {
@@ -69,6 +69,8 @@ TEST_CASE("Unit_hipLaunchHostFunc_Negative_Parameters") {
   SECTION("Pass functions as nullptr") {
     HIP_CHECK_ERROR(hipLaunchHostFunc(stream, nullptr, nullptr), hipErrorInvalidValue);
   }
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 /**
@@ -209,7 +211,8 @@ TEST_CASE("Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture") {
   HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal));
 
   // Device alloc (async so it belongs to the captured stream)
-  HIP_CHECK(hipMallocAsync(&d_arrayA, arraySize * sizeof(double), captureStream));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&d_arrayA), arraySize * sizeof(double),
+                           captureStream));
 
   // Initialize host data via a host function in the stream
   set_vector_args args{h_array, initValue};

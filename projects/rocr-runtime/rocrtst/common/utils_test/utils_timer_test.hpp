@@ -1,3 +1,9 @@
+/*
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
+ * 
+ * SPDX-License-Identifier: MIT
+ */
+ 
 #ifndef ROCRTST_UTILS_TIMER_TEST_H_
 #define ROCRTST_UTILS_TIMER_TEST_H_
 

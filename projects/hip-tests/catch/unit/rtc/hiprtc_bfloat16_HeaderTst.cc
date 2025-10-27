@@ -28,9 +28,8 @@ THE SOFTWARE.
  * string and compile using the api mentioned above.
  */
 
-#include <hip/hiprtc.h>
-#include <hip/hip_runtime.h>
 #include <hip_test_common.hh>
+#include <hip/hiprtc.h>
 static constexpr auto bfloat16_string{
     R"(
 extern "C"
@@ -135,6 +134,7 @@ TEST_CASE("Unit_Rtc_bfloat16_header") {
     }
   }
   HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipFree(result_d));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   delete[] result_h;
 }

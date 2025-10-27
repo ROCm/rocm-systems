@@ -86,7 +86,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEvent(HsaEventDescriptor *EventDesc,
 		if (hsakmt_use_model)
 			model_set_event_page(events_page, KFD_SIGNAL_EVENT_LIMIT);
 		else
-			hsakmt_fmm_get_handle(events_page, (uint64_t *)&args.event_page_offset);
+			hsakmt_fmm_get_handle(events_page, (uint64_t *)&args.event_page_offset, NULL);
 	}
 
 	if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_CREATE_EVENT, &args) != 0) {

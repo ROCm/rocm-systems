@@ -100,11 +100,14 @@ void TestFanReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
 
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Current Fan Speed: ";
+    }
+
     ret = rsmi_dev_fan_speed_get(dv_ind, 0, &orig_speed);
-    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+    if (ret == RSMI_STATUS_NOT_SUPPORTED || ret == RSMI_STATUS_UNEXPECTED_DATA){
        IF_VERB(STANDARD) {
-          std::cout << "\t**" <<  ": " <<
-                             "Not supported on this machine" << std::endl;
+          std::cout << "\t** Not supported on this machine" << std::endl;
         }
         return;
     } else {

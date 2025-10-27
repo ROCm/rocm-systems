@@ -6,6 +6,63 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Add `--list-blocks <arch>` option to general options to list available IP blocks on specified arch (similar to `--list-metrics`), cannot be used with `--block`.
+
+* Added `config_delta/gfx950_diff.yaml` to analysis config yamls to track the revision between a gfx9 architecture against the latest supported architecture gfx950
+
+### Changed
+
+* `-b/--block` accepts block alias(es) (See block aliases using command-line option `--list-blocks <arch>`).
+
+* analysis configs yamls are now managed with the new config management workflow in `tools/config_management/`
+
+* `amdsmi` python API is used instead of `amd-smi` CLI to query GPU specifications.
+
+
+### Removed
+
+### Optimized
+
+### Resolved issues
+
+### Known issues
+
+### Upcoming changes
+
+## ROCm Compute Profiler 3.3.1 for ROCm 7.1.1
+
+### Added
+
+* Improved standalone Roofline plots in profile mode (PDF output) and analyze mode (CLI and GUI visual plots):
+  * Fixed the peak MFMA/VALU lines being cut off.
+  * Cleaned up the overlapping roofline numeric values by moving them into the side legend.
+  * Added AI points chart with respective values, cache level, and compute/memory bound status.
+  * Added full kernel names to symbol chart.
+
+* Add support for multi-kernel applications' pc sampling.
+  * PC Sampling's outputs' instructions are displayed with the name of the kernel that individual instruction belongs to.
+  * Single kernel selection is supported so that the pc samples of selected kernel can be displayed.
+
+
+### Changed
+
+* Roofline analysis now runs on GPU 0 by default instead of all GPUs.
+
+### Optimized
+
+* Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
+
+### Resolved issues
+
+* Bugfixes for stability
+
+## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
+
+### Added
+* Live attach/detach feature that allows coupling with a workload process, without controlling its start or end.
+  * Use '--attach-pid' to specify the target process ID.
+  * Use '--attach-duration-msec' to specify time duration.
+
 * Add `rocpd` choice for `--format-rocprof-output` option in profile mode
 
 * Add `--retain-rocpd-output` option in profile mode to save large raw rocpd databases in workload directory
@@ -13,6 +70,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Show description of metrics during analysis
   * Use `--include-cols Description` to show the Description column, which is excluded by default from the
   ROCm Compute Profiler CLI output.
+* `--set` filtering option in profile mode to enable single-pass counter collection for predefined subsets of metrics.
+* `--list-sets` filtering option in profile mode to list the sets available for single pass counter collection
 
 * Add missing counters based on register specification which enables missing metrics
   * Enable SQC_DCACHE_INFLIGHT_LEVEL counter and associated metrics
@@ -22,6 +81,41 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * users can now left click on any metric cell to view detailed descriptions in the dedicated `METRIC DESCRIPTION` tab
 
 * Add support for analysis report output as a sqlite database using ``--output-format db`` analysis mode option
+
+* `Compute Throughput` panel to TUI's `High Level Analysis` category with the following metrics:
+  * VALU FLOPs
+  * VALU IOPs
+  * MFMA FLOPs (F8)
+  * MFMA FLOPs (BF16)
+  * MFMA FLOPs (F16)
+  * MFMA FLOPs (F32)
+  * MFMA FLOPs (F64)
+  * MFMA FLOPs (F6F4) (in gfx950)
+  * MFMA IOPs (Int8)
+  * SALU Utilization
+  * VALU Utilization
+  * MFMA Utilization
+  * VMEM Utilization
+  * Branch Utilization
+  * IPC
+
+* `Memory Throughput` panel to TUI's `High Level Analysis` category with the following metrics:
+  * vL1D Cache BW
+  * vL1D Cache Utilization
+  * Theoretical LDS Bandwidth
+  * LDS Utilization
+  * L2 Cache BW
+  * L2 Cache Utilization
+  * L2-Fabric Read BW
+  * L2-Fabric Write BW
+  * sL1D Cache BW
+  * L1I BW
+  * Address Processing Unit Busy
+  * Data-Return Busy
+  * L1I-L2 Bandwidth
+  * sL1D-L2 BW
+
+* Roofline support for Debian 12 and Azure Linux 3.0.
 
 ### Changed
 
@@ -38,7 +132,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * CLI analysis mode baseline comparison will now only compare common metrics across workloads and will not show Metric ID
   * Remove metrics from analysis configuration files which are explicitly marked as empty or None
 
-* Change the basic view of TUI from aggregated analysis data to individual kernel analysis data
+* Changed the basic (default) view of TUI from aggregated analysis data to individual kernel analysis data.
 
 * Update `Unit` of the following `Bandwidth` related metrics to `Gbps` instead of `Bytes per Normalization Unit`
   * Theoretical Bandwidth (section 1202)
@@ -71,71 +165,52 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * SIMD Utilization
   * Clock Rate
 
-* Add `Compute Throughput` panel to TUI with the following metrics:
-  * VALU FLOPs
-  * VALU IOPs
-  * MFMA FLOPs (F8)
-  * MFMA FLOPs (BF16)
-  * MFMA FLOPs (F16)
-  * MFMA FLOPs (F32)
-  * MFMA FLOPs (F64)
-  * MFMA FLOPs (F6F4) (in gfx950)
-  * MFMA IOPs (Int8)
-  * SALU Utilization
-  * VALU Utilization
-  * MFMA Utilization
-  * VMEM Utilization
-  * Branch Utilization
-  * IPC
-
-* Add `Memory Throughput` panel to TUI with the following metrics:
-  * vL1D Cache BW
-  * vL1D Cache Utilization
-  * Theoretical LDS Bandwidth
-  * LDS Utilization
-  * L2 Cache BW
-  * L2 Cache Utilization
-  * L2-Fabric Read BW
-  * L2-Fabric Write BW
-  * sL1D Cache BW
-  * L1I BW
-  * Address Processing Unit Busy
-  * Data-Return Busy
-  * L1I-L2 Bandwidth
-  * sL1D-L2 BW
-
 * Analysis output:
   * Replace `-o / --output` analyze mode option with `--output-format` and `--output-name`
     * Add ``--output-format`` analysis mode option to select the output format of the analysis report.
     * Add ``--output-name`` analysis mode option to override the default file/folder name.
   * Replace `--save-dfs` analyze mode option with `--output-format csv`
 
-### Resolved issues
+* Command-line options:
+  * `--list-metrics` and `--config-dir` options moved to general command-line options.
+  * * `--list-metrics` option cannot be used without argument (GPU architecture).
+  * `--list-metrics` option do not show number of L2 channels.
+  * `--list-available-metrics` profile mode option to display the metrics available for profiling in current GPU.
+  * `--list-available-metrics` analyze mode option to display the metrics available for analysis.
+  * `--block` option cannot be used with `--list-metrics` and `--list-available-metrics`options.
 
-* Fixed not detecting memory clock issue when using amd-smi
-* Fixed standalone GUI crashing
-* Fixed L2 read/write/atomic bandwidths on MI350
-* Update metric names for better alignment between analysis configuration and documentation
-* Fixed an issue where accumulation counters could not be collected on AMD Instinct MI100
-* Updated Roofline plots to handle and apply kernel filtering.
+* Default rocprof interface changed from rocprofv3 to rocprofiler-sdk
+  * Use ROCPROF=rocprofv3 to use rocprofv3 interface
 
+* Roofline analysis now runs on GPU 0 by default instead of all GPUs.
 
-### Known issues
+### Removed
+
+* Usage of `rocm-smi` in favor of `amd-smi`.
+* Hardware IP block-based filtering has been removed in favor of analysis report block-based filtering.
+* Removed aggregated analysis view from TUI analyze mode.
 
 ### Optimized
 
 * Improved `--time-unit` option in analyze mode to apply time unit conversion across all analysis sections, not just kernel top stats.
+* Improved logic to obtain rocprof supported counters which prevents unnecessary warnings.
+* Improved post-analysis runtime performance by caching and multi-processing.
 
-* Improve logic to obtain rocprof supported counters which prevents unnecessary warnings
+### Resolved issues
 
-* Improve post-analysis runtime performance by caching and multi-processing
+* Fixed an issue of not detecting the memory clock when using `amd-smi`.
+* Fixed standalone GUI crashing.
+* Fixed L2 read/write/atomic bandwidths on AMD Instinct MI350 series accelerators.
+* Update metric names for better alignment between analysis configuration and documentation
+* Fixed an issue where accumulation counters could not be collected on AMD Instinct MI100.
+* Fixed an issue of kernel filtering not working in the roofline chart
 
-### Removed
+### Known issues
 
-* Usage of rocm-smi
-* Hardware IP block based filtering has been removed in favor of analysis report block based filtering
-* Remove aggregated analysis view from TUI mode
+* MI300A/X L2-Fabric 64B read counter may display negative values - The rocprof-compute metric 17.6.1 (Read 64B) can report negative values due to incorrect calculation when TCC_BUBBLE_sum + TCC_EA0_RDREQ_32B_sum exceeds TCC_EA0_RDREQ_sum.
+  * A workaround has been implemented using max(0, calculated_value) to prevent negative display values while the root cause is under investigation.
 
+### Upcoming changes
 
 ## ROCm Compute Profiler 3.2.3 for ROCm 7.0.0
 

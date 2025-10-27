@@ -23,7 +23,6 @@
 #include "libpyrocpd.hpp"
 #include "lib/output/format_path.hpp"
 #include "lib/python/rocpd/source/common.hpp"
-#include "lib/python/rocpd/source/csv.hpp"
 #include "lib/python/rocpd/source/functions.hpp"
 #include "lib/python/rocpd/source/interop.hpp"
 #include "lib/python/rocpd/source/otf2.hpp"
@@ -461,6 +460,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
                             conn, select_guid_nid_pid("memory_copies")};
 
+                        auto scratch_memory = rocpd::sql_generator<rocpd::types::scratch_memory>{
+                            conn, select_guid_nid_pid("scratch_memory")};
+
                         auto counters = rocpd::sql_generator<rocpd::types::counter>{
                             conn, select_guid_nid_pid("counters_collection")};
 
@@ -496,6 +498,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       samples,
                                                       kernels,
                                                       memory_copies,
+                                                      scratch_memory,
                                                       memory_allocations,
                                                       counters);
                     }
@@ -504,112 +507,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             return true;
         },
         "Write pftrace output file from rocpd SQLite3 database");
-
-    pyrocpd.def(
-        "write_csv",
-        [](rocpd::RocpdImportData& data, const rocprofiler::tool::output_config& output_cfg) {
-            auto sqlgen_csv = common::simple_timer{
-                fmt::format("CSV generation from {} SQL database(s)", data.size())};
-
-            if(data.empty()) return;
-
-            auto csv_manager = rocpd::output::CsvManager{output_cfg};
-
-            for(auto obj : {data.connection})
-            {
-                auto* conn  = rocpd::interop::get_connection(std::move(obj));
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
-
-                for(const auto& nitr : nodes)
-                {
-                    auto agents = rocpd::read<rocpd::types::agent>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
-                    auto processes = rocpd::read<rocpd::types::process>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
-
-                    for(const auto& pitr : processes)
-                    {
-                        ROCP_FATAL_IF(pitr.nid != nitr.id || pitr.guid != nitr.guid)
-                            << fmt::format("Found process with a mismatched nid/guid. process: "
-                                           "{}/{} vs. node: {}/{}",
-                                           pitr.nid,
-                                           pitr.guid,
-                                           nitr.id,
-                                           nitr.guid);
-                        auto _sqlgen_csv = common::simple_timer{fmt::format(
-                            "CSV generation from SQL for process {} (total)", pitr.pid)};
-
-                        auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl,
-                                                                  std::string_view
-                                                                      where_extra_condition = {}) {
-                            return fmt::format(
-                                "SELECT * FROM {} WHERE guid = '{}' AND nid = {} AND pid = {} {}",
-                                tbl,
-                                pitr.guid,
-                                nitr.id,
-                                pitr.pid,
-                                where_extra_condition);
-                        };
-
-                        rocpd::output::write_agent_info_csv(csv_manager, agents);
-
-                        constexpr auto region_order_by = "start ASC, end DESC";
-
-                        auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
-                            conn, select_guid_nid_pid("kernels"), region_order_by};
-                        auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
-                            conn, select_guid_nid_pid("memory_copies"), region_order_by};
-                        auto memory_allocations =
-                            rocpd::sql_generator<rocpd::types::memory_allocation>{
-                                conn, select_guid_nid_pid("memory_allocations"), region_order_by};
-                        auto hip_api_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions", "AND category LIKE 'HIP_%'"),
-                            region_order_by};
-                        auto hsa_api_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions", "AND category LIKE 'HSA_%'"),
-                            region_order_by};
-                        auto marker_api_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions_and_samples",
-                                                "AND category LIKE 'MARKER_%'"),
-                            region_order_by};
-                        auto counters_calls = rocpd::sql_generator<rocpd::types::counter>{
-                            conn, select_guid_nid_pid("counters_collection"), region_order_by};
-                        auto scratch_memory_calls =
-                            rocpd::sql_generator<rocpd::types::scratch_memory>{
-                                conn, select_guid_nid_pid("scratch_memory"), region_order_by};
-                        auto rccl_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions", "AND category LIKE 'RCCL_%'"),
-                            region_order_by};
-                        auto rocdecode_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions", "AND category LIKE 'ROCDECODE_%'"),
-                            region_order_by};
-                        auto rocjpeg_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions", "AND category LIKE 'ROCJPEG_%'"),
-                            region_order_by};
-
-                        rocpd::output::write_csvs(csv_manager,
-                                                  kernels,
-                                                  memory_copies,
-                                                  memory_allocations,
-                                                  hip_api_calls,
-                                                  hsa_api_calls,
-                                                  marker_api_calls,
-                                                  counters_calls,
-                                                  scratch_memory_calls,
-                                                  rccl_calls,
-                                                  rocdecode_calls,
-                                                  rocjpeg_calls);
-                    }
-                }
-            }
-        },
-        "Write trace data to CSV files");
 
     pyrocpd.def(
         "write_otf2",
@@ -632,42 +529,32 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             // (1) the process with the earliest start time
             // (2) find the process with the longest duration
             uint64_t min_start_time = std::numeric_limits<uint64_t>::max();
-            uint64_t max_fini_time  = 0;
+            uint64_t max_fini_time  = std::numeric_limits<uint64_t>::min();
             for(auto obj : {data.connection})
             {
                 auto* conn = rocpd::interop::get_connection(std::move(obj));
 
                 // min start
-                sqlite3_stmt* _stmt_min_start;
-                sqlite3_prepare_v2(
-                    conn, "SELECT MIN(start) FROM processes;", -1, &_stmt_min_start, nullptr);
-                uint64_t _min_start_time = std::numeric_limits<uint64_t>::max();
-                if(sqlite3_step(_stmt_min_start) == SQLITE_ROW)
+                sqlite3_stmt* _stmt_min_start_max_fini = nullptr;
+                uint64_t      _min_start_time          = std::numeric_limits<uint64_t>::max();
+                uint64_t      _max_fini_time           = std::numeric_limits<uint64_t>::min();
+
+                sqlite3_prepare_v2(conn,
+                                   "SELECT MIN(start), MAX(fini) FROM processes;",
+                                   -1,
+                                   &_stmt_min_start_max_fini,
+                                   nullptr);
+                if(sqlite3_step(_stmt_min_start_max_fini) == SQLITE_ROW)
                 {
                     _min_start_time =
-                        static_cast<uint64_t>(sqlite3_column_int64(_stmt_min_start, 0));
+                        static_cast<uint64_t>(sqlite3_column_int64(_stmt_min_start_max_fini, 0));
+                    _max_fini_time =
+                        static_cast<uint64_t>(sqlite3_column_int64(_stmt_min_start_max_fini, 1));
                 }
 
-                sqlite3_finalize(_stmt_min_start);
-                if(min_start_time > _min_start_time)
-                {
-                    min_start_time = _min_start_time;
-                }
-                //// max fini
-                sqlite3_stmt* _stmt_max_fini;
-                sqlite3_prepare_v2(
-                    conn, "SELECT MAX(fini) FROM processes;", -1, &_stmt_max_fini, nullptr);
-                uint64_t _max_fini_time = 0;
-                if(sqlite3_step(_stmt_max_fini) == SQLITE_ROW)
-                {
-                    _max_fini_time = static_cast<uint64_t>(sqlite3_column_int64(_stmt_max_fini, 0));
-                }
-
-                sqlite3_finalize(_stmt_max_fini);
-                if(max_fini_time < _max_fini_time)
-                {
-                    max_fini_time = _max_fini_time;
-                }
+                sqlite3_finalize(_stmt_min_start_max_fini);
+                min_start_time = std::min(min_start_time, _min_start_time);
+                max_fini_time  = std::max(max_fini_time, _max_fini_time);
             }
 
             auto otf2_session =

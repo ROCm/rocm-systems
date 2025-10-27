@@ -26,27 +26,29 @@
 #include <stdint.h>
 #include <cstdint>
 
+#include "src/def/gpu_block_info.h"
+
 #define COPY_DATA_SEL_REG 0  ///< Mem-mapped register
 #define COPY_DATA_SEL_SRC_SYS_PERF_COUNTER 4
 #define COPY_DATA_SEL_COUNT_1DW 0  ///< Copy 1 word (32 bits)
 
 // Counter Select Register value lambdas
-#define select_value(reg_name)                                                \
+#define SELECT_VALUE(reg_name)                                                \
   [](const counter_des_t& counter_des) {                                      \
     uint32_t select = SET_REG_FIELD_BITS(reg_name, PERF_SEL, counter_des.id); \
     return select;                                                            \
   }
-#define select_value_t2(reg_name)                                                       \
+#define SELECT_VALUE_T2(reg_name)                                                       \
   [](const counter_des_t& counter_des) {                                                \
     uint32_t select = SET_REG_FIELD_BITS(reg_name, PERFCOUNTER_SELECT, counter_des.id); \
     return select;                                                                      \
   }
-#define select_value_t3(reg_name)                                              \
+#define SELECT_VALUE_T3(reg_name)                                              \
   [](const counter_des_t& counter_des) {                                       \
     uint32_t select = SET_REG_FIELD_BITS(reg_name, CNTR_SEL0, counter_des.id); \
     return select;                                                             \
   }
-#define mc_select_value(reg_name)                                                           \
+#define MC_SELECT_VALUE(reg_name)                                                           \
   [](const counter_des_t& counter_des) {                                                    \
     uint32_t select = SET_REG_FIELD_BITS(reg_name, PERF_SEL, counter_des.id) |              \
                       SET_REG_FIELD_BITS(reg_name, PERF_MODE, PERFMON_COUNTER_MODE_ACCUM) | \
@@ -61,45 +63,45 @@ class gfx9_cntx_prim {
  public:
   static const uint32_t GFXIP_LEVEL = 9;
   static const uint32_t NUMBER_OF_BLOCKS = LastCounterBlockId + 1;
-  static constexpr Register GRBM_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 0, mmGRBM_GFX_INDEX);
+  static constexpr Register GRBM_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
   static constexpr Register COMPUTE_PERFCOUNT_ENABLE_ADDR =
-      REG_32B_ADDR(GC, 0, mmCOMPUTE_PERFCOUNT_ENABLE);
-  static constexpr Register RLC_PERFMON_CLK_CNTL_ADDR = REG_32B_ADDR(GC, 0, mmRLC_PERFMON_CLK_CNTL);
-  static constexpr Register CP_PERFMON_CNTL_ADDR = REG_32B_ADDR(GC, 0, mmCP_PERFMON_CNTL);
+      REG_32B_ADDR(GC, 0, regCOMPUTE_PERFCOUNT_ENABLE);
+  static constexpr Register RLC_PERFMON_CLK_CNTL_ADDR = REG_32B_ADDR(GC, 0, regRLC_PERFMON_CLK_CNTL);
+  static constexpr Register CP_PERFMON_CNTL_ADDR = REG_32B_ADDR(GC, 0, regCP_PERFMON_CNTL);
 
   static const uint32_t MC_PERFCOUNTER_RSLT_CNTL__ENABLE_ANY_MASK_PRM = 0x01000000L;
   static const uint32_t MC_PERFCOUNTER_RSLT_CNTL__CLEAR_ALL_MASK_PRM = 0x02000000L;
 
   static constexpr Register SPI_SQG_EVENT_CTL_ADDR{};
-  static constexpr Register SQ_PERFCOUNTER_CTRL_ADDR = REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER_CTRL);
+  static constexpr Register SQ_PERFCOUNTER_CTRL_ADDR = REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL);
   static constexpr Register SQ_PERFCOUNTER_CTRL2_ADDR{};
   static constexpr Register COMPUTE_THREAD_TRACE_ENABLE_ADDR{};
-  static constexpr Register SQ_PERFCOUNTER_MASK_ADDR = REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER_MASK);
-  static constexpr Register SQ_THREAD_TRACE_MASK_ADDR = REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_MASK);
+  static constexpr Register SQ_PERFCOUNTER_MASK_ADDR = REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_MASK);
+  static constexpr Register SQ_THREAD_TRACE_MASK_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_MASK);
   static constexpr Register SQ_THREAD_TRACE_PERF_MASK_ADDR =
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_PERF_MASK);
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_PERF_MASK);
   static constexpr Register SQ_THREAD_TRACE_TOKEN_MASK_ADDR =
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_TOKEN_MASK);
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_TOKEN_MASK);
   static constexpr Register SQ_THREAD_TRACE_TOKEN_MASK2_ADDR =
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_TOKEN_MASK2);
-  static constexpr Register SQ_THREAD_TRACE_MODE_ADDR = REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_MODE);
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_TOKEN_MASK2);
+  static constexpr Register SQ_THREAD_TRACE_MODE_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_MODE);
   static constexpr Register SQ_THREAD_TRACE_BUF0_BASE_LO_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BUF0_SIZE_ADDR{};
-  static constexpr Register SQ_THREAD_TRACE_BASE_ADDR = REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_BASE);
+  static constexpr Register SQ_THREAD_TRACE_BASE_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BASE);
   static constexpr Register SQ_THREAD_TRACE_BASE2_ADDR =
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_BASE2);
-  static constexpr Register SQ_THREAD_TRACE_SIZE_ADDR = REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_SIZE);
-  static constexpr Register SQ_THREAD_TRACE_CTRL_ADDR = REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_CTRL);
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BASE2);
+  static constexpr Register SQ_THREAD_TRACE_SIZE_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_SIZE);
+  static constexpr Register SQ_THREAD_TRACE_CTRL_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_CTRL);
   static constexpr Register SQ_THREAD_TRACE_HIWATER_ADDR =
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_HIWATER);
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_HIWATER);
   static const uint32_t SQ_THREAD_TRACE_HIWATER_VAL = 0x6;
   static constexpr Register SQ_THREAD_TRACE_STATUS_ADDR =
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_STATUS);
-  static constexpr Register SQ_THREAD_TRACE_CNTR_ADDR = REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_CNTR);
-  static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR = REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_WPTR);
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
+  static constexpr Register SQ_THREAD_TRACE_CNTR_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_CNTR);
+  static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_WPTR);
   static constexpr Register SQ_THREAD_TRACE_STATUS_OFFSET = []() {
-    Register reg = REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_STATUS);
+    Register reg = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
     reg.offset -= UCONFIG_SPACE_START;
     return reg;
   }();
@@ -109,16 +111,16 @@ class gfx9_cntx_prim {
   static const uint32_t UMC_COUNTER_BLOCK_NUM_INSTANCES = UmcCounterBlockMaxInstances;
 
   static constexpr Register RLC_SPM_PERFMON_CNTL__ADDR =
-      REG_32B_ADDR(GC, 0, mmRLC_SPM_PERFMON_CNTL);
-  static constexpr Register RLC_SPM_MC_CNTL__ADDR = REG_32B_ADDR(GC, 0, mmRLC_SPM_MC_CNTL);
+      REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_CNTL);
+  static constexpr Register RLC_SPM_MC_CNTL__ADDR = REG_32B_ADDR(GC, 0, regRLC_SPM_MC_CNTL);
   static constexpr Register RLC_SPM_PERFMON_RING_BASE_LO__ADDR =
-      REG_32B_ADDR(GC, 0, mmRLC_SPM_PERFMON_RING_BASE_LO);
+      REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_RING_BASE_LO);
   static constexpr Register RLC_SPM_PERFMON_RING_BASE_HI__ADDR =
-      REG_32B_ADDR(GC, 0, mmRLC_SPM_PERFMON_RING_BASE_HI);
+      REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_RING_BASE_HI);
   static constexpr Register RLC_SPM_PERFMON_RING_SIZE__ADDR =
-      REG_32B_ADDR(GC, 0, mmRLC_SPM_PERFMON_RING_SIZE);
+      REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_RING_SIZE);
   static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE__ADDR =
-      REG_32B_ADDR(GC, 0, mmRLC_SPM_PERFMON_SEGMENT_SIZE);
+      REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_SEGMENT_SIZE);
 #if defined(regRLC_SPM_PERFMON_SEGMENT_SIZE_CORE1)
   static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE_CORE1__ADDR =
       REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_SEGMENT_SIZE_CORE1);
@@ -126,45 +128,45 @@ class gfx9_cntx_prim {
   static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE_CORE1__ADDR = Register(0xDCAF);
 #endif
   static constexpr Register RLC_SPM_GLOBAL_MUXSEL_ADDR__ADDR =
-      REG_32B_ADDR(GC, 0, mmRLC_SPM_GLOBAL_MUXSEL_ADDR);
+      REG_32B_ADDR(GC, 0, regRLC_SPM_GLOBAL_MUXSEL_ADDR);
   static constexpr Register RLC_SPM_GLOBAL_MUXSEL_DATA__ADDR =
-      REG_32B_ADDR(GC, 0, mmRLC_SPM_GLOBAL_MUXSEL_DATA);
+      REG_32B_ADDR(GC, 0, regRLC_SPM_GLOBAL_MUXSEL_DATA);
   static constexpr Register RLC_SPM_SE_MUXSEL_ADDR__ADDR =
-      REG_32B_ADDR(GC, 0, mmRLC_SPM_SE_MUXSEL_ADDR);
+      REG_32B_ADDR(GC, 0, regRLC_SPM_SE_MUXSEL_ADDR);
   static constexpr Register RLC_SPM_SE_MUXSEL_DATA__ADDR =
-      REG_32B_ADDR(GC, 0, mmRLC_SPM_SE_MUXSEL_DATA);
+      REG_32B_ADDR(GC, 0, regRLC_SPM_SE_MUXSEL_DATA);
   static constexpr Register RLC_SPM_PERFMON_SAMPLE_DELAY_MAX__ADDR =
-      REG_32B_ADDR(GC, 0, mmRLC_SPM_PERFMON_SAMPLE_DELAY_MAX);
+      REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_SAMPLE_DELAY_MAX);
   static const uint32_t RLC_SPM_COUNTERS_PER_LINE = 16;
   static const uint32_t RLC_SPM_TIMESTAMP_SIZE16 = 4;
 
   static constexpr Register SQ_THREAD_TRACE_USERDATA_0 =
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_USERDATA_0);
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_USERDATA_0);
   static constexpr Register SQ_THREAD_TRACE_USERDATA_1 =
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_USERDATA_1);
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_USERDATA_1);
   static constexpr Register SQ_THREAD_TRACE_USERDATA_2 =
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_USERDATA_2);
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_USERDATA_2);
   static constexpr Register SQ_THREAD_TRACE_USERDATA_3 =
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_USERDATA_3);
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_USERDATA_3);
 
   static Register sqtt_perfcounter_addr(uint32_t index) {
     static const Register SQTT_PERFCOUNTERS_SELECT[16] = {
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER0_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER1_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER2_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER3_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER4_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER5_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER6_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER7_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER8_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER9_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER10_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER11_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER12_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER13_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER14_SELECT),
-        REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER15_SELECT)};
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER1_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER3_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER5_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER7_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER8_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER9_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER10_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER11_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER12_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER13_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER14_SELECT),
+        REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER15_SELECT)};
     return SQTT_PERFCOUNTERS_SELECT[index & 0xF];
   }
 
@@ -388,47 +390,47 @@ class gfx9_cntx_prim {
 
   // MC registers values
   static auto constexpr mc_select_value_MC_VM_L2_PERFCOUNTER0_CFG =
-      mc_select_value(MC_VM_L2_PERFCOUNTER0_CFG);
+      MC_SELECT_VALUE(MC_VM_L2_PERFCOUNTER0_CFG);
   static auto constexpr mc_select_value_ATC_L2_PERFCOUNTER0_CFG =
-      mc_select_value(ATC_L2_PERFCOUNTER0_CFG);
+      MC_SELECT_VALUE(ATC_L2_PERFCOUNTER0_CFG);
   static auto constexpr mc_select_value_ATC_PERFCOUNTER0_CFG =
-      mc_select_value(ATC_PERFCOUNTER0_CFG);
+      MC_SELECT_VALUE(ATC_PERFCOUNTER0_CFG);
   static auto constexpr mc_select_value_GCEA_PERFCOUNTER0_CFG =
-      mc_select_value(GCEA_PERFCOUNTER0_CFG);
+      MC_SELECT_VALUE(GCEA_PERFCOUNTER0_CFG);
   static auto constexpr mc_select_value_RPB_PERFCOUNTER0_CFG =
-      mc_select_value(RPB_PERFCOUNTER0_CFG);
+      MC_SELECT_VALUE(RPB_PERFCOUNTER0_CFG);
 
   static uint32_t mc_reset_value() { return MC_PERFCOUNTER_RSLT_CNTL__CLEAR_ALL_MASK_PRM; }
   static uint32_t mc_start_value() { return MC_PERFCOUNTER_RSLT_CNTL__ENABLE_ANY_MASK_PRM; }
 
-  static auto constexpr select_value_CB_PERFCOUNTER0_SELECT = select_value(CB_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_DB_PERFCOUNTER0_SELECT = select_value(DB_PERFCOUNTER0_SELECT);
+  static auto constexpr select_value_CB_PERFCOUNTER0_SELECT = SELECT_VALUE(CB_PERFCOUNTER0_SELECT);
+  static auto constexpr select_value_DB_PERFCOUNTER0_SELECT = SELECT_VALUE(DB_PERFCOUNTER0_SELECT);
   static auto constexpr select_value_GRBM_PERFCOUNTER0_SELECT =
-      select_value(GRBM_PERFCOUNTER0_SELECT);
+      SELECT_VALUE(GRBM_PERFCOUNTER0_SELECT);
   static auto constexpr select_value_GRBM_SE0_PERFCOUNTER_SELECT =
-      select_value(GRBM_SE0_PERFCOUNTER_SELECT);
+      SELECT_VALUE(GRBM_SE0_PERFCOUNTER_SELECT);
   static auto constexpr select_value_PA_SU_PERFCOUNTER0_SELECT =
-      select_value(PA_SU_PERFCOUNTER0_SELECT);
+      SELECT_VALUE(PA_SU_PERFCOUNTER0_SELECT);
   static auto constexpr select_value_PA_SC_PERFCOUNTER0_SELECT =
-      select_value(PA_SC_PERFCOUNTER0_SELECT);
+      SELECT_VALUE(PA_SC_PERFCOUNTER0_SELECT);
   static auto constexpr select_value_SPI_PERFCOUNTER0_SELECT =
-      select_value(SPI_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_TA_PERFCOUNTER0_SELECT = select_value(TA_PERFCOUNTER0_SELECT);
+      SELECT_VALUE(SPI_PERFCOUNTER0_SELECT);
+  static auto constexpr select_value_TA_PERFCOUNTER0_SELECT = SELECT_VALUE(TA_PERFCOUNTER0_SELECT);
   static auto constexpr select_value_TCA_PERFCOUNTER0_SELECT =
-      select_value(TCA_PERFCOUNTER0_SELECT);
+      SELECT_VALUE(TCA_PERFCOUNTER0_SELECT);
   static auto constexpr select_value_TCC_PERFCOUNTER0_SELECT =
-      select_value(TCC_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_TD_PERFCOUNTER0_SELECT = select_value(TD_PERFCOUNTER0_SELECT);
+      SELECT_VALUE(TCC_PERFCOUNTER0_SELECT);
+  static auto constexpr select_value_TD_PERFCOUNTER0_SELECT = SELECT_VALUE(TD_PERFCOUNTER0_SELECT);
   static auto constexpr select_value_TCP_PERFCOUNTER0_SELECT =
-      select_value(TCP_PERFCOUNTER0_SELECT);
+      SELECT_VALUE(TCP_PERFCOUNTER0_SELECT);
   static auto constexpr select_value_VGT_PERFCOUNTER0_SELECT =
-      select_value(VGT_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_IA_PERFCOUNTER0_SELECT = select_value(IA_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_WD_PERFCOUNTER0_SELECT = select_value(WD_PERFCOUNTER0_SELECT);
+      SELECT_VALUE(VGT_PERFCOUNTER0_SELECT);
+  static auto constexpr select_value_IA_PERFCOUNTER0_SELECT = SELECT_VALUE(IA_PERFCOUNTER0_SELECT);
+  static auto constexpr select_value_WD_PERFCOUNTER0_SELECT = SELECT_VALUE(WD_PERFCOUNTER0_SELECT);
 
   // static auto constexpr select_value_SX_PERFCOUNTER0_SELECT =
-  // select_value_t2(SX_PERFCOUNTER0_SELECT); static auto constexpr
-  // select_value_GDS_PERFCOUNTER0_SELECT = select_value_t2(GDS_PERFCOUNTER0_SELECT);
+  // SELECT_VALUE_T2(SX_PERFCOUNTER0_SELECT); static auto constexpr
+  // select_value_GDS_PERFCOUNTER0_SELECT = SELECT_VALUE_T2(GDS_PERFCOUNTER0_SELECT);
 
   static auto constexpr select_value_SX_PERFCOUNTER0_SELECT = [](const counter_des_t& counter_des) {
     return (uint32_t)0;
@@ -437,9 +439,9 @@ class gfx9_cntx_prim {
       [](const counter_des_t& counter_des) { return (uint32_t)0; };
 
   static auto constexpr select_value_CPC_PERFCOUNTER0_SELECT =
-      select_value_t3(CPC_PERFCOUNTER0_SELECT);
+      SELECT_VALUE_T3(CPC_PERFCOUNTER0_SELECT);
   static auto constexpr select_value_CPF_PERFCOUNTER0_SELECT =
-      select_value_t3(CPF_PERFCOUNTER0_SELECT);
+      SELECT_VALUE_T3(CPF_PERFCOUNTER0_SELECT);
 
   static uint32_t spm_select_value(const counter_des_t& counter_des) {
     uint32_t tcc_perfcounter0_select =
@@ -725,5 +727,10 @@ class gfx9_cntx_prim {
 
 }  // namespace gfx9
 }  // namespace gfxip
+
+#undef SELECT_VALUE
+#undef SELECT_VALUE_T2
+#undef SELECT_VALUE_T3
+#undef MC_SELECT_VALUE
 
 #endif  // _GFX9_PRIMITIVES_H_

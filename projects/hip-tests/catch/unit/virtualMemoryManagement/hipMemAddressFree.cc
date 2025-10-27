@@ -62,11 +62,11 @@ TEST_CASE("Unit_hipMemAddressFree_negative") {
   REQUIRE(granularity > 0);
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   // Allocate virtual address range
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
 
   SECTION("nullptr to devptr") {
-    REQUIRE(hipMemAddressFree((hipDeviceptr_t) nullptr, size_mem) == hipErrorInvalidValue);
+    REQUIRE(hipMemAddressFree(nullptr, size_mem) == hipErrorInvalidValue);
   }
 
   SECTION("pass zero to size") { REQUIRE(hipMemAddressFree(ptrA, 0) == hipErrorInvalidValue); }

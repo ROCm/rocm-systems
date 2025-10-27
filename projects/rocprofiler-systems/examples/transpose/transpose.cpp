@@ -85,13 +85,18 @@ transpose_a(int* in, int* out, int M, int N)
 {
     __shared__ int tile[TILE_DIM][TILE_DIM];
 
-    int idx = (blockIdx.y * blockDim.y + threadIdx.y) * M + blockIdx.x * blockDim.x +
-              threadIdx.x;
-    tile[threadIdx.y][threadIdx.x] = in[idx];
+    int tx = threadIdx.x, ty = threadIdx.y;
+    int x = blockIdx.x * TILE_DIM + tx;
+    int y = blockIdx.y * TILE_DIM + ty;
+
+    int v = 0;
+    if(x < M && y < N) v = in[y * M + x];  // guarded load
+    tile[ty][tx] = v;
     __syncthreads();
-    idx = (blockIdx.x * blockDim.x + threadIdx.y) * N + blockIdx.y * blockDim.y +
-          threadIdx.x;
-    out[idx] = tile[threadIdx.x][threadIdx.y];
+
+    int xt = blockIdx.y * TILE_DIM + tx;
+    int yt = blockIdx.x * TILE_DIM + ty;
+    if(xt < N && yt < M) out[yt * N + xt] = tile[tx][ty];  // guarded store
 }
 
 namespace

@@ -322,6 +322,29 @@ void SvmMemoryTestBasic::TestCreateDestroy(void) {
   }
 }
 
+void SvmMemoryTestBasic::TestSVMPrefetch(void) {
+  hsa_status_t err;
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("SVMPrefetch Test");
+  }
+
+  ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
+
+  auto pool_idx = 0;
+  for (auto a : agent_pools) {
+    for (auto p : a->pools) {
+      TestSVMPrefetch(a->agent, p);
+    }
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
 void SvmMemoryTestBasic::SetUp(void) {
   hsa_status_t err;
 
@@ -359,4 +382,105 @@ void SvmMemoryTestBasic::Close() {
   // This will close handles opened within rocrtst utility calls and call
   // hsa_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
+}
+
+
+// Test to check that GPU can prefetch SVM memory from specific agent.
+void SvmMemoryTestBasic::TestSVMPrefetch(hsa_agent_t agent, hsa_amd_memory_pool_t pool) {
+  hsa_amd_pointer_info_t ptrInfo = {};
+  rocrtst::pool_info_t pool_i;
+  hsa_device_type_t ag_type;
+  hsa_agent_t cpu_agent;
+
+  static const int kMemoryAllocSize = 1024;
+
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type));
+  if (ag_type != HSA_DEVICE_TYPE_GPU) return;
+
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NEAREST_CPU, &cpu_agent));
+
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+
+  if(!pool_i.alloc_allowed) return;
+
+  hsa_queue_t* queue = NULL;  // command queue
+  hsa_signal_t signal = {0};  // completion signal
+
+  /* Create a queue to enqueue kernel */
+  // get queue size
+  uint32_t queue_size = 0;
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size));
+
+  // create queue
+  ASSERT_SUCCESS(
+      hsa_queue_create(agent, queue_size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, 0, 0, &queue));
+
+  struct host_data_t {
+    int data[kMemoryAllocSize * 4];
+    int dup_data[kMemoryAllocSize * 4];
+    int result[kMemoryAllocSize * 4];
+  };
+
+  struct dev_data_t {
+    int result[kMemoryAllocSize * 4];
+  };
+
+  struct host_data_t* host_data = NULL;
+  struct dev_data_t* dev_data = NULL;
+
+  /* Set up host_data */
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve((void**)&host_data, sizeof(host_data_t), 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+  ASSERT_NE(host_data, nullptr);
+
+  /* Verify that pointer info for unmapped VA's return expected values */
+  ptrInfo.size = sizeof(ptrInfo);
+  ASSERT_SUCCESS(hsa_amd_pointer_info(host_data, &ptrInfo, nullptr, nullptr, nullptr));
+  ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
+  ASSERT_EQ(ptrInfo.hostBaseAddress, host_data);
+  /* For unmapped VA, then size is equal to size of address reservation */
+  ASSERT_EQ(ptrInfo.sizeInBytes, sizeof(host_data_t));
+
+  if (verbosity() > 0) {
+    std::cout << "    Pointer info on reserved address OK" << std::endl;
+  }
+
+  std::vector<hsa_amd_svm_attribute_pair_t> host_attrs;
+  host_attrs.push_back({HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION, cpu_agent.handle});
+  host_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, agent.handle});
+  ASSERT_SUCCESS(hsa_amd_svm_attributes_set(host_data, sizeof(host_data_t), host_attrs.data(), host_attrs.size()));
+
+  /* Set up dev_data */
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve((void**)&dev_data, sizeof(dev_data_t), 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+  ASSERT_NE(dev_data, nullptr);
+
+  std::vector<hsa_amd_svm_attribute_pair_t> dev_attrs;
+  dev_attrs.push_back({HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION, agent.handle});
+  dev_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, agent.handle});
+
+  ASSERT_SUCCESS(hsa_amd_svm_attributes_set(dev_data, sizeof(dev_data_t), dev_attrs.data(), dev_attrs.size()));
+  ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &signal));
+
+  ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(dev_data, sizeof(dev_data_t), agent, 0, nullptr, signal));
+
+  // wait for the signal and reset it for future use
+  while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                   HSA_WAIT_STATE_ACTIVE)) {
+  }
+
+  hsa_amd_svm_attributes_get(dev_data, sizeof(dev_data_t), dev_attrs.data() , dev_attrs.size());
+
+  // Check if mem location is sourced from the expected agent
+  ASSERT_EQ(dev_attrs[0].value, agent.handle);
+
+  //verify the agent owner
+  if (verbosity() > 0) {
+    std::cout << "    GPU has prefetched the preferred agent memory successfully" << std::endl;
+  }
+  if (signal.handle) {
+    hsa_signal_destroy(signal);
+  }
+  if (queue) {
+    hsa_queue_destroy(queue);
+  }
+
 }

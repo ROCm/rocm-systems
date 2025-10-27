@@ -95,6 +95,7 @@ TEST_CASE("Unit_hipStreamLegacy_WithBlockingStream") {
 
   HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 1 \n");
@@ -129,6 +130,7 @@ void launchFunction(hipStream_t stream) {
 
   HIP_CHECK_THREAD(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, stream));
   HIP_CHECK_THREAD(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK_THREAD(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     if (hostArrDst[i] != 5) {
@@ -223,6 +225,7 @@ TEST_CASE("Unit_hipStreamLegacy_WithNonBlockingStream") {
 
   HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 10 or 11 \n");
@@ -265,6 +268,7 @@ TEST_CASE("Unit_hipStreamLegacy_WithStreamPerThread") {
 
   HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamPerThread));
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 15 \n");
@@ -317,6 +321,7 @@ TEST_CASE("Unit_hipStreamLegacy_MultiDevice") {
 
     HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
     HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+    HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
     for (int i = 0; i < N; i++) {
       INFO("At index : " << i << " Got value : " << hostArrDst[i]
@@ -377,6 +382,7 @@ TEST_CASE("Unit_hipStreamLegacy_H2H_H2D_D2D_D2H_Default") {
   HIP_CHECK(hipMemcpyAsync(devArr2, devArr1, NBYTES, hipMemcpyDeviceToDevice, hipStreamLegacy));
   HIP_CHECK(hipMemcpyAsync(hostArr3, devArr2, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipMemcpyAsync(hostArr4, hostArr3, NBYTES, hipMemcpyDefault, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArr4[i] << " Expected value : 30 \n");
@@ -481,6 +487,7 @@ TEST_CASE("Unit_hipStreamLegacy_MultiDeviceMultiOperation") {
   // Finally copy daat to hostArr4
   HIP_CHECK(hipSetDevice(currentDevice));
   HIP_CHECK(hipMemcpyAsync(h2Dev0, d2Dev0, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << h2Dev0[i]
@@ -561,6 +568,7 @@ TEST_CASE("Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation") {
 
   std::thread D2H_Thread(copyFromDeviceToHost, devArr, hostArrDst);
   D2H_Thread.join();
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 50 \n");
@@ -623,7 +631,8 @@ TEST_CASE("Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation") {
   HIP_CHECK(hipSetDevice(1));
 
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArrDev1, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
-
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
+  
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i]
                        << " Expected value : 500 or 501 \n");
@@ -704,6 +713,7 @@ TEST_CASE("Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation") {
   dev0Thread.join();
   std::thread dev1Thread(operationsInDev1, devArrDev1, hostArrDst);
   dev1Thread.join();
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i]
@@ -765,6 +775,7 @@ TEST_CASE("Unit_hipStreamLegacy_WithKernel") {
   addOneKernel<<<1, 1, 0, hipStreamLegacy>>>(devArr, N);
   addOneKernel<<<1, 1, 0, hipStreamLegacy>>>(devArr, N);
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 3 \n");

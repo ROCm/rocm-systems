@@ -53,6 +53,7 @@ TEST_CASE("Unit_kernel_ChkPrintf") {
   const char* check = st.c_str();
   for (int i = 0; i < device_count; ++i) {
     HIP_CHECK(hipSetDevice(i));
+    if (!HipTest::isPcieAtomicSupported()) continue;
     hipLaunchKernelGGL(run_printf, dim3(1), dim3(1), 0, 0);
     HIP_CHECK(hipDeviceSynchronize());
     char* data = new char[st.size()];

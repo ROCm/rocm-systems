@@ -22,6 +22,9 @@
 
 #pragma once
 
+#include <memory>
+#include <unordered_map>
+#include <vector>
 #include "att_lib_wrapper.hpp"
 
 namespace rocprofiler
@@ -30,5 +33,24 @@ namespace att_wrapper
 {
 void
 PerfcounterFile(class WaveConfig& config, const perfevent_t* events, size_t event_count);
+
+class RealtimeTS
+{
+public:
+    using realtime_vec_t = std::vector<realtime_t>;
+    using shader_map_t   = std::unordered_map<int, realtime_vec_t>;
+
+    RealtimeTS(const Fspath& dir)
+    : path(dir / "realtime.json"){};
+    ~RealtimeTS();
+
+    void     add(int shader, const realtime_t* events, size_t event_count);
+    uint64_t frequency{0};
+
+private:
+    const Fspath path;
+    shader_map_t aggregated{};  ///< Stores all RT values so far.
+};
+
 }  // namespace att_wrapper
 }  // namespace rocprofiler

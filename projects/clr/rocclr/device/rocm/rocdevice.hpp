@@ -1,4 +1,4 @@
-/* Copyright (c) 2009 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -32,16 +32,12 @@
 #include "thread/monitor.hpp"
 #include "utils/versions.hpp"
 
+#include "device/rocm/rocrctx.hpp"
 #include "device/rocm/rocsettings.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocdefs.hpp"
 #include "device/rocm/rocprintf.hpp"
 #include "device/rocm/rocglinterop.hpp"
-
-#include "hsa/hsa.h"
-#include "hsa/hsa_ext_image.h"
-#include "hsa/hsa_ext_amd.h"
-#include "hsa/hsa_ven_amd_loader.h"
 
 #include <atomic>
 #include <iostream>
@@ -137,7 +133,7 @@ class Sampler : public device::Sampler {
 class NullDevice : public amd::Device {
  public:
   //! constructor
-  NullDevice() {};
+  NullDevice(){};
 
   //! create the device
   bool create(const amd::Isa& isa);
@@ -230,7 +226,8 @@ class NullDevice : public amd::Device {
     return true;
   }
 
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) override {
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice) override {
     ShouldNotReachHere();
     return false;
   }
@@ -282,6 +279,20 @@ class NullDevice : public amd::Device {
     return false;
   }
 
+  //! Empty implementation on Null device
+  bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                uint64_t* size_copied, int32_t* status) override {
+    ShouldNotReachHere();
+    return false;
+  }
+
+  //! Empty implementation on Null device
+  bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                 uint64_t* size_copied, int32_t* status) override {
+    ShouldNotReachHere();
+    return false;
+  }
+
   bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
                     cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override {
     return true;
@@ -303,12 +314,6 @@ class NullDevice : public amd::Device {
   }
 #endif
 #endif
-
- protected:
-  //! Initialize compiler instance and handle
-  static bool initCompiler(bool isOffline);
-  //! destroy compiler instance and handle
-  static bool destroyCompiler();
 
  private:
   static constexpr bool offlineDevice_ = true;
@@ -412,16 +417,23 @@ class Device : public NullDevice {
   //! Gets free memory on a GPU device
   virtual bool globalFreeMemory(size_t* freeMemory) const;
   virtual void* hostAlloc(size_t size, size_t alignment,
-                          MemorySegment mem_seg = MemorySegment::kNoAtomics) const;
+                          MemorySegment mem_seg = MemorySegment::kNoAtomics,
+                          const void* agentInfo = nullptr) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const;
+
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                        uint64_t* size_copied, int32_t* status) override;
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                         uint64_t* size_copied, int32_t* status) override;
 
   bool deviceAllowAccess(void* dst) const;
 
   bool allowPeerAccess(device::Memory* memory) const;
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
-  void* deviceLocalAlloc(size_t size, bool atomics = false, bool pseudo_fine_grain = false,
-                         bool contiguous = false) const;
+
+  void* deviceLocalAlloc(size_t size,
+                        const AllocationFlags& flags = AllocationFlags{}) const;
   void* reserveMemory(size_t size, size_t alignment) const;
   void releaseMemory(void* ptr, size_t size) const;
   void memFree(void* ptr, size_t size) const;
@@ -440,7 +452,8 @@ class Device : public NullDevice {
   virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment);
   virtual bool virtualFree(void* addr);
 
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags);
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice);
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const { return true; }
 
@@ -462,9 +475,6 @@ class Device : public NullDevice {
 
   //! Allocate host memory in terms of numa policy set by user
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
-
-  //! Allocate host memory from agent info
-  void* hostAgentAlloc(size_t size, const AgentInfo& agentInfo, MemorySegment mem_seg) const;
 
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
   //! return a new device pointer accessible by the GPU agent.
@@ -552,7 +562,7 @@ class Device : public NullDevice {
 
   virtual amd::Memory* GetArenaMemObj(const void* ptr, size_t& offset, size_t size = 0);
 
-  const uint32_t getPreferredNumaNode() const { return preferred_numa_node_; }
+  virtual uint32_t getPreferredNumaNode() const final { return preferred_numa_node_; }
 
   const bool isFineGrainSupported() const;
 
@@ -689,4 +699,3 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 /**
  * @}
  */
-

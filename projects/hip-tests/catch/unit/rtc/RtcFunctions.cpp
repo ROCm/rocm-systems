@@ -22,8 +22,8 @@ This file contains functions for idividual HIPRTC supported compiler options
 validation. For PASS senario the function returns 1 or 0 otherwise.
 */
 
-#include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
+#include <hip/hiprtc.h>
 #include <hip/hip_fp16.h>
 #include <picojson.h>
 #include <fstream>

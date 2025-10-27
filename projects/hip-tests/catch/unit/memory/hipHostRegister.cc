@@ -118,13 +118,17 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset", "", i
     HIP_CHECK(hipHostRegister(A, sizeBytes, hipHostRegisterDefault));
   }
 #if (HT_AMD == 1) && (HT_LINUX == 1)
-  SECTION("hipExtHostRegisterUncached") {
-    HIP_CHECK(hipHostRegister(A, sizeBytes, hipExtHostRegisterUncached));
-  }
-  SECTION("hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached") {
-    HIP_CHECK(hipHostRegister(
-        A, sizeBytes,
-        hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached));
+  if (!IsNavi4X()) {
+    SECTION("hipExtHostRegisterUncached") {
+      HIP_CHECK(hipHostRegister(A, sizeBytes, hipExtHostRegisterUncached));
+    }
+    SECTION("hipHostRegisterPortable | hipHostRegisterMapped | "
+            "hipExtHostRegisterUncached | hipHostRegisterIoMemory") {
+      HIP_CHECK(hipHostRegister(
+          A, sizeBytes,
+          hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached | 
+          hipHostRegisterIoMemory));
+    }
   }
 #endif
   for (int i = 0; i < LEN; i++) {
@@ -923,11 +927,17 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
       FlagType{0x08, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | 0x08, true},
 #if (HT_AMD == 1) && (HT_LINUX == 1)
+      FlagType{hipHostRegisterIoMemory, true},
       FlagType{hipExtHostRegisterUncached, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached, true},
 #endif
       FlagType{0xF0, false}, FlagType{0xFFF2, false}, FlagType{0xFFFFFFFF, false});
 
+#if (HT_AMD == 1) && (HT_LINUX == 1)
+  if (IsNavi4X() && (flags.value & hipExtHostRegisterUncached)) {
+    return;
+  }
+#endif
   INFO("Testing hipHostRegister flag: " << flags.value);
   if (flags.valid) {
     HIP_CHECK(hipHostRegister(hostPtr, sizeBytes, flags.value));
@@ -937,7 +947,6 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
   }
   free(hostPtr);
 }
-
 /**
  * Test Description
  * ------------------------

@@ -217,6 +217,9 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from subm
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
                                "Build libunwind from submodule" ON
 )
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_NLOHMANN_JSON
+                               "Build nlohmann/json from submodule" ON
+)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CODECOV "Build for code coverage" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
                                "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF
@@ -385,8 +388,8 @@ endif()
 # ------------------------------------------------------------------------------#
 
 configure_file(
-    ${PROJECT_SOURCE_DIR}/LICENSE
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE
+    ${PROJECT_SOURCE_DIR}/LICENSE.md
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE.md
     COPYONLY
 )
 
@@ -430,7 +433,8 @@ install(
 )
 
 install(
-    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE
+    FILES
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}
     COMPONENT setup
 )

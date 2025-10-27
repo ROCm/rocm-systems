@@ -9,3 +9,6 @@ OCLRegionDeviceQueries
 OCLDynamicBLines
 
 OCLAtomicCounter
+
+OCLGetQueueThreadID
+	

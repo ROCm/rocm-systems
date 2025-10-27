@@ -100,6 +100,7 @@ uint64_t Event::recordProfilingInfo(int32_t status, uint64_t timeStamp) {
 
 // Global epoch time since the first processed command
 uint64_t epoch = 0;
+std::once_flag epoch_init;
 // ================================================================================================
 bool Event::setStatus(int32_t status, uint64_t timeStamp) {
   assert(status <= CL_QUEUED && "invalid status");
@@ -112,9 +113,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
 
   if (profilingInfo().enabled_) {
     timeStamp = recordProfilingInfo(status, timeStamp);
-    if (epoch == 0) {
-      epoch = profilingInfo().queued_;
-    }
+    std::call_once(epoch_init, [&]{ epoch = profilingInfo().queued_;});
   }
 
   if (amd::IS_HIP) {

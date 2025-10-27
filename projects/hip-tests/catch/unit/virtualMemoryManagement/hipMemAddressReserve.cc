@@ -68,7 +68,7 @@ TEST_CASE("Unit_hipMemAddressReserve_AlignmentTest") {
   REQUIRE(granularity > 0);
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   // Allocate virtual address range
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   size_t alignmnt = 1;
   hipMemGenericAllocationHandle_t handle;
   // Allocate physical memory
@@ -93,8 +93,8 @@ TEST_CASE("Unit_hipMemAddressReserve_AlignmentTest") {
     accessDesc.flags = hipMemAccessFlagsProtReadWrite;
     // Make the address accessible to GPU 0
     HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-    HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
     HIP_CHECK(hipMemUnmap(ptrA, size_mem));
     HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
@@ -131,7 +131,7 @@ TEST_CASE("Unit_hipMemAddressReserve_Negative") {
   REQUIRE(granularity > 0);
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   // Allocate virtual address range
-  hipDeviceptr_t ptrA;
+  void* ptrA;
 
   SECTION("Nullptr to ptr") {
     REQUIRE(hipMemAddressReserve(nullptr, size_mem, 0, 0, 0) == hipErrorInvalidValue);

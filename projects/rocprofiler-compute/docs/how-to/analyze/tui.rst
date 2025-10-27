@@ -8,10 +8,10 @@ Text-based User Interface (TUI) analysis
 
 ROCm Compute Profiler's analyze mode now supports a lightweight Text-based User Interface (TUI)
 that provides an interactive terminal experience for enhanced usability. You can use the TUI
-interface as a more visually engaging and interactive alternative to explore analysis results
-compared to the standard :doc:`cli`. It provides enhanced visual feedback and easy navigation without
-needing the extra setup of a full graphical interface. This analysis option is implemented as a
-terminal-based interface that offers real-time visual feedback, keyboard shortcuts for common
+interface as a more visually engaging and interactive alternative to explore individual kernel analysis
+results compared to the standard :doc:`cli`. It provides enhanced visual feedback and easy navigation
+without needing the extra setup of a full graphical interface. This analysis option is implemented as
+a terminal-based interface that offers real-time visual feedback, keyboard shortcuts for common
 actions, and improved readability with formatted output.
 
 .. note::
@@ -30,19 +30,24 @@ For example:
 
    $ rocprof-compute analyze --tui
 
-2. To start the analysis, use the dropdown menu at the top left of the screen to select a single
-workload from ``rocprof-compute profile`` generated output directories.
+2. To start the individual kernel analysis, use the drop-down menu at the top left of the screen to select
+a single workload from ``rocprof-compute profile`` generated output directories.
 
-.. image:: ../../data/analyze/tui.png
+.. image:: ../../data/analyze/tui_home.png
    :align: center
    :alt: ROCm Compute Profiler TUI home screen
    :width: 800
 
-3. You can see the center window update with collapsed contents. Uncollapse to view tables, charts,
-and graphs visualizing the analysis data.
+3. You can see the center window update with a top header for kernel selection and collapsed contents beneath.
+Select a kernel of interest to load the corresponding analysis results. The top kernel is selected by default.
 
-4. After the analysis results are loaded, you can start interactive analysis with detailed metrics.
-You can left click on any metric cell to view detailed descriptions in the dedicated `METRIC DESCRIPTION` tab.
+.. image:: ../../data/analyze/tui_kernel_selection.png
+   :align: center
+   :alt: ROCm Compute Profiler TUI home screen
+   :width: 800
+
+4. After the analysis results are loaded, you can start interactive analysis with the detailed metrics by
+expanding the collapsed contents to view tables, charts, and graphs, and visualizing the analysis data.
 The TUI supports basic keyboard shortcuts, including quit application commands for easy navigation.
 
 TUI analysis structure
@@ -51,10 +56,28 @@ TUI analysis structure
 Unlike the :doc:`cli` plain style interfaces, the TUI restructures the analysis workflow into four
 hierarchical categories to provide a more organized, top-down analysis approach:
 
-1. Top Stat
-2. High Level analysis
-3. Detailed block analysis
-4. Source Level analysis
+#. Kernel Selection Header with Top Stats:
+
+   Supports interactive kernel selection to toggle between kernel(s) to view individual kernel
+   analysis results.
+
+#. High Level Analysis:
+
+   Experimental performance metrics layout, reorganized performance metrics grouping to display the new
+   GPU Speed-of-Light section, Compute Throughput section, and Memory Throughput section.
+
+#. Detailed Block Analysis
+
+   Displays analysis results grouped by metric blocks, similar to the CLI output.
+   When applicable, performance metrics are shown as charts instead of only tables,
+   providing a more visual representation.
+
+#. Source Level analysis
+
+   Displays the PC Sampling section.
+   Source Level analysis does not have PC sampling enabled by default during the
+   profiling stage. Refer to :doc:`../pc_sampling` for details on how to build and enable PC sampling
+   manually.
 
 You are recommended to follow this top-down hierarchical structure to conduct a thorough performance
 analysis, starting with the broad overview and progressively drilling down to specific details.
