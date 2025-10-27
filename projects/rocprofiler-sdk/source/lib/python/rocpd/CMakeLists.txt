@@ -61,7 +61,7 @@ message(
     STATUS "  Python files to install: ${CMAKE_CURRENT_LIST_FILE}(${ROCPD_PYTHON_FILES})")
 message(STATUS "  Python version agnostic: YES")
 message(STATUS "  Binding type: Pure Python (no compilation)")
-message(STATUS "  Dependencies: sqlite3 (built-in), otf2 (PyPI), perfnetto (PyPI)")
+message(STATUS "  Dependencies: sqlite3 (built-in), otf2 (PyPI), perfetto (PyPI)")
 message(STATUS "")
 
 # Install all Python files
@@ -74,8 +74,13 @@ install(
 file(
     WRITE ${CMAKE_CURRENT_BINARY_DIR}/requirements.txt
     "# rocpd Pure Python Dependencies\n"
-    "# Install with: pip install -r requirements.txt\n" "\n" "# OTF2 trace export\n"
-    "otf2>=3.0\n" "\n" "# Perfetto trace export\n" "perfnetto>=0.1\n")
+    "# Install with: pip install -r requirements.txt\n\n"
+    "# OTF2 trace export (optional - only needed for OTF2 export)\n"
+    "otf2>=3.0\n\n"
+    "# Perfetto trace export (optional - only needed for Perfetto export)\n"
+    "perfetto>=0.11.0\n\n"
+    "# Note: Both otf2 and perfetto are optional dependencies.\n"
+    "# CSV export and all other functionality works without them.\n")
 
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/requirements.txt
@@ -136,7 +141,7 @@ try:
     print()
     print('Note: Full functionality requires:')
     print('  - pip install otf2 (for OTF2 export)')
-    print('  - pip install perfnetto (for Perfetto export)')
+    print('  - pip install perfetto (for Perfetto export)')
     sys.exit(0)
 
 except Exception as e:
