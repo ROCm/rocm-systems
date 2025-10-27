@@ -227,6 +227,7 @@ jobs:
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
             ${{ matrix.system.ci-flags }} -- \
+            -DROCPROFILER_CLANG_TIDY_EXE=/usr/local/bin/clang-tidy
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
