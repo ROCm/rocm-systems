@@ -150,12 +150,21 @@ hsa_status_t Runtime::Release() {
 
   if (runtime_singleton_ == nullptr) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
-  if (runtime_singleton_->ref_count_ == 1) {
+  if (runtime_singleton_->ref_count_-- == 1) {
+    auto system_event_handlers = runtime_singleton_->GetSystemEventHandlers();
+
+    if (!system_event_handlers.empty()) {
+      hsa_amd_event_t system_shutdown_event = {} ;
+      system_shutdown_event.event_type = HSA_AMD_SYSTEM_SHUTDOWN_EVENT;
+      /* Remaining fields hsa_amd_event_t are empty */
+
+      for (auto& callback : system_event_handlers) {
+        callback.first(&system_shutdown_event, callback.second);
+      }
+    }
     // Release all registered memory, then unload backends
     runtime_singleton_->Unload();
   }
-
-  runtime_singleton_->ref_count_--;
 
   if (runtime_singleton_->ref_count_ == 0) {
     delete runtime_singleton_;
