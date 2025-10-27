@@ -206,7 +206,7 @@ jobs:
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') || contains(matrix.system.gpu, 'navi4') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |

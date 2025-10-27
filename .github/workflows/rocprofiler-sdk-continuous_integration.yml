@@ -301,7 +301,7 @@ jobs:
           ls -la
 
       - name: Enable PC Sampling
-        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') || contains(matrix.system.gpu, 'navi4') }}
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
@@ -594,7 +594,7 @@ jobs:
           echo "✅ AQLProfile Installation complete!"
 
       - name: Enable PC Sampling
-        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') || contains(matrix.system.gpu, 'navi4') }}
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run:
@@ -740,7 +740,7 @@ jobs:
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') || contains(matrix.system.gpu, 'navi4') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
