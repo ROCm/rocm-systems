@@ -43,8 +43,8 @@ except Exception as e:
     print(f"ERROR: sqlite3 not available: {e}", file=sys.stderr)
     print("Python must be compiled with sqlite3 support", file=sys.stderr)
 
-# Use pure Python compatibility layer instead of libpyrocpd
-from . import libpyrocpd_compat as libpyrocpd
+# Import pure Python implementation of libpyrocpd
+from . import libpyrocpd
 from .importer import RocpdImportData
 
 __all__ = [

@@ -26,7 +26,7 @@
 from .importer import RocpdImportData
 from .time_window import apply_time_window
 from . import output_config
-from . import libpyrocpd_compat as libpyrocpd
+from . import libpyrocpd
 
 
 def write_pftrace(importData, config):

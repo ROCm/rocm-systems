@@ -33,7 +33,7 @@ try:
 except Exception:
     pass
 
-from . import libpyrocpd_compat as libpyrocpd
+from . import libpyrocpd
 
 
 __all__ = ["format_path", "output_config", "add_args", "process_args"]

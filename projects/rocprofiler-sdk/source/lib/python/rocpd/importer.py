@@ -31,7 +31,7 @@ import sys
 import sqlite3
 
 from .schema import RocpdSchema
-from . import libpyrocpd_compat as libpyrocpd
+from . import libpyrocpd
 
 __all__ = ["RocpdImportData", "execute_statement"]
 

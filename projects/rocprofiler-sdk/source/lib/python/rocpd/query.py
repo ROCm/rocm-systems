@@ -30,7 +30,7 @@ from typing import Union, Tuple, List, Optional
 from datetime import datetime
 
 from . import output_config
-from . import libpyrocpd_compat as libpyrocpd
+from . import libpyrocpd
 from .importer import RocpdImportData
 from .time_window import apply_time_window
 

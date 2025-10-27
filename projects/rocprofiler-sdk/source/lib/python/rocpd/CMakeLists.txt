@@ -28,7 +28,7 @@ file(
 
 # Copy all other Python files to build directory for testing
 file(
-    COPY ${CMAKE_CURRENT_SOURCE_DIR}/libpyrocpd_compat.py
+    COPY ${CMAKE_CURRENT_SOURCE_DIR}/libpyrocpd.py
          ${CMAKE_CURRENT_SOURCE_DIR}/importer.py
          ${CMAKE_CURRENT_SOURCE_DIR}/output_config.py
          ${CMAKE_CURRENT_SOURCE_DIR}/schema.py
@@ -44,7 +44,7 @@ file(
 # List all Python files to install
 set(ROCPD_PYTHON_FILES
     ${ROCPD_BUILD_DIR}/__init__.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/libpyrocpd_compat.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/libpyrocpd.py
     ${CMAKE_CURRENT_SOURCE_DIR}/importer.py
     ${CMAKE_CURRENT_SOURCE_DIR}/output_config.py
     ${CMAKE_CURRENT_SOURCE_DIR}/schema.py
@@ -124,10 +124,10 @@ try:
     print(f'✓ format_path() works: {path}')
 
     # Test enumerations
-    print(f'✓ agent_indexing enum: {rocpd.libpyrocpd_compat.agent_indexing.node}')
+    print(f'✓ agent_indexing enum: {rocpd.libpyrocpd.agent_indexing.node}')
 
     # Test data classes
-    config = rocpd.libpyrocpd_compat.output_config()
+    config = rocpd.libpyrocpd.output_config()
     print(f'✓ output_config class works')
 
     print('\\n' + '='*70)

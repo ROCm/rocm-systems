@@ -114,7 +114,7 @@ rocpd/
 ├── __init__.py                 # Main API entry point
 ├── __main__.py                 # CLI entry point (python -m rocpd)
 ├── importer.py                 # Database connection and multi-DB support
-├── libpyrocpd_compat.py        # Pure Python replacement for C++ bindings
+├── libpyrocpd.py               # Core pure Python implementation
 ├── schema.py                   # Database schema definitions
 ├── query.py                    # SQL query utilities
 ├── output_config.py            # Output configuration management
@@ -189,9 +189,9 @@ for row in data.execute("SELECT * FROM kernels"):
     print(row)
 ```
 
-### `libpyrocpd_compat.py` - Core Data Types
+### `libpyrocpd.py` - Core Data Types and Functions
 
-Pure Python replacement for the old C++ PyBind11 bindings. Provides:
+The core pure Python implementation of rocpd. Provides:
 
 **Enumerations**:
 - `agent_indexing` - Agent indexing modes (node, node_and_agent)

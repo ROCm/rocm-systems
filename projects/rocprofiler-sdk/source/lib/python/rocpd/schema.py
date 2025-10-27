@@ -31,7 +31,7 @@
 #
 
 import argparse
-from . import libpyrocpd_compat as libpyrocpd
+from . import libpyrocpd
 
 
 class RocpdSchema:
