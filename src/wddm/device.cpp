@@ -152,37 +152,64 @@ bool WDDMDevice::GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
   return false;
 }
 
+/*Local heap(dedicated GPU memory) includes visiable heap and invisiable heap.
+ *Non local heap refers to shared GPU memory and it is sytem memory.
+ */
 uint64_t WDDMDevice::VramAvail(void) {
   D3DKMT_QUERYSTATISTICS stats;
   NTSTATUS ret;
   uint64_t usedVis = 0;
   uint64_t usedInv = 0;
+  uint64_t usedNonLocal = 0;
+  uint32_t segmentId = 0;
 
   // wait fence complete
   uint64_t value = page_fence_value_.load();
   if(!CpuWait(&page_syncobj_, &value, 1, false))
     return HSA_STATUS_ERROR;
 
-  // local cpu-visible memory
-  memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-  stats.AdapterLuid = adapter_luid_;
-  stats.QuerySegment.SegmentId = 0;
-  ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-  if (ret == 0)
-    usedVis = stats.QueryResult.SegmentInformation.BytesResident;
+  if (IsDgpu()) {
+    // local cpu-visible memory
+    if(!GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_MEMORY, segmentId))
+      return HSA_STATUS_ERROR;
 
-  // local invisible memory
-  memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-  stats.AdapterLuid = adapter_luid_;
-  stats.QuerySegment.SegmentId = 1;
+    memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
+    stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+    stats.AdapterLuid = adapter_luid_;
+    stats.QuerySegment.SegmentId = segmentId;
+    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+    if (ret == 0)
+      usedVis = stats.QueryResult.SegmentInformation.BytesResident;
 
-  ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-  if (ret == 0)
-    usedInv = stats.QueryResult.SegmentInformation.BytesResident;
+    // local invisible memory
+    if (device_info_.local_invisible_heap_size) {
+      segmentId++;
+      memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
+      stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+      stats.AdapterLuid = adapter_luid_;
+      stats.QuerySegment.SegmentId = 1;
 
-  return LocalHeapSize() - usedVis - usedInv;
+      ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+      if (ret == 0)
+        usedInv = stats.QueryResult.SegmentInformation.BytesResident;
+    }
+
+    return LocalHeapSize() - usedVis - usedInv;
+  } else {
+    // APU - NonLocal memory
+    if(!GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_SYSMEM, segmentId))
+      return HSA_STATUS_ERROR;
+
+    memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
+    stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+    stats.AdapterLuid = adapter_luid_;
+    stats.QuerySegment.SegmentId = segmentId;
+    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+    if (ret == 0)
+      usedNonLocal = stats.QueryResult.SegmentInformation.BytesResident;
+
+    return NonLocalHeapSize() - usedNonLocal;
+  }
 }
 
 bool WDDMDevice::CreateDevice(void) {

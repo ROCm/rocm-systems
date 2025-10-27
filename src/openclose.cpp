@@ -145,7 +145,14 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
         device = get_wddmdev(j+1);
         if (device == nullptr)
             return -1;
-        total_local_size += wsl::AlignUp(device->LocalHeapSize(), align) * 4;
+        /*
+         * For APU, use non local memory(shared GPU memory) as GPU memory,
+         * because it has small local memory
+        */
+        if (device->IsDgpu())
+          total_local_size += wsl::AlignUp(device->LocalHeapSize(), align) * 4;
+        else
+          total_local_size += wsl::AlignUp(device->NonLocalHeapSize(), align) * 4;
     }
 
     local_heap_space_start_ = 0;

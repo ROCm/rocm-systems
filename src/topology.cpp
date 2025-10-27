@@ -642,7 +642,12 @@ static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
     return ret;
 
   props.HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
-  props.SizeInBytes = device->LocalHeapSize();
+
+  if (device->IsDgpu())
+    props.SizeInBytes = device->LocalHeapSize();
+  else
+    props.SizeInBytes = device->NonLocalHeapSize();
+
   props.Width = device->MemoryBusWidth();
   props.MemoryClockMax = device->MaxMemoryClockMhz();
 
