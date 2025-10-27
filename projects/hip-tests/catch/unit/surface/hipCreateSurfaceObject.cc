@@ -72,7 +72,11 @@ TEST_CASE("Unit_hipCreateSurfaceObject_Negative_Parameters") {
 
   SECTION("array handle is nullptr") {
     resc.res.array.array = nullptr;
+#if HT_AMD
+    HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc), hipErrorInvalidValue);
+#else
     HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc), hipErrorInvalidHandle);
+#endif
   }
 
   HIP_CHECK(hipFreeArray(array));
