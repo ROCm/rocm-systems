@@ -195,14 +195,13 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
-std::vector<char>   output_buffer(1ul << 30);
+std::vector<char>   output_buffer(1ul << 33);
 std::atomic<size_t> output_size{0};
+size_t              total_insts{0};
 
 void
 parse_output()
 {
-    // std::ofstream("result.att", std::ios::binary).write(output_buffer.data(), output_size);
-
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          events,
                     uint64_t                                       num_events,
@@ -245,12 +244,15 @@ parse_output()
                 latency.latency += inst.duration;
                 latency.hitcount += 1;
             }
+            total_insts += wave->instructions_size;
         }
     };
 
+    std::cout << "Total size: " << output_size/1024/1024 << " MB" << std::endl;
     DECODER_CALL(
         rocprofiler_trace_decode(decoder, parse, output_buffer.data(), output_size, nullptr));
     output_size = 0;
+    std::cout << "Total instructions: " << total_insts/1000000 << " M" << std::endl;
 };
 
 // std::ofstream file("result.att", std::ios::binary);
@@ -286,8 +288,6 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
         for(size_t j = 0; j < data_size; j++)
             static_cast<char*>(output)[j + location] = static_cast<char*>(se_data)[j];
     }
-
-    std::cout << "Size: " << data_size << std::endl;
 }
 
 }  // namespace Decoder
@@ -314,7 +314,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, 1});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1u << 23});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1ul << 26});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 1});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
                               ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
