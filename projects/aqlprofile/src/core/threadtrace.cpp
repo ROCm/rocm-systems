@@ -170,7 +170,7 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
       sample_data_ptr += sizeof(att_header_packet_t);
       sample_size_plus_header = sample_size + sizeof(att_header_packet_t);
     }
-  
+
     memorymgr->CopyMemory((void*)sample_data_ptr, sample_ptr, sample_size);
     callback(se_index, (void*)cpu_sample.data(), sample_size_plus_header, userdata);
   }
@@ -277,9 +277,6 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
         trace_config.buffer_data.emplace_back(trace_config.buffer_data.at(i));
     }
   }
-
-  for (int64_t i=0; i<trace_config.buffer_data.size(); i++)
-    std::cout << i << " Buffer data: " << std::hex << reinterpret_cast<uint64_t>(trace_config.buffer_data.at(i)) << std::dec << std::endl;
 
   MemoryManager::RegisterManager(memorymgr);
 
@@ -398,13 +395,12 @@ PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
 
   if (out->needs_swap)
   {
-    std::cout << out->needs_swap << " Status: " << std::hex << status << std::dec << std::endl;
     out->is_too_late = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetLockDownFailMask()) != 0;
 
     auto& config    = manager->config;
     out->read_size  = config.capacity_per_se;
-    out->data       = config.buffer_data.at(manager->current_buffer.fetch_add(1) % config.buffer_data.size());
     out->num_swaps  = manager->buffer_swaps.fetch_add(1);
+    out->data       = config.buffer_data.at((out->num_swaps + config.buffer_data.size() - 1) % config.buffer_data.size());
   }
 
   return HSA_STATUS_SUCCESS;

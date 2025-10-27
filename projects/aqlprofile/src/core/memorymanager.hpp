@@ -198,7 +198,6 @@ class TraceMemoryManager : public MemoryManager {
 
   void* AddExtraOutputBuf()
   {
-    current_buffer.fetch_add(1);
     aqlprofile_buffer_desc_flags_t flags{};
     flags.device_access = true;
     flags.memory_hint = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
@@ -254,9 +253,6 @@ class TraceMemoryManager : public MemoryManager {
   bool isDoubleBuffer() const { return !extra_cmd_buffers.empty() && !extra_output_buffers.empty(); }
 
   pm4_builder::TraceConfig config{};
-
-
-  std::atomic<size_t> current_buffer{0};
   std::atomic<size_t> buffer_swaps{0};
 
  protected:

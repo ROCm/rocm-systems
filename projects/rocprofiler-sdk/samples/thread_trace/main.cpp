@@ -164,15 +164,16 @@ main(int /*argc*/, char** /*argv*/)
 
     roctxProfilerResume(0);
 
-    for(size_t i = 0; i < streams.size() * kernels.size() * 800; i++)  // 3000 = 1GB
+    for(size_t i = 0; i < streams.size() * kernels.size() * 2000; i++)  // 3000 = 1GB on mi300x
     {
         auto& stream = streams.at(i % streams.size());
         auto& kernel = kernels.at(i % kernels.size());
 
+        HIP_API_CALL(hipStreamSynchronize(stream.stream));
         Launch(kernel, stream, 3);
         HIP_API_CALL(hipGetLastError());
-        HIP_API_CALL(hipDeviceSynchronize());
     }
+    HIP_API_CALL(hipDeviceSynchronize());
 
     roctxProfilerPause(0);
 
