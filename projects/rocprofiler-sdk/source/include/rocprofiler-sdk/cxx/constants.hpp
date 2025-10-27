@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,39 +19,18 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+//
 
 #pragma once
 
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <variant>
-#include <vector>
+#include <rocprofiler-sdk/fwd.h>
 
-namespace rocpd
+namespace rocprofiler
 {
-
-class json
+namespace sdk
 {
-public:
-    static std::shared_ptr<json> create();
+// Null/invalid agent ID constant
+constexpr auto null_agent_id = rocprofiler_agent_id_t{.handle = 0};
 
-    using json_value =
-        std::variant<std::string, int, double, long long, bool, std::vector<json>,
-                     std::nullptr_t, std::shared_ptr<json>>;
-
-    void set(const std::string& key, const json_value& value);
-
-    std::string to_string() const;
-
-private:
-    json() = default;
-
-private:
-    static std::string stringify(const std::shared_ptr<json_value>& value);
-
-private:
-    std::unordered_map<std::string, std::shared_ptr<json_value>> data;
-};
-
-}  // namespace rocpd
+}  // namespace sdk
+}  // namespace rocprofiler
