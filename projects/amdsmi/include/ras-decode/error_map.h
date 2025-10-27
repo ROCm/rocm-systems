@@ -28,13 +28,12 @@
 /**
  * @brief Structure representing an error mapping entry
  */
-typedef struct
-{
-    uint32_t id;
-    const char *error_category;
-    const char *error_type;
-    const char *method;
-    const char *error_severity;
+typedef struct {
+  uint32_t id;
+  const char *error_category;
+  const char *error_type;
+  const char *method;
+  const char *error_severity;
 } error_map_entry_t;
 
 /**

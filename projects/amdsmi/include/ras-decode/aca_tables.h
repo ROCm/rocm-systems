@@ -30,55 +30,50 @@
 #ifndef RAS_DECODE_TABLES_H
 #define RAS_DECODE_TABLES_H
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /**
  * @brief Structure mapping hardware ID and ACA type to bank names
  */
-typedef struct
-{
-    uint16_t hw_id;    /**< Hardware ID value */
-    uint16_t aca_type; /**< ACA type identifier */
-    const char *name;  /**< Bank name string */
+typedef struct {
+  uint16_t hw_id;    /**< Hardware ID value */
+  uint16_t aca_type; /**< ACA type identifier */
+  const char *name;  /**< Bank name string */
 } aca_bank_entry_t;
 
 /**
  * @brief Structure mapping bank-specific error codes to error types
  */
-typedef struct
-{
-    const char *bank;    /**< Bank name string */
-    uint32_t error_code; /**< Error code value */
-    const char *type;    /**< Error type string */
+typedef struct {
+  const char *bank;    /**< Bank name string */
+  uint32_t error_code; /**< Error code value */
+  const char *type;    /**< Error type string */
 } aca_error_type_t;
 
 /**
  * @brief Structure for generic error code to error type mapping
  */
-typedef struct
-{
-    uint32_t error_code; /**< Error code value */
-    const char *type;    /**< Error type string */
+typedef struct {
+  uint32_t error_code; /**< Error code value */
+  const char *type;    /**< Error type string */
 } aca_error_entry_t;
 
 /**
  * @brief Structure mapping instance_id_hi to OAM and AID values
  */
-typedef struct
-{
-    uint8_t oam; /**< OAM value */
-    uint8_t aid; /**< AID value */
+typedef struct {
+  uint8_t oam; /**< OAM value */
+  uint8_t aid; /**< AID value */
 } oam_aid_map_t;
 
 /**
  * @brief Structure for mapping bank and instance ID LO to instance name
  */
-typedef struct
-{
-    const char *bank;      /**< Bank name */
-    uint32_t instance_id_lo;  /**< Instance ID Lo (masked with 0xFFFFFFFC) */
-    const char *name;      /**< Instance name */
+typedef struct {
+  const char *bank;        /**< Bank name */
+  uint32_t instance_id_lo; /**< Instance ID Lo (masked with 0xFFFFFFFC) */
+  const char *name;        /**< Instance name */
 } aca_instance_entry_t;
 
 // External table declarations
@@ -119,8 +114,8 @@ int find_error_type_by_bank(const char *bank, uint32_t error_code, const char **
  * @param[out] error_type Pointer to store result string
  * @return 0 on success, 1 if not found, -1 on parameter error
  */
-int find_error_in_table(const aca_error_entry_t *table, size_t table_size,
-                        uint32_t error_code, const char **error_type);
+int find_error_in_table(const aca_error_entry_t *table, size_t table_size, uint32_t error_code,
+                        const char **error_type);
 
 /**
  * @brief Find OAM and AID values based on instance_id_hi
