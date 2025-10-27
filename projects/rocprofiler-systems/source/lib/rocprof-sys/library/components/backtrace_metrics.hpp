@@ -83,8 +83,7 @@ struct backtrace_metrics : comp::empty_base
     static void                     configure(bool, int64_t _tid = threading::get_id());
     static void                     init_perfetto(int64_t _tid, valid_array_t);
     static void                     fini_perfetto(int64_t _tid, valid_array_t);
-    static void                     init_rocpd(int64_t _tid, valid_array_t);
-    static void                     fini_rocpd(int64_t _tid, valid_array_t);
+    static void                     init_cache(int64_t _tid, valid_array_t);
     static std::vector<std::string> get_hw_counter_labels(int64_t);
 
     template <typename Tp>
@@ -115,7 +114,7 @@ struct backtrace_metrics : comp::empty_base
     const auto& get_hw_counters() const { return m_hw_counter; }
 
     void post_process_perfetto(int64_t _tid, uint64_t _ts) const;
-    void post_process_rocpd(int64_t _tid, uint64_t _ts) const;
+    void cache_backtrace_data(int64_t _tid, uint64_t _ts) const;
 
     backtrace_metrics& operator-=(const backtrace_metrics&);
 

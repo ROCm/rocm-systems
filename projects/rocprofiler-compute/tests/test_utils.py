@@ -8669,3 +8669,129 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     output = capsys.readouterr().out
     assert "6 -> Workgroup Manager (SPI)" in output
     assert "5.2 -> Command processor packet processor (CPC)" in output
+
+
+# =============================================================================
+# TESTS FOR AMDSMI INTERFACE
+# =============================================================================
+
+
+def test_amdsmi_ctx():
+    from utils.amdsmi_interface import amdsmi_ctx
+
+    with mock.patch("amdsmi.amdsmi_init") as amdsmi_init_mock:
+        with mock.patch("amdsmi.amdsmi_shut_down") as amdsmi_shutdown_mock:
+            with amdsmi_ctx():
+                amdsmi_init_mock.assert_called_once()
+            amdsmi_shutdown_mock.assert_called_once()
+
+
+def test_get_device_handle():
+    from utils.amdsmi_interface import get_device_handle
+
+    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        get_device_handle()
+        device_handles_mock.assert_called_once()
+
+    with mock.patch(
+        "amdsmi.amdsmi_get_processor_handles", side_effect=Exception("Mock exception")
+    ) as device_handles_mock:
+        handle = get_device_handle()
+        assert handle is None
+
+
+def test_get_mem_max_clock():
+    from utils.amdsmi_interface import get_mem_max_clock
+
+    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch("amdsmi.amdsmi_get_clock_info") as mem_max_clock_mock:
+            mem_max_clock_mock.return_value = {"max_clk": 100}
+            clk = get_mem_max_clock()
+            mem_max_clock_mock.assert_called_once()
+            assert clk == 100
+
+
+def test_get_gpu_model():
+    from utils.amdsmi_interface import get_gpu_model
+
+    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch("amdsmi.amdsmi_get_gpu_board_info") as device_name_mock:
+            with mock.patch("amdsmi.amdsmi_get_gpu_asic_info") as asic_name_mock:
+                with mock.patch("amdsmi.amdsmi_get_gpu_vbios_info") as vbios_name_mock:
+                    device_name_mock.return_value = {"product_name": "AMD MIXXX"}
+                    asic_name_mock.return_value = {"market_name": "MIXXX"}
+                    vbios_name_mock.return_value = {"name": "mixxx"}
+                    model = get_gpu_model()
+                    device_name_mock.assert_called_once()
+                    assert model == ("AMD MIXXX", "MIXXX", "mixxx")
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_board_info", side_effect=Exception("Mock exception")
+        ):
+            model = get_gpu_model()
+            assert model == "N/A"
+
+
+def test_get_gpu_vbios_part_number():
+    from utils.amdsmi_interface import get_gpu_vbios_part_number
+
+    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch("amdsmi.amdsmi_get_gpu_vbios_info") as vbios_part_number_mock:
+            vbios_part_number_mock.return_value = {
+                "part_number": "12345-67890",
+            }
+            part_number = get_gpu_vbios_part_number()
+            vbios_part_number_mock.assert_called_once()
+            assert part_number == "12345-67890"
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_vbios_info", side_effect=Exception("Mock exception")
+        ):
+            part_number = get_gpu_vbios_part_number()
+            assert part_number == "N/A"
+
+
+def test_get_gpu_compute_partition():
+    from utils.amdsmi_interface import get_gpu_compute_partition
+
+    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_compute_partition"
+        ) as compute_partition_mock:
+            compute_partition_mock.return_value = "Mock Partition"
+            partition = get_gpu_compute_partition()
+            compute_partition_mock.assert_called_once()
+            assert partition == "Mock Partition"
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_compute_partition",
+            side_effect=Exception("Mock exception"),
+        ):
+            partition = get_gpu_compute_partition()
+            assert partition == "N/A"
+
+
+def test_get_gpu_memory_partition():
+    from utils.amdsmi_interface import get_gpu_memory_partition
+
+    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_memory_partition"
+        ) as memory_partition_mock:
+            memory_partition_mock.return_value = "Mock Memory Partition"
+            partition = get_gpu_memory_partition()
+            memory_partition_mock.assert_called_once()
+            assert partition == "Mock Memory Partition"
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_memory_partition",
+            side_effect=Exception("Mock exception"),
+        ):
+            partition = get_gpu_memory_partition()
+            assert partition == "N/A"

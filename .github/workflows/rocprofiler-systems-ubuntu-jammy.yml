@@ -311,17 +311,28 @@ jobs:
           -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv" \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DUSE_CLANG_OMP=OFF \
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 
+    - name: Test Clean Up
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        du /tmp -d 1 -h
+        du build/rocprof-sys-tests-output -d 1 -h
+        df -h
+        rm -fr /tmp/* build/rocprof-sys-tests-output/*
+
     - name: Install
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
-      run:
+      run: |
         cmake --build build --target install --parallel 2
+        rm -fr /opt/rocprofiler-systems-dev/
 
     - name: CPack and Install
       working-directory: projects/rocprofiler-systems/

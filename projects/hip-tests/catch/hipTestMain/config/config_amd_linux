@@ -23,8 +23,6 @@
         "Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range",
         "Disabling test tracked SWDEV-395683",
         "Unit_hipStreamPerThread_MultiThread",
-        "SWDEV-398981 fails in stress test",
-        "Unit_hipStreamCreateWithPriority_MulthreadDefaultflag",
         "=== Below 2 tests are disable due to defect EXSWHTEC-356 ===",
         "Unit_Device___hisinf2_Accuracy_Positive",
         "Unit_Device___hisnan2_Accuracy_Positive",

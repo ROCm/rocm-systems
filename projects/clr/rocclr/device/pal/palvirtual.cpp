@@ -2346,7 +2346,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::PrintChildren(const HSAILKernel& hsaKernel, VirtualGPU* gpuDefQueue) {
+void VirtualGPU::PrintChildren(const pal::Kernel& hsaKernel, VirtualGPU* gpuDefQueue) {
   AmdAqlWrap* wraps = (AmdAqlWrap*)(&((AmdVQueueHeader*)gpuDefQueue->virtualQueue_->data())[1]);
   uint p = 0;
   for (uint i = 0; i < gpuDefQueue->vqHeader_->aql_slot_num; ++i) {
@@ -2381,11 +2381,11 @@ void VirtualGPU::PrintChildren(const HSAILKernel& hsaKernel, VirtualGPU* gpuDefQ
       print << wraps[i].aql.grid_size_y << ", ";
       print << wraps[i].aql.grid_size_z << "]\n";
 
-      HSAILKernel* child = nullptr;
+      pal::Kernel* child = nullptr;
       for (auto it = hsaKernel.prog().kernels().begin(); it != hsaKernel.prog().kernels().end();
            ++it) {
-        if (wraps[i].aql.kernel_object == static_cast<HSAILKernel*>(it->second)->gpuAqlCode()) {
-          child = static_cast<HSAILKernel*>(it->second);
+        if (wraps[i].aql.kernel_object == static_cast<pal::Kernel*>(it->second)->gpuAqlCode()) {
+          child = static_cast<pal::Kernel*>(it->second);
         }
       }
       if (child == nullptr) {
@@ -2449,7 +2449,7 @@ void VirtualGPU::PrintChildren(const HSAILKernel& hsaKernel, VirtualGPU* gpuDefQ
 }
 
 // ================================================================================================
-bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const HSAILKernel& hsaKernel,
+bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& hsaKernel,
                                   VirtualGPU** gpuDefQueue, uint64_t* vmDefQueue) {
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
   if (nullptr == defQueue) {
@@ -2482,7 +2482,7 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const HSAILKernel& 
 }
 
 // ================================================================================================
-void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const HSAILKernel& hsaKernel,
+void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& hsaKernel,
                                    VirtualGPU* gpuDefQueue, uint64_t vmDefQueue,
                                    uint64_t vmParentWrap, GpuEvent* gpuEvent) {
   uint32_t id = gpuEvent->id_;
@@ -2628,7 +2628,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   state_.anyOrder_ = anyOrder;
 
   // Get the HSA kernel object
-  const HSAILKernel& hsaKernel = static_cast<const HSAILKernel&>(*(kernel.getDeviceKernel(dev())));
+  const pal::Kernel& hsaKernel = static_cast<const pal::Kernel&>(*(kernel.getDeviceKernel(dev())));
 
   // If RGP capturing is enabled, then start SQTT trace
   if (rgpCaptureEna()) {
@@ -2696,7 +2696,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   assert((nullptr != aqlPkt) && "Couldn't load kernel arguments");
 
   // Dynamic call stack size is considered to calculate private segment size and scratch regs
-  // in LightningKernel::postLoad(). As it is not called during hipModuleLaunchKernel unlike
+  // in pal::Kernel::postLoad(). As it is not called during hipModuleLaunchKernel unlike
   // hipLaunchKernel/hipLaunchKernelGGL, Updated value is passed to dispatch packet.
   size_t privateMemSize = hsaKernel.spillSegSize();
   if ((hsaKernel.workGroupInfo()->usedStackSize_ & 0x1) == 0x1) {
@@ -2725,13 +2725,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   }
   dispatchParam.pCpuAqlCode = hsaKernel.cpuAqlKd();
   dispatchParam.hsaQueueVa = hsaQueueMem_->vmAddress();
-  if (!hsaKernel.prog().isLC() && hsaKernel.workGroupInfo()->wavesPerSimdHint_ != 0) {
-    constexpr uint32_t kWavesPerSimdLimit = 4;
-    dispatchParam.wavesPerSh =
-        kWavesPerSimdLimit * dev().info().cuPerShaderArray_ * dev().info().simdPerCU_;
-  } else {
-    dispatchParam.wavesPerSh = 0;
-  }
+  dispatchParam.wavesPerSh = 0;
   dispatchParam.useAtc = dev().settings().svmFineGrainSystem_ ? true : false;
   dispatchParam.kernargSegmentSize = hsaKernel.argsBufferSize();
   dispatchParam.aqlPacketIndex = aql_index;
@@ -3584,7 +3578,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
   bool srdResource = false;
   amd::Memory* const* memories =
       reinterpret_cast<amd::Memory* const*>(params + kernelParams.memoryObjOffset());
-  const HSAILKernel& hsaKernel = static_cast<const HSAILKernel&>(*(kernel.getDeviceKernel(dev())));
+  const pal::Kernel& hsaKernel = static_cast<const pal::Kernel&>(*(kernel.getDeviceKernel(dev())));
   const amd::KernelSignature& signature = kernel.signature();
   ldsAddress = hsaKernel.ldsSize();
 

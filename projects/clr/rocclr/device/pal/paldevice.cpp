@@ -37,7 +37,6 @@
 #include "palPlatform.h"
 #include "palDevice.h"
 #include "palQueueSemaphore.h"
-#include "hsailctx.hpp"
 
 #include "vdi_common.hpp"
 
@@ -167,10 +166,6 @@ namespace amd::pal {
 Util::GenericAllocator NullDevice::allocator_;
 char* Device::platformObj_;
 Pal::IPlatform* Device::platform_;
-
-#if defined(WITH_COMPILER_LIB)
-NullDevice::Compiler* NullDevice::compiler_;
-#endif
 AppProfile Device::appProfile_;
 
 Pal::IDevice* gDeviceList[Pal::MaxDevices] = {};
@@ -261,22 +256,9 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLeve
     LogPrintfError("Unable to create PAL setting for offline PAL device %s", isa.targetId());
     return false;
   }
-  if (!settings().useLightning_) {
-    if ((isa.hsailName() != nullptr)) {
-      palName_ = isa.hsailName();
-    } else {
-      return false;
-    }
-  }
-
   if (!ValidateComgr()) {
     LogPrintfError("Code object manager initialization failed for offline PAL device %s",
                    isa.targetId());
-    return false;
-  }
-
-  if (!ValidateHsail()) {
-    LogPrintfError("HSAIL initialization failed for offline PAL device %s", isa.targetId());
     return false;
   }
 
@@ -293,37 +275,12 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLeve
 
   info_.wavefrontWidth_ = settings().enableWave32Mode_ ? 32 : 64;
 
-  if (!settings().useLightning_) {
-#if defined(WITH_COMPILER_LIB)
-    const char* library = getenv("HSA_COMPILER_LIBRARY");
-    aclCompilerOptions opts = {sizeof(aclCompilerOptions_0_8),
-                               library,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr};
-    // Initialize the compiler handle
-    acl_error error;
-    compiler_ = amd::Hsail::CompilerInit(&opts, &error);
-    if (error != ACL_SUCCESS) {
-      LogPrintfError("Error initializing the compiler for offline PAL device %s", isa.targetId());
-      return false;
-    }
-#endif  // defined(WITH_COMPILER_LIB)
-  }
-
   return true;
 }
 
 device::Program* NullDevice::createProgram(amd::Program& owner, amd::option::Options* options) {
   device::Program* program;
-  if (settings().useLightning_) {
-    program = new LightningProgram(*this, owner);
-  } else {
-    program = new HSAILProgram(*this, owner);
-  }
+  program = new pal::Program(*this, owner);
 
   if (program == nullptr) {
     LogError("Memory allocation has failed!");
@@ -471,10 +428,8 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.globalMemSize_ = std::min(4 * info_.maxMemAllocSize_, info_.globalMemSize_);
 
   // Use 64 bit pointers
-  if (settings().use64BitPtr_) {
-    info_.addressBits_ = 64;
-  } else {
-    info_.addressBits_ = (settings().useLightning_) ? 64 : 32;
+  info_.addressBits_ = 64;
+  if (!settings().use64BitPtr_) {
     // Limit total size with 3GB for 32 bit
     info_.globalMemSize_ = std::min(info_.globalMemSize_, uint64_t(3 * Gi));
   }
@@ -531,11 +486,10 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 
   info_.platform_ = AMD_PLATFORM;
 
-  ::strncpy(info_.name_, settings().useLightning_ ? isa().targetId() : palName_,
-            sizeof(info_.name_));
+  ::strncpy(info_.name_, isa().targetId(), sizeof(info_.name_));
   ::strncpy(info_.vendor_, "Advanced Micro Devices, Inc.", sizeof(info_.vendor_) - 1);
-  ::snprintf(info_.driverVersion_, sizeof(info_.driverVersion_) - 1, AMD_BUILD_STRING " (PAL%s)%s",
-             settings().useLightning_ ? ",LC" : ",HSAIL", isOnline() ? "" : " [Offline]");
+  ::snprintf(info_.driverVersion_, sizeof(info_.driverVersion_) - 1,
+             AMD_BUILD_STRING " (PAL,LC)%s", isOnline() ? "" : " [Offline]");
 
   info_.profile_ = "FULL_PROFILE";
   info_.spirVersions_ = "";
@@ -1037,11 +991,6 @@ bool Device::create(Pal::IDevice* device) {
     return false;
   }
 
-  if (!ValidateHsail()) {
-    LogError("Hsail initialization failed!");
-    return false;
-  }
-
   computeEnginesId_.resize(std::min(numComputeEngines(), settings().numComputeRings_));
 
   amd::Context::Info info = {0};
@@ -1086,27 +1035,6 @@ bool Device::create(Pal::IDevice* device) {
     allocedMem[i] = 0;
   }
 
-  if (!settings().useLightning_) {
-#if defined(WITH_COMPILER_LIB)
-    const char* library = getenv("HSA_COMPILER_LIBRARY");
-    aclCompilerOptions opts = {sizeof(aclCompilerOptions_0_8),
-                               library,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               nullptr};
-    // Initialize the compiler handle
-    acl_error error;
-    compiler_ = amd::Hsail::CompilerInit(&opts, &error);
-    if (error != ACL_SUCCESS) {
-      LogError("Error initializing the compiler");
-      return false;
-    }
-#endif  // defined(WITH_COMPILER_LIB)
-  }
-
   // Allocate SRD manager
   srdManager_ = new SrdManager(*this, std::max(HsaImageObjectSize, HsaSamplerObjectSize), 64 * Ki);
   if (srdManager_ == nullptr) {
@@ -1117,7 +1045,7 @@ bool Device::create(Pal::IDevice* device) {
 }
 
 // ================================================================================================
-// Master function that handles developer callbacks from PAL.
+// Primary function that handles developer callbacks from PAL.
 void PAL_STDCALL Device::PalDeveloperCallback(void* pPrivateData, const Pal::uint32 deviceIndex,
                                               Pal::Developer::CallbackType type, void* pCbData) {
 #ifdef PAL_GPUOPEN_OCL
@@ -1248,7 +1176,7 @@ bool Device::initializeHeapResources() {
     // Setup trap handler if available
     if (trap_handler_ != nullptr) {
       auto program =
-          reinterpret_cast<pal::LightningProgram*>(trap_handler_->getDeviceProgram(*this));
+          reinterpret_cast<pal::Program*>(trap_handler_->getDeviceProgram(*this));
       if (program != nullptr) {
         Pal::Result result{Pal::Result::Success};
         Pal::GpuMemoryRef memRef = {};
@@ -1314,12 +1242,7 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
 }
 
 device::Program* Device::createProgram(amd::Program& owner, amd::option::Options* options) {
-  device::Program* program;
-  if (settings().useLightning_) {
-    program = new LightningProgram(*this, owner);
-  } else {
-    program = new HSAILProgram(*this, owner);
-  }
+  device::Program* program = new pal::Program(*this, owner);
   if (program == nullptr) {
     LogError("We failed memory allocation for program!");
   }
@@ -1534,12 +1457,6 @@ void Device::tearDown() {
     delete platformObj_;
     platform_ = nullptr;
   }
-#if defined(WITH_COMPILER_LIB)
-  if (compiler_ != nullptr) {
-    amd::Hsail::CompilerFini(compiler_);
-    compiler_ = nullptr;
-  }
-#endif  // defined(WITH_COMPILER_LIB)
 }
 
 Memory* Device::getGpuMemory(amd::Memory* mem) const {
@@ -2361,7 +2278,7 @@ bool Device::validateKernel(const amd::Kernel& kernel, const device::VirtualDevi
     }
   }
 
-  const HSAILKernel* hsaKernel = static_cast<const HSAILKernel*>(devKernel);
+  const pal::Kernel* hsaKernel = static_cast<const pal::Kernel*>(devKernel);
   if (hsaKernel->dynamicParallelism()) {
     if (settings().useDeviceQueue_) {
       amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(*this);
@@ -2805,39 +2722,33 @@ bool Device::createBlitProgram() {
   } else {
     if (settings().oclVersion_ >= OpenCL20) {
       extraBlits = iDev()->GetDispatchKernelSource();
-      if (settings().useLightning_) {
-        extraBlits.append(SchedulerSourceCode20);
-      } else {
-        extraBlits.append(SchedulerSourceCode);
-      }
+      extraBlits.append(SchedulerSourceCode20);
       ocl20 = "-cl-std=CL2.0";
     }
   }
 
-  if (settings().useLightning_) {
-    const std::string TrapHandlerAsm = TrapHandlerCode;
-    // Create a program for trap handler
-    // note: It's not critical for runtime functionality to fail trap handler initialization
-    auto asm_program = new amd::Program(*context_, TrapHandlerAsm.c_str(), amd::Program::Assembly);
-    if (asm_program != nullptr) {
-      std::vector<amd::Device*> devices;
-      devices.push_back(this);
-      std::string opt = "-cl-internal-kernel ";
-      if (auto retval =
-              asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {
-        DevLogPrintfError("Build failed for trap handler with error code: %d\n", retval);
-        asm_program->release();
-      } else {
-        if (asm_program->load()) {
-          trap_handler_ = asm_program;
-        } else {
-          DevLogError("Could not load the trap handler \n");
-          asm_program->release();
-        }
-      }
+  const std::string TrapHandlerAsm = TrapHandlerCode;
+  // Create a program for trap handler
+  // note: It's not critical for runtime functionality to fail trap handler initialization
+  auto asm_program = new amd::Program(*context_, TrapHandlerAsm.c_str(), amd::Program::Assembly);
+  if (asm_program != nullptr) {
+    std::vector<amd::Device*> devices;
+    devices.push_back(this);
+    std::string opt = "-cl-internal-kernel ";
+    if (auto retval =
+            asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {
+      DevLogPrintfError("Build failed for trap handler with error code: %d\n", retval);
+      asm_program->release();
     } else {
-      DevLogError("Trap handler creation failed\n");
+      if (asm_program->load()) {
+        trap_handler_ = asm_program;
+      } else {
+        DevLogError("Could not load the trap handler \n");
+        asm_program->release();
+      }
     }
+  } else {
+    DevLogError("Trap handler creation failed\n");
   }
 
   blitProgram_ = new BlitProgram(context_);

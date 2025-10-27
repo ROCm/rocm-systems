@@ -2978,6 +2978,9 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeMemoryPoolSupportedHandleTypes:
       cdattr = cudaDevAttrMemoryPoolSupportedHandleTypes;
       break;
+    case hipDeviceAttributeHostNumaId:
+      cdattr = cudaDevAttrHostNumaId;
+      break;
     default:
       return hipCUDAErrorTohipError(cudaErrorInvalidValue);
   }

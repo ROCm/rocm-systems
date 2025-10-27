@@ -75,6 +75,7 @@
 #include "core/util/locks.h"
 #include "core/util/os.h"
 #include "core/util/utils.h"
+#include "core/util/mpsc_queue.hpp"
 
 #include "core/inc/amd_loader_context.hpp"
 #include "core/inc/amd_hsa_code.hpp"
@@ -595,6 +596,89 @@ class Runtime {
     std::vector<void*> arg_;
   };
 
+  // Event item structure to hold all signal information
+  struct AsyncEventItem {
+    hsa_signal_t signal;
+    hsa_signal_condition_t cond;
+    hsa_signal_value_t value;
+    hsa_amd_signal_handler handler;
+    void* arg;
+    HsaEvent* hsa_event;  //!< A list of HSA events for KFD wait
+    uint64_t age;         //!< The age list for KFD wait
+
+    AsyncEventItem() : signal{0}, cond(HSA_SIGNAL_CONDITION_EQ), value(0),
+                      handler(nullptr), arg(nullptr), hsa_event(nullptr), age(0) {}
+
+    AsyncEventItem(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t val,
+                    hsa_amd_signal_handler h, void* a)
+        : signal(sig), cond(c), value(val), handler(h), arg(a),
+          hsa_event(nullptr), age(0) {}
+
+    AsyncEventItem(const AsyncEventItem& other)
+        : signal(other.signal), cond(other.cond), value(other.value),
+          handler(other.handler), arg(other.arg), hsa_event(other.hsa_event), age(other.age) {}
+
+    void init(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t v, hsa_amd_signal_handler h, void* a) {
+        signal = sig;
+        cond = c;
+        value = v;
+        handler = h;
+        arg = a;
+    }
+    // Helper operator to convert signal to Signal* for easier access
+    Signal* operator->() {
+      if (signal.handle == 0) {
+        return nullptr;
+      }
+      return core::Signal::Convert(signal);
+    }
+  };
+
+  class AsyncEventsPool : private BaseShared {
+    public:
+      AsyncEventsPool() : block_size_(preallocblocks_ * minblock_) {}
+      ~AsyncEventsPool() { clear(); }
+
+      AsyncEventItem* alloc();
+      void free(AsyncEventItem* item);
+      void clear();
+
+    private:
+      static const size_t minblock_ = 4096 / sizeof(AsyncEventItem);
+      static const size_t preallocblocks_ = 512;
+      static const size_t maxblocksize_ = 1ULL << 28;
+      HybridMutex lock_;
+      std::vector<AsyncEventItem*> free_list_;
+      std::vector<std::pair<void*, size_t>> block_list_;
+      size_t block_size_;
+  };
+  // New concurrent events structure using lock-free queue
+  struct ConcurrentAsyncEvents {
+    ConcurrentAsyncEvents() {}
+
+    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
+                  hsa_signal_value_t value, hsa_amd_signal_handler handler, void* arg);
+
+    void Clear();
+
+    size_t Size();
+
+    bool empty() { return event_queue_.empty(); }
+
+    //! Get all events for processing
+    bool GetAllEvents(std::vector<AsyncEventItem>& all_events);
+
+    //! Get single event for processing
+    bool GetEvent(AsyncEventItem& event);
+
+    //! Add events back to queue (for events that need to be kept)
+    void AddEventsBack(const std::vector<AsyncEventItem>& events);
+  private:
+    //AsyncEventItem Queue
+    ::rocr::MPSCQueue<AsyncEventItem*> event_queue_;
+    AsyncEventsPool asyncEventPool_;
+  };
+
   struct PrefetchRange;
   typedef std::map<uintptr_t, PrefetchRange> prefetch_map_t;
 
@@ -747,8 +831,10 @@ class Runtime {
   struct AsyncEventsInfo {
     AsyncEventsControl control;
     AsyncEvents events;
-    AsyncEvents new_events;
+    ConcurrentAsyncEvents new_events;
     bool monitor_exceptions;
+
+    AsyncEventsInfo() : control(), events(), new_events(), monitor_exceptions(false) {}
   };
 
   struct AsyncEventsInfo asyncSignals_;

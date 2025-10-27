@@ -20,6 +20,10 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip/hip_ext.h>
+#include <cstring>
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
 
 /**
  * @addtogroup clock clock
@@ -111,6 +115,178 @@ bool kernel_time_execution(void (*kernel)(int, uint64_t), int clock_rate, uint64
   return verify_time_execution(ratio, time1, time2, expected_time1, expected_time2);
 }
 
+template <class T> void loadSym(T& symbol, const char* symbolName, void* handle) {
+  using namespace std::string_literals;
+  void* fnsym = dlsym(handle, symbolName);
+
+  if (!fnsym)
+    throw std::runtime_error("Failure while trying to dynamically load symbol: "s + symbolName);
+
+  symbol = reinterpret_cast<T>(fnsym);
+}
+
+void getCurrentDeviceUUID(hipUUID& uuid) {
+  hipDeviceProp_t props;
+  int deviceId;
+
+  HIP_CHECK(hipGetDevice(&deviceId));
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  std::memcpy(uuid.bytes, props.uuid.bytes, sizeof(hipUUID::bytes));
+}
+
+#ifndef _WIN32
+// Gets the maximum engine frequency of the GPU by dynamically loading amdsmi
+// @uuid the id of the GPU to query the frequency for
+// @return the maximum engine frequency of the GPU (MHz) or -1 if error
+int getEngineFreq(const hipUUID& uuid) {
+  static constexpr unsigned int AMDSMI_MAX_STRING_LENGTH = 256;
+  typedef void* amdsmi_processor_handle;
+  typedef void* amdsmi_socket_handle;
+  typedef enum {
+    AMDSMI_STATUS_SUCCESS = 0,  //!< Call succeeded
+  } amdsmi_status_t;
+
+  typedef struct {
+    uint32_t clk;            //!< In MHz
+    uint32_t min_clk;        //!< In MHz
+    uint32_t max_clk;        //!< In MHz
+    uint8_t clk_locked;      //!< True/False
+    uint8_t clk_deep_sleep;  //!< True/False
+    uint32_t reserved[4];
+  } amdsmi_clk_info_t;
+
+  typedef struct {
+    uint32_t drm_render;  //!< the render node under /sys/class/drm/renderD*
+    uint32_t drm_card;    //!< the graphic card device under /sys/class/drm/card*
+    uint32_t hsa_id;      //!< the HSA enumeration ID
+    uint32_t hip_id;      //!< the HIP enumeration ID
+    char hip_uuid[AMDSMI_MAX_STRING_LENGTH];  //!< the HIP unique identifer
+  } amdsmi_enumeration_info_t;
+
+  typedef enum {
+    AMDSMI_CLK_TYPE_GFX = 0x0
+  } amdsmi_clk_type_t;
+
+  amdsmi_clk_info_t clk_info;
+  uint32_t gpu_count = 0;
+  uint32_t num_processor = 0;
+  amdsmi_status_t (*fninit)(uint64_t);
+  amdsmi_status_t (*fnget_socket_handles)(uint32_t*, amdsmi_socket_handle*);
+  amdsmi_status_t (*fnget_processor_handles)(amdsmi_socket_handle, uint32_t*,
+                                             amdsmi_processor_handle*);
+  amdsmi_status_t (*fnget_gpu_enumeration_info)(amdsmi_processor_handle,
+                                                amdsmi_enumeration_info_t*);
+  amdsmi_status_t (*fnget_clock_info)(amdsmi_processor_handle, amdsmi_clk_type_t,
+                                      amdsmi_clk_info_t*);
+  amdsmi_status_t (*fnshut_down)();
+  int result = -1;
+  bool smi_initialized = false;
+  auto cleanUp = [&smi_initialized, &fnshut_down](void* handle) {
+    if (smi_initialized)
+      fnshut_down();
+
+    if (handle)
+      dlclose(handle);
+  };
+  std::unique_ptr<void, decltype(cleanUp)> lib_hdl(nullptr, cleanUp);
+
+  lib_hdl.reset(dlopen("libamd_smi.so", RTLD_LAZY));
+
+  if (!lib_hdl) {
+    return -1;
+  }
+
+  try {
+    loadSym(fninit, "amdsmi_init", lib_hdl.get());
+    loadSym(fnget_socket_handles, "amdsmi_get_socket_handles", lib_hdl.get());
+    loadSym(fnget_processor_handles, "amdsmi_get_processor_handles", lib_hdl.get());
+    loadSym(fnget_gpu_enumeration_info, "amdsmi_get_gpu_enumeration_info", lib_hdl.get());
+    loadSym(fnget_clock_info, "amdsmi_get_clock_info", lib_hdl.get());
+    loadSym(fnshut_down, "amdsmi_shut_down", lib_hdl.get());
+  } catch (std::runtime_error&) {
+    return -1;
+  }
+
+  if (fninit(1ul << 1)) {
+    return -1;
+  } else
+    smi_initialized = true;
+
+  uint32_t socket_count = 0;
+  uint32_t num_socket = 0;
+
+  // get the socket count available in the system
+  if (fnget_socket_handles(&socket_count, nullptr)) {
+    return -1;
+  }
+
+  std::vector<amdsmi_socket_handle> sockets(socket_count);
+  if (fnget_socket_handles(&socket_count, &sockets[0])) {
+    return -1;
+  }
+
+  while (num_socket < socket_count && result == -1) {
+    // just get number of processors first
+    if (fnget_processor_handles(sockets[num_socket], &gpu_count, nullptr)) {
+      return -1;
+    }
+
+    std::vector<amdsmi_processor_handle> processors(gpu_count);
+    if (fnget_processor_handles(sockets[num_socket], &gpu_count, &processors[0])) {
+      return -1;
+    }
+
+    while (num_processor < gpu_count && result == -1) {
+      amdsmi_enumeration_info_t info;
+      int offset = 0;
+      const char* prefix = "GPU-";
+
+      if (fnget_gpu_enumeration_info(processors[num_processor], &info)) {
+        return -1;
+      }
+
+      if (!std::strncmp(info.hip_uuid, "GPU-", std::strlen(prefix))) {
+        // amd-smi adds "GPU-" in front of the hip_uuid; whereas HIP doesn't
+        offset = strlen(prefix);
+      }
+
+      if (!std::memcmp(uuid.bytes, info.hip_uuid + offset, sizeof(hipUUID::bytes) - offset)) {
+        if (fnget_clock_info(processors[num_processor], AMDSMI_CLK_TYPE_GFX, &clk_info)) {
+          return -1;
+        }
+
+        result = clk_info.max_clk;
+      }
+
+      num_processor++;
+    }
+
+    num_socket++;
+    num_processor = 0;
+  }
+
+  return result;
+}
+#endif
+
+// @max_clock_rate will be set to the maximum clock rate as reported by hipDeviceGetAttribute()
+// @return         maximum engine clock rate obtained via amdsmi or -1 if querying via amdsmi fails
+int getClockRate(int& max_clock_rate) {
+  max_clock_rate = 0;  // in kHz
+  HIP_CHECK(hipDeviceGetAttribute(&max_clock_rate, hipDeviceAttributeClockRate, 0));
+
+#ifdef _WIN32
+  return -1;
+#else
+  hipUUID uuid;
+  int smi_clock_rate = 0;  // in kHz
+
+  getCurrentDeviceUUID(uuid);
+  smi_clock_rate = getEngineFreq(uuid);
+  return smi_clock_rate;
+#endif
+}
+
 /**
  * Test Description
  * ------------------------
@@ -126,15 +302,34 @@ bool kernel_time_execution(void (*kernel)(int, uint64_t), int clock_rate, uint64
  */
 TEST_CASE("Unit_hipClock64_Positive_Basic") {
   HIP_CHECK(hipSetDevice(0));
-  int clock_rate = 0;  // in kHz
-  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, 0));
-  if (clock_rate == 0) {
+
+  int max_clock_rate;
+  int clock_rate = getClockRate(max_clock_rate);
+
+  if (max_clock_rate == 0) {
     HipTest::HIP_SKIP_TEST("hipDeviceAttributeClockRate returns 0");
     return;
   }
   if (IsGfx11()) {
     HipTest::HIP_SKIP_TEST("Issue with clock64() function on gfx11 devices!");
     return;
+  }
+
+  if (clock_rate == -1) {
+    // libamd_smi.so might not be present depending on some systems, so we load it dynamically
+    // and use it if it is, otherwise we use the attribute
+    UNSCOPED_INFO(
+        "Failed to get clock rate via amdsmi (is libamd_smi.so in the library search path?)");
+    clock_rate = max_clock_rate;
+  } else {
+    clock_rate *= 1000;
+
+    if (clock_rate != max_clock_rate) {
+      UNSCOPED_INFO("clock rate: " << clock_rate << "kHz is not set to maximum: " << max_clock_rate
+                                   << "kHz");
+    } else {
+      UNSCOPED_INFO("clock rate: " << clock_rate << "kHz");
+    }
   }
 
   const auto expected_time1 = GENERATE(1000, 1500, 2000);
@@ -158,15 +353,32 @@ TEST_CASE("Unit_hipClock64_Positive_Basic") {
  */
 TEST_CASE("Unit_hipClock_Positive_Basic") {
   HIP_CHECK(hipSetDevice(0));
-  int clock_rate = 0;  // in kHz
-  HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, 0));
-  if (clock_rate == 0) {
+
+  int max_clock_rate;
+  int clock_rate = getClockRate(max_clock_rate);
+
+  if (max_clock_rate == 0) {
     HipTest::HIP_SKIP_TEST("hipDeviceAttributeClockRate returns 0");
     return;
   }
   if (IsGfx11()) {
-    HipTest::HIP_SKIP_TEST("Issue with clock() function on gfx11 devices!");
+    HipTest::HIP_SKIP_TEST("Issue with clock64() function on gfx11 devices!");
     return;
+  }
+
+  if (clock_rate == -1) {
+    // libamd_smi.so might not be present depending on some systems, so we load it dynamically
+    // and use it if it is, otherwise we use the attribute
+    UNSCOPED_INFO(
+        "Failed to get clock rate via amdsmi (is libamd_smi.so in the library search path?)");
+    clock_rate = max_clock_rate;
+  } else {
+    clock_rate *= 1000;
+
+    if (clock_rate != max_clock_rate) {
+      UNSCOPED_INFO("clock rate: " << clock_rate << "kHz is not set to maximum: " << max_clock_rate
+                                   << "kHz");
+    }
   }
 
   const auto expected_time1 = GENERATE(1000, 1500, 2000);
