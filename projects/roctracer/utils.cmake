@@ -28,21 +28,6 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
         "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
         @ONLY
       )
-      if( BUILD_ENABLE_LINTIAN_OVERRIDES )
-        if(BUILD_SHARED_LIBS STREQUAL "OFF")
-          string(FIND ${DEB_OVERRIDES_INSTALL_FILENM} "static" OUT_VAR1)
-          if(OUT_VAR1 EQUAL -1)
-            set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_OVERRIDES_INSTALL_FILENM}-static" )
-          endif()
-        else()
-          if(ENABLE_ASAN_PACKAGING)
-            string( FIND ${DEB_OVERRIDES_INSTALL_FILENM} "asan" OUT_VAR2)
-            if(OUT_VAR2 EQUAL -1)
-              set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_OVERRIDES_INSTALL_FILENM}-asan" )
-            endif()
-          endif()
-        endif()
-      endif()
 
       # Install Change Log 
       find_program ( DEB_GZIP_EXEC gzip )
@@ -61,19 +46,12 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
                   DESTINATION ${CMAKE_INSTALL_DOCDIR}
                   COMPONENT ${COMPONENT_NAME_T})
       endif()
+
     else()
         # License file
         install ( FILES ${LICENSE_FILE}
             DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt
             COMPONENT ${COMPONENT_NAME_T})
-    endif()
-
-       # Install lintian overrides
-    if( BUILD_ENABLE_LINTIAN_OVERRIDES STREQUAL "ON" AND BUILD_DEBIAN_PKGING_FLAG STREQUAL "ON")
-      set( OVERRIDE_FILE "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}" )
-      install ( FILES ${OVERRIDE_FILE}
-	  DESTINATION ${DEB_OVERRIDES_INSTALL_PATH}
-          COMPONENT ${COMPONENT_NAME_T})
     endif()
 endfunction()
 
@@ -88,11 +66,6 @@ function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DE
     set( DEB_COPYRIGHT_YEAR           "2025" CACHE STRING "Debian Package Copyright Year" )
     set( DEB_LICENSE                  "MIT" CACHE STRING "Debian Package License Type" )
     set( DEB_CHANGELOG_INSTALL_FILENM "changelog.Debian.gz" CACHE STRING "Debian Package ChangeLog File Name" ) 
-
-    if( BUILD_ENABLE_LINTIAN_OVERRIDES )
-      set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_PACKAGE_NAME}" CACHE STRING "Debian Package Lintian Override File Name" )
-      set( DEB_OVERRIDES_INSTALL_PATH   "/usr/share/lintian/overrides/" CACHE STRING "Deb Pkg Lintian Override Install Loc" )
-    endif()
 
     # Get TimeStamp
     find_program( DEB_DATE_TIMESTAMP_EXEC date )
