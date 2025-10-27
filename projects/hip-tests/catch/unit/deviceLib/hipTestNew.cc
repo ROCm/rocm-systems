@@ -49,5 +49,7 @@ TEST_CASE("Unit_hipTest_DeviceNewOperator") {
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(i == A[i]);
   }
+
+  HIP_CHECK(hipFree(Ad));
   delete[] A;
 }

@@ -307,6 +307,9 @@ TEST_CASE("Unit_bf16_basic") {
       INFO("Index: " << i << " input: " << in[i] << " output: " << res[i]);
       REQUIRE(res[i] == 1);
     }
+
+    HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_res));
   }
 
   SECTION("MathOp Compare") {
@@ -454,6 +457,7 @@ TEST_CASE("Unit_bf16_basic") {
 
     HIP_CHECK(hipFree(d_in1))
     HIP_CHECK(hipFree(d_in2));
+    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("abs") {

@@ -40,8 +40,6 @@ TEST_CASE("Unit_hipMemcpyAsync_H2H-H2D-D2H-H2PinMem") {
   int *A_h{nullptr}, *B_h{nullptr};
   int *A_Ph{nullptr}, *B_Ph{nullptr};
   HIP_CHECK(hipSetDevice(0));
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
   HipTest::initArrays<int>(&A_d, &B_d, nullptr, &A_h, &B_h, nullptr, NUM_ELM * sizeof(int));
   HipTest::initArrays<int>(nullptr, nullptr, nullptr, &A_Ph, &B_Ph, nullptr, NUM_ELM * sizeof(int),
                            true);
@@ -153,6 +151,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_hipStreamLegacy_CaptureInfo") {
     REQUIRE(C_h[i] == D_h[i]);
   }
 
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipStreamDestroy(streamForGraph));

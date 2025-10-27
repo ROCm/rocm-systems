@@ -55,6 +55,9 @@ TEST_CASE("Unit_ToAndFroMemCpyToDevice") {
   for (int i = LEN - 16; i < LEN; i++) {
     REQUIRE(0x01010101 == B[i]);
   }
+
+  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Bd));
   delete[] A;
   delete[] B;
 }

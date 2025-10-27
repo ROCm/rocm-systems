@@ -13,7 +13,7 @@ monorepo/
 │       ├── CMakeLists.txt
 │       ├── coverage/
 │       │   └── coverage-latest.xml  # committed coverage file
-│       ├── utils/
+│       ├── tools/
 │       │   ├── update_coverage.sh  # coverage generation/update script
 │       │   └── run-ci.py             # CDash upload script
 │       └── ...
@@ -31,7 +31,7 @@ Run this periodically to update the coverage baseline:
 ```bash
 # From monorepo root
 cd projects/rocprofiler-compute
-./utils/update_coverage.sh
+./tools/update_coverage.sh
 
 # This will:
 # - Build with coverage enabled

@@ -636,9 +636,7 @@ public:
     // Construct client address to send this SHareable handle to
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    char temp[10];
-    sprintf(temp, "%u", process);
-    strcpy(cliaddr.sun_path, temp);
+    strcpy(cliaddr.sun_path, std::to_string(process).c_str());
 
     // Send corresponding shareable handle to the client
     int sendfd = (int)shareableHdl;

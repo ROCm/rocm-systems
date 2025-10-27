@@ -24,6 +24,7 @@
 
 #include <rocprofiler-sdk/registration.h>
 #include "lib/common/defines.hpp"
+#include "rocprofiler-sdk/fwd.h"
 
 #include <cstdint>
 #include <string>
@@ -71,5 +72,16 @@ set_init_status(int);
 
 void
 set_fini_status(int);
+
+bool
+supports_attachment();
+
+// call tool_attach function for all registered clients
+rocprofiler_status_t
+attach();
+
+// call tool_detach function for all registered clients
+rocprofiler_status_t
+detach();
 }  // namespace registration
 }  // namespace rocprofiler

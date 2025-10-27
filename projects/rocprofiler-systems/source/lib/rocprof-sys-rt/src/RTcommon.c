@@ -138,14 +138,14 @@ int             fakeTickCount;
 static TLS_VAR short DYNINST_tls_tramp_guard = 1;
 
 DLLEXPORT int
-DYNINST_lock_tramp_guard()
+DYNINST_lock_tramp_guard(void)
 {
     if(!DYNINST_tls_tramp_guard) return 0;
     DYNINST_tls_tramp_guard = 0;
     return 1;
 }
 DLLEXPORT void
-DYNINST_unlock_tramp_guard()
+DYNINST_unlock_tramp_guard(void)
 {
     DYNINST_tls_tramp_guard = 1;
 }
@@ -160,7 +160,7 @@ DECLARE_DYNINST_LOCK(DYNINST_trace_lock);
  **/
 double DYNINSTdummydouble = 4321.71;
 static void
-initFPU()
+initFPU(void)
 {
     double x = 17.1234;
     DYNINSTdummydouble *= x;
@@ -171,15 +171,13 @@ initFPU()
  * all platforms that support binary rewriting, but before DYNINSTinit
  **/
 void
-DYNINSTBaseInit()
+DYNINSTBaseInit(void)
 {
 #if defined(cap_mutatee_traps)
     DYNINSTinitializeTrapHandler();
 #endif
     DYNINST_unlock_tramp_guard();
     DYNINSThasInitialized = 1;
-
-    RTuntranslatedEntryCounter = 0;
 }
 
 /**
@@ -195,7 +193,7 @@ DYNINSTBaseInit()
  * libraries don't call this.
  **/
 void
-DYNINSTinit()
+DYNINSTinit(void)
 {
     rtdebug_printf("%s[%d]:  DYNINSTinit:  welcome to DYNINSTinit()\n", __FILE__,
                    __LINE__);
@@ -226,14 +224,14 @@ DYNINSTinit()
  * cases (MT in particular)
  **/
 int
-DYNINSTreturnZero()
+DYNINSTreturnZero(void)
 {
     return 0;
 }
 
 /* Used to by dyninst breakpoint snippet */
 void
-DYNINST_snippetBreakpoint()
+DYNINST_snippetBreakpoint(void)
 {
     tc_lock_lock(&DYNINST_trace_lock);
 
@@ -250,7 +248,7 @@ DYNINST_snippetBreakpoint()
 
 /* Used to instrument (and report) the entry of fork */
 DLLEXPORT void
-DYNINST_instForkEntry()
+DYNINST_instForkEntry(void)
 {
     tc_lock_lock(&DYNINST_trace_lock);
 
@@ -717,12 +715,10 @@ rtdebug_printf(const char* format, ...)
     return ret;
 }
 
-// clang-format off
 #ifndef CASE_RETURN_STR
 #    define CASE_RETURN_STR(x)                                                           \
         case x: return #x
 #endif
-// clang-format on
 
 const char*
 asyncEventType2str(rtBPatch_asyncEventType t)
@@ -808,7 +804,7 @@ dyninstTrapTranslate(void* source, volatile unsigned long* table_used,
 }
 
 DLLEXPORT void
-DYNINSTtrapFunction()
+DYNINSTtrapFunction(void)
 {
     __asm__ __volatile__("nop\n" :::);
 }

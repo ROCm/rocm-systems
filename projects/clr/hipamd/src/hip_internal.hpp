@@ -415,8 +415,8 @@ public:
       pCaptureGraph_ = pGraph;
       captureStatus_ = hipStreamCaptureStatusActive;
     }
-    /// Reset graph to nullptr when capture is invalidated, but keep the status
-    void ResetCaptureGraph() { pCaptureGraph_ = nullptr; }
+    /// Release graph when capture is invalidated
+    void ReleaseCaptureGraph();
     void SetCaptureId() {
       // ID is generated in Begin Capture i.e.. when capture status is active
       captureID_ = GenerateCaptureID();
@@ -498,7 +498,7 @@ public:
     std::list<int> userEnabledPeers;
 
     /// True if this device is active
-    bool isActive_;
+    std::atomic<bool>  isActive_;
 
 
     MemoryPool* default_mem_pool_;  //!< Default memory pool for this device

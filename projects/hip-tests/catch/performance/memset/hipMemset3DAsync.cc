@@ -39,6 +39,7 @@ class Memset3DAsyncBenchmark : public Benchmark<Memset3DAsyncBenchmark> {
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream_.stream()) {
       HIP_CHECK(hipMemset3DAsync(dst_.pitched_ptr(), 17, dst_.extent(), stream_.stream()));
     }
+    HIP_CHECK(hipStreamSynchronize(stream_.stream()));
   }
 
  private:

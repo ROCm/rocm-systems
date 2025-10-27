@@ -40,6 +40,7 @@ class MemsetD32AsyncBenchmark : public Benchmark<MemsetD32AsyncBenchmark> {
       HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(dst_.ptr()), 123'456, size_,
                                   stream_.stream()));
     }
+    HIP_CHECK(hipStreamSynchronize(stream_.stream()));
   }
 
  private:

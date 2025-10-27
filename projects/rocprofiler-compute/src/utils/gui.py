@@ -23,10 +23,12 @@
 
 ##############################################################################
 
-import colorlover
+from typing import Any
+
+import colorlover  # type: ignore
 import pandas as pd
-import plotly.express as px
-from dash import dash_table, html
+import plotly.express as px  # type: ignore
+from dash import dash_table, html  # type: ignore
 
 from utils import schema
 from utils.logger import console_error
@@ -41,73 +43,79 @@ IS_DARK = True  # TODO: Remove hardcoded in favor of class property
 ##################
 # HELPER FUNCTIONS
 ##################
-def filter_df(column, df, filt):
-    filt_df = df
-    if filt != []:
-        filt_df = df.loc[df[schema.pmc_perf_file_prefix][column].astype(str).isin(filt)]
-    return filt_df
+def filter_df(column: str, df: pd.DataFrame, filt: list[str]) -> pd.DataFrame:
+    if not filt:
+        return df
+    return df.loc[df[schema.PMC_PERF_FILE_PREFIX][column].astype(str).isin(filt)]
 
 
-def multi_bar_chart(table_id, display_df):
+def multi_bar_chart(
+    table_id: int, display_df: pd.DataFrame
+) -> dict[str, dict[str, Any]]:
+    nested_bar: dict[str, dict[str, Any]] = {}
     if table_id == 1604:
-        nested_bar = {}
-        for index, row in display_df.iterrows():
-            if not row["Coherency"] in nested_bar:
-                nested_bar[row["Coherency"]] = {}
-            nested_bar[row["Coherency"]][row["Xfer"]] = row["Avg"]
-    if table_id == 1705:  # L2 - Fabric Interface Stalls
-        nested_bar = {}
-        for index, row in display_df.iterrows():
-            if not row["Transaction"] in nested_bar:
-                nested_bar[row["Transaction"]] = {}
-            nested_bar[row["Transaction"]][row["Type"]] = row["Avg"]
+        for _, row in display_df.iterrows():
+            coherency = row["Coherency"]
+            if coherency not in nested_bar:
+                nested_bar[coherency] = {}
+            nested_bar[coherency][row["Xfer"]] = row["Avg"]
+    elif table_id == 1705:  # L2 - Fabric Interface Stalls
+        for _, row in display_df.iterrows():
+            transaction = row["Transaction"]
+            if transaction not in nested_bar:
+                nested_bar[transaction] = {}
+            nested_bar[transaction][row["Type"]] = row["Avg"]
 
     return nested_bar
 
 
-def discrete_background_color_bins(df, n_bins=5, columns="all"):
+def discrete_background_color_bins(
+    df: pd.DataFrame, n_bins: int = 5, columns: str | list[str] = "all"
+) -> tuple[list[dict[str, Any]], html.Div]:
     bounds = [i * (1.0 / n_bins) for i in range(n_bins + 1)]
+
     if columns == "all":
-        if "id" in df:
-            df_numeric_columns = df.select_dtypes("number").drop(["id"], axis=1)
-        else:
-            df_numeric_columns = df.select_dtypes("number")
+        df_numeric_columns = (
+            df.select_dtypes("number").drop(["id"], axis=1)
+            if "id" in df.columns
+            else df.select_dtypes("number")
+        )
     else:
         df_numeric_columns = df[columns]
+
     df_max = df_numeric_columns.max().max()
     df_min = df_numeric_columns.min().min()
     ranges = [((df_max - df_min) * i) + df_min for i in bounds]
-    styles = []
-    legend = []
+
+    styles: list[dict[str, Any]] = []
+    legend: list[html.Div] = []
+
     for i in range(1, len(bounds)):
         min_bound = ranges[i - 1]
         max_bound = ranges[i]
-        backgroundColor = colorlover.scales[str(n_bins)]["seq"]["Blues"][i - 1]
+        background_color = colorlover.scales[str(n_bins)]["seq"]["Blues"][i - 1]
         color = "white" if i > len(bounds) / 2.0 else "inherit"
 
-        for column in df_numeric_columns:
+        for column in df_numeric_columns.columns:
+            filter_query = f"{{{column}}} >= {min_bound}" + (
+                f" && {{{column}}} < {max_bound}" if i < len(bounds) - 1 else ""
+            )
             styles.append({
                 "if": {
-                    "filter_query": (
-                        "{{{column}}} >= {min_bound}"
-                        + (
-                            " && {{{column}}} < {max_bound}"
-                            if (i < len(bounds) - 1)
-                            else ""
-                        )
-                    ).format(column=column, min_bound=min_bound, max_bound=max_bound),
+                    "filter_query": filter_query,
                     "column_id": column,
                 },
-                "backgroundColor": backgroundColor,
+                "backgroundColor": background_color,
                 "color": color,
             })
+
         legend.append(
             html.Div(
                 style={"display": "inline-block", "width": "60px"},
                 children=[
                     html.Div(
                         style={
-                            "backgroundColor": backgroundColor,
+                            "backgroundColor": background_color,
                             "borderLeft": "1px rgb(50, 50, 50) solid",
                             "height": "10px",
                         }
@@ -117,112 +125,84 @@ def discrete_background_color_bins(df, n_bins=5, columns="all"):
             )
         )
 
-    return (styles, html.Div(legend, style={"padding": "5px 0 5px 0"}))
+    return styles, html.Div(legend, style={"padding": "5px 0 5px 0"})
 
 
 ####################
 # GRAPHICAL ELEMENTS
 ####################
-def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
-    """
-    Read data into a bar chart. ID will determine which subtype of barchart.
-    """
-    d_figs = []
+def create_instruction_mix_bar_chart(display_df: pd.DataFrame, df_unit: str) -> px.bar:
+    display_df = display_df.copy()
+    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "" else 0)
 
-    # Insr Mix bar chart
-    if table_config["id"] in barchart_elements["instr_mix"]:
-        display_df["Avg"] = [
-            x.astype(int) if x != "" else int(0) for x in display_df["Avg"]
-        ]
-        df_unit = display_df["Unit"].iloc[0]
-        d_figs.append(
+    return px.bar(
+        display_df,
+        x="Avg",
+        y="Metric",
+        color="Avg",
+        labels={"Avg": f"# of {df_unit.lower()}"},
+        height=400,
+        orientation="h",
+    )
+
+
+def create_multi_bar_charts(
+    display_df: pd.DataFrame, table_id: int, df_unit: str
+) -> list[px.bar]:
+    display_df = display_df.copy()
+    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "" else 0)
+
+    nested_bar = multi_bar_chart(table_id, display_df)
+    charts = []
+
+    for group, metric in nested_bar.items():
+        chart = px.bar(
+            title=group,
+            x=list(metric.values()),
+            y=list(metric.keys()),
+            labels={"x": df_unit, "y": ""},
+            text=list(metric.values()),
+            orientation="h",
+            height=200,
+        )
+        chart.update_xaxes(showgrid=False, rangemode="nonnegative")
+        chart.update_yaxes(showgrid=False)
+        chart.update_layout(title_x=0.5)
+        charts.append(chart)
+
+    return charts
+
+
+def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
+    display_df = display_df.copy()
+    display_df["Avg"] = display_df["Avg"].apply(lambda x: float(x) if x != "" else 0.0)
+
+    charts = []
+
+    if table_id == 1701:
+        # Special layout for L2 Cache SOL
+        pct_data = display_df[display_df["Unit"] == "Pct"]
+        charts.append(
             px.bar(
-                display_df,
+                pct_data,
                 x="Avg",
                 y="Metric",
                 color="Avg",
-                labels={"Avg": "# of {}".format(df_unit.lower())},
-                height=400,
+                range_color=[0, 100],
+                labels={"Avg": "%"},
+                height=220,
                 orientation="h",
-            )
+            ).update_xaxes(range=[0, 110], ticks="inside", title="%")
         )
 
-    # Multi bar chart
-    elif table_config["id"] in barchart_elements["multi_bar"]:
-        display_df["Avg"] = [
-            x.astype(int) if x != "" else int(0) for x in display_df["Avg"]
-        ]
-        df_unit = display_df["Unit"].iloc[0]
-        nested_bar = multi_bar_chart(table_config["id"], display_df)
-        # generate chart for each coherency
-        for group, metric in nested_bar.items():
-            d_figs.append(
+        # HBM Bandwidth chart
+        hbm_row = display_df[display_df["Metric"] == "HBM Bandwidth"]
+        if not hbm_row.empty:
+            hbm_bw = float(hbm_row["Avg"].iloc[0])
+            gb_data = display_df[display_df["Unit"] == "Gb/s"]
+            charts.append(
                 px.bar(
-                    title=group,
-                    x=metric.values(),
-                    y=metric.keys(),
-                    labels={"x": df_unit, "y": ""},
-                    text=metric.values(),
-                    orientation="h",
-                    height=200,
-                )
-                .update_xaxes(showgrid=False, rangemode="nonnegative")
-                .update_yaxes(showgrid=False)
-                .update_layout(title_x=0.5)
-            )
-    # L2 Cache per channel
-    # elif table_config["id"] in barchart_elements["l2_cache_per_chan"]:
-    # nested_bar = {}
-    # channels = []
-    # for colName, colData in display_df.items():
-    #     if colName == "Channel":
-    #         channels = list(colData.values)
-    #     else:
-    #         display_df[colName] = [
-    #             x.astype(float) if x != "" and x != None else float(0)
-    #             for x in display_df[colName]
-    #         ]
-    #         nested_bar[colName] = list(display_df[colName])
-    # for group, metric in nested_bar.items():
-    #     d_figs.append(
-    #         px.bar(
-    #             title=group[0 : group.rfind("(")],
-    #             x=channels,
-    #             y=metric,
-    #             labels={
-    #                 "x": "Channel",
-    #                 "y": group[group.rfind("(") + 1 : len(group) - 1].replace(
-    #                     "per", norm_filt
-    #                 ),
-    #             },
-    #         ).update_yaxes(rangemode="nonnegative")
-    #     )
-
-    # Speed-of-light bar chart
-    elif table_config["id"] in barchart_elements["sol"]:
-        display_df["Avg"] = [
-            float(x) if x != "" else float(0) for x in display_df["Avg"]
-        ]
-        if table_config["id"] == 1701:
-            # special layout for L2 Cache SOL
-            d_figs.append(
-                px.bar(
-                    display_df[display_df["Unit"] == "Pct"],
-                    x="Avg",
-                    y="Metric",
-                    color="Avg",
-                    range_color=[0, 100],
-                    labels={"Avg": "%"},
-                    height=220,
-                    orientation="h",
-                ).update_xaxes(range=[0, 110], ticks="inside", title="%")
-            )  # append first % chart
-            hbm_bw = float(
-                display_df[display_df["Metric"] == "HBM Bandwidth"]["Avg"].iloc[0]
-            )
-            d_figs.append(
-                px.bar(
-                    display_df[display_df["Unit"] == "Gb/s"],
+                    gb_data,
                     x="Avg",
                     y="Metric",
                     color="Avg",
@@ -231,88 +211,145 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                     height=220,
                     orientation="h",
                 ).update_xaxes(range=[0, hbm_bw])
-            )  # append second GB/s chart
-        elif table_config["id"] == 1101:
-            # Special formatting reference 'Pct of Peak' value
-            display_df["Pct of Peak"] = [
-                x.astype(float) if x != "" else float(0)
-                for x in display_df["Pct of Peak"]
-            ]
-            d_figs.append(
-                px.bar(
-                    display_df,
-                    x="Pct of Peak",
-                    y="Metric",
-                    color="Pct of Peak",
-                    range_color=[0, 100],
-                    labels={"Avg": "%"},
-                    height=400,
-                    orientation="h",
-                ).update_xaxes(range=[0, 110])
             )
-        else:
-            d_figs.append(
-                px.bar(
-                    display_df,
-                    x="Avg",
-                    y="Metric",
-                    color="Avg",
-                    range_color=[0, 100],
-                    labels={"Avg": "%"},
-                    height=400,
-                    orientation="h",
-                ).update_xaxes(range=[0, 110])
-            )
+
+    elif table_id == 1101:
+        # Special formatting reference 'Pct of Peak' value
+        display_df["Pct of Peak"] = display_df["Pct of Peak"].apply(
+            lambda x: float(x) if x != "" else 0.0
+        )
+        charts.append(
+            px.bar(
+                display_df,
+                x="Pct of Peak",
+                y="Metric",
+                color="Pct of Peak",
+                range_color=[0, 100],
+                labels={"Avg": "%"},
+                height=400,
+                orientation="h",
+            ).update_xaxes(range=[0, 110])
+        )
     else:
-        console_error(
-            "Table id %s. Cannot determine barchart type." % table_config["id"]
+        charts.append(
+            px.bar(
+                display_df,
+                x="Avg",
+                y="Metric",
+                color="Avg",
+                range_color=[0, 100],
+                labels={"Avg": "%"},
+                height=400,
+                orientation="h",
+            ).update_xaxes(range=[0, 110])
         )
 
-    # update layout for each of the charts
-    for fig in d_figs:
+    return charts
+
+
+def build_bar_chart(
+    display_df: pd.DataFrame,
+    table_config: dict[str, Any],
+    barchart_elements: dict[str, Any],
+) -> list:
+    """
+    Read data into a bar chart. ID will determine which subtype of barchart.
+    """
+    table_id = table_config["id"]
+    charts: list[px.bar] = []
+
+    # Get unit from first row if available
+    df_unit = display_df["Unit"].iloc[0] if "Unit" in display_df.columns else ""
+
+    # Instruction Mix bar chart
+    if table_id in barchart_elements["instr_mix"]:
+        charts.append(create_instruction_mix_bar_chart(display_df, df_unit))
+
+    # Multi bar chart
+    elif table_id in barchart_elements["multi_bar"]:
+        charts.extend(create_multi_bar_charts(display_df, table_id, df_unit))
+
+    # Speed-of-light bar chart
+    elif table_id in barchart_elements["sol"]:
+        charts.extend(create_sol_charts(display_df, table_id))
+
+    else:
+        console_error(
+            f"Table id {table_id}. Cannot determine barchart type.", exit=False
+        )
+        return []
+
+    # Apply consistent styling to all charts
+    for fig in charts:
         fig.update_layout(
             margin=dict(l=50, r=50, b=50, t=50, pad=4),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             font={"color": "#ffffff"},
         )
-    return d_figs
+
+    return charts
+
+
+def get_dark_mode_styles() -> tuple[
+    dict[str, Any], dict[str, Any], list[dict[str, Any]]
+]:
+    if not IS_DARK:
+        return {}, {}, []
+
+    style_header = {
+        "backgroundColor": "rgb(30, 30, 30)",
+        "color": "white",
+        "fontWeight": "bold",
+    }
+
+    style_data = {
+        "backgroundColor": "rgb(50, 50, 50)",
+        "color": "white",
+        "whiteSpace": "normal",
+        "height": "auto",
+    }
+
+    style_data_conditional = [
+        {"if": {"row_index": "odd"}, "backgroundColor": "rgb(60, 60, 60)"}
+    ]
+
+    return style_header, style_data, style_data_conditional
 
 
 def build_table_chart(
-    display_df, table_config, original_df, display_columns, comparable_columns, decimal
-):
+    display_df: pd.DataFrame,
+    table_config: dict[str, Any],
+    original_df: pd.DataFrame,
+    display_columns: list[str],
+    comparable_columns: list[str],
+    decimal: int,
+) -> list[dash_table.DataTable]:
     """
     Read data into a DashTable
     """
     d_figs = []
+
     # build comlumns/header with formatting
     formatted_columns = []
     for col in display_df.columns:
-        if (
-            str(col).lower() == "pct"
-            or str(col).lower() == "pop"
-            or str(col).lower() == "percentage"
-        ):
-            formatted_columns.append(
-                dict(
-                    id=col,
-                    name=col,
-                    type="numeric",
-                    format={"specifier": ".{}f".format(decimal)},
-                )
-            )
+        col_lower = str(col).lower()
+        if col_lower in {"pct", "pop", "percentage"}:
+            formatted_columns.append({
+                "id": col,
+                "name": col,
+                "type": "numeric",
+                "format": {"specifier": f".{decimal}f"},
+            })
         elif col in comparable_columns:
-            formatted_columns.append(
-                dict(
-                    id=col,
-                    name=col,
-                    type="numeric",
-                    format={"specifier": ".{}f".format(decimal)},
-                )
-            )
+            formatted_columns.append({
+                "id": col,
+                "name": col,
+                "type": "numeric",
+                "format": {"specifier": f".{decimal}f"},
+            })
         else:
-            formatted_columns.append(dict(id=col, name=col, type="text"))
+            formatted_columns.append({"id": col, "name": col, "type": "text"})
 
     # tooltip shows only on the 1st col for now if 'Metric Description' available
     table_tooltip = (
@@ -326,13 +363,16 @@ def build_table_chart(
                     ),
                     "type": "markdown",
                 }
-                for column, value in row.items()
+                for column in row.keys()
             }
             for row in original_df.to_dict("records")
         ]
         if "Description" in original_df.columns.values.tolist()
         else None
     )
+
+    # Get styling based on dark mode
+    style_header, style_data, style_data_conditional = get_dark_mode_styles()
 
     # build data table with columns, tooltip, df and other properties
     d_t = dash_table.DataTable(
@@ -348,36 +388,11 @@ def build_table_chart(
         # style cell
         style_cell={"maxWidth": "500px"},
         # display style
-        style_header=(
-            {
-                "backgroundColor": "rgb(30, 30, 30)",
-                "color": "white",
-                "fontWeight": "bold",
-            }
-            if IS_DARK
-            else {}
-        ),
-        style_data=(
-            {
-                "backgroundColor": "rgb(50, 50, 50)",
-                "color": "white",
-                "whiteSpace": "normal",
-                "height": "auto",
-            }
-            if IS_DARK
-            else {}
-        ),
-        style_data_conditional=(
-            [
-                {"if": {"row_index": "odd"}, "backgroundColor": "rgb(60, 60, 60)"},
-            ]
-            if IS_DARK
-            else []
-        ),
+        style_header=style_header,
+        style_data=style_data,
+        style_data_conditional=style_data_conditional,
         # the df to display
         data=display_df.to_dict("records"),
     )
-    # print("DATA: \n", display_df.to_dict('records'))
     d_figs.append(d_t)
     return d_figs
-    # print(d_t.columns)

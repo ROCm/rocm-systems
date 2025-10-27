@@ -650,6 +650,7 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWaitValue_Default", "", uint32_t, uint64_t) {
   HIP_CHECK(hipFree(d_a));
   HIP_CHECK(hipFree(d_b));
   HIP_CHECK(hipFree(d_c));
+  HIP_CHECK(hipHostUnregister(hostPtr.get()));
   HIP_CHECK(hipStreamDestroy(dataCopyStream));
   HIP_CHECK(hipStreamDestroy(kernelExecStream));
   REQUIRE(a == c);

@@ -27,7 +27,6 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
-
 #ifndef _DYNINST_RT_EXPORT_H_
 #define _DYNINST_RT_EXPORT_H_
 #ifndef ASSEMBLER
@@ -35,6 +34,8 @@
     dyninst users to directly have access to from their own runtime
     libraries.
 */
+
+#    include <stddef.h>
 
 #    if !defined(DLLEXPORT)
 #        if defined(_MSC_VER)
@@ -63,7 +64,7 @@ DYNINSTuserMessage(void* msg, unsigned int msg_size);
 /* Returns the number of threads DYNINST currently knows about.  (Which
    may differ at certain times from the number of threads actually present.) */
 DLLEXPORT int
-DYNINSTthreadCount();
+DYNINSTthreadCount(void);
 
 /**
  * These function implement a locking mechanism that can be used by
@@ -106,21 +107,15 @@ dyninst_unlock(dyninst_lock_t* lock);
  **/
 
 DLLEXPORT void
-DYNINSTsafeBreakPoint();
+DYNINSTsafeBreakPoint(void);
 DLLEXPORT void
-DYNINSTinit();
+DYNINSTinit(void);
 DLLEXPORT void
-DYNINST_snippetBreakpoint();
+DYNINST_snippetBreakpoint(void);
 DLLEXPORT void
 DYNINST_stopThread(void*, void*, void*, void*);
 DLLEXPORT void
 DYNINST_stopInterProc(void*, void*, void*, void*, void*, void*);
-DLLEXPORT void
-RThandleShadow(void*, void*, void*, void*, void*);
-DLLEXPORT unsigned long
-RTtranslateMemory(unsigned long, unsigned long, unsigned long);
-DLLEXPORT unsigned long
-RTtranslateMemoryShift(unsigned long, unsigned long, unsigned long);
 DLLEXPORT void*
 DYNINSTos_malloc(size_t, void*, void*);
 DLLEXPORT int

@@ -1,3 +1,8 @@
+/*
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
+ * 
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @brief Opencl kernel to read from a buffer and sum its values

@@ -10,7 +10,9 @@ with the rocprofiler.
 
 The user through rocprofv3 script can select the
 options to obtain tracing and counter collection
-services from the rocprofiler.
+services from the rocprofiler. rocprofv3 supports both
+launching new applications and attaching to existing
+processes using the `--attach`/`--pid`/`-p` options.
 
 Currently, this tool supports kernel trace and the
 hsa-api trace.

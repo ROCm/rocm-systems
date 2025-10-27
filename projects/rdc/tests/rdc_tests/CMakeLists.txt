@@ -52,10 +52,22 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 # Source files
-aux_source_directory(${SRC_DIR} rdctstSources)
+set(rdctstSources
+    ${SRC_DIR}/main.cc
+    ${SRC_DIR}/test_base.cc
+    ${SRC_DIR}/test_common.cc
+    ${SRC_DIR}/test_utils.cc
+)
 
-# Other source directories
-aux_source_directory(${SRC_DIR}/functional functionalSources)
+# Functional test source files
+set(functionalSources
+    ${SRC_DIR}/functional/rdci_discovery.cc
+    ${SRC_DIR}/functional/rdci_dmon.cc
+    ${SRC_DIR}/functional/rdci_fieldgroup.cc
+    ${SRC_DIR}/functional/rdci_group.cc
+    ${SRC_DIR}/functional/rdci_stats.cc
+    ${SRC_DIR}/functional/rdci_cpu_support.cc
+)
 
 link_directories(${ROCM_INSTALL_DIR} ${AMD_SMI_LIB_DIR})
 

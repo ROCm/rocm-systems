@@ -18,8 +18,6 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "top.hpp"
 #include "device/device.hpp"
 #include "device/appprofile.hpp"
@@ -54,5 +52,3 @@ bool AppProfile::ParseApplicationProfile() {
   return true;
 }
 }  // namespace amd::roc
-
-#endif

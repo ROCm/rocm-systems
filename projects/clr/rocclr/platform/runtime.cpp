@@ -80,7 +80,8 @@ bool Runtime::init() {
     ClPrint(LOG_ERROR, LOG_INIT, "Runtime initialization failed");
     return false;
   }
-  ClPrint(LOG_INFO, LOG_MISC, "ROCclr version: %s", ROCCLR_VERSION_GITHASH);
+
+  ClPrint(LOG_INFO, LOG_MISC && !amd::IS_HIP, "ROCclr version: %s", ROCCLR_VERSION_GITHASH);
 
   initialized_ = true;
   pid_ = amd::Os::getProcessId();
@@ -133,7 +134,7 @@ uint ReferenceCountedObject::retain() {
 }
 
 uint ReferenceCountedObject::release() {
-  uint newCount = referenceCount_.fetch_sub(1, std::memory_order_relaxed) - 1;
+  uint newCount = referenceCount_.fetch_sub(1, std::memory_order_acq_rel) - 1;
   if (newCount == 0) {
     if (terminate()) {
       // The destructor should be called with a count==1 for the last thread

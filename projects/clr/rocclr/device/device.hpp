@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -34,9 +34,6 @@
 #include "devprogram.hpp"
 #include "devkernel.hpp"
 #include "amdocl/cl_profile_amd.h"
-#if defined(WITH_COMPILER_LIB)
-#include "hsailctx.hpp"
-#endif
 #include "devsignal.hpp"
 
 #if defined(__clang__)
@@ -692,8 +689,6 @@ class Settings : public amd::HeapObject {
                                               //  that replaces generic OS allocation routines
       uint supportDepthsRGB_ : 1;             //!< Support DEPTH and sRGB channel order format
       uint singleFpDenorm_ : 1;               //!< Support Single FP Denorm
-      uint hsailExplicitXnack_ : 1;           //!< Xnack in hsail path for this device
-      uint useLightning_ : 1;                 //!< Enable LC path for this device
       uint enableWgpMode_ : 1;                //!< Enable WGP mode for this device
       uint enableWave32Mode_ : 1;             //!< Enable Wave32 mode for this device
       uint lcWavefrontSize64_ : 1;            //!< Enable Wave64 mode for this device
@@ -705,7 +700,7 @@ class Settings : public amd::HeapObject {
       uint gwsInitSupported_ : 1;             //!< Check if GWS is supported on this machine.
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
-      uint reserved_ : 12;
+      uint reserved_ : 14;
     };
     uint value_;
   };
@@ -715,7 +710,7 @@ class Settings : public amd::HeapObject {
 
   //! Virtual destructor as this class is used as a base class and is also used
   //! to delete the derived classes.
-  virtual ~Settings() {};
+  virtual ~Settings(){};
 
   //! Check the specified extension
   bool checkExtension(uint name) const {
@@ -810,7 +805,7 @@ class Memory : public amd::HeapObject {
   };
 
   //! Default destructor for the device memory object
-  virtual ~Memory() {};
+  virtual ~Memory(){};
 
   //! Releases virtual objects associated with this memory
   void releaseVirtual();
@@ -968,7 +963,7 @@ class Memory : public amd::HeapObject {
     HostMemoryRegistered = 0x00000010,    //!< Host memory was registered
     MemoryCpuUncached = 0x00000020,       //!< Memory is uncached on CPU access(slow read)
     AllowedPeerAccess = 0x00000040,       //!< Memory can be accessed from peer
-    PersistentMap = 0x00000080            //!< Map Peristent memory
+    PersistentMap = 0x00000080            //!< Map Persistent memory
   };
   uint flags_;  //!< Memory object flags
 
@@ -1009,7 +1004,7 @@ class Sampler : public amd::HeapObject {
   Sampler() : hwSrd_(0), hwState_(nullptr) {}
 
   //! Default destructor for the device memory object
-  virtual ~Sampler() {};
+  virtual ~Sampler(){};
 
   //! Returns device specific HW state for the sampler
   uint64_t hwSrd() const { return hwSrd_; }
@@ -1086,22 +1081,6 @@ class ClBinary : public amd::HeapObject {
                       amd::Elf::ElfSections& elfSectionType  //!< LLVMIR binary is in SPIR format
   ) const;
 
-  //! Loads compile options from OCL binary file
-  bool loadCompileOptions(std::string& compileOptions  //!< return the compile options loaded
-  ) const;
-
-  //! Loads link options from OCL binary file
-  bool loadLinkOptions(std::string& linkOptions  //!< return the link options loaded
-  ) const;
-
-  //! Store compile options into OCL binary file
-  void storeCompileOptions(const std::string& compileOptions  //!< the compile options to be stored
-  );
-
-  //! Store link options into OCL binary file
-  void storeLinkOptions(const std::string& linkOptions  //!< the link options to be stored
-  );
-
   //! Check if the binary is recompilable
   bool isRecompilable(std::string& llvmBinary, amd::Elf::ElfPlatform thePlatform);
 
@@ -1164,12 +1143,6 @@ class ClBinary : public amd::HeapObject {
 
   //! Returns TRUE if binary file was allocated
   bool isBinaryAllocated() const { return (flags_ & BinaryAllocated) ? true : false; }
-
-#if defined(WITH_COMPILER_LIB)
-  //! Returns BIF symbol name by symbolID,
-  //! returns empty string if not found or if BIF version is unsupported
-  std::string getBIFSymbol(unsigned int symbolID) const;
-#endif
 
  protected:
   const amd::Device& dev_;  //!< Device object
@@ -1280,7 +1253,7 @@ class ThreadTrace : public amd::HeapObject {
 };
 
 //! A device execution environment.
-class VirtualDevice : public amd::HeapObject {
+class VirtualDevice : public amd::ReferenceCountedObject {
  public:
   //! Construct a new virtual device for the given physical device.
   VirtualDevice(amd::Device& device)
@@ -1351,10 +1324,11 @@ class VirtualDevice : public amd::HeapObject {
   virtual bool isFenceDirty() const = 0;
   //! Init hidden heap for device memory allocations
   virtual void HiddenHeapInit() = 0;
-  //! Dispatch captured AQL packet
-  virtual bool dispatchAqlPacket(uint8_t* aqlpacket, const std::string& kernelName,
-                                 amd::AccumulateCommand* vcmd = nullptr) = 0;
 
+  //! Dispatches multiple AQL packets in a single batch operation
+  virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
+                                      const std::vector<std::string>& kernelNames,
+                                      amd::AccumulateCommand* vcmd = nullptr) = 0 ;
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1376,10 +1350,7 @@ class VirtualDevice : public amd::HeapObject {
   mutable std::atomic<uint64_t> queued_async_handlers_ = 0;  //!< Outstanding HSA async handlers
 };
 
-#if defined(USE_COMGR_LIBRARY)
 extern bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue);
-#endif
-
 }  // namespace amd::device
 
 namespace amd {
@@ -1396,7 +1367,8 @@ class MemObjMap : public AllStatic {
     size_t psize;                              ///< Total size of the device memory allocation
     size_t poffset;                            ///< Offset within the allocation
     int owners_process_id;                     ///< ID of the process that owns the allocation
-    char reserved[LP64_SWITCH(20, 12)];        ///< Reserved for future extensions
+    int owners_device_id;                      ///< ID of the device that owns the allocation
+    char reserved[LP64_SWITCH(16, 8)];        ///< Reserved for future extensions
 
     bool operator<(const IpcMemHandle& h) const {
       int cmp = std::memcmp(ipc_handle, h.ipc_handle, AMD_IPC_MEM_HANDLE_SIZE);
@@ -1603,7 +1575,7 @@ class Isa {
   uint32_t memChannelBankWidth_;   //!< Memory channel bank width.
   uint32_t localMemSizePerCU_;     //!< Local memory size per CU.
   uint32_t localMemBanks_;         //!< Number of banks of local memory.
-}; // class Isa
+};  // class Isa
 
 /*! \addtogroup Runtime
  *  @{
@@ -1613,9 +1585,6 @@ class Isa {
  */
 class Device : public RuntimeObject {
  protected:
-#if defined(WITH_COMPILER_LIB)
-  typedef aclCompiler Compiler;
-#endif
 
  public:
   // The structures below for MGPU launch match the device library format
@@ -1646,7 +1615,8 @@ class Device : public RuntimeObject {
     kNoAtomics = 0,
     kAtomics = 1,
     kKernArg = 2,
-    kUncachedAtomics = 4
+    kUncachedAtomics = 4,
+    kIoMemory = 8
   } MemorySegment;
 
   typedef enum CacheState {
@@ -1658,6 +1628,8 @@ class Device : public RuntimeObject {
 
   //<! Enum describing the access permissions of Virtual memory
   enum class VmmAccess { kNone = 0x0, kReadOnly = 0x1, kReadWrite = 0x3 };
+  //<! Enum describing the location of Virtual memory
+  enum class VmmLocationType { kNone = 0x0, kDevice = 0x1, kHost = 0x2 };
 
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
@@ -1686,11 +1658,6 @@ class Device : public RuntimeObject {
                 const std::string& extraOptions  //!< Extra compilation options
     );
   };
-
-#if defined(WITH_COMPILER_LIB)
-  virtual Compiler* compiler() const = 0;
-  virtual Compiler* binCompiler() const { return compiler(); }
-#endif
 
   Device();
   virtual ~Device();
@@ -1802,6 +1769,30 @@ class Device : public RuntimeObject {
   virtual bool globalFreeMemory(size_t* freeMemory  //!< Free memory information on a GPU device
   ) const = 0;
 
+  /**
+   * @brief Read data from a file to device memory.
+   * @param[IN] handle: file descriptor of the file to read.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of read.
+   * @param[IN] file_offset: offset into fd where data has to be read.
+   * @param[IN/OUT] size_copied: actual size read.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) = 0;
+
+  /**
+   * Write data from device memory to a file.
+   * @param[IN] handle: file descriptor of the file to write.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of write.
+   * @param[IN] file_offset: offset into fd where data has to written.
+   * @param[IN/OUT] size_copied: actual size copied.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) = 0;
+
   virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
                                   amd::ExternalSemaphoreHandleType sem_handle_type) = 0;
   virtual void DestroyExtSemaphore(void* extSemaphore) = 0;
@@ -1814,13 +1805,27 @@ class Device : public RuntimeObject {
   /**
    * @copydoc amd::Context::hostAlloc
    */
-  virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics) const {
+  virtual void* hostAlloc(size_t size, size_t alignment,
+                          MemorySegment mem_seg = kNoAtomics,
+                          const void* agentInfo = nullptr) const {
     ShouldNotCallThis();
     return NULL;
   }
 
-  virtual void* deviceLocalAlloc(size_t size, bool atomics = false, bool pseudo_fine_grain = false,
-                                 bool contiguous = false) const {
+  //! Flags for deviceLocalAlloc method
+  typedef union {
+    struct {
+      uint32_t atomics_ : 1;           //!< True if atomics support is required
+      uint32_t pseudo_fine_grain_ : 1; //!< True if pseudo fine grain memory is required
+      uint32_t contiguous_ : 1;        //!< True if contiguous memory allocation is required
+      uint32_t executable_ : 1;        //!< True if executable memory is required
+      uint32_t reserved_ : 28;         //!< Reserved for future use
+    };
+    uint32_t data_;
+  } AllocationFlags;
+
+  virtual void* deviceLocalAlloc(
+      size_t size, const AllocationFlags& flags = AllocationFlags{}) const {
     ShouldNotCallThis();
     return NULL;
   }
@@ -1878,7 +1883,7 @@ class Device : public RuntimeObject {
    * @param ForceAlloc force_alloc
    */
   amd::Memory* CreateVirtualBuffer(Context& device_context, void* vptr, size_t size, int deviceId,
-                                   bool parent, bool kForceAlloc = false);
+                                   int locationType, bool parent, bool kForceAlloc = false);
 
   /**
    * Deletes Virtual Buffer and creates memob
@@ -1904,7 +1909,8 @@ class Device : public RuntimeObject {
    * @param access_flags Access permissions
    * @param count Number of access permissions
    */
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) = 0;
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice) = 0;
 
   /**
    * Get Access permisions for a virtual memory object.
@@ -1997,7 +2003,10 @@ class Device : public RuntimeObject {
 
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const {};
 
-  virtual const uint32_t getPreferredNumaNode() const { return 0; }
+  virtual uint32_t getPreferredNumaNode() const {
+    return static_cast<uint32_t>(-1); //!< PAL doesn't support it
+  }
+
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
@@ -2070,9 +2079,6 @@ class Device : public RuntimeObject {
 
   //! Checks if OCL runtime can use code object manager for compilation
   bool ValidateComgr();
-
-  //! Checks if OCL runtime can use hsail for compilation
-  bool ValidateHsail();
 
   bool IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* mem_offset) const;
 

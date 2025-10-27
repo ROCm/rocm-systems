@@ -115,7 +115,7 @@ TEST_CASE("Unit_hipEventIpc") {
 #endif
   HIP_CHECK(hipEventDestroy(start));
   HIP_CHECK(hipEventDestroy(stop));
-#if HT_AMD
+#if HT_WIN
   HIP_CHECK(hipEventDestroy(ipc_event));
 #endif
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));

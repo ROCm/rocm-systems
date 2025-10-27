@@ -22,6 +22,7 @@
 
 set(TEST_SRC
     hip_hc_8pk.cc
+    hip_check_VGPRs.cpp
 )
 hip_add_exe_to_target(NAME HipSpecificTest
                       TEST_SRC ${TEST_SRC}

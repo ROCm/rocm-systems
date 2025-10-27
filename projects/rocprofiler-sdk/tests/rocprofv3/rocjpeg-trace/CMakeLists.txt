@@ -77,10 +77,10 @@ add_test(
     NAME rocprofv3-test-rocjpeg-tracing-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-trace/out_results.json --otf2-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-trace/out_results.otf2 --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-trace/out_results.pftrace --csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-trace/out_rocjpeg_api_trace.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_results.json --otf2-input
+        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_results.otf2 --pftrace-input
+        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_results.pftrace --csv-input
+        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_rocjpeg_api_trace.csv)
 
 set_tests_properties(
     rocprofv3-test-rocjpeg-tracing-validate

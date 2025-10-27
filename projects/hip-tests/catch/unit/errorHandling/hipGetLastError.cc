@@ -26,12 +26,6 @@ THE SOFTWARE.
 #include <chrono>  //NOLINT
 #include <thread>  //NOLINT
 
-#ifdef _WIN64
-#include <windows.h>
-#define setenv(x, y, z) _putenv_s(x, y)
-#define unsetenv(x) _putenv(x)
-#endif
-
 static constexpr size_t WIDTH = 1024;
 static constexpr size_t HEIGHT = 1024;
 static constexpr size_t N = 1024 * 1024;
@@ -935,17 +929,11 @@ TEST_CASE("Unit_hipGetLastError_with_Kernel_Invalid_Configuration") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 #endif
-/*
-New environment variable DEBUG_HIP_7_PREVIEW is added.
-This is used for enabling the backward incompatible changes before the next
-major ROCm release 7.0. This will be removed after the ROCm release 7.0.
-*/
 /**
  * Test Description
  * ------------------------
- *  - With Env Var DEBUG_HIP_7_PREVIEW, Verify hipGetLastError status
- *    with hipMalloc api invalid arg call.
- *    Status should be last Error reported in the thread/Runtime.
+ * - Verify hipGetLastError status with an Error - Success calls
+ *   Each time status should return the corresponding Error when it called.
  * Test source
  * ------------------------
  *  - unit/errorHandling/hipGetLastError.cc
@@ -953,35 +941,7 @@ major ROCm release 7.0. This will be removed after the ROCm release 7.0.
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGetLastError_With_EnvVar_Positive_Basic") {
-  if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
-    HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
-    int* A_d;
-    HIP_CHECK(hipMalloc(&A_d, 1024));
-    HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
-    HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-    HIP_CHECK(hipFree(A_d));
-    HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-    unsetenv("DEBUG_HIP_7_PREVIEW");
-  } else {
-    INFO("Env Not set");
-  }
-}
-/**
- * Test Description
- * ------------------------
- *  - With Env Var DEBUG_HIP_7_PREVIEW, Verify hipGetLastError status
- *    with an Error - Success calls
- *    Each time status should return the corresponding Error when it called.
- * Test source
- * ------------------------
- *  - unit/errorHandling/hipGetLastError.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.4
- */
-TEST_CASE("Unit_hipGetLastError_With_EnvVar_Chk_Updated_Status") {
-  if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
+TEST_CASE("Unit_hipGetLastError_With_Chk_Updated_Status") {
     hipGraph_t graph;
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
@@ -989,16 +949,11 @@ TEST_CASE("Unit_hipGetLastError_With_EnvVar_Chk_Updated_Status") {
     HIP_CHECK(hipMalloc(&C_d, 1024));
     HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
     HIP_CHECK(hipFree(C_d));
-    unsetenv("DEBUG_HIP_7_PREVIEW");
-  } else {
-    INFO("Env Not set");
-  }
 }
 /**
  * Test Description
  * ------------------------
- *  - With Env Var DEBUG_HIP_7_PREVIEW, Verify hipGetLastError status
- *    along with hipPeekAtLastError.
+ *  - Verify hipGetLastError status along with hipPeekAtLastError.
  * Test source
  * ------------------------
  *  - unit/errorHandling/hipGetLastError.cc
@@ -1006,8 +961,7 @@ TEST_CASE("Unit_hipGetLastError_With_EnvVar_Chk_Updated_Status") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGetLastError_With_EnvVar_Chk_Along_hipPeekAtLastError") {
-  if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
+TEST_CASE("Unit_hipGetLastError_Chk_Along_hipPeekAtLastError") {
     hipGraph_t graph;
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
@@ -1016,15 +970,11 @@ TEST_CASE("Unit_hipGetLastError_With_EnvVar_Chk_Along_hipPeekAtLastError") {
     HIP_CHECK(hipFree(C_d));
     HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-    unsetenv("DEBUG_HIP_7_PREVIEW");
-  } else {
-    INFO("Env Not set");
-  }
 }
 /**
  * Test Description
  * ------------------------
- *  - With Env Var DEBUG_HIP_7_PREVIEW, Verify hipGetLastError status
+ *  - Verify hipGetLastError status
  *    with different Error and Success combinations.
  *    Each time status should return the corresponding Error when it called.
  * Test source
@@ -1034,24 +984,18 @@ TEST_CASE("Unit_hipGetLastError_With_EnvVar_Chk_Along_hipPeekAtLastError") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGetLastError_With_EnvVar_Error_Combinations") {
+TEST_CASE("Unit_hipGetLastError_Error_Combinations") {
   int value = 0;
   hipGraph_t graph;
   SECTION("A case with Error-Error") {
-    if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
       HIP_CHECK(hipGetLastError());
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
       HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
                       hipErrorInvalidDevice);
       HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidDevice);
       HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-      unsetenv("DEBUG_HIP_7_PREVIEW");
-    } else {
-      INFO("Env Not set");
-    }
   }
   SECTION("A case with Error-Success-Error-Success") {
-    if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
       int* A_d;
       HIP_CHECK(hipMalloc(&A_d, 1024));
@@ -1060,14 +1004,9 @@ TEST_CASE("Unit_hipGetLastError_With_EnvVar_Error_Combinations") {
       HIP_CHECK(hipFree(A_d));
       HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidDevice);
       HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-      unsetenv("DEBUG_HIP_7_PREVIEW");
-    } else {
-      INFO("Env Not set");
-    }
   }
   SECTION("A case with Success-Error-Error-Success") {
-    if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
-      int* A_d;
+      int *A_d;
       HIP_CHECK(hipMalloc(&A_d, 1024));
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
       HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
@@ -1075,14 +1014,9 @@ TEST_CASE("Unit_hipGetLastError_With_EnvVar_Error_Combinations") {
       HIP_CHECK(hipFree(A_d));
       HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidDevice);
       HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-      unsetenv("DEBUG_HIP_7_PREVIEW");
-    } else {
-      INFO("Env Not set");
-    }
   }
   SECTION("A Case with Success-Error-Success-Error") {
-    if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
-      int* A_d;
+      int *A_d;
       HIP_CHECK(hipMalloc(&A_d, 1024));
       HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
       HIP_CHECK(hipFree(A_d));
@@ -1090,10 +1024,6 @@ TEST_CASE("Unit_hipGetLastError_With_EnvVar_Error_Combinations") {
                       hipErrorInvalidDevice);
       HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidDevice);
       HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-      unsetenv("DEBUG_HIP_7_PREVIEW");
-    } else {
-      INFO("Env Not set");
-    }
   }
 }
 
@@ -1106,8 +1036,7 @@ static void thread_func() {
 /**
  * Test Description
  * ------------------------
- *  - With Env Var DEBUG_HIP_7_PREVIEW, Verify hipGetLastError status with a
- *    runtime api invalid arg call.
+ *  - Verify hipGetLastError status with a runtime api invalid arg call.
  *    Check in other thread this error should not report by hipGetLastError()
  * Test source
  * ------------------------
@@ -1116,10 +1045,9 @@ static void thread_func() {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGetLastError_With_EnvVar_With_Thread") {
+TEST_CASE("Unit_hipGetLastError_With_Thread") {
   hipGraph_t graph;
-  if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
-    int* A_d;
+    int *A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     std::thread t(thread_func);
@@ -1127,16 +1055,11 @@ TEST_CASE("Unit_hipGetLastError_With_EnvVar_With_Thread") {
     HIP_CHECK(hipFree(A_d));
     HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-    unsetenv("DEBUG_HIP_7_PREVIEW");
-  } else {
-    INFO("Env Not set");
-  }
 }
 /**
  * Test Description
  * ------------------------
- *  - With Env Var DEBUG_HIP_7_PREVIEW, Verify hipGetLastError status
- *    in the multiple processes.
+ *  - Verify hipGetLastError status in the multiple processes.
  * Test source
  * ------------------------
  *  - unit/errorHandling/hipGetLastError.cc
@@ -1144,32 +1067,23 @@ TEST_CASE("Unit_hipGetLastError_With_EnvVar_With_Thread") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-// Disabled due to test failure
-#if 0
-TEST_CASE("Unit_hipGetLastError_With_EnvVar_MultiProcess") {
+TEST_CASE("Unit_hipGetLastError_MultiProcess") {
   hipGraph_t graph;
-  if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
-    /*int *A_d;
+    int *A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
-    HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);*/
+    HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     hip::SpawnProc proc("hipGetLastErrorEnv_Exe", true);
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     REQUIRE(proc.run() == 1);
-    //HIP_CHECK(hipFree(A_d));
+    HIP_CHECK(hipFree(A_d));
     HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-    unsetenv("DEBUG_HIP_7_PREVIEW");
-  } else {
-    INFO("Env Not set");
-  }
 }
-#endif
-static void __global__ emptyKernl() {}
+static void __global__ emptyKernl() { }
 /**
  * Test Description
  * ------------------------
- *  - With Env Var DEBUG_HIP_7_PREVIEW, Verify hipGetLastError status
- *    with Invalid Configuration in kernel call.
+ *  - Verify hipGetLastError status with Invalid Configuration in kernel call.
  *    Kernel call invalid configuration- blocks=0 & threadsPerBlock=0
  * Test source
  * ------------------------
@@ -1182,9 +1096,8 @@ static void __global__ emptyKernl() {}
 // Below test failed on NVIDIA due to error mismatch produced by the Invalid Kernel config.
 // For more details please check the ticket SWDEV-501851 comments.
 #if HT_AMD
-TEST_CASE("Unit_hipGetLastError_With_EnvVar_Kernel_Invalid_Config") {
+TEST_CASE("Unit_hipGetLastError_Kernel_Invalid_Config") {
   hipError_t ret;
-  if (setenv("DEBUG_HIP_7_PREVIEW", "1", 1) == 0) {
     hipLaunchKernelGGL(emptyKernl, dim3(0), dim3(0), 0, 0);
     int* A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
@@ -1192,10 +1105,6 @@ TEST_CASE("Unit_hipGetLastError_With_EnvVar_Kernel_Invalid_Config") {
     REQUIRE(ret == hipErrorInvalidConfiguration);
     HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
     HIP_CHECK(hipFree(A_d));
-    unsetenv("DEBUG_HIP_7_PREVIEW");
-  } else {
-    INFO("Env Not set");
-  }
 }
 #endif
 /**

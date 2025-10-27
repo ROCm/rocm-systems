@@ -79,6 +79,9 @@ class MemoryAccessTest : public TestBase {
   // @Brief: This test verify that GPU is able to Read & write CPU memory
   void GPUAccessToCPUMemoryTest(void);
 
+  // @Brief: This test verifies that memory accessed on the GPU after a copy is coherent
+  void MemoryAccessCoherentTest(void);
+
 
  private:
   void CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,

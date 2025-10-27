@@ -66,16 +66,14 @@ TEST_CASE("Unit_hipMemUnmap_negative") {
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
 
   hipMemGenericAllocationHandle_t handle;
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
 
-  SECTION("nullptr to ptrA") {
-    REQUIRE(hipMemUnmap((hipDeviceptr_t) nullptr, size_mem) == hipErrorInvalidValue);
-  }
+  SECTION("nullptr to ptrA") { REQUIRE(hipMemUnmap(nullptr, size_mem) == hipErrorInvalidValue); }
 
   SECTION("pass zero to size") { REQUIRE(hipMemUnmap(ptrA, 0) == hipErrorInvalidValue); }
 

@@ -695,8 +695,8 @@ write_otf2(const output_config&                                          cfg,
         const auto* sym  = _get_kernel_sym_data(info);
         CHECK(sym != nullptr);
 
-        auto name =
-            tool_metadata.get_kernel_name(info.kernel_id, itr.correlation_id.external.value);
+        auto name = tool_metadata.get_kernel_name(
+            info.kernel_id, cfg.kernel_rename, itr.correlation_id.external.value);
         _hash_data.emplace(
             get_hash_id(name),
             region_info{std::string{name}, OTF2_REGION_ROLE_FUNCTION, OTF2_PARADIGM_HIP});
