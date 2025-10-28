@@ -54,14 +54,11 @@ hsa_inited()
 uint64_t
 submitPackets(hsa_queue_t* queue, const void** packets, size_t num_packets)
 {
-    ROCP_ERROR << fmt::format("[DEBUG] submitPackets: num_packets={}", num_packets);
     const uint32_t pkt_size = 0x40;
 
     // Advance command queue by num_packets
     const uint64_t write_idx =
         hsa::get_core_table()->hsa_queue_add_write_index_scacq_screl_fn(queue, num_packets);
-
-    ROCP_ERROR << fmt::format("[DEBUG] submitPackets: write_idx={}", write_idx);
 
     // Wait for queue space to be available
     while((write_idx - hsa::get_core_table()->hsa_queue_load_read_index_relaxed_fn(queue)) >=
@@ -98,9 +95,6 @@ submitPackets(hsa_queue_t* queue, const void** packets, size_t num_packets)
     // Ring doorbell once for all packets (doorbell should be last write index)
     hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal,
                                                        write_idx + num_packets - 1);
-    ROCP_ERROR << fmt::format(
-        "[DEBUG] submitPackets: doorbell rung, write_idx + num_packets - 1 = {}",
-        write_idx + num_packets - 1);
     return write_idx + num_packets - 1;
 }
 
@@ -165,9 +159,8 @@ construct_aql_pkt(std::shared_ptr<counter_config>& profile)
 }
 
 bool
-agent_async_handler(hsa_signal_value_t signal_v, void* data)
+agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
 {
-    ROCP_ERROR << fmt::format("[DEBUG] agent_async_handler: called with signal_v={}", signal_v);
     if(!data) return false;
     const auto& callback_data = *static_cast<rocprofiler::counters::agent_callback_data*>(data);
 
@@ -216,7 +209,6 @@ agent_async_handler(hsa_signal_value_t signal_v, void* data)
 
     // reset the signal to allow another sample to start
     hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
-    ROCP_ERROR << fmt::format("[DEBUG] agent_async_handler: completed, signal reset to 1");
     return true;
 }
 
@@ -358,36 +350,18 @@ read_agent_ctx(const context::context*                    ctx,
                                   agent->get_rocp_agent()->cu_count,
                                   agent->get_rocp_agent()->simd_arrays_per_engine);
 
+        // Submit the read packet to the queue
+        submitPacket(agent->profile_queue(), &callback_data.packet->packets.read_packet);
+
         // Submit a barrier packet. This is needed to flush hardware caches. Without this
         // the read packet may not have the correct data.
         rocprofiler::hsa::rocprofiler_packet barrier{};
         barrier.barrier_and.header            = header_pkt(HSA_PACKET_TYPE_BARRIER_AND);
         barrier.barrier_and.completion_signal = callback_data.completion;
-
-        auto signal_before =
-            hsa::get_core_table()->hsa_signal_load_relaxed_fn(callback_data.completion);
-        ROCP_ERROR << fmt::format("[DEBUG] read_agent_ctx: before signal store, signal={}",
-                                  signal_before);
-
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 0);
         callback_data.user_data = user_data;
-
-        ROCP_ERROR << fmt::format(
-            "[DEBUG] read_agent_ctx: submitting batched READ+BARRIER packets");
-        // Submit both READ and BARRIER packets in a batch (single doorbell ring)
-        const void* packets[2] = {&callback_data.packet->packets.read_packet, &barrier.barrier_and};
-        submitPackets(agent->profile_queue(), packets, 2);
-
-        ROCP_ERROR << fmt::format(
-            "[DEBUG] read_agent_ctx: batched packets submitted, about to wait");
-
+        submitPacket(agent->profile_queue(), &barrier.barrier_and);
         wait_if_sync();
-
-        auto signal_after =
-            hsa::get_core_table()->hsa_signal_load_relaxed_fn(callback_data.completion);
-        ROCP_ERROR << fmt::format("[DEBUG] read_agent_ctx: wait completed, signal={}",
-                                  signal_after);
-
         if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) == 0) callback_data.cached_counters = nullptr;
     }
 
