@@ -92,9 +92,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          # testing
-          ref: users/geomin12/fix-rocr-runtime
-          # ref: 595de0c74bbede891c6a5e9ad0844e5d3e5ed2c8 # 2025-10-28 commit
+          ref: 550a6f7f6af0deaafba352da1dd0674e146902b6 # 2025-10-28 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
