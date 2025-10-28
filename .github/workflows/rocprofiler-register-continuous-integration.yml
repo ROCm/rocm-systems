@@ -64,6 +64,7 @@ jobs:
     - name: Install Packages
       timeout-minutes: 25
       run: |
+        git config --global --add safe.directory '*'
         cd projects/rocprofiler-register
         CC=${{ matrix.compiler }} &&
         CXX=$(echo ${{ matrix.compiler }} | sed 's/clang-/clang++-/1' | sed 's/gcc-/g++-/1') &&
