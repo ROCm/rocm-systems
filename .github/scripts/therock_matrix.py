@@ -30,7 +30,7 @@ project_map = {
         "project_to_test": "rocprofiler-tests",
     },
     "all": {
-        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_COMPILER=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "hip-tests, rocprofiler-tests",
     }
 }

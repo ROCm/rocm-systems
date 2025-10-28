@@ -38,7 +38,9 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 595de0c74bbede891c6a5e9ad0844e5d3e5ed2c8 # 2025-10-28 commit
+          # testing
+          ref: users/geomin12/fix-rocr-runtime
+          # ref: 595de0c74bbede891c6a5e9ad0844e5d3e5ed2c8 # 2025-10-28 commit
 
       - name: Install python deps
         run: |
