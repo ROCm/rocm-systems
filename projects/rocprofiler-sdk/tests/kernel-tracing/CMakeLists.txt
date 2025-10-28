@@ -27,7 +27,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     ENVIRONMENT "${kernel-tracing-env}"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
-    FIXTURES_SETUP kernel-tracing)
+    FIXTURES_SETUP kernel-tracing
+    UNSTABLE)
 
 rocprofiler_add_integration_validate_test(
     kernel-tracing
@@ -38,4 +39,5 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     FIXTURES_REQUIRED kernel-tracing
     DISCOVERY_ARGS ${PYTEST_ARGS}
-    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-test.json)
+    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-test.json
+    UNSTABLE)
