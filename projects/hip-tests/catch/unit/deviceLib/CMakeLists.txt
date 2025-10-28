@@ -119,25 +119,25 @@ set(AMD_GFX1200_SPEC_TEST_SRC
 # Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900  --offload-arch=gfx906"
 # having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
 add_custom_target(kerDevAllocMultCO.code
-                  COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
+                  COMMAND ${CMAKE_CXX_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocMultCO.code
                   -I${HIP_PATH}/include/
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
 add_custom_target(kerDevWriteMultCO.code
-                  COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
+                  COMMAND ${CMAKE_CXX_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   ${CMAKE_CURRENT_SOURCE_DIR}/kerDevWriteMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevWriteMultCO.code
                   -I${HIP_PATH}/include/
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
 add_custom_target(kerDevFreeMultCO.code
-                  COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
+                  COMMAND ${CMAKE_CXX_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   ${CMAKE_CURRENT_SOURCE_DIR}/kerDevFreeMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevFreeMultCO.code
                   -I${HIP_PATH}/include/
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
 add_custom_target(kerDevAllocSingleKer.code
-                  COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
+                  COMMAND ${CMAKE_CXX_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocSingleKer.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocSingleKer.code
                   -I${HIP_PATH}/include/
@@ -184,7 +184,6 @@ if(HIP_PLATFORM MATCHES "amd")
       set(ARCH_GFX1200 -1)
     endif()
     set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
-    set_source_files_properties(floatTM.cc PROPERTIES COMPILE_FLAGS -std=c++17)
     set_source_files_properties(bfloat16.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
 if(${ARCH_CHECK} GREATER_EQUAL 0)
 	set(TEST_SRC ${TEST_SRC} ${AMD_ARCH_SPEC_TEST_SRC})

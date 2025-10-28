@@ -18,7 +18,15 @@ if(HIP_PLATFORM MATCHES "amd")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-  set(OFFLOAD_ARCH_GENERIC_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
+  set(OFFLOAD_ARCH_GENERIC_STR 
+    --offload-arch=gfx9-generic
+    --offload-arch=gfx9-4-generic:sramecc+:xnack-
+    --offload-arch=gfx9-4-generic:sramecc-:xnack-
+    --offload-arch=gfx9-4-generic:xnack+
+    --offload-arch=gfx10-1-generic
+    --offload-arch=gfx10-3-generic
+    --offload-arch=gfx11-generic
+    --offload-arch=gfx12-generic)
 
   set(DISABLE_GENERIC_TARGET_ONLY)
 
@@ -37,19 +45,24 @@ if(HIP_PLATFORM MATCHES "amd")
         set(LIBFS -lstdc++fs)
     endif()
 
+    set_source_files_properties(hipSquareGenericTarget.cc PROPERTIES LANGUAGE HIP)
     add_executable(${GENERIC_TARGET_ONLY_EXE}
       hipSquareGenericTarget.cc
       $<TARGET_OBJECTS:Main_Object>)
     target_compile_options(${GENERIC_TARGET_ONLY_EXE} PUBLIC -w ${OFFLOAD_ARCH_GENERIC_STR})
     target_compile_definitions(${GENERIC_TARGET_ONLY_EXE} PRIVATE NO_GENERIC_TARGET_ONLY_TEST)
-    target_link_libraries(${GENERIC_TARGET_ONLY_EXE} Catch2::Catch2WithMain)
+    if(NOT USE_PREBUILT_CATCH)
+      target_link_libraries(${GENERIC_TARGET_ONLY_EXE} Catch2::Catch2WithMain)
+    endif()
 
     add_executable(${GENERIC_TARGET_ONLY_COMPRESSED_EXE}
       hipSquareGenericTarget.cc
       $<TARGET_OBJECTS:Main_Object>)
     target_compile_definitions(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} PRIVATE GENERIC_COMPRESSED NO_GENERIC_TARGET_ONLY_TEST)
     target_compile_options(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} PUBLIC --offload-compress -w ${OFFLOAD_ARCH_GENERIC_STR})
-    target_link_libraries(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} Catch2::Catch2WithMain)
+    if(NOT USE_PREBUILT_CATCH)
+      target_link_libraries(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} Catch2::Catch2WithMain)
+    endif()
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_EXE})
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_COMPRESSED_EXE})
   else()
@@ -63,12 +76,14 @@ if(HIP_PLATFORM MATCHES "amd")
   hip_add_exe_to_target(NAME hipSquareGenericTarget
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-  set_target_properties(hipSquareGenericTarget PROPERTIES COMPILE_FLAGS "-mcode-object-version=6 ${DISABLE_GENERIC_TARGET_ONLY} -w ${OFFLOAD_ARCH_GENERIC_STR}")
+  set_target_properties(hipSquareGenericTarget PROPERTIES COMPILE_FLAGS "-mcode-object-version=6 ${DISABLE_GENERIC_TARGET_ONLY}")
+  target_compile_options(hipSquareGenericTarget PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
 
   hip_add_exe_to_target(NAME hipSquareGenericTargetCompressed
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-  set_target_properties(hipSquareGenericTargetCompressed PROPERTIES COMPILE_FLAGS " -DGENERIC_COMPRESSED ${DISABLE_GENERIC_TARGET_ONLY} -mcode-object-version=6 --offload-compress -w ${OFFLOAD_ARCH_GENERIC_STR}")
+  set_target_properties(hipSquareGenericTargetCompressed PROPERTIES COMPILE_FLAGS " -DGENERIC_COMPRESSED ${DISABLE_GENERIC_TARGET_ONLY} -mcode-object-version=6 --offload-compress")
+  target_compile_options(hipSquareGenericTargetCompressed PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
 
   add_dependencies(hipSquareGenericTarget hipSquareGenericTargetCompressed)
   if(BUILD_SHARED_LIBS)
@@ -90,5 +105,4 @@ if(HIP_PLATFORM MATCHES "amd")
                     -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/compiler/hipSpirvTest)
     add_dependencies(CompilerTest hipSpirvTest)
   endif()
-
 endif()
