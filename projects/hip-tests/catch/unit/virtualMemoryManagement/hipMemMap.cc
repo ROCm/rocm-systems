@@ -690,7 +690,7 @@ TEST_CASE("Unit_hipMemMap_Capture") {
   constexpr size_t kAlignment = 2;
   constexpr int kDeviceId = 0;
   hipDevice_t device = 0;
-  hipDeviceptr_t device_ptr = nullptr;
+  void* device_ptr = nullptr;
 
   CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
