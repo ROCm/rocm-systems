@@ -2443,9 +2443,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
         if(handle_consecutive_kernels)
         {
+            // TODO: Fix DeviceThreadTracer to handle remaining thread traces before stopping
+            // contex so the following call can function correctly with marker trace:
+            // create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
+
             // Use user data pointer to dispatch id to communicate dispatch ID to shader callback
             // function
-            create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
+            ROCPROFILER_CALL(rocprofiler_create_context(&att_device_context), "context creation");
             ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                                  get_client_ctx(),
                                  ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,

@@ -27,7 +27,7 @@ import sys
 import pytest
 import json
 
-target_kernel_regex = re.compile(r"target_kernel")
+target_kernel_regex = re.compile(r"target_kernel|pc_sampling_kernel")
 
 
 def test_kernel_data(json_data):
