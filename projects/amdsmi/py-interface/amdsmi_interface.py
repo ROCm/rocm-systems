@@ -2953,7 +2953,8 @@ def amdsmi_get_gpu_process_list(
                 "cpu_mem": process_list[index].memory_usage.cpu_mem,
                 "vram_mem": process_list[index].memory_usage.vram_mem,
             },
-            "cu_occupancy": _validate_if_max_uint(process_list[index].cu_occupancy, MaxUIntegerTypes.UINT32_T)
+            "cu_occupancy": _validate_if_max_uint(process_list[index].cu_occupancy, MaxUIntegerTypes.UINT32_T),
+            "evicted_time": _validate_if_max_uint(process_list[index].evicted_time, MaxUIntegerTypes.UINT32_T)
         })
 
     return result
@@ -5303,6 +5304,7 @@ def amdsmi_get_gpu_compute_process_info() -> List[Dict[str, int]]:
             "vram_usage": proc.vram_usage,
             "sdma_usage": proc.sdma_usage,
             "cu_occupancy": proc.cu_occupancy,
+            "evicted_time": proc.evicted_time,
         }
         for proc in procs
     ]
@@ -5324,6 +5326,7 @@ def amdsmi_get_gpu_compute_process_info_by_pid(pid: int) -> Dict[str, int]:
         "vram_usage": proc.vram_usage,
         "sdma_usage": proc.sdma_usage,
         "cu_occupancy": proc.cu_occupancy,
+        "evicted_time": proc.evicted_time,
     }
 
 

@@ -440,6 +440,28 @@ static int CheckValidProcessInfoData(const std::string& s, int sysfs_ret){
   return sysfs_ret;
 }
 
+static int GetProcessKFDStats(std::string path, uint32_t& val){
+
+    std::string tmp;
+    int err = ReadSysfsStr(path, &tmp);
+    auto sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
+
+    if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)){
+      return sysfs_data_errcode;
+    }
+    else if(sysfs_data_errcode==0){
+      // Update KFD stat by the process
+      val = static_cast<uint32_t>(std::stoul(tmp));
+    }
+    else {
+      // Some GFX revisions do not provide KFD stats debugfs method
+      // which may cause ENOENT
+      val = KFD_STATS_INVALID;
+    }
+
+    return 0;
+}
+
 int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
                          std::unordered_set<uint64_t> *gpu_set) {
   assert(proc != nullptr);
@@ -447,6 +469,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
   int err;
   std::string tmp;
   std::unordered_set<uint64_t>::iterator itr;
+  uint32_t kfd_stat;
 
   std::string proc_str_path = kKFDProcPathRoot;
   proc_str_path += "/";
@@ -460,6 +483,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
   proc->vram_usage = 0;
   proc->sdma_usage = 0;
   proc->cu_occupancy = 0;
+  proc->evicted_time = 0;
 
   for (itr = gpu_set->begin(); itr != gpu_set->end(); itr++) {
     uint64_t gpu_id = (*itr);
@@ -502,21 +526,23 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
     cu_occupancy_path += std::to_string(gpu_id);
     cu_occupancy_path += "/cu_occupancy";
 
-    err = ReadSysfsStr(cu_occupancy_path, &tmp);
-    sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
+    err = GetProcessKFDStats(cu_occupancy_path, kfd_stat);
+    if (err != 0){
+      return err;
+    }
+    proc->cu_occupancy = kfd_stat;
 
-    if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)){
-      return sysfs_data_errcode;
+    std::string evicted_time_path = proc_str_path;
+    evicted_time_path += "/stats_";
+    evicted_time_path += std::to_string(gpu_id);
+    evicted_time_path += "/evicted_ms";
+
+    err = GetProcessKFDStats(evicted_time_path, kfd_stat);
+    if (err != 0){
+      return err;
     }
-    else if(sysfs_data_errcode==0){
-      // Update CU usage by the process
-      proc->cu_occupancy = std::stoi(tmp);
-    }
-    else {
-      // Some GFX revisions do not provide cu_occupancy debugfs method
-      // which may cause ENOENT
-      proc->cu_occupancy = CU_OCCUPANCY_INVALID;
-    }
+    proc->evicted_time = kfd_stat;
+
   }
 
   return 0;

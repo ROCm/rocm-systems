@@ -904,22 +904,22 @@ amdsmi_frequency_range_t = struct_amdsmi_frequency_range_t
 class union_amdsmi_bdf_t(Union):
     pass
 
-class struct_amdsmi_bdf_t(Structure):
+class struct_bdf_(Structure):
     pass
 
-struct_amdsmi_bdf_t._pack_ = 1 # source:False
-struct_amdsmi_bdf_t._fields_ = [
+struct_bdf_._pack_ = 1 # source:False
+struct_bdf_._fields_ = [
     ('function_number', ctypes.c_uint64, 3),
     ('device_number', ctypes.c_uint64, 5),
     ('bus_number', ctypes.c_uint64, 8),
     ('domain_number', ctypes.c_uint64, 48),
 ]
 
-class struct_bdf_(Structure):
+class struct_amdsmi_bdf_t(Structure):
     pass
 
-struct_bdf_._pack_ = 1 # source:False
-struct_bdf_._fields_ = [
+struct_amdsmi_bdf_t._pack_ = 1 # source:False
+struct_amdsmi_bdf_t._fields_ = [
     ('function_number', ctypes.c_uint64, 3),
     ('device_number', ctypes.c_uint64, 5),
     ('bus_number', ctypes.c_uint64, 8),
@@ -1397,7 +1397,9 @@ struct_amdsmi_proc_info_t._fields_ = [
     ('memory_usage', struct_memory_usage_),
     ('container_name', ctypes.c_char * 256),
     ('cu_occupancy', ctypes.c_uint32),
-    ('reserved', ctypes.c_uint32 * 11),
+    ('evicted_time', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint32 * 10),
+    ('PADDING_1', ctypes.c_ubyte * 4),
 ]
 
 amdsmi_proc_info_t = struct_amdsmi_proc_info_t
@@ -2196,7 +2198,7 @@ struct_amdsmi_process_info_t._fields_ = [
     ('vram_usage', ctypes.c_uint64),
     ('sdma_usage', ctypes.c_uint64),
     ('cu_occupancy', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('evicted_time', ctypes.c_uint32),
 ]
 
 amdsmi_process_info_t = struct_amdsmi_process_info_t

@@ -24,6 +24,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The entry `policies` is added to the end of the dictionary to match API definition.
   - The entry `plpds` is marked for deprecation as it has the same information as `policies`.
 
+- **Added evicted_time metric for kfd processes**.  
+  - Time that queues are evicted on a GPU in milliseconds
+  - Added to CLI in `amd-smi monitor -q` and `amd-smi process`
+  - Added to C API and Python API:
+    - amdsmi_get_gpu_process_list()
+    - amdsmi_get_gpu_compute_process_info()
+    - amdsmi_get_gpu_compute_process_info_by_pid()
+
 ### Changed
 
 - N/A

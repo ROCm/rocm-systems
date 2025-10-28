@@ -184,6 +184,8 @@ void TestProcInfoRead::Run(void) {
                                    proc_info.sdma_usage <<
                                    " Compute Unit Usage: " <<
                                    proc_info.cu_occupancy <<
+                                   " Evicted Time: " <<
+                                   proc_info.evicted_time << std::endl <<
                                    std::endl;
       }
     }

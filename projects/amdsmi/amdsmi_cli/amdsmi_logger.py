@@ -230,7 +230,7 @@ class AMDSMILogger():
                         # Add N/A for empty process_info
                         table_values += "N/A".rjust(17) + "N/A".rjust(9) + "N/A".rjust(10) + \
                                         "N/A".rjust(10) + "N/A".rjust(10) + "N/A".rjust(10) + \
-                                        "N/A".rjust(9) + '\n'
+                                        "N/A".rjust(9) + "N/A".rjust(10) + '\n'
                     else:
                         #Fix this herre
                         for process_key, process_value in process_dict['process_info'].items():
@@ -250,6 +250,8 @@ class AMDSMILogger():
                             elif process_key == "mem_usage":
                                 table_values += string_process_value.rjust(10)
                             elif process_key == "cu_occupancy":
+                                table_values += string_process_value.rjust(9)
+                            elif process_key == "evicted_time":
                                 table_values += string_process_value.rjust(9)
                                 # Add the stored gpu and stored timestamp to the next line
                                 table_values += '\n'
@@ -1124,8 +1126,9 @@ class AMDSMILogger():
                     cu_occupancy = (str(round(process['cu_occupancy']['current_cu'] / process['cu_occupancy']['total_num_cu'] * 100, 1)) + " %").rjust(7)
                 else:
                     cu_occupancy = "N/A"
-                print("| {0:4.4s}  {1:9.9s}  {2:19.19s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:7.7s} |".format(
-                         gpu_id, pid, process_name, gtt_mem, vram_mem, mem_usage, cu_occupancy))
+                evicted_time = str(process['evicted_time']).rjust(9)
+                print("| {0:4.4s}  {1:9.9s}  {2:19.19s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:7.7s}  {7:9.9s} |".format(
+                         gpu_id, pid, process_name, gtt_mem, vram_mem, mem_usage, cu_occupancy, evicted_time))
                 if process['name'] == "N/A":
                     elevated_permission_error = True
         else:

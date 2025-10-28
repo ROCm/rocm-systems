@@ -1159,7 +1159,8 @@ typedef struct {
     } memory_usage;  //!< In Bytes
     char container_name[AMDSMI_MAX_STRING_LENGTH];
     uint32_t cu_occupancy;  //!< Num CUs utilized
-    uint32_t reserved[11];
+    uint32_t evicted_time;    //!< Time that queues are evicted on a GPU in milliseconds
+    uint32_t reserved[10];
 } amdsmi_proc_info_t;
 
 /**
@@ -2085,6 +2086,7 @@ typedef struct {
     uint64_t vram_usage;    //!< VRAM usage in MB
     uint64_t sdma_usage;    //!< SDMA usage in microseconds
     uint32_t cu_occupancy;  //!< Compute Unit usage in percent
+    uint32_t evicted_time;    //!< Time that queues are evicted on a GPU in milliseconds
 } amdsmi_process_info_t;
 
 /**
