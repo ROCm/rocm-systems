@@ -125,7 +125,10 @@ worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t param
                     size_t                       parity = write_index % buffer.size();
                     std::unique_lock<std::mutex> lock(mut.at(parity));
 
+    std::cout << "Done submit2! " << std::hex << std::uintptr_t(buffer.at(parity)) << " to " << std::uintptr_t(status->data) << " size " << buffer_size << std::dec << std::endl;
                     auto err = copy_fn(buffer.at(parity), status->data, buffer_size);
+                    //std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::cout << "Done copy!" << std::endl;
                     ROCP_FATAL_IF(err != HSA_STATUS_SUCCESS) << "Memory copy error: " << err;
                     write_index.fetch_add(1);
                     write_cv.notify_all();

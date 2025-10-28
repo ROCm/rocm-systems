@@ -35,7 +35,7 @@
 #include "hip/hip_runtime.h"
 
 // Two waves per SIMD on MI300
-#define DATA_SIZE (304 * 256 * 8)
+#define DATA_SIZE (256 * 256 * 8 * 4)
 #define HIP_API_CALL(CALL)                                                                         \
     if((CALL) != hipSuccess)                                                                       \
     {                                                                                              \
@@ -164,7 +164,7 @@ main(int /*argc*/, char** /*argv*/)
 
     roctxProfilerResume(0);
 
-    for(size_t i = 0; i < streams.size() * kernels.size() * 2000; i++)  // 3000 = 1GB on mi300x
+    for(size_t i = 0; i < streams.size() * kernels.size() * 10000; i++)  // 3000 = 1GB on mi300x
     {
         auto& stream = streams.at(i % streams.size());
         auto& kernel = kernels.at(i % kernels.size());
