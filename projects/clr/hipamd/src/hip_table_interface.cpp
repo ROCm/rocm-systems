@@ -2041,3 +2041,13 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
   return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count,
                                                                  library);
 }
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library) {
+  return hip::GetHipDispatchTable()->hipLibraryEnumerateKernels_fn(kernels, numKernels, library);
+}
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
+  return hip::GetHipDispatchTable()->hipKernelGetLibrary_fn(library, kernel);
+}
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
+  return hip::GetHipDispatchTable()->hipKernelGetName_fn(name, kernel);
+}

@@ -30,6 +30,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <unistd.h>
 
 using namespace std::chrono_literals;
@@ -45,20 +46,27 @@ constexpr auto CACHE_FILE_FLUSH_TIMEOUT = 10ms;
 constexpr auto NUM_OF_THREADS           = 1;
 }  // namespace
 
-buffer_storage::buffer_storage(pid_t _pid)
+buffer_storage::buffer_storage()
 {
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
     m_thread_pool = std::make_unique<PTL::ThreadPool>(NUM_OF_THREADS);
     m_thread_pool->initialize_threadpool(NUM_OF_THREADS);
 
     m_task_group = std::make_unique<PTL::TaskGroup<void>>(m_thread_pool.get());
+}
+
+void
+buffer_storage::start_flushing_thread(pid_t _pid)
+{
+    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
     m_task_group->exec([this, _pid]() {
-        std::ofstream _ofs(filename, std::ios::binary | std::ios::out);
+        auto filepath = get_buffered_storage_filename(get_root_process_id(), getpid());
+        std::ofstream _ofs(filepath, std::ios::binary | std::ios::out);
 
         if(!_ofs)
         {
             std::stringstream _ss;
-            _ss << "Error opening file for writing: " << filename;
+            _ss << "Error opening file for writing: " << filepath;
             throw std::runtime_error(_ss.str());
         }
 
@@ -114,9 +122,23 @@ buffer_storage::buffer_storage(pid_t _pid)
     });
 }
 
+buffer_storage::~buffer_storage()
+{
+    shutdown();
+    if(m_thread_pool && m_thread_pool->is_alive())
+    {
+        m_thread_pool->destroy_threadpool();
+    }
+}
+
 void
 buffer_storage::shutdown()
 {
+    if(!m_running)
+    {
+        return;
+    }
+
     ROCPROFSYS_DEBUG("Buffer storage shutting down..");
     m_running = false;
     m_shutdown_condition.notify_all();
@@ -131,7 +153,11 @@ buffer_storage::shutdown()
     std::mutex       _exit_mutex;
     std::unique_lock _exit_lock{ _exit_mutex };
     m_exit_condition.wait(_exit_lock, [&]() { return m_exit_finished; });
-    m_thread_pool->destroy_threadpool();
+
+    if(m_thread_pool && m_thread_pool->is_alive())
+    {
+        m_thread_pool->destroy_threadpool();
+    }
 }
 
 void

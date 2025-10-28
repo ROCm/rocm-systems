@@ -168,6 +168,7 @@ PC_SAMPLING_HOST_TRAP_FILES = sorted([
     "pmc_perf_0.csv",
     "pmc_perf.csv",
     "ps_file_agent_info.csv",
+    "ps_file_kernel_trace.csv",
     "ps_file_pc_sampling_host_trap.csv",
     "ps_file_results.json",
     "sysinfo.csv",
@@ -177,6 +178,7 @@ PC_SAMPLING_STOCHASTIC_FILES = sorted([
     "pmc_perf_0.csv",
     "pmc_perf.csv",
     "ps_file_agent_info.csv",
+    "ps_file_kernel_trace.csv",
     "ps_file_pc_sampling_stochastic.csv",
     "ps_file_results.json",
     "sysinfo.csv",
@@ -312,14 +314,6 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
         differences["gpu-id"] = [gpu_id]
         errors_pd = pd.concat([errors_pd, pd.DataFrame.from_dict(differences)])
     return errors_pd
-
-
-def run(cmd):
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if cmd[0] == "amd-smi" and p.returncode == 8:
-        print("ERROR: No GPU detected. Unable to load amd-smi")
-        assert 0
-    return p.stdout.decode("ascii")
 
 
 def gpu_soc():
