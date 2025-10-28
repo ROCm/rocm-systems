@@ -38,6 +38,22 @@ namespace thread_trace
 {
 constexpr double SQTT_BANDIWDTH = 16E9f * 5;  // 16GB/s, times 5 for wiggle room
 
+namespace
+{
+void amd_copy_async(void* dst, const void* src, hsa_agent_t dst_agent, hsa_agent_t src_agent, size_t size, Signal& dependency)
+{
+    thread_local Signal signal{};
+    auto dep = dependency.getSignal();
+
+    auto copy_fn = CHECK_NOTNULL(hsa::get_amd_ext_table())->hsa_amd_memory_async_copy_fn;
+
+    signal.reset();
+    auto status = copy_fn(dst, dst_agent, src, src_agent, size, 1, &dep, signal.getSignal());
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to copy: " << status;
+    signal.WaitOn();
+}
+};
+
 void
 worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t parameters)
 {
@@ -92,6 +108,12 @@ worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t param
         queue.SubmitAndSignalLast(parameters.control_packet->after_krn_pkt);
     };
 
+    Signal submit_signal{};
+
+    auto copy_sync = [&](void* dst, const void* src) {
+        amd_copy_async(dst, src, queue.near_cpu, queue.hsa_agent, buffer_size, submit_signal);
+    };
+
     auto start_t0 = std::chrono::system_clock::now();
     bool do_sleep = false;
     // Wait until ATT start packets have been executed
@@ -103,11 +125,13 @@ worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t param
         do_sleep = true;  // Reset value
 
         // Send query status packet and wait for result
-        queue.Submit(&packets.query_status, true);
+        queue.Submit(&packets.query_status, &submit_signal);
+        submit_signal.WaitOn();
         if(auto status = packets.query_buffer_status())
         {
+            auto t0 = std::chrono::system_clock::now();
             // Query returned buffer full: Send packet to trigger a buffer swap
-            queue.Submit(&status->packet, false);
+            queue.Submit(&status->packet, &submit_signal);
             ROCP_FATAL_IF(status->size != buffer_size)
                 << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
 
@@ -125,11 +149,12 @@ worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t param
                     size_t                       parity = write_index % buffer.size();
                     std::unique_lock<std::mutex> lock(mut.at(parity));
 
-    std::cout << "Done submit2! " << std::hex << std::uintptr_t(buffer.at(parity)) << " to " << std::uintptr_t(status->data) << " size " << buffer_size << std::dec << std::endl;
-                    auto err = copy_fn(buffer.at(parity), status->data, buffer_size);
-                    //std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    std::cout << "Done copy!" << std::endl;
-                    ROCP_FATAL_IF(err != HSA_STATUS_SUCCESS) << "Memory copy error: " << err;
+                    //auto err = copy_fn(buffer.at(parity), status->data, buffer_size);
+                    copy_sync(buffer.at(parity), status->data);
+                    auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
+                    ROCP_WARNING << "Copy: " << copy_time << " s. BW: " << buffer_size / float(copy_time);
+
+                    //ROCP_FATAL_IF(err != HSA_STATUS_SUCCESS) << "Memory copy error: " << err;
                     write_index.fetch_add(1);
                     write_cv.notify_all();
                 }
@@ -142,6 +167,7 @@ worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t param
             }
             // If a buffer flip has happened, we dont want to sleep due to transfer delay
             do_sleep = false;
+            submit_signal.WaitOn();
         }
     }
     stop_trace();
