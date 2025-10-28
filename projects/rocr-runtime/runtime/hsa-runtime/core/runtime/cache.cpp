@@ -42,7 +42,7 @@
 
 #include "core/inc/cache.h"
 #include "assert.h"
-
+#include <cstring>
 namespace rocr {
 namespace core {
 
@@ -52,7 +52,8 @@ hsa_status_t Cache::GetInfo(hsa_cache_info_t attribute, void* value) {
       *(uint32_t*)value = name_.size();
       break;
     case HSA_CACHE_INFO_NAME:
-      *(const char**)value = name_.c_str();
+      memset(value, 0x0, name_.size());
+      memcpy(value, name_.c_str(), name_.size()); 
       break;
     case HSA_CACHE_INFO_LEVEL:
       *(uint8_t*)value = level_;
