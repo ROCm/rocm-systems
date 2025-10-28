@@ -235,6 +235,7 @@ main()
     float*           result                   = nullptr;
     float            varA                     = 5.5;
     float            varB                     = 11.7;
+    uint32_t         num_blocks               = BLOCK_SIZE;
     checkHipErrors(hipMallocAsync(&result, sizeof(float), stream));
     for(auto i = 0; i < NUM_KERNELS; ++i)
     {
@@ -252,24 +253,17 @@ main()
                                gpuTransposeMatrix,
                                gpuMatrix,
                                WIDTH);
+            pc_sampling_kernel<<<num_blocks, i>>>(i);
             roctxProfilerPause(tid);
         }
     }
 
     // Nested test here
+    roctxProfilerResume(tid);
+    roctxProfilerResume(tid);
     roctxProfilerPause(tid);
-    roctxProfilerResume(tid);
-    // Kernel should not appear without --selected-regions-ref-count
+    // Kernel should appear only with --selected-regions-ref-count
     hipLaunchKernelGGL(nested_kernel,
-                       dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
-                       dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
-                       0,
-                       stream,
-                       gpuTransposeMatrix,
-                       gpuMatrix,
-                       WIDTH);
-    roctxProfilerResume(tid);
-    hipLaunchKernelGGL(target_kernel,
                        dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
                        dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
                        0,
@@ -286,9 +280,4 @@ main()
 
     // free the resources on host side
     free(Matrix);
-
-    // Run PC sampling kernel
-    uint32_t num_blocks = BLOCK_SIZE;
-    roctxProfilerResume(tid);
-    pc_sampling_kernel<<<num_blocks, 1>>>(1);
 }

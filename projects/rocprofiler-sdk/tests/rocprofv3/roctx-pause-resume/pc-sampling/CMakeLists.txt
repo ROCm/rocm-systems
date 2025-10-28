@@ -45,7 +45,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --pc-sampling-unit time
         --pc-sampling-method host_trap --pc-sampling-interval 1 -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-pc-sampling -o out --output-format json
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-pc-sampling -o out --output-format json csv
         --log-level env -- $<TARGET_FILE:roctx-pause-resume>)
 
 set_tests_properties(
@@ -58,6 +58,8 @@ set_tests_properties(
                "${roctx-pause-resume-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               SKIP_REGULAR_EXPRESSION
+               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
                DISABLED
                "${IS_PC_SAMPLING_DISABLED}")
 
@@ -76,5 +78,7 @@ set_tests_properties(
                rocprofv3-test-roctx-pause-resume-pc-sampling-execute
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
+               SKIP_REGULAR_EXPRESSION
+               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
                DISABLED
                "${IS_PC_SAMPLING_DISABLED}")

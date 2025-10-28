@@ -41,8 +41,8 @@ add_test(
     NAME rocprofv3-test-roctx-pause-resume-tracing-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --kernel-trace --pmc
-        TOTAL_16_OPS -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format
-        json --log-level env -- $<TARGET_FILE:roctx-pause-resume>)
+        SQ_WAVES -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json
+        --log-level info -- $<TARGET_FILE:roctx-pause-resume>)
 
 set_tests_properties(
     rocprofv3-test-roctx-pause-resume-tracing-execute

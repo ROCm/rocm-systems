@@ -48,7 +48,7 @@ def test_kernel_data(json_data):
         kernel_name = get_kernel_name(dispatch_info["kernel_id"])
         assert (
             target_kernel_regex.search(kernel_name) is not None
-        ), f"kernel '{kernel_name}' matches regular expression 'target_kernel'"
+        ), f"kernel '{kernel_name}' does not match regular expression '{target_kernel_regex.pattern}'"
 
 
 if __name__ == "__main__":

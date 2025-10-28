@@ -42,5 +42,7 @@ def pytest_addoption(parser):
 @pytest.fixture
 def json_data(request):
     filename = request.config.getoption("--json-input")
+    if not os.path.isfile(filename):
+        return pytest.skip("PC sampling unavailable")
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
