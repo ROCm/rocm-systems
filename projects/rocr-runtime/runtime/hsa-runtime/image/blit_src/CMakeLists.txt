@@ -67,10 +67,12 @@ endif()
 ##  Add custom command to generate a kernel code object file
 ##==========================================
 function(gen_kernel_bc TARGET_ID INPUT_FILE OUTPUT_FILE)
-
+  if(WIN32)
+    set (WIN_CL_COMPILE_OPTION "-fshort-wchar")
+  endif()
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
     "-O2 -x cl -Xclang -finclude-default-header -cl-denorms-are-zero -cl-std=CL2.0
-    -target amdgcn-amd-amdhsa -mcpu=${TARGET_ID} -mcode-object-version=4
+    -target amdgcn-amd-amdhsa -mcpu=${TARGET_ID} -mcode-object-version=4 ${WIN_CL_COMPILE_OPTION}
     -o ${OUTPUT_FILE} ${INPUT_FILE}")
 
   ## Add custom command to produce a code object file.

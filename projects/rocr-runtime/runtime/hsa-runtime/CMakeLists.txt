@@ -261,15 +261,10 @@ if (${PC_SAMPLING_SUPPORT})
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${PCS_SRCS} )
 endif()
 
-if (UNIX)
-  if ( NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64" )
-    set ( IMAGE_SUPPORT ON )
-  endif()
-set ( IMAGE_SUPPORT ${IMAGE_SUPPORT} CACHE BOOL "Build with image support (default: ON for x86, OFF elsewise)." )
-else()
-  # Force IMAGE_SUPPORT to be OFF
-  set(IMAGE_SUPPORT OFF CACHE BOOL "Build with image support (forced to OFF)" FORCE)
+if (NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64")
+  set (IMAGE_SUPPORT ON)
 endif()
+set (IMAGE_SUPPORT ${IMAGE_SUPPORT} CACHE BOOL "Build with image support (default: ON for x86, OFF elsewise).")
 
 ## Optional image module defintions.
 if(${IMAGE_SUPPORT})
