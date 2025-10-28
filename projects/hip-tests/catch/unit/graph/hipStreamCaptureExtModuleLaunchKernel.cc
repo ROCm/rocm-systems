@@ -182,7 +182,7 @@ TEST_CASE("Unit_hipStreamCapture_ExtModuleLaunchKernel") {
   if (stat(GraphModuleLaunchKernel::fileName, &fileStat) || !(fileStat.st_mode & S_IFREG)) {
     FAIL("module file " << GraphModuleLaunchKernel::fileName << " doesn't exist! aborted! \n"
                         << "To generate the file, type\n"
-                        << "/opt/rocm/hip/bin/hipcc --genco hipMatMul.cc -o hipMatMul.code");
+                        << "/opt/rocm/hip/bin/hipcc --cuda-device-only hipMatMul.cc -o hipMatMul.code");
     return;
   }
   HIPCHECK(hipSetDevice(0));

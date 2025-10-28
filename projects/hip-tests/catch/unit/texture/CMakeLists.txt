@@ -99,7 +99,7 @@ function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
 endfunction()  # CheckAcceptedArchs
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
-                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} --std=c++17 ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
+                   COMMAND ${CMAKE_CXX_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
                    -o tex_ref_get_module.code
                    -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
