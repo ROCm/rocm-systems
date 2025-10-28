@@ -1,52 +1,6 @@
-cmake_minimum_required(VERSION 3.16.8)
+cmake_minimum_required(VERSION 3.25)
 
-# Read -DHIP_PATH
-# If not set read env{HIP_PATH} only on Windows
-if(WIN32)
-    if(NOT DEFINED HIP_PATH)
-        if(DEFINED ENV{HIP_PATH})
-            set(HIP_PATH $ENV{HIP_PATH} CACHE STRING "HIP Path")
-        endif()
-    endif()
-endif()
-
-if(NOT DEFINED ROCM_PATH)
-    set(ROCM_PATH "/opt/rocm")
-endif()
-if(NOT DEFINED HIP_PATH)
-    set(HIP_PATH ${ROCM_PATH})
-endif()
-
-if(NOT DEFINED HIPCC_EXEC)
-    if(WIN32)
-        set(HIPCC_EXEC "hipcc.exe")
-    else()
-        set(HIPCC_EXEC "hipcc")
-    endif()
-endif()
-if(NOT DEFINED HIPCONFIG_EXEC)
-    if(WIN32)
-        set(HIPCONFIG_EXEC "hipconfig.exe")
-    else()
-        set(HIPCONFIG_EXEC "hipconfig")
-    endif()
-endif()
-
-# hip-tests only work with HIPCC for now
-# We need to move to amdclang++, for now we enforce hipcc
-# using that as default for hiptests project
-if(NOT DEFINED CMAKE_CXX_COMPILER)
-    set(CMAKE_CXX_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
-endif()
-if(NOT DEFINED CMAKE_C_COMPILER)
-    set(CMAKE_C_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
-endif()
-
-# Skip compiler check
-set(CMAKE_C_COMPILER_WORKS 1)
-set(CMAKE_CXX_COMPILER_WORKS 1)
-
-project(hiptests)
+project(hiptests LANGUAGES C CXX HIP)                                         
 
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
@@ -55,8 +9,28 @@ option(BUILD_PERF_TESTS "Build perf tests" OFF)
 option(BUILD_STRESS_TESTS "Build stress tests" OFF)
 option(THEROCK_BUILD_MODE "Option to let hip-tests know if TheRock is being used to build" OFF)
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
+option(GENERATE_COVERATE "Generate coverage" OFF)
 
-if (TEST_CLOCK_CYCLE)
+find_package(hip REQUIRED)
+find_program(HIPCONFIG_EXEC hipconfig)
+
+get_cmake_property(_variableNames VARIABLES)                
+list (SORT _variableNames)                                  
+foreach (_variableName ${_variableNames})                   
+  message(STATUS "${_variableName}=${${_variableName}}")  
+endforeach()       
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+
+if(THEROCK_BUILD_MODE AND WIN32)
+    message(FATAL_ERROR "TheRock Builds are not supported on Windows... yet")
+endif()
+
+if(TEST_CLOCK_CYCLE)
     add_definitions(-DTEST_CLOCK_CYCLE)
 endif()
 
@@ -72,22 +46,7 @@ if(NOT HIP_PLATFORM STREQUAL "amd" AND NOT HIP_PLATFORM STREQUAL "nvidia")
     message(FATAL_ERROR "Unexpected HIP_PLATFORM: " ${HIP_PLATFORM})
 endif()
 
-if(HIP_PLATFORM STREQUAL "amd")
-    if(UNIX AND DEFINED ROCM_PATH)
-        # Read -DROCM_PATH and set CXX_FLAGS for amd platform only
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --rocm-path=${ROCM_PATH}")
-    endif()
-
-    if(DEFINED HIP_PATH)
-        # Read -DHIP_PATH and set CXX_FLAGS for amd platform only
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hip-path=${HIP_PATH}")
-    endif()
-endif()
-
-message(STATUS "HIP_PATH: ${HIP_PATH}")
-message(STATUS "ROCM_PATH: ${ROCM_PATH}")
-
-execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version
+execute_process(COMMAND ${HIPCONFIG_EXEC} --version
                 OUTPUT_VARIABLE HIP_VERSION
                 RESULT_VARIABLE result
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -106,9 +65,6 @@ if(NOT WIN32)
     link_libraries(hiprtc-builtins)
   endif() # end BUILD_SHARED_LIBS
 endif() # end win32
-
-# enforce c++17
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++17")
 
 # Address sanitizer options
 if(ENABLE_ADDRESS_SANITIZER)
@@ -132,23 +88,12 @@ else()
    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
 endif()
 
-
-# Set JSON Parser path
-if(NOT DEFINED JSON_PARSER)
-    if(DEFINED ENV{JSON_PARSER})
-        set(JSON_PARSER $ENV{JSON_PARSER} CACHE STRING "JSON Parser Path")
-    else()
-        set(JSON_PARSER "${CMAKE_CURRENT_LIST_DIR}/external/picojson")
-    endif()
-endif()
-
 if(NOT THEROCK_BUILD_MODE)
     # Setup catch2 manually
-    set(CATCH2_DOWNLOAD_URL "https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/Catch2-3.8.1.tar.gz")
     include(FetchContent)
     FetchContent_Declare(
         Catch2
-        URL ${CATCH2_DOWNLOAD_URL}
+        URL "https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/Catch2-3.8.1.tar.gz"
         DOWNLOAD_EXTRACT_TIMESTAMP OFF
         URL_HASH SHA256=18b3f70ac80fccc340d8c6ff0f339b2ae64944782f8d2fca2bd705cf47cadb79
     )
@@ -164,8 +109,7 @@ include(CTest)
 include_directories(
     "./include"
     "./kernels"
-    ${HIP_PATH}/include
-    ${JSON_PARSER}
+    "${CMAKE_CURRENT_LIST_DIR}/external/picojson"
 )
 
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
@@ -182,11 +126,6 @@ foreach(json IN LISTS JSON_FILES)
     file(COPY ${json}
          DESTINATION ${HIP_TEST_CONFIG_BINARY_DIR})
 endforeach()
-set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
-     DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
-set(ADD_SCRIPT_PATH ${CATCH_SCRIPT_BINARY_DIR}/CatchAddTests.cmake)
-set(CATCH_INCLUDE_PATH ${CATCH_SCRIPT_BINARY_DIR}/catch_include.cmake)
 
 if (WIN32)
   configure_file(catchProp_in_rc.in ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc @ONLY)
@@ -206,7 +145,7 @@ if (WIN32)
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
-    add_compile_options(-Wall -Wextra -Wvla -Werror -Wno-deprecated -Wno-option-ignored)
+    add_compile_options(-Wall -Wextra -Wvla -Werror -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter)
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
@@ -249,7 +188,7 @@ elseif(DEFINED OFFLOAD_ARCH_STR)
 endif()
 
 if(DEFINED OFFLOAD_ARCH_STR)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OFFLOAD_ARCH_STR} ")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR} ")
 endif()
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
 
@@ -331,7 +270,7 @@ endif()
 # Disable CXX extensions (gnu++11 etc)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_custom_target(build_tests)
+add_custom_target(build_tests ALL)
 
 # Tests folder
 if(BUILD_UNIT_TESTS)
@@ -350,12 +289,14 @@ if(BUILD_STRESS_TESTS)
     add_subdirectory(stress ${CATCH_BUILD_DIR}/stress)
 endif()
 
-add_custom_target(gen_coverage
+if(GENERATE_COVERATE)
+    add_custom_target(gen_coverage
                   COMMAND ${CMAKE_COMMAND} -B build/
                   COMMAND ${CMAKE_COMMAND} --build build/
                   COMMAND ./build/generateHipAPICoverage ${HIP_PATH}/include
                   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../utils/coverage
                   COMMENT "Generating Test Coverage Report")
+endif()
 
 # packaging the tests
 # make package_test to generate packages for test
