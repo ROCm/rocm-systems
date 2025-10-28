@@ -103,7 +103,6 @@ class gfx9_cntx_prim {
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
   static constexpr Register SQ_THREAD_TRACE_CNTR_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_CNTR);
   static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_WPTR);
-      REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_STATUS);
   static constexpr Register SQ_THREAD_TRACE_STATUS2_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_STATUS_OFFSET = []() {
     Register reg = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);

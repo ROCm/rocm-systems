@@ -433,7 +433,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   *num_buffer_packets = buffers.size();
 
   if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
-    *header = getHeaderPacket(shader_engine_id, manager->config.GetTargetCU(shader_engine_id), manager->GetSimdMask()).raw;
+    *header = getHeaderPacket(shader_engine_id, manager->config.GetTargetCU(shader_engine_id), manager->GetSimdMask(), pm4_factory->GetGpuId()).raw;
   else
     *header = 0;
 

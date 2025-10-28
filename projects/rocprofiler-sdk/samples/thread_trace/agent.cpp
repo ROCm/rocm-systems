@@ -169,33 +169,26 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
     {
-        CHECK_NOTNULL(Results::table);
-        auto* data =
-            static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
-
-        if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
-        {
-            Results::table->addDecoder(
-                data->uri, data->code_object_id, data->load_delta, data->load_size);
-            return;
-        }
-
-        auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
-        CHECK_NOTNULL(memorybase);
-
-        DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(decoder,
-                                                                   data->code_object_id,
-                                                                   data->load_delta,
-                                                                   data->load_size,
-                                                                   memorybase,
-                                                                   data->memory_size));
-
         Results::table->addDecoder(
-            memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
+            data->uri, data->code_object_id, data->load_delta, data->load_size);
+        return;
     }
+
+    auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
+    CHECK_NOTNULL(memorybase);
+
+    DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(decoder,
+                                                               data->code_object_id,
+                                                               data->load_delta,
+                                                               data->load_size,
+                                                               memorybase,
+                                                               data->memory_size));
+
+    Results::table->addDecoder(
+        memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
 }
 
-std::vector<char>   output_buffer(1ul << 33);
+std::vector<char>   output_buffer(1ul << 34);
 std::atomic<size_t> output_size{0};
 size_t              total_insts{0};
 
@@ -314,8 +307,9 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, 1});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1ul << 26});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1ul << 25});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 1});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, 0xF});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
                               ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
 
