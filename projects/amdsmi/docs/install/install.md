@@ -16,7 +16,8 @@ and command line tool either as part of the
 
 The following are required to install and use the AMD SMI library through its language interfaces and CLI.
 
-* The `amdgpu` driver must be loaded for AMD SMI initialization to work.
+* The `amdgpu` driver must be loaded for AMD SMI initialization to work. See
+  [Install the amdgpu driver](#install_amdgpu_driver).
 
 * Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
 
@@ -44,47 +45,55 @@ information and hardware IPs.
 
 * Python version 3.6.8 or greater (64-bit)
 
-### Note: No module named more_itertools warning on Azure Linux 3
+::::{note}
 During the driver installation process on Azure Linux 3, you might encounter the `ModuleNotFoundError: No module named 'more_itertools'` warning. This warning is a result of the reintroduction of `python3-wheel` and `python3-setuptools` dependencies in the CMake of AMD SMI, which requires `more_itertools` to build these Python libraries. This issue will be fixed in a future ROCm release. As a workaround, use the following command before installation:
+
 ```
-sudo python3 -m pip install more_itertools 
+sudo python3 -m pip install more_itertools
 ```
+::::
 
 ### Go interface prerequisites
 
 * Go version 1.20 or greater
 
+(install_amdgpu_driver)=
+## Install the amdgpu driver
+
+```{note}
+As of ROCm 7.0.0, the `amdgpu` driver is distributed separately from the ROCm
+software stack. See
+{doc}`rocm-install-on-linux:reference/user-kernel-space-compat-matrix` for
+driver to ROCm user space compatibility information.
+```
+
+Confirm that your Linux kernel version matches the system requirements described in
+{ref}`rocm-install-on-linux:supported_distributions`.
+
+For up-to-date installation instructions, see the [AMD GPU Driver (amdgpu)
+documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html).
+
 (install_amdgpu_rocm)=
-## Install amdgpu driver and AMD SMI with ROCm
+## Install AMD SMI with ROCm
 
-<!--https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/amdgpu-install.html-->
-1. Get the `amdgpu-install` installer following the instructions for your
-   Linux distribution at {doc}`rocm-install-on-linux:install/amdgpu-install`.
+AMD SMI is included as a core package in the ROCm software stack as part of the
+`rocm-developer-tools` meta package. See [ROCm runtime
+packages](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/package-manager-integration.html#id3)
+for more information.
 
-   See the following example; your desired ROCm release and install URL may be
-   different.
+```{note}
+The `amdgpu-install` script is no longer the recommended way to install ROCm.
+Install using your supported Linux distribution's package manager instead.
+```
 
-   ```shell
-   sudo apt update
-   wget https://repo.radeon.com/amdgpu-install/6.2.2/ubuntu/noble/amdgpu-install_6.2.60202-1_all.deb
-   sudo apt install ./amdgpu-install_6.2.60202-1_all.deb
-   ```
+For up-to-date installation instructions via package manager, see {doc}`ROCm
+installation for Linux <rocm-install-on-linux:install/prerequisites>`.
 
-2. Use `amdgpu-install` to install the `amdgpu` driver and ROCm packages with
-   AMD SMI included.
+After installing the `amdgpu` driver and ROCm, verify your AMD SMI installation:
 
-   ``` shell
-   sudo amdgpu-install --usecase=rocm
-   ```
-
-   The `amdgpu-install --usecase=rocm` option triggers both an `amdgpu` driver
-   update and AMD SMI packages to be installed on your device.
-
-3. Verify your installation.
-
-   ```shell
-   amd-smi --help
-   ```
+```shell
+amd-smi
+```
 
 (install_without_rocm)=
 ## Install AMD SMI without ROCm
