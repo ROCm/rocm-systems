@@ -231,7 +231,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Added
 - Dynamic process attachment- ROCprofiler-sdk and `rocprofv3` now facilitate dynamic profiling of a running GPU applications by attaching to its process ID (PID), rather than launching the application through the profiler itself.
 - Scratch-memory trace information to the Perfetto output in `rocprofv3`.
-- New capabilities to ATT support in rocprofV3, including realtime clock support for thread trace alignment on GFX9, enabling high-resolution clock computation and better synchronization across shader engines. Additionally,MultiKernelDispatch ATT support is now available across all ASICs.
+- New capabilities to the thread trace support in `rocprofv3`, including real-time clock support for thread trace alignment on gfx9 architecture. This enables high-resolution clock computation and better synchronization across shader engines. Additionally, `MultiKernelDispatch` thread trace support is now available across all ASICs.
 - Documentation for dynamic process attachment.
 - Documentation for `rocpd` summaries.
 
