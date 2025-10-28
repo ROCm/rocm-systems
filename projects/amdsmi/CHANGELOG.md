@@ -51,6 +51,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     - amdsmi_get_gpu_compute_process_info()
     - amdsmi_get_gpu_compute_process_info_by_pid()
 
+- **Added new VRAM types to  `amdsmi_vram_type_t`**.
+  - `amd-smi static --vram` & `amdsmi_get_gpu_vram_info()` now support the following types:
+  - DDR5, LPDDR4, LPDDR5, and HBM3E
+
 ### Changed
 
 - N/A

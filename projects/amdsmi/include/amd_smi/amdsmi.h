@@ -619,7 +619,7 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef enum {
-    AMDSMI_VRAM_TYPE_UNKNOWN = 0, //!< Unknown memory type
+    AMDSMI_VRAM_TYPE_UNKNOWN = 0,  //!< Unknown memory type
     // HBM
     AMDSMI_VRAM_TYPE_HBM   = 1,   //!< High Bandwidth Memory
     AMDSMI_VRAM_TYPE_HBM2  = 2,   //!< High Bandwidth Memory, Generation 2
@@ -630,6 +630,7 @@ typedef enum {
     AMDSMI_VRAM_TYPE_DDR2  = 10,  //!< Double Data Rate, Generation 2
     AMDSMI_VRAM_TYPE_DDR3  = 11,  //!< Double Data Rate, Generation 3
     AMDSMI_VRAM_TYPE_DDR4  = 12,  //!< Double Data Rate, Generation 4
+    AMDSMI_VRAM_TYPE_DDR5  = 13,  //!< Double Data Rate, Generation 5
     // GDDR
     AMDSMI_VRAM_TYPE_GDDR1 = 17,  //!< Graphics Double Data Rate, Generation 1
     AMDSMI_VRAM_TYPE_GDDR2 = 18,  //!< Graphics Double Data Rate, Generation 2
@@ -638,7 +639,10 @@ typedef enum {
     AMDSMI_VRAM_TYPE_GDDR5 = 21,  //!< Graphics Double Data Rate, Generation 5
     AMDSMI_VRAM_TYPE_GDDR6 = 22,  //!< Graphics Double Data Rate, Generation 6
     AMDSMI_VRAM_TYPE_GDDR7 = 23,  //!< Graphics Double Data Rate, Generation 7
-    AMDSMI_VRAM_TYPE__MAX = AMDSMI_VRAM_TYPE_GDDR7
+    // LPDDR
+    AMDSMI_VRAM_TYPE_LPDDR4 = 30,  //!< Low Power Double Data Rate, Generation 4
+    AMDSMI_VRAM_TYPE_LPDDR5 = 31,  //!< Low Power Double Data Rate, Generation 5
+    AMDSMI_VRAM_TYPE__MAX = AMDSMI_VRAM_TYPE_LPDDR5
 } amdsmi_vram_type_t;
 
 /**
