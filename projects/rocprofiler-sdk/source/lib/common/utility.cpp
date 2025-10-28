@@ -32,6 +32,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -40,6 +41,33 @@ namespace common
 {
 namespace
 {
+// Parse clock ID from env var (e.g., "CLOCK_REALTIME" -> CLOCK_REALTIME constant)
+clockid_t
+parse_clock_id_from_env(const char* env_value)
+{
+    if(!env_value) return CLOCK_BOOTTIME;  // Default fallback
+
+    std::string_view val(env_value);
+    if(val == "CLOCK_REALTIME") return CLOCK_REALTIME;
+    if(val == "CLOCK_MONOTONIC") return CLOCK_MONOTONIC;
+    if(val == "CLOCK_MONOTONIC_RAW") return CLOCK_MONOTONIC_RAW;
+    if(val == "CLOCK_BOOTTIME") return CLOCK_BOOTTIME;
+    if(val == "CLOCK_PROCESS_CPUTIME_ID") return CLOCK_PROCESS_CPUTIME_ID;
+    if(val == "CLOCK_THREAD_CPUTIME_ID") return CLOCK_THREAD_CPUTIME_ID;
+    if(val == "CLOCK_REALTIME_COARSE") return CLOCK_REALTIME_COARSE;
+    if(val == "CLOCK_MONOTONIC_COARSE") return CLOCK_MONOTONIC_COARSE;
+    if(val == "CLOCK_TAI") return CLOCK_TAI;
+    // Add more if needed (TAI, etc.)
+
+    // Try numeric parse (e.g., "7" for CLOCK_BOOTTIME on Linux)
+    try {
+        return std::stoi(std::string(val));
+    } catch(...) {
+        ROCP_WARNING << "Unknown ROCPROF_CLOCK_ID: " << val << ", using CLOCK_BOOTTIME";
+        return CLOCK_BOOTTIME;
+    }
+}
+
 std::string_view
 get_clock_name(clockid_t _id)
 {
@@ -66,6 +94,14 @@ get_clock_name(clockid_t _id)
 
 auto _process_init_ns = timestamp_ns();
 }  // namespace
+
+// Runtime default clock ID: Read once from env, cache forever
+int
+get_default_clock_id()
+{
+    static const int _cached_clk = parse_clock_id_from_env(std::getenv("ROCPROF_CLOCK_ID"));
+    return _cached_clk;
+}
 
 uint64_t
 get_clock_period_ns_impl(clockid_t _clk_id)

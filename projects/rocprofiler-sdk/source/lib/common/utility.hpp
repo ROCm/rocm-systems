@@ -42,6 +42,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 namespace rocprofiler
@@ -80,16 +81,27 @@ get_ticks(clockid_t clk_id_v) noexcept
     return (static_cast<uint64_t>(ts.tv_sec) * nanosec) + static_cast<uint64_t>(ts.tv_nsec);
 }
 
-static constexpr int default_clock_id = CLOCK_BOOTTIME;
+// Runtime-configurable default clock (via env ROCPROF_CLOCK_ID or hardcoded fallback)
+int
+get_default_clock_id();
+
+static constexpr int default_clock_id = CLOCK_BOOTTIME;  // Compile-time fallback
 
 // CLOCK_MONOTONIC_RAW equates to HSA-runtime library implementation of os::ReadAccurateClock()
 // CLOCK_BOOTTIME equates to HSA-runtime library implementation of os::ReadSystemClock()
-template <int ClockT = default_clock_id>
+template <int ClockT = -1>  // -1 = use runtime default; else compile-time override
 inline uint64_t
 timestamp_ns()
 {
-    constexpr auto _clk        = ClockT;
-    static auto    _clk_period = get_clock_period_ns_impl(_clk);
+    // Determine clock: If template is -1 (default), use runtime config; else use template
+    const auto _clk = (ClockT == -1) ? get_default_clock_id() : ClockT;
+    
+    // Cache period per clock ID (thread-safe via static init in C++11+)
+    static thread_local std::unordered_map<int, uint64_t> _clk_periods;
+    if(_clk_periods.find(_clk) == _clk_periods.end()) {
+        _clk_periods[_clk] = get_clock_period_ns_impl(_clk);
+    }
+    const auto _clk_period = _clk_periods[_clk];
 
     if(ROCPROFILER_LIKELY(_clk_period == 1)) return get_ticks(_clk);
     return get_ticks(_clk) / _clk_period;
