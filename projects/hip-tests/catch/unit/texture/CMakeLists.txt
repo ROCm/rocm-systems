@@ -99,9 +99,10 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BIN
 
 if(HIP_PLATFORM MATCHES "amd")
   set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx942 gfx950)
+  set(IS_CORRECT_ARCH -1)
   set(ARCH_CHECK -1)
   foreach(ARCH_STR IN LISTS gfx90a_AND_ABOVE_TARGETS)
-    check_arch(ARCH_STR)
+    check_arch(${ARCH_STR})
     if (${IS_CORRECT_ARCH} GREATER_EQUAL 0)
       set(ARCH_CHECK 1)
       return()
