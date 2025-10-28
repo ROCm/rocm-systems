@@ -155,6 +155,8 @@ public:
 int
 main(int /*argc*/, char** /*argv*/)
 {
+    hipSetDevice(0);
+
     std::array<HipStream, 3>              streams{};
     std::vector<decltype(divide_kernel)*> kernels{};
 

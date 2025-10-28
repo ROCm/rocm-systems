@@ -35,11 +35,15 @@ class Signal
 {
 public:
     Signal(hsa_ext_amd_aql_pm4_packet_t* packet);
+    Signal();
     ~Signal();
     Signal(Signal& other) = delete;
     Signal& operator=(Signal& other) = delete;
 
     void WaitOn() const;
+
+    hsa_signal_t getSignal() const { return signal; }
+    void reset();
 
 private:
     hsa_signal_t      signal{};
@@ -57,6 +61,7 @@ public:
     HsaATTQueue& operator=(HsaATTQueue& other) = delete;
 
     std::unique_ptr<Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const;
+    void Submit(hsa_ext_amd_aql_pm4_packet_t* packet, Signal* completion) const;
 
     template <typename VecType>
     std::unique_ptr<Signal> SubmitAndSignalLast(VecType vec)
@@ -74,6 +79,8 @@ public:
     const rocprofiler_agent_id_t agent_id;
     const size_t                 buffer_size;
 
+    const hsa_agent_t hsa_agent;
+    const hsa_agent_t near_cpu;
 private:
     hsa_queue_t*         queue{nullptr};
     std::array<void*, 2> double_buffer_memory{};

@@ -40,15 +40,20 @@ namespace thread_trace
 {
 constexpr size_t QUEUE_SIZE = 256;
 
-Signal::Signal(hsa_ext_amd_aql_pm4_packet_t* packet)
+Signal::Signal(hsa_ext_amd_aql_pm4_packet_t* packet): Signal()
+{
+    packet->completion_signal = signal;
+    reset();
+}
+
+Signal::Signal()
 {
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
     auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
 
     ext->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &signal);
-    packet->completion_signal = signal;
-    core->hsa_signal_store_screlease_fn(signal, 1);
 }
+
 Signal::~Signal()
 {
     WaitOn();
@@ -63,16 +68,19 @@ Signal::WaitOn() const
     {}
 }
 
+void Signal::reset()
+{
+    CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_store_screlease_fn(signal, 1);
+}
+
 HsaATTQueue::HsaATTQueue(const hsa::AgentCache& agent, size_t double_buffer_size)
-: agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id)
+: agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id), hsa_agent(agent.get_hsa_agent()), near_cpu(agent.near_cpu())
 , buffer_size(double_buffer_size)
 {
     ROCP_TRACE << "Constructing Async queue.";
 
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
     auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
-
-    auto hsa_agent = agent.get_hsa_agent();
 
     auto status = core->hsa_queue_create_fn(hsa_agent,
                                             QUEUE_SIZE,
@@ -92,8 +100,10 @@ HsaATTQueue::HsaATTQueue(const hsa::AgentCache& agent, size_t double_buffer_size
             CHECK_HSA(ext->hsa_amd_memory_pool_allocate_fn(
                           agent.cpu_pool(), double_buffer_size, 0, &memory),
                       "failed to allocate contiguous memory");
+            CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &near_cpu, nullptr, memory),
+                      "failed to allow cpu access");
             CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, memory),
-                      "failed to allow access");
+                      "failed to allow gpu access");
         }
     }
 
@@ -109,8 +119,8 @@ HsaATTQueue::~HsaATTQueue()
         hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(memory);
 }
 
-std::unique_ptr<Signal>
-HsaATTQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const
+void
+HsaATTQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet, Signal* completion) const
 {
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
 
@@ -124,14 +134,24 @@ HsaATTQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const
     const auto* slot_data = reinterpret_cast<const uint32_t*>(packet);
 
     memcpy(&queue_slot[1], &slot_data[1], sizeof(hsa_ext_amd_aql_pm4_packet_t) - sizeof(uint32_t));
-    if(bWait)
-        signal =
-            std::make_unique<Signal>(reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(queue_slot));
+    if (completion)
+    {
+        completion->reset();
+        reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(queue_slot)->completion_signal = completion->getSignal();
+    }
     auto* header = reinterpret_cast<std::atomic<uint32_t>*>(queue_slot);
 
     header->store(slot_data[0], std::memory_order_release);
     core->hsa_signal_store_screlease_fn(queue->doorbell_signal, write_idx);
+}
 
+std::unique_ptr<Signal>
+HsaATTQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const
+{
+    auto signal = std::unique_ptr<Signal>{nullptr};
+    if (bWait) signal = std::make_unique<Signal>();
+
+    Submit(packet, signal.get());
     return signal;
 }
 
