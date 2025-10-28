@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 16
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 17
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1105,6 +1105,10 @@ typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t l
                                             const char* name);
 typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int *count,
                                                  hipLibrary_t library);
+typedef hipError_t (*t_hipLibraryEnumerateKernels)(hipKernel_t* kernels, unsigned int numKernels,
+                                                   hipLibrary_t library);
+typedef hipError_t (*t_hipKernelGetLibrary)(hipLibrary_t* library, hipKernel_t kernel);
+typedef hipError_t (*t_hipKernelGetName)(const char** name, hipKernel_t kernel);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1683,8 +1687,13 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 16
   t_hipStreamCopyAttributes hipStreamCopyAttributes_fn;
 
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 17
+  t_hipLibraryEnumerateKernels hipLibraryEnumerateKernels_fn;
+  t_hipKernelGetLibrary hipKernelGetLibrary_fn;
+  t_hipKernelGetName hipKernelGetName_fn;
+
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 17
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
 
   // ******************************************************************************************* //
   //
