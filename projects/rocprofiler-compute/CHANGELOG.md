@@ -13,6 +13,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * analysis configs yamls are now managed with the new config management workflow in `tools/config_management/`
 
 ### Removed
+* Removed `database` mode from `rocprofiler-compute`. This is to move our focus from grafana
+  and mongodb integration to other visualization methods such as:
+  * Analysis DB based Visualizer (upcoming)
+  * Plotly server based standalone GUI
+  * Commandline based Textual User Interface
 
 ### Optimized
 
@@ -182,7 +187,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Usage of `rocm-smi` in favor of `amd-smi`.
 * Hardware IP block-based filtering has been removed in favor of analysis report block-based filtering.
 * Removed aggregated analysis view from TUI analyze mode.
-* Removed `database` mode from `rocprofiler-compute`
 
 ### Optimized
 
