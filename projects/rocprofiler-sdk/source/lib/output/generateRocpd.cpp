@@ -1442,8 +1442,7 @@ write_rocpd(
         }
     };
 
-    auto insert_kfd_data = [&conn, &tool_metadata, &string_entries, node_id, this_pid](
-                               auto& pmc_ids) {
+    auto insert_kfd_data = [&conn, &tool_metadata, node_id, this_pid](auto& pmc_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_pmc: kfd");
 
         using kfd_pmc_info_t = struct
