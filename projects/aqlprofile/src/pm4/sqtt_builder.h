@@ -141,7 +141,7 @@ class SqttBuilder {
   // inserts "data" into the SQTT buffer as USERDATA_2 (data_lo) and USERDATA_3 (data_hi)
   virtual hsa_status_t InsertCodeobjMarker(CmdBuffer* cmd_buffer, uint32_t data, unsigned channel) = 0;
   // Builds PM4 command stream to swap SQTT buffer to the next
-  virtual void Swapbuffer(CmdBuffer* cmd_buffer, TraceConfig* config, void* addr, int se_id, bool buf1) = 0;
+  virtual void Swapbuffer(CmdBuffer* cmd_buffer, TraceConfig* config, void* addr, void* prev, int se_id, bool buf1) = 0;
   // Builds PM4 command stream to query status bit
   virtual void GetStatusPacket(CmdBuffer* cmd_buffer, TraceConfig* config, TraceControl& control, int se_id) = 0;
 
@@ -676,7 +676,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     SetGRBMToBroadcast(cmd_buffer);
   }
 
-  void Swapbuffer(CmdBuffer* cmd_buffer, TraceConfig* config, void* addr, int se_id, bool buf1) override
+  void Swapbuffer(CmdBuffer* cmd_buffer, TraceConfig* config, void* addr, void* prev, int se_id, bool buf1) override
   {
     int se_per_xcc = se_number_total / GetXCCNumber();
     uint64_t base_addr = reinterpret_cast<uint64_t>(addr);
@@ -701,6 +701,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       builder.BuildWriteWaitIdlePacket(cmd_buffer);
       WriteConfigPacket(cmd_buffer, reg_hi, buff1_hi);
     }
+    builder.BuildCacheFlushPacket(cmd_buffer, size_t(prev), config->data_buffer_size);
 
     SetGRBMToBroadcast(cmd_buffer);
   }

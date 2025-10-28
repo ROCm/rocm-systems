@@ -440,7 +440,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   for (size_t i=0; i<buffers.size(); i++)
   {
     pm4_builder::CmdBuffer commands;
-    sqttbuilder->Swapbuffer(&commands, &manager->config, buffers.at((i + 1) % buffers.size()), shader_engine_id, i%2);
+    sqttbuilder->Swapbuffer(&commands, &manager->config, buffers.at((i + 1) % buffers.size()), buffers.at(i % buffers.size()), shader_engine_id, i%2);
 
     void* cmdbuffer = manager->AddExtraCmdBuf(commands.Size());
     memcpy(cmdbuffer, commands.Data(), commands.Size());
