@@ -37,7 +37,6 @@ set_target_properties(
 set(OCCUPANCY ../sample/occupancy.hip)
 set_source_files_properties(${OCCUPANCY} PROPERTIES LANGUAGE HIP)
 add_executable(occupancy ${OCCUPANCY})
-target_compile_options(occupancy PRIVATE -g -O0)
 set_target_properties(
     occupancy
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
