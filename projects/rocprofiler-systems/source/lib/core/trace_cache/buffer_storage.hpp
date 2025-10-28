@@ -36,7 +36,6 @@
 #include <stdexcept>
 #include <stdint.h>
 #include <string.h>
-#include <thread>
 #include <type_traits>
 #include <unistd.h>
 
@@ -62,9 +61,10 @@ public:
         }
 
         constexpr bool is_supported_type = (supported_types::is_supported<T> && ...);
-        static_assert(is_supported_type, "Supported types are const char*, char*, "
-                                         "unsigned long, unsigned int, long, unsigned "
-                                         "char, std::vector<unsigned char> and int.");
+        static_assert(is_supported_type,
+                      "Supported types are const char*, char*, "
+                      "unsigned long, unsigned int, long, unsigned "
+                      "char, std::vector<unsigned char>, double, and int.");
 
         auto   arg_size        = get_size(values...);
         auto   total_size      = arg_size + sizeof(type) + sizeof(size_t);
@@ -102,9 +102,12 @@ public:
         (store_value(values), ...);
     }
 
+    void start_flushing_thread(pid_t pid);
+    ~buffer_storage();
+
 private:
     friend class cache_manager;
-    buffer_storage(pid_t _pid);
+    buffer_storage();
     void     shutdown();
     bool     is_running() const;
     void     fragment_memory();
@@ -119,7 +122,7 @@ private:
     };
 
     using supported_types = typelist<const char*, char*, uint64_t, int32_t, uint32_t,
-                                     std::vector<uint8_t>, uint8_t, int64_t>;
+                                     std::vector<uint8_t>, uint8_t, int64_t, double>;
 
     template <typename T>
     static constexpr bool is_string_literal_v =

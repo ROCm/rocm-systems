@@ -6,7 +6,7 @@
 Configuring and validating the environment
 ****************************************************
 
-After installing `ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_, additional steps are required to set up
+After installing `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_, additional steps are required to set up
 and validate the environment.
 
 .. note::

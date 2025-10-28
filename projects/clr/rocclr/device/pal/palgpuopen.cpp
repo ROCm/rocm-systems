@@ -358,7 +358,7 @@ Pal::Result RgpCaptureMgr::CheckForTraceResults() {
 // ================================================================================================
 // Called after a swap chain presents.  This signals a (next) frame-begin boundary and is
 // used to coordinate RGP trace start/stop.
-void RgpCaptureMgr::PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x, size_t y,
+void RgpCaptureMgr::PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x, size_t y,
                                 size_t z) {
   // Wait for the driver to be resumed in case it's been paused.
   WaitForDriverResume();
