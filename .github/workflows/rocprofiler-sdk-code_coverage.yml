@@ -266,7 +266,7 @@ jobs:
         echo "✅ ROCProfiler-Register Installation complete!"
 
     - name: Build and Install ROCR-Runtime
-      if: env.ENABLE_ROCR_BUILD
+      if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
       shell: bash
       working-directory: projects/rocr-runtime
       run: |
@@ -283,7 +283,7 @@ jobs:
         echo "✅ ROCR-Runtime Installation complete!"
 
     - name: Build and Install HIP
-      if: env.ENABLE_HIP_CLR_BUILD
+      if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
       shell: bash
       working-directory: projects
       run: |
