@@ -19,6 +19,7 @@
 
 
 #include "mempool_common.hh"
+#include <hip_test_config.hh>
 
 #include <resource_guards.hh>
 #include <utils.hh>
@@ -204,7 +205,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_VaryingMinBytesToHold") {
       // create a stream
       hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  constexpr int N = 1 << 20;
+  constexpr int N = TEST_MEMORY_MEM_POOL_TRIM_TO_N;
   REQUIRE(true == checkhipMemPoolTrimTo(stream, N));
   HIP_CHECK(hipStreamDestroy(stream));
 }
@@ -220,7 +221,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_VaryingMinBytesToHold") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold") {
-  constexpr int N = 1 << 20;
+  constexpr int N = TEST_MEMORY_MEM_POOL_TRIM_TO_N;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
@@ -257,7 +258,7 @@ static void thread_Test(hipStream_t stream, int N, int threadNum) {
 TEST_CASE("Unit_hipMemPoolTrimTo_Multithreaded") {
   checkMempoolSupported(0)
       // create a stream
-      constexpr int N = 1 << 20;
+      constexpr int N = TEST_MEMORY_MEM_POOL_TRIM_TO_N;
   std::vector<std::thread> tests;
   hipStream_t stream[NUMBER_OF_THREADS];
   // Initialize and create streams

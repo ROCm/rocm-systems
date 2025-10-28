@@ -36,6 +36,7 @@ are ignored and hipExtStreamCreateWithCUMask must return hipSuccess.
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 #include <chrono>
 #include <thread>
 #include <iostream>
@@ -172,7 +173,7 @@ TEST_CASE("Unit_hipExtStreamCreateWithCUMask_Functionality") {
   const int KNumPartition = NUM_CU_PARTITIONS;
   float *dA[KNumPartition], *dC[KNumPartition];
   float *hA, *hC;
-  size_t N = 25 * SIZE_INBYTES_OF_MB;
+  size_t N = TEST_STREAM_WITH_CU_MASK_N_MULTIPLIER * SIZE_INBYTES_OF_MB;
   size_t Nbytes = N * sizeof(float);
   std::vector<hipStream_t> streams(KNumPartition);
   std::vector<std::vector<uint32_t>> cuMasks(KNumPartition);

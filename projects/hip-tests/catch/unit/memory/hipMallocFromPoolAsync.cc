@@ -18,6 +18,7 @@
  */
 
 #include "mempool_common.hh"
+#include <hip_test_config.hh>
 
 #include <limits>
 
@@ -292,7 +293,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_ReleaseThreshold") {
       // create a stream
       hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  constexpr int N = 1 << 20;
+  constexpr int N = TEST_MEMORY_MALLOC_FROM_POOL_ASYNC_N;
   REQUIRE(true == checkMaximumAndDefaultThreshold(stream, N, testdefault));
   REQUIRE(true == checkMaximumAndDefaultThreshold(stream, N, testMaximum));
   HIP_CHECK(hipStreamDestroy(stream));
@@ -341,7 +342,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_hipStreamPerThread") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMallocFromPoolAsync_ReleaseThreshold_Mgpu") {
-  constexpr int N = 1 << 20;
+  constexpr int N = TEST_MEMORY_MALLOC_FROM_POOL_ASYNC_N;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int dev = 0; dev < numDevices; dev++) {
@@ -378,7 +379,7 @@ static void thread_Test1(hipStream_t stream, int N, enum eTestValue testtype, in
 
 static bool test_hipMallocFromPoolAsync_MThread(enum eTestValue testtype) {
   // create a stream
-  constexpr int N = 1 << 20;
+  constexpr int N = TEST_MEMORY_MALLOC_FROM_POOL_ASYNC_N;
   std::vector<std::thread> tests;
   hipStream_t stream[NUMBER_OF_THREADS];
   // Initialize and create streams
@@ -431,7 +432,7 @@ static void thread_Test2(hipMemPool_t mempool, hipStream_t stream, int N, int th
 static bool test_hipMallocFromPoolAsync_MThread_CommonMpool(enum eTestValue testtype,
                                                             bool bUseDefault = false) {
   // create a stream
-  constexpr int N = 1 << 20;
+  constexpr int N = TEST_MEMORY_MALLOC_FROM_POOL_ASYNC_N;
   std::vector<std::thread> tests;
   hipStream_t stream[NUMBER_OF_THREADS];
   // Create common mempool
@@ -577,7 +578,7 @@ static bool checkReuseAllowOtherFlags(int N, hipMemPoolAttr attr, enum eTestValu
 #if HT_AMD
 TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_Concurrent") {
   auto testType = GENERATE(testdefault, testMaximum);
-  constexpr int N = 1 << 20;
+  constexpr int N = TEST_MEMORY_MALLOC_FROM_POOL_ASYNC_N;
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   checkIfMultiDev(num_devices) hipStream_t* stream_buf = new hipStream_t[num_devices];
@@ -630,7 +631,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_Concurrent") {
 TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_MultiStream") {
   int num_devices;
   auto testType = GENERATE(testdefault, testMaximum);
-  constexpr int N = 1 << 20;
+  constexpr int N = TEST_MEMORY_MALLOC_FROM_POOL_ASYNC_N;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   checkIfMultiDev(num_devices)
       // 2 stream per ASIC

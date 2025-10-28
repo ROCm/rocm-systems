@@ -22,6 +22,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 
 #include "graph_dependency_common.hh"
@@ -144,7 +145,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Positive_CapturedStream") {
   hipStream_t streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_GET_NODES_N;
   constexpr int expectedRootNodes = 3;
   size_t numRootNodes{};
   float *A_d, *B_d, *C_d;

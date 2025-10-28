@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 #include "stream_capture_common.hh"
 
@@ -31,7 +32,7 @@ THE SOFTWARE.
  */
 
 void checkStreamCaptureInfo(hipStreamCaptureMode mode, hipStream_t stream) {
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_GET_CAPTURE_INFO_N;
   size_t Nbytes = N * sizeof(float);
 
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};

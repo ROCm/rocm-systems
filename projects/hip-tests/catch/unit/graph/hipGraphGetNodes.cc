@@ -22,6 +22,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 
 #include "graph_dependency_common.hh"
@@ -140,7 +141,7 @@ TEST_CASE("Unit_hipGraphGetNodes_Positive_Functional") {
 TEST_CASE("Unit_hipGraphGetNodes_Positive_CapturedStream") {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_GET_NODES_N;
   constexpr int numMemcpy{3}, numKernel{2}, numMemset{2};
   int cntMemcpy{}, cntKernel{}, cntMemset{};
   hipStream_t streamForGraph;

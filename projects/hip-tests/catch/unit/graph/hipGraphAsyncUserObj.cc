@@ -21,6 +21,7 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 #include <condition_variable>
 #include "user_object_common.hh"
+#include <hip_test_config.hh>
 bool setVar = false;
 void* globalPtr = nullptr;
 std::mutex m;

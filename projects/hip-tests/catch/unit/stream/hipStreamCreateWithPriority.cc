@@ -29,13 +29,14 @@ THE SOFTWARE.
 #include <atomic>
 #include <vector>
 #include "streamCommon.hh"  // NOLINT
+#include <hip_test_config.hh>
 
-#define MEMCPYSIZE1 (64 * 1024 * 1024)
-#define MEMCPYSIZE2 (1024 * 1024)
+#define MEMCPYSIZE1 TEST_STREAM_CREATE_WITH_PRIORITY_MEMCPYSIZE1
+#define MEMCPYSIZE2 TEST_STREAM_CREATE_WITH_PRIORITY_MEMCPYSIZE2
 #define NUMITERS 2
 #define GRIDSIZE 1024
 #define BLOCKSIZE 256
-#define TOTALTHREADS 16
+#define TOTALTHREADS TEST_STREAM_CREATE_WITH_PRIORITY_TOTALTHREADS
 
 namespace hipStreamCreateWithPriorityTest {
 

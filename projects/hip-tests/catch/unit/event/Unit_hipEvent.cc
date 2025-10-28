@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 
 #include <hip_test_common.hh>
+#include <hip_test_config.hh>
 
 /**
  * @addtogroup hipEventRecord hipEventRecord
@@ -202,7 +203,7 @@ void runTests(int64_t numElements) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEvent") { runTests(10000000); }
+TEST_CASE("Unit_hipEvent") { runTests(TEST_EVENT_UNIT_HIP_EVENT_ITERATIONS); }
 
 /**
  * End doxygen group EventTest.

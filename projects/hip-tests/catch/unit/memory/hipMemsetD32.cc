@@ -21,6 +21,7 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 #include <array>
+#include <hip_test_config.hh>
 
 /**
  * @addtogroup hipMemsetD32 hipMemsetD32
@@ -39,9 +40,8 @@ using memset_fn_t = hipError_t (*)(hipDeviceptr_t dest, test_target_t value, siz
 static constexpr memset_fn_t memset_fn = hipMemsetD32;
 
 // Table with buffer allocation number of elements
-static constexpr std::array<size_t, 5> buffer_nelems = {
-    4096, 4096 * 8, 4096 * 32, 4096 * 128, 4096 * 256,
-};
+static constexpr std::array<size_t, TEST_MEMORY_MEMSET_D32_BUFFER_NELEMS_SIZE> buffer_nelems = 
+    TEST_MEMORY_MEMSET_D32_BUFFER_NELEMS;
 
 // Pattern value that buffers will be set to
 static constexpr test_target_t pattern = static_cast<test_target_t>(0xDEADBEEF);

@@ -20,9 +20,10 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
-#define SIZE (1024 * 1024)
+#define SIZE TEST_GRAPH_ADD_NODE_BEGIN_CAPTURE_SIZE
 static size_t Nbytes = SIZE * sizeof(int);
 
 __device__ int globalOut[SIZE];

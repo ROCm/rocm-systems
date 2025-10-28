@@ -29,13 +29,14 @@ THE SOFTWARE.
 #include <utils.hh>
 #include <resource_guards.hh>
 #include <hip/driver_types.h>
+#include <hip_test_config.hh>
 
 template <bool should_synchronize, bool unaligned = false, typename F>
 void Memcpy2DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   const auto kind = GENERATE(hipMemcpyDeviceToHost, hipMemcpyDefault);
 
-  constexpr size_t cols = 127;
-  constexpr size_t rows = 128;
+  constexpr size_t cols = TEST_MEMORY_MEMCPY2D_COMMON_COLS;
+  constexpr size_t rows = TEST_MEMORY_MEMCPY2D_COMMON_ROWS;
 
   LinearAllocGuard2D<int, unaligned> device_alloc(cols, rows);
 
@@ -64,8 +65,8 @@ template <bool should_synchronize, bool enable_peer_access, bool unaligned = fal
 void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   const auto kind = GENERATE(hipMemcpyDeviceToDevice, hipMemcpyDefault);
 
-  constexpr size_t cols = 127;
-  constexpr size_t rows = 128;
+  constexpr size_t cols = TEST_MEMORY_MEMCPY2D_COMMON_COLS;
+  constexpr size_t rows = TEST_MEMORY_MEMCPY2D_COMMON_ROWS;
 
   const auto device_count = HipTest::getDeviceCount();
   const auto src_device = GENERATE_COPY(range(0, device_count));
@@ -124,8 +125,8 @@ template <bool should_synchronize, bool unaligned = false, typename F>
 void Memcpy2DHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   const auto kind = GENERATE(hipMemcpyHostToDevice, hipMemcpyDefault);
 
-  constexpr size_t cols = 127;
-  constexpr size_t rows = 128;
+  constexpr size_t cols = TEST_MEMORY_MEMCPY2D_COMMON_COLS;
+  constexpr size_t rows = TEST_MEMORY_MEMCPY2D_COMMON_ROWS;
 
   LinearAllocGuard2D<int, unaligned> device_alloc(cols, rows);
 
@@ -158,8 +159,8 @@ template <bool should_synchronize, typename F>
 void Memcpy2DHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   const auto kind = GENERATE(hipMemcpyHostToHost, hipMemcpyDefault);
 
-  constexpr size_t cols = 127;
-  constexpr size_t rows = 128;
+  constexpr size_t cols = TEST_MEMORY_MEMCPY2D_COMMON_COLS;
+  constexpr size_t rows = TEST_MEMORY_MEMCPY2D_COMMON_ROWS;
 
   const size_t src_pitch = GENERATE_REF(cols * sizeof(int), cols * sizeof(int) + 64);
 

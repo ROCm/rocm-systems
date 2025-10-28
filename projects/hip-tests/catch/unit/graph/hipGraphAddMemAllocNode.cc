@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include <hip_test_config.hh>
 
 /**
  * @addtogroup hipGraphAddMemAllocNode hipGraphAddMemAllocNode
@@ -35,7 +36,7 @@ THE SOFTWARE.
  * Creates a memory allocation node and adds it to a graph.
  */
 
-static constexpr auto element_count{512 * 1024 * 1024};
+static constexpr auto element_count{TEST_GRAPH_ADD_MEM_ALLOC_NODE_ELEMENT_COUNT};
 
 __global__ void validateGPU(int* const vec, const int value, size_t N, unsigned int* mismatch) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;

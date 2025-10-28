@@ -22,9 +22,10 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <utils.hh>
 #include <resource_guards.hh>
+#include <hip_test_config.hh>
 
 namespace {
-inline constexpr size_t kLaunchIters = 10;
+inline constexpr size_t kLaunchIters = TEST_GRAPH_STREAM_CAPTURE_COMMON_KLAUNCH_ITERS;
 }  // anonymous namespace
 
 template <typename T>

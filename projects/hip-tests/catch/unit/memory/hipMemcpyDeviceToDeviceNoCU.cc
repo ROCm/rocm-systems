@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 /**
  * @addtogroup hipMemcpy hipMemcpy
  * @{
@@ -48,7 +49,7 @@ static void fillDataTransfer2Dev(int* hostBuf, size_t len) {
 TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream") {
   auto testAsync = GENERATE(0, 1);
   auto isDefaultStrm = GENERATE(0, 1);
-  constexpr int N = 1 << 18;
+  constexpr int N = TEST_MEMORY_MEMCPY_DEVICE_TO_DEVICE_NO_CU_N;
   size_t buffer_size = N * sizeof(int);
   constexpr unsigned threadsPerBlock = 128;
   constexpr unsigned blocks = 64;
@@ -109,7 +110,7 @@ TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream") {
  *    - HIP_VERSION >= 6.1
  */
 TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_WithCU_NoCU_Comb_SingleStrm") {
-  constexpr int N = 1 << 18;
+  constexpr int N = TEST_MEMORY_MEMCPY_DEVICE_TO_DEVICE_NO_CU_N;
   size_t buffer_size = N * sizeof(int);
   // Allocate device resources
   int *Ad, *Bd, *Cd;
@@ -170,7 +171,7 @@ TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_WithCU_NoCU_Comb_SingleStrm") {
  *    - HIP_VERSION >= 6.1
  */
 TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm") {
-  constexpr int N = 1 << 18;
+  constexpr int N = TEST_MEMORY_MEMCPY_DEVICE_TO_DEVICE_NO_CU_N;
   size_t buffer_size = N * sizeof(int);
   // Allocate device resources
   int *Ad, *Bd, *Cd;

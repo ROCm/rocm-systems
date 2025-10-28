@@ -28,6 +28,7 @@ Testcase Scenarios :
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 /**
  * Tests basic functionality of cycle detection in hipGraph APIs by
@@ -127,7 +128,7 @@ TEST_CASE("Unit_hipGraph_BasicCyclic3") {
  * Uncyclic graph, removing edge from middle of linear graph
  */
 TEST_CASE("Unit_hipGraph_BasicCyclic4") {
-  int N = 1024 * 1024;
+  int N = TEST_GRAPH_CYCLE_N_TEST4;
   int Nbytes = N * sizeof(int);
   hipGraph_t graph;
   hipGraphExec_t graphExec;
@@ -186,7 +187,7 @@ TEST_CASE("Unit_hipGraph_BasicCyclic4") {
  * cyclic graph, removing edge to resolve cycle and remove edge from middle of graph
  */
 TEST_CASE("Unit_hipGraph_BasicCyclic5") {
-  int N = 1024 * 1024;
+  int N = TEST_GRAPH_CYCLE_N_TEST5;
   int Nbytes = N * sizeof(int);
   hipGraph_t graph;
   hipGraphExec_t graphExec;

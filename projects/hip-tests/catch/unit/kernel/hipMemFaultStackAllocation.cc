@@ -25,8 +25,9 @@ Testcase Scenarios :
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
-const size_t N = 100000;
+const size_t N = TEST_KERNEL_MEM_FAULT_STACK_ALLOCATION_N;
 
 __global__ void MyKernelConstSize(int* C_d, const int* A_d) {
   constexpr size_t A1size = 1024;

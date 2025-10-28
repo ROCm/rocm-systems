@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 #include "stream_capture_common.hh"
 
@@ -55,7 +56,7 @@ static __global__ void vectorSum(const float* A_d, const float* B_d, float* C_d,
  */
 static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
                                                hipStreamCaptureMode captureMode) {
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_UPDATE_CAPTURE_DEPENDENCIES_N;
   constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
   size_t Nbytes = N * sizeof(float);
@@ -174,7 +175,7 @@ static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
  */
 static void UpdateStreamCaptureDependenciesAdd(hipStream_t stream,
                                                hipStreamCaptureMode captureMode) {
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_UPDATE_CAPTURE_DEPENDENCIES_N;
   constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
   size_t Nbytes = N * sizeof(float);

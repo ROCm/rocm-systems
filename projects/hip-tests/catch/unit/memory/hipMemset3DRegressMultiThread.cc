@@ -30,13 +30,14 @@ Testcase Scenarios :
 */
 
 #include <hip_test_common.hh>
+#include <hip_test_config.hh>
 
 
 /*
  * Defines
  */
 #define MAX_REGRESS_ITERS 2
-#define MAX_THREADS 10
+#define MAX_THREADS TEST_MEMORY_MEMSET3D_REGRESS_MULTI_THREAD_MAX_THREADS
 
 /**
  * kernel function sets device memory with value passed

@@ -18,6 +18,7 @@
  */
 #define HIP_TEMPLATE_KERNEL_LAUNCH
 #include <hip_test_common.hh>
+#include <hip_test_config.hh>
 #include <stdio.h>
 #include <ratio>
 #include <chrono>
@@ -35,7 +36,7 @@ int64_t timeNanos() {
   return timeSpan.count();
 }
 
-#define WIDTH 1024
+#define WIDTH TEST_EVENT_UNIT_HIP_EVENT_MGPU_MTHREADS_WIDTH
 
 #define NUM (WIDTH * WIDTH)
 

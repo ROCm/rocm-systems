@@ -29,6 +29,7 @@ This testcase verifies following scenarios
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
+#include <hip_test_config.hh>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -39,7 +40,7 @@ This testcase verifies following scenarios
 #endif
 
 
-static constexpr auto NUM_ELM{4 * 1024 * 1024};
+static constexpr auto NUM_ELM{TEST_MEMORY_MEMCPY_EDGE_CASES_SIZE};
 static unsigned blocksPerCU{6};  // to hide latency
 static unsigned threadsPerBlock{256};
 

@@ -9,6 +9,22 @@ project(hiptests)
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
 
+# Test level configuration: quick (faster with reduced parameters) or full (comprehensive)
+set(TEST_LEVEL "full" CACHE STRING "Test level: quick or full")
+set_property(CACHE TEST_LEVEL PROPERTY STRINGS quick full)
+
+# Validate TEST_LEVEL
+if(NOT TEST_LEVEL MATCHES "^(quick|full)$")
+  message(FATAL_ERROR "Invalid TEST_LEVEL: ${TEST_LEVEL}. Must be 'quick' or 'full'.")
+endif()
+
+if(TEST_LEVEL STREQUAL "quick")
+  message(STATUS "Building with TEST_LEVEL=quick - tests will run faster with reduced parameters")
+  add_compile_definitions(QUICK_TESTS)
+else()
+  message(STATUS "Building with TEST_LEVEL=full - running comprehensive tests")
+endif()
+
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 if (TEST_CLOCK_CYCLE)
     add_definitions(-DTEST_CLOCK_CYCLE)

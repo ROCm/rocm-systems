@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 #include "stream_capture_common.hh"
 
@@ -78,7 +79,7 @@ TEST_CASE("Unit_hipStreamEndCapture_Negative_Parameters") {
  */
 TEST_CASE("Unit_hipStreamEndCapture_Positive_GraphDestroy") {
   hipGraph_t graph{nullptr};
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_END_CAPTURE_N;
   size_t Nbytes = N * sizeof(float);
 
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, Nbytes);
@@ -117,7 +118,7 @@ static void thread_func_neg(hipStream_t stream, hipGraph_t graph) {
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipStreamEndCapture_Negative_Thread") {
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_END_CAPTURE_N;
   size_t Nbytes = N * sizeof(float);
 
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, Nbytes);
@@ -161,7 +162,7 @@ static void thread_func_pos(hipStream_t stream, hipGraph_t* graph) {
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipStreamEndCapture_Positive_Thread") {
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_END_CAPTURE_N;
   size_t Nbytes = N * sizeof(float);
 
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, Nbytes);

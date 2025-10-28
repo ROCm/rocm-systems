@@ -48,6 +48,7 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
+#include <hip_test_config.hh>
 
 static constexpr auto NUM_W{16};
 static constexpr auto NUM_H{16};
@@ -508,7 +509,7 @@ static void hipMemcpy2DAsync_Basic_Size_Test(size_t inc) {
 
 TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test") {
   CHECK_IMAGE_SUPPORT
-  size_t input = 1 << 20;
+  size_t input = TEST_MEMORY_MEMCPY2D_OLD_INPUT;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

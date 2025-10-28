@@ -17,9 +17,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_test_config.hh>
 #include <iostream>
 #include <vector>
-constexpr int NN = 1 << 21;
+constexpr int NN = TEST_STREAM_LAUNCH_HOST_FUNC_NN;
 __global__ void kernel_do_nothing(__attribute__((unused)) int a) {
   // empty kernel
 }
@@ -63,7 +64,7 @@ TEST_CASE("Unit_hipMultiStream_sameDevice") {
 }
 
 TEST_CASE("Unit_hipMultiStream_multimeDevice") {
-  constexpr int nLoops = 50000;
+  constexpr int nLoops = TEST_STREAM_MULTI_STREAM_N_LOOPS;
   constexpr int nStreams = 2;
   std::vector<hipStream_t> streams(nStreams);
   int nGpu = 0;

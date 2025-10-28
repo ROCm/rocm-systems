@@ -98,10 +98,11 @@ Testcase Scenarios : Functional
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 #define INCREMENT_KERNEL_FINALEXP_VAL 7
-constexpr size_t N = 1000000;
-constexpr int LAUNCH_ITERS = 50;
+constexpr size_t N = TEST_GRAPH_STREAM_BEGIN_CAPTURE_OLD_N;
+constexpr int LAUNCH_ITERS = TEST_GRAPH_STREAM_BEGIN_CAPTURE_OLD_LAUNCH_ITERS;
 static int gCbackIter = 0;
 #define GRIDSIZE 256
 #define BLOCKSIZE 256

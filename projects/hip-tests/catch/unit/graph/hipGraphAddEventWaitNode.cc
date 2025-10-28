@@ -51,6 +51,7 @@ both graphs.
 #include <hip_test_kernels.hh>
 
 #include "graph_tests_common.hh"
+#include <hip_test_config.hh>
 
 /**
  * Scenario 1
@@ -224,7 +225,7 @@ TEST_CASE("Unit_hipGraphAddEventWaitNode_MultGraphMultStrmDependency") {
  * Scenario 3
  */
 TEST_CASE("Unit_hipGraphAddEventWaitNode_MultipleRun") {
-  validate_hipGraphAddEventWaitNode_internodedep(0, 100);
+  validate_hipGraphAddEventWaitNode_internodedep(0, TEST_GRAPH_EVENT_WAIT_ITERATIONS);
 }
 
 /**

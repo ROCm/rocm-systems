@@ -22,10 +22,11 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 #include <stdlib.h>
 
-constexpr size_t buffer_size = (1024 * 1024);
+constexpr size_t buffer_size = TEST_EVENT_CREATE_WITH_FLAGS_BUFFER_SIZE;
 constexpr int test_iteration_hstvismem = 5;
 constexpr int test_iteration_noncohmem = 10;
 constexpr int block_size = 512;

@@ -23,10 +23,11 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_test_config.hh>
 
-#define N 1024 * 1024
-#define NSTEP 1000
-#define NKERNEL 25
+#define N TEST_GRAPH_SIMPLE_GRAPH_WITH_KERNEL_N
+#define NSTEP TEST_GRAPH_SIMPLE_GRAPH_WITH_KERNEL_NSTEP
+#define NKERNEL TEST_GRAPH_SIMPLE_GRAPH_WITH_KERNEL_NKERNEL
 #define CONSTANT 5.34
 
 static __global__ void simpleKernel(float* out_d, float* in_d) {

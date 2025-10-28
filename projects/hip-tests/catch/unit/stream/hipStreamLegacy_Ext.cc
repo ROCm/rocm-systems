@@ -21,8 +21,9 @@ THE SOFTWARE.
 #include <hip_test_helper.hh>
 #include <utils.hh>
 #include <hip_test_process.hh>
+#include <hip_test_config.hh>
 
-static constexpr int N = 2 * 1024 * 1024;
+static constexpr int N = TEST_STREAM_LEGACY_EXT_N;
 static constexpr size_t NBYTES = N * sizeof(int);
 
 /**
@@ -159,8 +160,12 @@ void launchFunction(hipStream_t stream) {
  *  - HIP_VERSION >= 6.3
  */
 TEST_CASE("Unit_hipStreamLegacy_MultipleThreads") {
+#ifdef QUICK_TESTS
+  const int numberOfThreads = TEST_STREAM_LEGACY_EXT_NUMBER_OF_THREADS;
+#else
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
   const int numberOfThreads = (threadsSupported >= 10) ? 10 : threadsSupported;
+#endif
 
   std::vector<std::thread> threads;
   for (int t = 0; t < numberOfThreads; t++) {

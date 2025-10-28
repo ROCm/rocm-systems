@@ -18,11 +18,12 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 #include "hip/math_functions.h"
+#include <hip_test_config.hh>
 
-#define NUM_STREAMS 8
+#define NUM_STREAMS TEST_STREAM_API_STREAM_DISABLE_NUM_STREAMS
 
 namespace hipAPIStreamDisableTest {
-const int NN = 1 << 21;
+const int NN = TEST_STREAM_API_STREAM_DISABLE_NN;
 
 __global__ void kernel(float* x, float* y, int n) {
   int tid = threadIdx.x;

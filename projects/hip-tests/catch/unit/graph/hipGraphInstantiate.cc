@@ -48,8 +48,9 @@ Negative -
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
-#define NUM_OF_INSTANCES 10
+#define NUM_OF_INSTANCES TEST_GRAPH_INSTANTIATE_NUM_OF_INSTANCES
 /* Test verifies hipGraphInstantiate API Negative scenarios.
  */
 

@@ -24,11 +24,12 @@ THE SOFTWARE.
 #include <iostream>
 #include <chrono>  // NOLINT
 #include "hip/hip_runtime_api.h"
+#include <hip_test_config.hh>
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
-#define ITERATION 1000
-#define SIZE (64 * 1024 * 1024)
+#define ITERATION TEST_MEMORY_HOST_REGISTER_EXE_ITERATION
+#define SIZE TEST_MEMORY_HOST_REGISTER_EXE_SIZE
 #define ARRAY_SIZE 20
 
 static bool UNSETENV(std::string var) {

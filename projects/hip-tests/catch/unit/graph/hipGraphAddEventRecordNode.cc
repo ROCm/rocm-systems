@@ -59,6 +59,7 @@ Verify that hipEventElapsedTime() returns error.
 #include <hip_test_kernels.hh>
 
 #include "graph_tests_common.hh"
+#include <hip_test_config.hh>
 
 /**
  * Scenario 1: Create s simple graph with just one event record
@@ -238,7 +239,7 @@ TEST_CASE("Unit_hipGraphAddEventRecordNode_Functional_WithFlags") {
  * 100 times in a loop.
  */
 TEST_CASE("Unit_hipGraphAddEventRecordNode_MultipleRun") {
-  validateAddEventRecordNode(false, false, 100);
+  validateAddEventRecordNode(false, false, TEST_GRAPH_EVENT_RECORD_ITERATIONS);
 }
 
 /**

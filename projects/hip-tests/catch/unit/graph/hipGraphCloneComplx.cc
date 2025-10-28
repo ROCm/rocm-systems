@@ -33,6 +33,7 @@ to e_d. Instantiate and Launch Cloned Graph. verify the result ( e_d = a_d ) for
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 #define N (1024 * 128)
 
@@ -1507,7 +1508,7 @@ TEST_CASE("Unit_hipGraphClone_address_change_in_loop") {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
 
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < TEST_GRAPH_CLONE_COMPLX_LOOP; i++) {
     HIP_CHECK(hipSetDevice(i % devcount));
 
     HIP_CHECK(hipStreamCreate(&stream));

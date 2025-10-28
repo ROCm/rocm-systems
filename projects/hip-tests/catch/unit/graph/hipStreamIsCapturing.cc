@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 #include "stream_capture_common.hh"
 
@@ -87,7 +88,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_Positive_Basic") {
 }
 
 void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_IS_CAPTURING_N;
 
   hipStreamCaptureStatus cStatus;
   size_t Nbytes = N * sizeof(float);
@@ -175,7 +176,7 @@ static void thread_func(hipStream_t stream) {
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipStreamIsCapturing_Positive_Thread") {
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_IS_CAPTURING_N;
   size_t Nbytes = N * sizeof(float);
 
   hipGraph_t graph{nullptr};

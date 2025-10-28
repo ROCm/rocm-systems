@@ -26,6 +26,7 @@
 
 
 #include <hip_test_common.hh>
+#include <hip_test_config.hh>
 
 
 // Table with unique width/height and memset values.
@@ -33,10 +34,7 @@
 typedef std::tuple<int, int, int, int> tupletype;
 
 static constexpr std::initializer_list<tupletype> tableItems{
-    std::make_tuple(20, 20, 20, 20),   std::make_tuple(10, 10, 4, 4),
-    std::make_tuple(100, 100, 20, 40), std::make_tuple(256, 256, 39, 19),
-    std::make_tuple(100, 100, 20, 0),  std::make_tuple(100, 100, 0, 20),
-    std::make_tuple(100, 100, 0, 0),
+    TEST_MEMORY_MEMSET2D_TABLE_ITEMS
 };
 
 
@@ -185,8 +183,13 @@ TEST_CASE("Unit_hipMemset2DAsync_capturehipMemset2DAsync") {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   int rows, cols;
+#ifdef QUICK_TESTS
+  rows = GENERATE(3, 4);
+  cols = GENERATE(3, 4);
+#else
   rows = GENERATE(3, 4, 100);
   cols = GENERATE(3, 4, 100);
+#endif
   hipStream_t stream;
   size_t devPitch;
 

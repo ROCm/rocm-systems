@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <vector>
+#include <hip_test_config.hh>
 
 #define LEN 64
 #define SIZE LEN << 2
@@ -581,7 +582,7 @@ void HipMemcpyWithStreamMultiThreadtests::TestkindHtoH(bool& val_res) {
 }
 
 TEST_CASE("Unit_hipMemcpyWithStream_MultiThread") {
-  const auto Threadcount{10};
+  const auto Threadcount{TEST_MEMORY_MEMCPY_WITH_STREAM_MULTI_THREAD_THREADCOUNT};
   bool ret_val[Threadcount];
   std::thread th[Threadcount];
   for (int op = static_cast<int>(ops::TestwithOnestream); op < static_cast<int>(ops::END_OF_LIST);

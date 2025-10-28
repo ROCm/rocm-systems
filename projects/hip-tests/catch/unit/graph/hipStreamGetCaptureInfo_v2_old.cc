@@ -40,8 +40,9 @@ Parameter Validation/Negative:
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
-constexpr size_t N = 1000000;
+constexpr size_t N = TEST_GRAPH_STREAM_GET_CAPTURE_INFO_N;
 constexpr int LAUNCH_ITERS = 1;
 
 /**

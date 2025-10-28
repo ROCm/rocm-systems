@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <hip_test_config.hh>
 
 #include "memcpy2d_tests_common.hh"
 
@@ -44,8 +45,13 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
   // declare host and device arrays
   int rows, cols;
+#ifdef QUICK_TESTS
+  rows = GENERATE(3, 4);
+  cols = GENERATE(3, 4);
+#else
   rows = GENERATE(3, 4, 100);
   cols = GENERATE(3, 4, 100);
+#endif
   int *srcD, *srcH;
   int *dstD, *dstH;
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols));
@@ -189,8 +195,13 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_FuncTst") {
           copied array contains correct values") {
     // declare host and device arrays
     int rows, cols;
+#ifdef QUICK_TESTS
+    rows = GENERATE(3, 4);
+    cols = GENERATE(3, 4);
+#else
     rows = GENERATE(3, 4, 100);
     cols = GENERATE(3, 4, 100);
+#endif
     int *srcD, *srcH;
     int *dstD, *dstH;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols));

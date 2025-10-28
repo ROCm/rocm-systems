@@ -19,8 +19,9 @@
    THE SOFTWARE.
  */
 #include <hip_test_common.hh>
+#include <hip_test_config.hh>
 
-#define KERNEL_ITERATIONS 15
+#define KERNEL_ITERATIONS TEST_PRINTF_NON_HOST_KERNEL_ITERATIONS
 #define BLOCK_SIZE 2
 #define THREADS_PER_BLOCK 1024
 #define ITER_COUNT_FOR_THREAD (BLOCK_SIZE * THREADS_PER_BLOCK)

@@ -24,9 +24,10 @@
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
-#define ITER 6
-#define N 1024 * 1024
+#define ITER TEST_MEMORY_MEMSET_ASYNC_AND_KERNEL_ITER
+#define N TEST_MEMORY_MEMSET_ASYNC_AND_KERNEL_N
 
 constexpr auto blocksPerCU = 6;  // to hide latency
 constexpr auto threadsPerBlock = 256;

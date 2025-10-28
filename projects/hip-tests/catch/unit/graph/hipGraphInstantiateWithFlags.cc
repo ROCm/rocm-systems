@@ -30,6 +30,7 @@ platform hence skipping the testcases
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 #ifdef __linux__
 #include <unistd.h>
 #include <sys/types.h>
@@ -37,8 +38,8 @@ platform hence skipping the testcases
 #include <sys/shm.h>
 #endif
 
-constexpr size_t N = 1000000;
-static constexpr int SIZE = 1024 * 1024;
+constexpr size_t N = TEST_GRAPH_INSTANTIATE_WITH_FLAGS_N;
+static constexpr int SIZE = TEST_GRAPH_INSTANTIATE_WITH_FLAGS_SIZE;
 static constexpr size_t NBYTES = SIZE * sizeof(int);
 
 /**
@@ -335,7 +336,7 @@ Note - This test case is just to check if hipGraphInstantiateFlagAutoFreeOnLaunc
        will be added once the feature is fully implemented.
 */
 TEST_CASE("Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check") {
-  constexpr size_t size = 512 * 1024 * 1024;
+  constexpr size_t size = TEST_GRAPH_INSTANTIATE_WITH_FLAGS_SIZE_2;
   constexpr size_t Nbytes = size * sizeof(int);
 
   hipGraph_t graph;
@@ -409,7 +410,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check") {
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
 TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop") {
-  constexpr size_t NBytes = 1024 * 1024 * 1024;
+  constexpr size_t NBytes = TEST_GRAPH_INSTANTIATE_WITH_FLAGS_NBYTES;
 
   void* devMem = nullptr;
 
@@ -436,7 +437,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop") {
       hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
 
   // Launch the graph in a loop
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < TEST_GRAPH_INSTANTIATE_WITH_FLAGS_LOOP; i++) {
     HIP_CHECK(hipGraphLaunch(graphExec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -526,7 +527,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel") {
   HIP_CHECK(
       hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
 
-  for (int launch = 1; launch <= 10; launch++) {
+  for (int launch = 1; launch <= TEST_GRAPH_INSTANTIATE_WITH_FLAGS_LAUNCH; launch++) {
     HIP_CHECK(hipGraphLaunch(graphExec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -625,7 +626,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel") {
   HIP_CHECK(
       hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
 
-  for (int launch = 1; launch <= 10; launch++) {
+  for (int launch = 1; launch <= TEST_GRAPH_INSTANTIATE_WITH_FLAGS_LAUNCH; launch++) {
     std::fill(hostMemSrc, hostMemSrc + SIZE, launch);
     std::fill(hostMemDst, hostMemDst + SIZE, 0);
 
@@ -742,7 +743,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch") {
   HIP_CHECK(
       hipGraphInstantiateWithFlags(&graphExec2, graph2, hipGraphInstantiateFlagAutoFreeOnLaunch));
 
-  for (int launch = 1; launch <= 10; launch++) {
+  for (int launch = 1; launch <= TEST_GRAPH_INSTANTIATE_WITH_FLAGS_LAUNCH; launch++) {
     std::fill(hostMem1, hostMem1 + SIZE, launch);
     std::fill(hostMem2, hostMem2 + SIZE, 0);
     std::fill(hostMem3, hostMem3 + SIZE, 0);

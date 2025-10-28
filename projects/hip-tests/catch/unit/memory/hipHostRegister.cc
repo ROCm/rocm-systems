@@ -34,11 +34,12 @@ THE SOFTWARE.
 #include <hip_test_process.hh>
 
 #include <utils.hh>
+#include <hip_test_config.hh>
 
-#define OFFSET 128
+#define OFFSET TEST_MEMORY_HOST_REGISTER_OFFSET
 #define INITIAL_VAL 1
 #define EXPECTED_VAL 2
-#define ITERATION 100
+#define ITERATION TEST_MEMORY_HOST_REGISTER_ITERATION
 #define ADDITIONAL_MEMORY_PERCENT 10
 
 static constexpr auto LEN{1024 * 1024};
@@ -876,14 +877,26 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Memcpy", "", int, float, double) {
 
   REQUIRE(LEN > OFFSET);
   if (mem_type) {
+#ifdef QUICK_TESTS
+    for (size_t i = 0; i <= OFFSET; i++) {
+      doMemCopy<TestType>(LEN, i*16, A, Bh, Bd, true /*internalRegister*/);
+    }
+#else
     for (size_t i = 0; i < OFFSET; i++) {
       doMemCopy<TestType>(LEN, i, A, Bh, Bd, true /*internalRegister*/);
     }
+#endif
   } else {
     HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
+#ifdef QUICK_TESTS
+    for (size_t i = 0; i <= OFFSET; i++) {
+      doMemCopy<TestType>(LEN, i*16, A, Bh, Bd, false /*internalRegister*/);
+    }
+#else
     for (size_t i = 0; i < OFFSET; i++) {
       doMemCopy<TestType>(LEN, i, A, Bh, Bd, false /*internalRegister*/);
     }
+#endif
     HIP_CHECK(hipHostUnregister(A));
   }
 

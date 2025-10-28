@@ -20,11 +20,12 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_test_config.hh>
 #define GRIDSIZE 512
 #define BLOCKSIZE 256
 #define NUM_OF_STREAM 3
 #define THREADS_PER_BLOCK 512
-#define GRAPH_LAUNCH_ITERATIONS 1000
+#define GRAPH_LAUNCH_ITERATIONS TEST_STREAM_LAUNCH_HOST_FUNC_GRAPH_LAUNCH_ITERATIONS
 
 static __global__ void reduce(float* d_in, double* d_out) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;

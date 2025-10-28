@@ -25,6 +25,7 @@
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
+#include <hip_test_config.hh>
 #include <cstdio>
 #include <cstdint>
 #include <algorithm>
@@ -117,7 +118,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  size_t numElements = 8 * 1024 * 1024;
+  size_t numElements = TEST_MEMORY_MEM_POOL_API_NUM_ELEMENTS;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
                                    mem_pool, stream));
 
@@ -206,7 +207,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  size_t numElements = 8 * 1024 * 1024;
+  size_t numElements = TEST_MEMORY_MEM_POOL_API_NUM_ELEMENTS;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
                                    mem_pool, stream));
 
@@ -294,7 +295,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  size_t numElements = 8 * 1024 * 1024;
+  size_t numElements = TEST_MEMORY_MEM_POOL_API_NUM_ELEMENTS;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float),
                                    mem_pool, stream));
 
@@ -383,7 +384,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
   int value = 0;
 
   SECTION("Disallow Opportunistic - No Reuse") {
-    numElements = 8 * 1024 * 1024;
+    numElements = TEST_MEMORY_MEM_POOL_API_NUM_ELEMENTS;
     HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float),
                                      mem_pool, stream1));
 
@@ -406,7 +407,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     // Sleep for 1 second GPU should be idle by now
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-    numElements = 8 * 1024 * 1024;
+    numElements = TEST_MEMORY_MEM_POOL_API_NUM_ELEMENTS;
     // Allocate memory for the second stream
     HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
                                      mem_pool, stream2));
@@ -425,7 +426,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
   }
 
   SECTION("Allow Opportunistic - Reuse") {
-    numElements = 8 * 1024 * 1024;
+    numElements = TEST_MEMORY_MEM_POOL_API_NUM_ELEMENTS;
     HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float),
                                      mem_pool, stream1));
 
@@ -445,7 +446,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     // Sleep for 1 second GPU should be idle by now
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-    numElements = 8 * 1024 * 1024;
+    numElements = TEST_MEMORY_MEM_POOL_API_NUM_ELEMENTS;
     // Allocate memory for the second stream
     HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
                                      mem_pool, stream2));
@@ -465,7 +466,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
   }
 
   SECTION("Allow Opportunistic - No Reuse") {
-    numElements = 8 * 1024 * 1024;
+    numElements = TEST_MEMORY_MEM_POOL_API_NUM_ELEMENTS;
     HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float),
                                      mem_pool, stream1));
 
@@ -480,7 +481,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1));
 
-    numElements = 8 * 1024 * 1024;
+    numElements = TEST_MEMORY_MEM_POOL_API_NUM_ELEMENTS;
     // Allocate memory for the second stream
     HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
                                      mem_pool, stream2));
@@ -525,7 +526,7 @@ TEST_CASE("Unit_hipMemPoolApi_Default") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  size_t numElements = 8 * 1024 * 1024;
+  size_t numElements = TEST_MEMORY_MEM_POOL_API_NUM_ELEMENTS;
   HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), stream));
 
   numElements = 1024;

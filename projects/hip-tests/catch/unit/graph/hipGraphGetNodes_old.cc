@@ -39,6 +39,7 @@ entries and does update numNodes.
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 /**
  * Functional Test for hipGraphGetNodes API fetching node list
@@ -149,7 +150,7 @@ TEST_CASE("Unit_hipGraphGetNodes_CapturedStream") {
   hipGraphExec_t graphExec{nullptr};
   constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_GET_NODES_N;
   size_t Nbytes = N * sizeof(float);
   constexpr int numMemcpy{2}, numKernel{1}, numMemset{1};
   int cntMemcpy{}, cntKernel{}, cntMemset{};
@@ -253,7 +254,7 @@ TEST_CASE("Unit_hipGraphGetNodes_ParamValidation") {
   hipGraph_t graph{nullptr};
   constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_GET_NODES_N;
   size_t Nbytes = N * sizeof(float), numNodes{};
   float *A_d, *C_d;
   float *A_h, *C_h;

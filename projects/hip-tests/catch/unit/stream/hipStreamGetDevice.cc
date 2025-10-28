@@ -20,8 +20,9 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
+#include <hip_test_config.hh>
 
-#define NUMBER_OF_THREADS 10
+#define NUMBER_OF_THREADS TEST_STREAM_GET_DEVICE_NUMBER_OF_THREADS
 static bool thread_results[NUMBER_OF_THREADS];
 
 /**

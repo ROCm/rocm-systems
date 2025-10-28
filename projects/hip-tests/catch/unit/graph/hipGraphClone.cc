@@ -37,8 +37,9 @@ Functional:
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
-#define NUM_THREADS 10
+#define NUM_THREADS TEST_GRAPH_CLONE_NUM_THREADS
 
 /* This test covers the negative scenarios of
    hipGraphClone API */

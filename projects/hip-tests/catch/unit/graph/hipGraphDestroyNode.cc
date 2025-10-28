@@ -49,8 +49,9 @@ Functional ::
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
-#define NUM_OF_DUMMY_NODES 8
+#define NUM_OF_DUMMY_NODES TEST_GRAPH_DESTROY_NODE_NUM_OF_DUMMY_NODES
 
 static __global__ void dummyKernel() { return; }
 

@@ -27,11 +27,12 @@
 #include <hip_test_checkers.hh>
 #include <hip_test_helper.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 
 /* Defines */
-#define NUM_THREADS 1000
-#define ITER 10
+#define NUM_THREADS TEST_MEMORY_MEMSET2D_ASYNC_MULTI_THREAD_NUM_THREADS
+#define ITER TEST_MEMORY_MEMSET2D_ASYNC_MULTI_THREAD_ITER
 #define NUM_H 256
 #define NUM_W 256
 

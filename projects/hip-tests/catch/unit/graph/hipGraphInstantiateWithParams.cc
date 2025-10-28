@@ -35,10 +35,11 @@ Functional:
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 #if CUDA_VERSION >= CUDA_12000
 
-constexpr size_t N = 1000000;
+constexpr size_t N = TEST_GRAPH_INSTANTIATE_WITH_PARAMS_N;
 /**
 * Test Description
 * ------------------------

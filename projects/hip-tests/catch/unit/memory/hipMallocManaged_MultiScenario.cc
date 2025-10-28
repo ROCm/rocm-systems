@@ -30,6 +30,7 @@
 #include "hipMallocManagedCommon.hh"
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
+#include <hip_test_config.hh>
 #include <atomic>
 
 const size_t MAX_GPU{256};
@@ -119,7 +120,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiChunkSingleDevice") {
   std::atomic<int> DataMismatch{0};
   constexpr int Chunks = 4;
   int Counter = 0;
-  int NUM_ELMS = (1024 * 1024);
+  int NUM_ELMS = TEST_MEMORY_MALLOC_MANAGED_MULTI_SCENARIO_NUM_ELMS;
   float *Ad[Chunks], *Hmm = nullptr, *Ah = new float[NUM_ELMS];
   hipStream_t stream[Chunks];
   for (int i = 0; i < Chunks; ++i) {
@@ -176,7 +177,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiChunkMultiDevice") {
     HipTest::HIP_SKIP_TEST("Skipping test because more than one device was not found.");
     return;
   }
-  unsigned int NUM_ELMS = (1024 * 1024);
+  unsigned int NUM_ELMS = TEST_MEMORY_MALLOC_MANAGED_MULTI_SCENARIO_NUM_ELMS;
   float *Ad[MAX_GPU], *Hmm = NULL, *Ah = new float[NUM_ELMS];
   hipStream_t stream[MAX_GPU];
   for (int Oloop = 0; Oloop < NumDevices; ++Oloop) {

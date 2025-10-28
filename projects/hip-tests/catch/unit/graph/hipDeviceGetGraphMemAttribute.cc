@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include <hip_test_config.hh>
 
 /**
  * @addtogroup hipDeviceGetGraphMemAttribute hipDeviceGetGraphMemAttribute
@@ -32,7 +33,7 @@ THE SOFTWARE.
  * Get the mem attribute for graphs.
  */
 
-static constexpr auto element_count{64 * 1024 * 1024};
+static constexpr auto element_count{TEST_GRAPH_DEVICE_GET_GRAPH_MEM_ATTR_ELEMENT_COUNT};
 
 
 /* Create graph with memory node */

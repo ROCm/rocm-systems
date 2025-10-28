@@ -22,6 +22,7 @@
 #include <hip_test_kernels.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include <hip_test_config.hh>
 
 #ifdef __linux__
 #include <unistd.h>
@@ -310,8 +311,8 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
 
 // definitions
 #define THREADS_PER_BLOCK 512
-#define LAUNCH_ITERATIONS 5
-#define NUMBER_OF_THREADS 5
+#define LAUNCH_ITERATIONS TEST_MEMORY_MEMPOOL_COMMON_LAUNCH_ITERATIONS
+#define NUMBER_OF_THREADS TEST_MEMORY_MEMPOOL_COMMON_NUMBER_OF_THREADS
 #define NUM_OF_STREAM 3
 
 enum eTestValue {

@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
 #include "stream_capture_common.hh"  // NOLINT
 
@@ -84,7 +85,7 @@ class eventQuery {
 
 template <typename T, typename F>
 void captureStreamAndLaunchGraph(F graphFunc, hipStreamCaptureMode mode, hipStream_t stream) {
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_BEGIN_CAPTURE_N;
   size_t Nbytes = N * sizeof(T);
 
   hipGraph_t graph{nullptr};
@@ -320,7 +321,7 @@ static void colligatedStrmCapture(const hipStream_t& stream1, const hipStream_t&
 /* Local function for colligated stream capture functionality
  */
 static void colligatedStrmCaptureFunc(const hipStream_t& stream1, const hipStream_t& stream2) {
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_BEGIN_CAPTURE_N;
   size_t Nbytes = N * sizeof(int);
 
   hipGraph_t graph1{nullptr}, graph2{nullptr};
@@ -388,7 +389,7 @@ static void threadStrmCaptureFunc(hipStream_t stream, int* A_h, int* A_d, int* B
 /* Local Function for multithreaded tests
  */
 static void multithreadedTest(hipStreamCaptureMode mode) {
-  constexpr size_t N = 1000000;
+  constexpr size_t N = TEST_GRAPH_STREAM_BEGIN_CAPTURE_N;
   size_t Nbytes = N * sizeof(int);
 
   hipGraph_t graph1{nullptr}, graph2{nullptr};

@@ -54,10 +54,11 @@ Testcase Scenarios :
 #include <atomic>
 #include <limits>
 #include <vector>
+#include <hip_test_config.hh>
 
 
 /* Buffer size for bigger chunks in alloc/free cycles */
-static constexpr auto BuffSizeBC = 5 * 1024 * 1024;
+static constexpr auto BuffSizeBC = TEST_MEMORY_MALLOC_CONCURRENCY_BUFF_SIZE_BC;
 
 /* Buffer size for smaller chunks in alloc/free cycles */
 static constexpr auto BuffSizeSC = 16;
@@ -67,13 +68,13 @@ static constexpr auto BuffSizeSC = 16;
 static constexpr auto NumDiv = 100;
 
 /* Max alloc/free iterations for smaller chunks */
-static constexpr auto MaxAllocFree_SmallChunks = (5000000 / NumDiv);
+static constexpr auto MaxAllocFree_SmallChunks = TEST_MEMORY_MALLOC_CONCURRENCY_MAX_ALLOC_FREE_SMALL_CHUNKS;
 
 /* Max alloc/free iterations for bigger chunks */
-static constexpr auto MaxAllocFree_BigChunks = 10000;
+static constexpr auto MaxAllocFree_BigChunks = TEST_MEMORY_MALLOC_CONCURRENCY_MAX_ALLOC_FREE_BIG_CHUNKS;
 
 /* Max alloc and pool iterations */
-static constexpr auto MaxAllocPoolIter = (2000000 / NumDiv);
+static constexpr auto MaxAllocPoolIter = TEST_MEMORY_MALLOC_CONCURRENCY_MAX_ALLOC_POOL_ITER;
 
 /* Test status shared across threads */
 static std::atomic<bool> g_thTestPassed{true};
@@ -86,7 +87,7 @@ static bool validateMemoryOnGPU(int gpu) {
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
   bool TestPassed = true;
-  constexpr auto N = 4 * 1024 * 1024;
+  constexpr auto N = TEST_MEMORY_MALLOC_CONCURRENCY_N;
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
   size_t Nbytes = N * sizeof(int);
@@ -152,7 +153,7 @@ static bool validateMemoryOnGpuMThread(int gpu) {
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
   bool TestPassed = true;
-  constexpr auto N = 4 * 1024 * 1024;
+  constexpr auto N = TEST_MEMORY_MALLOC_CONCURRENCY_N;
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
   size_t Nbytes = N * sizeof(int);

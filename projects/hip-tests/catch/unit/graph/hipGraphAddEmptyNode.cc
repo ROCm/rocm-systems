@@ -31,8 +31,9 @@ Testcase Scenarios :
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_config.hh>
 
-#define TEST_LOOP_SIZE 50
+#define TEST_LOOP_SIZE TEST_GRAPH_LOOP_SIZE
 /**
  * Functional Test to add empty node with dependencies
  */

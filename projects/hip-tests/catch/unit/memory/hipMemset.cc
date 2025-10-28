@@ -29,6 +29,7 @@ Testcase Scenarios :
 
 
 #include <hip_test_common.hh>
+#include <hip_test_config.hh>
 
 
 // Table with unique number of elements and memset values.
@@ -38,7 +39,10 @@ static constexpr std::initializer_list<tupletype> tableItems{
     std::make_tuple((4 * 1024 * 1024), 0x42, 0xDEADBEEF, 0xDEAD, 0xDE),
     std::make_tuple((10), 0x42, 0x101, 0x10, 0x1),
     std::make_tuple((10013), 0x5a, 0xDEADBEEF, 0xDEAD, 0xDE),
-    std::make_tuple((256 * 1024 * 1024), 0xa6, 0xCAFEBABE, 0xCAFE, 0xCA)};
+#ifndef QUICK_TESTS
+    std::make_tuple((256 * 1024 * 1024), 0xa6, 0xCAFEBABE, 0xCAFE, 0xCA)
+#endif
+};
 
 enum MemsetType { hipMemsetTypeDefault, hipMemsetTypeD8, hipMemsetTypeD16, hipMemsetTypeD32 };
 
@@ -46,13 +50,19 @@ template <typename T>
 static bool testhipMemset(T* A_h, T* A_d, T memsetval, enum MemsetType type, size_t numElements) {
   size_t Nbytes = numElements * sizeof(T);
   bool testResult = true;
+#ifdef QUICK_TESTS
+  constexpr auto offset = 3;  // To memset on unaligned ptr.
+#else
   constexpr auto MAX_OFFSET = 3;  // To memset on unaligned ptr.
+#endif
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
 
+#ifndef QUICK_TESTS
   for (int offset = MAX_OFFSET; offset >= 0; offset--) {
+#endif
     if (type == hipMemsetTypeDefault) {
       HIP_CHECK(hipMemset(A_d + offset, memsetval, numElements - offset));
 
@@ -74,7 +84,9 @@ static bool testhipMemset(T* A_h, T* A_d, T memsetval, enum MemsetType type, siz
         break;
       }
     }
+#ifndef QUICK_TESTS
   }
+#endif
 
   HIP_CHECK(hipFree(A_d));
   free(A_h);
@@ -86,7 +98,11 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
                                                      enum MemsetType type, size_t numElements) {
   size_t Nbytes = numElements * sizeof(T);
   bool testResult = true;
+#ifdef QUICK_TESTS
+  constexpr auto offset = 3;  // To memset on unaligned ptr.
+#else
   constexpr auto MAX_OFFSET = 3;  // To memset on unaligned ptr.
+#endif
   hipStream_t stream;
 
   HIP_CHECK(hipStreamCreate(&stream));
@@ -94,7 +110,9 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
   A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
 
+#ifndef QUICK_TESTS
   for (int offset = MAX_OFFSET; offset >= 0; offset--) {
+#endif
     if (type == hipMemsetTypeDefault) {
       HIP_CHECK(hipMemsetAsync(A_d + offset, memsetval, numElements - offset, stream));
 
@@ -120,7 +138,9 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
         break;
       }
     }
+#ifndef QUICK_TESTS
   }
+#endif
 
   HIP_CHECK(hipFree(A_d));
   HIP_CHECK(hipStreamDestroy(stream));
@@ -254,7 +274,7 @@ TEST_CASE("Unit_hipMemset_2AsyncOperations") {
   HIP_CHECK(hipMemsetAsync(p2, 0, 32 * 32 * 4, s));
   HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32 * 32, s));
   HIP_CHECK(hipStreamSynchronize(s));
-  for (int i = 0; i < 256; ++i) {
+  for (int i = 0; i < TEST_MEMORY_MEMSET_LOOP_ITERATIONS; ++i) {
     HIP_CHECK(hipMemsetAsync(p2, 0, 32 * 32 * 4, s));
     HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32 * 32, s));
   }
