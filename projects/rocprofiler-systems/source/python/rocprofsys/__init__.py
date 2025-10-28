@@ -36,15 +36,18 @@ This submodule imports the timemory Python function profiler
 
 try:
     import os
+    from pathlib import Path
 
-    os.environ["ROCPROFSYS_ROOT"] = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "../../../..")
-    )
-    os.environ["ROCPROFSYS_PATH"] = os.path.abspath(
-        os.path.join(os.environ["ROCPROFSYS_ROOT"], "lib")
-    )
-    os.environ["ROCPROFSYS_SCRIPT_PATH"] = os.path.abspath(
-        os.path.join(os.environ["ROCPROFSYS_ROOT"], "libexec/rocprofiler-systems")
+    # Set up ROCPROFSYS environment variables
+    rocprofsys_root = Path(__file__).resolve().parents[4]
+    os.environ.update(
+        {
+            "ROCPROFSYS_ROOT": str(rocprofsys_root),
+            "ROCPROFSYS_PATH": str(rocprofsys_root / "lib"),
+            "ROCPROFSYS_SCRIPT_PATH": str(
+                rocprofsys_root / "libexec/rocprofiler-systems"
+            ),
+        }
     )
 
     from .libpyrocprofsys import coverage
