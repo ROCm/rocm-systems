@@ -8,7 +8,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added the following API's to amdsmi_interface.py**.  
+- **Added the following C API's to amdsmi_interface.py**.  
   - amdsmi_get_cpu_handle()
   - amdsmi_get_esmi_err_msg()
   - amdsmi_get_gpu_event_notification()
@@ -23,6 +23,25 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added additional return value to API amdsmi_get_xgmi_plpd()**.  
   - The entry `policies` is added to the end of the dictionary to match API definition.
   - The entry `plpds` is marked for deprecation as it has the same information as `policies`.
+
+- **Added pcie levels to `amd-smi static --bus` command**.  
+  - The static --bus option has been updated to include the range of pcie levels that one may set a device to.
+  - Levels are a 2-tuple composed of the PCIE speed and bandwidth.
+
+  ```console
+  $ amd-smi static --bus
+  GPU: 0
+  BUS:
+  BDF: 0000:43:00.0
+  MAX_PCIE_WIDTH: 16
+  MAX_PCIE_SPEED: 16 GT/s
+  PCIE_LEVELS:
+    0: (2.5 GT/s, 1)
+    1: (5.0 GT/s, 4)
+    2: (16.0 GT/s, 16)
+  PCIE_INTERFACE_VERSION: Gen 4
+  SLOT_TYPE: CEM
+  ```
 
 - **Added evicted_time metric for kfd processes**.  
   - Time that queues are evicted on a GPU in milliseconds
@@ -1219,9 +1238,9 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
     GPU: 0
         CLK_LEVEL: Successfully changed sclk perf level(s) to 5, 6
 
-    GPU: 1
-        CLK_LEVEL: level(s) 5, 6 is/are greater than performance levels supported for device
-    ```
+GPU: 1
+    CLK_LEVEL: clock level(s) 5, 6 is/are greater than sclk frequency levels supported for device GPU ID: 1 BDF:0000:46:00.0
+```
 
 - **Added new command `amd-smi static -C/--clock`**.  
   - This new command displays the clock frequency performance levels for the selected GPUs and clocks.

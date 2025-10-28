@@ -428,6 +428,7 @@ class AMDSMICommands():
             args.partition = partition
         if clock:
             args.clock = clock
+
         # args.clock defaults to False so if it was overwritten to empty list, that indicates that it was given as an arguments but with an empty list
         if args.clock == []:
             args.clock = True
@@ -534,6 +535,7 @@ class AMDSMICommands():
                 'bdf': "N/A",
                 'max_pcie_width': "N/A",
                 'max_pcie_speed': "N/A",
+                'pcie_levels': "N/A",
                 'pcie_interface_version': "N/A",
                 'slot_type': "N/A"
             }
@@ -571,6 +573,21 @@ class AMDSMICommands():
 
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get bus info for gpu %s | %s", gpu_id, e.get_error_info())
+
+            try:
+                pcie_info = amdsmi_interface.amdsmi_get_gpu_pci_bandwidth(args.gpu)
+                num_supported = pcie_info['transfer_rate']['num_supported']
+                if num_supported != 0:
+                    bus_info['pcie_levels'] = {}
+                    for level in range(0, num_supported):
+                        speed = str(self.helpers.convert_SI_unit(float(pcie_info['transfer_rate']['frequency'][level]), AMDSMIHelpers.SI_Unit.NANO)) + " GT/s"
+                        width = pcie_info['lanes'][level]
+                        level_values = (speed, width)
+                        bus_info['pcie_levels'].update({level: level_values})
+                else:
+                    bus_info['pcie_levels'] = "N/A"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get pci bandwidth info for gpu %s | %s", gpu_id, e.get_error_info())
 
             static_dict['bus'] = bus_info
         if args.vbios:
@@ -1018,7 +1035,6 @@ class AMDSMICommands():
                 logging.debug("Failed to get cache info for gpu %s | %s", gpu_id, e.get_error_info())
 
             static_dict['cache_info'] = cache_info_list
-
         # default to printing all clocks, if in current_platform_args; otherwise print specific clocks
         if 'clock' in current_platform_args and (args.clock == True or isinstance(args.clock, list)):
             original_clock_args = args.clock  #save original args.clock value, so we can reset for multiple devices
@@ -1056,8 +1072,15 @@ class AMDSMICommands():
 
                     try:
                         frequencies = amdsmi_interface.amdsmi_get_clk_freq(args.gpu, clk_type_conversion)
+                        # some clocks may have a sysfs file but no frequencies for whatever reason.
+                        if len(frequencies['frequency']) == 0:
+                            freq_dict = "N/A"
+                            continue
                         freq_dict = {}
-                        freq_dict.update({'current level':frequencies['current']})
+                        current_level = frequencies['current']
+                        freq_dict.update({'current_level':current_level})
+                        current_frequency = str(self.helpers.convert_SI_unit(frequencies['frequency'][current_level], AMDSMIHelpers.SI_Unit.MICRO)) + "MHz"
+                        freq_dict.update({'current_frequency':current_frequency})
                         freq_dict.update({'frequency_levels':{}})
                         if frequencies["num_supported"] != 0:
                             for level in range(len(frequencies['frequency'])):
@@ -1070,6 +1093,7 @@ class AMDSMICommands():
                             freq_dict = "N/A"
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         freq_dict = "N/A"
+                        logging.debug("Failed to get clock info for gpu %s | %s", gpu_id, e.get_error_info())
                     clk_dict[clk] = freq_dict
 
                 static_dict['clock'] = clk_dict
@@ -4563,6 +4587,7 @@ class AMDSMICommands():
                         args.power_cap is not None,
                         args.soc_pstate is not None,
                         args.xgmi_plpd is not None,
+                        args.pcie is not None,
                         args.clk_level is not None,
                         args.clk_limit is not None,
                         args.process_isolation is not None]):
@@ -5087,7 +5112,7 @@ class AMDSMICommands():
         gpu_args_enabled = False
         gpu_attributes = ["fan", "perf_level", "profile", "perf_determinism", "compute_partition",
                           "memory_partition", "power_cap", "soc_pstate", "xgmi_plpd",
-                          "process_isolation", "clk_limit", "clk_level"]
+                          "process_isolation", "clk_limit", "clk_level", "pcie"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr) is not None:
