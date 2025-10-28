@@ -12,6 +12,5 @@ pandas
 perfetto
 pycobertura
 pytest
-pytest-cmake
 pyyaml
 reportlab
