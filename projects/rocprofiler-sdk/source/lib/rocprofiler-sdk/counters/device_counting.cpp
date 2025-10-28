@@ -52,54 +52,56 @@ hsa_inited()
 }
 
 uint64_t
-submitPacket(hsa_queue_t* queue, const void* packet, bool ring_doorbell)
+submitPackets(hsa_queue_t* queue, const void** packets, size_t num_packets)
 {
     const uint32_t pkt_size = 0x40;
 
-    // advance command queue
+    // Advance command queue by num_packets
     const uint64_t write_idx =
-        hsa::get_core_table()->hsa_queue_add_write_index_scacq_screl_fn(queue, 1);
+        hsa::get_core_table()->hsa_queue_add_write_index_scacq_screl_fn(queue, num_packets);
+
+    // Wait for queue space to be available
     while((write_idx - hsa::get_core_table()->hsa_queue_load_read_index_relaxed_fn(queue)) >=
           queue->size)
     {
         sched_yield();
     }
 
-    const uint32_t slot_idx = (uint32_t)(write_idx % queue->size);
-    // NOLINTBEGIN(performance-no-int-to-ptr)
-    uint32_t* queue_slot =
-        reinterpret_cast<uint32_t*>((uintptr_t)(queue->base_address) + (slot_idx * pkt_size));
-    // NOLINTEND(performance-no-int-to-ptr)
-
-    const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packet);
-
-    // Copy buffered commands into the queue slot.
-    // Overwrite the AQL invalid header (first dword) last.
-    // This prevents the slot from being read until it's fully written.
-    memcpy(&queue_slot[1], &slot_data[1], pkt_size - sizeof(uint32_t));
-    std::atomic<uint32_t>* header_atomic_ptr =
-        reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
-    header_atomic_ptr->store(slot_data[0], std::memory_order_release);
-
-    // ringdoor bell (if requested)
-    if(ring_doorbell)
+    // Submit all packets
+    for(size_t i = 0; i < num_packets; ++i)
     {
-        hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal, write_idx);
+        const uint32_t slot_idx = (uint32_t)((write_idx + i) % queue->size);
+        // NOLINTBEGIN(performance-no-int-to-ptr)
+        uint32_t* queue_slot =
+            reinterpret_cast<uint32_t*>((uintptr_t)(queue->base_address) + (slot_idx * pkt_size));
+        // NOLINTEND(performance-no-int-to-ptr)
+
+        const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packets[i]);
+
+        // Copy buffered commands into the queue slot.
+        // Overwrite the AQL invalid header (first dword) last.
+        // This prevents the slot from being read until it's fully written.
+        memcpy(&queue_slot[1], &slot_data[1], pkt_size - sizeof(uint32_t));
+        std::atomic<uint32_t>* header_atomic_ptr =
+            reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
+        header_atomic_ptr->store(slot_data[0], std::memory_order_release);
+
+        ROCP_TRACE << fmt::format("SLOT_IDX: {} WRITE_IDX: {} PKT: {}",
+                                  slot_idx,
+                                  write_idx + i,
+                                  *static_cast<const hsa::rocprofiler_packet*>(packets[i]));
     }
 
-    ROCP_TRACE << fmt::format("SLOT_IDX: {} WRITE_IDX: {} PKT: {}",
-                              slot_idx,
-                              write_idx,
-                              *static_cast<const hsa::rocprofiler_packet*>(packet));
-    return write_idx;
+    // Ring doorbell once for all packets (doorbell should be last write index)
+    hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal,
+                                                       write_idx + num_packets - 1);
+    return write_idx + num_packets - 1;
 }
 
-void
-flushQueue(hsa_queue_t* queue)
+uint64_t
+submitPacket(hsa_queue_t* queue, const void* packet)
 {
-    // Ring the doorbell with the current write index to flush any batched packets
-    const uint64_t write_idx = hsa::get_core_table()->hsa_queue_load_write_index_relaxed_fn(queue);
-    hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal, write_idx);
+    return submitPackets(queue, &packet, 1);
 }
 
 namespace
@@ -348,9 +350,6 @@ read_agent_ctx(const context::context*                    ctx,
                                   agent->get_rocp_agent()->cu_count,
                                   agent->get_rocp_agent()->simd_arrays_per_engine);
 
-        // Submit the read packet to the queue (defer doorbell for batching)
-        submitPacket(agent->profile_queue(), &callback_data.packet->packets.read_packet, false);
-
         // Submit a barrier packet. This is needed to flush hardware caches. Without this
         // the read packet may not have the correct data.
         rocprofiler::hsa::rocprofiler_packet barrier{};
@@ -358,11 +357,11 @@ read_agent_ctx(const context::context*                    ctx,
         barrier.barrier_and.completion_signal = callback_data.completion;
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 0);
         callback_data.user_data = user_data;
-        uint64_t last_write_idx = submitPacket(agent->profile_queue(), &barrier.barrier_and, false);
 
-        // Flush the queue to ring doorbell once for both packets (batched submission)
-        hsa::get_core_table()->hsa_signal_store_relaxed_fn(agent->profile_queue()->doorbell_signal,
-                                                           last_write_idx);
+        // Submit both READ and BARRIER packets in a batch (single doorbell ring)
+        const void* packets[2] = {&callback_data.packet->packets.read_packet, &barrier.barrier_and};
+        submitPackets(agent->profile_queue(), packets, 2);
+
         wait_if_sync();
         if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) == 0) callback_data.cached_counters = nullptr;
     }
