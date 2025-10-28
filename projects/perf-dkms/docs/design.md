@@ -482,3 +482,383 @@ dmesg | grep "pmu_stub.*statistics"
 - **Lazy Allocation**: Allocate resources on demand
 
 This design document provides a comprehensive overview of the PMU stub implementation, serving as both documentation and a guide for future enhancements targeting real GPU performance monitoring hardware.
+## Dimension-Aware Performance Monitoring
+
+### Overview
+
+The dimension-aware performance monitoring feature enables users to monitor specific hardware dimensions (XCC, SE, SA, WGP, CU) instead of aggregated GPU-wide counters. This provides fine-grained performance visibility into different parts of the GPU hardware hierarchy.
+
+### Hardware Dimension Hierarchy
+
+AMD GPUs are organized in a hierarchical structure:
+
+```
+GPU
+ └── XCC (eXtended Compute Core) [0..N]
+      └── SE (Shader Engine) [0..3 typically]
+           └── SA (Shader Array) [0..1 typically]
+                └── WGP (Work Group Processor) [0..3 typically]
+                     └── CU (Compute Unit) [0..63 typically]
+```
+
+For GFX12 architecture:
+- **XCC**: 1 instance (index 0)
+- **SE**: 4 instances (index 0-3)  
+- **SA**: 2 instances per SE (index 0-1)
+- **WGP**: 4 instances per SA (index 0-3)
+- **CU**: 64 total (distributed across WGPs)
+
+### config1 Bit Field Layout
+
+Dimension specifications are encoded in the `config1` field of perf_event_attr:
+
+```
+Bits   Field         Description
+-----  ------------  -----------------------------------------
+0-7    xcc           XCC index (0-255)
+8-15   se            Shader Engine index (0-255)
+16-23  sa            Shader Array index (0-255)
+24-31  wgp           Work Group Processor index (0-255)
+32-39  cu            Compute Unit index (0-255)
+40     aggregate     Aggregate across dimensions (future)
+41-63  reserved      Reserved for future use
+```
+
+### Default Behavior
+
+When dimensions are not specified (config1=0), the driver operates in **broadcast mode**: it reads all hardware instances and aggregates (sums) the results.
+
+When specific dimensions are provided, unspecified sub-dimensions default to 0. For example:
+- `se=2` is equivalent to `se=2,sa=0,wgp=0,cu=0` - targets SE 2, SA 0, WGP 0
+- `se=2,sa=1` is equivalent to `se=2,sa=1,wgp=0,cu=0` - targets SE 2, SA 1, WGP 0
+
+This allows hierarchical targeting of specific hardware units without requiring users to specify all levels of the hierarchy.
+
+### Named Parameter Syntax
+
+Users can specify dimensions using named parameters that perf translates to config1:
+
+```bash
+# Monitor specific shader engine
+perf stat -e amdgpu_pmu/sq_waves,se=2/ -a sleep 1
+
+# Monitor specific shader engine and shader array
+perf stat -e amdgpu_pmu/sq_waves,se=2,sa=1/ -a sleep 1
+
+# Monitor full hierarchy path
+perf stat -e amdgpu_pmu/sq_waves,se=2,sa=1,wgp=3/ -a sleep 1
+
+# Raw config1 encoding (SE=2 is bit 8-15, so 0x0200)
+perf stat -e amdgpu_pmu/sq_waves,config1=0x0200/ -a sleep 1
+```
+
+### Counter Dimension Support
+
+Not all counters support all dimensions. Counter support is defined in the counter registry:
+
+| Counter Type | Supported Dimensions | Example Counters |
+|-------------|---------------------|-----------------|
+| Global      | None (DIM_NONE)     | grbm_count, grbm_busy |
+| Per-SE      | SE, SA, WGP         | sq_waves, sq_insts_valu |
+| Per-SA      | SE, SA              | gl2c_hit, gl2c_miss |
+| Per-WGP     | SE, SA, WGP         | ta_busy, ta_total_wavefronts |
+
+The driver validates that requested dimensions are supported by the counter before allowing measurement.
+
+### Implementation Architecture
+
+#### 1. Format Attribute Exposure
+
+The driver exposes format attributes via sysfs that perf uses to parse parameters:
+
+```
+/sys/bus/event_source/devices/amdgpu_pmu/format/
+├── config         (config:0-63)     - Counter ID
+├── config1        (config1:0-63)    - Raw dimension encoding
+├── xcc            (config1:0-7)     - XCC index
+├── se             (config1:8-15)    - SE index
+├── sa             (config1:16-23)   - SA index
+├── wgp            (config1:24-31)   - WGP index
+├── cu             (config1:32-39)   - CU index
+└── aggregate      (config1:40)      - Aggregate flag
+```
+
+When a user specifies `se=2`, perf reads the `se` format file, sees it maps to `config1:8-15`, and encodes the value 2 into those bits of event->attr.config1.
+
+#### 2. Dimension Extraction and Validation
+
+The `pmu_dimension.h` header provides helper functions:
+
+```c
+/* Extract dimensions from config1 field */
+static inline void pmu_extract_dimensions(u64 config1,
+                                          struct pmu_dimension_coords *dims)
+{
+    dims->xcc = (config1 >> PMU_DIM_XCC_SHIFT) & PMU_DIM_XCC_MASK;
+    dims->se = (config1 >> PMU_DIM_SE_SHIFT) & PMU_DIM_SE_MASK;
+    dims->sa = (config1 >> PMU_DIM_SA_SHIFT) & PMU_DIM_SA_MASK;
+    dims->wgp = (config1 >> PMU_DIM_WGP_SHIFT) & PMU_DIM_WGP_MASK;
+    dims->cu = (config1 >> PMU_DIM_CU_SHIFT) & PMU_DIM_CU_MASK;
+    dims->aggregate = (config1 >> PMU_DIM_AGGREGATE_SHIFT) & 1;
+
+    /* Mark as valid if any dimension or flag is non-zero */
+    dims->valid = (config1 != 0);
+}
+
+/* Validate dimensions against hardware limits */
+static inline bool pmu_validate_dimensions(
+    const struct pmu_dimension_coords *dims,
+    const struct pmu_dimension_limits *limits)
+{
+    if (!dims->valid)
+        return true; /* No dimensions specified is valid */
+    
+    return dims->xcc <= limits->max_xcc &&
+           dims->se <= limits->max_se &&
+           dims->sa <= limits->max_sa &&
+           dims->wgp <= limits->max_wgp &&
+           dims->cu <= limits->max_cu;
+}
+```
+
+During event initialization (`amdgpu_pmu_event_init`):
+1. Extract dimensions from event->attr.config1
+2. Validate against hardware limits from GPU architecture
+3. Validate counter supports requested dimensions
+4. Pass dimension info to AQL layer for measurement setup
+
+#### 3. Counter Allocation
+
+The `aql_counter_try_allocate_dimension()` function allocates hardware counters for dimension-specific monitoring:
+
+```c
+counter_reg_info_t* aql_counter_try_allocate_dimension(
+    block_info_t *block,
+    uint32_t event_id,
+    struct perf_event *perf_event,
+    const struct pmu_dimension_coords *dims,
+    arch_t *arch)
+{
+    /* Calculate flat index from hierarchical coordinates */
+    uint32_t flat_index = encode_dimension_index(
+        dims->se, dims->sa, dims->wgp,
+        arch->num_sa, arch->num_wgp_per_sa);
+    
+    /* Allocate counter */
+    counter_reg_info_t *reg = aql_counter_try_allocate(
+        block, event_id, perf_event);
+    
+    /* Store dimension index for packet generation */
+    reg->allocation.instance_id = flat_index;
+    
+    return reg;
+}
+```
+
+The `encode_dimension_index()` helper converts hierarchical SE/SA/WGP coordinates to a flat array index:
+
+```
+Formula: index = (se * num_sa * wgp_per_sa) + (sa * wgp_per_sa) + wgp
+
+Example (GFX12: 4 SE × 2 SA × 4 WGP):
+  SE=2, SA=1, WGP=3:
+  index = (2 × 2 × 4) + (1 × 4) + 3 = 16 + 4 + 3 = 23
+```
+
+#### 4. Hardware Configuration (GRBM_GFX_INDEX)
+
+The hardware uses the GRBM_GFX_INDEX register to target specific SE/SA/WGP instances. The packet generation code sets this register before programming counters:
+
+```c
+/* In generate_start_packet() */
+if (reg_info->allocation.instance_id != 0) {
+    /* Decode flat index back to coordinates */
+    dimension_coords_t coords = decode_dimension_index(
+        reg_info->allocation.instance_id,
+        arch->num_sa,
+        arch->num_wgp_per_sa);
+    
+    /* Set GRBM_GFX_INDEX to target specific dimension */
+    pm4_set_grbm_index(buffer, 
+                       arch->control_regs.grbm_gfx_index,
+                       coords.wgp << 2,  /* instance_index */
+                       coords.sa,
+                       coords.se);
+    
+    /* Now configure counter - hardware will target specified dimension */
+    generate_counter_config(buffer, arch, counter);
+} else {
+    /* Broadcast mode - target all instances */
+    generate_grbm_broadcast(buffer, arch);
+    generate_counter_config(buffer, arch, counter);
+}
+```
+
+The PM4 packet functions (`pm4_set_grbm_index`) write to the GRBM_GFX_INDEX register:
+
+```c
+typedef struct {
+    uint32_t instance_index : 8;  /* WGP instance (shifted by 2) */
+    uint32_t sa_index : 8;         /* Shader Array index */
+    uint32_t se_index : 8;         /* Shader Engine index */
+    uint32_t reserved : 8;
+} pm4_grbm_gfx_index_t;
+```
+
+#### 5. Counter Reading
+
+When reading dimension-specific counters, the driver only reads from the targeted dimension instead of iterating through all instances:
+
+```c
+/* In generate_read_packet() */
+if (reg_info->allocation.instance_id != 0) {
+    /* Dimension-specific: read only from targeted instance */
+    dimension_coords_t coords = decode_dimension_index(...);
+    
+    pm4_set_grbm_index(buffer, ..., coords.wgp, coords.sa, coords.se);
+    
+    /* Copy counter value to memory (single instance) */
+    pm4_append_copy_data(buffer, gpu_addr, 
+                        reg_info->register_addr_lo, ...);
+} else {
+    /* Broadcast mode: iterate through all SE/SA/WGP instances */
+    for (se = 0; se < num_se; se++) {
+        for (sa = 0; sa < num_sa; sa++) {
+            for (wgp = 0; wgp < num_wgp; wgp++) {
+                pm4_set_grbm_index(...);
+                pm4_append_copy_data(...);
+            }
+        }
+    }
+}
+```
+
+### Usage Examples
+
+#### Basic Dimension Targeting
+
+```bash
+# Monitor shader engine 0
+perf stat -e amdgpu_pmu/sq_waves,se=0/ -a sleep 1
+
+# Monitor shader engine 1, shader array 0
+perf stat -e amdgpu_pmu/sq_waves,se=1,sa=0/ -a sleep 1
+
+# Monitor full path: SE=2, SA=1, WGP=3
+perf stat -e amdgpu_pmu/sq_waves,se=2,sa=1,wgp=3/ -a sleep 1
+```
+
+#### Comparing Dimensions
+
+```bash
+# Compare activity across shader engines
+perf stat -e amdgpu_pmu/sq_waves,se=0/ \
+          -e amdgpu_pmu/sq_waves,se=1/ \
+          -e amdgpu_pmu/sq_waves,se=2/ \
+          -e amdgpu_pmu/sq_waves,se=3/ \
+          -a sleep 5
+```
+
+#### Raw config1 Encoding
+
+```bash
+# SE=2 (bits 8-15): 0x0200
+perf stat -e amdgpu_pmu/sq_waves,config1=0x0200/ -a sleep 1
+
+# SE=2, SA=1 (bits 8-23): 0x00010200  
+perf stat -e amdgpu_pmu/sq_waves,config1=0x00010200/ -a sleep 1
+
+# SE=3, SA=1, WGP=2 (bits 8-31): 0x02010300
+perf stat -e amdgpu_pmu/sq_waves,config1=0x02010300/ -a sleep 1
+```
+
+### Error Handling
+
+The driver provides clear error messages for common mistakes:
+
+```bash
+# Invalid dimension (SE=99 exceeds maximum)
+$ perf stat -e amdgpu_pmu/sq_waves,se=99/ -a sleep 1
+Error: dimension out of range: se=99 (max: 3)
+
+# Unsupported dimension for counter
+$ perf stat -e amdgpu_pmu/grbm_count,se=0/ -a sleep 1
+Error: counter 'grbm_count' does not support requested dimensions
+
+# Dimension validation happens during event_init, before allocation
+```
+
+Dimension limits are determined from GPU architecture at module load time:
+```c
+/* In amdgpu_pmu_init() */
+global_dim_limits.max_xcc = arch->num_xcc - 1;
+global_dim_limits.max_se = arch->num_se - 1;
+global_dim_limits.max_sa = arch->num_sa - 1;
+global_dim_limits.max_wgp = arch->num_wgp_per_sa - 1;
+global_dim_limits.max_cu = arch->num_cu - 1;
+```
+
+### Current Limitations and Future Work
+
+#### Implemented
+- ✅ Single dimension instance monitoring (one SE/SA/WGP at a time)
+- ✅ Named parameter syntax via perf format attributes
+- ✅ Raw config1 encoding support
+- ✅ Dimension validation against hardware limits
+- ✅ Counter compatibility checking
+- ✅ GRBM_GFX_INDEX targeting for hardware configuration
+
+#### Future Enhancements
+
+**Aggregate Mode** (config1 bit 40):
+```bash
+# Monitor SE=0 but aggregate across all SA/WGP within that SE
+perf stat -e amdgpu_pmu/sq_waves,se=0,aggregate=1/ -a sleep 1
+```
+Implementation: Allocate multiple counter instances, configure each for different SA/WGP within the SE, sum results.
+
+**Per-CU Monitoring**:
+Currently focused on SE/SA/WGP. CU-level monitoring would require additional hardware support and more fine-grained GRBM_GFX_INDEX configuration.
+
+**Dynamic Dimension Discovery**:
+Export per-GPU dimension limits via sysfs for runtime discovery:
+```
+/sys/bus/event_source/devices/amdgpu_pmu/caps/
+├── max_xcc
+├── max_se
+├── max_sa
+├── max_wgp
+└── max_cu
+```
+
+### Performance Considerations
+
+**Overhead**:
+- Dimension-specific monitoring has minimal overhead vs. broadcast mode
+- Single targeted register write vs. broadcast affects all instances
+- Counter read is faster (1 instance vs. SE×SA×WGP instances)
+
+**Scalability**:
+- Each dimension-specific event allocates one hardware counter
+- Maximum concurrent events limited by available hardware counters per block
+- Typical limits: 4-8 counters per block type (SQ, TA, GL2C, etc.)
+
+**Use Cases**:
+- **Load Balancing Analysis**: Compare activity across SEs to detect imbalance
+- **Hotspot Detection**: Identify which SE/SA is most active  
+- **Power Analysis**: Monitor specific regions during power management
+- **Debugging**: Isolate issues to specific hardware units
+
+### Testing
+
+See test files:
+- `src/aql_c/tests/test_dimension_helpers.c` - Unit tests for dimension encoding/decoding
+- `test/dimension_test.sh` - Integration tests for dimension syntax
+- `test/gpu_workload_test.sh` - GPU workload tests with dimension monitoring
+
+### References
+
+- AMD GFX12 Architecture Documentation
+- Linux Perf Subsystem Documentation
+- GRBM_GFX_INDEX Register Specification
+- PM4 Packet Format Reference

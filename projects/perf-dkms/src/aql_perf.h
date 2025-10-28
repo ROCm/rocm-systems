@@ -19,6 +19,7 @@
 #include <linux/perf_event.h>
 #include "aql_c/aql_structures.h"
 #include "aql_c/packet_generation.h"
+#include "pmu_dimension.h"
 
 /* Forward declarations */
 struct file;
@@ -187,8 +188,18 @@ struct aql_perf_packet {
     size_t packet_size;
 };
 
-/* Forward declaration for counter_reg_info_t */
+/* Forward declarations */
 typedef struct counter_reg_info counter_reg_info_t;
+struct pmu_dimension_coords;
+struct shared_counter_ref;
+
+/* Shared counter tracking for dimension-specific events */
+struct shared_counter_ref {
+    uint32_t counter_id;                   /* Which counter type (counter_id_t) */
+    struct aql_measurement *measurement;   /* The measurement that owns the counter */
+    atomic_t ref_count;                    /* How many events share this counter */
+    struct list_head list;                 /* List linkage */
+};
 
 /* Per-measurement tracking structure */
 struct aql_measurement {
@@ -204,6 +215,14 @@ struct aql_measurement {
 
     /* Allocated counter from block (NULL if not allocated) */
     counter_reg_info_t* allocated_counter;
+
+    /* Counter sharing support */
+    struct shared_counter_ref *shared_ref;  /* Shared counter reference */
+    bool owns_counter;                      /* True if this measurement allocated the counter */
+
+    /* Dimension-specific monitoring support */
+    struct pmu_dimension_coords target_dims;  /* Target hardware dimensions */
+    bool dimension_specific;                  /* True if targeting specific dimensions */
 
     /* Work queue support for atomic context handling */
     struct workqueue_struct *work_queue;
@@ -235,6 +254,10 @@ struct aql_perf_session {
     struct list_head active_measurements;
     spinlock_t measurement_lock;
     atomic_t active_gpu_count;
+
+    /* Counter sharing for dimension-specific events */
+    struct list_head shared_counters;  /* List of shared counter allocations */
+    spinlock_t shared_lock;            /* Protects shared_counters list */
 
     /* Error recovery */
     struct aql_error_recovery recovery;

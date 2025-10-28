@@ -375,10 +375,21 @@ void aql_perf_destroy_error_context(struct aql_error_context *error)
  */
 bool aql_perf_is_gpu_disabled(struct aql_perf_session *session, uint32_t gpu_id)
 {
+    uint32_t i;
+
     if (!session)
         return true;
 
-    return test_bit(gpu_id, &session->recovery.error_mask);
+    /* Find GPU index from GPU ID */
+    for (i = 0; i < session->num_gpus; i++) {
+        if (session->gpu_ids[i] == gpu_id) {
+            /* Use index (0, 1, 2...) not hardware ID (7410, 7411...) */
+            return test_bit(i, &session->recovery.error_mask);
+        }
+    }
+
+    /* GPU ID not found in session - treat as disabled */
+    return true;
 }
 
 /**

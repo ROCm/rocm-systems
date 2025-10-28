@@ -20,6 +20,7 @@
 #include "kfd_test.h"
 #include "aql_perf.h"
 #include "aql_c/counter_registry.h"
+#include "pmu_dimension.h"
 
 /* Global PMU instance */
 static struct amdgpu_pmu *amdgpu_pmu_instance;
@@ -42,18 +43,66 @@ static void amdgpu_pmu_start(struct perf_event *event, int flags);
 static void amdgpu_pmu_stop(struct perf_event *event, int flags);
 static void amdgpu_pmu_read(struct perf_event *event);
 
-/* Sysfs attribute functions */
-static ssize_t amdgpu_pmu_format_show(struct device *dev,
-                                    struct device_attribute *attr,
-                                    char *buf)
-{
-    return sprintf(buf, "config:0-63\n");
-}
+/*
+ * PMU_FORMAT_ATTR - Define a perf format attribute
+ *
+ * This macro creates the necessary boilerplate for exposing perf event
+ * format attributes via sysfs. Format attributes tell userspace tools
+ * like perf how to encode event parameters into the config/config1/config2
+ * fields of struct perf_event_attr.
+ *
+ * The format string uses the syntax "field:start-end" or "field:bit" to
+ * describe which bits of the config field are used for this parameter.
+ *
+ * Example:
+ *   PMU_FORMAT_ATTR(se, "config1:8-15")
+ *   Creates /sys/bus/event_source/devices/amdgpu_pmu/format/se
+ *   with contents "config1:8-15"
+ *
+ * This allows perf to parse: perf stat -e amdgpu_pmu/event,se=2/
+ */
+#define PMU_FORMAT_ATTR(_name, _format) \
+static ssize_t __pmu_format_##_name##_show(struct device *dev, \
+					    struct device_attribute *attr, \
+					    char *page) \
+{ \
+	return sprintf(page, _format "\n"); \
+} \
+static struct device_attribute format_attr_##_name = \
+	__ATTR(_name, 0444, __pmu_format_##_name##_show, NULL)
 
-static DEVICE_ATTR(format, 0444, amdgpu_pmu_format_show, NULL);
+/*
+ * Format Attributes - Define how perf encodes event parameters
+ *
+ * These attributes tell the perf tool how to encode named parameters
+ * into the config and config1 fields of struct perf_event_attr.
+ *
+ * config1 bit layout (defined in pmu_dimension.h):
+ *   Bits  0-7  : XCC index
+ *   Bits  8-15 : SE index
+ *   Bits 16-23 : SA index
+ *   Bits 24-31 : WGP index
+ *   Bits 32-39 : CU index
+ *   Bit  40    : Aggregate flag
+ */
+PMU_FORMAT_ATTR(config, "config:0-63");      /* Counter ID */
+PMU_FORMAT_ATTR(config1, "config1:0-63");    /* Raw dimension encoding */
+PMU_FORMAT_ATTR(xcc, "config1:0-7");         /* XCC index */
+PMU_FORMAT_ATTR(se, "config1:8-15");         /* SE index */
+PMU_FORMAT_ATTR(sa, "config1:16-23");        /* SA index */
+PMU_FORMAT_ATTR(wgp, "config1:24-31");       /* WGP index */
+PMU_FORMAT_ATTR(cu, "config1:32-39");        /* CU index */
+PMU_FORMAT_ATTR(aggregate, "config1:40");    /* Aggregate across dimensions */
 
 static struct attribute *amdgpu_pmu_format_attrs[] = {
-    &dev_attr_format.attr,
+    &format_attr_config.attr,
+    &format_attr_config1.attr,
+    &format_attr_xcc.attr,
+    &format_attr_se.attr,
+    &format_attr_sa.attr,
+    &format_attr_wgp.attr,
+    &format_attr_cu.attr,
+    &format_attr_aggregate.attr,
     NULL,
 };
 
@@ -86,9 +135,43 @@ static struct attribute_group amdgpu_pmu_events_group = {
     .attrs = NULL,  /* Set during init */
 };
 
+/* CPU mask attribute - shows which CPUs (GPUs) are available */
+static ssize_t cpumask_show(struct device *dev,
+                             struct device_attribute *attr,
+                             char *buf)
+{
+    int num_gpus = aql_pmu_get_gpu_count();
+    cpumask_var_t mask;
+    ssize_t ret;
+    int i;
+
+    if (!zalloc_cpumask_var(&mask, GFP_KERNEL))
+        return -ENOMEM;
+
+    /* Set bits 0 to num_gpus-1 */
+    for (i = 0; i < num_gpus && i < nr_cpu_ids; i++)
+        cpumask_set_cpu(i, mask);
+
+    ret = cpumap_print_to_pagebuf(true, buf, mask);
+    free_cpumask_var(mask);
+    return ret;
+}
+
+static DEVICE_ATTR_RO(cpumask);
+
+static struct attribute *amdgpu_pmu_cpumask_attrs[] = {
+    &dev_attr_cpumask.attr,
+    NULL,
+};
+
+static struct attribute_group amdgpu_pmu_cpumask_group = {
+    .attrs = amdgpu_pmu_cpumask_attrs,
+};
+
 static const struct attribute_group *amdgpu_pmu_attr_groups[] = {
     &amdgpu_pmu_format_group,
     &amdgpu_pmu_events_group,
+    &amdgpu_pmu_cpumask_group,
     NULL,
 };
 
@@ -126,21 +209,85 @@ void amdgpu_pmu_free_event_idx(struct amdgpu_pmu *pmu, int idx)
     }
 }
 
+/**
+ * get_gpu_dimension_limits - Get dimension limits for a specific GPU
+ * @gpu_id: GPU identifier
+ * @limits: Output structure for dimension limits
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+static int get_gpu_dimension_limits(uint32_t gpu_id, struct pmu_dimension_limits *limits)
+{
+    struct aql_perf_session *session;
+    arch_t *arch;
+    uint32_t gpu_index;
+    int ret = 0;
+
+    if (!limits)
+        return -EINVAL;
+
+    session = aql_pmu_get_session();
+    if (!session) {
+        pmu_err("Cannot get dimension limits: no AQL session\n");
+        return -ENODEV;
+    }
+
+    /* Find GPU index from GPU ID */
+    for (gpu_index = 0; gpu_index < session->num_gpus; gpu_index++) {
+        if (session->gpu_ids[gpu_index] == gpu_id)
+            break;
+    }
+
+    if (gpu_index >= session->num_gpus) {
+        pmu_err("GPU %u not found in session\n", gpu_id);
+        ret = -ENODEV;
+        goto out;
+    }
+
+    /* Get architecture for this specific GPU */
+    if (!session->archs || !session->archs[gpu_index]) {
+        pmu_err("No architecture information for GPU %u\n", gpu_id);
+        ret = -ENODEV;
+        goto out;
+    }
+
+    arch = session->archs[gpu_index];
+
+    /* Populate dimension limits from this GPU's architecture */
+    limits->max_xcc = (arch->num_xcc > 0) ? arch->num_xcc - 1 : 0;
+    limits->max_se = (arch->num_se > 0) ? arch->num_se - 1 : 0;
+    limits->max_sa = (arch->num_sa > 0) ? arch->num_sa - 1 : 0;
+    limits->max_wgp = (arch->num_wgp_per_sa > 0) ? arch->num_wgp_per_sa - 1 : 0;
+    limits->max_cu = (arch->num_cu > 0) ? arch->num_cu - 1 : 0;
+
+    pmu_debug("GPU %u dimension limits: XCC=0-%u, SE=0-%u, SA=0-%u, WGP=0-%u, CU=0-%u\n",
+              gpu_id, limits->max_xcc, limits->max_se, limits->max_sa,
+              limits->max_wgp, limits->max_cu);
+
+out:
+    aql_pmu_put_session(session);
+    return ret;
+}
+
 /* PMU callback: Initialize event */
 static int amdgpu_pmu_event_init(struct perf_event *event)
 {
     struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
+    struct pmu_dimension_coords dims = {0};
+    const counter_def_t *counter;
+    u64 config = event->attr.config;
+    u64 config1 = event->attr.config1;
     int ret;
 
-    pmu_debug("event_init: config=0x%llx\n", event->attr.config);
+    pmu_debug("event_init: config=0x%llx config1=0x%llx\n", config, config1);
 
     /* Check if event is for our PMU */
     if (event->attr.type != event->pmu->type)
         return -ENOENT;
 
     /* Check if event configuration is supported */
-    if (!amdgpu_pmu_is_valid_event(event->attr.config)) {
-        pmu_err("Unsupported event config: 0x%llx\n", event->attr.config);
+    if (!amdgpu_pmu_is_valid_event(config)) {
+        pmu_err("Unsupported event config: 0x%llx\n", config);
         return -EINVAL;
     }
 
@@ -152,27 +299,85 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
 
     /* GPU PMU doesn't support inherit (GPU counters aren't per-process) */
     if (event->attr.inherit) {
-        pmu_debug("Rejecting inherit flag - GPU counters can't inherit to children\n");
-        return -EOPNOTSUPP;
+        pmu_debug("Disabling inherit flag - GPU counters can't inherit to children\n");
+        event->attr.inherit = 0;
     }
 
-    // /* We don't support exclude filters */
-    // if (event->attr.exclude_user || event->attr.exclude_kernel ||
-    //     event->attr.exclude_hv || event->attr.exclude_idle) {
-    //     pmu_err("Exclude filters not supported\n");
-    //     return -EOPNOTSUPP;
-    // }
+    /* Require explicit CPU specification to map to GPU.
+     * Users must use perf -C <cpu> where CPU number maps to GPU ID.
+     * Example: perf stat -C 0 -e amdgpu_pmu/sq_waves/ (monitors GPU 0)
+     *          perf stat -C 1 -e amdgpu_pmu/sq_waves/ (monitors GPU 1) */
+    if (event->cpu < 0) {
+        pmu_err("GPU PMU requires explicit CPU with -C flag (CPU maps to GPU ID)\n");
+        pmu_err("Example: perf stat -C 0 -e amdgpu_pmu/event/ (for GPU 0)\n");
+        return -EINVAL;
+    }
+
+    /* Map CPU ID to GPU ID using modulo for systems with more CPUs than GPUs */
+    {
+        int num_gpus = aql_pmu_get_gpu_count();
+        int gpu_id = (num_gpus > 0) ? (event->cpu % num_gpus) : 0;
+        pmu_debug("Mapping CPU %d to GPU %d (num_gpus=%d)\n",
+                  event->cpu, gpu_id, num_gpus);
+        /* Store GPU ID for later use in add/start/stop/read callbacks */
+        event->hw.idx = gpu_id;
+    }
+
+    /* Extract and validate dimensions from config1 if specified */
+    if (config1 != 0) {
+        struct pmu_dimension_limits gpu_limits;
+        uint32_t gpu_id = event->hw.idx;
+
+        pmu_extract_dimensions(config1, &dims);
+        pmu_debug("Extracted dimensions: xcc=%u se=%u sa=%u wgp=%u cu=%u agg=%d valid=%d\n",
+                  dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu,
+                  dims.aggregate, dims.valid);
+
+        /* Get dimension limits for the specific GPU this event targets */
+        ret = get_gpu_dimension_limits(gpu_id, &gpu_limits);
+        if (ret != 0) {
+            pmu_err("Failed to get dimension limits for GPU %u: %d\n", gpu_id, ret);
+            return ret;
+        }
+
+        /* Validate dimensions against this GPU's hardware limits */
+        if (!pmu_validate_dimensions(&dims, &gpu_limits)) {
+            pmu_err("Dimension out of range for GPU %u: xcc=%u se=%u sa=%u wgp=%u cu=%u (max: %u/%u/%u/%u/%u)\n",
+                    gpu_id, dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu,
+                    gpu_limits.max_xcc, gpu_limits.max_se,
+                    gpu_limits.max_sa, gpu_limits.max_wgp,
+                    gpu_limits.max_cu);
+            return -EINVAL;
+        }
+
+        /* Get counter definition and validate it supports requested dimensions */
+        counter = lookup_counter_by_id((counter_id_t)config);
+        if (counter) {
+            ret = pmu_validate_counter_dimensions(counter, &dims);
+            if (ret != 0) {
+                pmu_err("Counter '%s' does not support requested dimensions "
+                        "(supported: 0x%x, requested: xcc=%u se=%u sa=%u wgp=%u cu=%u)\n",
+                        counter->name, counter->supported_dimensions,
+                        dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu);
+                return ret;
+            }
+        }
+    }
 
     /* Initialize AQL hardware counter */
-    ret = aql_pmu_event_init(event);
+    ret = aql_pmu_event_init(event, dims.valid ? &dims : NULL);
     if (ret != 0) {
         pmu_err("AQL hardware counter initialization failed for config=0x%llx: %d\n",
-                event->attr.config, ret);
+                config, ret);
         return ret;
     }
 
     /* Successfully initialized hardware counter */
-    pmu_debug("Using AQL hardware counter for event config=0x%llx\n", event->attr.config);
+    if (dims.valid) {
+        pmu_debug("Using AQL hardware counter for event config=0x%llx with dimensions\n", config);
+    } else {
+        pmu_debug("Using AQL hardware counter for event config=0x%llx (no dimensions)\n", config);
+    }
     atomic64_inc(&pmu->hardware_events);
     atomic64_inc(&pmu->total_events);
 
@@ -184,37 +389,35 @@ static int amdgpu_pmu_add(struct perf_event *event, int flags)
 {
     struct hw_perf_event *hwc = &event->hw;
 
-    pmu_info("add: ENTRY - config=0x%llx, flags=0x%x, hwc->config_base=0x%lx\n",
-             event->attr.config, flags, hwc->config_base);
+    pmu_debug("add: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
 
     /* Check if this is an AQL hardware event */
     if (hwc->config_base != 0) {
-        pmu_debug("add: AQL hardware event detected, hwc->config_base=0x%lx\n", hwc->config_base);
         /* AQL hardware event - start measurement if requested */
         if (flags & PERF_EF_START) {
-            pmu_debug("add: Starting AQL hardware event immediately (PERF_EF_START flag set)\n");
             int ret = aql_pmu_event_start(event);
             if (ret) {
                 pmu_err("add: Failed to start AQL hardware event: %d\n", ret);
                 return ret;
             }
             hwc->state = 0;
-            pmu_debug("add: AQL hardware event started successfully, state=0\n");
         } else {
             hwc->state = PERF_HES_STOPPED;
-            pmu_debug("add: AQL hardware event added but not started, state=PERF_HES_STOPPED\n");
         }
 
         /* Set initial counter value */
         local64_set(&event->count, 0);
 
-        pmu_debug("add: Added AQL hardware event config=0x%llx successfully\n", event->attr.config);
+        pmu_debug("add: Added AQL hardware event successfully\n");
         return 0;
     }
 
-    /* Only AQL hardware events are supported */
-    pmu_err("add: Non-AQL event detected, config=0x%llx\n", event->attr.config);
-    return -EINVAL;
+    /* Event not initialized (config_base=0) - perf may be cloning/reusing event structure.
+     * Return success but mark as stopped to prevent retry loop. */
+    pmu_debug("add: Event not initialized, marking as stopped\n");
+    hwc->state = PERF_HES_STOPPED | PERF_HES_UPTODATE;
+    local64_set(&event->count, 0);
+    return 0;
 }
 
 /* PMU callback: Remove event from PMU */
@@ -222,29 +425,27 @@ static void amdgpu_pmu_del(struct perf_event *event, int flags)
 {
     struct hw_perf_event *hwc = &event->hw;
 
-    pmu_info("del: ENTRY - config=0x%llx, flags=0x%x, hwc->config_base=0x%lx\n",
-             event->attr.config, flags, hwc->config_base);
+    pmu_debug("del: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
 
     /* Check if this is an AQL hardware event */
     if (hwc->config_base != 0) {
-        pmu_debug("del: Removing AQL hardware event\n");
-        /* AQL hardware event - stop and cleanup */
+        /* AQL hardware event - stop measurement */
         if (flags & PERF_EF_UPDATE) {
-            pmu_debug("del: Reading final count (PERF_EF_UPDATE flag set)\n");
             amdgpu_pmu_read(event);
         }
 
-        /* Destroy handles stopping internally - don't call stop separately
-         * to avoid duplicate work items and use-after-free */
-        pmu_debug("del: Destroying AQL hardware event\n");
-        aql_pmu_event_destroy(event);
+        /* Stop the event but DON'T destroy it - the event may be re-added later.
+         * Only event_destroy should free the measurement structure. */
+        aql_pmu_event_stop(event);
 
-        pmu_debug("del: Removed AQL hardware event config=0x%llx successfully\n", event->attr.config);
+        /* Mark event as stopped */
+        hwc->state = PERF_HES_STOPPED | PERF_HES_UPTODATE;
+
+        pmu_debug("del: Removed AQL hardware event successfully\n");
         return;
     }
 
-    /* Only AQL hardware events are supported */
-    pmu_err("del: Non-AQL event detected, config=0x%llx\n", event->attr.config);
+    pmu_debug("del: Event not initialized (config_base=0)\n");
 }
 
 /* PMU callback: Start event */
@@ -485,7 +686,7 @@ static int __init amdgpu_pmu_init(void)
         .stop           = amdgpu_pmu_stop,
         .read           = amdgpu_pmu_read,
         .attr_groups    = amdgpu_pmu_attr_groups,
-        .capabilities   = PERF_PMU_CAP_NO_INTERRUPT,
+        .capabilities   = PERF_PMU_CAP_NO_INTERRUPT | PERF_PMU_CAP_NO_EXCLUDE,
     };
 
     /* Register PMU with perf subsystem */
@@ -509,6 +710,22 @@ static int __init amdgpu_pmu_init(void)
         amdgpu_pmu_cleanup_event_attrs();
         kfree(pmu);
         return ret;
+    }
+
+    /* Verify GPU architecture is available for dimension validation */
+    {
+        struct aql_perf_session *session = aql_pmu_get_session();
+        if (!session || session->num_gpus == 0 || !session->archs || !session->archs[0]) {
+            pmu_err("GPU architecture unavailable - cannot validate dimensions\n");
+            perf_pmu_unregister(&pmu->pmu);
+            amdgpu_pmu_cleanup_event_attrs();
+            if (session)
+                aql_pmu_put_session(session);
+            kfree(pmu);
+            return -ENODEV;
+        }
+        pmu_info("GPU architecture loaded - %u GPU(s) available\n", session->num_gpus);
+        aql_pmu_put_session(session);
     }
 
     pmu_info("PMU Stub module loaded successfully\n");

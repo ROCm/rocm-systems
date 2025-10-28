@@ -8,6 +8,34 @@
 
 #include "aql_structures.h"
 
+/* Forward declaration for dimension coordinates structure */
+struct pmu_dimension_coords;
+
+/*
+ * Dimension Capability Flags
+ * ===========================
+ *
+ * These flags indicate which hardware dimensions a performance counter supports.
+ * Different counter types have different granularities:
+ *
+ * - GRBM counters: Global, no dimension support (DIM_NONE)
+ * - SQ counters: Per shader engine/array/WGP (DIM_SE_SA_WGP)
+ * - GL2C counters: Per shader engine/array (DIM_SE_SA)
+ * - TA counters: Per shader engine/array/WGP (DIM_SE_SA_WGP)
+ *
+ * When a user specifies dimensions not supported by a counter, the event
+ * creation will fail with an appropriate error message.
+ */
+#define DIM_NONE        0x00  /* Global counter, no dimension support */
+#define DIM_XCC         0x01  /* Per-XCC (Infinity Fabric block) */
+#define DIM_SE          0x02  /* Per-Shader Engine */
+#define DIM_SA          0x04  /* Per-Shader Array */
+#define DIM_WGP         0x08  /* Per-Work Group Processor */
+#define DIM_CU          0x10  /* Per-Compute Unit */
+#define DIM_ALL         (DIM_XCC | DIM_SE | DIM_SA | DIM_WGP | DIM_CU)
+#define DIM_SE_SA_WGP   (DIM_SE | DIM_SA | DIM_WGP)
+#define DIM_SE_SA       (DIM_SE | DIM_SA)
+
 /**
  * @brief Counter ID enumeration - stable identifiers across architectures
  *
@@ -78,6 +106,7 @@ typedef struct {
     counter_id_t id;                 /* Unique numeric identifier */
     const char* name;                /* Counter name (e.g., "SQ_WAVES") */
     hardware_ip_block_t hw_block;    /* Hardware block this counter belongs to */
+    uint32_t supported_dimensions;   /* Bitmap of supported dimension flags (DIM_*) */
 } counter_def_t;
 
 /**
@@ -135,5 +164,23 @@ const counter_def_t* get_all_counters(void);
  * @return Number of entries in the base counter array
  */
 size_t get_counter_count(void);
+
+/**
+ * @brief Validate that a counter supports the requested dimensions
+ *
+ * Checks whether the specified counter supports the dimensions requested
+ * in the dimension coordinates structure. This is used during event
+ * initialization to reject invalid dimension specifications early.
+ *
+ * @param counter Pointer to counter definition
+ * @param dims Requested dimension coordinates
+ * @return 0 on success, -EINVAL if counter doesn't support requested dimensions
+ *
+ * Example:
+ *   A GRBM counter (DIM_NONE) will fail if any dimension is specified.
+ *   An SQ counter (DIM_SE_SA_WGP) will fail if XCC or CU is specified.
+ */
+int pmu_validate_counter_dimensions(const counter_def_t* counter,
+                                    const struct pmu_dimension_coords* dims);
 
 #endif /* COUNTER_REGISTRY_H */

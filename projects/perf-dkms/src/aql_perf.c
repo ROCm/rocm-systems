@@ -243,6 +243,17 @@ static void aql_perf_session_release(struct aql_perf_session *session)
     /* Ensure all measurements are stopped */
     // This will be implemented in measurement management
 
+    /* Clean up any remaining shared counter refs */
+    {
+        struct shared_counter_ref *ref, *tmp;
+        spin_lock(&session->shared_lock);
+        list_for_each_entry_safe(ref, tmp, &session->shared_counters, list) {
+            list_del(&ref->list);
+            kfree(ref);
+        }
+        spin_unlock(&session->shared_lock);
+    }
+
     /* Free counter buffers and architectures for all GPUs */
     if (session->archs && session->num_gpus > 0) {
         for (uint32_t i = 0; i < session->num_gpus; i++) {
@@ -301,6 +312,10 @@ struct aql_perf_session *aql_perf_session_create(void)
     INIT_LIST_HEAD(&session->active_measurements);
     refcount_set(&session->ref_count, 1);
     atomic_set(&session->active_gpu_count, 0);
+
+    /* Initialize shared counter tracking */
+    INIT_LIST_HEAD(&session->shared_counters);
+    spin_lock_init(&session->shared_lock);
 
     /* Initialize state */
     session->state = SESSION_UNINITIALIZED;

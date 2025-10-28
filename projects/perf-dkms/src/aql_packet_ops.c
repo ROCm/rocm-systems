@@ -20,6 +20,7 @@
 #include "aql_c/counter_registry.h"
 #include "aql_c/packet_generation.h"
 #include "aql_c/pm4_packets.h"
+#include "aql_c/arch_creator_common.h"
 
 /* External KFD functions */
 extern int kfd_ioctl_submit_ib_packet(struct file *filep, struct kfd_process *p,
@@ -93,6 +94,107 @@ static uint64_t aql_perf_get_counter_select(struct aql_perf_session *session, ui
     return event_id;
 }
 
+/* Counter Sharing Helper Functions */
+
+/**
+ * find_shared_counter - Find existing shared counter for this counter_id
+ * @session: AQL performance session
+ * @counter_id: Counter ID to search for
+ *
+ * Returns: Shared counter reference with incremented ref count, or NULL if not found
+ *
+ * Note: Caller must release the reference when done using release_shared_counter()
+ */
+static struct shared_counter_ref *find_shared_counter(
+    struct aql_perf_session *session,
+    uint32_t counter_id)
+{
+    struct shared_counter_ref *ref;
+    unsigned long flags;
+
+    spin_lock_irqsave(&session->shared_lock, flags);
+    list_for_each_entry(ref, &session->shared_counters, list) {
+        if (ref->counter_id == counter_id) {
+            atomic_inc(&ref->ref_count);
+            spin_unlock_irqrestore(&session->shared_lock, flags);
+            aql_info("[PMU] Found shared counter for counter_id=%u, ref_count=%d",
+                     counter_id, atomic_read(&ref->ref_count));
+            return ref;
+        }
+    }
+    spin_unlock_irqrestore(&session->shared_lock, flags);
+    return NULL;
+}
+
+/**
+ * create_shared_counter - Create new shared counter reference
+ * @session: AQL performance session
+ * @counter_id: Counter ID this reference tracks
+ * @measurement: Measurement that owns this counter allocation
+ *
+ * Returns: New shared counter reference, or NULL on allocation failure
+ */
+static struct shared_counter_ref *create_shared_counter(
+    struct aql_perf_session *session,
+    uint32_t counter_id,
+    struct aql_measurement *measurement)
+{
+    struct shared_counter_ref *ref;
+    unsigned long flags;
+
+    ref = kzalloc(sizeof(*ref), GFP_KERNEL);
+    if (!ref) {
+        aql_err("[PMU] Failed to allocate shared counter reference");
+        return NULL;
+    }
+
+    ref->counter_id = counter_id;
+    ref->measurement = measurement;
+    atomic_set(&ref->ref_count, 1);
+
+    spin_lock_irqsave(&session->shared_lock, flags);
+    list_add(&ref->list, &session->shared_counters);
+    spin_unlock_irqrestore(&session->shared_lock, flags);
+
+    aql_info("[PMU] Created shared counter for counter_id=%u, ref_count=1",
+             counter_id);
+
+    return ref;
+}
+
+/**
+ * release_shared_counter - Release shared counter reference
+ * @session: AQL performance session
+ * @ref: Shared counter reference to release
+ *
+ * Decrements reference count. When count reaches zero, removes from list and frees.
+ */
+static void release_shared_counter(
+    struct aql_perf_session *session,
+    struct shared_counter_ref *ref)
+{
+    unsigned long flags;
+    int old_count;
+
+    if (!ref)
+        return;
+
+    old_count = atomic_read(&ref->ref_count);
+
+    if (atomic_dec_and_test(&ref->ref_count)) {
+        spin_lock_irqsave(&session->shared_lock, flags);
+        list_del(&ref->list);
+        spin_unlock_irqrestore(&session->shared_lock, flags);
+
+        aql_info("[PMU] Released shared counter for counter_id=%u (ref_count %d -> 0)",
+                 ref->counter_id, old_count);
+        kfree(ref);
+    } else {
+        aql_info("[PMU] Decremented shared counter for counter_id=%u (ref_count %d -> %d)",
+                 ref->counter_id, old_count, atomic_read(&ref->ref_count));
+    }
+}
+
 /* Packet Creation Functions */
 
 /**
@@ -163,15 +265,46 @@ int aql_perf_create_start_packet(struct aql_measurement *measurement,
         return -EINVAL;
     }
 
+    /* Check if another event already allocated this counter */
+    struct shared_counter_ref *shared_ref = find_shared_counter(session, measurement->counter_id);
+    if (shared_ref) {
+        /* Reuse existing allocation - share the counter */
+        measurement->shared_ref = shared_ref;
+        measurement->owns_counter = false;
+
+        const counter_def_t *counter_def_for_log = lookup_counter_by_id((counter_id_t)measurement->counter_id);
+        aql_info("[PMU] Sharing counter for %s (counter_id=%u, ref_count=%d)",
+                 counter_def_for_log ? counter_def_for_log->name : "unknown",
+                 measurement->counter_id,
+                 atomic_read(&shared_ref->ref_count));
+
+        /* Copy allocated counter pointer from the owning measurement */
+        measurement->allocated_counter = shared_ref->measurement->allocated_counter;
+
+        /* No START packet needed - counter already started */
+        *out_pm4_buffer = NULL;
+        return 0;
+    }
+
     aql_info("[PMU] generate_start_packet: Allocating counter from block=%s, event_id=0x%x",
              block->name, event_id);
 
-    /* Atomically allocate a counter from the block */
+    /* First event for this counter - allocate hardware counter */
     allocated_counter = aql_counter_try_allocate(block, event_id, measurement->event);
     if (!allocated_counter) {
         aql_err("[PMU] Failed to allocate counter from block %s (all busy)", block->name);
         return -EBUSY;
     }
+
+    /* Create shared reference for this new allocation */
+    shared_ref = create_shared_counter(session, measurement->counter_id, measurement);
+    if (!shared_ref) {
+        aql_err("[PMU] Failed to create shared counter reference");
+        aql_counter_release(allocated_counter);
+        return -ENOMEM;
+    }
+    measurement->shared_ref = shared_ref;
+    measurement->owns_counter = true;
 
     /* Build counter_info_t structure */
     ret = aql_build_counter_info(measurement->counter_id, arch, allocated_counter,
@@ -468,6 +601,8 @@ struct aql_measurement *aql_perf_measurement_create(struct aql_perf_session *ses
     measurement->counter_id = (uint32_t)event->attr.config; /* Use event config as counter ID */
     measurement->last_counter_value = 0;
     measurement->allocated_counter = NULL; /* No counter allocated yet */
+    measurement->shared_ref = NULL; /* No shared reference yet */
+    measurement->owns_counter = false; /* Not owning any counter yet */
 
     /* Initialize work queue support */
     measurement->work_queue = alloc_workqueue("aql_gpu_%u", WQ_MEM_RECLAIM | WQ_HIGHPRI, 1, gpu_id);
@@ -540,7 +675,7 @@ int aql_perf_measurement_start(struct aql_measurement *measurement)
 
     spin_unlock_irqrestore(&session->measurement_lock, flags);
 
-    /* Create START packet (allocates counter atomically) */
+    /* Create START packet (allocates counter atomically or shares existing) */
     ret = aql_perf_create_start_packet(measurement, &pm4_buffer);
     if (ret) {
         aql_err("[PMU] Session %llu: Failed to create START packet for GPU %u: %d",
@@ -548,30 +683,41 @@ int aql_perf_measurement_start(struct aql_measurement *measurement)
         goto cleanup_measurement;
     }
 
-    /* Submit PM4 buffer directly */
-    ret = aql_perf_submit_pm4_packet(session, measurement->gpu_id, pm4_buffer);
-    if (ret) {
-        aql_err("[PMU] Session %llu: Failed to submit START packet for GPU %u: %d",
-                session->session_id, measurement->gpu_id, ret);
-        /* Counter was allocated, need to release it */
-        if (measurement->allocated_counter) {
-            aql_counter_release(measurement->allocated_counter);
-            measurement->allocated_counter = NULL;
+    /* If pm4_buffer is NULL, counter is shared and already started */
+    if (pm4_buffer) {
+        /* Submit PM4 buffer directly */
+        ret = aql_perf_submit_pm4_packet(session, measurement->gpu_id, pm4_buffer);
+        if (ret) {
+            aql_err("[PMU] Session %llu: Failed to submit START packet for GPU %u: %d",
+                    session->session_id, measurement->gpu_id, ret);
+            /* Counter was allocated, need to release it */
+            if (measurement->owns_counter && measurement->allocated_counter) {
+                aql_counter_release(measurement->allocated_counter);
+                measurement->allocated_counter = NULL;
+            }
+            /* Release shared reference */
+            if (measurement->shared_ref) {
+                release_shared_counter(session, measurement->shared_ref);
+                measurement->shared_ref = NULL;
+            }
+            pm4_buffer_destroy(pm4_buffer);
+            goto cleanup_measurement;
         }
-        pm4_buffer_destroy(pm4_buffer);
-        goto cleanup_measurement;
-    }
 
-    /* Cleanup PM4 buffer */
-    pm4_buffer_destroy(pm4_buffer);
+        /* Cleanup PM4 buffer */
+        pm4_buffer_destroy(pm4_buffer);
+
+        aql_info("[PMU] Session %llu: Started measurement for GPU %u (owns_counter=true)",
+                 session->session_id, measurement->gpu_id);
+    } else {
+        aql_info("[PMU] Session %llu: Started measurement for GPU %u (sharing counter, owns_counter=false)",
+                 session->session_id, measurement->gpu_id);
+    }
 
     /* Update state to active */
     spin_lock_irqsave(&session->measurement_lock, flags);
     measurement->state = MEASUREMENT_ACTIVE;
     spin_unlock_irqrestore(&session->measurement_lock, flags);
-
-    aql_info("[PMU] Session %llu: Started measurement for GPU %u",
-             session->session_id, measurement->gpu_id);
 
     mutex_unlock(&session->session_mutex);
     return 0;
@@ -634,30 +780,45 @@ int aql_perf_measurement_stop(struct aql_measurement *measurement)
     measurement->state = MEASUREMENT_STOPPING;
     spin_unlock_irqrestore(&session->measurement_lock, flags);
 
-    /* Create END packet */
-    ret = aql_perf_create_end_packet(measurement, &pm4_buffer);
-    if (ret) {
-        aql_err("[PMU] Session %llu: Failed to create END packet for GPU %u: %d",
-                session->session_id, measurement->gpu_id, ret);
-        goto cleanup;
-    }
+    /* Only generate STOP packet if we own the counter */
+    if (measurement->owns_counter) {
+        /* Create END packet */
+        ret = aql_perf_create_end_packet(measurement, &pm4_buffer);
+        if (ret) {
+            aql_err("[PMU] Session %llu: Failed to create END packet for GPU %u: %d",
+                    session->session_id, measurement->gpu_id, ret);
+            goto cleanup;
+        }
 
-    /* Submit PM4 buffer */
-    ret = aql_perf_submit_pm4_packet(session, measurement->gpu_id, pm4_buffer);
-    if (ret) {
-        aql_err("[PMU] Session %llu: Failed to submit END packet for GPU %u: %d",
-                session->session_id, measurement->gpu_id, ret);
+        /* Submit PM4 buffer */
+        ret = aql_perf_submit_pm4_packet(session, measurement->gpu_id, pm4_buffer);
+        if (ret) {
+            aql_err("[PMU] Session %llu: Failed to submit END packet for GPU %u: %d",
+                    session->session_id, measurement->gpu_id, ret);
+            pm4_buffer_destroy(pm4_buffer);
+            goto cleanup;
+        }
+
+        /* Cleanup PM4 buffer */
         pm4_buffer_destroy(pm4_buffer);
-        goto cleanup;
+
+        /* Release allocated counter (we own it) */
+        if (measurement->allocated_counter) {
+            aql_counter_release(measurement->allocated_counter);
+            measurement->allocated_counter = NULL;
+        }
+
+        aql_info("[PMU] Session %llu: Stopped measurement for GPU %u (owned counter, released)",
+                 session->session_id, measurement->gpu_id);
+    } else {
+        aql_info("[PMU] Session %llu: Stopped measurement for GPU %u (shared counter, not releasing)",
+                 session->session_id, measurement->gpu_id);
     }
 
-    /* Cleanup PM4 buffer */
-    pm4_buffer_destroy(pm4_buffer);
-
-    /* Release allocated counter */
-    if (measurement->allocated_counter) {
-        aql_counter_release(measurement->allocated_counter);
-        measurement->allocated_counter = NULL;
+    /* Release shared reference (decrements ref count) */
+    if (measurement->shared_ref) {
+        release_shared_counter(session, measurement->shared_ref);
+        measurement->shared_ref = NULL;
     }
 
     /* Remove from active measurements */
@@ -666,9 +827,6 @@ int aql_perf_measurement_stop(struct aql_measurement *measurement)
     measurement->state = MEASUREMENT_IDLE;
     atomic_dec(&session->active_gpu_count);
     spin_unlock_irqrestore(&session->measurement_lock, flags);
-
-    aql_info("[PMU] Session %llu: Stopped measurement for GPU %u",
-             session->session_id, measurement->gpu_id);
 
     mutex_unlock(&session->session_mutex);
     return 0;
@@ -682,6 +840,46 @@ cleanup:
 
     mutex_unlock(&session->session_mutex);
     return ret;
+}
+
+/**
+ * aql_aggregate_counter_instances - Sum counter values across all hardware instances
+ * @session: AQL session containing architecture information
+ * @measurement: Measurement containing counter metadata
+ * @result_buffer: Buffer containing per-instance counter values
+ * @gpu_idx: Index of GPU in session
+ *
+ * Aggregates counter values by summing all hardware instances (SE x SA x WGP).
+ * The number of instances is determined from the counter's hardware block
+ * dimension information.
+ *
+ * Returns: Sum of all instance values
+ */
+static uint64_t aql_aggregate_counter_instances(
+    struct aql_perf_session *session,
+    struct aql_measurement *measurement,
+    uint64_t *result_buffer,
+    int gpu_idx)
+{
+    arch_t *arch = session->archs[gpu_idx];
+    const counter_def_t *counter_def = lookup_counter_by_id((counter_id_t)measurement->counter_id);
+    block_info_t *block = arch->block_map.blocks[counter_def->hw_block];
+    uint64_t sum = 0;
+    uint32_t num_instances = 1;
+
+    /* Determine total number of instances based on block dimensions */
+    for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
+        num_instances *= block->dimensions[dim_idx].size;
+    }
+
+    /* Sum all instances */
+    for (uint32_t i = 0; i < num_instances; i++) {
+        sum += result_buffer[i];
+    }
+
+    aql_info("[PMU] Aggregated %u instances, total=%llu", num_instances, sum);
+
+    return sum;
 }
 
 /**
@@ -758,10 +956,38 @@ uint64_t aql_perf_measurement_read(struct aql_measurement *measurement)
                  measurement->gpu_id, measurement->allocated_counter);
     }
 
-    counter_value = result_buffer ? *result_buffer : -1;
+    if (!result_buffer) {
+        counter_value = -1;
+    } else if (measurement->dimension_specific) {
+        /*
+         * Dimension-specific counter: filter to return only the specific instance.
+         * The GPU read packet collects all instances in a flat array.
+         * Calculate the flat index for the target dimension and return only that value.
+         */
+        arch_t *arch = session->archs[gpu_idx];
+        uint32_t flat_idx = encode_dimension_index(
+            measurement->target_dims.se,
+            measurement->target_dims.sa,
+            measurement->target_dims.wgp,
+            arch->num_sa,
+            arch->num_wgp_per_sa
+        );
 
-    aql_info("[PMU] READ_SYNC: GPU %u, read counter_value=%llu from buffer (buffer=%p)",
-             measurement->gpu_id, counter_value, result_buffer);
+        counter_value = result_buffer[flat_idx];
+
+        aql_info("[PMU] READ_SYNC: GPU %u, dimension-specific read: SE=%u SA=%u WGP=%u -> flat_idx=%u, value=%llu",
+                 measurement->gpu_id,
+                 measurement->target_dims.se,
+                 measurement->target_dims.sa,
+                 measurement->target_dims.wgp,
+                 flat_idx, counter_value);
+    } else {
+        /* Aggregate across all instances */
+        counter_value = aql_aggregate_counter_instances(session, measurement, result_buffer, gpu_idx);
+    }
+
+    aql_info("[PMU] READ_SYNC: GPU %u, final counter_value=%llu (dimension_specific=%d)",
+             measurement->gpu_id, counter_value, measurement->dimension_specific);
 
     /* Update cached value */
     measurement->last_counter_value = counter_value;
@@ -810,11 +1036,18 @@ void aql_perf_measurement_destroy(struct aql_measurement *measurement)
         aql_perf_measurement_stop(measurement);
     }
 
-    /* Ensure counter is released if still allocated */
-    if (measurement->allocated_counter) {
-        aql_warn("[PMU] Measurement still has allocated counter during destroy, releasing");
+    /* Ensure counter is released if still allocated and owned */
+    if (measurement->owns_counter && measurement->allocated_counter) {
+        aql_warn("[PMU] Measurement still has owned counter during destroy, releasing");
         aql_counter_release(measurement->allocated_counter);
         measurement->allocated_counter = NULL;
+    }
+
+    /* Release shared counter reference if still held */
+    if (measurement->shared_ref) {
+        aql_warn("[PMU] Measurement still has shared_ref during destroy, releasing");
+        release_shared_counter(measurement->session, measurement->shared_ref);
+        measurement->shared_ref = NULL;
     }
 
     /* Clean up work queue */
@@ -897,10 +1130,16 @@ void aql_work_handler(struct work_struct *work)
     if (measurement->pending_destroy && work_item->op_type == AQL_WORK_STOP) {
         aql_debug("[PMU] Async STOP complete, destroying measurement as requested");
 
-        /* Release counter if still allocated */
-        if (measurement->allocated_counter) {
+        /* Release counter if still allocated and owned */
+        if (measurement->owns_counter && measurement->allocated_counter) {
             aql_counter_release(measurement->allocated_counter);
             measurement->allocated_counter = NULL;
+        }
+
+        /* Release shared counter reference if still held */
+        if (measurement->shared_ref) {
+            release_shared_counter(measurement->session, measurement->shared_ref);
+            measurement->shared_ref = NULL;
         }
 
         /* Can't call destroy_workqueue from work handler running on that queue.

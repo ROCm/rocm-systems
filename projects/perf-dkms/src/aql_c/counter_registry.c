@@ -14,51 +14,98 @@
 #include <linux/kernel.h>
 #endif
 
+/* Include dimension support for validation */
+#ifndef USERSPACE_BUILD
+#include "../pmu_dimension.h"
+#else
+/* Userspace builds don't need dimension validation */
+struct pmu_dimension_coords;
+#endif
+
 /* Base counter definitions - architecture agnostic */
 static const counter_def_t base_counters[] = {
-    /* GL2C Block Counters */
-    {COUNTER_GL2C_EA_RDREQ, "gl2c_ea_rdreq", HW_IP_BLOCK_GL2C},
-    {COUNTER_GL2C_EA_RDREQ_128B, "gl2c_ea_rdreq_128b", HW_IP_BLOCK_GL2C},
-    {COUNTER_GL2C_EA_RDREQ_32B, "gl2c_ea_rdreq_32b", HW_IP_BLOCK_GL2C},
-    {COUNTER_GL2C_EA_RDREQ_64B, "gl2c_ea_rdreq_64b", HW_IP_BLOCK_GL2C},
-    {COUNTER_GL2C_EA_WRREQ, "gl2c_ea_wrreq", HW_IP_BLOCK_GL2C},
-    {COUNTER_GL2C_EA_WRREQ_64B, "gl2c_ea_wrreq_64b", HW_IP_BLOCK_GL2C},
-    {COUNTER_GL2C_EA_WRREQ_STALL, "gl2c_ea_wrreq_stall", HW_IP_BLOCK_GL2C},
-    {COUNTER_GL2C_HIT, "gl2c_hit", HW_IP_BLOCK_GL2C},
-    {COUNTER_GL2C_MISS, "gl2c_miss", HW_IP_BLOCK_GL2C},
+    /*
+     * GL2C Block Counters - DIM_SE_SA (L2 Cache per Shader Array)
+     *
+     * Dimension rationale: The GL2C (Graphics L2 Cache) is a hardware block that
+     * exists once per Shader Array (SA) in the GPU hierarchy. Each SE contains
+     * multiple SAs, and each SA has its own dedicated L2 cache instance. This
+     * hardware architecture means GL2C counters naturally vary across SE and SA
+     * dimensions, but not WGP or CU (which share the same L2 cache within an SA).
+     *
+     * Hardware topology: SE -> SA -> [GL2C instance] -> WGPs (share this cache)
+     */
+    {COUNTER_GL2C_EA_RDREQ, "gl2c_ea_rdreq", HW_IP_BLOCK_GL2C, DIM_SE_SA},
+    {COUNTER_GL2C_EA_RDREQ_128B, "gl2c_ea_rdreq_128b", HW_IP_BLOCK_GL2C, DIM_SE_SA},
+    {COUNTER_GL2C_EA_RDREQ_32B, "gl2c_ea_rdreq_32b", HW_IP_BLOCK_GL2C, DIM_SE_SA},
+    {COUNTER_GL2C_EA_RDREQ_64B, "gl2c_ea_rdreq_64b", HW_IP_BLOCK_GL2C, DIM_SE_SA},
+    {COUNTER_GL2C_EA_WRREQ, "gl2c_ea_wrreq", HW_IP_BLOCK_GL2C, DIM_SE_SA},
+    {COUNTER_GL2C_EA_WRREQ_64B, "gl2c_ea_wrreq_64b", HW_IP_BLOCK_GL2C, DIM_SE_SA},
+    {COUNTER_GL2C_EA_WRREQ_STALL, "gl2c_ea_wrreq_stall", HW_IP_BLOCK_GL2C, DIM_SE_SA},
+    {COUNTER_GL2C_HIT, "gl2c_hit", HW_IP_BLOCK_GL2C, DIM_SE_SA},
+    {COUNTER_GL2C_MISS, "gl2c_miss", HW_IP_BLOCK_GL2C, DIM_SE_SA},
 
-    /* SQ Block Counters */
-    {COUNTER_SQC_LDS_BANK_CONFLICT, "sqc_lds_bank_conflict", HW_IP_BLOCK_SQ},
-    {COUNTER_SQC_LDS_IDX_ACTIVE, "sqc_lds_idx_active", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_ACCUM_PREV, "sq_accum_prev", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_BUSY_CYCLES, "sq_busy_cycles", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INSTS_FLAT, "sq_insts_flat", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INSTS_LDS, "sq_insts_lds", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INSTS_SALU, "sq_insts_salu", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INSTS_SMEM, "sq_insts_smem", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INSTS_TEX_LOAD, "sq_insts_tex_load", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INSTS_TEX_STORE, "sq_insts_tex_store", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INSTS_VALU, "sq_insts_valu", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INSTS_WAVE32, "sq_insts_wave32", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INSTS_WAVE32_LDS, "sq_insts_wave32_lds", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INSTS_WAVE32_VALU, "sq_insts_wave32_valu", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INST_CYCLES_VMEM, "sq_inst_cycles_vmem", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_INST_LEVEL_LDS, "sq_inst_level_lds", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_WAIT_ANY, "sq_wait_any", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_WAIT_INST_ANY, "sq_wait_inst_any", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_WAVE32_INSTS, "sq_wave32_insts", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_WAVE64_INSTS, "sq_wave64_insts", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_WAVES, "sq_waves", HW_IP_BLOCK_SQ},
-    {COUNTER_SQ_WAVE_CYCLES, "sq_wave_cycles", HW_IP_BLOCK_SQ},
+    /*
+     * SQ Block Counters - DIM_SE_SA_WGP (Shader Quad per Work Group Processor)
+     *
+     * Dimension rationale: The SQ (Shader Quad / Shader Engine Sequencer) contains
+     * shader execution resources that exist at the Work Group Processor (WGP) level.
+     * Each WGP has its own independent shader execution units, instruction buffers,
+     * and local data share (LDS). This hardware architecture means shader-related
+     * counters (instructions, waves, cycles) naturally vary across SE, SA, and WGP
+     * dimensions, providing the finest granularity for performance analysis.
+     *
+     * Hardware topology: SE -> SA -> WGP -> [SQ instance with CUs/SIMDs]
+     */
+    {COUNTER_SQC_LDS_BANK_CONFLICT, "sqc_lds_bank_conflict", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQC_LDS_IDX_ACTIVE, "sqc_lds_idx_active", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_ACCUM_PREV, "sq_accum_prev", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_BUSY_CYCLES, "sq_busy_cycles", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INSTS_FLAT, "sq_insts_flat", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INSTS_LDS, "sq_insts_lds", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INSTS_SALU, "sq_insts_salu", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INSTS_SMEM, "sq_insts_smem", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INSTS_TEX_LOAD, "sq_insts_tex_load", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INSTS_TEX_STORE, "sq_insts_tex_store", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INSTS_VALU, "sq_insts_valu", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INSTS_WAVE32, "sq_insts_wave32", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INSTS_WAVE32_LDS, "sq_insts_wave32_lds", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INSTS_WAVE32_VALU, "sq_insts_wave32_valu", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INST_CYCLES_VMEM, "sq_inst_cycles_vmem", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_INST_LEVEL_LDS, "sq_inst_level_lds", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_WAIT_ANY, "sq_wait_any", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_WAIT_INST_ANY, "sq_wait_inst_any", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_WAVE32_INSTS, "sq_wave32_insts", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_WAVE64_INSTS, "sq_wave64_insts", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_WAVES, "sq_waves", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+    {COUNTER_SQ_WAVE_CYCLES, "sq_wave_cycles", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
 
-    /* TA Block Counters */
-    {COUNTER_TA_BUFFER_LOAD_WAVEFRONTS, "ta_buffer_load_wavefronts", HW_IP_BLOCK_TA},
-    {COUNTER_TA_BUFFER_STORE_WAVEFRONTS, "ta_buffer_store_wavefronts", HW_IP_BLOCK_TA},
-    {COUNTER_TA_TA_BUSY, "ta_ta_busy", HW_IP_BLOCK_TA},
+    /*
+     * TA Block Counters - DIM_SE_SA_WGP (Texture Addresser per WGP)
+     *
+     * Dimension rationale: The TA (Texture Addresser) handles texture and buffer
+     * addressing for each Work Group Processor. Like the SQ, texture units exist
+     * at the WGP level, making TA counters naturally dimensional across SE/SA/WGP.
+     *
+     * Hardware topology: SE -> SA -> WGP -> [TA instance]
+     */
+    {COUNTER_TA_BUFFER_LOAD_WAVEFRONTS, "ta_buffer_load_wavefronts", HW_IP_BLOCK_TA, DIM_SE_SA_WGP},
+    {COUNTER_TA_BUFFER_STORE_WAVEFRONTS, "ta_buffer_store_wavefronts", HW_IP_BLOCK_TA, DIM_SE_SA_WGP},
+    {COUNTER_TA_TA_BUSY, "ta_ta_busy", HW_IP_BLOCK_TA, DIM_SE_SA_WGP},
 
-    /* GRBM Block Counters */
-    {COUNTER_GRBM_COUNT, "grbm_count", HW_IP_BLOCK_GRBM},
-    {COUNTER_GRBM_GUI_ACTIVE, "grbm_gui_active", HW_IP_BLOCK_GRBM},
+    /*
+     * GRBM Block Counters - DIM_NONE (Global, not per-dimension)
+     *
+     * Dimension rationale: The GRBM (Graphics Register Bus Manager) is a global
+     * hardware block that exists once per GPU, not per SE/SA/WGP. It manages the
+     * register bus and tracks global GPU activity. Since there is only one GRBM
+     * instance, these counters have no dimensional variation - they provide
+     * GPU-wide metrics that cannot be broken down by shader engine or other topology.
+     *
+     * Hardware topology: GPU -> [Single GRBM instance] (global, not replicated)
+     */
+    {COUNTER_GRBM_COUNT, "grbm_count", HW_IP_BLOCK_GRBM, DIM_NONE},
+    {COUNTER_GRBM_GUI_ACTIVE, "grbm_gui_active", HW_IP_BLOCK_GRBM, DIM_NONE},
 };
 
 #define BASE_COUNTER_COUNT (sizeof(base_counters) / sizeof(counter_def_t))
@@ -179,4 +226,66 @@ const counter_def_t* get_all_counters(void) {
  */
 size_t get_counter_count(void) {
     return BASE_COUNTER_COUNT;
+}
+
+/**
+ * @brief Validate that a counter supports the requested dimensions
+ *
+ * Checks whether the specified counter supports the dimensions requested
+ * in the dimension coordinates structure. This validation ensures that:
+ *
+ * 1. Global counters (DIM_NONE) reject any dimension specification
+ * 2. Dimension-specific counters only accept their supported dimensions
+ * 3. Aggregate mode is always allowed
+ *
+ * Examples:
+ * - GRBM counter (DIM_NONE) with se=2 -> FAIL (doesn't support SE)
+ * - SQ counter (DIM_SE_SA_WGP) with se=2,sa=1 -> OK
+ * - SQ counter (DIM_SE_SA_WGP) with xcc=1 -> FAIL (doesn't support XCC)
+ * - GL2C counter (DIM_SE_SA) with se=2,wgp=1 -> FAIL (doesn't support WGP)
+ *
+ * @param counter Pointer to counter definition
+ * @param dims Requested dimension coordinates
+ * @return 0 on success, -EINVAL if counter doesn't support requested dimensions
+ */
+int pmu_validate_counter_dimensions(const counter_def_t* counter,
+                                    const struct pmu_dimension_coords* dims)
+{
+    uint32_t requested_dims = 0;
+
+    if (!counter || !dims)
+        return -EINVAL;
+
+    /* If dimensions not specified, always valid */
+    if (!dims->valid)
+        return 0;
+
+    /* Aggregate mode is always allowed */
+    if (dims->aggregate)
+        return 0;
+
+    /* Build a bitmap of requested dimensions.
+     * Note: We check != 0 because dimension value 0 is indistinguishable from
+     * "not specified" in the current config1 encoding. This means se=0 cannot
+     * be explicitly requested (it's the default). This is a known limitation. */
+    if (dims->xcc != 0)
+        requested_dims |= DIM_XCC;
+    if (dims->se != 0)
+        requested_dims |= DIM_SE;
+    if (dims->sa != 0)
+        requested_dims |= DIM_SA;
+    if (dims->wgp != 0)
+        requested_dims |= DIM_WGP;
+    if (dims->cu != 0)
+        requested_dims |= DIM_CU;
+
+    /* Special case: if counter supports DIM_NONE, reject any dimensions */
+    if (counter->supported_dimensions == DIM_NONE && requested_dims != 0)
+        return -EINVAL;
+
+    /* Check if all requested dimensions are supported */
+    if ((requested_dims & ~counter->supported_dimensions) != 0)
+        return -EINVAL;
+
+    return 0;
 }

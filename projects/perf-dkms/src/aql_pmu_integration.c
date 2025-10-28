@@ -15,6 +15,7 @@
 
 #include "aql_perf.h"
 #include "amdgpu_pmu.h"
+#include "pmu_dimension.h"
 
 /* Global AQL session - initialized during module load */
 static struct aql_perf_session *global_aql_session = NULL;
@@ -128,52 +129,40 @@ static uint32_t aql_pmu_select_gpu(struct perf_event *event)
     uint32_t cpu = event->cpu;
     uint32_t gpu_id;
 
-    aql_debug("GPU selection: event->cpu=%d, session=%p", cpu, session);
+    aql_debug("select_gpu: cpu=%d, num_gpus=%u",
+              cpu, session ? session->num_gpus : 0);
 
     if (!session || session->num_gpus == 0) {
-        aql_debug("GPU selection failed: session=%p, num_gpus=%u",
-                  session, session ? session->num_gpus : 0);
+        aql_err("select_gpu: no session or no GPUs");
         return U32_MAX;
     }
 
-    aql_debug("GPU selection: available GPUs=%u", session->num_gpus);
-
     /* For now, use simple CPU-to-GPU mapping */
     if (cpu == -1) {
-        aql_debug("GPU selection: CPU-wide event (cpu=-1), selecting first healthy GPU");
         /* Use first healthy GPU for CPU-wide events */
         for (uint32_t i = 0; i < session->num_gpus; i++) {
             gpu_id = session->gpu_ids[i];
-            aql_debug("GPU selection: checking GPU[%u] ID=%u, disabled=%s",
-                      i, gpu_id, aql_perf_is_gpu_disabled(session, gpu_id) ? "yes" : "no");
             if (!aql_perf_is_gpu_disabled(session, gpu_id)) {
-                aql_debug("GPU selection: selected GPU ID=%u for CPU-wide event", gpu_id);
+                aql_debug("Selected GPU %u for CPU-wide event", gpu_id);
                 return gpu_id;
             }
         }
     } else {
         /* Map CPU to GPU using modulo */
         uint32_t healthy_count = aql_perf_get_healthy_gpu_count(session);
-        aql_debug("GPU selection: CPU-specific event (cpu=%u), healthy_gpus=%u", cpu, healthy_count);
 
         if (healthy_count == 0) {
-            aql_debug("GPU selection: no healthy GPUs available");
             return U32_MAX;
         }
 
         uint32_t gpu_index = cpu % healthy_count;
         uint32_t healthy_idx = 0;
 
-        aql_debug("GPU selection: mapping CPU %u to GPU index %u (cpu %% healthy_count)",
-                  cpu, gpu_index);
-
         for (uint32_t i = 0; i < session->num_gpus; i++) {
             gpu_id = session->gpu_ids[i];
             if (!aql_perf_is_gpu_disabled(session, gpu_id)) {
-                aql_debug("GPU selection: healthy GPU[%u] index=%u, target_index=%u, GPU_ID=%u",
-                          i, healthy_idx, gpu_index, gpu_id);
                 if (healthy_idx == gpu_index) {
-                    aql_debug("GPU selection: selected GPU ID=%u for CPU %u", gpu_id, cpu);
+                    aql_debug("Selected GPU %u for CPU %u", gpu_id, cpu);
                     return gpu_id;
                 }
                 healthy_idx++;
@@ -181,7 +170,6 @@ static uint32_t aql_pmu_select_gpu(struct perf_event *event)
         }
     }
 
-    aql_debug("GPU selection: failed to find suitable GPU");
     return U32_MAX;
 }
 
@@ -191,7 +179,7 @@ static uint32_t aql_pmu_select_gpu(struct perf_event *event)
  *
  * Returns: 0 on success, negative error code on failure
  */
-int aql_pmu_event_init(struct perf_event *event)
+int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coords *dims)
 {
     struct aql_measurement *measurement;
     uint32_t gpu_id;
@@ -224,11 +212,23 @@ int aql_pmu_event_init(struct perf_event *event)
         return PTR_ERR(measurement);
     }
 
+    /* Store dimension information in measurement if specified */
+    if (dims && dims->valid) {
+        measurement->target_dims = *dims;
+        measurement->dimension_specific = true;
+        if (dims->aggregate) {
+            aql_debug("GPU %u: aggregate mode (all dimensions)", gpu_id);
+        } else {
+            aql_debug("GPU %u: dimension-specific se=%u sa=%u wgp=%u",
+                      gpu_id, dims->se, dims->sa, dims->wgp);
+        }
+    } else {
+        measurement->dimension_specific = false;
+        aql_debug("GPU %u: initialized (aggregated)", gpu_id);
+    }
+
     /* Store measurement in event's hardware config */
     event->hw.config_base = (unsigned long)measurement;
-
-    aql_debug("Initialized hardware event for GPU %u (event config=0x%llx)",
-              gpu_id, event->attr.config);
 
     mutex_unlock(&aql_pmu_mutex);
     return 0;
@@ -252,6 +252,7 @@ void aql_pmu_event_destroy(struct perf_event *event)
     aql_debug("Destroying hardware event for GPU %u", measurement->gpu_id);
     aql_perf_measurement_destroy(measurement);
 
+    /* Clear config_base so add/del/start/stop know the event is destroyed */
     event->hw.config_base = 0;
 
     mutex_unlock(&aql_pmu_mutex);
@@ -324,26 +325,30 @@ uint64_t aql_pmu_event_read(struct perf_event *event)
     struct aql_measurement *measurement;
     uint64_t counter_value;
 
-    aql_info("[PMU] READ: Entry - config=0x%llx, config_base=0x%lx",
-             event->attr.config, event->hw.config_base);
-
     if (!event->hw.config_base) {
-        aql_warn("[PMU] READ: No measurement attached to event");
         return 0;
     }
 
     measurement = (struct aql_measurement *)event->hw.config_base;
 
-    aql_info("[PMU] READ: Calling aql_perf_measurement_read_atomic for GPU %u",
-             measurement->gpu_id);
-
     /* Use atomic version to return cached value and schedule refresh */
     counter_value = aql_perf_measurement_read_atomic(measurement);
 
-    aql_info("[PMU] READ: Got counter value %llu from GPU %u (state=%d, cache_valid=%d)",
-             counter_value, measurement->gpu_id, measurement->state, measurement->cache_valid);
+    aql_debug("GPU %u: read=%llu", measurement->gpu_id, counter_value);
 
     return counter_value;
+}
+
+/**
+ * aql_pmu_get_gpu_count - Get number of available GPUs
+ *
+ * Returns: Number of GPUs in the global AQL session, or 0 if not initialized
+ */
+int aql_pmu_get_gpu_count(void)
+{
+    if (!global_aql_session)
+        return 0;
+    return global_aql_session->num_gpus;
 }
 
 /**
