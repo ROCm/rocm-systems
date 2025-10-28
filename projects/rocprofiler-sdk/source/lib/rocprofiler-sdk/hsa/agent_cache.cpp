@@ -137,7 +137,7 @@ AgentCache::init_device_counting_service_queue(const CoreApiTable& api,
 
     if(!agent_ctx || m_profile_queue) return;
 
-    // create the queue and set it to high_priority
+    // create the queue and set it to normal_priority
     CHECK(api.hsa_queue_create_fn) << "no hsa_queue_create_fn in api table";
     auto status = api.hsa_queue_create_fn(get_hsa_agent(),
                                           64,
@@ -151,7 +151,7 @@ AgentCache::init_device_counting_service_queue(const CoreApiTable& api,
         << "HSA Queue is not initialized";
 
     CHECK(ext.hsa_amd_queue_set_priority_fn) << "no hsa_amd_queue_set_priority_fn in api table";
-    ext.hsa_amd_queue_set_priority_fn(m_profile_queue, HSA_AMD_QUEUE_PRIORITY_HIGH);
+    ext.hsa_amd_queue_set_priority_fn(m_profile_queue, HSA_AMD_QUEUE_PRIORITY_NORMAL);
 }
 
 AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,

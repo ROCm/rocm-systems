@@ -52,7 +52,7 @@ hsa_inited()
 }
 
 uint64_t
-submitPacket(hsa_queue_t* queue, const void* packet)
+submitPacket(hsa_queue_t* queue, const void* packet, bool ring_doorbell)
 {
     const uint32_t pkt_size = 0x40;
 
@@ -81,14 +81,25 @@ submitPacket(hsa_queue_t* queue, const void* packet)
         reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
     header_atomic_ptr->store(slot_data[0], std::memory_order_release);
 
-    // ringdoor bell
-    hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal, write_idx);
+    // ringdoor bell (if requested)
+    if(ring_doorbell)
+    {
+        hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal, write_idx);
+    }
 
     ROCP_TRACE << fmt::format("SLOT_IDX: {} WRITE_IDX: {} PKT: {}",
                               slot_idx,
                               write_idx,
                               *static_cast<const hsa::rocprofiler_packet*>(packet));
     return write_idx;
+}
+
+void
+flushQueue(hsa_queue_t* queue)
+{
+    // Ring the doorbell with the current write index to flush any batched packets
+    const uint64_t write_idx = hsa::get_core_table()->hsa_queue_load_write_index_relaxed_fn(queue);
+    hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal, write_idx);
 }
 
 namespace
@@ -246,34 +257,6 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
                                                                        &callback_data),
              HSA_STATUS_SUCCESS);
     // NOLINTEND(performance-no-int-to-ptr)
-
-    // If we do not have a completion handle, this is our first time profiling this agent.
-    // Setup our shared data structures.
-    static std::unordered_set<hsa_queue_t*> queues_init;
-    if(queues_init.find(callback_data.queue) != queues_init.end()) return;
-    queues_init.insert(callback_data.queue);
-
-    // Set state of the queue to allow profiling (may not be needed since AQL
-    // may do this in the future).
-    CHECK(agent.cpu_pool().handle != 0);
-    CHECK(agent.get_hsa_agent().handle != 0);
-
-    aql::set_profiler_active_on_queue(
-        agent.cpu_pool(), agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
-            pkt.ext_amd_aql_pm4.completion_signal = callback_data.completion;
-            submitPacket(callback_data.queue, (void*) &pkt);
-            constexpr auto timeout_hint =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-            if(hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                                 HSA_SIGNAL_CONDITION_EQ,
-                                                                 0,
-                                                                 timeout_hint.count(),
-                                                                 HSA_WAIT_STATE_ACTIVE) != 0)
-            {
-                ROCP_FATAL << "Could not set agent to be profiled";
-            }
-            hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
-        });
 }
 }  // namespace
 
@@ -365,8 +348,8 @@ read_agent_ctx(const context::context*                    ctx,
                                   agent->get_rocp_agent()->cu_count,
                                   agent->get_rocp_agent()->simd_arrays_per_engine);
 
-        // Submit the read packet to the queue
-        submitPacket(agent->profile_queue(), &callback_data.packet->packets.read_packet);
+        // Submit the read packet to the queue (defer doorbell for batching)
+        submitPacket(agent->profile_queue(), &callback_data.packet->packets.read_packet, false);
 
         // Submit a barrier packet. This is needed to flush hardware caches. Without this
         // the read packet may not have the correct data.
@@ -375,7 +358,11 @@ read_agent_ctx(const context::context*                    ctx,
         barrier.barrier_and.completion_signal = callback_data.completion;
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 0);
         callback_data.user_data = user_data;
-        submitPacket(agent->profile_queue(), &barrier.barrier_and);
+        uint64_t last_write_idx = submitPacket(agent->profile_queue(), &barrier.barrier_and, false);
+
+        // Flush the queue to ring doorbell once for both packets (batched submission)
+        hsa::get_core_table()->hsa_signal_store_relaxed_fn(agent->profile_queue()->doorbell_signal,
+                                                           last_write_idx);
         wait_if_sync();
         if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) == 0) callback_data.cached_counters = nullptr;
     }
