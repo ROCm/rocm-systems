@@ -3,7 +3,7 @@
 ## Build Instructions
 
 ```bash
-cd /home/ben/rocm-systems/worktrees/test_apps/projects/perf-dkms/test_apps
+cd <path-to-rocm-systems>/projects/perf-dkms/test_apps
 mkdir -p build && cd build
 cmake ..
 make -j$(nproc)
@@ -12,14 +12,14 @@ make -j$(nproc)
 ## Run All Tests
 
 ```bash
-cd /home/ben/rocm-systems/worktrees/test_apps/projects/perf-dkms/test_apps
+cd <path-to-rocm-systems>/projects/perf-dkms/test_apps
 ./run_all_tests.sh
 ```
 
 ## Run Individual Tests
 
 ```bash
-cd /home/ben/rocm-systems/worktrees/test_apps/projects/perf-dkms/test_apps/build
+cd <path-to-rocm-systems>/projects/perf-dkms/test_apps/build
 
 # Test 1: VALU Heavy
 ./valu_heavy/valu_heavy

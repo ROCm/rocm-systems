@@ -1,7 +1,7 @@
 #include "test_framework.hpp"
 #include <vector>
 
-// Wave32 kernel - compile with -mwavefrontsize64 or wave32
+// Wave32 kernel - compile with -mwavefrontsize32 for wave32 mode
 __global__ void wave32_kernel(float* output, const float* input) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 

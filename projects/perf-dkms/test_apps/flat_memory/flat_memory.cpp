@@ -7,7 +7,8 @@ __global__ void flat_memory_kernel(float* output, float* input, int use_flat) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Use FLAT addressing by going through generic pointer
-    float* generic_ptr = use_flat ? input : input;
+    // Cast through void* to force FLAT addressing instead of buffer operations
+    float* generic_ptr = use_flat ? (float*)((void*)input) : input;
     float val = generic_ptr[idx];
 
     // Multiple FLAT operations

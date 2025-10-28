@@ -3,7 +3,7 @@ AMD GPU Performance Counter Test Suite - Build Complete
 ================================================================================
 
 Build Date: $(date)
-Location: /home/ben/rocm-systems/worktrees/test_apps/projects/perf-dkms/test_apps
+Location: <project-root>/projects/perf-dkms/test_apps
 
 BUILD SUMMARY:
 --------------
@@ -51,7 +51,7 @@ All 14 test executables successfully built in build/ directory:
 QUICK START:
 ------------
 To run all tests:
-    cd /home/ben/rocm-systems/worktrees/test_apps/projects/perf-dkms/test_apps
+    cd <path-to-test_apps>
     ./run_all_tests.sh
 
 To run individual test:
