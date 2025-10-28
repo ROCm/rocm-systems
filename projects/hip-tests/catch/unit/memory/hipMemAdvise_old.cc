@@ -493,6 +493,7 @@ TEST_CASE("Unit_hipMemAdvise_TstAccessedByFlg") {
     HIP_CHECK(hipMemAdvise(Hmm, 2 * 4096, hipMemAdviseSetAccessedBy, 0));
     HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(int), hipMemRangeAttributeLastPrefetchLocation,
                                       Hmm, 2 * 4096));
+    HIP_CHECK(hipFree(Hmm));
     if (data != -2) {
       WARN("Didnt get expected value!!\n");
       REQUIRE(false);
@@ -899,6 +900,8 @@ TEST_CASE("Unit_hipMemAdvise_TstSetUnsetPrfrdLoc") {
       WARN("Didnt receive expected value!!");
       REQUIRE(false);
     }
+
+    HIP_CHECK(hipFree(Hmm));
   } else {
     SUCCEED(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory "

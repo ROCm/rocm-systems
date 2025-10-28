@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,43 +22,31 @@
 
 #pragma once
 
-#include "buffer_storage.hpp"
-#include "metadata_registry.hpp"
-#include "storage_parser.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
-namespace rocprofsys
+#include <string>
+#include <vector>
+
+namespace rocprofiler
 {
-namespace trace_cache
+namespace counters
 {
-
-class cache_manager
+/**
+ * Test helper: Get metrics by architecture name without agent encoding.
+ * This function is for internal testing purposes only and should not be used in production code.
+ * Returns metrics with base IDs only (no agent-specific encoding).
+ */
+inline std::vector<Metric>
+getMetricsForAgent(const std::string& agent_arch)
 {
-public:
-    static cache_manager& get_instance();
-    buffer_storage&       get_buffer_storage() { return m_storage; }
-    metadata_registry&    get_metadata_registry() { return m_metadata; }
-    void                  shutdown();
-    void                  post_process_bulk();
-
-private:
-    void post_process_metadata();
-    cache_manager() = default;
-
-    buffer_storage    m_storage;
-    metadata_registry m_metadata;
-};
-
-inline metadata_registry&
-get_metadata_registry()
-{
-    return cache_manager::get_instance().get_metadata_registry();
+    auto mets = loadMetrics();
+    if(const auto* metric_ptr = rocprofiler::common::get_val(mets->arch_to_metric, agent_arch))
+    {
+        return *metric_ptr;
+    }
+    return std::vector<Metric>{};
 }
 
-inline buffer_storage&
-get_buffer_storage()
-{
-    return cache_manager::get_instance().get_buffer_storage();
-}
-
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace counters
+}  // namespace rocprofiler

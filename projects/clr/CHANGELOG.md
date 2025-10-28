@@ -7,6 +7,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
+    - `hipLibraryEnumerateKernels` Return Kernel handles within a library
+    - `hipKernelGetLibrary` Return Library handle for a hipKernel_t handle
+    - `hipKernelGetName` Return function name for a hipKernel_t handle
     - `hipLibraryLoadData`      creates library object from code
     - `hipLibraryLoadFromFile`  creates library object from file
     - `hipLibraryUnload`        unloads library

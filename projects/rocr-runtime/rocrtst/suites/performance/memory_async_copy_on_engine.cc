@@ -175,11 +175,11 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
   }
 
   for (int i = 0; i < kNumGranularity; i++) {
-    if (Size[i] > size) {
-      printf("Skip test with block size %s\n", Str[i]);
+    if (Granularities[i].Size > size) {
+      printf("Skip test with block size %s\n", Granularities[i].Str);
       break;
     }
-    printf("Start test with block size %s\n",Str[i]);
+    printf("Start test with block size %s\n", Granularities[i].Str);
 
     std::vector<double> time;
 
@@ -215,7 +215,7 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
           static_cast<hsa_amd_sdma_engine_id_t>(1 << (ffs(engine_ids_mask) - 1));
       
       err = hsa_amd_memory_async_copy_on_engine(ptr_dst, dst_agent, ptr_src, src_agent,
-                                              Size[i], 0, NULL, t->signal,
+                                              Granularities[i].Size, 0, NULL, t->signal,
                                               engine_id, false);
       
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
@@ -234,7 +234,7 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
 
 
       err = hsa_amd_memory_async_copy(host_ptr_dst, cpu_agent_, ptr_dst,
-                                                 dst_agent, Size[i], 0, NULL, s);
+                                                 dst_agent, Granularities[i].Size, 0, NULL, s);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
       while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1,
@@ -244,7 +244,7 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
       err = AcquireAccess(cpu_agent_, sys_pool_, host_ptr_dst);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-      if (memcmp(host_ptr_src, host_ptr_dst, Size[i])) {
+      if (memcmp(host_ptr_src, host_ptr_dst, Granularities[i].Size)) {
         verified_ = false;
       }
       // Push the result back to vector time

@@ -1329,6 +1329,65 @@ TEST_CASE("Unit_hipMemSetAccess_negative") {
   CTX_DESTROY();
 }
 
+TEST_CASE("Unit_hipMemSetGetAccess_Capture") {
+  CTX_CREATE();
+
+  const size_t kBufferBytes = DATA_SIZE * sizeof(int);
+  const int kDeviceId = 0;
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkVMMSupported(device);
+
+  hipMemAllocationProp alloc_prop{};
+  alloc_prop.type = hipMemAllocationTypePinned;
+  alloc_prop.location.type = hipMemLocationTypeDevice;
+  alloc_prop.location.id = device;
+
+  size_t granularity = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &alloc_prop,
+                                           hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+
+  const size_t vmm_bytes = ((granularity + kBufferBytes - 1) / granularity) * granularity;
+
+  hipMemGenericAllocationHandle_t mem_handle;
+  HIP_CHECK(hipMemCreate(&mem_handle, vmm_bytes, &alloc_prop, 0));
+
+  hipDeviceptr_t vmm_ptr = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&vmm_ptr, vmm_bytes, 0, 0, 0));
+  HIP_CHECK(hipMemMap(vmm_ptr, vmm_bytes, 0, mem_handle, 0));
+  HIP_CHECK(hipMemRelease(mem_handle));
+
+  hipMemAccessDesc access_desc{};
+  access_desc.location.type = hipMemLocationTypeDevice;
+  access_desc.location.id = device;
+  access_desc.flags = hipMemAccessFlagsProtReadWrite;
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+
+  // Test hipMemSetAccess inside stream capture
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemSetAccess(vmm_ptr, vmm_bytes, &access_desc, 1));
+  END_CAPTURE(stream);
+
+  // Test hipMemGetAccess inside stream capture
+  BEGIN_CAPTURE(stream);
+  hipMemLocation mem_location{};
+  mem_location.type = hipMemLocationTypeDevice;
+  mem_location.id = device;
+  unsigned long long access_flags = 0;
+  HIP_CHECK(hipMemGetAccess(&access_flags, &mem_location, vmm_ptr));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemUnmap(vmm_ptr, vmm_bytes));
+  HIP_CHECK(hipMemAddressFree(vmm_ptr, vmm_bytes));
+  CTX_DESTROY();
+}
+
 TEST_CASE("Unit_hipMemSetAccessHostDevice_hostalloc") {
   // Ensure device 0 is selected
   REQUIRE(hipSetDevice(0) == hipSuccess);

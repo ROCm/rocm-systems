@@ -29,7 +29,6 @@
 #include "core/debug.hpp"
 #include "core/gpu.hpp"
 #include "core/perfetto.hpp"
-#include "core/rocpd/json.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/buffer_storage.hpp"
 #include "core/trace_cache/cache_manager.hpp"
@@ -64,6 +63,8 @@
 #include <timemory/process/threading.hpp>
 #include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
+
+#include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <cctype>
@@ -368,7 +369,8 @@ consume_args(Tp&&...)
 auto
 get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
-    auto backtrace = ::rocpd::json::create();
+    auto backtrace = nlohmann::json();
+
     if(_bt_data && !_bt_data->empty())
     {
         const std::string _unk    = "??";
@@ -384,9 +386,9 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data
                 (_linfo && _linfo.line > 0)
                            ? join("", _linfo.line)
                            : ((itr.lineno == 0) ? std::string{ "?" } : join("", itr.lineno));
-            auto _entry = join("", demangle(*_func), " @ ",
-                               join(':', ::basename(_loc->c_str()), _line));
-            backtrace->set(join("", "frame#", _bt_cnt++), _entry);
+            auto _entry                              = join("", demangle(*_func), " @ ",
+                                                            join(':', ::basename(_loc->c_str()), _line));
+            backtrace[join("", "frame#", _bt_cnt++)] = _entry;
         }
     }
     return backtrace;
@@ -408,26 +410,6 @@ get_parent_stack_id([[maybe_unused]] const CorrelationIdType& correlation_id)
 #else
     return 0;
 #endif
-}
-
-auto
-get_extdata(const rocprofiler_callback_tracing_record_t& record)
-{
-    constexpr auto message_key = "message";
-    auto           args        = callback_arg_array_t{};
-    auto           extdata     = ::rocpd::json::create();
-
-    rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, 2, &args);
-
-    for(auto [key, val] : args)
-    {
-        if(key == message_key)
-        {
-            extdata->set(key, val);
-        }
-    }
-
-    return extdata;
 }
 
 struct scope_destructor
@@ -867,7 +849,7 @@ tool_tracing_callback_stop(
         cache_category<CategoryT>();
         cache_add_thread_info(record.thread_id);
         std::string args_str = get_args_string(args);
-        cache_region(&record, _beg_ts, _end_ts, call_stack->to_string(), args_str,
+        cache_region(&record, _beg_ts, _end_ts, call_stack.dump(), args_str,
                      trait::name<CategoryT>::value);
     }
 }
@@ -952,7 +934,7 @@ ompt_cache_instant_event(
 
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(record.thread_id);
-    cache_region(&record, _instant_ts, _instant_ts, call_stack->to_string(),
+    cache_region(&record, _instant_ts, _instant_ts, call_stack.dump(),
                  get_args_string(args), trait::name<category::rocm_ompt_api>::value);
 }
 
@@ -966,7 +948,7 @@ ompt_cache_orphan_event(
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(stored_data.record.thread_id);
     cache_region(&stored_data.record, stored_data._beg_ts, stored_data._beg_ts,
-                 call_stack->to_string(), get_args_string(stored_data.args),
+                 call_stack.dump(), get_args_string(stored_data.args),
                  trait::name<category::rocm_ompt_api>::value);
 }
 
@@ -1034,7 +1016,7 @@ ompt_pop_standard_callback(
     auto call_stack = get_backtrace(_bt_data);
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(record.thread_id);
-    cache_region(&record, stored_data._beg_ts, _end_ts, call_stack->to_string(),
+    cache_region(&record, stored_data._beg_ts, _end_ts, call_stack.dump(),
                  get_args_string(stored_data.args),
                  trait::name<category::rocm_ompt_api>::value);
 }
@@ -1084,7 +1066,7 @@ ompt_pop_parallel_callback(
 
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(record.thread_id);
-    cache_region(&record, stored_data._beg_ts, _end_ts, call_stack->to_string(),
+    cache_region(&record, stored_data._beg_ts, _end_ts, call_stack.dump(),
                  get_args_string(stored_data.args),
                  trait::name<category::rocm_ompt_api>::value);
 }
