@@ -517,6 +517,102 @@ write_perfetto(
         for(auto ditr : kernel_dispatch_gen)
         {
             auto gen = kernel_dispatch_gen.get(ditr);
+
+            // Temporary fix until timestamp issues are resolved: Set timestamps to be
+            // halfway between ending timestamp and starting timestamp of overlapping
+            // kernel dispatches. Perfetto displays slices incorrectly if overlapping
+            // slices on the same track are not completely enveloped.
+            {
+                struct kernel_dispatch_group_index
+                {
+                    uint64_t agent_abs_index;
+                    uint64_t stream_id = 0;
+                    uint64_t queue_id  = 0;
+
+                    bool operator<(const kernel_dispatch_group_index& other) const
+                    {
+                        if(agent_abs_index != other.agent_abs_index)
+                            return agent_abs_index < other.agent_abs_index;
+
+                        if(queue_id != other.queue_id) return queue_id < other.queue_id;
+
+                        return stream_id < other.stream_id;
+                    }
+                };
+
+                struct kernel_dispatch_data
+                {
+                    std::vector<types::kernel_dispatch>::iterator sample;
+                    rocprofiler_timestamp_t                       timestamp;
+                };
+
+                std::map<kernel_dispatch_group_index, std::vector<kernel_dispatch_data>>
+                    kernel_groups;
+
+                for(auto it = begin(gen); it != end(gen); ++it)
+                {
+                    kernel_dispatch_group_index group_index;
+                    group_index.agent_abs_index = it->agent_abs_index;
+                    if(ocfg.group_by_queue)
+                        group_index.queue_id = it->queue_id;
+                    else
+                        group_index.stream_id = it->stream_id;
+
+                    kernel_groups[group_index].push_back({it, it->start / 2 + it->end / 2});
+                }
+
+                for(auto group_it = begin(kernel_groups); group_it != end(kernel_groups);
+                    ++group_it)
+                {
+                    auto& group_data = group_it->second;
+                    std::sort(begin(group_data),
+                              end(group_data),
+                              [&](const kernel_dispatch_data& a, const kernel_dispatch_data& b) {
+                                  return a.timestamp < b.timestamp;
+                              });
+
+                    for(auto sample_it = group_data.begin(); sample_it != group_data.end() - 1;
+                        ++sample_it)
+                    {
+                        auto next_sample_it = std::next(sample_it);
+
+                        auto current_it = sample_it->sample;
+                        auto next_it    = next_sample_it->sample;
+
+                        if(next_it->start >= current_it->end) continue;
+
+                        auto current_time = sample_it->timestamp;
+                        auto next_time    = next_sample_it->timestamp;
+
+                        auto   current_half_span = current_it->end - current_time;
+                        auto   next_half_span    = next_time - next_it->start;
+                        auto   total_span        = current_half_span + next_half_span;
+                        auto   max_span          = next_time - current_time;
+                        double scale_factor =
+                            (total_span > 0) ? static_cast<double>(max_span) / total_span : 0.0;
+
+                        auto new_current_end = current_time + static_cast<rocprofiler_timestamp_t>(
+                                                                  current_half_span * scale_factor);
+
+                        auto new_next_start = next_time - static_cast<rocprofiler_timestamp_t>(
+                                                              next_half_span * scale_factor);
+
+                        // Report changed timestamps to ROCP INFO
+                        ROCP_INFO << fmt::format(
+                            "Kernel ending timestamp changed from {} ns to {} ns "
+                            "following kernel starting timestamp changed from {} ns to {} ns "
+                            "due to firmware timestamp error.",
+                            current_it->end,
+                            new_current_end,
+                            next_it->start,
+                            new_next_start);
+
+                        current_it->end = new_current_end;
+                        next_it->start  = new_next_start;
+                    }
+                }
+            }
+
             for(auto it = begin(gen); it != end(gen); ++it)
             {
                 auto& current = *it;
@@ -532,32 +628,6 @@ write_perfetto(
                 else
                 {
                     _track = &stream_tracks.at(stream_id);
-                }
-
-                // Temporary fix until timestamp issues are resolved: Set timestamps to be
-                // halfway between ending timestamp and starting timestamp of overlapping
-                // kernel dispatches. Perfetto displays slices incorrectly if overlapping
-                // slices on the same track are not completely enveloped.
-                auto next = std::next(it);
-                if(next != end(gen) && next->agent_abs_index == it->agent_abs_index &&
-                   ((ocfg.group_by_queue && next->queue_id == it->queue_id) ||
-                    (!ocfg.group_by_queue && next->stream_id == it->stream_id)) &&
-                   next->start < it->end)
-                {
-                    auto start = next->start;
-                    auto end   = it->end;
-                    auto mid   = start + (end - start) / 2;
-                    // Report changed timestamps to ROCP INFO
-                    ROCP_INFO << fmt::format(
-                        "Kernel ending timestamp increased by {} ns to {} ns with "
-                        "following kernel starting timestamp decreased by {} ns to {} ns "
-                        "due to firmware timestamp error.",
-                        (it->end - mid),
-                        mid,
-                        (mid - next->start),
-                        mid);
-                    it->end     = mid;
-                    next->start = mid;
                 }
 
                 auto agent_index = agent_data.at(current.agent_abs_index).second;
