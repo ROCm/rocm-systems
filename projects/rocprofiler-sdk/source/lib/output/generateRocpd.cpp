@@ -1677,8 +1677,10 @@ write_rocpd(
                 // insert thread info if it doesn't already exist
                 get_thread_id(data.tid);
 
-                // create an empty event, just to associate the following info tables
-                auto evt_id = create_event(conn, {});
+                // get KFD category and create event entry
+                auto category = tool_metadata.buffer_names.at(data.kind);
+                auto evt_id =
+                    create_event(conn, {insert_value("category_id", string_entries.at(category))});
 
                 // track timestamps with a region
                 auto region_stmt =
