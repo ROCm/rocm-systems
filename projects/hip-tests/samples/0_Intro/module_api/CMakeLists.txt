@@ -58,7 +58,7 @@ add_executable(defaultDriver.hip.out ${EXCLUDE_OPTION} defaultDriver.cpp)
 # Generate code object
 add_custom_target(
   codeobj
-  COMMAND  ${HIP_HIPCC_EXECUTABLE} --genco  ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o vcpy_kernel.code
+  COMMAND  ${HIP_HIPCC_EXECUTABLE} --cuda-device-only  ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o vcpy_kernel.code
   COMMENT "codeobj generated"
 )
 

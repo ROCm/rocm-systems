@@ -56,7 +56,7 @@ add_executable(hipDispatchEnqueueRateMT ${EXCLUDE_OPTION} hipDispatchEnqueueRate
 # Generate code object
 add_custom_target(
   codeobj2
-  COMMAND  ${HIP_HIPCC_EXECUTABLE} --genco  ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.cpp -o test_kernel.code
+  COMMAND  ${HIP_HIPCC_EXECUTABLE} --cuda-device-only  ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.cpp -o test_kernel.code
   COMMENT "codeobj2 generated"
 )
 

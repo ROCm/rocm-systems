@@ -53,7 +53,7 @@ add_executable(texture2dDrv ${EXCLUDE_OPTION} texture2dDrv.cpp)
 # Generate code object
 add_custom_target(
   codeobj3
-  COMMAND  ${HIP_HIPCC_EXECUTABLE} --genco  ${CMAKE_CURRENT_SOURCE_DIR}/tex2dKernel.cpp -o tex2dKernel.code
+  COMMAND  ${HIP_HIPCC_EXECUTABLE} --cuda-device-only  ${CMAKE_CURRENT_SOURCE_DIR}/tex2dKernel.cpp -o tex2dKernel.code
   COMMENT "codeobj3 generated"
 )
 
