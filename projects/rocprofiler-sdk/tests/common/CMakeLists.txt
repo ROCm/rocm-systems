@@ -272,7 +272,7 @@ function(rocprofiler_add_integration_execute_test NAME)
     endif()
 
     # the tests shouldn't be run when rocprofiler-sdk is built with code-coverage support
-    if(ROCPROFILER_BUILD_CODECOV AND arg_DISABLE_CODECOV)
+    if(ROCPROFILER_BUILD_CODECOV AND arg_DISABLED_CODECOV)
         set(arg_DISABLED ON)
     endif()
 
@@ -419,7 +419,7 @@ function(rocprofiler_add_integration_validate_test NAME)
         "${_MULTI_OPTS}" # <multi_value_keywords>
         ${ARGN})
 
-    find_package(Pytest REQUIRED)
+    find_package(rocprofiler_sdk_pytest REQUIRED)
 
     rocprofiler_set_integration_test_name(arg_NAME "${NAME}" "validate")
 
@@ -462,7 +462,7 @@ function(rocprofiler_add_integration_validate_test NAME)
     endforeach()
 
     # the tests shouldn't be run when rocprofiler-sdk is built with code-coverage support
-    if(ROCPROFILER_BUILD_CODECOV AND arg_DISABLE_CODECOV)
+    if(ROCPROFILER_BUILD_CODECOV AND arg_DISABLED_CODECOV)
         set(arg_DISABLED ON)
     endif()
 
@@ -492,37 +492,58 @@ function(rocprofiler_add_integration_validate_test NAME)
     endforeach()
 
     # Build properties list safely to avoid argument shifting
-    set(_props
-        DISABLED ${arg_DISABLED}
-        TIMEOUT ${arg_TIMEOUT}
-        LABELS "${arg_LABELS}"
-        FAIL_REGULAR_EXPRESSION "${arg_FAIL_REGULAR_EXPRESSION}"
-    )
+    set(_props)
+    list(APPEND _props DISABLED "${arg_DISABLED}")
+    list(APPEND _props TIMEOUT "${arg_TIMEOUT}")
 
-    if(arg_SKIP_REGULAR_EXPRESSION)
-        list(APPEND _props SKIP_REGULAR_EXPRESSION "${arg_SKIP_REGULAR_EXPRESSION}")
-    endif()
+    function(_append_prop _key _listvar)
+        if(DEFINED ${_listvar})
+            list(JOIN ${_listvar} ";" _joined)
+            string(REPLACE ";" "\\;" _escaped "${_joined}")
+            list(APPEND _props ${_key} "${_escaped}")
+            set(_props
+                "${_props}"
+                PARENT_SCOPE)
+        endif()
+    endfunction()
 
-    if(arg_PASS_REGULAR_EXPRESSION)
-        list(APPEND _props PASS_REGULAR_EXPRESSION "${arg_PASS_REGULAR_EXPRESSION}")
-    endif()
+    # Multi-valued properties (must be joined!)
+    _append_prop(LABELS arg_LABELS)
+    _append_prop(FAIL_REGULAR_EXPRESSION arg_FAIL_REGULAR_EXPRESSION)
+    _append_prop(SKIP_REGULAR_EXPRESSION arg_SKIP_REGULAR_EXPRESSION)
+    _append_prop(PASS_REGULAR_EXPRESSION arg_PASS_REGULAR_EXPRESSION)
+    _append_prop(FIXTURES_REQUIRED arg_FIXTURES_REQUIRED)
 
-    if(arg_FIXTURES_REQUIRED)
-        list(APPEND _props FIXTURES_REQUIRED "${arg_FIXTURES_REQUIRED}")
-    endif()
-
-    pytest_discover_tests(
-        ${arg_NAME} ${_STRIP_PARAM_BRACKETS} ${_INCLUDE_FILE_PATH} ${_BUNDLE_TESTS}
-        TEST_PATHS ${arg_TEST_PATHS}
-        WORKING_DIRECTORY ${arg_WORKING_DIRECTORY}
-        TRIM_FROM_NAME "${arg_TRIM_FROM_NAME}"
-        TRIM_FROM_FULL_NAME "${arg_TRIM_FROM_FULL_NAME}"
-        LIBRARY_PATH_PREPEND ${arg_LIBRARY_PATH}
-        PYTHON_PATH_PREPEND ${arg_PYTHON_PATH}
-        ENVIRONMENT "${arg_ENVIRONMENT}"
-        DEPENDS "${arg_DEPENDS}"
-        EXTRA_ARGS ${arg_ARGS} --durations=20 -rA -s -vv
-        DISCOVERY_EXTRA_ARGS ${arg_DISCOVERY_ARGS}
-        PROPERTIES ${_props})
+    rocprofiler_sdk_pytest_discover_tests(
+        ${arg_NAME}
+        ${_STRIP_PARAM_BRACKETS}
+        ${_INCLUDE_FILE_PATH}
+        ${_BUNDLE_TESTS}
+        TEST_PATHS
+        ${arg_TEST_PATHS}
+        WORKING_DIRECTORY
+        ${arg_WORKING_DIRECTORY}
+        TRIM_FROM_NAME
+        "${arg_TRIM_FROM_NAME}"
+        TRIM_FROM_FULL_NAME
+        "${arg_TRIM_FROM_FULL_NAME}"
+        LIBRARY_PATH_PREPEND
+        ${arg_LIBRARY_PATH}
+        PYTHON_PATH_PREPEND
+        ${arg_PYTHON_PATH}
+        ENVIRONMENT
+        "${arg_ENVIRONMENT}"
+        DEPENDS
+        "${arg_DEPENDS}"
+        EXTRA_ARGS
+        ${arg_ARGS}
+        --durations=20
+        -rA
+        -s
+        -vv
+        DISCOVERY_EXTRA_ARGS
+        ${arg_DISCOVERY_ARGS}
+        PROPERTIES
+        ${_props})
 
 endfunction()

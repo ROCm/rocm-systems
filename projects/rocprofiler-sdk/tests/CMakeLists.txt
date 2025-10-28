@@ -47,7 +47,7 @@ endif()
 
 # needed for validation
 find_package(Python3 REQUIRED)
-find_package(Pytest REQUIRED)
+find_package(rocprofiler_sdk_pytest REQUIRED)
 
 # generally needed
 find_package(rocprofiler-sdk REQUIRED)

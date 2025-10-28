@@ -274,7 +274,7 @@ locateMetricsFile(std::string_view name)
             return candidate.string();
         }
         ROCP_WARNING << name << " not found at ROCPROFILER_METRICS_PATH (" << env
-                  << "). Falling back to install path.";
+                     << "). Falling back to install path.";
     }
 
     // 2) Fall back to install path
