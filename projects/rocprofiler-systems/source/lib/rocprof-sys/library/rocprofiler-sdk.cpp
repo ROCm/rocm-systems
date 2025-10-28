@@ -69,7 +69,6 @@
 #include <atomic>
 #include <cctype>
 #include <cstdint>
-#include <deque>
 #include <iostream>
 #include <mutex>
 #include <regex>

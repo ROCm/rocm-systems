@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "metadata_registry.hpp"
-#include "agent_manager.hpp"
 #include "core/debug.hpp"
 #include <algorithm>
 #include <cstdint>

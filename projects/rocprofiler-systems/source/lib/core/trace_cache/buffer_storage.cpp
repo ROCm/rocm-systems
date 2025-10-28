@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "buffer_storage.hpp"
-#include "PTL/Task.hh"
 #include "PTL/TaskGroup.hh"
 #include "PTL/ThreadPool.hh"
 #include "debug.hpp"
@@ -30,7 +29,6 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
-#include <thread>
 #include <unistd.h>
 
 using namespace std::chrono_literals;

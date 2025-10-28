@@ -47,8 +47,6 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
-#include <numeric>
-#include <ostream>
 #include <string>
 #include <unistd.h>
 

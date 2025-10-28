@@ -48,8 +48,6 @@ class cache_manager;
 class buffer_storage
 {
 public:
-    static buffer_storage& get_instance();
-
     template <typename... T>
     void store(entry_type type, T&&... values)
     {

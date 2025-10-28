@@ -80,9 +80,7 @@
 #include <csignal>
 #include <cstring>
 #include <ctime>
-#include <initializer_list>
 #include <mutex>
-#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
