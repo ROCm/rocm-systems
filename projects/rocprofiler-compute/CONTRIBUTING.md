@@ -191,3 +191,12 @@ Any future contributions should adhere to these guidelines:
 ### Build and test documentation changes
 
 For instructions on how to build and test documentation changes (files under docs folder), please see https://rocm.docs.amd.com/en/latest/contribute/contributing.html
+
+
+## Metrics Management
+
+If your PR touches **metric configs** (panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml`, config deltas, or metric descriptions in `docs/data/metrics_description.yaml`), please follow the metric management workflow summarized here:
+- Edit the panel YAMLs and, when appropriate, generate/apply a delta and (optionally) promote a new architecture using the [workflow script](`tools/config_management/master_config_workflow_script.py`).
+- Verify hashes are updated and CI tests pass.
+
+For full details, see the [metric config management README](./tools/config_management/README.md)

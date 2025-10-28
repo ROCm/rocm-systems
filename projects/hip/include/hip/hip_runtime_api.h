@@ -557,6 +557,8 @@ typedef enum hipDeviceAttribute_t {
                                             ///< hipHostRegister
   hipDeviceAttributeMemoryPoolSupportedHandleTypes,  ///< Supported handle mask for HIP Stream
                                                      ///< Ordered Memory Allocator
+  hipDeviceAttributeHostNumaId,             ///< NUMA ID of the cpu node closest to the device,
+                                            ///< or -1 when NUMA isn't supported
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -899,7 +901,10 @@ enum hipLimit_t {
  * can be obtained with #hipHostGetDevicePointer.*/
 #define hipHostRegisterMapped 0x2
 
-/** Not supported.*/
+/** The passed memory pointer is treated as pointing to some memory-mapped I/O space, e.g.
+ * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and 
+ * contiguous.
+ * */
 #define hipHostRegisterIoMemory 0x4
 
 /** This flag is ignored On AMD devices.*/
@@ -6418,6 +6423,35 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
  * @return #hipSuccess, #hipErrorInvalidValue
 */
 hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
+
+/**
+ * @brief Retrieve kernel handles within a library
+ *
+ * @param [out] kernels Buffer for kernel handles
+ * @param [in] numKernels Maximum number of kernel handles to return to buffer
+ * @oaram [in] library Library handle to query from
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library);
+
+/**
+ * @brief Returns a Library Handle
+ *
+ * @param [out] library Returned Library handle
+ * @param [in] kernel Kernel to retrieve library Handle
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
+
+/**
+ * @brief Returns a Kernel Name
+ *
+ * @param [out] name Returned Kernel Name
+ * @param [in] kernel Kernel handle to retrieve name
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
 
 /**
  * @brief Find out attributes for a given function.

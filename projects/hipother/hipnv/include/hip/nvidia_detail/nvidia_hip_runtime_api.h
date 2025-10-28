@@ -2978,6 +2978,9 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeMemoryPoolSupportedHandleTypes:
       cdattr = cudaDevAttrMemoryPoolSupportedHandleTypes;
       break;
+    case hipDeviceAttributeHostNumaId:
+      cdattr = cudaDevAttrHostNumaId;
+      break;
     default:
       return hipCUDAErrorTohipError(cudaErrorInvalidValue);
   }
@@ -3673,6 +3676,19 @@ inline static hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t 
 
 inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {
   return hipCUResultTohipError(cuLibraryGetKernelCount(count, library));
+}
+
+inline static hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library) {
+  return hipCUResultTohipError(cuLibraryEnumerateKernels(kernels, numKernels, library));
+}
+
+inline static hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
+  return hipCUResultTohipError(cuKernelGetLibrary(library, kernel));
+}
+
+inline static hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
+  return hipCUResultTohipError(cuKernelGetName(name, kernel));
 }
 
 inline static hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,

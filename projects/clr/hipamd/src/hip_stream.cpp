@@ -547,7 +547,7 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   if (stream != nullptr) {
     // If still capturing return error
     if (hip::Stream::StreamCaptureOngoing(stream) == true) {
-      HIP_RETURN(hipErrorStreamCaptureUnsupported);
+      return hipErrorStreamCaptureUnsupported;
     }
   }
   bool wait = (stream == nullptr) ? true : false;

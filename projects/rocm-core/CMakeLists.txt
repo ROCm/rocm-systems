@@ -1,28 +1,5 @@
-################################################################################
-##
-## MIT License
-##
-## Copyright (c) 2017 - 2023 Advanced Micro Devices, Inc. All rights Reserved.
-##
-## Permission is hereby granted, free of charge, to any person obtaining a copy
-## of this software and associated documentation files (the "Software"), to deal
-## in the Software without restriction, including without limitation the rights
-## to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-## copies of the Software, and to permit persons to whom the Software is
-## furnished to do so, subject to the following conditions:
-##
-## The above copyright notice and this permission notice shall be included in all
-## copies or substantial portions of the Software.
-##
-## THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-## IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-## FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-## AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-## LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-## OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-## SOFTWARE.
-##
-################################################################################
+##Copyright © Advanced Micro Devices, Inc., or its affiliates.
+##SPDX-License-Identifier: MIT
 
 cmake_minimum_required( VERSION 3.16 )
 set( CORE_TARGET "rocm-core" )
@@ -149,6 +126,32 @@ if(BUILD_SHARED_LIBS)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT CORE_RUNTIME )
 
+  if( NOT WIN32 )
+    # rdhc tool is developed and tested for Linux based systems only.
+    # rdhc tool is not supported on Windows.
+    # Install rdhc files
+    install ( FILES
+              ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/README.md
+              ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/requirements.txt
+              DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
+              COMPONENT CORE_RUNTIME)
+
+    install ( PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/rdhc.py
+              DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}
+              COMPONENT CORE_RUNTIME )
+
+    # Create symlink for rdhc in bin directory
+    add_custom_target ( rdhc_symlink ALL
+                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                      COMMAND ${CMAKE_COMMAND} -E create_symlink
+                      ../${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}/rdhc.py rdhc-link )
+
+    install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/rdhc-link
+              DESTINATION ${CMAKE_INSTALL_BINDIR}
+              RENAME rdhc
+              COMPONENT CORE_RUNTIME )
+  endif()
+
 else()
   install ( FILES ${BUILD_DIR}/version
             DESTINATION .info
@@ -168,6 +171,33 @@ else()
   install ( FILES ${BUILD_DIR}/rocmmod
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT ${STATIC_COMP_TYPE} )
+
+  if( NOT WIN32 )
+    # rdhc tool is developed and tested for Linux based systems only.
+    # rdhc tool is not supported on Windows.
+    # Install rdhc files
+    install ( FILES
+              ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/README.md
+              ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/requirements.txt
+              DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
+              COMPONENT ${STATIC_COMP_TYPE})
+
+    install ( PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/rdhc.py
+              DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}
+              COMPONENT ${STATIC_COMP_TYPE} )
+
+    # Create symlink for rdhc in bin directory
+    add_custom_target ( rdhc_symlink_static ALL
+                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                      COMMAND ${CMAKE_COMMAND} -E create_symlink
+                      ../${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}/rdhc.py rdhc-link-static )
+
+    install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/rdhc-link-static
+              DESTINATION ${CMAKE_INSTALL_BINDIR}
+              RENAME rdhc
+              COMPONENT ${STATIC_COMP_TYPE} )
+  endif()
+
 endif()
 
 ## Cmake module config file configurations

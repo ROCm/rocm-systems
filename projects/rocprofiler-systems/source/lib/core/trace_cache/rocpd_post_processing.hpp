@@ -21,7 +21,9 @@
 // SOFTWARE.
 
 #pragma once
+#include "agent_manager.hpp"
 #include "core/node_info.hpp"
+#include "core/rocpd/data_processor.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/storage_parser.hpp"
 
@@ -33,10 +35,13 @@ namespace trace_cache
 class rocpd_post_processing
 {
 public:
-    rocpd_post_processing(metadata_registry& metadata);
+    rocpd_post_processing(metadata_registry& metadata, agent_manager& agent_mngr, int pid,
+                          int ppid);
 
     void register_parser_callback(storage_parser& parser);
     void post_process_metadata();
+
+    std::shared_ptr<rocpd::data_processor> get_data_processor() const;
 
 private:
     using primary_key = size_t;
@@ -54,8 +59,11 @@ private:
     postprocessing_callback get_pmc_event_with_sample_callback() const;
     postprocessing_callback get_amd_smi_sample_callback() const;
     postprocessing_callback get_cpu_freq_sample_callback() const;
+    postprocessing_callback get_backtrace_sample_callback() const;
 
-    metadata_registry& m_metadata;
+    metadata_registry&                     m_metadata;
+    agent_manager&                         m_agent_manager;
+    std::shared_ptr<rocpd::data_processor> m_data_processor;
 };
 
 }  // namespace trace_cache

@@ -34,9 +34,6 @@
 #include "devprogram.hpp"
 #include "devkernel.hpp"
 #include "amdocl/cl_profile_amd.h"
-#if defined(WITH_COMPILER_LIB)
-#include "hsailctx.hpp"
-#endif
 #include "devsignal.hpp"
 
 #if defined(__clang__)
@@ -694,8 +691,6 @@ class Settings : public amd::HeapObject {
                                               //  that replaces generic OS allocation routines
       uint supportDepthsRGB_ : 1;             //!< Support DEPTH and sRGB channel order format
       uint singleFpDenorm_ : 1;               //!< Support Single FP Denorm
-      uint hsailExplicitXnack_ : 1;           //!< Xnack in hsail path for this device
-      uint useLightning_ : 1;                 //!< Enable LC path for this device
       uint enableWgpMode_ : 1;                //!< Enable WGP mode for this device
       uint enableWave32Mode_ : 1;             //!< Enable Wave32 mode for this device
       uint lcWavefrontSize64_ : 1;            //!< Enable Wave64 mode for this device
@@ -707,7 +702,7 @@ class Settings : public amd::HeapObject {
       uint gwsInitSupported_ : 1;             //!< Check if GWS is supported on this machine.
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
-      uint reserved_ : 12;
+      uint reserved_ : 14;
     };
     uint value_;
   };
@@ -970,7 +965,7 @@ class Memory : public amd::HeapObject {
     HostMemoryRegistered = 0x00000010,    //!< Host memory was registered
     MemoryCpuUncached = 0x00000020,       //!< Memory is uncached on CPU access(slow read)
     AllowedPeerAccess = 0x00000040,       //!< Memory can be accessed from peer
-    PersistentMap = 0x00000080            //!< Map Peristent memory
+    PersistentMap = 0x00000080            //!< Map Persistent memory
   };
   uint flags_;  //!< Memory object flags
 
@@ -1088,22 +1083,6 @@ class ClBinary : public amd::HeapObject {
                       amd::Elf::ElfSections& elfSectionType  //!< LLVMIR binary is in SPIR format
   ) const;
 
-  //! Loads compile options from OCL binary file
-  bool loadCompileOptions(std::string& compileOptions  //!< return the compile options loaded
-  ) const;
-
-  //! Loads link options from OCL binary file
-  bool loadLinkOptions(std::string& linkOptions  //!< return the link options loaded
-  ) const;
-
-  //! Store compile options into OCL binary file
-  void storeCompileOptions(const std::string& compileOptions  //!< the compile options to be stored
-  );
-
-  //! Store link options into OCL binary file
-  void storeLinkOptions(const std::string& linkOptions  //!< the link options to be stored
-  );
-
   //! Check if the binary is recompilable
   bool isRecompilable(std::string& llvmBinary, amd::Elf::ElfPlatform thePlatform);
 
@@ -1166,12 +1145,6 @@ class ClBinary : public amd::HeapObject {
 
   //! Returns TRUE if binary file was allocated
   bool isBinaryAllocated() const { return (flags_ & BinaryAllocated) ? true : false; }
-
-#if defined(WITH_COMPILER_LIB)
-  //! Returns BIF symbol name by symbolID,
-  //! returns empty string if not found or if BIF version is unsupported
-  std::string getBIFSymbol(unsigned int symbolID) const;
-#endif
 
  protected:
   const amd::Device& dev_;  //!< Device object
@@ -1282,7 +1255,7 @@ class ThreadTrace : public amd::HeapObject {
 };
 
 //! A device execution environment.
-class VirtualDevice : public amd::HeapObject {
+class VirtualDevice : public amd::ReferenceCountedObject {
  public:
   //! Construct a new virtual device for the given physical device.
   VirtualDevice(amd::Device& device)
@@ -1379,10 +1352,7 @@ class VirtualDevice : public amd::HeapObject {
   mutable std::atomic<uint64_t> queued_async_handlers_ = 0;  //!< Outstanding HSA async handlers
 };
 
-#if defined(USE_COMGR_LIBRARY)
 extern bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue);
-#endif
-
 }  // namespace amd::device
 
 namespace amd {
@@ -1622,9 +1592,6 @@ class Isa {
  */
 class Device : public RuntimeObject {
  protected:
-#if defined(WITH_COMPILER_LIB)
-  typedef aclCompiler Compiler;
-#endif
 
  public:
   // The structures below for MGPU launch match the device library format
@@ -1655,7 +1622,8 @@ class Device : public RuntimeObject {
     kNoAtomics = 0,
     kAtomics = 1,
     kKernArg = 2,
-    kUncachedAtomics = 4
+    kUncachedAtomics = 4,
+    kIoMemory = 8
   } MemorySegment;
 
   typedef enum CacheState {
@@ -1697,11 +1665,6 @@ class Device : public RuntimeObject {
                 const std::string& extraOptions  //!< Extra compilation options
     );
   };
-
-#if defined(WITH_COMPILER_LIB)
-  virtual Compiler* compiler() const = 0;
-  virtual Compiler* binCompiler() const { return compiler(); }
-#endif
 
   Device();
   virtual ~Device();
@@ -2047,7 +2010,10 @@ class Device : public RuntimeObject {
 
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const {};
 
-  virtual const uint32_t getPreferredNumaNode() const { return 0; }
+  virtual uint32_t getPreferredNumaNode() const {
+    return static_cast<uint32_t>(-1); //!< PAL doesn't support it
+  }
+
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
@@ -2120,9 +2086,6 @@ class Device : public RuntimeObject {
 
   //! Checks if OCL runtime can use code object manager for compilation
   bool ValidateComgr();
-
-  //! Checks if OCL runtime can use hsail for compilation
-  bool ValidateHsail();
 
   bool IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* mem_offset) const;
 
