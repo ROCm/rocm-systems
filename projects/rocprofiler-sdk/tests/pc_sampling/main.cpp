@@ -26,6 +26,7 @@
 #include <cassert>
 #include <iostream>
 #include <random>
+#include <string>
 
 namespace
 {
@@ -61,19 +62,18 @@ check_hip_error(void);
 }  // namespace
 
 __global__ void
-matrix_multiply(float* A, float* B, float* Out, int /*m*/, int n, int k)
+matrix_multiply(float* A, float* B, float* Out, int m, int n, int k)
 {
     int gid_x = blockDim.x * blockIdx.x + threadIdx.x;
     int gid_y = blockDim.y * blockIdx.y + threadIdx.y;
 
-    if(gid_x < N && gid_y < M)
+    if(gid_x < n && gid_y < m)
     {
         float sum = 0;
         for(int i = 0; i < k; ++i)
         {
             sum += A[gid_y * k + i] * B[i * n + gid_x];
         }
-
         Out[gid_y * n + gid_x] = sum;
     }
 }
@@ -138,55 +138,46 @@ matrix_multiply_tile(float* A, float* B, float* Out, int m, int n, int k)
 #endif
 
 void
-run_hip_app()
+run_hip_app(const std::string& arch_name)
 {
-    hipDeviceProp_t device_props;
-    HIP_API_CALL(hipGetDeviceProperties(&device_props, 0));
-    // Check if the GPU architecture is gfx120*
-    std::string arch_name(device_props.gcnArchName);
-
-    std::vector<float> A(M * K);
-    std::vector<float> B(K * N);
-    std::vector<float> Out(M * N);
-
-    // Randomly initialize the matrices
-    for(int i = 0; i < M * K; ++i)
+    size_t m = M, n = N, k = K;
+    if(arch_name.find("gfx120") != std::string::npos)
     {
-        A[i] = (float) rand() / (float) RAND_MAX;
+        // m /= 4;
+        // n /= 4;
+        // k /= 4;
     }
 
-    for(int i = 0; i < K * N; ++i)
-    {
-        B[i] = (float) rand() / (float) RAND_MAX;
-    }
+    std::vector<float> A(m * k);
+    std::vector<float> B(k * n);
+    std::vector<float> Out(m * n);
 
-    // Allocate GPU Memory
+    for(size_t i = 0; i < m * k; ++i)
+        A[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+    for(size_t i = 0; i < k * n; ++i)
+        B[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+
     float *d_A, *d_B, *d_Out;
-    HIP_API_CALL(hipMalloc(&d_A, sizeof(float) * M * K));
-    HIP_API_CALL(hipMalloc(&d_B, sizeof(float) * K * N));
-    HIP_API_CALL(hipMalloc(&d_Out, sizeof(float) * M * N));
+    HIP_API_CALL(hipMalloc(&d_A, sizeof(float) * m * k));
+    HIP_API_CALL(hipMalloc(&d_B, sizeof(float) * k * n));
+    HIP_API_CALL(hipMalloc(&d_Out, sizeof(float) * m * n));
 
-    // Copy data to GPU
-    HIP_API_CALL(hipMemcpy(d_A, A.data(), sizeof(float) * M * K, hipMemcpyHostToDevice));
-    HIP_API_CALL(hipMemcpy(d_B, B.data(), sizeof(float) * K * N, hipMemcpyHostToDevice));
-
-    // Run the kernel
     dim3 block_size(BLOCK_SIZE_X, BLOCK_SIZE_Y);
-    dim3 grid_size((M + block_size.x - 1) / block_size.x, (N + block_size.y - 1) / block_size.y);
-    matrix_multiply<<<grid_size, block_size>>>(d_A, d_B, d_Out, M, N, K);
+    dim3 grid_size((m + block_size.x - 1) / block_size.x, (n + block_size.y - 1) / block_size.y);
+
+    matrix_multiply<<<grid_size, block_size>>>(
+        d_A, d_B, d_Out, static_cast<int>(m), static_cast<int>(n), static_cast<int>(k));
     check_hip_error();
-    if(arch_name.find("gfx120") != 0)
+
+    if(arch_name.rfind("gfx120", 0) == std::string::npos)
     {
-        // There are some issues with PC sampling when LDS is in use,
-        // so avoid running matmul with shared memory on Navi4x
-        matrix_multiply_tile<<<grid_size, block_size>>>(d_A, d_B, d_Out, M, N, K);
+        matrix_multiply_tile<<<grid_size, block_size>>>(
+            d_A, d_B, d_Out, static_cast<int>(m), static_cast<int>(n), static_cast<int>(k));
         check_hip_error();
     }
 
-    // Copy data back to CPU
-    HIP_API_CALL(hipMemcpy(Out.data(), d_Out, sizeof(float) * M * N, hipMemcpyDeviceToHost));
+    HIP_API_CALL(hipMemcpy(Out.data(), d_Out, sizeof(float) * m * n, hipMemcpyDeviceToHost));
 
-    // Free GPU Memory
     HIP_API_CALL(hipFree(d_A));
     HIP_API_CALL(hipFree(d_B));
     HIP_API_CALL(hipFree(d_Out));
@@ -209,10 +200,14 @@ main(int /*argc*/, char** /*argv*/)
     assert(status == hipSuccess);
     assert(deviceId == currDeviceId);
 
+    hipDeviceProp_t device_props{};
+    HIP_API_CALL(hipGetDeviceProperties(&device_props, deviceId));
+    std::string arch_name = device_props.gcnArchName;
+
     for(int i = 0; i < 1; i++)
     {
         std::cout << "<<< MatMul starts" << std::endl;
-        run_hip_app();
+        run_hip_app(arch_name);
         std::cout << ">>> MatMul ends" << std::endl;
     }
 
