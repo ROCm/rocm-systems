@@ -196,7 +196,7 @@ class VirtualGPU : public device::VirtualDevice {
   class ManagedBuffer : public amd::EmbeddedObject {
    public:
     //! The number of chunks the arg pool will be divided
-    static constexpr uint32_t kPoolNumSignals = 4;
+    static constexpr uint32_t kPoolNumSignals = 16;
     ManagedBuffer(VirtualGPU& gpu, uint32_t pool_size)
         : gpu_(gpu), pool_size_(pool_size), pool_signal_(kPoolNumSignals) {}
     ~ManagedBuffer();

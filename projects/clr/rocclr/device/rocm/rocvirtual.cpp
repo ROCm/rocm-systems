@@ -1801,7 +1801,7 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
   }
   hsa_agent_t agent = gpu_.dev().getBackendDevice();
   for (auto& it : pool_signal_) {
-    if (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 1, &agent, &it)) {
+    if (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 1, &agent, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &it)) {
       return false;
     }
   }
@@ -1810,8 +1810,7 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
 
 // ================================================================================================
 address VirtualGPU::ManagedBuffer::Acquire(uint32_t size) {
-  auto alignment = amd::alignUp(256u, gpu_.dev().info().globalMemCacheLineSize_);
-  return Acquire(size, alignment);
+  return Acquire(size, gpu_.dev().info().globalMemCacheLineSize_);
 }
 
 // ================================================================================================
