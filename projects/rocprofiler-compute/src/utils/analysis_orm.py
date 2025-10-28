@@ -255,6 +255,9 @@ def get_views() -> list[TextClause]:
                 "duration_ns_sum"
             ),
             median_calc.c.duration_ns_median,
+            func.avg(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                "duration_ns_mean"
+            ),
         )
         .select_from(Dispatch)
         .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
