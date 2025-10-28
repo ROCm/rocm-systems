@@ -47,10 +47,10 @@ endif()
 
 # needed for validation
 find_package(Python3 REQUIRED)
-find_package(rocprofiler_sdk_pytest REQUIRED)
 
 # generally needed
 find_package(rocprofiler-sdk REQUIRED)
+find_package(rocprofiler_sdk_pytest REQUIRED)
 
 # get the gfx architectures that are present on the system
 rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
