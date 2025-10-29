@@ -221,26 +221,26 @@ def get_csv_data(file_path):
 @pytest.fixture
 def kernel_input_data(request):
     if os.path.exists(request.config.getoption("--skip-if")):
-        pytest.skip()
+        pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
     return get_data(request, "--kernel-input", "kernel_dispatch")
 
 
 @pytest.fixture
 def memory_copy_input_data(request):
     if os.path.exists(request.config.getoption("--skip-if")):
-        pytest.skip()
+        pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
     return get_data(request, "--memory-copy-input", "memory_copy")
 
 
 @pytest.fixture
 def hsa_input_data(request):
     if os.path.exists(request.config.getoption("--skip-if")):
-        pytest.skip()
+        pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
     return get_data(request, "--hsa-input", "hsa_api")
 
 
 @pytest.fixture
 def agent_info_input_data(request):
     if os.path.exists(request.config.getoption("--skip-if")):
-        pytest.skip()
+        pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
     return get_data(request, "--agent-input", "agent_info")
