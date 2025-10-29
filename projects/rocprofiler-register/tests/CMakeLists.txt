@@ -168,9 +168,16 @@ function(rocp_register_test_executable _NAME)
         ${_NAME} ${_NAME} "${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         "${RRTE_CORE_PASS_REGEX}" "${RRTE_CORE_FAIL_REGEX}")
 
+    # Build LD_PRELOAD list for -preload tests
+    set(_PRELOAD_LIBS "librocprofiler-register.so" "libgeneric-tool.so")
+    if(ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY)
+        list(PREPEND _PRELOAD_LIBS "${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}")
+    endif()
+    list(JOIN _PRELOAD_LIBS ":" _PRELOAD_STRING)
+
     rocp_register_add_test(
         ${_NAME}-preload ${_NAME}
-        "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}:librocprofiler-register.so:libgeneric-tool.so"
+        "LD_PRELOAD=${_PRELOAD_STRING}"
         "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
 
     rocp_register_add_test(
@@ -188,7 +195,7 @@ function(rocp_register_test_executable _NAME)
     rocp_register_add_test(
         ${_NAME}-preload-wrap
         ${_NAME}
-        "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}:librocprofiler-register.so:libgeneric-tool.so;ROCP_REG_TEST_WRAP=1"
+        "LD_PRELOAD=${_PRELOAD_STRING};ROCP_REG_TEST_WRAP=1"
         "${RRTE_PRELOAD_WRAP_PASS_REGEX}"
         "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
 
