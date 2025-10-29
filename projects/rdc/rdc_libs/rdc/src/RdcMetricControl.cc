@@ -342,7 +342,8 @@ void RdcMetricControl::reloadConfigIfNeeded() {
 bool RdcMetricControl::shouldCollectField(rdc_field_t field_id) const {
   // Check Level 1: Data source
   // Determine if field is from AMD-SMI or ROCProfiler
-  // Prof fields start at RDC_FI_PROF_OCCUPANCY_PERCENT (800)
+  // ROCProfiler fields are defined in the range [RDC_FI_PROF_OCCUPANCY_PERCENT (800), RDC_EVNT_XGMI_0_NOP_TX).
+  // RDC_EVNT_XGMI_0_NOP_TX marks the start of XGMI event fields, so this range check isolates ROCProfiler field IDs.
   bool is_rocprof_field = (field_id >= RDC_FI_PROF_OCCUPANCY_PERCENT && field_id < RDC_EVNT_XGMI_0_NOP_TX);
 
   if (is_rocprof_field) {

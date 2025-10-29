@@ -1190,6 +1190,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
   value->field_id = field_id;
   value->ts = now();
 
+  // Get metric control instance once for all cases
+  auto& control = RdcMetricControl::getInstance();
+
   switch (field_id) {
     case RDC_FI_CPU_MODEL: {
       amdsmi_cpu_info_t cpu_info = {};
@@ -1204,7 +1207,6 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_CPU_SKT_ENERGY: {
       uint64_t energy = 0;
       // Check if CPU socket energy collection is enabled
-      auto& control = RdcMetricControl::getInstance();
       if (!control.enable_amdsmi_get_cpu_socket_energy) {
         value->value.l_int = 0;
         value->status = AMDSMI_STATUS_SUCCESS;
@@ -1251,7 +1253,6 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_CPU_MCLK_FREQUENCY: {
       uint32_t fclk = 0, mclk = 0;
       // Check if CPU fclk/mclk collection is enabled
-      auto& control = RdcMetricControl::getInstance();
       if (!control.enable_amdsmi_get_cpu_fclk_mclk) {
         value->value.l_int = 0;
         value->status = AMDSMI_STATUS_SUCCESS;
