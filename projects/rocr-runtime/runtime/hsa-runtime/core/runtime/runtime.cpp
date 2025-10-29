@@ -897,7 +897,12 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
 
   static_assert(sizeof(HSAint64) >= sizeof(interop_handle),
                 "HSAint64 too small for interop_handle");
-  HSAint64 resource_handle = reinterpret_cast<HSAint64>(interop_handle);
+  HSAint64 resource_handle =
+#ifdef _WIN32
+      static_cast<HSAint64>(reinterpret_cast<uintptr_t>(interop_handle));
+#else
+      static_cast<HSAint64>(interop_handle);
+#endif
 
   if (num_agents > tinyArraySize) {
     nodes = new HSAuint32[num_agents];
@@ -1408,7 +1413,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   if (err != HSA_STATUS_SUCCESS) return err;
 
   if (agent->device_type() == Agent::kAmdGpuDevice) {
-    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);    
+    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
     amdgpu_bo_import_result res;
 
     srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
