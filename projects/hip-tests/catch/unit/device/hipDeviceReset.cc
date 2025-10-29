@@ -49,7 +49,9 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipDeviceReset_Positive_Basic") {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
+
   INFO("Current device is: " << device);
+  HIP_CHECK(hipDeviceReset());
 
   unsigned int flags_before = 0u;
   HIP_CHECK(hipGetDeviceFlags(&flags_before));
@@ -58,8 +60,6 @@ TEST_CASE("Unit_hipDeviceReset_Positive_Basic") {
 
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, 500));
-  hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
 
   const auto cache_config_ret = hipDeviceSetCacheConfig(hipFuncCachePreferL1);
   REQUIRE((cache_config_ret == hipSuccess || cache_config_ret == hipErrorNotSupported));
@@ -78,12 +78,6 @@ TEST_CASE("Unit_hipDeviceReset_Positive_Basic") {
   CHECK(flags_after == flags_before);
 
   CHECK(hipFree(ptr) == hipErrorInvalidValue);
-
-// Inconsistent behavior in CUDA, sometimes segfaults, sometimes works
-// Return value mismatch on AMD - EXSWHTEC-124
-#if 0
-  CHECK(hipStreamDestroy(stream) == hipErrorInvalidHandle);
-#endif
 
   if (cache_config_ret == hipSuccess) {
     hipFuncCache_t cache_config;
@@ -114,6 +108,7 @@ TEST_CASE("Unit_hipDeviceReset_Positive_Basic") {
 TEST_CASE("Unit_hipDeviceReset_Positive_Threaded") {
   HIP_CHECK(hipSetDevice(0));
   INFO("Current device is: " << 0);
+  HIP_CHECK(hipDeviceReset());
 
   unsigned int flags_before = 0u;
   HIP_CHECK(hipGetDeviceFlags(&flags_before));
@@ -122,8 +117,6 @@ TEST_CASE("Unit_hipDeviceReset_Positive_Threaded") {
 
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, 500));
-  hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
 
   const auto cache_config_ret = hipDeviceSetCacheConfig(hipFuncCachePreferL1);
   REQUIRE((cache_config_ret == hipSuccess || cache_config_ret == hipErrorNotSupported));
@@ -147,12 +140,6 @@ TEST_CASE("Unit_hipDeviceReset_Positive_Threaded") {
   CHECK(flags_after == flags_before);
 
   CHECK(hipFree(ptr) == hipErrorInvalidValue);
-
-// Inconsistent behavior in CUDA, sometimes segfaults, sometimes works
-// Return value mismatch on AMD - EXSWHTEC-124
-#if 0
-  CHECK(hipStreamDestroy(stream) == hipErrorInvalidHandle);
-#endif
 
   if (cache_config_ret == hipSuccess) {
     hipFuncCache_t cache_config;
