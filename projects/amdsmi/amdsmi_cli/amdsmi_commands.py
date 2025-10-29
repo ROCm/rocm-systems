@@ -6611,20 +6611,20 @@ class AMDSMICommands():
                 self.logger.table_title = "\nLINK METRIC TABLE"
                 self.logger.print_output(multiple_device_enabled=True, tabular=True)
 
-        self.logger.multiple_device_output = xgmi_values
+            self.logger.multiple_device_output = xgmi_values
 
-        if self.logger.is_csv_format():
-            new_output = []
-            for elem in self.logger.multiple_device_output:
-                new_output.append(self.logger.flatten_dict(elem, topology_override=True))
-            self.logger.multiple_device_output = new_output
+            if self.logger.is_csv_format():
+                new_output = []
+                for elem in self.logger.multiple_device_output:
+                    new_output.append(self.logger.flatten_dict(elem, topology_override=True))
+                self.logger.multiple_device_output = new_output
 
-        if self.logger.is_json_format():
-            self.logger.store_xgmi_metric_json_output.append(xgmi_values)
-            if not any([args.link_status, args.source_status]):
-                self.logger.combine_arrays_to_json()
-        elif not self.logger.is_human_readable_format():
-            self.logger.print_output(multiple_device_enabled=True)
+            if self.logger.is_json_format():
+                self.logger.store_xgmi_metric_json_output.append(xgmi_values)
+                if not any([args.link_status, args.source_status]):
+                    self.logger.combine_arrays_to_json()
+            elif not self.logger.is_human_readable_format():
+                self.logger.print_output(multiple_device_enabled=True)
 
         if args.source_status:
             # Header modification
@@ -6641,7 +6641,6 @@ class AMDSMICommands():
                 src_gpu = src_gpu_handles.get(src_gpu_bdf)
 
                 # Populate link statuses
-                status_row = []
                 tabular_output_dict = {"gpu#": f"GPU{src_gpu_id}",
                                        "gpu": src_gpu_id,
                                        "bdf": src_gpu_bdf,
@@ -6655,7 +6654,7 @@ class AMDSMICommands():
                         del tabular_output_dict['gpu#']
                     tabular_output.append(tabular_output_dict)
                     if self.logger.is_json_format():
-                        self.logger.store_xgmi_link_status_json_output.append(tabular_output_dict)
+                        self.logger.store_xgmi_source_status_json_output.append(tabular_output_dict)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     xgmi_dict['link_metrics']['link_status']={"status": "failed"}
                     logging.debug("Failed to get XGMI link status for GPU %s | %s", src_gpu_id, e.get_error_info())
@@ -6669,7 +6668,8 @@ class AMDSMICommands():
                 self.logger.print_output(multiple_device_enabled=True, tabular=True)
             self.logger.clear_multiple_devices_output()
             if self.logger.is_json_format():
-                self.logger.combine_arrays_to_json()
+                if not args.link_status:
+                    self.logger.combine_arrays_to_json()
 
         if args.link_status:
             # XGMI LINK STATUS for src_gpu to dest_gpu
@@ -6698,7 +6698,11 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException:
                     xgmi_metrics_info = {"links": []}
                 # First column: GPU# + tab + bdf, then status for each dest bdf
-                row_dict = {"": f"GPU{src_gpu_id}\t{src_gpu_bdf}".ljust(20)}
+                if self.logger.is_human_readable_format():
+                    row_dict = {"": f"GPU{src_gpu_id}\t{src_gpu_bdf}".ljust(20)}
+                else:
+                    row_dict = {"gpu": f"GPU{src_gpu_id}", "bdf": src_gpu_bdf}
+                json_status = []
                 # Cache GPU handles for destination GPUs
                 dest_gpu_handles = {dest_xgmi_dict['bdf']:
                                     amdsmi_interface.amdsmi_get_processor_handle_from_bdf(dest_xgmi_dict['bdf'])
@@ -6730,29 +6734,44 @@ class AMDSMICommands():
                     else:
                         status = "N/A"
 
-                    row_dict[dest_gpu_bdf.ljust(14)] = str(status).ljust(14)
+                    if self.logger.is_human_readable_format():
+                        row_dict[dest_gpu_bdf.ljust(14)] = str(status).ljust(14)
+                    else:
+                        row_dict[dest_gpu_bdf] = status
+                    json_status.append(status)
                 tabular_output.append(row_dict)
+                if self.logger.is_json_format():
+                    self.logger.store_xgmi_link_status_json_output.append({
+                        "gpu": src_gpu_id,
+                        "bdf": src_gpu_bdf,
+                        "link_status": json_status
+                    })
 
-            self.logger.multiple_device_output = tabular_output
-            self.logger.print_output(multiple_device_enabled=True, tabular=True)
+            if not self.logger.is_json_format():
+                self.logger.multiple_device_output = tabular_output
+                self.logger.print_output(multiple_device_enabled=True, tabular=True)
+
             self.logger.clear_multiple_devices_output()
 
-            if self.logger.is_human_readable_format():
-                # Populate the legend output
-                legend_parts = [
-                    "\n\nLegend:",
-                    "  SELF = Current GPU",
-                    "  N/A = Not supported",
-                    "  U / D / X = Link is Up / Down / Disabled",
-                    "  Read / Write = GPU Metric Accumulated Read / Write"
-                ]
-                legend_output = "\n".join(legend_parts)
+            if self.logger.is_json_format():
+                self.logger.combine_arrays_to_json()
 
-                if self.logger.destination == 'stdout':
-                    print(legend_output)
-                else:
-                    with self.logger.destination.open('a', encoding="utf-8") as output_file:
-                        output_file.write(legend_output + '\n')
+        if self.logger.is_human_readable_format():
+            # Populate the legend output
+            legend_parts = [
+                "\n\nLegend:",
+                "  SELF = Current GPU",
+                "  N/A = Not supported",
+                "  U / D / X = Link is Up / Down / Disabled",
+                "  Read / Write = GPU Metric Accumulated Read / Write"
+            ]
+            legend_output = "\n".join(legend_parts)
+
+            if self.logger.destination == 'stdout':
+                print(legend_output)
+            else:
+                with self.logger.destination.open('a', encoding="utf-8") as output_file:
+                    output_file.write(legend_output + '\n')
 
 
     def partition(self, args, multiple_devices=False, gpu=None, current=None, memory=None, accelerator=None):

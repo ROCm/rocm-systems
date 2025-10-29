@@ -49,6 +49,7 @@ class AMDSMILogger():
         self.store_core_json_output = []
         self.store_gpu_json_output = []
         self.store_xgmi_metric_json_output = []
+        self.store_xgmi_source_status_json_output = []
         self.store_xgmi_link_status_json_output = []
         self.store_current_partition_json_output = []
         self.store_memory_partition_json_output = []
@@ -606,6 +607,8 @@ class AMDSMILogger():
             combined_json["gpu_data"] = self.store_gpu_json_output
         if self.store_xgmi_metric_json_output:
             combined_json["xgmi_metric"] = self.store_xgmi_metric_json_output
+        if self.store_xgmi_source_status_json_output:
+            combined_json["link_port_status"] = self.store_xgmi_source_status_json_output
         if self.store_xgmi_link_status_json_output:
             combined_json["link_status"] = self.store_xgmi_link_status_json_output
         if self.store_current_partition_json_output:
