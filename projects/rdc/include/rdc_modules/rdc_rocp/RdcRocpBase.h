@@ -58,6 +58,22 @@ class RdcRocpBase {
    */
   rdc_status_t rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value_data* value,
                            rdc_field_type_t* type);
+
+  /**
+   * @brief Bulk lookup of multiple ROCProfiler counters for a single GPU
+   *
+   * @param[in] fields Vector of fields to lookup (all for the same GPU)
+   * @param[out] values Vector to be populated with returned values
+   * @param[out] types Vector to be populated with returned types
+   * @param[out] statuses Vector to be populated with status for each field
+   *
+   * @retval ::RDC_ST_OK The function has been executed successfully.
+   */
+  rdc_status_t rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& fields,
+                                std::vector<rdc_field_value_data>& values,
+                                std::vector<rdc_field_type_t>& types,
+                                std::vector<rdc_status_t>& statuses);
+
   const char* get_field_id_from_name(rdc_field_t);
   const std::vector<rdc_field_t> get_field_ids();
 
