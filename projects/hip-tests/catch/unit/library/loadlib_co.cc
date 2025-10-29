@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 TEST_CASE("Unit_hip_library_load_co") {
   constexpr size_t size = 32;
+  constexpr size_t num_kernels = 3;
   std::vector<float> input1, input2;
   input1.reserve(size);
   input2.reserve(size);
@@ -45,6 +46,19 @@ TEST_CASE("Unit_hip_library_load_co") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   std::string lib_co = "library_code_load.code";
+  
+  auto host_verify = [](const std::vector<float>& x, const std::vector<float>&y, const std::vector<float>& expected, int op) {
+    for (size_t i = 0; i < size; i++) {
+      float tmp;
+      switch(op) {
+        case 0: tmp = x[i] + y[i]; break;
+        case 1: tmp = x[i] - y[i]; break;
+        case 2: tmp = x[i] * y[i]; break;
+        default: tmp = 0;
+      }
+      REQUIRE(tmp == expected[i]);
+    }
+  };
 
   SECTION("One Kernel") {
     hipLibrary_t library;
@@ -54,6 +68,10 @@ TEST_CASE("Unit_hip_library_load_co") {
         hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     HIP_CHECK(hipLibraryGetKernel(&function, library, "add_kernel"));
 
+    hipLibrary_t new_library;
+    HIP_CHECK(hipKernelGetLibrary(&new_library, function));
+    REQUIRE(new_library == library);
+
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
     REQUIRE(count == 3);
@@ -67,11 +85,7 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     std::vector<float> out(size, 0);
     HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float tmp = input1[i] + input2[i];
-      INFO("Index: " << i << " cpu res: " << tmp << " gpu res: " << out[i]);
-      REQUIRE(out[i] == tmp);
-    }
+    host_verify(input1, input2, out, 0);
   }
 
   SECTION("Two Kernel") {
@@ -81,6 +95,10 @@ TEST_CASE("Unit_hip_library_load_co") {
     HIP_CHECK(
         hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     HIP_CHECK(hipLibraryGetKernel(&function, library, "sub_kernel"));
+    
+    hipLibrary_t new_library;
+    HIP_CHECK(hipKernelGetLibrary(&new_library, function));
+    REQUIRE(new_library == library);
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
@@ -95,11 +113,7 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     std::vector<float> out(size, 0);
     HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float tmp = input1[i] - input2[i];
-      INFO("Index: " << i << " cpu res: " << tmp << " gpu res: " << out[i]);
-      REQUIRE(out[i] == tmp);
-    }
+    host_verify(input1, input2, out, 1);
   }
 
   SECTION("Three Kernel") {
@@ -109,6 +123,10 @@ TEST_CASE("Unit_hip_library_load_co") {
     HIP_CHECK(
         hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     HIP_CHECK(hipLibraryGetKernel(&function, library, "mul_kernel"));
+    
+    hipLibrary_t new_library;
+    HIP_CHECK(hipKernelGetLibrary(&new_library, function));
+    REQUIRE(new_library == library);
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
@@ -123,11 +141,45 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     std::vector<float> out(size, 0);
     HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float tmp = input1[i] * input2[i];
-      INFO("Index: " << i << " cpu res: " << tmp << " gpu res: " << out[i]);
-      REQUIRE(out[i] == tmp);
+    host_verify(input1, input2, out, 2);
+  }
+
+  SECTION("All Kernels") {
+    hipLibrary_t library;
+    hipKernel_t functions[num_kernels];
+
+    HIP_CHECK(
+      hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+    
+    HIP_CHECK(hipLibraryEnumerateKernels(functions, num_kernels, library));
+
+    void* args[] = {&d_out, &d_in1, &d_in2};
+
+    auto kernel_idx = [](const char* kName) {
+      std::string ss = kName;
+      if (ss == "add_kernel") {
+        return 0;
+      } else if (ss == "sub_kernel") {
+        return 1;
+      } else if (ss == "mul_kernel") {
+        return 2;
+      }
+      return -1;
+    };
+
+    
+    std::vector<float> out(size, 0);
+    for (int k = 0; k < num_kernels; k++) {
+      const char* kName = nullptr;
+      HIP_CHECK(hipKernelGetName(&kName, functions[k]));
+      HIP_CHECK(hipLaunchKernel(functions[k], 1, size, args, 0, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+      host_verify(input1, input2, out, kernel_idx(kName));
     }
+
+    HIP_CHECK(hipLibraryUnload(library));
+
   }
 
   HIP_CHECK(hipStreamDestroy(stream));
