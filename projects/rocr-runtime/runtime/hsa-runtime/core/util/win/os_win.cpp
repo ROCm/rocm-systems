@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 // 
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
 // 
 // Developed by:
 // 
@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef _WIN32  // Are we compiling for windows?
+#define NOMINMAX
 
 #include "core/util/os.h"
 
@@ -48,13 +49,10 @@
 #include <process.h>
 #include <string>
 #include <windows.h>
-#include <ntstatus.h>
-#include <psapi.h>
 
 #include <emmintrin.h>
 #include <pmmintrin.h>
 #include <xmmintrin.h>
-#include <shared_mutex>
 
 #undef Yield
 #undef CreateMutex
@@ -84,37 +82,37 @@ void* GetExportAddress(LibHandle lib, std::string export_name) {
   return GetProcAddress(*(HMODULE*)&lib, export_name.c_str());
 }
 
-bool CloseLib(LibHandle lib) { return FreeLibrary(*(::HMODULE*)&lib); }
+void CloseLib(LibHandle lib) { FreeLibrary(*(::HMODULE*)&lib); }
 
 std::vector<LibHandle> GetLoadedLibs() {
   // Use EnumProcessModulesEx
-  assert(!"Not implemented.");
-  return std::vector<LibHandle>{};
+  static_assert(false, "Not implemented.");
 }
 
 std::string GetLibraryName(LibHandle lib) {
-  assert(!"Not implemented.");
-  return std::string{};
+  static_assert(false, "Not implemented.");
 }
 
 Semaphore CreateSemaphore() {
-  auto sem = static_cast<void*>(CreateSemaphoreA(nullptr, 0, LONG_MAX, nullptr));
-  assert(sem != nullptr && "CreateSemaphore failed");
+  sem = static_cast<void*>(CreateSemaphore(NULL, 0, LONG_MAX, NULL));
+  assert(sem != NULL && "CreateSemaphore failed");
+
   return *(Semaphore*)&sem;
 }
 
 bool WaitSemaphore(Semaphore sem) {
-  return WaitForSingleObject(sem, INFINITE) == WAIT_OBJECT_0;
+  return WaitForSingleObject(*(::HANDLE*)&lock, INFINITE) == WAIT_OBJECT_0;
 }
 
 void PostSemaphore(Semaphore sem) {
-  ReleaseSemaphore(sem, 1, nullptr);
+  ReleaseSemaphore(static_cast<HANDLE>(*sem), 1, NULL);
 }
 
 void DestroySemaphore(Semaphore sem) {
-  if (!CloseHandle(sem)) {
+  if (!CloseHandle(static_cast<HANDLE>(*sem))) {
     assert("CloseHandle() failed");
   }
+  *sem = NULL;
 }
 
 Mutex CreateMutex() { return CreateEvent(NULL, false, true, NULL); }
@@ -261,37 +259,48 @@ uint64_t AccurateClockFrequency() {
 }
 
 SharedMutex CreateSharedMutex() {
-  return reinterpret_cast<SharedMutex>(new std::shared_mutex());
+  assert(false && "Not implemented.");
+  abort();
+  return nullptr;
 }
 
 bool TryAcquireSharedMutex(SharedMutex lock) {
-  return reinterpret_cast<std::shared_mutex*>(lock)->try_lock();
+  assert(false && "Not implemented.");
+  abort();
+  return false;
 }
 
 bool AcquireSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->lock();
-  return true;
+  assert(false && "Not implemented.");
+  abort();
+  return false;
 }
 
 void ReleaseSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->unlock();
+  assert(false && "Not implemented.");
+  abort();
 }
 
 bool TrySharedAcquireSharedMutex(SharedMutex lock) {
-  return reinterpret_cast<std::shared_mutex*>(lock)->try_lock_shared();
+  assert(false && "Not implemented.");
+  abort();
+  return false;
 }
 
 bool SharedAcquireSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->lock_shared();
-  return true;
+  assert(false && "Not implemented.");
+  abort();
+  return false;
 }
 
 void SharedReleaseSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->unlock_shared();
+  assert(false && "Not implemented.");
+  abort();
 }
 
 void DestroySharedMutex(SharedMutex lock) {
-  delete reinterpret_cast<std::shared_mutex*>(lock);
+  assert(false && "Not implemented.");
+  abort();
 }
 
 uint64_t ReadSystemClock() {
@@ -301,183 +310,17 @@ uint64_t ReadSystemClock() {
 }
 
 uint64_t SystemClockFrequency() {
-  LARGE_INTEGER frequency;
-  QueryPerformanceFrequency(&frequency);
-  return frequency.QuadPart;
+  assert(false && "Not implemented.");
+  abort();
+  return 0;
 }
 
 bool ParseCpuID(cpuid_t* cpuinfo) {
-  int regs[4] = {};
-  int info{};
-
-  __cpuid(regs, info);
-  memset(cpuinfo->ManufacturerID, 0, sizeof(cpuinfo->ManufacturerID));
-  *reinterpret_cast<int*>(cpuinfo->ManufacturerID) = regs[1];
-  *reinterpret_cast<int*>(cpuinfo->ManufacturerID + 4) = regs[3];
-  *reinterpret_cast<int*>(cpuinfo->ManufacturerID + 8) = regs[2];
-  // @todo fill the rest of CPU info
-  return true;
+  assert(false && "Not implemented.");
+  abort();
+  return false;
 }
 
-bool IsEnvVarSet(std::string env_var_name) {
-  char* buff = NULL;
-  buff = getenv(env_var_name.c_str());
-  return (buff != NULL);
-}
-
-std::vector<LibHandle> GetLoadedToolsLib() {
-  std::vector<LibHandle> ret;
-  std::vector<std::string> names;
-  HMODULE hMods[1024];
-  HANDLE hProcess = GetCurrentProcess();
-  DWORD cbNeeded;
-  unsigned int i;
-
-  if (EnumProcessModules(hProcess, hMods, sizeof(hMods), &cbNeeded)) {
-    for (i = 0; i < (cbNeeded / sizeof(HMODULE)); i++) {
-      TCHAR szModName[MAX_PATH];
-
-      // Get the full path to the module's file.
-
-      if (GetModuleFileNameEx(hProcess, hMods[i], szModName, sizeof(szModName) / sizeof(TCHAR))) {
-        // Print the module name and handle value.
-        names.push_back(szModName);
-      }
-    }
-  }
-
-  if (!names.empty()) {
-    for (auto& name : names) ret.push_back(LoadLib(name));
-  }
-
-  return ret;
-}
-
-int GetProcessId() { return ::_getpid(); }
-
-uint64_t TimeNanos() {
-  static double PerformanceFrequency = 0.f;
-  if (PerformanceFrequency == 0) {
-    LARGE_INTEGER frequency;
-    QueryPerformanceFrequency(&frequency);
-    PerformanceFrequency = (double)frequency.QuadPart;
-  }
-  LARGE_INTEGER current;
-  QueryPerformanceCounter(&current);
-  return (uint64_t)((double)current.QuadPart / PerformanceFrequency * 1e9);
-}
-
-static inline int memProtToOsProt(MemProt prot) {
-  switch (prot) {
-    case MEM_PROT_NONE:
-      return PAGE_NOACCESS;
-    case MEM_PROT_READ:
-      return PAGE_READONLY;
-    case MEM_PROT_RW:
-      return PAGE_READWRITE;
-    case MEM_PROT_RWX:
-      return PAGE_EXECUTE_READWRITE;
-    default:
-      break;
-  }
-  return -1;
-}
-
-static size_t g_page_size_ = 0;   //!< The default os page size
-static int processorCount_;       //!< The number of active processors
-static size_t allocationGranularity_;
-
-//! Return the default os page size.
-size_t PageSize() {
-  if (g_page_size_ == 0) {
-    SYSTEM_INFO si{};
-    ::GetSystemInfo(&si);
-    g_page_size_ = si.dwPageSize;
-  }
-  return g_page_size_;
-}
-
-void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
-  size = AlignUp(size, PageSize());
-  if (allocationGranularity_ == 0) {
-    SYSTEM_INFO si;
-    ::GetSystemInfo(&si);
-    g_page_size_ = si.dwPageSize;
-    allocationGranularity_ = (size_t)si.dwAllocationGranularity;
-  }
-  alignment = std::max(allocationGranularity_, AlignUp(alignment, allocationGranularity_));
-  assert(IsPowerOfTwo(alignment) && "not a power of 2");
-
-  size_t requested = size + alignment - allocationGranularity_;
-  address mem, aligned;
-  do {
-    mem = reinterpret_cast<address>(VirtualAlloc(start, requested, MEM_RESERVE, memProtToOsProt(prot)));
-
-    // check for out of memory.
-    if (mem == NULL) return NULL;
-
-    aligned = AlignUp(mem, alignment);
-
-    // check for already aligned memory.
-    if (aligned == mem && size == requested) {
-      return mem;
-    }
-
-    // try to reserve the aligned address.
-    if (VirtualFree(mem, 0, MEM_RELEASE) == 0) {
-      assert(!"VirtualFree failed");
-    }
-
-    mem = (address)VirtualAlloc(aligned, size, MEM_RESERVE, memProtToOsProt(prot));
-    assert((mem == NULL || mem == aligned) && "VirtualAlloc failed");
-
-  } while (mem != aligned);
-
-  return mem;
-}
-bool ReleaseMemory(void* addr, size_t size) { return VirtualFree(addr, 0, MEM_RELEASE) != 0; }
-
-bool CommitMemory(void* addr, size_t size, MemProt prot) {
-  return VirtualAlloc(addr, size, MEM_COMMIT, memProtToOsProt(prot)) != NULL;
-}
-
-bool UncommitMemory(void* addr, size_t size) { return VirtualFree(addr, size, MEM_DECOMMIT) != 0; }
-
-uint64_t HostTotalPhysicalMemory() {
-  static uint64_t totalPhys = 0;
-
-  if (totalPhys != 0) {
-    return totalPhys;
-  }
-
-  MEMORYSTATUSEX mstatus;
-  mstatus.dwLength = sizeof(mstatus);
-
-  ::GlobalMemoryStatusEx(&mstatus);
-
-  totalPhys = mstatus.ullTotalPhys;
-  return totalPhys;
-}
-
-int Ffs(int i) {
-  int res = 0;
-  unsigned long index;
-  if (_BitScanForward(&index, i) != 0) {
-    res = index + 1;
-  }
-  return res;
-}
-
-int Ctz(uint64_t i) {
-  unsigned long index;
-  if (_BitScanReverse64(&index, i)) {
-    return sizeof(i) * 8 - 1 - index;
-  } else {
-    return sizeof(i) * 8;
-  }
-}
-
-char* DlError() { return nullptr; }
 }   //  namespace os
 }   //  namespace rocr
 
