@@ -183,7 +183,7 @@ function(rocp_register_test_executable _NAME)
     rocp_register_add_test(
         ${_NAME}-env
         ${_NAME}
-        "ROCP_TOOL_LIBRARIES=libgeneric-tool.so;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        "LD_PRELOAD=librocprofiler-register.so;ROCP_TOOL_LIBRARIES=libgeneric-tool.so;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         "${RRTE_PRELOAD_PASS_REGEX}"
         "${RRTE_PRELOAD_FAIL_REGEX}")
 
@@ -202,7 +202,7 @@ function(rocp_register_test_executable _NAME)
     rocp_register_add_test(
         ${_NAME}-env-wrap
         ${_NAME}
-        "ROCP_TOOL_LIBRARIES=libgeneric-tool.so;ROCP_REG_TEST_WRAP=1;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        "LD_PRELOAD=librocprofiler-register.so;ROCP_TOOL_LIBRARIES=libgeneric-tool.so;ROCP_REG_TEST_WRAP=1;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         "${RRTE_PRELOAD_WRAP_PASS_REGEX}"
         "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
 
