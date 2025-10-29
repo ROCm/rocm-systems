@@ -1255,7 +1255,15 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         int flag = payload_data->args.implicit_task.flags;
         if(flag & ompt_task_initial) return;
     }
-    // TODO: Once thread events are supported, the same logic should apply
+    // TODO: Once ompt_callback_thread_begin is supported, we need to skip
+    //  every occurrence of an "initial-thread-begin" for similar reasons.
+    // This callback is identified with thread_type == ompt_thread_initial.
+
+    // Note: If the finalization issue is resolved, the corresponding ends of these
+    //  callbacks (which should be discarded) can be identified with:
+    // - implicit_task: (flag & ompt_task_initial) && endpoint == ompt_scope_end
+    // - thread_end: The thread_data ptr from the thread_begin callback generated
+    //    by the "initial-thread-begin" needs to match the thread_end's thread_data ptr
 #endif
 
     auto ts = rocprofiler_timestamp_t{};
