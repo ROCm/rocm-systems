@@ -95,3 +95,87 @@ TEST_CASE("Unit_hipStreamCopyAttributes_Basic") {
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks the following negative scenarios
+ *  - 1) With Invalid source Stream
+ *  - 2) With Invalid destination Stream
+ *  - 3) With Invalid source and destination Streams
+ * Test source
+ * ------------------------
+ *  - unit/stream/hipStreamCopyAttributes.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipStreamCopyAttributes_Negative") {
+  hipStream_t srcStream = nullptr;
+  HIP_CHECK(hipStreamCreate(&srcStream));
+  hipStream_t dstStream = nullptr;
+  HIP_CHECK(hipStreamCreate(&dstStream));
+
+  SECTION("With Invalid Source Stream") {
+    HIP_CHECK_ERROR(
+        hipStreamCopyAttributes(dstStream, reinterpret_cast<hipStream_t>(-1)),
+        hipErrorInvalidResourceHandle);
+  }
+
+  SECTION("With Invalid Destination Stream") {
+    HIP_CHECK_ERROR(
+        hipStreamCopyAttributes(reinterpret_cast<hipStream_t>(-1), srcStream),
+        hipErrorInvalidResourceHandle);
+  }
+
+  SECTION("With Invalid Source & Destination Streams") {
+    HIP_CHECK_ERROR(hipStreamCopyAttributes(reinterpret_cast<hipStream_t>(-1),
+                                            reinterpret_cast<hipStream_t>(-1)),
+                    hipErrorInvalidResourceHandle);
+  }
+
+  HIP_CHECK(hipStreamDestroy(srcStream));
+  HIP_CHECK(hipStreamDestroy(dstStream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks behavior of hipStreamCopyAttributes
+ *  - with SynchronizationPolicy attribute and with all possible values
+ * Test source
+ * ------------------------
+ *  - unit/stream/hipStreamCopyAttributes.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues") {
+  hipStream_t srcStream = nullptr;
+  HIP_CHECK(hipStreamCreate(&srcStream));
+  hipStream_t dstStream = nullptr;
+  HIP_CHECK(hipStreamCreate(&dstStream));
+
+  hipStreamAttrID attr = hipStreamAttributeSynchronizationPolicy;
+  hipStreamAttrValue valueToSetForSrc;
+  hipSynchronizationPolicy syncPolicy =
+      GENERATE(hipSynchronizationPolicy::hipSyncPolicyAuto,
+               hipSynchronizationPolicy::hipSyncPolicySpin,
+               hipSynchronizationPolicy::hipSyncPolicyYield,
+               hipSynchronizationPolicy::hipSyncPolicyBlockingSync);
+  valueToSetForSrc.syncPolicy = syncPolicy;
+  HIP_CHECK(hipStreamSetAttribute(srcStream, attr, &valueToSetForSrc));
+
+  hipStreamAttrValue valueToSetForDst;
+  valueToSetForDst.syncPolicy = hipSynchronizationPolicy::hipSyncPolicySpin;
+  HIP_CHECK(hipStreamSetAttribute(dstStream, attr, &valueToSetForDst));
+
+  HIP_CHECK(hipStreamCopyAttributes(dstStream, srcStream));
+
+  hipStreamAttrValue valueOut;
+  HIP_CHECK(hipStreamGetAttribute(dstStream, attr, &valueOut));
+  REQUIRE(valueOut.syncPolicy == syncPolicy);
+
+  HIP_CHECK(hipStreamDestroy(srcStream));
+  HIP_CHECK(hipStreamDestroy(dstStream));
+}
