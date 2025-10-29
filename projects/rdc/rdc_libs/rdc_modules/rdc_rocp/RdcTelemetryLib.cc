@@ -209,6 +209,10 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
     }
 
     // Bulk lookup for this GPU
+    // Note: rocp_lookup_bulk only handles rocprofiler-sdk metrics.
+    // Non-rocprofiler fields (e.g., RDC_FI_PROF_KFD_ID) are handled within
+    // the bulk lookup via special case logic in apply_field_transformation().
+    // Fields without rocprofiler metric mappings will return RDC_ST_BAD_PARAMETER.
     std::vector<rdc_field_value_data> bulk_data;
     std::vector<rdc_field_type_t> bulk_types;
     std::vector<rdc_status_t> bulk_statuses;

@@ -115,6 +115,25 @@ class RdcRocpBase {
   };
 
   /**
+   * @brief Apply field-specific transformations to raw profiler values
+   *
+   * @param[in] field Field ID to transform
+   * @param[in] agent_index Index of the agent/GPU
+   * @param[in] raw_value Raw value from profiler
+   * @param[in] elapsed_time_ms Elapsed time in milliseconds (for eval fields)
+   * @param[in] sampled_values Map of all sampled values (for fields needing multiple metrics)
+   * @param[out] output Transformed output value
+   * @param[out] type Output type
+   *
+   * @retval ::RDC_ST_OK Transformation successful
+   */
+  rdc_status_t apply_field_transformation(rdc_field_t field, uint32_t agent_index,
+                                          double raw_value, double elapsed_time_ms,
+                                          const std::map<std::string, double>& sampled_values,
+                                          rdc_field_value_data* output,
+                                          rdc_field_type_t* type);
+
+  /**
    * @brief Convert from profiler status into RDC status
    */
   rdc_status_t Rocp2RdcError(rocprofiler_status_t status);
