@@ -35,6 +35,7 @@ THE SOFTWARE.
 #include "common/rdc_utils.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/impl/RdcMetricControl.h"
 #include "rdc_lib/impl/SmiUtils.h"
 #include "rdc_lib/rdc_common.h"
 
@@ -100,24 +101,45 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
       }
 
       uint64_t weight = std::numeric_limits<uint64_t>::max();
-      err = amdsmi_topo_get_link_weight(ph.first, ph.second, &weight);
-      if (err != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_INFO, "Fail to get process GPUs weight information: " << err);
+      // Check if topology link weight collection is enabled
+      auto& control = RdcMetricControl::getInstance();
+      if (control.enable_amdsmi_topo_get_link_weight) {
+        err = amdsmi_topo_get_link_weight(ph.first, ph.second, &weight);
+        if (err != AMDSMI_STATUS_SUCCESS) {
+          RDC_LOG(RDC_INFO, "Fail to get process GPUs weight information: " << err);
+        }
+      } else {
+        weight = 0;
+        err = AMDSMI_STATUS_SUCCESS;
       }
 
       uint64_t min_bandwidth = std::numeric_limits<uint64_t>::max();
       uint64_t max_bandwidth = std::numeric_limits<uint64_t>::max();
-      err = amdsmi_get_minmax_bandwidth_between_processors(ph.first, ph.second, &min_bandwidth,
-                                                           &max_bandwidth);
-      if (err != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_INFO, "Fail to get process GPUs detail information: " << err);
+      // Check if topology minmax bandwidth collection is enabled
+      if (control.enable_amdsmi_get_minmax_bandwidth_between_processors) {
+        err = amdsmi_get_minmax_bandwidth_between_processors(ph.first, ph.second, &min_bandwidth,
+                                                             &max_bandwidth);
+        if (err != AMDSMI_STATUS_SUCCESS) {
+          RDC_LOG(RDC_INFO, "Fail to get process GPUs detail information: " << err);
+        }
+      } else {
+        min_bandwidth = 0;
+        max_bandwidth = 0;
+        err = AMDSMI_STATUS_SUCCESS;
       }
 
       uint64_t hops = std::numeric_limits<uint64_t>::max();
       amdsmi_link_type_t type = AMDSMI_LINK_TYPE_UNKNOWN;
-      err = amdsmi_topo_get_link_type(ph.first, ph.second, &hops, &type);
-      if (err != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_INFO, "Fail to get process GPUs hops and type information: " << err);
+      // Check if topology link type collection is enabled
+      if (control.enable_amdsmi_topo_get_link_type) {
+        err = amdsmi_topo_get_link_type(ph.first, ph.second, &hops, &type);
+        if (err != AMDSMI_STATUS_SUCCESS) {
+          RDC_LOG(RDC_INFO, "Fail to get process GPUs hops and type information: " << err);
+        }
+      } else {
+        hops = 0;
+        type = AMDSMI_LINK_TYPE_UNKNOWN;
+        err = AMDSMI_STATUS_SUCCESS;
       }
 
       bool accessible = false;

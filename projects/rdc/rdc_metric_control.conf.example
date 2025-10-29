@@ -1,0 +1,132 @@
+# RDC Metric Control Configuration Example
+# ===========================================
+# This file controls which metrics are collected to help debug performance issues.
+# Set values to true/false or 1/0
+#
+# To use this configuration:
+# 1. Copy to your desired location
+# 2. Edit the values as needed
+# 3. Set environment variable: export RDC_METRIC_CONFIG_FILE=/path/to/config
+# 4. Run RDC with this configuration
+#
+# Alternatively, you can use environment variables directly:
+# export RDC_ENABLE_POWER_METRICS=0
+# export RDC_ENABLE_AMDSMI_GET_GPU_PCI_THROUGHPUT=0
+
+[data_sources]
+# Master switches for entire subsystems
+amdsmi = true
+rocprofiler = true
+
+[amdsmi_categories]
+# AMD-SMI metric categories
+power = true
+thermal = true
+clocks = true
+memory = true
+utilization = true
+ecc = true
+pcie = true
+xgmi = true
+device_info = true
+cpu = true
+
+[rocprofiler_categories]
+# ROCProfiler metric categories
+occupancy = true
+flops = true
+bandwidth = true
+pipeline = true
+
+[tier3a_apis]
+# Fine-grained control for known performance hotspots
+# These are the most likely culprits for slow metric collection
+
+# PCIe throughput - VERY SLOW (resets counters, cached for 30s in RDC)
+# Known to cause significant slowdowns on some systems
+amdsmi_get_gpu_pci_throughput = true
+
+# Bulk fetch optimization (fetches many metrics at once)
+# Usually beneficial, disable only if causing issues
+amdsmi_get_gpu_metrics_info = true
+
+# EEPROM validation - VERY SLOW (hardware access)
+# Can take seconds on some systems, disable for performance testing
+amdsmi_gpu_validate_ras_eeprom = true
+
+# Process information (system-wide scan)
+# Can be slow when many processes are running
+amdsmi_get_gpu_compute_process_info = true
+
+# Topology operations - O(n²) with GPU count
+# These three APIs are called for each pair of GPUs
+# On systems with many GPUs (e.g., 8x GPUs = 64 calls), this can be slow
+amdsmi_get_minmax_bandwidth_between_processors = true
+amdsmi_topo_get_link_weight = true
+amdsmi_topo_get_link_type = true
+
+# ECC status/count - iterates over GPU blocks
+# Calls are made for each memory block, can add up
+amdsmi_get_gpu_ecc_status = true
+amdsmi_get_gpu_ecc_count = true
+amdsmi_get_gpu_bad_page_info = true
+
+# Sensor reads - usually fast but can add overhead at high frequencies
+amdsmi_get_temp_metric = true
+amdsmi_get_power_info = true
+
+# CPU HSMP operations - mailbox interface
+# Uses HSMP (Host System Management Port) which can have variable latency
+amdsmi_get_cpu_socket_energy = true
+amdsmi_get_cpu_fclk_mclk = true
+
+# ROCProfiler sampling
+rocprof_sampling = true
+
+[optimizations]
+# Optimization flags
+# Bulk fetch attempts to get multiple metrics in one AMD-SMI call
+bulk_fetch = true
+
+[reload]
+# Auto-reload configuration every N iterations (0 = never reload)
+# Useful for dynamic tuning without restarting RDC
+# Example: interval = 1000 will reload config every 1000 collection cycles
+interval = 0
+
+# ===========================================
+# PERFORMANCE TUNING EXAMPLES
+# ===========================================
+
+# Example 1: Disable slowest operations for maximum performance
+# [tier3a_apis]
+# amdsmi_get_gpu_pci_throughput = false
+# amdsmi_gpu_validate_ras_eeprom = false
+# amdsmi_get_gpu_compute_process_info = false
+
+# Example 2: Disable topology queries for large GPU systems
+# [tier3a_apis]
+# amdsmi_get_minmax_bandwidth_between_processors = false
+# amdsmi_topo_get_link_weight = false
+# amdsmi_topo_get_link_type = false
+
+# Example 3: Disable ECC metrics if not needed
+# [amdsmi_categories]
+# ecc = false
+
+# Example 4: Disable entire subsystems
+# [data_sources]
+# rocprofiler = false
+
+# Example 5: Enable only specific categories
+# [amdsmi_categories]
+# power = true
+# thermal = true
+# clocks = false
+# memory = false
+# utilization = false
+# ecc = false
+# pcie = false
+# xgmi = false
+# device_info = true
+# cpu = false

@@ -29,6 +29,7 @@ THE SOFTWARE.
 
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/impl/RdcMetricControl.h"
 #include "rdc_lib/impl/SmiUtils.h"
 #include "rdc_lib/rdc_common.h"
 
@@ -48,6 +49,15 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
   result->per_gpu_result_count = 0;
   amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
   uint32_t num_items = 0;
+
+  // Check if process info collection is enabled
+  auto& control = RdcMetricControl::getInstance();
+  if (!control.enable_amdsmi_get_gpu_compute_process_info) {
+    result->status = RDC_DIAG_RESULT_SKIP;
+    strncpy_with_null(result->info, "Process info collection is disabled", MAX_DIAG_MSG_LENGTH);
+    return RDC_ST_OK;
+  }
+
   err = amdsmi_get_gpu_compute_process_info(nullptr, &num_items);
   if (err != AMDSMI_STATUS_SUCCESS) {
     RDC_LOG(RDC_ERROR, "Fail to get process information: " << err);
