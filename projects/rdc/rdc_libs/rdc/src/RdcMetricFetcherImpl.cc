@@ -35,6 +35,7 @@ THE SOFTWARE.
 #include "common/rdc_fields_supported.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/impl/RdcMetricControl.h"
 #include "rdc_lib/impl/SmiUtils.h"
 #include "rdc_lib/rdc_common.h"
 
@@ -96,6 +97,15 @@ void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
                                    rdc_field_value* value) {
   amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
   amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
+
+  // Check if ECC status/count collection is enabled
+  auto& control = RdcMetricControl::getInstance();
+  if (!control.enable_amdsmi_get_gpu_ecc_status || !control.enable_amdsmi_get_gpu_ecc_count) {
+    value->value.l_int = 0;
+    value->status = AMDSMI_STATUS_SUCCESS;
+    value->type = INTEGER;
+    return;
+  }
 
   amdsmi_processor_handle processor_handle = nullptr;
   err = get_processor_handle_from_id(gpu_index, &processor_handle);
@@ -209,6 +219,15 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
   uint64_t uncorrectable_count = 0;
   amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
 
+  // Check if ECC status/count collection is enabled
+  auto& control = RdcMetricControl::getInstance();
+  if (!control.enable_amdsmi_get_gpu_ecc_status || !control.enable_amdsmi_get_gpu_ecc_count) {
+    value->value.l_int = 0;
+    value->status = AMDSMI_STATUS_SUCCESS;
+    value->type = INTEGER;
+    return;
+  }
+
   amdsmi_processor_handle processor_handle = nullptr;
   err = get_processor_handle_from_id(gpu_index, &processor_handle);
 
@@ -294,7 +313,16 @@ void RdcMetricFetcherImpl::get_pcie_throughput(const RdcFieldKey& key) {
     }
   } while (0);
 
-  ret = amdsmi_get_gpu_pci_throughput(processor_handle, &sent, &received, &max_pkt_sz);
+  // Check if PCI throughput collection is enabled
+  auto& control = RdcMetricControl::getInstance();
+  if (!control.enable_amdsmi_get_gpu_pci_throughput) {
+    sent = 0;
+    received = 0;
+    max_pkt_sz = 0;
+    ret = AMDSMI_STATUS_SUCCESS;
+  } else {
+    ret = amdsmi_get_gpu_pci_throughput(processor_handle, &sent, &received, &max_pkt_sz);
+  }
 
   uint64_t curTime = now();
   MetricValue value{};
@@ -347,6 +375,13 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
       RDC_FI_POWER_USAGE,  // average_socket_power
       RDC_FI_GPU_UTIL      // average_gfx_activity
   };
+
+  // Check if bulk fetch is enabled
+  auto& control = RdcMetricControl::getInstance();
+  if (!control.enable_bulk_fetch || !control.enable_amdsmi_get_gpu_metrics_info) {
+    results.clear();
+    return RDC_ST_NOT_SUPPORTED;
+  }
 
   // To prevent always call the bulk API even if it is not supported,
   // the static is used to cache last try.
@@ -477,6 +512,15 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
                                                     amdsmi_processor_handle& processor_handle) {
   std::shared_ptr<FieldSMIData> smi_data;
   amdsmi_status_t ret = AMDSMI_STATUS_INVAL;
+
+  // Check if this field should be collected based on metric control settings
+  auto& control = RdcMetricControl::getInstance();
+  if (!control.shouldCollectField(field_id)) {
+    value->value.l_int = 0;
+    value->status = AMDSMI_STATUS_SUCCESS;
+    value->type = INTEGER;
+    return RDC_ST_OK;
+  }
 
   auto read_smi_counter = [&](void) {
     RdcFieldKey f_key(gpu_index, field_id);
@@ -612,6 +656,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     } break;
     case RDC_FI_POWER_USAGE: {
       amdsmi_power_info_t power_info = {};
+      // Check if power info collection is enabled
+      if (!control.enable_amdsmi_get_power_info) {
+        value->value.l_int = 0;
+        value->status = AMDSMI_STATUS_SUCCESS;
+        value->type = INTEGER;
+        break;
+      }
       value->status = amdsmi_get_power_info(processor_handle, &power_info);
       value->type = INTEGER;
       if (value->status != AMDSMI_STATUS_SUCCESS) {
@@ -672,6 +723,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_GPU_TEMP:
     case RDC_FI_MEMORY_TEMP: {
       int64_t i64 = 0;
+      // Check if temperature metric collection is enabled
+      if (!control.enable_amdsmi_get_temp_metric) {
+        value->value.l_int = 0;
+        value->status = AMDSMI_STATUS_SUCCESS;
+        value->type = INTEGER;
+        break;
+      }
       amdsmi_temperature_type_t sensor_type = AMDSMI_TEMPERATURE_TYPE_EDGE;
       if (field_id == RDC_FI_MEMORY_TEMP) {
         sensor_type = AMDSMI_TEMPERATURE_TYPE_VRAM;
@@ -696,6 +754,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_GPU_PAGE_RETRIED: {
       uint32_t num_pages = 0;
       amdsmi_retired_page_record_t page_record;
+      // Check if bad page info collection is enabled
+      if (!control.enable_amdsmi_get_gpu_bad_page_info) {
+        value->value.l_int = 0;
+        value->status = AMDSMI_STATUS_SUCCESS;
+        value->type = INTEGER;
+        break;
+      }
       value->status = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, &page_record);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
@@ -887,6 +952,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_HEALTH_RETIRED_PAGE_NUM:
     case RDC_HEALTH_PENDING_PAGE_NUM: {
       uint32_t num_pages = 0;
+      // Check if bad page info collection is enabled
+      if (!control.enable_amdsmi_get_gpu_bad_page_info) {
+        value->value.l_int = 0;
+        value->status = AMDSMI_STATUS_SUCCESS;
+        value->type = INTEGER;
+        break;
+      }
       ret = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, nullptr);
       if (AMDSMI_STATUS_SUCCESS == ret) {
         if (RDC_HEALTH_RETIRED_PAGE_NUM == field_id) {
@@ -926,6 +998,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_HEALTH_EEPROM_CONFIG_VALID: {
+      // Check if RAS EEPROM validation is enabled
+      if (!control.enable_amdsmi_gpu_validate_ras_eeprom) {
+        value->value.l_int = 0;
+        value->status = AMDSMI_STATUS_SUCCESS;
+        value->type = INTEGER;
+        break;
+      }
       ret = amdsmi_gpu_validate_ras_eeprom(processor_handle);
       value->status = Smi2RdcError(ret);
       break;
@@ -1124,6 +1203,14 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
     }
     case RDC_FI_CPU_SKT_ENERGY: {
       uint64_t energy = 0;
+      // Check if CPU socket energy collection is enabled
+      auto& control = RdcMetricControl::getInstance();
+      if (!control.enable_amdsmi_get_cpu_socket_energy) {
+        value->value.l_int = 0;
+        value->status = AMDSMI_STATUS_SUCCESS;
+        value->type = INTEGER;
+        break;
+      }
       value->status = amdsmi_get_cpu_socket_energy(processor_handle, &energy);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
@@ -1163,6 +1250,14 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_CPU_FCLK_FREQUENCY:
     case RDC_FI_CPU_MCLK_FREQUENCY: {
       uint32_t fclk = 0, mclk = 0;
+      // Check if CPU fclk/mclk collection is enabled
+      auto& control = RdcMetricControl::getInstance();
+      if (!control.enable_amdsmi_get_cpu_fclk_mclk) {
+        value->value.l_int = 0;
+        value->status = AMDSMI_STATUS_SUCCESS;
+        value->type = INTEGER;
+        break;
+      }
       value->status = amdsmi_get_cpu_fclk_mclk(processor_handle, &fclk, &mclk);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
