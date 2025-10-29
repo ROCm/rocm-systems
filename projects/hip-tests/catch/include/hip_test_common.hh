@@ -22,9 +22,10 @@ THE SOFTWARE.
 
 #pragma once
 #pragma clang diagnostic ignored "-Wsign-compare"
+#include <catch2/catch_all.hpp>
 #include "hip_test_context.hh"
 
-#include <catch.hpp>
+
 #include <atomic>
 #include <chrono>
 #include <cstring>

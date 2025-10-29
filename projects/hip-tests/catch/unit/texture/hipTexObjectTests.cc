@@ -117,19 +117,16 @@ class TexObjectTestWrapper {
  */
 TEST_CASE("Unit_hipGetTexObjectResourceDesc_positive") {
   CHECK_IMAGE_SUPPORT;
-  CTX_CREATE();
 
-  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(false);
+  TexObjectTestWrapper tex_obj_wrapper(false);
 
   HIP_RESOURCE_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
-  HIP_CHECK(hipTexObjectGetResourceDesc(&check_desc, tex_obj_wrapper->texture_object));
+  HIP_CHECK(hipTexObjectGetResourceDesc(&check_desc, tex_obj_wrapper.texture_object));
 
-  REQUIRE(check_desc.resType == tex_obj_wrapper->res_desc.resType);
-  REQUIRE(check_desc.res.array.hArray == tex_obj_wrapper->res_desc.res.array.hArray);
-  delete tex_obj_wrapper;
-  CTX_DESTROY();
+  REQUIRE(check_desc.resType == tex_obj_wrapper.res_desc.resType);
+  REQUIRE(check_desc.res.array.hArray == tex_obj_wrapper.res_desc.res.array.hArray);
 }
 
 /**
@@ -150,15 +147,14 @@ TEST_CASE("Unit_hipGetTexObjectResourceDesc_positive") {
  */
 TEST_CASE("Unit_hipGetTexObjectResourceDesc_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
-  CTX_CREATE();
 
-  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(false);
+  TexObjectTestWrapper tex_obj_wrapper(false);
 
   HIP_RESOURCE_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
   SECTION("desc is nullptr") {
-    HIP_CHECK_ERROR(hipTexObjectGetResourceDesc(nullptr, tex_obj_wrapper->texture_object),
+    HIP_CHECK_ERROR(hipTexObjectGetResourceDesc(nullptr, tex_obj_wrapper.texture_object),
                     hipErrorInvalidValue);
   }
 
@@ -166,9 +162,6 @@ TEST_CASE("Unit_hipGetTexObjectResourceDesc_Negative_Parameters") {
     HIP_CHECK_ERROR(hipTexObjectGetResourceDesc(&check_desc, static_cast<hipTextureObject_t>(0)),
                     hipErrorInvalidValue);
   }
-
-  delete tex_obj_wrapper;
-  CTX_DESTROY();
 }
 
 /**
@@ -200,21 +193,21 @@ TEST_CASE("Unit_hipGetTexObjectResourceDesc_Negative_Parameters") {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
+#if HT_AMD
 TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_positive") {
   CHECK_IMAGE_SUPPORT;
-  CTX_CREATE();
-  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(true);
+
+  TexObjectTestWrapper tex_obj_wrapper(true);
 
   HIP_RESOURCE_VIEW_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
-  HIP_CHECK(hipTexObjectGetResourceViewDesc(&check_desc, tex_obj_wrapper->texture_object));
+  HIP_CHECK(hipTexObjectGetResourceViewDesc(&check_desc, tex_obj_wrapper.texture_object));
 
-  REQUIRE(check_desc.format == tex_obj_wrapper->res_view_desc.format);
-  REQUIRE(check_desc.width == tex_obj_wrapper->res_view_desc.width);
-  delete tex_obj_wrapper;
-  CTX_DESTROY();
+  REQUIRE(check_desc.format == tex_obj_wrapper.res_view_desc.format);
+  REQUIRE(check_desc.width == tex_obj_wrapper.res_view_desc.width);
 }
+#endif
 
 /**
  * Test Description
@@ -233,16 +226,16 @@ TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_positive") {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
+#if HT_AMD
 TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
-  CTX_CREATE();
-  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(true);
+  TexObjectTestWrapper tex_obj_wrapper(true);
 
   HIP_RESOURCE_VIEW_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
   SECTION("desc is nullptr") {
-    HIP_CHECK_ERROR(hipTexObjectGetResourceViewDesc(nullptr, tex_obj_wrapper->texture_object),
+    HIP_CHECK_ERROR(hipTexObjectGetResourceViewDesc(nullptr, tex_obj_wrapper.texture_object),
                     hipErrorInvalidValue);
   }
 
@@ -251,10 +244,8 @@ TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters") {
         hipTexObjectGetResourceViewDesc(&check_desc, static_cast<hipTextureObject_t>(0)),
         hipErrorInvalidValue);
   }
-
-  delete tex_obj_wrapper;
-  CTX_DESTROY();
 }
+#endif
 
 /**
  * End doxygen group hipTexObjectGetResourceViewDesc.
@@ -287,19 +278,16 @@ TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters") {
  */
 TEST_CASE("Unit_hipGetTexObjectTextureDesc_positive") {
   CHECK_IMAGE_SUPPORT;
-  CTX_CREATE();
 
-  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(false);
+  TexObjectTestWrapper tex_obj_wrapper(false);
 
   HIP_TEXTURE_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
-  HIP_CHECK(hipTexObjectGetTextureDesc(&check_desc, tex_obj_wrapper->texture_object));
+  HIP_CHECK(hipTexObjectGetTextureDesc(&check_desc, tex_obj_wrapper.texture_object));
 
-  REQUIRE(check_desc.filterMode == tex_obj_wrapper->tex_desc.filterMode);
-  REQUIRE(check_desc.flags == tex_obj_wrapper->tex_desc.flags);
-  delete tex_obj_wrapper;
-  CTX_DESTROY();
+  REQUIRE(check_desc.filterMode == tex_obj_wrapper.tex_desc.filterMode);
+  REQUIRE(check_desc.flags == tex_obj_wrapper.tex_desc.flags);
 }
 
 /**
@@ -321,15 +309,14 @@ TEST_CASE("Unit_hipGetTexObjectTextureDesc_positive") {
  */
 TEST_CASE("Unit_hipGetTexObjectTextureDesc_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
-  CTX_CREATE();
 
-  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(false);
+  TexObjectTestWrapper tex_obj_wrapper(false);
 
   HIP_TEXTURE_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
 
   SECTION("desc is nullptr") {
-    HIP_CHECK_ERROR(hipTexObjectGetTextureDesc(nullptr, tex_obj_wrapper->texture_object),
+    HIP_CHECK_ERROR(hipTexObjectGetTextureDesc(nullptr, tex_obj_wrapper.texture_object),
                     hipErrorInvalidValue);
   }
 
@@ -337,9 +324,6 @@ TEST_CASE("Unit_hipGetTexObjectTextureDesc_Negative_Parameters") {
     HIP_CHECK_ERROR(hipTexObjectGetTextureDesc(&check_desc, static_cast<hipTextureObject_t>(0)),
                     hipErrorInvalidValue);
   }
-
-  delete tex_obj_wrapper;
-  CTX_DESTROY();
 }
 
 /**
@@ -369,10 +353,7 @@ TEST_CASE("Unit_hipGetTexObjectTextureDesc_Negative_Parameters") {
  */
 TEST_CASE("Unit_hipTexObjectDestroy_positive") {
   CHECK_IMAGE_SUPPORT;
-  CTX_CREATE();
 
-  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(false, true);
-  REQUIRE(hipTexObjectDestroy(tex_obj_wrapper->texture_object) == hipSuccess);
-  delete tex_obj_wrapper;
-  CTX_DESTROY();
+  TexObjectTestWrapper tex_obj_wrapper(false, true);
+  REQUIRE(hipTexObjectDestroy(tex_obj_wrapper.texture_object) == hipSuccess);
 }

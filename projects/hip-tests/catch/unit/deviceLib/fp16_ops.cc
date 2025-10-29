@@ -73,7 +73,7 @@ void fp16_arith_cpu(const std::vector<float>& a, const std::vector<float>& b,
 TEST_CASE("Unit_fp16_arith") {
   constexpr size_t num_of_ops = 18;
   constexpr size_t iters = 100;
-  Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f);
+  Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f, /*seed*/ 0x1234);
   constexpr float input2 = 1.1f;
   for (size_t iter = 0; iter < iters; iter++) {
     auto input1 = input1_gen.get();
@@ -98,7 +98,7 @@ TEST_CASE("Unit_fp16_arith") {
     for (size_t i = 0; i < out.size(); i++) {
       INFO("Iter: " << i << " In1: " << in1[i] << " CPU res: " << cpuout[i]
                     << " GPU res: " << out[i]);
-      REQUIRE(out[i] == Approx(cpuout[i]).epsilon(0.1));
+      REQUIRE(out[i] == Catch::Approx(cpuout[i]).epsilon(0.1));
     }
     HIP_CHECK(hipFree(dout));
     HIP_CHECK(hipFree(din1));
@@ -153,7 +153,7 @@ void fp162_arith_cpu(std::vector<float2>& a, std::vector<float2>& b, std::vector
 TEST_CASE("Unit_fp162_arith") {
   constexpr size_t num_of_ops = 18;
   constexpr size_t iters = 100;
-  Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f);
+  Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f, /* seed */ 0x1234);
   for (size_t iter = 0; iter < iters; iter++) {
     auto input1 = input1_gen.get();
     auto input2 = input1_gen.get();
@@ -178,8 +178,8 @@ TEST_CASE("Unit_fp162_arith") {
     for (size_t i = 0; i < out.size(); i++) {
       INFO("Iter: " << i << " In1: " << in1[i].x << " - " << in1[i].y << " CPU res: " << cpuout[i].x
                     << " - " << cpuout[i].y << " GPU res: " << out[i].x << " - " << out[i].y);
-      REQUIRE(out[i].x == Approx(cpuout[i].x).epsilon(0.1));
-      REQUIRE(out[i].y == Approx(cpuout[i].y).epsilon(0.1));
+      REQUIRE(out[i].x == Catch::Approx(cpuout[i].x).epsilon(0.1));
+      REQUIRE(out[i].y == Catch::Approx(cpuout[i].y).epsilon(0.1));
     }
     HIP_CHECK(hipFree(dout));
     HIP_CHECK(hipFree(din1));

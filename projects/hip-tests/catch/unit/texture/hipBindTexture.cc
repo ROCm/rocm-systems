@@ -135,7 +135,7 @@ TEST_CASE("Unit_hipBindTexture_Negative") {
   }
 
   SECTION("Invalid hipChannelFormatDesc") {
-    hipChannelFormatDesc invalid_channel_desc{-1, -1, -1, -1, hipChannelFormatKindSigned};
+    hipChannelFormatDesc invalid_channel_desc;
     HIP_CHECK_ERROR(hipBindTexture(&offset, tex_ref, reinterpret_cast<void*>(tex_buf),
                                    invalid_channel_desc, N * sizeof(float)),
                     hipErrorInvalidChannelDescriptor);

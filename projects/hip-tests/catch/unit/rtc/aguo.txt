@@ -1,0 +1,7 @@
+# CMake generated Testfile for 
+# Source directory: C:/workspace/staging_10_14/drivers/drivers/compute/hip-tests/catch/unit/rtc
+# Build directory: C:/workspace/staging_10_14/drivers/drivers/compute/build/native/Release/x64/hip/catch/catch_tests/unit/rtc
+# 
+# This file includes the relevant testing commands required for 
+# testing this directory and lists subdirectories to be tested as well.
+include("RTC-b12d07c_include.cmake")

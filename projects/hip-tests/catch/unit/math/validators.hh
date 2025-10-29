@@ -22,12 +22,13 @@ THE SOFTWARE.
 
 #pragma once
 
-#include <catch.hpp>
+#include <catch2/catch_all.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 // Define a new MatcherBase class with a public 'describe' member function because
 // Catch::MatcherBase::describe is protected and thus can't be used via a pointer to
 // Catch::MatcherBase.
-template <typename T> class MatcherBase : public Catch::MatcherBase<T> {
+template <typename T> class MatcherBase : public Catch::Matchers::MatcherBase<T> {
  public:
   virtual std::string describe() const = 0;
   virtual ~MatcherBase() = default;
@@ -62,22 +63,22 @@ template <typename T, typename Matcher> class ValidatorBase : public MatcherBase
 
 template <typename T> auto ULPValidatorBuilderFactory(int64_t ulps) {
   return [=](T target, auto&&...) {
-    return std::make_unique<ValidatorBase<T, Catch::Matchers::Floating::WithinUlpsMatcher>>(
-        target, Catch::WithinULP(target, ulps));
+    return std::make_unique<ValidatorBase<T, Catch::Matchers::WithinUlpsMatcher>>(
+        target, Catch::Matchers::WithinULP(target, ulps));
   };
 };
 
 template <typename T> auto AbsValidatorBuilderFactory(double margin) {
   return [=](T target, auto&&...) {
-    return std::make_unique<ValidatorBase<T, Catch::Matchers::Floating::WithinAbsMatcher>>(
-        target, Catch::WithinAbs(target, margin));
+    return std::make_unique<ValidatorBase<T, Catch::Matchers::WithinAbsMatcher>>(
+        target, Catch::Matchers::WithinAbs(target, margin));
   };
 }
 
 template <typename T> auto RelValidatorBuilderFactory(T margin) {
   return [=](T target, auto&&...) {
-    return std::make_unique<ValidatorBase<T, Catch::Matchers::Floating::WithinRelMatcher>>(
-        target, Catch::WithinRel(target, margin));
+    return std::make_unique<ValidatorBase<T, Catch::Matchers::WithinRelMatcher>>(
+        target, Catch::Matchers::WithinRel(target, margin));
   };
 }
 

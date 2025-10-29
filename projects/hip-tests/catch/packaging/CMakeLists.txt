@@ -18,7 +18,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-cmake_minimum_required(VERSION 3.16.8)
+cmake_minimum_required(VERSION 3.25)
 # vc 19.31.31107.0 gives issue while packaging using makefile
 # To avoid error NMAKE : fatal error U1065: invalid option 'w'
 # Windows to use Ninja generator like other projects
@@ -33,10 +33,10 @@ include(GNUInstallDirs)
 if(NOT DEFINED CPACK_INSTALL_PREFIX)
   set(CPACK_INSTALL_PREFIX "/opt/rocm/")
 endif()
-if(BUILD_SHARED_LIBS)
-  set(PKG_NAME hip-catch-${HIP_PLATFORM})
-else()
+if(NOT BUILD_SHARED_LIBS AND NOT WIN32)
   set(PKG_NAME hip-catch-${HIP_PLATFORM}-static)
+else()
+  set(PKG_NAME hip-catch-${HIP_PLATFORM})
 endif()
 set(CPACK_PACKAGE_NAME ${PKG_NAME})
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "HIP: Heterogenous-computing Interface for Portability [CATCH TESTS]")
@@ -66,6 +66,7 @@ get_property(INSTALL_EXE_TARGETS GLOBAL PROPERTY G_INSTALL_EXE_TARGETS)
 get_property(INSTALL_CUSTOM_TARGETS GLOBAL PROPERTY G_INSTALL_CUSTOM_TARGETS)
 get_property(INSTALL_SRC_FILES GLOBAL PROPERTY G_INSTALL_SRC_FILES)
 get_property(INSTALL_HEADER_FILES GLOBAL PROPERTY G_INSTALL_HEADER_FILES)
+get_property(INSTALL_SCRIPT_FILES GLOBAL PROPERTY G_INSTALL_SCRIPT_TARGETS)
 # Create top level CTestTestfile.cmake
 file(WRITE ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/CTestTestfile.cmake ${_autogen})
 foreach(CTEST_INCLUDE_FILE ${INSTALL_CTEST_INCLUDE_FILES})
@@ -121,12 +122,14 @@ set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 else()
 # windows packaging
-set(INSTALL_DIR .)
 set(CPACK_INSTALL_PREFIX "")
 set(CPACK_SYSTEM_NAME "")
 set(CPACK_GENERATOR "ZIP" CACHE STRING "Windows package types for catch tests")
 set(CPACK_TEST_ZIP "ON")
 set(CPACK_ZIP_TEST_PACKAGE_NAME "catch")
+set(CPACK_PKG_DIRS
+    ${CMAKE_BINARY_DIR}/_CPack_Packages/${CPACK_GENERATOR}/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME})
+set(INSTALL_DIR ${CPACK_PKG_DIRS})
 endif()
 
 set(INSTALL_DIR_TESTS ${INSTALL_DIR}/${CATCH_BUILD_DIR})
@@ -134,10 +137,10 @@ set(INSTALL_DIR_SCRIPT ${INSTALL_DIR}/${CATCH_BUILD_DIR}/script)
 set(INSTALL_DIR_SRC ${INSTALL_DIR}/${CATCH_BUILD_DIR}/src)
 set(INSTALL_DIR_HEADERS ${INSTALL_DIR}/${CATCH_BUILD_DIR}/headers)
 # install catch scripts
-install(FILES
-        ${ADD_SCRIPT_PATH}
-        ${CATCH_INCLUDE_PATH}
-        DESTINATION ${INSTALL_DIR_SCRIPT})
+foreach(CATCH_SCRIPT_FILE ${INSTALL_SCRIPT_FILES})
+  install(FILES ${CATCH_SCRIPT_FILE} DESTINATION ${INSTALL_DIR_SCRIPT})
+endforeach()
+
 # install cmake include files
 foreach(CTEST_INCLUDE_FILE ${INSTALL_CTEST_INCLUDE_FILES})
   install(FILES ${CTEST_INCLUDE_FILE} DESTINATION ${INSTALL_DIR_SCRIPT})
@@ -146,6 +149,7 @@ endforeach()
 foreach(SRC_FILE ${INSTALL_SRC_FILES})
   install(FILES ${SRC_FILE} DESTINATION ${INSTALL_DIR_SRC})
 endforeach()
+
 # install header files
 foreach(HEADER_FILES ${INSTALL_HEADER_FILES})
   install(FILES ${HEADER_FILES} DESTINATION ${INSTALL_DIR_HEADERS})
@@ -172,4 +176,12 @@ install(FILES ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt DESTINATION
 install(DIRECTORY
         ${HIP_TEST_CONFIG_BINARY_DIR}
         DESTINATION ${INSTALL_DIR_TESTS})
+# workaround to make the built test binaries portable
+# CPACK_GENERATOR executes this packaging/CMakeLists.txt multiple times
+# there is no way to check which generator is being used. 
+# So had to be written in a config file for each generator to replace and execute
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/catch_package.cmake.in
+               ${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake @ONLY)
+set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake")
+
 include(CPack)

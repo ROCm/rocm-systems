@@ -156,7 +156,6 @@ TEST_CASE("Unit_hipHostMalloc_Basic") {
     HIP_CHECK(hipHostFree(A_h));
     HIP_CHECK(hipHostFree(B_h));
     HIP_CHECK(hipHostFree(C_h));
-    HIP_CHECK(hipFree(B_d));
   }
 }
 /*
@@ -189,7 +188,6 @@ TEST_CASE("Unit_hipHostMalloc_NonCoherent") {
   CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_DEVICE, ptrType);
   CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_STREAM, ptrType);
   CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_EVENT, ptrType);
-  HIP_CHECK(hipFreeHost(A));
 }
 
 /*
@@ -211,8 +209,6 @@ TEST_CASE("Unit_hipHostMalloc_Coherent") {
     CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_DEVICE, ptrType);
     CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_STREAM, ptrType);
     CheckHostPointer(numElements, A, hipEventReleaseToSystem, SYNC_EVENT, ptrType);
-
-    HIP_CHECK(hipFreeHost(A));
   } else {
     SUCCEED("Coherence memory allocation failed. Is SVM atomic supported?");
   }
@@ -233,7 +229,6 @@ TEST_CASE("Unit_hipHostMalloc_Default") {
   CheckHostPointer(numElements, A, 0, SYNC_DEVICE, ptrType);
   CheckHostPointer(numElements, A, 0, SYNC_STREAM, ptrType);
   CheckHostPointer(numElements, A, 0, SYNC_EVENT, ptrType);
-  HIP_CHECK(hipFreeHost(A));
 }
 
 TEST_CASE("Unit_hipHostGetDevicePointer_NullCheck") {

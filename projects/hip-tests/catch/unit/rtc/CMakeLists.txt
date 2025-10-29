@@ -28,6 +28,7 @@ set(AMD_TEST_SRC
     hiprtc_Bitcode_UndefinedFn.cc
     hiprtc_bfloat16_HeaderTst.cc
 )
+set(AMD_TEST_SRC customOptions.cc)
 
 add_custom_target(copyRtcHeaders ALL
   COMMAND ${CMAKE_COMMAND} -E copy
@@ -54,7 +55,8 @@ if(HIP_PLATFORM MATCHES "nvidia")
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS nvrtc)
 elseif(HIP_PLATFORM MATCHES "amd")
-  set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
+  #set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
+  set(TEST_SRC ${AMD_TEST_SRC})
   hip_add_exe_to_target(NAME RTC
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests

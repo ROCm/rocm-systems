@@ -17,10 +17,12 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
+project(hipTestMain)
 
 if(CMAKE_BUILD_TYPE MATCHES "^Debug$")
     add_definitions(-DHT_LOG_ENABLE)
 endif()
+#find_package(Catch2 REQUIRED)
 
 add_library(Main_Object EXCLUDE_FROM_ALL OBJECT main.cc hip_test_context.cc hip_test_features.cc)
 if(HIP_PLATFORM MATCHES "amd")
@@ -28,3 +30,6 @@ if(HIP_PLATFORM MATCHES "amd")
 else()
     target_compile_options(Main_Object PUBLIC -std=c++17)
 endif()
+
+target_link_libraries(Main_Object PUBLIC Catch2::Catch2)
+

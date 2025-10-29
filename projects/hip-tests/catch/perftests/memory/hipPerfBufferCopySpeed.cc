@@ -63,6 +63,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
   unsigned int numIter;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
+  int test = 0;
   // 1. Run all P2P for all sizes
   if (numDevices >= 2) {
     for (int sizeIdx = 0; sizeIdx < NUM_SIZES; ++sizeIdx) {
@@ -135,6 +136,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
        CONSOLE_PRINT(
            "HIPPerfBufferCopySpeed[%3d]       (%10u bytes)        P2P    s:%-5s d:%-5s       i:%4u  (GB/s) perf     %f",
            testIdx, bufSize_, "dev0", "dev1", numIter, (float)perf);
+      test++;
       void* temp = malloc(bufSize_ + 4096);
       void* chkBuf = reinterpret_cast<void*>(temp);
       HIP_CHECK(hipMemcpy(chkBuf, dstBuffer, bufSize_, hipMemcpyDefault));
@@ -190,6 +192,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
      CONSOLE_PRINT(
          "HIPPerfBufferCopySpeed[%3d]       (%10u bytes)        NoCU   s:%-5s d:%-5s       i:%4u  (GB/s) perf     %f",
          testIdx, bufSize_, "dev0", "dev0", numIter, (float)perf);
+    test++;
     void* temp = malloc(bufSize_ + 4096);
     void* chkBuf = reinterpret_cast<void*>(temp);
     HIP_CHECK(hipMemcpy(chkBuf, dstBuffer, bufSize_, hipMemcpyDefault));
@@ -334,6 +337,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
         CONSOLE_PRINT(
             "HIPPerfBufferCopySpeed[%3d]       (%10u bytes)        %-5s  s:%-5s d:%-5s       i:%4u  (GB/s) perf     %f",
             testIdx, bufSize_, "     ", strSrc, strDst, numIter, (float)perf);
+        test++;
         void* temp = malloc(bufSize_ + 4096);
         void* chkBuf = reinterpret_cast<void*>(temp);
         HIP_CHECK(hipMemcpy(chkBuf, dstBuffer, bufSize_, hipMemcpyDefault));
