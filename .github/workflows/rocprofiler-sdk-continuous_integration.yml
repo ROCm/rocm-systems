@@ -102,7 +102,7 @@ jobs:
           tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
- 
+
       - name: Show GPU firmware
         shell: bash
         run: |
@@ -484,6 +484,12 @@ jobs:
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
+      - name: Show GPU firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${{ env.ROCM_PATH }}/bin/rocm-smi" --showfw
+
       - name: Install requirements (venv)
         timeout-minutes: 10
         shell: bash
@@ -681,6 +687,12 @@ jobs:
         tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
         ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+
+    - name: Show GPU firmware
+      shell: bash
+      run: |
+        set -euo pipefail
+        "${{ env.ROCM_PATH }}/bin/rocm-smi" --showfw
 
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
       uses: actions/checkout@v5
