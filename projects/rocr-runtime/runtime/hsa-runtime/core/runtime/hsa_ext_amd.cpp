@@ -62,6 +62,7 @@
 #include "core/inc/ipc_signal.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
+#include "core/inc/counted_queue_manager.h"
 
 namespace rocr {
 
@@ -1573,6 +1574,43 @@ hsa_status_t hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devic
                                                           size_copied, status);
 
   return (ret == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
+                                           hsa_amd_queue_priority_t priority,
+                                           void (*callback)(hsa_status_t status,
+                                                            hsa_queue_t* source, void* data),
+                                           void* data, uint64_t flags, hsa_queue_t** queue) {
+  TRY;
+  IS_OPEN();
+
+  // support only multi-producer queues in the pool
+  if (type != HSA_QUEUE_TYPE_MULTI) return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+
+  if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Create queue pool manager instance if it does not already exist
+  // if it does not exist, create a singleton instance of it
+  // Call acquire queue via manager object
+  return core::CountedQueuePoolManager::Instance().AcquireQueue(agent, type, priority, callback, data,
+                                                         flags, queue);
+  CATCH;
+}
+
+hsa_status_t hsa_amd_counted_queue_release(hsa_queue_t* queue) {
+  TRY;
+  IS_OPEN();
+  return core::CountedQueuePoolManager::Instance().ReleaseQueue(queue);
+  CATCH;
+}
+
+hsa_status_t hsa_amd_counted_queue_get_info(hsa_queue_t* queue,
+                                            hsa_counted_queue_info_attribute_t attribute,
+                                            void* value) {
+  TRY;
+  IS_OPEN();
+  return core::CountedQueuePoolManager::Instance().GetQueueInfo(queue, attribute, value);
   CATCH;
 }
 

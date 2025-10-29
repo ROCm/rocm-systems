@@ -3757,6 +3757,85 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
                                            uint64_t *size_copied, int32_t *status);
 
 /**
+ * @brief Create a queue that is limited by the GPU_MAX_HW_QUEUES environment variable.
+ *
+ * This underlying hardware queue returned by this function may be shared by other queues. For
+ * each priority this function will create a new hardware queue as long as the number of queues
+ * is less than GPU_MAX_HW_QUEUES. Once the GPU_MAX_HW_QUEUES limit is reached, this function will
+ * stop creating new hardware queues and return a reference to an existing queue of the requested
+ * @p priority instead. Each successful call will return a different @p queue handle.
+ * The hsa_amd_counted_queue_get_info API can be used to determine whether this queue is currently shared.
+ *
+ * When there are multiple eligible hardware queues available, the queue with the lowest
+ * HSA_QUEUE_INFO_USE_COUNT will be returned.
+ *
+ * For each successful call, hsa_amd_counted_queue_release should be called to release the
+ * HSA_QUEUE_INFO_USE_COUNT.
+ *
+ * @param[in] agent Agent where to create the queue
+ *
+ * @param[in] type  For future use. HSA_QUEUE_TYPE_MULTI is the only valid option.
+ *
+ * @param[in] priority Associated priority. The GPU_MAX_HW_QUEUES limit is counted for each priority
+ *
+ * @param[in] callback callback invoked by the HSA runtime for every asynchronous event related to
+ * the newly created queue. May be NULL. The HSA runtime passes three arguments to the callback: a
+ * code identifying the event that triggered the invocation, a pointer to the queue where the event
+ * originated, and the application data.
+ *
+ * @param[in] data Application data that is passed to @p callback on every iteration. May be NULL.
+ *
+ * @param[in] flags For future use. Ignored.
+ *
+ * @param[out] queue Unique handle to reference the newly created queue.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES There is failure to allocate the resources required
+ * by the implementation.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p agent does not support queues of the given
+ * type.
+ */
+hsa_status_t hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
+                                           hsa_amd_queue_priority_t priority,
+                                           void (*callback)(hsa_status_t status,
+                                                            hsa_queue_t* source, void* data),
+                                           void* data, uint64_t flags, hsa_queue_t** queue);
+
+/**
+ * @brief Release a counted queue
+ *
+ * @param[in] queue handle
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ * @retval ::HSA_STATUS_ERROR Invalid queue or queue was already released
+ */
+hsa_status_t hsa_amd_counted_queue_release(hsa_queue_t* queue);
+
+typedef enum {
+  /*
+   * Returns how many times the underlying hardware queue has been shared.
+   * @p value will be set to -1 if this queue was not allocated using
+   * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
+   */
+  HSA_QUEUE_INFO_USE_COUNT,
+  /*
+   * Returns a unique ID representing the HW resource used by this queue. Two queues
+   * with the same HW_ID use the same underlying hardware queue. This query can be
+   * used on counted and non-counted queues. The type of this attribute is uint32_t.
+   */
+  HSA_QUEUE_INFO_HW_ID,
+} hsa_counted_queue_info_attribute_t;
+
+hsa_status_t hsa_amd_counted_queue_get_info(hsa_queue_t* queue, hsa_counted_queue_info_attribute_t attribute,
+                                            void* value);
+
+/**
  * @brief logging types
  */
 typedef enum hsa_amd_log_flag_s {
