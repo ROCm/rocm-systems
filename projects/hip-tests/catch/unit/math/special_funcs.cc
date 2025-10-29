@@ -24,7 +24,10 @@ THE SOFTWARE.
 #include "special_common.hh"
 #include "math_special_func_kernels_rtc.hh"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include <boost/math/special_functions.hpp>
+#pragma GCC diagnostic pop
 
 
 /**

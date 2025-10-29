@@ -24,7 +24,10 @@ THE SOFTWARE.
 #include "unary_common.hh"
 #include "binary_common.hh"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include <boost/math/special_functions.hpp>
+#pragma GCC diagnostic pop
 
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(sin, std::sin, 2, 2);
