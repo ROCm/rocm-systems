@@ -33,7 +33,12 @@ namespace amd {
 namespace rdc {
 
 RdcMetricControl::RdcMetricControl() {
-  // Load configuration from environment variables on startup
+  // Load configuration: first from file (if specified), then from environment
+  // Environment variables will override file settings
+  const char* config_file = std::getenv("RDC_METRIC_CONFIG_FILE");
+  if (config_file) {
+    setFromConfigFile(config_file);
+  }
   setFromEnvironment();
 }
 
