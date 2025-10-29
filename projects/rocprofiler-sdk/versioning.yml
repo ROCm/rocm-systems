@@ -1,0 +1,59 @@
+versioning:
+  schema-version: 0.1
+  name: rocprofiler-sdk
+  build-directory: build
+  install-directory: install
+  cmake-build-type: RelWithDebInfo
+  cmake-generator: Ninja
+  cmake-config-args: "-DROCPROFILER_BUILD_DEBUG=ON -DROCPROFILER_BUILD_CI=ON"
+  source-tree:
+    version-file: VERSION
+    sources:
+      # files to use/not use for determining a version ID. This is mostly
+      # used for restoring cached data in continuous integration.
+      recursive-include:
+        - source/include/rocprofiler-sdk/**/*.h
+        - source/include/rocprofiler-sdk/**/*.h.in
+        - source/include/rocprofiler-sdk/cxx/**/*.hpp
+        - source/lib/rocprofiler-sdk/**
+        - source/lib/common/**
+      recursive-exclude:
+        - '**/*.md'
+        - source/**/CMakeLists.txt
+        - source/**/*.cmake
+        - source/scripts/**
+        - source/docs/**
+        - source/**/tests/**
+    headers:
+      # files to use for abidw --header-file
+      recursive-include:
+        - source/include/rocprofiler-sdk/**/*.h
+        - source/include/rocprofiler-sdk/cxx/**/*.hpp
+
+  # values relative to this file's path in the build tree
+  build-tree:
+    version-file: VERSION
+    sources:
+      # files to use/not use for determining a version ID. This is mostly
+      # used for restoring cached data in continuous integration.
+      include:
+        - source/include/rocprofiler-sdk/version.h
+        - source/include/rocprofiler-sdk/ext_version.h
+      exclude:
+        - source/include/rocprofiler-sdk/*.h
+    abi-check:
+      include:
+        - lib/librocprofiler-sdk.so*
+
+  # values relative to this file's path in the install tree
+  install-tree:
+    working-directory: "../.."
+    # relative to dirname(versioning.yml)/ {working-directory}
+    version-file: share/rocprofiler-sdk/VERSION
+    headers:
+      recursive-include:
+        - include/rocprofiler-sdk/**/*.h
+        - include/rocprofiler-sdk/cxx/**/*.hpp
+    abi-check:
+      include:
+        - lib/librocprofiler-sdk.so*
