@@ -22,7 +22,7 @@ set(TEST_SRC
     hipStreamLegacy_compiler_options.cc
     hipStreamGetId.cc
     hipStreamSetGetAttributes.cc
-    hipStreamCopyAttributes_Ext.cc)
+    hipStreamCopyAttributes.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} hipStreamGetCUMask.cc hipStreamWithCUMask.cc
