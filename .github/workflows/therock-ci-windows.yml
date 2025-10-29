@@ -39,7 +39,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 83b25f87ea8f163ef37295f28204a9b4ab86f168 # 2025-09-30 commit
+          ref: 550a6f7f6af0deaafba352da1dd0674e146902b6 # 2025-10-28 commit
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -52,7 +52,6 @@ jobs:
 
       - name: Patch rocm-systems
         run: |
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0007-Rollup-of-build-changes-needed-for-compat-with-TheRo.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Install requirements
@@ -143,7 +142,7 @@ jobs:
         run: |
           python TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
-            --amdgpu-family ${{ env.AMDGPU_FAMILIES }} \
+            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir ${{ env.BUILD_DIR }} \
             --upload
 

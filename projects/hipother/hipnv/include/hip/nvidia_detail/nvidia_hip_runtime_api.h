@@ -3179,6 +3179,12 @@ inline static hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, 
       gridSize, blockSize, f, NULL, dynSharedMemPerBlk, blockSizeLimit));
 }
 
+inline static hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* func,
+                                                                  int numBlocks, int blockSize) {
+  return hipCUDAErrorTohipError(cudaOccupancyAvailableDynamicSMemPerBlock(
+      dynamicSmemSize, func, numBlocks, blockSize));
+}
+
 // TODO - Match CUoccupancyB2DSize
 inline static hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
     int* gridSize, int* blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit,
@@ -4043,6 +4049,13 @@ inline static hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
     int* numBlocks, T func, int blockSize, size_t dynamicSMemSize, unsigned int flags) {
   return hipCUDAErrorTohipError(cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
       numBlocks, func, blockSize, dynamicSMemSize, flags));
+}
+
+template <class T>
+inline static hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, T func,
+                                                                  int numBlocks, int blockSize) {
+  return hipCUDAErrorTohipError(cudaOccupancyAvailableDynamicSMemPerBlock(
+      dynamicSmemSize, func, numBlocks, blockSize));
 }
 
 #if CUDA_VERSION < CUDA_12000
