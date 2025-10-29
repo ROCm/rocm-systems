@@ -163,7 +163,7 @@ jobs:
       shell: bash
       run: |
         cd projects/rocprofiler-register
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-register/tests
+        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb
         cmake --build build-tests-deb --target all --parallel 16
         export PATH=${{ env.PACKAGING_INSTALL_PREFIX }}/bin:$PATH
         export LD_LIBRARY_PATH=${{ env.PACKAGING_INSTALL_PREFIX }}/lib:$LD_LIBRARY_PATH
