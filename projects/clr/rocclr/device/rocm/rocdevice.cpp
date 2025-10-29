@@ -3365,6 +3365,9 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
       gpu_error = CL_DEVICE_NOT_AVAILABLE;
       LogError("GPU Memory Error");
       break;
+    case HSA_AMD_SYSTEM_SHUTDOWN_EVENT:
+      // This is not a fatal error just ignore it.
+      return HSA_STATUS_SUCCESS;
     default:
       gpu_error = CL_DEVICE_NOT_AVAILABLE;
       LogError("Unknown Event Type ");
