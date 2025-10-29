@@ -68,6 +68,24 @@
                 "end",
                 "name"
             ]
+        },
+        {
+            "name": "regions",
+            "required_columns": [
+                "tid",
+                "start",
+                "end",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify entries have non-zero start times",
+                    "error_message": "Found entries with zero start times in table",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM regions WHERE start = 0"
+                }
+            ]
         }
     ]
 }
