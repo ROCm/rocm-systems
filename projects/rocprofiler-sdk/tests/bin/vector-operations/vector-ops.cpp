@@ -54,8 +54,8 @@ using auto_lock_t = std::unique_lock<std::mutex>;
 auto print_lock   = std::mutex{};
 }  // namespace
 
-#define WIDTH  (8 * 1024)
-#define HEIGHT (8 * 1024)
+#define WIDTH  (1024)
+#define HEIGHT (1024)
 
 #define NUM (WIDTH * HEIGHT)
 
@@ -192,16 +192,16 @@ run(int NUM_QUEUE, int DEVICE_ID)
 
     sync_streams();
 
-    for(int R = 0; R < 8; R++)
+    for(int q = 0; q < NUM_QUEUE; q++)
     {
         hipLaunchKernelGGL(addition_kernel,
                            dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                            dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
                            0,
-                           streams[0],
-                           deviceA[0],
-                           deviceB[0],
-                           deviceC[0],
+                           streams[q],
+                           deviceA[q],
+                           deviceB[q],
+                           deviceC[q],
                            WIDTH,
                            HEIGHT);
 
@@ -211,23 +211,29 @@ run(int NUM_QUEUE, int DEVICE_ID)
                            dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                            dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
                            0,
-                           streams[1],
-                           deviceA[1],
-                           deviceB[1],
-                           deviceC[1],
+                           streams[q],
+                           deviceA[q],
+                           deviceB[q],
+                           deviceC[q],
                            WIDTH,
                            HEIGHT);
 
         HIP_API_CALL(hipGetLastError());
 
+        if(getenv("ROCPROF_TESTING_RAISE_SIGNAL") != nullptr &&
+           std::stoi(getenv("ROCPROF_TESTING_RAISE_SIGNAL")) > 0)
+        {
+            ::raise(SIGINT);
+        }
+
         hipLaunchKernelGGL(multiply_kernel,
                            dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                            dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
                            0,
-                           streams[2],
-                           deviceA[2],
-                           deviceB[2],
-                           deviceC[2],
+                           streams[q],
+                           deviceA[q],
+                           deviceB[q],
+                           deviceC[q],
                            WIDTH,
                            HEIGHT);
 
@@ -237,16 +243,14 @@ run(int NUM_QUEUE, int DEVICE_ID)
                            dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                            dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
                            0,
-                           streams[3],
-                           deviceB[3],
-                           deviceA[3],
-                           deviceC[3],
+                           streams[q],
+                           deviceB[q],
+                           deviceA[q],
+                           deviceC[q],
                            WIDTH,
                            HEIGHT);
 
         HIP_API_CALL(hipGetLastError());
-
-        HIP_API_CALL(hipDeviceSynchronize());
     }
 
     sync_streams();
@@ -273,11 +277,14 @@ run(int NUM_QUEUE, int DEVICE_ID)
 }
 
 int
-main(int /*argc*/, char** /*argv*/)
+main(int argc, char** argv)
 {
-    int stream_count = 4;
+    int stream_count = 8;
     int device_count = 0;
     HIP_API_CALL(hipGetDeviceCount(&device_count));
+
+    if(argc > 1) stream_count = std::stoi(argv[1]);
+    if(argc > 2) device_count = std::stoi(argv[2]);
 
     for(int i = 0; i < device_count; ++i)
         run(stream_count, i);
