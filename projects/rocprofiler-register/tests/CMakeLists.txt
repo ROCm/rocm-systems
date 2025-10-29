@@ -170,7 +170,7 @@ function(rocp_register_test_executable _NAME)
 
     rocp_register_add_test(
         ${_NAME}-preload ${_NAME}
-        "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}:libgeneric-tool.so"
+        "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}:librocprofiler-register.so:libgeneric-tool.so"
         "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
 
     rocp_register_add_test(
@@ -188,7 +188,7 @@ function(rocp_register_test_executable _NAME)
     rocp_register_add_test(
         ${_NAME}-preload-wrap
         ${_NAME}
-        "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}:libgeneric-tool.so;ROCP_REG_TEST_WRAP=1"
+        "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}:librocprofiler-register.so:libgeneric-tool.so;ROCP_REG_TEST_WRAP=1"
         "${RRTE_PRELOAD_WRAP_PASS_REGEX}"
         "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
 
