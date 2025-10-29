@@ -622,6 +622,8 @@ The following example demonstrates profiling roofline data only:
    INFO [Run 1/3][Approximate profiling time left: pending first measurement...]
    INFO [profiling] Current input file: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1/perfmon/pmc_perf_0.txt
    ...
+   INFO [roofline] Checking for roofline.csv in /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
+   INFO [roofline] No roofline data found. Generating...
    Empirical Roofline Calculation
    Copyright © 2025  Advanced Micro Devices, Inc. All rights reserved.
    Total detected GPU devices: 8
