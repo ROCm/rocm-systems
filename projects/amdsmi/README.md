@@ -130,6 +130,10 @@ during development; earlier versions are not guaranteed to work.
 * libdrm-dev (for Ubuntu and Debian)
 * libdrm-devel (for RPM-based distributions)
 
+To build the tests, the following additional dependency is required:
+
+* Google Test (libgtest-dev for Ubuntu/Debian, gtest-devel for RPM-based distributions)
+
 In order to build the AMD SMI Python package, the following components are required:
 
 * Python (3.6.8 or later)
