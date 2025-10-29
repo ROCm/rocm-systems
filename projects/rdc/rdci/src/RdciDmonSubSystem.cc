@@ -254,14 +254,30 @@ void RdciDmonSubSystem::show_help() const {
 }
 
 void RdciDmonSubSystem::create_temp_group() {
-  if (device_indexes_.size() != 0) {
+  if (device_indexes_.size() == 0) {
     return;
   }
 
   const std::string group_name("rdci-dmon-group");
-  rdc_gpu_group_t group_id = 0;
-  rdc_status_t result =
-      rdc_group_gpu_create(rdc_handle_, RDC_GROUP_EMPTY, group_name.c_str(), &group_id);
+  // Check if temp group already exists by searching for existing groups
+  rdc_gpu_group_t group_id_list[RDC_MAX_NUM_GROUPS];
+  uint32_t count = 0;
+  rdc_status_t result = rdc_group_get_all_ids(rdc_handle_, group_id_list, &count);
+  if (result == RDC_ST_OK) {
+    for (uint32_t i = 0; i < count; i++) {
+      rdc_group_info_t group_info;
+      result = rdc_group_gpu_get_info(rdc_handle_, group_id_list[i], &group_info);
+      if (result == RDC_ST_OK && std::string(group_info.group_name) == group_name) {
+        // Temp group already exists, reuse it
+        options_.insert({OPTIONS_GROUP_ID, group_id_list[i]});
+        need_cleanup_ = true;
+        return;
+      }
+    }
+  }
+
+  rdc_gpu_group_t group_id;
+  result = rdc_group_gpu_create(rdc_handle_, RDC_GROUP_EMPTY, group_name.c_str(), &group_id);
   if (result != RDC_ST_OK) {
     throw RdcException(result, "Fail to create the dmon group");
   }
