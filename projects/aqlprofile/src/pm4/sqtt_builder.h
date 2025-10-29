@@ -29,6 +29,7 @@
 #include <unordered_map>
 
 #include "pm4/cmd_config.h"
+#include "trace_decoder_instrument.h"
 
 #define SQTT_PERFCOUNTER_TOKEN (1u << 14)
 #define SQTT_PERFCOUNTER_SIMD_MASK 24
@@ -36,36 +37,6 @@
 namespace pm4_builder {
 class CmdBuffer;
 class CmdBuilder;
-
-enum ATT_OPCODES {
-  ATT_CODEOBJ_OPCODE = 4,
-  ATT_TIMESTAMP_OPCODE,
-  ATT_AGENT_INFO_OPCODE,
-};
-
-enum ATT_AGENT_INFO_TYPE {
-  ATT_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ = 0,
-  ATT_AGENT_INFO_TYPE_COUNTER_FREQUENCY,
-};
-
-union att_decoder_packet_header_t {
-  struct {
-    unsigned int opcode : 8;
-    unsigned int type : 4;
-    unsigned int data20 : 20;
-  };
-  unsigned int u32All;
-};
-
-union att_decoder_rocm_header_t {
-  struct {
-    unsigned int char1 : 8;  //!< '\0'
-    unsigned int char2 : 8;  //!< 'R'
-    unsigned int char3 : 8;  //!< 'O'
-    unsigned int char4 : 8;  //!< 'C'
-  };
-  unsigned int u32All;
-};
 
 /* Class responsible for locking PM4 packets to a specific XCC (mask).
 Starts locking future packets on constructor.
@@ -444,7 +415,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     }
     builder.BuildWriteWaitIdlePacket(cmd_buffer);
 
-    att_decoder_rocm_header_t header{};
+    rocprof_trace_decoder_instrument_enable_t header{};
     header.char1 = '\0';
     header.char2 = 'R';
     header.char3 = 'O';
@@ -454,18 +425,18 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, header.u32All);
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, 524801);
 
-    att_decoder_packet_header_t packet{};
-    packet.opcode = ATT_AGENT_INFO_OPCODE;
+    rocprof_trace_decoder_packet_header_t packet{};
+    packet.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_AGENT_INFO;
 
     if (config->enable_rt_timestamp)
     {
-      packet.type = ATT_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ;
+      packet.type = ROCPROF_TRACE_DECODER_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ;
       packet.data20 = this->timestamp_freq / 1000;
       builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
     }
     if (Primitives::GFXIP_LEVEL == 9 && config->perfcounters.size())
     {
-      packet.type = ATT_AGENT_INFO_TYPE_COUNTER_FREQUENCY;
+      packet.type = ROCPROF_TRACE_DECODER_AGENT_INFO_TYPE_COUNTER_INTERVAL;
       packet.data20 = (1 + cu_per_se) * ((config->perfcounters.size() + 3) & ~3) * config->perfPeriod;
       builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
     }
@@ -631,8 +602,8 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
 
   virtual hsa_status_t InsertCodeobjMarker(CmdBuffer* cmd_buffer, uint32_t data,
                                     unsigned channel) override {
-    att_decoder_packet_header_t header{};
-    header.opcode = ATT_CODEOBJ_OPCODE;
+    rocprof_trace_decoder_packet_header_t header{};
+    header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ;
     header.type = channel;
     header.data20 = 0;
     auto userdata_channel = Primitives::SQ_THREAD_TRACE_USERDATA_2;
@@ -645,8 +616,8 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
   
   virtual void InsertTimestampMarker(CmdBuffer* cmd_buffer, uint64_t* addr) override
   {
-    att_decoder_packet_header_t header{};
-    header.opcode = ATT_TIMESTAMP_OPCODE;
+    rocprof_trace_decoder_packet_header_t header{};
+    header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP;
     header.type = 0;
     header.data20 = 0;
 

@@ -41,19 +41,6 @@
 #define THREAD_TRACE_PREFIX_SIZE 0x100
 #define DEFAULT_TRACE_BUFFER_SIZE (3 << 26)
 
-typedef union {
-  struct {
-    uint64_t legacy_version : 13;
-    uint64_t gfx9_version2 : 3;
-    uint64_t DSIMDM : 4;
-    uint64_t DCU : 5;
-    uint64_t DSA : 1;
-    uint64_t SEID : 6;
-    uint64_t reserved2 : 32;
-  };
-  uint64_t raw;
-} att_header_packet_t;
-
 typedef enum {
   ATT_MARKER_HEADER_CHANNEL = 0,
   ATT_MARKER_SIZE_LO_CHANNEL,
@@ -74,8 +61,8 @@ typedef union {
   uint32_t raw;
 } aqlprofile_att_header_marker_t;
 
-inline att_header_packet_t getHeaderPacket(int SE, int CU, int SIMD, aql_profile::gpu_id_t id) {
-  att_header_packet_t header{.raw = 0};
+inline rocprof_trace_decoder_gfx9_header_t getHeaderPacket(int SE, int CU, int SIMD, aql_profile::gpu_id_t id, bool double_buffer) {
+  rocprof_trace_decoder_gfx9_header_t header{.raw = 0};
   // Requires decoder version 0.1.2 or higher
   if(id == aql_profile::MI300_GPU_ID) header.gfx9_version2 = 5;
   else if(id == aql_profile::MI350_GPU_ID) header.gfx9_version2 = 6;
@@ -86,6 +73,7 @@ inline att_header_packet_t getHeaderPacket(int SE, int CU, int SIMD, aql_profile
   header.DCU = CU;
   header.DSIMDM = SIMD;
   header.DSA = 0;
+  header.double_buffer = double_buffer ? 1 : 0;
   return header;
 }
 
@@ -147,7 +135,8 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     max_sample_size = std::max(sample_size, max_sample_size);
   }
 
-  std::vector<size_t> cpu_sample(max_sample_size / sizeof(size_t) + sizeof(att_header_packet_t), 0);
+  constexpr size_t gfx9_header_size = sizeof(rocprof_trace_decoder_gfx9_header_t);
+  std::vector<size_t> cpu_sample(max_sample_size / sizeof(size_t) + gfx9_header_size, 0);
 
   // The samples sizes are returned in the control buffer
   for (uint64_t se_index = 0; se_index < se_number_total; se_index++) {
@@ -165,10 +154,10 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
       sample_ptr = memorymgr->config.buffer_data[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
     }
     else if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID) {
-      auto* header = reinterpret_cast<att_header_packet_t*>(cpu_sample.data());
-      *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetGpuId());
-      sample_data_ptr += sizeof(att_header_packet_t);
-      sample_size_plus_header = sample_size + sizeof(att_header_packet_t);
+      auto* header = reinterpret_cast<rocprof_trace_decoder_gfx9_header_t*>(cpu_sample.data());
+      *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetGpuId(), false);
+      sample_data_ptr += gfx9_header_size;
+      sample_size_plus_header = sample_size + gfx9_header_size;
     }
 
     memorymgr->CopyMemory((void*)sample_data_ptr, sample_ptr, sample_size);
@@ -433,7 +422,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   *num_buffer_packets = buffers.size();
 
   if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
-    *header = getHeaderPacket(shader_engine_id, manager->config.GetTargetCU(shader_engine_id), manager->GetSimdMask(), pm4_factory->GetGpuId()).raw;
+    *header = getHeaderPacket(shader_engine_id, manager->config.GetTargetCU(shader_engine_id), manager->GetSimdMask(), pm4_factory->GetGpuId(), true).raw;
   else
     *header = 0;
 
