@@ -10,9 +10,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added `config_delta/gfx950_diff.yaml` to analysis config yamls to track the revision between a gfx9 architecture against the latest supported architecture gfx950
 
 * Analysis db features
-  * Add support for per kernel metrics analysis
-  * Add support for dispatch timeline analysis
-  * Show median instead of mean of duration in kernel view
+  * Add support for per kernel metrics analysis.
+  * Add support for dispatch timeline analysis.
+  * Show duration as median in addition to mean in kernel view.
 
 ### Changed
 * `-b/--block` accepts block alias(es) (See block aliases using command-line option `--list-blocks <arch>`).
