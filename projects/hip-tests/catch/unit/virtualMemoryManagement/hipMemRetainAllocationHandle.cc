@@ -160,7 +160,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_Capture") {
 
   size_t allocation_size = ((granularity + buffer_size - 1) / granularity) * granularity;
   hipMemGenericAllocationHandle_t allocation_handle;
-  hipDeviceptr_t device_ptr;
+  void* device_ptr;
   HIP_CHECK(hipMemCreate(&allocation_handle, allocation_size, &allocation_prop, 0));
   HIP_CHECK(hipMemAddressReserve(&device_ptr, allocation_size, 0, 0, 0));
   HIP_CHECK(hipMemMap(device_ptr, allocation_size, 0, allocation_handle, 0));
@@ -171,7 +171,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_Capture") {
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemRetainAllocationHandle(&retained_handle, reinterpret_cast<void*>(device_ptr)));
+  HIP_CHECK(hipMemRetainAllocationHandle(&retained_handle, device_ptr));
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));
