@@ -33,7 +33,7 @@ git sparse-checkout init --cone
 git sparse-checkout set projects/rocprofiler-compute
 git checkout develop
 
-cd rocprofiler-compute
+cd projects/rocprofiler-compute
 python3 -m pip install -r requirements.txt
 ```
 
