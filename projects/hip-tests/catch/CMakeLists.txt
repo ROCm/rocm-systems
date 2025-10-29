@@ -11,20 +11,27 @@ option(THEROCK_BUILD_MODE "Option to let hip-tests know if TheRock is being used
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 option(GENERATE_COVERATE "Generate coverage" OFF)
 
-find_package(hip REQUIRED)
-find_program(HIPCONFIG_EXEC hipconfig)
-
-get_cmake_property(_variableNames VARIABLES)                
-list (SORT _variableNames)                                  
-foreach (_variableName ${_variableNames})                   
-  message(STATUS "${_variableName}=${${_variableName}}")  
-endforeach()       
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+find_package(hip REQUIRED)
+find_package(Git)
+find_package(Python 3 COMPONENTS Interpreter REQUIRED)
+
+find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
+if(UNIX)
+    find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
+    find_program(GCC_C gcc)
+    find_program(GXX_C g++)
+endif()
+
+message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
 
 if(THEROCK_BUILD_MODE AND WIN32)
     message(FATAL_ERROR "TheRock Builds are not supported on Windows... yet")
@@ -163,8 +170,14 @@ message(STATUS "CMAKE HIP ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 # preference to pass arch -
 # OFFLOAD_ARCH_STR
 # rocm_agent_enumerator
-if(NOT DEFINED OFFLOAD_ARCH_STR
-   AND EXISTS "${ROCM_PATH}/bin/rocm_agent_enumerator"
+if(DEFINED OFFLOAD_ARCH_STR)
+    string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
+elseif(DEFINED GPU_TARGETS)
+    foreach(_hip_gpu_arch ${GPU_TARGETS})
+        set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
+    endforeach()
+elseif(NOT DEFINED OFFLOAD_ARCH_STR
+   AND EXISTS "${ROCM_AGENT_ENUMERATOR_EXEC}"
    AND HIP_PLATFORM STREQUAL "amd" AND UNIX)
     execute_process(COMMAND "${ROCM_PATH}/bin/rocm_agent_enumerator"
          OUTPUT_VARIABLE HIP_GPU_ARCH
@@ -183,16 +196,16 @@ if(NOT DEFINED OFFLOAD_ARCH_STR
     else()
         message(STATUS "ROCm Agent Enumerator found no valid architectures")
     endif()
-elseif(DEFINED OFFLOAD_ARCH_STR)
-    string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
 endif()
 
-if(DEFINED OFFLOAD_ARCH_STR)
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR} ")
-endif()
+# Trim any trailing spaces, this trips up the cxx function call
+string(STRIP "${OFFLOAD_ARCH_STR}" OFFLOAD_ARCH_STR)
+
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
+if(DEFINED OFFLOAD_ARCH_STR)
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR}")
+endif()
 
-find_package(Git)
 # get hip-tests commit short hash
 execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -249,7 +262,6 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt ${_catch
 # allows user to run ctest from catch_tests level
 set(_subdirs ${_autogen} "subdirs(..)\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 # copy python script and headers to catch test package
 set(CATCH_INCLUDE_DIR include)
@@ -329,3 +341,10 @@ if(DOXYGEN_FOUND)
 else()
     message(STATUS "Doxygen was not found. Building test plan documentation will not be available")
 endif()
+
+
+# get_cmake_property(_variableNames VARIABLES)                
+# list (SORT _variableNames)                                  
+# foreach (_variableName ${_variableNames})                   
+#   message(STATUS "${_variableName}=${${_variableName}}")  
+# endforeach()       

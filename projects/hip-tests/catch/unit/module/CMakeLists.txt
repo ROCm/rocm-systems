@@ -96,15 +96,16 @@ if(BUILD_SHARED_LIBS)
       hipGetProcAddressModuleApis.cc)
 endif()
 
+message(STATUS "offload arch str: ${OFFLOAD_ARCH_STR}")
 add_custom_target(empty_module.code
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
-                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/empty_module.cc
+                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} -x hip
+                  ${CMAKE_CURRENT_SOURCE_DIR}/empty_module.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/empty_module.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copyKernel.code
-                  COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 --cuda-device-only ${OFFLOAD_ARCH_STR}
-                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 --cuda-device-only
+                  ${OFFLOAD_ARCH_STR} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernel.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
@@ -173,7 +174,6 @@ add_custom_target(copiousArgKernel.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel0.code
@@ -181,7 +181,6 @@ add_custom_target(copiousArgKernel0.code
                   -mllvm -amdgpu-kernarg-preload-count=0
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel0.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel1.code
@@ -189,7 +188,6 @@ add_custom_target(copiousArgKernel1.code
                   -mllvm -amdgpu-kernarg-preload-count=1
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel1.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel2.code
@@ -197,7 +195,6 @@ add_custom_target(copiousArgKernel2.code
                   -mllvm -amdgpu-kernarg-preload-count=2
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel2.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel3.code
@@ -205,7 +202,6 @@ add_custom_target(copiousArgKernel3.code
                   -mllvm -amdgpu-kernarg-preload-count=3
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel3.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel16.code
@@ -213,7 +209,6 @@ add_custom_target(copiousArgKernel16.code
                   -mllvm -amdgpu-kernarg-preload-count=16
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel16.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel17.code
@@ -221,8 +216,8 @@ add_custom_target(copiousArgKernel17.code
                   -mllvm -amdgpu-kernarg-preload-count=17
                   ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel17.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel0.code
