@@ -709,7 +709,7 @@ KFDNode::Initialize(void) {
     node_to = it->first;
     link = it->second;
     ret = ReadKFDGpuId(node_to, &node_to_gpu_id);
-    if (ret) {return ret;}
+    if (ret) {continue;}
     if (node_to_gpu_id == 0) {  //  CPU node
       if (numa_node_found) {
         if (numa_node_weight_ > link->weight()) {
