@@ -1,4 +1,3 @@
-
 #ifndef CUID_H
 #define CUID_H
 
@@ -16,7 +15,49 @@ typedef enum {
     AMDCUID_DEVICE_TYPE_UNKNOWN   = 0XFF
 } amdcuid_device_type_t;
 
+typedef struct {
+    uint8_t bytes[16] = {0};
+} amdcuid;
 
+struct amdcuid_cuid_fields {
+    amdcuid_device_type_t device_type;
+    union amdcuid_fields {
+        amdcuid_cuid_fields_cpu cpu;
+        amdcuid_cuid_fields_gpu gpu;
+        amdcuid_cuid_fields_nic nic;
+        amdcuid_cuid_fields_platform platform;
+    }
+};
+
+struct amdcuid_cuid_fields_cpu {     // The following structs are derived from the primary CUID, ultimately for display to the user
+    uint16_t vendor_id;
+    uint16_t family;
+    uint16_t model;
+    uint16_t device_id;
+    uint8_t revision_id;
+    uint16_t unit_id;
+    uint16_t core;
+    uint16_t physical_id;
+} __attribute__((packed));
+
+struct amdcuid_cuid_fields_gpu {
+    uint16_t vendor_id;
+    uint16_t device_id;
+    uint16_t pci_class;
+    uint8_t revision_id;
+    uint16_t unit_id;
+} __attribute__((packed));
+
+struct amdcuid_cuid_fields_nic {
+    uint16_t vendor_id;
+    uint16_t device_id;
+    uint16_t pci_class;
+    uint8_t revision_id;
+} __attribute__((packed));
+
+struct amdcuid_cuid_fields_platform {
+    uint8_t system_information[14]; // System Information (Type1)
+} __attribute__((packed));
 
 /**
  * @brief Status codes returned by CUID API functions.
@@ -28,49 +69,35 @@ typedef enum {
     AMDCUID_STATUS_INVALID_ARGUMENT = 3,  ///< Invalid argument passed to function
     AMDCUID_STATUS_PERMISSION_DENIED = 4, ///< Insufficient permissions for operation
     AMDCUID_STATUS_UNSUPPORTED = 5,       ///< Operation or device type not supported
-    AMDCUID_STATUS_NOT_INIT = 6,          ///< CUID library not initialized
-    AMDCUID_STATUS_WRONG_DEVICE_TYPE = 7,      ///< Incorrect device type for function
-    AMDCUID_STATUS_INSUFFICIENT_SIZE = 8,   ///< Provided buffer or array is too small
-    AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND = 9, ///< Hardware fingerprint could not be found
-    AMDCUID_STATUS_HW_FINGERPRINT_FORMAT_ERROR = 10, ///< Hardware fingerprint format is incorrect
-    AMDCUID_STATUS_HW_FINGERPRINT_PERMISSION_DENIED = 11 ///< Not permitted to access hardware fingerprint
+    AMDCUID_STATUS_WRONG_DEVICE_TYPE = 6,      ///< Incorrect device type for function
+    AMDCUID_STATUS_INSUFFICIENT_SIZE = 7,   ///< Provided buffer or array is too small
+    AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND = 8, ///< Hardware fingerprint could not be found
+    AMDCUID_STATUS_HW_FINGERPRINT_FORMAT_ERROR = 9, ///< Hardware fingerprint format is incorrect
+    AMDCUID_STATUS_HW_FINGERPRINT_PERMISSION_DENIED = 10, ///< Not permitted to access hardware fingerprint
+    AMDCUID_STATUS_KEY_ERROR = 11,                          ///< Error reading key file or key file does not exist
+    AMDCUID_STATUS_HMAC_ERROR = 12                          ///< HMAC computation failed
 } amdcuid_status_t;
 
 
-typedef struct {
-    uint8_t bytes[16] = {0};
-} amdcuid;
 
 /**
- * @brief Salt structure used in CUID generation.
+ * @brief A wrapper around the secondary CUID to enable device handling/query.
  *
- * This structure holds a 112-bit (14-byte) salt value used in the generation of
- * Component Unique Identifiers (CUIDs). The salt adds an additional layer of uniqueness
- * and security to the CUID generation process.
+ * This type will help identify devices by their secondary cuid and determine their device type at a glance.
+ * When querying devices for additional details, users will provide this type to direct their queries to a particular
+ * device.
  */
 typedef struct {
-    uint8_t bytes[14]; // 112 bits = 14 bytes
-} amdcuid_salt_t;
-
-
-/**
- * @brief Opaque handler pointing to the underlying implementation.
- *
- * This type is used to abstract the internal implementation details of the CUID library.
- * Users interact with this handle to reference internal objects or contexts without
- * needing to know their structure or contents.
- */
-typedef struct {
-    void *impl;
+    amdcuid secondary_cuid;
+    amdcuid_device_type_t device_type;
 } amdcuid_handle;
 
 
-
 /**
- * @brief Bitmask set of component types for querying multiple device types.
+ * @brief Bitmask set of device types for querying multiple device types.
  *
- * These values are used as bitmasks to specify which component types to include in queries.
- * Each value corresponds to a specific device type, and AMDCUID_COMPONENT_TYPE_SET_ALL selects all types.
+ * These values are used as bitmasks to specify which device types to include in queries.
+ * Each value corresponds to a specific device type, and AMDCUID_DEVICE_TYPE_SET_ALL selects all types.
  */
 typedef enum {
     AMDCUID_DEVICE_TYPE_SET_PLATFORM  = 1U << AMDCUID_DEVICE_TYPE_PLATFORM, ///< Platform devices (chassis, motherboard)
@@ -87,23 +114,25 @@ typedef enum {
  * The order of the handles in the list is unspecified and may vary between calls.
  *
  * @param[in] component_types Bitmask of component types to query (use AMDCUID_COMPONENT_TYPE_SET_*).
- * @param[in] handle_count Maximum number of handles to write to @p handles.
+ * @param[in/out] handle_count On input, the maximum number of handles to write to @p handles.
+                               On output, the number of entries it filled, or tried to fill if the provided max number was too small
  * @param[out] handles If non-NULL, must point to an array of amdcuid_handle with at least @p handle_count elements.
  *                     The caller allocates and frees this array.
  * @param[out] total_available_handles If non-NULL, set to the total number of handles available for the given component_types.
  * @return AMDCUID_STATUS_SUCCESS on success, or an appropriate error code on failure.
  */
 amdcuid_status_t amdcuid_get_handles(
-    amdcuid_device_type_set_t  component_types,
+    amdcuid_device_type_set_t component_types,
     uint32_t handle_count,
     amdcuid_handle *handles,
     uint32_t *total_available_handles
 );
 
 /**
-* @brief Retrieve the primary CUID for a given handle.
+* @brief Retrieve the primary CUID for a given handle. REQUIRES ROOT PRIVILEGES
 *
-* Retrieve the primary CUID for a given handle.
+* Retrieve the primary CUID from the /tmp/priv_cuid file for a given handle. This function accesses privileged device information
+* and therefore requires ROOT privileges to execute.
 * 
 * @param[in]     The handle of the device to query
 * @param[out]    The primary CUID as an unsigned 128 bit integer
@@ -115,16 +144,21 @@ amdcuid_status_t amdcuid_get_primary_cuid(
 );
 
 /**
-* @brief Retrieve the secondary CUID for a given handle.
+* @brief Retrieve the secondary CUID for a given device name.
 *
-* Retrieve the secondary CUID for a given handle.
+* Retrieve the secondary CUID from the /tmp/cuid file for a given device name.
 * 
-* @param[in]     The handle of the device to query
+* @param[in]     The name or identifier of the device. The possible identifiers that can be used are listed below:
+*                  for GPUS: the render node path (ex.: /sys/class/drm/renderD128/)
+*                  for CPUS: the core id (ex.: 0:0)
+*                  for NICs: the device name (ex.: /sys/class/net/enp131s0)
+* @param[in]     The length of the string given as the device name
 * @param[out]    The secondary CUID as an unsigned 128 bit integer
 * @return        AMDCUID_STATUS_SUCCESS on success, or an appropriate error code on failure
 */
 amdcuid_status_t amdcuid_get_secondary_cuid(
-    amdcuid_handle handle,
+    char *device_name,
+    uint32_t *name_len,
     amdcuid *secondary_cuid
 );
 
@@ -248,28 +282,4 @@ amdcuid_status_t amdcuid_get_network_interface(
     char *network_interface,
     uint32_t *length
 );
-
-/**
- * @brief Retrieve handles whose secondary CUID matches the given string prefix.
- *
- * This helper function allows searching for device handles by a partial (prefix) match
- * of the secondary CUID, provided as a hexadecimal string. All handles whose secondary
- * CUID matches the prefix will be returned.
- *
- * @param[in]  prefix         The hexadecimal string prefix to match (case-insensitive, no "0x" prefix).
- * @param[in]  component_types Bitmask of component types to query (use AMDCUID_COMPONENT_TYPE_SET_*).
- * @param[out] handles        Array to store matching handles (allocated by caller).
- * @param[in]  max_handles    Maximum number of handles to write to @p handles.
- * @param[out] matched_count  Number of handles matched and written to @p handles.
- * @return     AMDCUID_STATUS_SUCCESS on success, or an appropriate error code on failure.
- */
-amdcuid_status_t amdcuid_find_handles_by_secondary_cuid_prefix(
-    const char *prefix,
-    amdcuid_device_type_set_t component_types,
-    amdcuid_handle *handles,
-    uint32_t max_handles,
-    uint32_t *matched_count
-);
-
-
-#endif  // CUID_H
+#endif // CUID_H
