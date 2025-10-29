@@ -63,7 +63,7 @@ env:
 
   GLOBAL_CMAKE_OPTIONS: ""
   ENABLE_ROCR_BUILD: "true"
-  ENABLE_HIP_CLR_BUILD: "false"
+  ENABLE_HIP_CLR_BUILD: "true"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
