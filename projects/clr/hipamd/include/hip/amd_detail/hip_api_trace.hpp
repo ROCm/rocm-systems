@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 17
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 18
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -685,6 +685,8 @@ typedef hipError_t (*t_hipModuleOccupancyMaxPotentialBlockSizeWithFlags)(
     int* gridSize, int* blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit,
     unsigned int flags);
 typedef hipError_t (*t_hipModuleUnload)(hipModule_t module);
+typedef hipError_t (*t_hipOccupancyAvailableDynamicSMemPerBlock)(size_t* dynamicSmemSize, const void* f,
+                                                                 int numBlocks, int blockSize);
 typedef hipError_t (*t_hipOccupancyMaxActiveBlocksPerMultiprocessor)(int* numBlocks, const void* f,
                                                                      int blockSize,
                                                                      size_t dynSharedMemPerBlk);
@@ -1691,9 +1693,12 @@ struct HipDispatchTable {
   t_hipLibraryEnumerateKernels hipLibraryEnumerateKernels_fn;
   t_hipKernelGetLibrary hipKernelGetLibrary_fn;
   t_hipKernelGetName hipKernelGetName_fn;
+  
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
+  t_hipOccupancyAvailableDynamicSMemPerBlock hipOccupancyAvailableDynamicSMemPerBlock_fn;
 
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 19
 
   // ******************************************************************************************* //
   //
