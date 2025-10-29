@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -745,8 +746,20 @@ TEST(core, public_api_iterate_agents)
         auto expected = findDeviceMetrics(agent, {});
         for(const auto& x : expected)
         {
-            ASSERT_GT(from_api.count(x.id()), 0);
-            from_api.erase(x.id());
+            // Counter IDs from API now include agent encoding. Extract base metric ID for
+            // comparison.
+            bool found = false;
+            for(auto it = from_api.begin(); it != from_api.end(); ++it)
+            {
+                rocprofiler_counter_id_t counter_id = {.handle = *it};
+                if(counters::get_base_metric_from_counter_id(counter_id) == x.id())
+                {
+                    from_api.erase(it);
+                    found = true;
+                    break;
+                }
+            }
+            ASSERT_TRUE(found) << "Expected counter ID " << x.id() << " not found in API results";
         }
         EXPECT_TRUE(from_api.empty());
     }
