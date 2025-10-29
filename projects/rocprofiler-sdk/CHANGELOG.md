@@ -226,7 +226,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Support for compilation of gfx940 and gfx941 targets.
 
 
-## ROCprofiler-SDK 1.1.0 for ROCm release 7.1
+## ROCprofiler-SDK 1.0.0 for ROCm release 7.1
 
 ### Added
 - Dynamic process attachment- ROCprofiler-sdk and `rocprofv3` now facilitate dynamic profiling of a running GPU applications by attaching to its process ID (PID), rather than launching the application through the profiler itself.
