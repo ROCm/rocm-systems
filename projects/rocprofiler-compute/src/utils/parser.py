@@ -315,33 +315,13 @@ class MetricEvaluator:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
-        self._prepare_df_cache()
-
-    def _prepare_df_cache(self) -> None:
-        """Prepare cached dataframe access for performance."""
-        if isinstance(self.raw_pmc_df, dict):
-            self.df_cache = {
-                f"raw_pmc_df_{key}": self.raw_pmc_df[key]
-                for key in self.raw_pmc_df.keys()
-            }
-        elif isinstance(self.raw_pmc_df, pd.DataFrame):
-            raw_pmc_df_keys = set(self.raw_pmc_df.columns.get_level_values(0))
-            self.df_cache = {
-                f"raw_pmc_df_{key}": self.raw_pmc_df[key] for key in raw_pmc_df_keys
-            }
-        else:
-            raise ValueError(f'Unknown `raw_pmc_df` type: "{type(self.raw_pmc_df)}".')
 
     def eval_expression(self, expr: str) -> Union[str, float, int]:
         """Evaluate a single expression with proper local context."""
         try:
-            # Optimize dataframe access by replacing dict notation with dir_path
-            # variable access
-            opt_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", expr)
-
             # Create comprehensive local context
             local_expr_context = {}
-            local_expr_context.update(self.df_cache)
+            local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
 
@@ -361,7 +341,7 @@ class MetricEvaluator:
             })
 
             eval_result = eval(
-                compile(opt_expr, "<string>", "eval"),
+                compile(expr, "<string>", "eval"),
                 {},
                 local_expr_context,
             )
@@ -383,7 +363,9 @@ class MetricEvaluator:
 
         except AttributeError as attribute_error:
             if str(attribute_error) == "'NoneType' object has no attribute 'get'":
-                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+                console_warning(
+                    f"Failed to evaluate expression '{expr}': {attribute_error}."
+                )
                 return ""
             else:
                 console_error("analysis", str(attribute_error))
@@ -479,8 +461,17 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
             equation_string,
         )
     else:
+        # Use pmc_perf.csv for all counters
         equation_string = re.sub(
-            r"raw_pmc_df", f"raw_pmc_df['{coll_level}']", equation_string
+            r"raw_pmc_df",
+            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
+            equation_string,
+        )
+        # Use coll_level csv for SQ_ACCUM_PREV_HIRES counter only
+        equation_string = re.sub(
+            rf"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']['SQ_ACCUM_PREV_HIRES']",
+            f"raw_pmc_df['{coll_level}']['SQ_ACCUM_PREV_HIRES']",
+            equation_string,
         )
     return equation_string
 
@@ -913,7 +904,9 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, Union[int, float]]:
 
 
 def calc_builtin_vars(
-    raw_pmc_df: Union[pd.DataFrame, dict], config: dict, sys_vars: dict[str, Union[int, float]]
+    raw_pmc_df: Union[pd.DataFrame, dict],
+    config: dict,
+    sys_vars: dict[str, Union[int, float]],
 ) -> dict[str, Optional[Union[str, float, int]]]:
     """Calculate built-in variables"""
     # TODO: fix all $normUnit in Unit column or title
@@ -949,9 +942,7 @@ def calc_builtin_vars(
         try:
             # Merge sys_vars with builtin_vars_collection for second pass
             combined_vars = {**sys_vars, **builtin_vars_collection}
-            temporary_evaluator = MetricEvaluator(
-                raw_pmc_df, combined_vars, {}
-            )
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
@@ -1329,7 +1320,8 @@ def search_pc_sampling_record(
         return None
 
     # Convert to sorted list of tuples:
-    # (code_object_id, inst_index, code_object_offset, count, count_issued, count_stalled, stall_reason)
+    # (code_object_id, inst_index, code_object_offset, count, count_issued,
+    # count_stalled, stall_reason)
     sorted_counts = sorted(
         [
             (
