@@ -83,7 +83,7 @@ class Event : public RuntimeObject {
 
  private:
   Monitor lock_;
-  Monitor notify_lock_;  //!< Lock used for notification with direct dispatch only
+  mutable Monitor notify_lock_;  //!< Lock used for notification with direct dispatch only
 
   std::atomic<CallBackEntry*> callbacks_;  //!< linked list of callback entries.
   std::atomic<int32_t> status_;            //!< current execution status.
@@ -219,7 +219,7 @@ class Event : public RuntimeObject {
   void* HwEvent() const { return hw_event_; }
 
   //! Returns notify even associated with the current command
-  Event* NotifyEvent() const { return notify_event_; }
+  Event* NotifyEvent() const {ScopedLock l(notify_lock_); return notify_event_; }
 
   //! Get entry scope of the event
   int32_t getCommandEntryScope() const {

@@ -15,6 +15,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Improved Fortran main function detection to ensure `rocprof-sys-instrument` uses the Fortran program main function instead of the C wrapper.
 
+### Resolved issues
+
+- Fixed a crash when running `rocprof-sys-python` with ROCPROFSYS_USE_ROCPD enabled.
+
 ## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 
 ### Added

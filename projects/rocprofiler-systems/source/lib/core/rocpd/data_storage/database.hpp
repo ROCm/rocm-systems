@@ -38,27 +38,29 @@ static std::mutex _mutex;
 class database
 {
 public:
-    static database& get_instance();
-
-    database(database&)            = delete;
-    database& operator=(database&) = delete;
+    explicit database(int pid, int ppid);
+    database()                      = delete;
+    database(database&)             = delete;
+    database& operator=(database&)  = delete;
+    database(database&&)            = default;
+    database& operator=(database&&) = default;
 
     void flush();
 
     ~database();
 
 private:
-    database();
-
     template <typename... Args>
-    inline void validate_sqlite3_result(int sqlite3_error_code, const char* query,
-                                        Args&&... args)
+    void validate_sqlite3_result(int sqlite3_error_code, const char* query,
+                                 Args&&... args)
     {
         std::stringstream ss;
         ss << "\n===========================================================\n";
         ss << "Database Error\n";
         ((ss << args << " "), ...);
         ss << "\nQuery: " << query << "\n";
+        // Fetch error message of last sqlite3_* call
+        const auto* error_message = sqlite3_errstr(sqlite3_error_code);
         switch(sqlite3_error_code)
         {
             case SQLITE_OK:
@@ -98,7 +100,7 @@ private:
             }
             break;
         }
-        ss << " [Sqlite3 error: " << sqlite3_errstr(sqlite3_error_code);
+        ss << " [Sqlite3 error: " << error_message;
         ss << " (Extended error message: " << sqlite3_errmsg(_sqlite3_db_temp) << ")]";
         throw std::runtime_error(ss.str());
     }
@@ -110,17 +112,16 @@ private:
                                              std::is_same_v<std::decay_t<T>, int32_t> ||
                                              std::is_same_v<std::decay_t<T>, uint32_t>),
                                            int> = 0>
-    inline void bind_value([[maybe_unused]] sqlite3_stmt* stmt,
-                           [[maybe_unused]] int position, [[maybe_unused]] T& _value,
-                           [[maybe_unused]] const std::string& query)
+    void bind_value([[maybe_unused]] sqlite3_stmt* stmt, [[maybe_unused]] int position,
+                    [[maybe_unused]] T& _value, [[maybe_unused]] const std::string& query)
     {
         throw std::runtime_error("Unsupported type for binding!");
     }
 
     template <typename T,
               std::enable_if_t<common::traits::is_string_literal<T>(), int> = 0>
-    inline void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
-                           const std::string& query)
+    void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
+                    const std::string& query)
     {
         validate_sqlite3_result(
             sqlite3_bind_text(stmt, position, _value, -1, SQLITE_STATIC), query.c_str(),
@@ -129,8 +130,8 @@ private:
 
     template <typename T,
               std::enable_if_t<std::is_floating_point_v<std::decay_t<T>>, int> = 0>
-    inline void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
-                           const std::string& query)
+    void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
+                    const std::string& query)
     {
         validate_sqlite3_result(
             sqlite3_bind_double(stmt, position, _value), query.c_str(),
@@ -140,8 +141,8 @@ private:
     template <typename T, std::enable_if_t<std::is_same_v<std::decay_t<T>, int64_t> ||
                                                std::is_same_v<std::decay_t<T>, uint64_t>,
                                            int> = 0>
-    inline void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
-                           const std::string& query)
+    void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
+                    const std::string& query)
     {
         validate_sqlite3_result(sqlite3_bind_int64(stmt, position, _value), query.c_str(),
                                 "Failed to bind int64_t/uint64_t! Position: ", position,
@@ -151,8 +152,8 @@ private:
     template <typename T, std::enable_if_t<std::is_same_v<std::decay_t<T>, int32_t> ||
                                                std::is_same_v<std::decay_t<T>, uint32_t>,
                                            int> = 0>
-    inline void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
-                           const std::string& query)
+    void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
+                    const std::string& query)
     {
         validate_sqlite3_result(sqlite3_bind_int(stmt, position, _value), query.c_str(),
                                 "Failed to bind int32_t/uint32_t! Position: ", position,
@@ -192,11 +193,16 @@ public:
         };
     }
 
-    static std::string get_upid();
+    std::string get_upid();
 
 private:
-    sqlite3* _sqlite3_db{ nullptr };
-    sqlite3* _sqlite3_db_temp{ nullptr };
+    static std::string generate_upid(const int pid, const int ppid);
+
+private:
+    sqlite3*    _sqlite3_db{ nullptr };
+    sqlite3*    _sqlite3_db_temp{ nullptr };
+    std::string m_tag;
+    std::string m_upid;
 };
 
 }  // namespace data_storage
