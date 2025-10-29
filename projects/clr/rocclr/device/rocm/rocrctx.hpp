@@ -23,10 +23,6 @@
 #include <mutex>
 #include "top.hpp"
 
-#if IS_WINDOWS
-#include <windows.h>
-#endif
-
 #ifdef ROCR_DYN_DLL
 #include "hsa.h"
 #include "hsa_ext_image.h"
