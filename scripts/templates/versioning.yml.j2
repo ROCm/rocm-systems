@@ -1,0 +1,200 @@
+versioning:
+  schema-version: 0.1
+
+  # name of the project
+  name: {{ name }}
+
+  # default build directory
+  build-directory: {{ build_directory }}
+
+  # default install directory
+  install-directory: {{ install_directory }}
+
+  # default CMAKE_BUILD_TYPE
+  cmake-build-type: {{ cmake_build_type }}
+
+  # default CMake generator
+  cmake-generator: {{ cmake_generator }}
+
+  # default extra CMake configure args (space-separated)
+  cmake-config-args: "{{ cmake_config_args }}"
+
+  # values relative to this file's path in the source tree
+  source-tree:
+    # sets the base path for all filepaths in this section. If "." then it is the directory containing this versioning.yml file.
+    working-directory: {{ source_tree.working_directory }}
+
+    # relative to working-directory
+    version-file: {{ source_tree.version_file }}
+
+    # files to use/not use for determining a version ID. This is mostly used for
+    # generating git conflicts and saving/restoring cached data in workflows.
+    sources:
+      include:
+        {% for item in source_tree.sources.include %}
+        - {{ item }}
+        {% endfor %}
+      recursive-include:
+        {% for item in source_tree.sources.recursive_include %}
+        - {{ item }}
+        {% endfor %}
+      exclude:
+        {% for item in source_tree.sources.exclude %}
+        - {{ item }}
+        {% endfor %}
+      recursive-exclude:
+        {% for item in source_tree.sources.recursive_exclude %}
+        - {{ item }}
+        {% endfor %}
+
+    # files to use for abidw --header-file and determining the version ID.
+    headers:
+      include:
+        {% for item in source_tree.headers.include %}
+        - {{ item }}
+        {% endfor %}
+      recursive-include:
+        {% for item in source_tree.headers.recursive_include %}
+        - {{ item }}
+        {% endfor %}
+      exclude:
+        {% for item in source_tree.headers.exclude %}
+        - {{ item }}
+        {% endfor %}
+      recursive-exclude:
+        {% for item in source_tree.headers.recursive_exclude %}
+        - {{ item }}
+        {% endfor %}
+
+  # values relative to this file's path in the build tree
+  build-tree:
+    # sets the base path for all filepaths in this section. If "." then it is the directory containing this versioning.yml file.
+    working-directory: {{ build_tree.working_directory }}
+
+    # relative to working-directory
+    version-file: {{ build_tree.version_file }}
+
+    # files to use/not use for determining a version ID. This is mostly used for
+    # generating git conflicts and saving/restoring cached data in workflows.
+    sources:
+      include:
+        {% for item in build_tree.sources.include %}
+        - {{ item }}
+        {% endfor %}
+      recursive-include:
+        {% for item in build_tree.sources.recursive_include %}
+        - {{ item }}
+        {% endfor %}
+      exclude:
+        {% for item in build_tree.sources.exclude %}
+        - {{ item }}
+        {% endfor %}
+      recursive-exclude:
+        {% for item in build_tree.sources.recursive_exclude %}
+        - {{ item }}
+        {% endfor %}
+
+    # files to use for abidw --header-file and determining the version ID.
+    headers:
+      include:
+        {% for item in build_tree.headers.include %}
+        - {{ item }}
+        {% endfor %}
+      recursive-include:
+        {% for item in build_tree.headers.recursive_include %}
+        - {{ item }}
+        {% endfor %}
+      exclude:
+        {% for item in build_tree.headers.exclude %}
+        - {{ item }}
+        {% endfor %}
+      recursive-exclude:
+        {% for item in build_tree.headers.recursive_exclude %}
+        - {{ item }}
+        {% endfor %}
+
+    # files to use for ABI checking
+    abi-check:
+      # files to use for ABI checking
+      include:
+        {% for item in build_tree.abi_check.include %}
+        - {{ item }}
+        {% endfor %}
+      recursive-include:
+        {% for item in build_tree.abi_check.recursive_include %}
+        - {{ item }}
+        {% endfor %}
+      exclude:
+        {% for item in build_tree.abi_check.exclude %}
+        - {{ item }}
+        {% endfor %}
+      recursive-exclude:
+        {% for item in build_tree.abi_check.recursive_exclude %}
+        - {{ item }}
+        {% endfor %}
+
+  # values relative to this file's path in the install tree
+  install-tree:
+    # sets the base path for all filepaths in this section. If "." then it is the directory containing this versioning.yml file.
+    working-directory: {{ install_tree.working_directory }}
+
+    # relative to working-directory
+    version-file: {{ install_tree.version_file }}
+
+    # files to use/not use for determining a version ID. This is mostly used for
+    # generating git conflicts and saving/restoring cached data in workflows.
+    sources:
+      include:
+        {% for item in install_tree.sources.include %}
+        - {{ item }}
+        {% endfor %}
+      recursive-include:
+        {% for item in install_tree.sources.recursive_include %}
+        - {{ item }}
+        {% endfor %}
+      exclude:
+        {% for item in install_tree.sources.exclude %}
+        - {{ item }}
+        {% endfor %}
+      recursive-exclude:
+        {% for item in install_tree.sources.recursive_exclude %}
+        - {{ item }}
+        {% endfor %}
+
+    # files to use for abidw --header-file and determining the version ID.
+    headers:
+      include:
+        {% for item in install_tree.headers.include %}
+        - {{ item }}
+        {% endfor %}
+      recursive-include:
+        {% for item in install_tree.headers.recursive_include %}
+        - {{ item }}
+        {% endfor %}
+      exclude:
+        {% for item in install_tree.headers.exclude %}
+        - {{ item }}
+        {% endfor %}
+      recursive-exclude:
+        {% for item in install_tree.headers.recursive_exclude %}
+        - {{ item }}
+        {% endfor %}
+
+    # files to use for ABI checking
+    abi-check:
+      include:
+        {% for item in install_tree.abi_check.include %}
+        - {{ item }}
+        {% endfor %}
+      recursive-include:
+        {% for item in install_tree.abi_check.recursive_include %}
+        - {{ item }}
+        {% endfor %}
+      exclude:
+        {% for item in install_tree.abi_check.exclude %}
+        - {{ item }}
+        {% endfor %}
+      recursive-exclude:
+        {% for item in install_tree.abi_check.recursive_exclude %}
+        - {{ item }}
+        {% endfor %}

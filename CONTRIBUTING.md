@@ -199,6 +199,122 @@ If you want to be looped into these syncs, please reach out to project leadershi
 
 ---
 
+## Project Versioning
+
+Project versioning will adhere to the principles of [Semantic Versioning (semver)](https://semver.org/):
+
+> Given a version number MAJOR.MINOR.PATCH, increment the:
+>
+> 1. MAJOR version when you make incompatible API changes.
+> 2. MINOR version when you add functionality in a backward compatible manner.
+> 3. PATCH version when you make backward compatible bug fixes.
+>
+> Additional labels for pre-release and build metadata are available as extensions to the MAJOR.MINOR.PATCH format.
+
+### Symbol Visibility
+
+Every software project should use the following CMake code in the top-level CMakeLists.txt after the first `project(...)` call before
+any CMake build targets are created:
+
+```cmake
+set(CMAKE_C_VISIBILITY_PRESET "hidden")
+set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+```
+
+This ensures that all shared object symbols have hidden visibility by default.
+Any public API functions must then be explicitly exported. It is recommended for projects
+to defined a project-specific preprocessor definition of the form: `<PROJECT_NAME>_API`.
+Here is a [simplified sample derived from rocprofiler-sdk](projects/rocprofiler-sdk/source/include/rocprofiler-sdk/defines.h):
+
+```cpp
+// macro for attribute, useful since Windows uses __declspec
+#define ROCPROFILER_SDK_ATTRIBUTE(...) __attribute__((__VA_ARGS__))
+
+// always defined for export
+#define ROCPROFILER_SDK_PUBLIC_API ROCPROFILER_SDK_ATTRIBUTE(visibility("default"))
+
+// always defined for suppressing export
+#define ROCPROFILER_SDK_HIDDEN_API ROCPROFILER_SDK_ATTRIBUTE(visibility("hidden"))
+
+// See CMake code below for rocprofiler_sdk_EXPORTS
+#if defined(rocprofiler_sdk_EXPORTS)
+#    define ROCPROFILER_SDK_API ROCPROFILER_SDK_PUBLIC_API
+#else
+#    define ROCPROFILER_SDK_API
+#endif
+```
+
+In the above code, we defined a `ROCPROFILER_SDK_PUBLIC_API` for exporting a symbol. However, we only
+want these symbols to be marked as exported when _building_ the shared library -- when a user of the
+API is including the project's headers and linking to the shared library, the symbol should not be marked as
+exported[^1]. Thus, we define `rocprofiler_sdk_EXPORTS` when building the shared library -- with the expectation
+that consumer software linking to the shared library will not define `rocprofiler_sdk_EXPORTS`.
+CMake, by default, when building shared libraries, defines `<target-name>_EXPORTS`. It can be overridden via
+the `DEFINE_SYMBOL` target property (which is useful overridding the output library name via the `OUTPUT_NAME` target property):
+
+```cmake
+set_target_properties(
+    rocprofiler-sdk-shared-library
+    PROPERTIES
+        OUTPUT_NAME   rocprofiler-sdk
+        DEFINE_SYMBOL rocprofiler_sdk_EXPORTS
+)
+```
+
+Alternatively, one can simply define it explicitly via target compile definitions (with special emphasis on the use of `PRIVATE`)
+as needed:
+
+```cmake
+target_compile_definitions(
+    rocprofiler-sdk-object-library
+    PRIVATE
+        rocprofiler_sdk_EXPORTS=1
+)
+```
+
+However, the `DEFINE_SYMBOL` approach is the preferred method since there is no chance of using `PUBLIC` or `INTERFACE` instead of `PRIVATE`.
+
+[^1]: This is mostly a best practice on Linux, but is quite important on Windows, which requires symbols
+to be marked as imported when defined in a external shared library.
+
+#### Project Versioning File Structure
+
+- `projects/<project-name>/VERSION`
+  - This file contains the major, minor, and patch version of the project on the first line.
+  - The VERSION in this file should be the sole source of truth regarding the version. Anything needing the version number should read from this file.
+  - It also contains, on the second line, `# hash: <md5sum>` which is a hash of the files at the time of the last version bump. More on this later.
+  - This file should be installed to `<prefix>/share/<project-name>/VERSION`
+- `projects/<project-name>/versioning.yml`
+  - Every `VERSION` file should be accompanied by a `versioning.yml` file.
+  - This file contains the information needed for performing versioning checks and updating the version
+  - In general it has three sections per project: `source-tree`, `build-tree`, and `install-tree`.
+    - Each one of these sections defines the source files for generating the md5sum hash (`sources` and `headers`), the public API headers (`headers`), and which binary files should be checked for ABI and API changes (`abi-check`).
+  - This file should be installed to `<prefix>/share/<project-name>/VERSION`
+
+#### Useful Utilities
+
+- `cmake/rocm_versioning.cmake`
+  - This is a CMake module with various functions to assist with compliance to our versioning standards.
+- `scripts/abi-guard.py`
+  - This is a Python3 command-line tool for generating/updating the project's VERSION file, generating a versioning YAML spec, listing the files included or excluded from API/ABI checks, executing API/ABI checks, etc.
+
+#### Versioning Workflows
+
+A reusable workflow is provided in `.github/workflows/abi-guard.yml`.
+This workflow should be used to quickly integrate checks for versioning compliance.
+In general, this workflow automates using [libabigail](https://man7.org/linux/man-pages/man7/libabigail.7.html) to detect changes in the API/ABI of a project.
+
+- If this workflow detects added/removed functions/variables in the public API, it fails without at least a minor version bump.
+- If this workflow detects changed functions in the public API, it strongly recommends an alternative approach since this breaks the ABI and/or ABI and, in general, a minor version bumps for a breaking change is not [Semantic Versioning (semver)](https://semver.org/) compliant.
+- If this workflow detects no API/ABI breaks but the version remains unchanged, it recommends a patch version bump.
+  - Note: we probably want to be able to avoid this failing for documentation changes.
+
+Usage of this workflow is added on a per-project basis at present. Ideally, this workflow will be automatically applied in the future.
+[Sample using the abi-guard.yml workflow on rocprofiler-sdk project](.github/workflows/rocprofiler-sdk-abi-guard.yml).
+
+---
+
 ## Integration with TheRock
 
 [TheRock](https://github.com/rocm/therock) is our new open-source build system for ROCm. It is designed to significantly enhance our support and scalability for ROCm 7.0 and beyond, and it is actively welcoming community contributions. TheRock currently supports a subset of AMD GPU targets, with ongoing efforts from our team and the community to expand this further, as detailed in TheRock [roadmap](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md).

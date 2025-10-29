@@ -60,6 +60,9 @@ rocprofiler_install_env_setup_files(
     INSTALL_DIR ${CMAKE_INSTALL_DATAROOTDIR}
     COMPONENT development)
 
+rocm_versioning_install_version_files(rocprofiler-sdk FILES ${PROJECT_SOURCE_DIR}/VERSION
+                                      ${PROJECT_SOURCE_DIR}/versioning.yml COMPONENT core)
+
 function(compute_rocprofiler_sdk_version _VAR)
     string(REGEX REPLACE "([0-9]+)\\\.([0-9]+)\\\.(.*)" "\\1.\\2" _TMP "${${_VAR}}")
     set(PACKAGE_${_VAR}
