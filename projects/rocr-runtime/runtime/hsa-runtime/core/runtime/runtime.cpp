@@ -669,6 +669,7 @@ hsa_status_t Runtime::AllowAccess(uint32_t num_agents,
                                   const hsa_agent_t* agents, const void* ptr) {
   const AMD::MemoryRegion* amd_region = NULL;
   size_t alloc_size = 0;
+  printf("Hello\n");
 
   {
     ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
