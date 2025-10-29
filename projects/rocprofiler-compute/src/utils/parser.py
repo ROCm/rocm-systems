@@ -366,7 +366,7 @@ class MetricEvaluator:
                 local_expr_context,
             )
 
-            if np.isnan(eval_result):
+            if np.isnan(eval_result).any():
                 return ""
             else:
                 return eval_result
@@ -378,10 +378,12 @@ class MetricEvaluator:
                 )
                 return ""
             else:
+                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
                 return ""
 
         except AttributeError as attribute_error:
             if str(attribute_error) == "'NoneType' object has no attribute 'get'":
+                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
                 return ""
             else:
                 console_error("analysis", str(attribute_error))
