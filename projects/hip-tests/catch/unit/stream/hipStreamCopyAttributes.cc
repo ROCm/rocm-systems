@@ -28,7 +28,7 @@ THE SOFTWARE.
  *  - 3) With Invalid source and destination Stream
  * Test source
  * ------------------------
- *  - unit/stram/hipStreamCopyAttributes_Ext.cc
+ *  - unit/stream/hipStreamCopyAttributes.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
@@ -39,19 +39,19 @@ TEST_CASE("Unit_hipStreamCopyAttributes_Negative") {
   hipStream_t dstStream = nullptr;
   HIP_CHECK(hipStreamCreate(&dstStream));
 
-  SECTION("Invalid src Stream") {
+  SECTION("With Invalid Source Stream") {
     HIP_CHECK_ERROR(
         hipStreamCopyAttributes(dstStream, reinterpret_cast<hipStream_t>(-1)),
         hipErrorInvalidResourceHandle);
   }
 
-  SECTION("Invalid dst Stream") {
+  SECTION("With Invalid Destination Stream") {
     HIP_CHECK_ERROR(
         hipStreamCopyAttributes(reinterpret_cast<hipStream_t>(-1), srcStream),
         hipErrorInvalidResourceHandle);
   }
 
-  SECTION("Invalid src & dst Streams") {
+  SECTION("With Invalid Source & Destination Streams") {
     HIP_CHECK_ERROR(hipStreamCopyAttributes(reinterpret_cast<hipStream_t>(-1),
                                             reinterpret_cast<hipStream_t>(-1)),
                     hipErrorInvalidResourceHandle);
@@ -68,7 +68,7 @@ TEST_CASE("Unit_hipStreamCopyAttributes_Negative") {
  *  - with SynchronizationPolicy attribute and with all possible values
  * Test source
  * ------------------------
- *  - unit/stram/hipStreamCopyAttributes_Ext.cc
+ *  - unit/stream/hipStreamCopyAttributes.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
