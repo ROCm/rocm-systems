@@ -100,7 +100,7 @@ def add_general_group(
         default=rocprof_compute_home / "rocprof_compute_soc/analysis_configs/",
     )
     # Nowhere to load specs from in db mode
-    if parser.usage and "database" not in parser.usage:
+    if parser.usage:
         general_group.add_argument(
             "-s", "--specs", action="store_true", help="Print system specs and exit."
         )
@@ -502,106 +502,6 @@ Examples:
     #     '--iter', required=False, default=-1, type=int,
     #     help="\t\t\tNumber of iterations (DEFAULT: 10)"
     # )
-
-    ## Database Command Line Options
-    ## ----------------------------
-    db_parser = subparsers.add_parser(
-        "database",
-        help="Interact with rocprofiler-compute database",
-        usage="""
-            \nrocprof-compute database <interaction type> [connection options]
-
-            \n\n-------------------------------------------------------------------------------
-            \nExamples:
-            \n\trocprof-compute database --import -H pavii1 -u temp -t asw -w "workloads/vcopy/mi200/"
-            \n\trocprof-compute database --remove -H pavii1 -u temp -w "rocprofiler-compute_asw_sample_mi200"
-            \n-------------------------------------------------------------------------------\n
-        """,  # noqa: E501
-        prog="tool",
-        allow_abbrev=False,
-        formatter_class=lambda prog: argparse.RawTextHelpFormatter(
-            prog, max_help_position=40
-        ),
-    )
-    db_parser._optionals.title = "Help"
-
-    add_general_group(
-        db_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
-    )
-    interaction_group = db_parser.add_argument_group("Interaction Type")
-    connection_group = db_parser.add_argument_group("Connection Options")
-
-    interaction_group.add_argument(
-        "-i",
-        "--import",
-        required=False,
-        dest="upload",
-        action="store_true",
-        help="\t\tImport workload to rocprofiler-compute DB",
-    )
-    interaction_group.add_argument(
-        "-r",
-        "--remove",
-        required=False,
-        dest="remove",
-        action="store_true",
-        help="\t\tRemove a workload from rocprofiler-compute DB",
-    )
-
-    connection_group.add_argument(
-        "-H",
-        "--host",
-        required=True,
-        metavar="",
-        help="\t\tName or IP address of the server host.",
-    )
-    connection_group.add_argument(
-        "-P",
-        "--port",
-        required=False,
-        metavar="",
-        help="\t\tTCP/IP Port. (DEFAULT: 27018)",
-        default=27018,
-    )
-    connection_group.add_argument(
-        "-u",
-        "--username",
-        required=True,
-        metavar="",
-        help="\t\tUsername for authentication.",
-    )
-    connection_group.add_argument(
-        "-p",
-        "--password",
-        metavar="",
-        help="\t\tThe user's password. (will be requested later if it's not set)",
-        default="",
-    )
-    connection_group.add_argument(
-        "-t", "--team", required=False, metavar="", help="\t\tSpecify Team prefix."
-    )
-    connection_group.add_argument(
-        "-w",
-        "--workload",
-        required=True,
-        metavar="",
-        dest="workload",
-        help=(
-            "\t\tSpecify name of workload (to remove) or path to workload (to import)"
-        ),
-    )
-    connection_group.add_argument(
-        "--kernel-verbose",
-        required=False,
-        metavar="",
-        help=(
-            "\t\tSpecify Kernel Name verbose level 1-5. "
-            "Lower the level, shorter the kernel name. "
-            "(DEFAULT: 5) (DISABLE: 5)"
-        ),
-        default=5,
-        type=int,
-    )
 
     ## Analyze Command Line Options
     ## ----------------------------
