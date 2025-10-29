@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,38 +20,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
+#include "example_utils.hpp"
 
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <variant>
-#include <vector>
+#include <hip/hip_runtime.h>
 
-namespace rocpd
+#include <cstdlib>
+#include <iostream>
+
+// [sphinx-start]
+__global__ void kernel()
 {
+  __shared__ int array[128];
+  __shared__ double result;
+}
+// [sphinx-end]
 
-class json
+int main()
 {
-public:
-    static std::shared_ptr<json> create();
+    kernel<<<64, 512>>>();
+    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipDeviceSynchronize());
 
-    using json_value =
-        std::variant<std::string, int, double, long long, bool, std::vector<json>,
-                     std::nullptr_t, std::shared_ptr<json>>;
-
-    void set(const std::string& key, const json_value& value);
-
-    std::string to_string() const;
-
-private:
-    json() = default;
-
-private:
-    static std::string stringify(const std::shared_ptr<json_value>& value);
-
-private:
-    std::unordered_map<std::string, std::shared_ptr<json_value>> data;
-};
-
-}  // namespace rocpd
+    std::cout << "Success!" << std::endl;
+    return EXIT_SUCCESS;
+}

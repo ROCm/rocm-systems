@@ -1024,7 +1024,14 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
         set(_TEST_FILE
             ${PROJECT_BINARY_DIR}/python/tests/${TEST_PYTHON_VERSION}/${_TEST_FILE}
         )
+
+        if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+            list(APPEND TEST_LABELS "rocpd")
+            list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_USE_ROCPD=ON")
+        endif()
+
         configure_file(${TEST_FILE} ${_TEST_FILE} @ONLY)
+
         if(TEST_STANDALONE)
             add_test(
                 NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}

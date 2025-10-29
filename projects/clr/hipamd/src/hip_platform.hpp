@@ -113,10 +113,10 @@ class PlatformState {
 
   size_t UfdMapSize() const { return ufd_map_.size(); }
 
-  inline bool RegisterLibraryFunction(const hipKernel_t f) {
+  inline bool RegisterLibraryFunction(const hipKernel_t f, const hipLibrary_t l) {
     amd::ScopedLock lock(lock_);
     if (library_functions_.find(f) == library_functions_.end()) {
-      library_functions_.insert(f);
+      library_functions_.insert(std::make_pair(f, l));
       return true;
     }
     return false;
@@ -125,6 +125,15 @@ class PlatformState {
     amd::ScopedLock lock(lock_);
     if (library_functions_.find(f) != library_functions_.end()) {
       library_functions_.erase(f);
+      return true;
+    }
+    return false;
+  }
+
+  inline bool GetFunctionLibrary(const hipKernel_t f, hipLibrary_t* lib) {
+    amd::ScopedLock lock(lock_);
+    if (library_functions_.find(f) != library_functions_.end()) {
+      *lib = library_functions_[f];
       return true;
     }
     return false;
@@ -140,6 +149,6 @@ class PlatformState {
   std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_;  //!< Unique File Desc Map
 
   void* dynamicLibraryHandle_{nullptr};
-  std::unordered_set<hipKernel_t> library_functions_;
+  std::unordered_map<hipKernel_t, hipLibrary_t> library_functions_;
 };
 }  // namespace hip

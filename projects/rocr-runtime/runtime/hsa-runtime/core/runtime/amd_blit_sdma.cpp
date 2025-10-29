@@ -234,6 +234,62 @@ template <bool useGCR> hsa_status_t BlitSdma<useGCR>::Destroy() {
   return HSA_STATUS_SUCCESS;
 }
 
+class CommandCallBackData {
+  public:
+    CommandCallBackData(const void* cmd,
+                        size_t cmd_size,
+                        uint64_t size,
+                        size_t num_dep_signals,
+                        core::Signal& out_signal,
+                        std::vector<core::Signal*>& gang_signals,
+                        BlitSdmaBase* owner):
+                        cmd_size_(cmd_size),
+                        size_(size),
+                        num_dep_signals_(num_dep_signals),
+                        out_signal_(&out_signal),
+                        owner_(owner) {
+      cmd_ = malloc(cmd_size);
+      if (cmd == nullptr)
+        throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                              "Failed to allocate data for copy callback.");
+
+      memcpy(cmd_, cmd, cmd_size);
+
+      for (auto gang_sig: gang_signals)
+        gang_signals_.push_back(gang_sig);
+    }
+
+    ~CommandCallBackData() {
+      free(cmd_);
+    }
+
+    void *cmd_;
+    size_t cmd_size_;
+    uint64_t size_;
+    size_t num_dep_signals_;
+    core::Signal* out_signal_;
+    std::vector<core::Signal*> gang_signals_;
+    BlitSdmaBase* owner_;
+};
+
+static bool DepSignalCompleteHandler(hsa_signal_value_t signal_value, void *arg ) {
+  CommandCallBackData* callbackData = reinterpret_cast<CommandCallBackData*>(arg);
+
+  if (--callbackData->num_dep_signals_ == 0) {
+    /* Callback SubmitCommand with no dependent signals */
+    const std::vector<core::Signal*> dep_signals(0);
+
+    callbackData->owner_->SubmitCommand(callbackData->cmd_,
+                                        callbackData->cmd_size_,
+                                        callbackData->size_,
+                                        dep_signals,
+                                        *(callbackData->out_signal_),
+                                        callbackData->gang_signals_);
+    delete callbackData;
+  }
+  return false;
+}
+
 template <bool useGCR>
 hsa_status_t BlitSdma<useGCR>::SubmitBlockingCommand(const void* cmd, size_t cmd_size,
                                                      uint64_t size) {
@@ -272,6 +328,7 @@ hsa_status_t BlitSdma<useGCR>::SubmitCommand(const void* cmd, size_t cmd_size, u
                                              core::Signal& out_signal,
                                              std::vector<core::Signal*>& gang_signals) {
   uint32_t num_poll_command = 0;
+  uint32_t num_poll_signals = 0;
 
   // Cached copy of dep_signals[i]->LoadRelaxed
   uint64_t dep_signals_value[HSA_MAX_DEP_SIGNALS];
@@ -283,19 +340,40 @@ hsa_status_t BlitSdma<useGCR>::SubmitCommand(const void* cmd, size_t cmd_size, u
     // lower 32-bits
     dep_signals_value[i] = dep_signals[i]->LoadRelaxed();
     if (dep_signals_value[i]) {
+      num_poll_signals++;
       num_poll_command++;
       if (dep_signals_value[i] >> 32)
         num_poll_command++;
     }
   }
 
-  // Workaround for rare-issue on gfx908 where SDMA_OP_POLL_REGMEM returns before
-  // polled memory is cleared
-  static bool doublePoll = agent_->supported_isas()[0]->GetMajorVersion() == 9 &&
-                           agent_->supported_isas()[0]->GetMinorVersion() == 0 &&
-                           agent_->supported_isas()[0]->GetStepping() != 10;
-  if (doublePoll)
-    num_poll_command *= 2;
+  // Workaround for rare issue on gfx90x asics where SDMA_OP_POLL_REGMEM returns before
+  // polled memory is cleared. Use SetAsyncSignalHandler to poll the signal signal
+  // value on host-side. Once all the dependent signals are cleared, DepSignalCompleteHandler
+  // will call SubmitCommand(..) again without any dependent-signals.
+  static bool swPollWorkaround = agent_->supported_isas()[0]->GetMajorVersion() == 9 &&
+                                 agent_->supported_isas()[0]->GetMinorVersion() == 0 &&
+                                 agent_->supported_isas()[0]->GetStepping() != 10;
+
+  if (swPollWorkaround && num_poll_signals) {
+    CommandCallBackData* callbackArgs =
+      new CommandCallBackData(cmd, cmd_size, size, num_poll_signals, out_signal, gang_signals, this);
+
+    if (callbackArgs == nullptr) {
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                             "Failed to allocate data for copy callback.");
+    }
+
+    for (size_t i = 0; i < dep_signals.size(); ++i) {
+      if (dep_signals_value[i]) {
+        core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
+                                         core::Signal::Convert(dep_signals[i]),
+                                         HSA_SIGNAL_CONDITION_EQ, 0, DepSignalCompleteHandler,
+                                         reinterpret_cast<void*>(callbackArgs));
+      }
+    }
+    return HSA_STATUS_SUCCESS;
+  }
 
   const uint32_t total_poll_command_size =
       (num_poll_command * poll_command_size_);
@@ -384,26 +462,12 @@ hsa_status_t BlitSdma<useGCR>::SubmitCommand(const void* cmd, size_t cmd_size, u
         command_addr += poll_command_size_;
         bytes_written_[wrapped_index] = prior_bytes;
         wrapped_index += poll_command_size_;
-
-        if (doublePoll) {
-          BuildPollCommand(command_addr, &signal_addr[1], 0);
-          command_addr += poll_command_size_;
-          bytes_written_[wrapped_index] = prior_bytes;
-          wrapped_index += poll_command_size_;
-        }
       }
       // Then wait for the lower 32 bits to 0.
       BuildPollCommand(command_addr, &signal_addr[0], 0);
       command_addr += poll_command_size_;
       bytes_written_[wrapped_index] = prior_bytes;
       wrapped_index += poll_command_size_;
-
-      if (doublePoll) {
-        BuildPollCommand(command_addr, &signal_addr[0], 0);
-        command_addr += poll_command_size_;
-        bytes_written_[wrapped_index] = prior_bytes;
-        wrapped_index += poll_command_size_;
-      }
     }
   }
 

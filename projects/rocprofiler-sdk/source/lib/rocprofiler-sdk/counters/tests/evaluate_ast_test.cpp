@@ -326,12 +326,16 @@ TEST(evaluate_ast, counter_constants)
             // Check that the value matches agent_t and that its dim/id is set correctly
             ASSERT_EQ(ptr->size(), 1);
             EXPECT_EQ(ptr->at(0).counter_value, raw_agent_values[c.name()]);
-            EXPECT_EQ(rocprofiler::counters::rec_to_counter_id(ptr->at(0).id).handle, c.id());
-            EXPECT_EQ(rocprofiler::counters::rec_to_dim_pos(
-                          ptr->at(0).id,
-                          rocprofiler::counters::rocprofiler_profile_counter_instance_types::
-                              ROCPROFILER_DIMENSION_NONE),
-                      0);
+
+            // After agent encoding changes, rec_to_counter_id() returns a full agent-encoded ID
+            // Extract and compare just the base metric ID
+            auto reconstructed_id = rocprofiler::counters::rec_to_counter_id(ptr->at(0).id);
+            auto base_metric =
+                rocprofiler::counters::get_base_metric_from_counter_id(reconstructed_id);
+            EXPECT_EQ(base_metric, c.id());
+
+            // Note: With agent encoding, ROCPROFILER_DIMENSION_AGENT is always set,
+            // so we cannot check that ROCPROFILER_DIMENSION_NONE == 0
         }
         asts.at("gfx9").at(name).expand_derived(asts.at("gfx9"));
         std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
@@ -340,13 +344,13 @@ TEST(evaluate_ast, counter_constants)
         EXPECT_FLOAT_EQ(ret->at(0).counter_value, final_computed_values[name]);
 
         asts.at("gfx9").at(name).set_out_id(*ret);
-        EXPECT_EQ(rocprofiler::counters::rec_to_counter_id(ret->at(0).id).handle,
-                  metrics[name].id());
-        EXPECT_EQ(rocprofiler::counters::rec_to_dim_pos(
-                      ret->at(0).id,
-                      rocprofiler::counters::rocprofiler_profile_counter_instance_types::
-                          ROCPROFILER_DIMENSION_NONE),
-                  0);
+        // After agent encoding changes, rec_to_counter_id() returns agent-encoded ID
+        // Extract and compare just the base metric ID
+        auto reconstructed_id = rocprofiler::counters::rec_to_counter_id(ret->at(0).id);
+        auto base_metric = rocprofiler::counters::get_base_metric_from_counter_id(reconstructed_id);
+        EXPECT_EQ(base_metric, metrics[name].id());
+        // Note: With agent encoding, ROCPROFILER_DIMENSION_AGENT is always set,
+        // so we cannot check that ROCPROFILER_DIMENSION_NONE == 0
     }
 }
 
@@ -528,7 +532,13 @@ TEST(evaluate_ast, evaluate_simple_counters)
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
+            // After agent encoding changes, compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }
@@ -650,7 +660,13 @@ run_reduce_test(
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
+            // After agent encoding changes, compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }
@@ -1155,7 +1171,14 @@ TEST(evaluate_ast, evaluate_mixed_counters)
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected.at(pos).id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected.at(pos).id);
+            // After agent encoding changes, compare base metrics extracted from counter IDs
+            auto v_counter_id = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id =
+                rocprofiler::counters::rec_to_counter_id(expected.at(pos).id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected.at(pos).counter_value);
             pos++;
         }
@@ -1253,7 +1276,13 @@ TEST(evaluate_ast, derived_counter_reduction)
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
+            // After agent encoding changes, compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }
@@ -1382,7 +1411,13 @@ TEST(evatuate_ast, evaluate_select)
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
+            // After agent encoding changes, compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }
@@ -1520,7 +1555,13 @@ TEST(evaluate_ast, counter_reduction_dimension)
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
+            // After agent encoding changes, compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }
