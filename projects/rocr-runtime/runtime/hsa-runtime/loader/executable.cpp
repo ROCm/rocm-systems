@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -40,14 +40,12 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "executable.hpp"
+
 #include <libelf.h>
 #include <limits.h>
-#if defined(__linux__)
 #include <link.h>
 #include <unistd.h>
-#else
-#include <cstdint>
-#endif
 
 #include <algorithm>
 #include <cstddef>
@@ -62,8 +60,6 @@
 #include "amd_hsa_code_util.hpp"
 #include "amd_options.hpp"
 #include "core/util/utils.h"
-
-#include "executable.hpp"
 
 #include "AMDHSAKernelDescriptor.h"
 
@@ -92,12 +88,7 @@ static __forceinline link_map*& r_debug_tail() {
 namespace rocr {
   // Having a side effect prevents call site optimization that allows removal of a noinline function call
   // with no side effect.
-#if defined(__linux__)
-  __attribute__((noinline)) 
-#else
-  __declspec(noinline)
-#endif
-void _loader_debug_state() {
+__attribute__((noinline)) void _loader_debug_state() {
   static volatile int function_needs_a_side_effect = 0;
   function_needs_a_side_effect ^= 1;
 }
