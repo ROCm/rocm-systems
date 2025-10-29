@@ -351,6 +351,7 @@ int IOLink::ReadProperties(void) {
 int
 IOLink::Initialize(void) {
   int ret = 0;
+  uint64_t tmp64 = 0;
   ret = ReadProperties();
   if (ret) {return ret;}
 
@@ -369,8 +370,9 @@ IOLink::Initialize(void) {
   ret = get_property_value(kIOLinkPropWEIGHTStr, &weight_);
   if (ret) {return ret;}
 
-  ret = get_property_value(kIOLinkPropFLAGSStr, reinterpret_cast<uint64_t *>(&flags_));
+  ret = get_property_value(kIOLinkPropFLAGSStr, &tmp64);
   if (ret) {return ret;}
+  flags_ = static_cast<uint32_t>(tmp64);
 
   ret = UpdateP2pCapability();
   if (ret) {return ret;}
