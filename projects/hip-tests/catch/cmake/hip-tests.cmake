@@ -67,7 +67,7 @@ function(hip_add_exe_to_target)
       target_compile_options(${_EXE_NAME} PUBLIC ${_COMPILE_OPTIONS})
     endif()
     target_link_libraries(${_EXE_NAME} Catch2::Catch2)
-    target_link_libraries(${_EXE_NAME} hip::device)
+    target_link_libraries(${_EXE_NAME} hip::host hip::device)
 
     foreach(arg IN LISTS _UNPARSED_ARGUMENTS)
         message(WARNING "Unparsed arguments: ${arg}")
