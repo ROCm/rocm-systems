@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <thread>
 
 #include "rdc_lib/rdc_common.h"
+#include "rdc_lib/impl/RdcMetricControl.h"
 
 namespace amd {
 namespace rdc {
@@ -54,6 +55,8 @@ void RdcMetricsUpdaterImpl::start() {
   });
   updater_ = std::async(std::launch::async, [this]() {
     while (started_) {
+      // Check if config needs to be reloaded
+      RdcMetricControl::getInstance().reloadConfigIfNeeded();
       watch_table_->rdc_field_update_all();
       std::this_thread::sleep_for(std::chrono::microseconds(_check_frequency));
     }
