@@ -5511,6 +5511,12 @@ def amdsmi_get_rocm_version()-> Tuple[bool, str]:
 
     try:
         possible_locations = list()
+        # 0. Relative to amdsmi_interface.py in TheRock:
+        #    `amdsmi_interface.py` is located in
+        #    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
+        #    `_rocm_sdk_core/lib`.
+        librocm_core_path = Path(__file__).resolve().parent.parent.parent.parent / "lib/librocm-core.so"
+        possible_locations.append(librocm_core_path)
         # 1.
         rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
         if rocm_path:
