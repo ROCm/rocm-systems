@@ -1642,7 +1642,9 @@ def load_yaml(filepath: str) -> dict[str, Any]:
 
 
 def get_panel_alias() -> dict[str, str]:
-    panel_yaml = load_yaml("{}/tools/config_management/gfx9_config_template.yaml".format(config.rocprof_compute_home.parent))
+    panel_yaml = load_yaml(
+        f"{config.rocprof_compute_home.parent}/tools/config_management/gfx9_config_template.yaml"
+    )
     return {
         panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml["panels"]
     }
