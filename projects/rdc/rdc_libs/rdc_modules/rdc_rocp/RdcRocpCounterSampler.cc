@@ -164,8 +164,6 @@ void CounterSampler::sample_counter_values(const std::vector<std::string>& count
   usleep(duration);
   rocprofiler_sample_device_counting_service(ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE, out.data(),
                                              &out_size);
-
-
   rocprofiler_stop_context(ctx_);
   out.resize(out_size);
 }
@@ -396,9 +394,14 @@ CounterSampler::ProfileSet CounterSampler::create_profiles_for_counters(
     }
   }
 
-  RDC_LOG(RDC_DEBUG, "Created " << profile_set.profiles.size()
-          << " profiles from " << counters.size() << " counters (compression: "
-          << (100.0 * profile_set.profiles.size() / counters.size()) << "%)");
+  if (counters.size() == 0) {
+    RDC_LOG(RDC_DEBUG, "Created " << profile_set.profiles.size()
+            << " profiles from 0 counters (compression: N/A)");
+  } else {
+    RDC_LOG(RDC_DEBUG, "Created " << profile_set.profiles.size()
+            << " profiles from " << counters.size() << " counters (compression: "
+            << (100.0 * profile_set.profiles.size() / counters.size()) << "%)");
+  }
 
   return profile_set;
 }
@@ -423,14 +426,12 @@ void CounterSampler::sample_counters_with_packing(const std::vector<std::string>
   // Clear output
   out_values.clear();
 
-  // Statistics tracking
-  static uint64_t total_sample_calls = 0;
-  static uint64_t total_profiles_sampled = 0;
+  // Statistics tracking (thread-safe)
+  static std::atomic<uint64_t> total_sample_calls{0};
+  static std::atomic<uint64_t> total_profiles_sampled{0};
 
   // Sample from all profiles in the set
-  int profile_index = 0;
   for (const auto& profile : cached->second.profiles) {
-    profile_index++;
     std::vector<rocprofiler_record_counter_t> records;
     records.resize(profile.expected_size);
 
@@ -444,8 +445,6 @@ void CounterSampler::sample_counters_with_packing(const std::vector<std::string>
     rocprofiler_sample_device_counting_service(ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE,
                                                records.data(), &out_size);
     total_sample_calls++;
-
-
     rocprofiler_stop_context(ctx_);
     records.resize(out_size);
 
