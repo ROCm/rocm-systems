@@ -36,11 +36,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <mutex>
-#include <sstream>
-#include <string>
-#include <unordered_map>
 #include <vector>
+#include <thread>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     if((result) != ROCPROFILER_STATUS_SUCCESS)                                                     \
@@ -99,6 +96,11 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
                      rocprofiler_thread_trace_shader_data_flags_t /* flags */,
                      rocprofiler_user_data_t userdata)
 {
+    static auto* is_slow = std::getenv("ATT_SLOW_CALLBACK");
+    static bool do_sleep = is_slow ? atoi(is_slow) != 0 : false;
+
+    if (do_sleep) std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
     auto* agent_output_buffer = static_cast<agent_output_buffer_t*>(userdata.ptr);
 
     size_t output_buf_size = agent_output_buffer->output_buffer.size();
@@ -140,7 +142,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
             agent_buffers->emplace_back(ATTTest::DoubleBuffer::agent_output_buffer_t{agent->id});
     }
 
-    constexpr uint64_t gpu_buffer_size = 4 << 20;
+    uint64_t gpu_buffer_size = 64 << 20;
 
     auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {1}});
@@ -148,7 +150,19 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {1}});
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
                             ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
-    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, 1});
+
+    auto* nodetail = std::getenv("ATT_NODETAIL");
+    bool extra_args = nodetail ? atoi(nodetail) != 0 : false;
+
+    if(extra_args)
+    {
+        // Dont generate instruction profiling, only occupancy and shaderdata
+        parameters.emplace_back(rocprofiler_thread_trace_parameter_t{
+            ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {1}});
+        gpu_buffer_size = 4 << 20;
+    }
+    
+    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {gpu_buffer_size}});
 
     for(auto& agent : *agent_buffers)
     {
@@ -213,10 +227,10 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
         for (auto& output_buffer : *agent_buffers)
         {
+            std::cout << "Trace size " << (output_buffer.output_size.load()>>20) << std::endl;
             uint32_t current_sdata = 0;
             auto& buffer = output_buffer.output_buffer;
             size_t output_size = std::min(output_buffer.output_size.exchange(0), buffer.size());
-            std::cout << "Trace size " << output_size << std::endl;
             rocprofiler_trace_decode(decoder, parse, buffer.data(), output_size, &current_sdata);
         }
     }

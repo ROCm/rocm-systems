@@ -153,24 +153,50 @@ set_tests_properties(
                DISABLED
                ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
 
-# Double buffer test
+# Double buffer tests
 add_executable(thread-trace-api-double-buffer-test)
 target_sources(thread-trace-api-double-buffer-test PRIVATE double_buffer.cpp main.cpp
                                                    kernel_branch.cpp kernel_lds.cpp)
-target_link_libraries(
-    thread-trace-api-double-buffer-test
-    PRIVATE ${COMMON_LINK_LIBRARIES})
+target_link_libraries(thread-trace-api-double-buffer-test PRIVATE ${COMMON_LINK_LIBRARIES})
 
-add_test(NAME thread-trace-api-double-buffer-test
+add_test(NAME thread-trace-api-double-buffer-consistency-test
          COMMAND $<TARGET_FILE:thread-trace-api-double-buffer-test>)
 
 set_tests_properties(
-    thread-trace-api-double-buffer-test
+    thread-trace-api-double-buffer-consistency-test
     PROPERTIES TIMEOUT
                120
                LABELS
                "integration-tests"
                ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1"
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+add_test(NAME thread-trace-api-double-buffer-hammer-test
+         COMMAND $<TARGET_FILE:thread-trace-api-double-buffer-test>)
+
+set_tests_properties(
+    thread-trace-api-double-buffer-hammer-test
+    PROPERTIES TIMEOUT
+               240
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1;ATT_NODETAIL=0;ATT_SLOW_CALLBACK=0"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+add_test(NAME thread-trace-api-double-buffer-slow-test
+         COMMAND $<TARGET_FILE:thread-trace-api-double-buffer-test>)
+
+set_tests_properties(
+    thread-trace-api-double-buffer-slow-test
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
