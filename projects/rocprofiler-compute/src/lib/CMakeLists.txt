@@ -11,8 +11,5 @@ endif()
 find_package(rocprofiler-sdk REQUIRED)
 
 add_library(rocprofiler-compute-tool SHARED)
-target_sources(rocprofiler-compute-tool PRIVATE 
-    rocprofiler_compute_tool.cpp
-    helper.cpp
-)
+target_sources(rocprofiler-compute-tool PRIVATE rocprofiler_compute_tool.cpp helper.cpp)
 target_link_libraries(rocprofiler-compute-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk)

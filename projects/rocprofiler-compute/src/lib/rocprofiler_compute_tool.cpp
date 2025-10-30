@@ -137,7 +137,8 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                      size_t record_count,
                      rocprofiler_user_data_t /* user_data */,
                      void *callback_data_args) {
-  auto *tool_data_ptr = static_cast<std::unique_ptr<tool_data_t> *>(callback_data_args);
+  auto *tool_data_ptr =
+      static_cast<std::unique_ptr<tool_data_t> *>(callback_data_args);
   tool_data_t *tool;
   {
     std::lock_guard<std::mutex> lock(tool_data_ptr->get()->mut);
@@ -178,12 +179,14 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
           ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER) {
     auto *data = static_cast<kernel_symbol_data_t *>(record.payload);
     int demangle_status = 0;
-    auto kernel_name = helper_utils::cxa_demangle(data->kernel_name, &demangle_status);
+    auto kernel_name =
+        helper_utils::cxa_demangle(data->kernel_name, &demangle_status);
     kernel_name = helper_utils::truncate_name(kernel_name);
 
     // check if regex can be found in kernel name matches regex from tool data,
     // if matches store kernel id
-    auto *tool_data_ptr = static_cast<std::unique_ptr<tool_data_t> *>(callback_data);
+    auto *tool_data_ptr =
+        static_cast<std::unique_ptr<tool_data_t> *>(callback_data);
     auto *tool = tool_data_ptr->get();
     // Lock before modifying target_kernel_ids
     std::lock_guard<std::mutex> lock(tool->mut);
@@ -244,30 +247,38 @@ bool is_targetted_dispatch(const tool_data_t *tool, uint64_t kernel_id,
 }
 
 /**
- * @brief Creates a counter collection profile for performance monitoring on a specific GPU agent.
+ * @brief Creates a counter collection profile for performance monitoring on a
+ * specific GPU agent.
  *
- * This function parses the requested counters from the tool configuration, validates them against
- * the counters supported by the target GPU agent, and creates a rocprofiler counter configuration
- * for collecting the available requested counters during dispatch profiling.
+ * This function parses the requested counters from the tool configuration,
+ * validates them against the counters supported by the target GPU agent, and
+ * creates a rocprofiler counter configuration for collecting the available
+ * requested counters during dispatch profiling.
  *
- * @param tool Pointer to tool data containing the requested counters string and counter mappings
- * @param dispatch_data Dispatch counting service data containing agent information for the target GPU
+ * @param tool Pointer to tool data containing the requested counters string and
+ * counter mappings
+ * @param dispatch_data Dispatch counting service data containing agent
+ * information for the target GPU
  *
- * @return rocprofiler_counter_config_id_t A valid counter configuration profile ID that can be used
- *         for counter collection, or an invalid profile (handle = 0) if creation fails
+ * @return rocprofiler_counter_config_id_t A valid counter configuration profile
+ * ID that can be used for counter collection, or an invalid profile (handle =
+ * 0) if creation fails
  *
  * @details
  * The function performs the following operations:
- * 1. Parses the requested counters from tool->requested_counters string (format: "prefix:counter1 counter2 ...")
+ * 1. Parses the requested counters from tool->requested_counters string
+ * (format: "prefix:counter1 counter2 ...")
  * 2. Queries all counters supported by the specified GPU agent
  * 3. Filters the supported counters to match only those requested
- * 4. Logs warnings for any requested counters that are not supported by the agent
- * 5. Creates and returns a rocprofiler counter configuration for the valid counters
+ * 4. Logs warnings for any requested counters that are not supported by the
+ * agent
+ * 5. Creates and returns a rocprofiler counter configuration for the valid
+ * counters
  * 6. Updates the tool's counter ID to name mapping for later reference
  *
- * @note If no counters are requested or none of the requested counters are supported,
- *       an empty profile may be created. Unsupported counters are logged as warnings
- *       but do not cause the function to fail.
+ * @note If no counters are requested or none of the requested counters are
+ * supported, an empty profile may be created. Unsupported counters are logged
+ * as warnings but do not cause the function to fail.
  */
 rocprofiler_counter_config_id_t create_counter_collection_profile(
     tool_data_t *tool,
@@ -376,7 +387,8 @@ void dispatch_callback(
   }
 
   // static cast tool
-  auto *tool_data_ptr = static_cast<std::unique_ptr<tool_data_t> *>(callback_data_args);
+  auto *tool_data_ptr =
+      static_cast<std::unique_ptr<tool_data_t> *>(callback_data_args);
   tool_data_t *tool;
   {
     std::lock_guard<std::mutex> lock(tool_data_ptr->get()->mut);
@@ -458,7 +470,7 @@ void generate_output(tool_data_t *tool_data) {
   }
 
   // Write collected counter records and clean up
-  if (auto& os = tool_data->output_stream) {
+  if (auto &os = tool_data->output_stream) {
     for (const auto &r : tool_data->counter_records)
       *os << r.dispatch_id << ',' << r.counter_id << ',' << r.counter_name
           << ',' << r.counter_value << '\n';
@@ -479,10 +491,11 @@ void tool_fini(void *user_data) {
 
 } // namespace
 
-std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* id) {
+std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t *id) {
   auto tool_data = std::make_unique<tool_data_t>();
 
-  // Generate a unique output filename using a random hex string (no libuuid dependency)
+  // Generate a unique output filename using a random hex string (no libuuid
+  // dependency)
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<uint32_t> dis(0, 0xFFFFFFFF);
@@ -592,7 +605,8 @@ rocprofiler_configure(uint32_t version, const char *runtime_version,
   // create configure data
   static auto cfg = rocprofiler_tool_configure_result_t{
       sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini,
-      static_cast<void *>(new std::unique_ptr<tool_data_t>(std::move(tool_data)))};
+      static_cast<void *>(
+          new std::unique_ptr<tool_data_t>(std::move(tool_data)))};
 
   // return pointer to configure data
   return &cfg;
