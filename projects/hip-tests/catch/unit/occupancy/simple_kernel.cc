@@ -17,7 +17,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 
 extern "C" __global__ void SimpleKernel(int* a, int* b) {
   int tx = threadIdx.x;
