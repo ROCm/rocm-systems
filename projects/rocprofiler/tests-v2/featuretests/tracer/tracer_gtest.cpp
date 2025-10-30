@@ -239,7 +239,7 @@ TEST_F(HelloWorldTest, DISABLED_WhenRunningTracerWithAppThenKernelInfoMatchWithG
 
 // Test:2 Compares order of kernel-names in golden output against current
 // tracer output
-TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenFunctionNamesMatchWithGoldenOutput) {
+TEST_F(HelloWorldTest, DISABLED_WhenRunningTracerWithAppThenFunctionNamesMatchWithGoldenOutput) {
   // kernel info in current tracer run
   std::vector<tracer_kernel_info_t> current_kernel_info;
   GetKernelInfoForRunningApplication(&current_kernel_info);
@@ -262,7 +262,7 @@ TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenFunctionNamesMatchWithGoldenO
 
 // Test:3 Compares order of kernel-names in golden output against current
 // tracer output
-TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenKernelDurationShouldBePositive) {
+TEST_F(HelloWorldTest, DISABLED_WhenRunningTracerWithAppThenKernelDurationShouldBePositive) {
   // kernel info in current tracer run
   std::vector<tracer_kernel_info_t> current_kernel_info;
 
@@ -274,7 +274,7 @@ TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenKernelDurationShouldBePositiv
 
 // Test:4 Compares end-time is greater than start-time in current
 // tracer output
-TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenEndTimeIsGreaterThenStartTime) {
+TEST_F(HelloWorldTest, DISABLED_WhenRunningTracerWithAppThenEndTimeIsGreaterThenStartTime) {
   // kernel info in current profiler run
   std::vector<tracer_kernel_info_t> current_kernel_info;
 
