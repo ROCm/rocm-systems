@@ -50,7 +50,6 @@ namespace trace_cache
 {
 namespace
 {
-
 #if ROCPROFSYS_USE_ROCM > 0
 auto
 get_handle_from_code_object(
@@ -405,71 +404,106 @@ rocpd_post_processing::get_pmc_event_with_sample_callback() const
 postprocessing_callback
 rocpd_post_processing::get_amd_smi_sample_callback() const
 {
-    struct xcp_metrics_t
+    struct gpu_metrics_t
     {
         std::vector<uint16_t> vcn_busy;
         std::vector<uint16_t> jpeg_busy;
+
+        uint16_t              xgmi_link_width = 0;
+        uint16_t              xgmi_link_speed = 0;
+        std::vector<uint64_t> xgmi_read_data_acc;
+        std::vector<uint64_t> xgmi_write_data_acc;
+
+        uint16_t pcie_link_width     = 0;
+        uint16_t pcie_link_speed     = 0;
+        uint64_t pcie_bandwidth_acc  = 0;
+        uint64_t pcie_bandwidth_inst = 0;
     };
 
-    auto deserialize_xcp_metrics = [](const std::vector<uint8_t>& serialized_data,
-                                      bool& _is_vcn_supported, bool& _is_jpeg_supported,
-                                      std::vector<xcp_metrics_t>& result) {
-        if(serialized_data.size() < 5)
+    auto deserialize_gpu_metrics = [](const std::vector<uint8_t>& serialized_data,
+                                      gpu_metrics_t& result, bool is_vcn_enabled,
+                                      bool is_jpeg_enabled, bool is_xgmi_enabled,
+                                      bool is_pcie_enabled) {
+        // - counts (4 bytes): vcn_count, jpeg_count, xgmi_read_count, xgmi_write_count
+        // - conditional data based on settings (passed as parameters)
+        if(serialized_data.empty())
         {
             throw std::runtime_error("Invalid serialized data: insufficient header size");
+            // return;  // Empty data, nothing to deserialize
         }
-
         size_t offset = 0;
 
-        // Read header
-        _is_vcn_supported   = static_cast<bool>(serialized_data[offset++]);
-        _is_jpeg_supported  = static_cast<bool>(serialized_data[offset++]);
-        uint8_t chunk_count = serialized_data[offset++];
-        uint8_t vcn_count   = serialized_data[offset++];
-        uint8_t jpeg_count  = serialized_data[offset++];
-
-        constexpr size_t elem_size  = sizeof(uint16_t) / sizeof(uint8_t);
-        const size_t     chunk_size = (vcn_count + jpeg_count) * elem_size;
-
-        // Validate total size
-        const size_t expected_size = 5 + (chunk_count * chunk_size);
-        if(serialized_data.size() != expected_size)
-        {
-            throw std::runtime_error("Invalid serialized data: size mismatch");
-        }
-
-        auto deserialize_uint16_array = [](const std::vector<uint8_t>& data,
-                                           size_t& _offset, int array_size) {
-            std::vector<uint16_t> _result;
-            _result.reserve(array_size);
-
-            for(int i = 0; i < array_size; ++i)
-            {
-                if(_offset + 1 >= data.size())
-                {
-                    throw std::runtime_error(
-                        "Invalid serialized data: unexpected end of data");
-                }
-
-                uint16_t value = static_cast<uint16_t>(data[_offset]) |
-                                 (static_cast<uint16_t>(data[_offset + 1]) << 8);
-                _result.push_back(value);
-                _offset += 2;
-            }
-
-            return _result;
+        auto deserialize_uint8 = [](const std::vector<uint8_t>& data, size_t& _offset) {
+            if(_offset >= data.size())
+                throw std::runtime_error("Invalid serialized data: unexpected end");
+            return data[_offset++];
         };
 
-        result.reserve(chunk_count);
+        auto deserialize_uint16 = [](const std::vector<uint8_t>& data, size_t& _offset) {
+            if(_offset + 1 >= data.size())
+                throw std::runtime_error("Invalid serialized data: unexpected end");
+            uint16_t value = static_cast<uint16_t>(data[_offset]) |
+                             (static_cast<uint16_t>(data[_offset + 1]) << 8);
+            _offset += 2;
+            return value;
+        };
 
-        for(size_t count = 0; count < chunk_count; ++count)
+        auto deserialize_uint64 = [](const std::vector<uint8_t>& data, size_t& _offset) {
+            if(_offset + 7 >= data.size())
+                throw std::runtime_error("Invalid serialized data: unexpected end");
+            uint64_t value = 0;
+            for(int i = 0; i < 8; ++i)
+                value |= (static_cast<uint64_t>(data[_offset + i]) << (i * 8));
+            _offset += 8;
+            return value;
+        };
+
+        auto deserialize_uint16_vector = [&](const std::vector<uint8_t>& data,
+                                             size_t& _offset, uint8_t count) {
+            std::vector<uint16_t> values;
+            values.reserve(count);
+            for(uint8_t i = 0; i < count; ++i)
+                values.push_back(deserialize_uint16(data, _offset));
+            return values;
+        };
+
+        auto deserialize_uint64_vector = [&](const std::vector<uint8_t>& data,
+                                             size_t& _offset, uint8_t count) {
+            std::vector<uint64_t> values;
+            values.reserve(count);
+            for(uint8_t i = 0; i < count; ++i)
+                values.push_back(deserialize_uint64(data, _offset));
+            return values;
+        };
+
+        // Deserialize counts
+        uint8_t vcn_count        = deserialize_uint8(serialized_data, offset);
+        uint8_t jpeg_count       = deserialize_uint8(serialized_data, offset);
+        uint8_t xgmi_read_count  = deserialize_uint8(serialized_data, offset);
+        uint8_t xgmi_write_count = deserialize_uint8(serialized_data, offset);
+
+        // Conditionally deserialize data based on settings
+        if(is_vcn_enabled && vcn_count > 0)
+            result.vcn_busy =
+                deserialize_uint16_vector(serialized_data, offset, vcn_count);
+        if(is_jpeg_enabled && jpeg_count > 0)
+            result.jpeg_busy =
+                deserialize_uint16_vector(serialized_data, offset, jpeg_count);
+        if(is_xgmi_enabled)
         {
-            xcp_metrics_t entry;
-            entry.vcn_busy = deserialize_uint16_array(serialized_data, offset, vcn_count);
-            entry.jpeg_busy =
-                deserialize_uint16_array(serialized_data, offset, jpeg_count);
-
-            result.emplace_back(std::move(entry));
+            result.xgmi_link_width = deserialize_uint16(serialized_data, offset);
+            result.xgmi_link_speed = deserialize_uint16(serialized_data, offset);
+            result.xgmi_read_data_acc =
+                deserialize_uint64_vector(serialized_data, offset, xgmi_read_count);
+            result.xgmi_write_data_acc =
+                deserialize_uint64_vector(serialized_data, offset, xgmi_write_count);
+        }
+        if(is_pcie_enabled)
+        {
+            result.pcie_link_width     = deserialize_uint16(serialized_data, offset);
+            result.pcie_link_speed     = deserialize_uint16(serialized_data, offset);
+            result.pcie_bandwidth_acc  = deserialize_uint64(serialized_data, offset);
+            result.pcie_bandwidth_inst = deserialize_uint64(serialized_data, offset);
         }
     };
 
@@ -502,6 +536,8 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
 
         bool is_vcn_enabled  = settings_bits.test(static_cast<int>(pos::vcn_activity));
         bool is_jpeg_enabled = settings_bits.test(static_cast<int>(pos::jpeg_activity));
+        bool is_xgmi_enabled = settings_bits.test(static_cast<int>(pos::xgmi));
+        bool is_pcie_enabled = settings_bits.test(static_cast<int>(pos::pcie));
 
         insert_event_and_sample(
             is_busy_enabled, trait::name<category::amd_smi_gfx_busy>::value,
@@ -536,55 +572,114 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
                 .c_str(),
             _amd_smi.mem_usage);
 
-        if(!is_vcn_enabled && !is_jpeg_enabled)
-        {
+        if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled)
             return;
-        }
 
-        std::vector<xcp_metrics_t> xcp_metrics;
-        bool                       is_vcn_activity_supported;
-        bool                       is_jpeg_activity_supported;
-        deserialize_xcp_metrics(_amd_smi.xcp_activity, is_vcn_activity_supported,
-                                is_jpeg_activity_supported, xcp_metrics);
+        gpu_metrics_t gpu_metrics;
+        deserialize_gpu_metrics(_amd_smi.gpu_activity, gpu_metrics, is_vcn_enabled,
+                                is_jpeg_enabled, is_xgmi_enabled, is_pcie_enabled);
 
-        auto insert_xcp_metrics = [&](auto category, bool _is_enabled,
-                                      const std::vector<uint16_t>& data,
-                                      std::optional<size_t>        _idx = std::nullopt) {
-            if(!_is_enabled)
-            {
-                return;
-            }
+        // Lambda to insert uint16_t vector-based metrics (VCN, JPEG)
+        auto insert_uint16_vector_metrics = [&](auto category, bool _is_enabled,
+                                                const std::vector<uint16_t>& data,
+                                                std::optional<size_t>        _idx =
+                                                    std::nullopt) {
+            if(!_is_enabled) return;
 
             using Category = std::decay_t<decltype(category)>;
 
-            for(size_t clk = 0; clk < data.size(); ++clk)
+            for(size_t i = 0; i < data.size(); ++i)
             {
-                const auto value = data[clk];
-                if(value == std::numeric_limits<uint16_t>::max())
-                {
-                    continue;
-                }
+                const auto value = data[i];
+                if(value == std::numeric_limits<uint16_t>::max()) continue;
 
-                auto pmc_name   = info::annotate_category<Category>(_idx, clk);
-                auto track_name = info::annotate_with_device_id<Category>(
-                    _amd_smi.device_id, _idx, clk);
+                auto pmc_name = info::annotate_category<Category>(_idx, i);
+                auto track_name =
+                    info::annotate_with_device_id<Category>(_amd_smi.device_id, _idx, i);
 
                 insert_event_and_sample(_is_enabled, pmc_name.c_str(), track_name.c_str(),
-                                        value);
+                                        static_cast<double>(value));
             }
         };
 
-        for(size_t idx = 0; idx < xcp_metrics.size(); ++idx)
-        {
-            auto dimension =
-                xcp_metrics.size() == 1 ? std::nullopt : std::make_optional<size_t>(idx);
+        // Lambda to insert uint64_t vector-based metrics (XGMI read/write)
+        auto insert_uint64_vector_metrics = [&](auto category, bool _is_enabled,
+                                                const std::vector<uint64_t>& data,
+                                                std::optional<size_t>        _idx =
+                                                    std::nullopt) {
+            if(!_is_enabled) return;
 
-            insert_xcp_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
-                               xcp_metrics[idx].vcn_busy, dimension);
+            using Category = std::decay_t<decltype(category)>;
 
-            insert_xcp_metrics(category::amd_smi_jpeg_activity{}, is_jpeg_enabled,
-                               xcp_metrics[idx].jpeg_busy, dimension);
-        }
+            for(size_t i = 0; i < data.size(); ++i)
+            {
+                const auto value = data[i];
+                if(value == std::numeric_limits<uint64_t>::max()) continue;
+
+                auto pmc_name = info::annotate_category<Category>(_idx, i);
+                auto track_name =
+                    info::annotate_with_device_id<Category>(_amd_smi.device_id, _idx, i);
+
+                insert_event_and_sample(_is_enabled, pmc_name.c_str(), track_name.c_str(),
+                                        static_cast<double>(value));
+            }
+        };
+
+        // Process uint16_t vector-based metrics
+        insert_uint16_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
+                                     gpu_metrics.vcn_busy, std::nullopt);
+
+        insert_uint16_vector_metrics(category::amd_smi_jpeg_activity{}, is_jpeg_enabled,
+                                     gpu_metrics.jpeg_busy, std::nullopt);
+
+        // Insert XGMI metrics (scalar values)
+        insert_event_and_sample(
+            is_xgmi_enabled, trait::name<category::amd_smi_xgmi_link_width>::value,
+            info::annotate_with_device_id<category::amd_smi_xgmi_link_width>(
+                _amd_smi.device_id)
+                .c_str(),
+            gpu_metrics.xgmi_link_width);
+
+        insert_event_and_sample(
+            is_xgmi_enabled, trait::name<category::amd_smi_xgmi_link_speed>::value,
+            info::annotate_with_device_id<category::amd_smi_xgmi_link_speed>(
+                _amd_smi.device_id)
+                .c_str(),
+            gpu_metrics.xgmi_link_speed);
+
+        insert_uint64_vector_metrics(category::amd_smi_xgmi_read_data{}, is_xgmi_enabled,
+                                     gpu_metrics.xgmi_read_data_acc, std::nullopt);
+
+        insert_uint64_vector_metrics(category::amd_smi_xgmi_write_data{}, is_xgmi_enabled,
+                                     gpu_metrics.xgmi_write_data_acc, std::nullopt);
+
+        insert_event_and_sample(
+            is_pcie_enabled, trait::name<category::amd_smi_pcie_link_width>::value,
+            info::annotate_with_device_id<category::amd_smi_pcie_link_width>(
+                _amd_smi.device_id)
+                .c_str(),
+            gpu_metrics.pcie_link_width);
+
+        insert_event_and_sample(
+            is_pcie_enabled, trait::name<category::amd_smi_pcie_link_speed>::value,
+            info::annotate_with_device_id<category::amd_smi_pcie_link_speed>(
+                _amd_smi.device_id)
+                .c_str(),
+            gpu_metrics.pcie_link_speed);
+
+        insert_event_and_sample(
+            is_pcie_enabled, trait::name<category::amd_smi_pcie_bandwidth_acc>::value,
+            info::annotate_with_device_id<category::amd_smi_pcie_bandwidth_acc>(
+                _amd_smi.device_id)
+                .c_str(),
+            static_cast<double>(gpu_metrics.pcie_bandwidth_acc));
+
+        insert_event_and_sample(
+            is_pcie_enabled, trait::name<category::amd_smi_pcie_bandwidth_inst>::value,
+            info::annotate_with_device_id<category::amd_smi_pcie_bandwidth_inst>(
+                _amd_smi.device_id)
+                .c_str(),
+            static_cast<double>(gpu_metrics.pcie_bandwidth_inst));
     };
 }
 
