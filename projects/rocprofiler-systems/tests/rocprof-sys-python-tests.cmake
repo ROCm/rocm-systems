@@ -161,7 +161,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             TEST
             ""
             "NAME;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_FILE"
-            "ARGS;PERFETTO_METRIC"
+            "ARGS;PERFETTO_METRIC;ROCPD_FILE;ROCPD_RULES"
             ${ARGN}
         )
 
@@ -191,6 +191,27 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
                 "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_PERFETTO_FILE} validated"
             ENVIRONMENT "${_python_environment}"
         )
+
+        if(
+            ${ENABLE_ROCPD_TEST}
+            AND ${_VALID_GPU}
+            AND TEST_ROCPD_FILE
+            AND TEST_ROCPD_RULES
+        )
+            rocprofiler_systems_add_python_test(
+                NAME ${TEST_NAME}-validate-rocpd
+                COMMAND
+                    ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
+                    -r ${TEST_ROCPD_RULES} -db
+                PYTHON_VERSION ${_VERSION}
+                FILE rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_ROCPD_FILE}
+                DEPENDS ${TEST_NAME}-${_VERSION}
+                PASS_REGEX
+                    "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_ROCPD_FILE} validated"
+                ENVIRONMENT "${_python_environment}"
+                LABELS "rocpd"
+            )
+        endif()
     endfunction()
 
     set(python_source_labels
@@ -237,6 +258,9 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PERFETTO_METRIC ${python_source_categories}
         ARGS -l ${python_source_labels} -c ${python_source_count} -d
              ${python_source_depth}
+        ROCPD_FILE "rocpd.db"
+        ROCPD_RULES
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-source-rules.json"
     )
 
     set(python_builtin_labels
@@ -290,6 +314,10 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PERFETTO_FILE "perfetto-trace.proto"
         ARGS -l ${python_builtin_labels} -c ${python_builtin_count} -d
              ${python_builtin_depth}
+        ROCPD_FILE "rocpd.db"
+        ROCPD_RULES
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-builtin-rules.json"
     )
+
     math(EXPR _INDEX "${_INDEX} + 1")
 endforeach()

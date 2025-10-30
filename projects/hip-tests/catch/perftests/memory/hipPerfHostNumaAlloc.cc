@@ -24,40 +24,22 @@ THE SOFTWARE.
  * `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
  * Copies data between host and device.
  */
-
+#include <unistd.h>
 #include <numaif.h>
+#include <numa.h>
 #include <hip_test_common.hh>
 // #define ENABLE_DEBUG 1
 // To run it correctly, we must not export HIP_VISIBLE_DEVICES.
 // And we must explicitly link libnuma because of numa api move_pages().
-#define NUM_PAGES 4
+#define NUM_PAGES 100
 char* h = nullptr;
 char* d_h = nullptr;
 char* m = nullptr;
 char* d_m = nullptr;
-int page_size = 1024;
+int page_size = 0;
 
 const int mode[] = {MPOL_DEFAULT, MPOL_BIND, MPOL_PREFERRED, MPOL_INTERLEAVE};
 const char* modeStr[] = {"MPOL_DEFAULT", "MPOL_BIND", "MPOL_PREFERRED", "MPOL_INTERLEAVE"};
-
-std::string exeCommand(const char* cmd) {
-  std::array<char, 128> buff;
-  std::string result;
-  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
-  if (!pipe) {
-    return result;
-  }
-  while (fgets(buff.data(), buff.size(), pipe.get()) != nullptr) {
-    result += buff.data();
-  }
-  return result;
-}
-
-int getCpuAgentCount() {
-  const char* cmd = "cat /proc/cpuinfo | grep \"physical id\" | sort | uniq | wc -l";
-  int cpuAgentCount = std::atoi(exeCommand(cmd).c_str());
-  return cpuAgentCount;
-}
 
 bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
   void* pages[NUM_PAGES];
@@ -66,19 +48,19 @@ bool test(int cpuId, int gpuId, int numaMode, unsigned int hostMallocflags) {
 
   CONSOLE_PRINT("set cpu %d, gpu %d, numaMode %d, hostMallocflags %u\n", cpuId, gpuId, numaMode,
                 hostMallocflags);
+  if (gpuId >= 0) {
+    HIP_CHECK(hipSetDevice(gpuId));
+  }
 
   if (cpuId >= 0) {
     unsigned long nodeMask = 1 << cpuId;           // NOLINT
     unsigned long maxNode = sizeof(nodeMask) * 8;  // NOLINT
+    // Will override existing numa policy in memory
     if (set_mempolicy(numaMode, numaMode == MPOL_DEFAULT ? NULL : &nodeMask,
                       numaMode == MPOL_DEFAULT ? 0 : maxNode) == -1) {
       WARN("set_mempolicy() failed with err " << errno << "\n");
       return false;
     }
-  }
-
-  if (gpuId >= 0) {
-    HIP_CHECK(hipSetDevice(gpuId));
   }
 
   posix_memalign(reinterpret_cast<void**>(&m), page_size, page_size * NUM_PAGES);
@@ -164,8 +146,9 @@ bool runTest(const int& cpuCount, const int& gpuCount, unsigned int hostMallocfl
 TEST_CASE("Perf_hipPerfHostNumaAlloc_test") {
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
-  int cpuCount = getCpuAgentCount();
-  CONSOLE_PRINT("Cpu count %d, Gpu count %d\n", cpuCount, gpuCount);
+  int cpuCount = numa_max_node() + 1; // number of numa nodes
+  page_size = getpagesize();
+  CONSOLE_PRINT("Cpu count %d, Gpu count %d, page_size %d\n", cpuCount, gpuCount, page_size);
 
   if (cpuCount < 0 || gpuCount < 0) {
     SUCCEED(

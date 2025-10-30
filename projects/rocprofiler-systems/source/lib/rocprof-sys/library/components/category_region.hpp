@@ -26,11 +26,15 @@
 #include "core/defines.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
+#include "core/trace_cache/cache_manager.hpp"
 #include "library/causal/data.hpp"
 #include "library/runtime.hpp"
+#include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
 
+#include <map>
+#include <thread>
 #include <timemory/components/gotcha/backends.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/concepts.hpp>
@@ -38,6 +42,83 @@
 #include <timemory/utility/types.hpp>
 
 #include <string_view>
+#include <utility>
+
+namespace
+{
+
+void
+cache_region(uint64_t thread_id, const std::string& name, uint64_t start_ts,
+             uint64_t end_ts, const std::string& category)
+{
+    constexpr size_t      NO_CORRELATION_ID = 0;
+    constexpr const char* CALLSTACK         = "";
+    constexpr const char* ARGUMENTS         = "";
+    rocprofsys::trace_cache::get_buffer_storage().store(
+        rocprofsys::trace_cache::entry_type::region, thread_id, name.c_str(),
+        NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts, end_ts, CALLSTACK, ARGUMENTS,
+        category.c_str());
+}
+
+struct entry_key
+{
+    std::string name;
+    std::string category;
+
+    friend bool operator<(const entry_key& lhs, const entry_key& rhs)
+    {
+        if(lhs.name != rhs.name)
+        {
+            return lhs.name < rhs.name;
+        }
+
+        return lhs.category < rhs.category;
+    }
+};
+
+using timestamp_t = uint64_t;
+
+thread_local std::map<entry_key, timestamp_t> map_name_to_args;
+
+template <typename CategoryT, typename... Args>
+void
+cache_start(const char* name)
+{
+    const auto start_ts =
+        static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
+    map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }] = start_ts;
+}
+
+template <typename CategoryT>
+void
+cache_stop(const char* name)
+{
+    entry_key key{ name, rocprofsys::trait::name<CategoryT>::value };
+    auto      x = map_name_to_args.find(key);
+    if(x != map_name_to_args.end())
+    {
+        map_name_to_args.erase(key);
+        auto timestamp = x->second;
+
+        const auto end_ts =
+            static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
+        uint64_t thread_id = 0;
+
+        const auto& extended_info =
+            rocprofsys::thread_info::get(std::this_thread::get_id());
+        if(extended_info.has_value() && extended_info->index_data.has_value())
+        {
+            constexpr size_t UNKNOWN_TIME = 0;
+            thread_id                     = extended_info->index_data->system_value;
+            rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
+                { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+        }
+
+        cache_region(thread_id, name, timestamp, end_ts,
+                     rocprofsys::trait::name<CategoryT>::value);
+    }
+}
+}  // namespace
 
 namespace tim
 {
@@ -192,6 +273,8 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
             tracing::push_perfetto(CategoryT{}, name.data(), std::forward<Args>(args)...);
         }
     }
+
+    cache_start<CategoryT>(name.data());
 }
 
 template <typename CategoryT>
@@ -257,6 +340,8 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
                 if(get_use_causal()) causal::pop_progress_point(name);
             }
         }
+
+        cache_stop<CategoryT>(name.data());
     }
     else
     {

@@ -58,6 +58,8 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
                                           "Provides spdlog library"
+rocprofiler_systems_add_interface_library(rocprofiler-systems-json
+                                          "Use nlohmann/json for json data handling"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
                                           "Provides timemory libraries"
@@ -545,6 +547,14 @@ include(Perfetto)
 # ----------------------------------------------------------------------------------------#
 
 include(SQLite3)
+
+# ----------------------------------------------------------------------------------------#
+#
+# NlohmannJson
+#
+# ----------------------------------------------------------------------------------------#
+
+include(NlohmannJson)
 
 # ----------------------------------------------------------------------------------------#
 #
