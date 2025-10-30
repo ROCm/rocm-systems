@@ -965,6 +965,21 @@ def patch_args(data):
 
 
 def get_args(cmd_args, inp_args, filter=[], require_in_both=False):
+    """
+    Merges key and values in dict cmd_args and inp_args and returns the merged dict. This is typically used to combine
+    arguments from multiple sources (e.g. command line and an input file).
+
+    If a key has conflicting values in cmd_args and inp_args, a RuntimeError is thrown.
+    If a filter is provided (as a list of regex strings), only keys matching at least one filter regex will throw a
+    RuntimeError for conflicting values. If the key with conflicting values does not match a filter, a warning is
+    generated instead, and the value from cmd_args is used in the merged dict.
+    If require_in_both is True, all keys must be present in both cmd_args and inp_args or a RuntimeError is thrown.
+    This is typically used when arguments must match exactly.
+    If a filter is provided and require_in_both is True, only keys matching at least one filter regex will throw a
+    RuntimeError if they are not present in both cmd_args and inp_args. If the key does not match a filter, a warning
+    is generated instead, and the unique key is used in the merged dict.
+    """
+
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):
             raise TypeError(
@@ -1001,6 +1016,9 @@ def get_args(cmd_args, inp_args, filter=[], require_in_both=False):
 
                 if re.match(fitr, key):
                     return True
+        else:
+            # if there are no filters, all keys match
+            return True
         return False
 
     for itr in set(cmd_keys + inp_keys):
@@ -1780,9 +1798,12 @@ def main(argv=None):
                     prev_args = pickle.load(ifs)
 
                 # get_args will compare the arguments used to the previous attachments's arguments
+                # arguments matching the filter will throw an error if they are different
                 args = get_args(
                     args,
                     dotdict(prev_args),
+                    # when updating this filter, please also update documentation on reattachment
+                    # in using-rocprofv3-process-attachment.rst
                     filter=[
                         ".*_trace",
                         "^pc_sampling_.*$",
