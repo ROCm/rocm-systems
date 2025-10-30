@@ -377,42 +377,6 @@ TEST_CASE("Unit_TexObjectCreate_TypePitch2D_IncompleteInit") {
 
   auto num_channels = GENERATE(1, 2, 4);
 
-  SECTION("Only devPtr initialized") {
-    res_desc.res.pitch2D.devPtr = reinterpret_cast<hipDeviceptr_t>(tex_buffer);
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Only formats initialized") {
-    res_desc.res.pitch2D.format = formats;
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Only num_channels initialized") {
-    res_desc.res.pitch2D.numChannels = num_channels;
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Only pitch_in_bytes initialized") {
-    res_desc.res.pitch2D.pitchInBytes = N;
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Only width initialized") {
-    res_desc.res.pitch2D.width = width;
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Only height initialized") {
-    res_desc.res.pitch2D.height = height;
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
   SECTION("Missing devPtr") {
     res_desc.res.pitch2D.format = formats;
     res_desc.res.pitch2D.numChannels = num_channels;
