@@ -264,7 +264,7 @@ jobs:
       - name: Install libabigail
         run: |
           sudo apt-get update
-          sudo apt-get install -y libabigail abigail-tools
+          sudo apt-get install -y abigail-tools
       - name: Download HEAD artifact
         uses: actions/download-artifact@v4
         with:
