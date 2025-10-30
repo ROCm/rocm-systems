@@ -188,7 +188,7 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
         memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
 }
 
-std::vector<char>   output_buffer(1ul << 34);
+std::vector<char>   output_buffer(1ul << 30);
 std::atomic<size_t> output_size{0};
 size_t              total_insts{0};
 
@@ -243,29 +243,28 @@ parse_output()
 
     std::cout << "Total size: " << output_size/1024/1024 << " MB" << std::endl;
     DECODER_CALL(
-        rocprofiler_trace_decode(decoder, parse, output_buffer.data(), output_size, nullptr));
+        rocprofiler_trace_decode(decoder, parse, output_buffer.data(), std::min(output_size.load(), output_buffer.size()), nullptr));
     output_size = 0;
     std::cout << "Total instructions: " << total_insts/1000000 << " M" << std::endl;
 };
-
-// std::ofstream file("result.att", std::ios::binary);
-// int fd = open("output.bin", O_WRONLY | O_CREAT | O_DIRECT, S_IRUSR | S_IWUSR);
 
 void
 shader_data_callback(rocprofiler_agent_id_t /* agent */,
                      int64_t /* se_id */,
                      void*  se_data,
                      size_t data_size,
+                     rocprofiler_thread_trace_shader_data_flags_t /* flags */,
                      rocprofiler_user_data_t /* userdata */)
 {
     CHECK_NOTNULL(Results::latencies);
 
-    // file.write((char*)se_data, data_size); return;
-    // Ensure buffer is page-aligned and page-sized for O_DIRECT
-    // write(fd, se_data, data_size); return;
-
     size_t location = output_size.fetch_add(data_size);
     void*  output   = output_buffer.data();
+
+    // Discard
+    if (location >= output_buffer.size()) return;
+
+    data_size = std::min(data_size, output_buffer.size() - location);
 
     auto is_ptr_mod8 = [](void* data) { return (reinterpret_cast<std::uintptr_t>(data) % 8) == 0; };
     auto is_int_mod8 = [](size_t data) { return (data % 8) == 0; };
