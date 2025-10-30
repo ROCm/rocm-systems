@@ -35,6 +35,8 @@
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
+#include <algorithm>
+#include <unordered_set>
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
@@ -305,6 +307,7 @@ TEST(thread_trace, data_integrity)
     auto return_synced = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t>
     {
         auto called = status_called.fetch_add(1);
+        // Small delay to let consumer keep pace
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
         for (size_t i=0; i<input_buffer.size(); i++)
@@ -385,4 +388,72 @@ TEST(thread_trace, slow_gpu)
 {
     rocprofiler::thread_trace::test_init();
     // TODO: Implement
+}
+
+TEST(thread_trace, buffer_alternation)
+{
+    rocprofiler::thread_trace::test_init();
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::QueueMock::BUFFER_SIZE;
+
+    struct callback_state_t
+    {
+        std::atomic<int> callback_count{0};
+        std::unordered_set<void*> buffer_addresses{};
+        void* last_address{nullptr};
+    };
+    auto callback_state = callback_state_t{};
+
+    // Track which buffer addresses we receive to verify the producer alternates between
+    // the two double-buffers (parity 0 and parity 1) as intended.
+    auto fetch_cb = [](
+        rocprofiler_agent_id_t,
+        int64_t,
+        void* data,
+        size_t,
+        rocprofiler_thread_trace_shader_data_flags_t,
+        rocprofiler_user_data_t userdata
+    ){
+        auto* state = static_cast<callback_state_t*>(userdata.ptr);
+        state->buffer_addresses.insert(data);
+
+        // Verify alternation as we go: consecutive callbacks should use different buffers
+        if (state->last_address != nullptr)
+        {
+            EXPECT_NE(data, state->last_address) << "Buffers should alternate between calls";
+        }
+        state->last_address = data;
+        state->callback_count.fetch_add(1);
+    };
+
+    auto input_buffer = std::vector<size_t>();
+    input_buffer.resize(BUFFER_SIZE/sizeof(size_t));
+
+    auto status_called = std::atomic<int>{0};
+    auto return_synced = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t>
+    {
+        // Throttle the mock producer so it never outruns the consumer in this scenario.
+        if (status_called > callback_state.callback_count) return std::nullopt;
+        status_called.fetch_add(1);
+
+        auto status = rocprofiler::hsa::sqtt_buffer_status_t{};
+        status.data = input_buffer.data();
+        status.size = BUFFER_SIZE;
+        return status;
+    };
+
+    auto userdata = rocprofiler_user_data_t{.ptr = &callback_state};
+    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
+    
+    // Let enough buffers through to establish a pattern
+    while (callback_state.callback_count < 20) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    threads.flag->store(false);
+    threads.consumer.join();
+    threads.producer.join();
+
+    // Verify we received callbacks
+    ASSERT_GT(callback_state.callback_count.load(), 10);
+    // The triple_buffer implementation uses write_index % buffer.size() where buffer.size() == 2.
+    // This means we should only ever see 2 distinct buffer addresses.
+    ASSERT_EQ(callback_state.buffer_addresses.size(), 2) << "Expected exactly 2 unique buffer addresses for double-buffering";
 }
