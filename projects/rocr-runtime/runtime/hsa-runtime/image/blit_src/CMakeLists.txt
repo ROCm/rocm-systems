@@ -130,9 +130,18 @@ function(generate_blit_file BFILE)
 
   ## Add a custom command that generates opencl_blit_objects.cpp
   ## This depends on all the generated code object files and the C++ generator script.
-  add_custom_command(OUTPUT ${BFILE}.cpp
+  if (UNIX)
+    add_custom_command(OUTPUT ${BFILE}.cpp
                      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/create_hsaco_ascii_file.sh ${CMAKE_CURRENT_BINARY_DIR}/${BFILE}.cpp
                      DEPENDS ${HSACO_TARG_LIST} create_hsaco_ascii_file.sh )
+  else()
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_custom_command(
+      OUTPUT ${BFILE}.cpp
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/create_hsaco_ascii_file.py ${CMAKE_CURRENT_BINARY_DIR}/${BFILE}.cpp ${HSACO_TARG_LIST}
+      COMMENT "Collating blit shaders..."
+      DEPENDS ${HSACO_TARG_LIST} create_hsaco_ascii_file.py)
+  endif()
 
   ## Export a target that builds (and depends on) opencl_blit_objects.cpp
   add_custom_target( ${BFILE} DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${BFILE}.cpp )

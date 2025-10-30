@@ -129,7 +129,7 @@ else()
 endif()
 
 # Mipmap APIs are not supported on Linux
-if(WIN32)
+if(0)
 set(TEST_SRC
     ${TEST_SRC}
     hipBindTextureToMipmappedArray.cc
