@@ -1030,6 +1030,7 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
     results_files_csv: list[str] = []
 
     # Convert native counter collection csv to rocprofv3 counter collection csv format
+    # for further processing to pmc_perf.csv file
     if using_native_tool:
         counter_data = pd.read_csv(
             glob.glob(f"{workload_dir}/out/pmc_1/*.csv")[0], index_col=False

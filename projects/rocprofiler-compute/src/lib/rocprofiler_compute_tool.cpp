@@ -68,12 +68,14 @@ for the agent and returns a pointer to it.
     - Cleans up resources.
 */
 
+#include "helper.hpp"
+
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <cxxabi.h>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <random>
 #include <regex>
@@ -113,7 +115,7 @@ struct counter_info_record_t {
 // Tool data struct, now includes a vector of counter_info_record_t
 struct tool_data_t {
   std::mutex mut{};
-  std::ostream *output_stream{nullptr};
+  std::unique_ptr<std::ostream> output_stream{nullptr};
   std::unordered_map<uint64_t, std::string> counter_id_name_map{};
   std::string requested_counters{};
   std::string kernel_filter_include_regex{};
@@ -163,118 +165,6 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
   }
 }
 
-// The function extracts the kernel name from
-// input string. By using the iterators it finds the
-// window in the string which contains only the kernel name.
-// For example 'Foo<int, float>::foo(a[], int (int))' -> 'foo'
-std::string truncate_name(std::string_view name) {
-  auto rit = name.rbegin();
-  auto rend = name.rend();
-  uint32_t counter = 0;
-  char open_token = 0;
-  char close_token = 0;
-  while (rit != rend) {
-    if (counter == 0) {
-      switch (*rit) {
-      case ')':
-        counter = 1;
-        open_token = ')';
-        close_token = '(';
-        break;
-      case '>':
-        counter = 1;
-        open_token = '>';
-        close_token = '<';
-        break;
-      case ']':
-        counter = 1;
-        open_token = ']';
-        close_token = '[';
-        break;
-      case ' ':
-        ++rit;
-        continue;
-      }
-      if (counter == 0)
-        break;
-    } else {
-      if (*rit == open_token)
-        counter++;
-      if (*rit == close_token)
-        counter--;
-    }
-    ++rit;
-  }
-  auto rbeg = rit;
-  while ((rit != rend) && (*rit != ' ') && (*rit != ':'))
-    rit++;
-  return std::string{name.substr(rend - rit, rit - rbeg)};
-}
-
-std::string cxa_demangle(std::string_view _mangled_name, int *_status) {
-  // return the mangled since there is no buffer
-  if (_mangled_name.empty()) {
-    *_status = -2;
-    return std::string{};
-  }
-
-  auto _demangled_name = std::string{_mangled_name};
-
-  // PARAMETERS to __cxa_demangle
-  //  mangled_name:
-  //      A NULL-terminated character string containing the name to be
-  //      demangled.
-  //  buffer:
-  //      A region of memory, allocated with malloc, of *length bytes, into
-  //      which the demangled name is stored. If output_buffer is not long
-  //      enough, it is expanded using realloc. output_buffer may instead be
-  //      NULL; in that case, the demangled name is placed in a region of memory
-  //      allocated with malloc.
-  //  _buflen:
-  //      If length is non-NULL, the length of the buffer containing the
-  //      demangled name is placed in *length.
-  //  status:
-  //      *status is set to one of the following values
-  size_t _demang_len = 0;
-  char *_demang = abi::__cxa_demangle(_demangled_name.c_str(), nullptr,
-                                      &_demang_len, _status);
-  switch (*_status) {
-  //  0 : The demangling operation succeeded.
-  // -1 : A memory allocation failure occurred.
-  // -2 : mangled_name is not a valid name under the C++ ABI mangling rules.
-  // -3 : One of the arguments is invalid.
-  case 0: {
-    if (_demang)
-      _demangled_name = std::string{_demang};
-    break;
-  }
-  case -1: {
-    std::clog << "[rocprofiler-compute] memory allocation failure occurred demangling "
-          << _demangled_name << std::endl;
-    break;
-  }
-  case -2: {
-    break;
-  }
-  case -3: {
-    std::clog << "[rocprofiler-compute] Invalid argument in: (\"" << _demangled_name
-          << "\", nullptr, nullptr, " << static_cast<void *>(_status) << ")"
-          << std::endl;
-    break;
-  }
-  default:
-    break;
-  };
-
-  // if it "demangled" but the length is zero, set the status to -2
-  if (_demang_len == 0 && *_status == 0)
-    *_status = -2;
-
-  // free allocated buffer
-  ::free(_demang);
-  return _demangled_name;
-}
-
 /**
  * Callback from rocprofiler when a code object is loaded.
  * We use this to get record kernel names as they are registered.
@@ -288,8 +178,8 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
           ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER) {
     auto *data = static_cast<kernel_symbol_data_t *>(record.payload);
     int demangle_status = 0;
-    auto kernel_name = cxa_demangle(data->kernel_name, &demangle_status);
-    kernel_name = truncate_name(kernel_name);
+    auto kernel_name = helper_utils::cxa_demangle(data->kernel_name, &demangle_status);
+    kernel_name = helper_utils::truncate_name(kernel_name);
 
     // check if regex can be found in kernel name matches regex from tool data,
     // if matches store kernel id
@@ -353,75 +243,34 @@ bool is_targetted_dispatch(const tool_data_t *tool, uint64_t kernel_id,
 }
 
 /**
- * Callback from rocprofiler when an kernel dispatch is enqueued into the HSA
- * queue. rocprofiler_counter_config_id_t* is a return to specify what counters
- * to collect for this dispatch (dispatch_packet).
+ * @brief Creates a counter collection profile for performance monitoring on a specific GPU agent.
+ *
+ * This function parses the requested counters from the tool configuration, validates them against
+ * the counters supported by the target GPU agent, and creates a rocprofiler counter configuration
+ * for collecting the available requested counters during dispatch profiling.
+ *
+ * @param tool Pointer to tool data containing the requested counters string and counter mappings
+ * @param dispatch_data Dispatch counting service data containing agent information for the target GPU
+ *
+ * @return rocprofiler_counter_config_id_t A valid counter configuration profile ID that can be used
+ *         for counter collection, or an invalid profile (handle = 0) if creation fails
+ *
+ * @details
+ * The function performs the following operations:
+ * 1. Parses the requested counters from tool->requested_counters string (format: "prefix:counter1 counter2 ...")
+ * 2. Queries all counters supported by the specified GPU agent
+ * 3. Filters the supported counters to match only those requested
+ * 4. Logs warnings for any requested counters that are not supported by the agent
+ * 5. Creates and returns a rocprofiler counter configuration for the valid counters
+ * 6. Updates the tool's counter ID to name mapping for later reference
+ *
+ * @note If no counters are requested or none of the requested counters are supported,
+ *       an empty profile may be created. Unsupported counters are logged as warnings
+ *       but do not cause the function to fail.
  */
-void dispatch_callback(
-    rocprofiler_dispatch_counting_service_data_t dispatch_data,
-    rocprofiler_counter_config_id_t *config,
-    rocprofiler_user_data_t * /*user_data*/, void *callback_data_args) {
-  /**
-   * This simple example uses the same profile counter set for all agents.
-   * We store profile in a cache to prevent constructing many identical
-   * profiles. We first check the cache to see if we have already constructed a
-   * profile for the agent. If we have, return it. Otherwise, construct a new
-   * profile.
-   */
-
-  auto kernel_id = dispatch_data.dispatch_info.kernel_id;
-
-  // create static map of kernel_id to number of dispatches (zero indexed) and
-  // update it
-  static std::unordered_map<uint64_t, uint64_t> kernel_id_iteration_map{};
-  static std::shared_mutex kernel_id_iteration_mutex;
-  uint64_t kernel_iteration = 0;
-  {
-    // Acquire unique lock for update and ensure map is updated correctly
-    std::unique_lock<std::shared_mutex> lock(kernel_id_iteration_mutex);
-    auto &iter = kernel_id_iteration_map[kernel_id];
-    iter += 1;
-    kernel_iteration = iter;
-  }
-
-  // static cast tool
-  tool_data_t *tool;
-  {
-    std::lock_guard<std::mutex> lock(
-        static_cast<tool_data_t *>(callback_data_args)->mut);
-    tool = static_cast<tool_data_t *>(callback_data_args);
-  }
-
-  // kernel filtering
-  if (!is_targetted_dispatch(tool, kernel_id, kernel_iteration)) {
-    return;
-  }
-
-  static std::shared_mutex m_mutex = {};
-  static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t>
-      profile_cache = {};
-
-  // check cache for existing profile for this agent
-  auto search_cache = [&]() {
-    if (auto pos =
-            profile_cache.find(dispatch_data.dispatch_info.agent_id.handle);
-        pos != profile_cache.end()) {
-      *config = pos->second;
-      return true;
-    }
-    return false;
-  };
-  {
-    auto rlock = std::shared_lock{m_mutex};
-    if (search_cache())
-      return;
-  }
-
-  // get write lock to update cache
-  auto wlock = std::unique_lock{m_mutex};
-  if (search_cache())
-    return;
-
+rocprofiler_counter_config_id_t create_counter_collection_profile(
+    tool_data_t *tool,
+    rocprofiler_dispatch_counting_service_data_t dispatch_data) {
   // get counters to collect
   std::set<std::string> counters_to_collect;
   const std::string &counters_str = tool->requested_counters;
@@ -486,15 +335,86 @@ void dispatch_callback(
     std::clog << "\033[0m" << std::endl;
   }
 
-  // Create a collection profile for the counters
+  // Create and return collection profile for the counters
   rocprofiler_counter_config_id_t profile = {.handle = 0};
   ROCPROFILER_CALL(
       rocprofiler_create_counter_config(dispatch_data.dispatch_info.agent_id,
                                         collect_counters.data(),
                                         collect_counters.size(), &profile),
       "construct profile cfg");
+  return profile;
+}
+
+/**
+ * Callback from rocprofiler when an kernel dispatch is enqueued into the HSA
+ * queue. rocprofiler_counter_config_id_t* is a return to specify what counters
+ * to collect for this dispatch (dispatch_packet).
+ * We store profile in a cache to prevent constructing many identical
+ * profiles. We first check the cache to see if we have already constructed a
+ * profile for the agent. If we have, return it. Otherwise, construct a new
+ * profile.
+ */
+void dispatch_callback(
+    rocprofiler_dispatch_counting_service_data_t dispatch_data,
+    rocprofiler_counter_config_id_t *config,
+    rocprofiler_user_data_t * /*user_data*/, void *callback_data_args) {
+
+  auto kernel_id = dispatch_data.dispatch_info.kernel_id;
+
+  // create static map of kernel_id to number of dispatches (zero indexed) and
+  // update it
+  static std::unordered_map<uint64_t, uint64_t> kernel_id_iteration_map{};
+  static std::shared_mutex kernel_id_iteration_mutex;
+  uint64_t kernel_iteration = 0;
+  {
+    // Acquire unique lock for update and ensure map is updated correctly
+    std::unique_lock<std::shared_mutex> lock(kernel_id_iteration_mutex);
+    auto &iter = kernel_id_iteration_map[kernel_id];
+    iter += 1;
+    kernel_iteration = iter;
+  }
+
+  // static cast tool
+  tool_data_t *tool;
+  {
+    std::lock_guard<std::mutex> lock(
+        static_cast<tool_data_t *>(callback_data_args)->mut);
+    tool = static_cast<tool_data_t *>(callback_data_args);
+  }
+
+  // kernel filtering
+  if (!is_targetted_dispatch(tool, kernel_id, kernel_iteration)) {
+    return;
+  }
+
+  static std::shared_mutex m_mutex = {};
+  static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t>
+      profile_cache = {};
+
+  // check cache for existing profile for this agent
+  auto search_cache = [&]() {
+    if (auto pos =
+            profile_cache.find(dispatch_data.dispatch_info.agent_id.handle);
+        pos != profile_cache.end()) {
+      *config = pos->second;
+      return true;
+    }
+    return false;
+  };
+  {
+    auto rlock = std::shared_lock{m_mutex};
+    if (search_cache())
+      return;
+  }
+
+  // get write lock to update cache
+  auto wlock = std::unique_lock{m_mutex};
+  if (search_cache())
+    return;
 
   // cache the profile for this agent
+  rocprofiler_counter_config_id_t profile =
+      create_counter_collection_profile(tool, dispatch_data);
   profile_cache.emplace(dispatch_data.dispatch_info.agent_id.handle, profile);
   // Return the profile to collect those counters for this dispatch
   *config = profile;
@@ -537,13 +457,11 @@ void generate_output(tool_data_t *tool_data) {
   }
 
   // Write collected counter records and clean up
-  if (auto *os = tool_data->output_stream) {
+  if (auto& os = tool_data->output_stream) {
     for (const auto &r : tool_data->counter_records)
       *os << r.dispatch_id << ',' << r.counter_id << ',' << r.counter_name
           << ',' << r.counter_value << '\n';
     os->flush();
-    if (os != &std::cout && os != &std::cerr)
-      delete os;
   }
 }
 
@@ -587,13 +505,12 @@ tool_data_t* create_tool_data(rocprofiler_client_id_t* id) {
   filename += base_filename;
 
   // Set output stream to file
-  auto *ofs = new std::ofstream{filename};
+  // Set output stream to file
+  auto ofs = std::make_unique<std::ofstream>(filename);
   if (!ofs->is_open()) {
-    delete ofs;
     throw std::runtime_error("Failed to open output file: " + filename);
   }
-  tool_data->output_stream = ofs;
-
+  tool_data->output_stream = std::move(ofs);
   // Write header at the beginning of the file
   *tool_data->output_stream
       << "dispatch_id,counter_id,counter_name,counter_value\n";

@@ -453,9 +453,11 @@ class RocProfCompute_Base:
                     "-std=c++17 -W -Wall -Wextra -Wshadow -O2 "
                     # rocprofiler sdk library path
                     f"-L {str(Path(args.rocprofiler_sdk_tool_path).parent.parent)} "
-                    # native tool source file
+                    # native tool source files (tool.cpp and helper.cpp)
                     f"{str(Path(__file__).parent.parent)}/"
                     "lib/rocprofiler_compute_tool.cpp "
+                    f"{str(Path(__file__).parent.parent)}/"
+                    "lib/helper.cpp "
                     # temporary shared object for native tool
                     f"-o {native_tool_path}"
                 )
