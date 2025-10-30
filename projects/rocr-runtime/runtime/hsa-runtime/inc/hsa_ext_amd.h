@@ -68,7 +68,7 @@
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 15
+#define HSA_AMD_INTERFACE_VERSION_MINOR 16
 
 #ifdef __cplusplus
 extern "C" {
