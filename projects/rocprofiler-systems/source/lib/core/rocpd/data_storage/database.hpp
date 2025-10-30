@@ -22,11 +22,18 @@
 
 #pragma once
 #include "common/traits.hpp"
+#include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <cstring>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <sqlite3.h>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -34,7 +41,63 @@ namespace rocpd
 {
 namespace data_storage
 {
-static std::mutex _mutex;
+
+struct database_performance_tracker
+{
+    struct query_info
+    {
+        size_t                   count;
+        std::chrono::nanoseconds time;
+    };
+
+    std::chrono::high_resolution_clock::time_point start_time;
+    size_t                                         query_count = 0;
+    size_t                                         row_count   = 0;
+    std::chrono::nanoseconds                       total_execution_time{ 0 };
+    std::unordered_map<std::string, query_info>    queries;
+    void                                           reset()
+    {
+        start_time           = std::chrono::high_resolution_clock::now();
+        query_count          = 0;
+        row_count            = 0;
+        total_execution_time = std::chrono::nanoseconds{ 0 };
+        queries.clear();
+    }
+
+    void print_summary() const
+    {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - start_time);
+
+        auto execution_time_in_s =
+            (float) total_execution_time.count() / 1000 / 1000 / 1000;
+
+        printf("=============================================\n");
+        printf("SQLite Performance Summary\n");
+        printf("=============================================\n");
+        printf("Session duration: %ld ms\n", elapsed.count());
+        printf("Total queries: %zu\n", query_count);
+        printf("Total rows: %zu\n", row_count);
+        printf("Total execution time: %.2f s (%ld ns)\n", execution_time_in_s,
+               total_execution_time.count());
+
+        if(query_count > 0)
+        {
+            auto avg_time = total_execution_time.count() / query_count;
+            printf("Average query time: %ld ns\n", avg_time);
+        }
+
+        for(const auto& [name, metrics] : queries)
+        {
+            auto time_in_s = (float) metrics.time.count() / 1000 / 1000 / 1000;
+            printf("Table: %.30s...\n\tcount: %zu\n\ttime: %.2f s (%zu ns)\n",
+                   name.c_str(), metrics.count, time_in_s, metrics.time.count());
+        }
+
+        printf("=============================================\n");
+    }
+};
+
 class database
 {
 public:
@@ -54,11 +117,6 @@ private:
     void validate_sqlite3_result(int sqlite3_error_code, const char* query,
                                  Args&&... args)
     {
-        std::stringstream ss;
-        ss << "\n===========================================================\n";
-        ss << "Database Error\n";
-        ((ss << args << " "), ...);
-        ss << "\nQuery: " << query << "\n";
         // Fetch error message of last sqlite3_* call
         const auto* error_message = sqlite3_errstr(sqlite3_error_code);
         switch(sqlite3_error_code)
@@ -67,6 +125,11 @@ private:
             case SQLITE_DONE: return;
             case SQLITE_CONSTRAINT:
             {
+                std::stringstream ss;
+                ss << "\n===========================================================\n";
+                ss << "Database Error\n";
+                ((ss << args << " "), ...);
+                ss << "\nQuery: " << query << "\n";
                 sqlite3_stmt* stmt;
 
                 ss << "Constraint violation(s): " << "\n";
@@ -93,6 +156,10 @@ private:
                 }
 
                 sqlite3_finalize(stmt);
+                ss << " [Sqlite3 error: " << error_message;
+                ss << " (Extended error message: " << sqlite3_errmsg(_sqlite3_db_temp)
+                   << ")]";
+                throw std::runtime_error(ss.str());
             }
             break;
             default:
@@ -100,9 +167,6 @@ private:
             }
             break;
         }
-        ss << " [Sqlite3 error: " << error_message;
-        ss << " (Extended error message: " << sqlite3_errmsg(_sqlite3_db_temp) << ")]";
-        throw std::runtime_error(ss.str());
     }
 
     template <typename T, std::enable_if_t<!(common::traits::is_string_literal<T>() ||
@@ -182,14 +246,35 @@ public:
         std::shared_ptr<sqlite3_stmt> stmt{ p_stmt, sqlite3_finalize };
 
         return [stmt, query, this](Values... value) {
-            std::lock_guard lock{ _mutex };
-            int             position = 1;
+            int position = 1;
+            if(memcmp(query.c_str(), "INSERT INTO rocpd_arg",
+                      sizeof("INSERT INTO rocpd_arg") - 1) == 0)
+            {
+                auto s1 = std::chrono::high_resolution_clock::now();
+                ((bind_value(stmt.get(), position++, value, query)), ...);
+                auto s2 = std::chrono::high_resolution_clock::now();
+                bind_duration +=
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(s2 - s1).count();
+                validate_sqlite3_result(sqlite3_step(stmt.get()), query.c_str(),
+                                        "Failed to execute step!\n",
+                                        "Values: ", value...);
+                auto s3 = std::chrono::high_resolution_clock::now();
+                step_duration +=
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(s3 - s2).count();
 
-            ((bind_value(stmt.get(), position++, value, query)), ...);
-
-            validate_sqlite3_result(sqlite3_step(stmt.get()), query.c_str(),
-                                    "Failed to execute step!\n", "Values: ", value...);
-            sqlite3_reset(stmt.get());
+                sqlite3_reset(stmt.get());
+                auto s4 = std::chrono::high_resolution_clock::now();
+                reset_duration +=
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(s4 - s3).count();
+            }
+            else
+            {
+                ((bind_value(stmt.get(), position++, value, query)), ...);
+                validate_sqlite3_result(sqlite3_step(stmt.get()), query.c_str(),
+                                        "Failed to execute step!\n",
+                                        "Values: ", value...);
+                sqlite3_reset(stmt.get());
+            }
         };
     }
 
@@ -199,10 +284,14 @@ private:
     static std::string generate_upid(const int pid, const int ppid);
 
 private:
-    sqlite3*    _sqlite3_db{ nullptr };
-    sqlite3*    _sqlite3_db_temp{ nullptr };
-    std::string m_tag;
-    std::string m_upid;
+    sqlite3*                                      _sqlite3_db{ nullptr };
+    sqlite3*                                      _sqlite3_db_temp{ nullptr };
+    std::string                                   m_tag;
+    std::string                                   m_upid;
+    std::unique_ptr<database_performance_tracker> m_perf_tracker;
+    size_t                                        bind_duration  = 0;
+    size_t                                        reset_duration = 0;
+    size_t                                        step_duration  = 0;
 };
 
 }  // namespace data_storage

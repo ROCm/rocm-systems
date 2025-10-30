@@ -30,7 +30,9 @@
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/rocpd_post_processing.hpp"
 #include <algorithm>
+#include <chrono>
 #include <memory>
+#include <unistd.h>
 #include <vector>
 
 namespace rocprofsys
@@ -117,6 +119,7 @@ cache_manager::get_instance()
 void
 cache_manager::post_process_bulk()
 {
+    auto start = std::chrono::high_resolution_clock::now();
     if(is_root_process())
     {
         if(m_storage.is_running())
@@ -132,7 +135,25 @@ cache_manager::post_process_bulk()
             ROCPROFSYS_PRINT(
                 "Generating rocpd with collected data. This may take a while..\n");
 
-            auto _cache_files = get_cache_files();
+            // auto                         _cache_files = get_cache_files();
+            std::map<pid_t, cache_files> _cache_files = {
+                { 157140,
+                  cache_files{
+                      .buff_storage =
+                          "/home/amd/work/rocm-systems/projects/rocprofiler-systems/"
+                          "debug_samples/buffered_storage_155992_157140.bin",
+                      .metadata =
+                          "/home/amd/work/rocm-systems/projects/rocprofiler-systems/"
+                          "debug_samples/metadata_155992_157140.json" } },
+                { 157141,
+                  cache_files{
+                      .buff_storage =
+                          "/home/amd/work/rocm-systems/projects/rocprofiler-systems/"
+                          "debug_samples/buffered_storage_155992_157141.bin",
+                      .metadata =
+                          "/home/amd/work/rocm-systems/projects/rocprofiler-systems/"
+                          "debug_samples/metadata_155992_157141.json" } }
+            };
 
             std::vector<std::thread> rocpd_threads;
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -179,7 +200,7 @@ cache_manager::post_process_bulk()
                         _post_processing.register_parser_callback(_parser);
                         _post_processing.post_process_metadata();
                         _parser.consume_storage();
-                        std::remove(files.metadata.c_str());  // Remove metadata file
+                        // std::remove(files.metadata.c_str());  // Remove metadata file
                     });
                 }
             }
@@ -190,6 +211,12 @@ cache_manager::post_process_bulk()
             }
         }
     }
+    std::cout << "Postprocessing time: "
+              << std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::high_resolution_clock::now() - start)
+                         .count() /
+                     1000.0 / 1000.0
+              << "s\n";
 }
 
 void

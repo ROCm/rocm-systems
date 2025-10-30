@@ -24,13 +24,64 @@
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/rocpd/data_storage/table_insert_query.hpp"
 #include "debug.hpp"
+#include <chrono>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
 
 namespace rocprofsys
 {
 namespace rocpd
 {
+
+struct statistic
+{
+    size_t duration;
+    size_t count;
+};
+
+std::map<std::string, std::map<size_t, statistic>> total_time;
+
+struct measure_time
+{
+    measure_time(const char* _cat)
+    : cat{ _cat }
+    {
+        start = std::chrono::high_resolution_clock::now();
+    }
+    ~measure_time()
+    {
+        static thread_local auto tid = gettid();
+        auto duration                = std::chrono::high_resolution_clock::now() - start;
+        total_time[cat][tid].duration +=
+            std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+        total_time[cat][tid].count++;
+    }
+
+    static void print_total()
+    {
+        static thread_local auto tid = gettid();
+        float                    tt{ 0 };
+        std::cout << "===========================================================\n";
+        std::cout << "TID: " << tid << std::endl;
+        for(auto& [category, stat] : total_time)
+        {
+            std::cout << "Category: " << category << "\n\tCount: " << stat[tid].count
+                      << "\n\tDuration: " << (float) stat[tid].duration / 1000 / 1000
+                      << "s "
+                      << "(" << stat[tid].duration << "us)\n";
+            tt += (float) stat[tid].duration / 1000 / 1000;
+        }
+        std::cout << "===========================================================\n";
+        std::cout << "Total time: " << tt << "s\n";
+        std::cout << "===========================================================\n";
+    }
+
+private:
+    std::string                                    cat;
+    std::chrono::high_resolution_clock::time_point start;
+};
+
 data_processor::data_processor(std::shared_ptr<data_storage::database> database)
 : _database(std::move(database))
 {
@@ -67,7 +118,8 @@ data_processor::initialize_metadata()
 size_t
 data_processor::insert_string(const char* str)
 {
-    auto it = _string_map.find(str);
+    measure_time t{ "insert_string" };
+    auto         it = _string_map.find(str);
     if(it != _string_map.end()) return _string_map.at(str);
 
     data_storage::queries::table_insert_query query;
@@ -87,6 +139,7 @@ data_processor::insert_node_info(size_t node_id, size_t hash, const char* machin
                                  const char* release, const char* version,
                                  const char* hardware_name, const char* domain_name)
 {
+    measure_time                              t{ "insert_node_info" };
     data_storage::queries::table_insert_query query;
     _database->execute_query(
         query.set_table_name("rocpd_info_node_" + _upid)
@@ -103,6 +156,7 @@ data_processor::insert_process_info(size_t nid, size_t ppid, size_t pid, size_t 
                                     const char* command, const char* environment,
                                     const char* extdata)
 {
+    measure_time                              t{ "insert_process_info" };
     data_storage::queries::table_insert_query query;
     _database->execute_query(query.set_table_name("rocpd_info_process_" + _upid)
                                  .set_columns("id", "guid", "nid", "ppid", "pid", "init",
@@ -121,6 +175,7 @@ data_processor::insert_agent(size_t node_id, size_t pid, const char* agent_type,
                              const char* product_name, const char* user_name,
                              const char* extdata)
 {
+    measure_time                              t{ "insert_agent" };
     data_storage::queries::table_insert_query query;
     _database->execute_query(
         query.set_table_name("rocpd_info_agent_" + _upid)
@@ -139,6 +194,7 @@ void
 data_processor::insert_track(const char* track_name, size_t node_id, size_t process_id,
                              std::optional<size_t> thread_id, const char* extdata)
 {
+    measure_time t{ "insert_track" };
     if(_tracks.find(track_name) != _tracks.end())
     {
         ROCPROFSYS_WARNING(2, "Fail to add track %s, already exist!\n", track_name);
@@ -166,7 +222,8 @@ data_processor::insert_pmc_description(
     const char* units, const char* value_type, const char* block, const char* expression,
     uint32_t is_constant, uint32_t is_derived, const char* extdata)
 {
-    auto it = _pmc_descriptor_map.find({ agent_id, name });
+    measure_time t{ "insert_pmc_description" };
+    auto         it = _pmc_descriptor_map.find({ agent_id, name });
     if(it != _pmc_descriptor_map.end())
     {
         ROCPROFSYS_WARNING(0,
@@ -199,6 +256,7 @@ void
 data_processor::insert_pmc_event(size_t event_id, size_t agent_id, const char* pmc_name,
                                  double value, const char* extdata)
 {
+    measure_time t{ "insert_pmc_event" };
     ROCPROFSYS_VERBOSE(2,
                        "Insert PMC event: id %ld, agent id: %ld, pmc name: %s, value: "
                        "%lf, extdata: %s\n",
@@ -222,6 +280,7 @@ void
 data_processor::insert_sample(const char* track, uint64_t timestamp, size_t event_id,
                               const char* extdata)
 {
+    measure_time t{ "insert_sample" };
     ROCPROFSYS_VERBOSE(
         3, "Insert sample: track: %s, timestamp: %lu, event id: %ld, extdata: %s\n",
         track, timestamp, event_id, extdata);
@@ -243,6 +302,7 @@ data_processor::insert_event(size_t string_primary_key, size_t stack_id,
                              const char* call_stack, const char* line_info,
                              const char* extdata)
 {
+    measure_time t{ "insert_event" };
     _insert_event_statement(_upid.c_str(), string_primary_key, stack_id, parent_stack_id,
                             correlation_id, call_stack, line_info, extdata);
     return _database->get_last_insert_id();
@@ -427,6 +487,7 @@ void
 data_processor::insert_args(size_t event_id, size_t position, const char* type,
                             const char* name, const char* value, const char* extdata)
 {
+    measure_time t{ "insert_args" };
     _insert_args_statement(_upid.c_str(), event_id, position, type, name, value, extdata);
 }
 
@@ -434,6 +495,7 @@ void
 data_processor::insert_stream_info(size_t stream_id, size_t node_id, size_t process_id,
                                    const char* name, const char* extdata)
 {
+    measure_time                              t{ "insert_stream_info" };
     data_storage::queries::table_insert_query query;
     _database->execute_query(
         query.set_table_name("rocpd_info_stream_" + _upid)
@@ -446,6 +508,7 @@ void
 data_processor::insert_queue_info(size_t queue_id, size_t node_id, size_t process_id,
                                   const char* name, const char* extdata)
 {
+    measure_time                              t{ "insert_queue_info" };
     data_storage::queries::table_insert_query query;
     _database->execute_query(
         query.set_table_name("rocpd_info_queue_" + _upid)
@@ -460,6 +523,7 @@ data_processor::insert_code_object(size_t id, size_t node_id, size_t process_id,
                                    uint64_t ld_size, uint64_t ld_delta,
                                    const char* storage_type, const char* extdata)
 {
+    measure_time t{ "insert_code_object" };
     ROCPROFSYS_VERBOSE(2, "Insert code object with ID: %ld\n", id);
     _insert_code_object_statement(id, _upid.c_str(), node_id, process_id, agent_id, uri,
                                   ld_base, ld_size, ld_delta, storage_type, extdata);
@@ -474,6 +538,7 @@ data_processor::insert_kernel_symbol(
     uint32_t accum_vgrp_count, const char* extdata)
 {
     ROCPROFSYS_VERBOSE(2, "Insert kernel symbol: %s with ID: %ld\n", name, id);
+    measure_time t{ "insert_kernel_symbol" };
     _insert_kernel_symbol_statement(
         id, _upid.c_str(), node_id, process_id, code_obj_id, name, display_name,
         kernel_obj, kernarg_segmnt_size, kernarg_segment_alignment, group_segment_size,
@@ -485,6 +550,7 @@ data_processor::insert_region(size_t node_id, size_t process_id, size_t thread_i
                               uint64_t start, uint64_t end, size_t name_id,
                               size_t event_id, const char* extdata)
 {
+    measure_time t{ "insert_region" };
     ROCPROFSYS_VERBOSE(2, "Insert region for event id: %ld\n", event_id);
 
     _insert_region_statement(_upid.c_str(), node_id, process_id, thread_id, start, end,
@@ -501,7 +567,7 @@ data_processor::insert_kernel_dispatch(
     size_t event_id, const char* extdata)
 {
     ROCPROFSYS_VERBOSE(2, "Insert kernel dispatch for event id: %ld\n", event_id);
-
+    measure_time t{ "kernel_dispatch" };
     _insert_kernel_dispatch_statement(
         _upid.c_str(), node_id, process_id, thread_id, agent_id, kernel_id, dispatch_id,
         queue_id, stream_id, start, end, private_segment_size, group_segment_size,
@@ -518,6 +584,7 @@ data_processor::insert_memory_copy(size_t node_id, size_t process_id, size_t thr
                                    size_t region_name_id, size_t event_id,
                                    const char* extdata)
 {
+    measure_time t{ "memory_copy" };
     _insert_memory_copy_statement(_upid.c_str(), node_id, process_id, thread_id, start,
                                   end, name_id, dst_agent_id, dst_addr, src_agent_id,
                                   src_addr, size, queue_id, stream_id, region_name_id,
@@ -532,6 +599,7 @@ data_processor::insert_memory_alloc(size_t node_id, size_t process_id, size_t th
                                     size_t stream_id, size_t event_id,
                                     const char* extdata)
 {
+    measure_time t{ "insert_memory_alloc" };
     if(agent_id.has_value())
     {
         _insert_memory_alloc_statement(_upid.c_str(), node_id, process_id, thread_id,
@@ -551,7 +619,8 @@ data_processor::insert_thread_info(size_t node_id, size_t parent_process_id,
                                    size_t process_id, size_t thread_id, const char* name,
                                    uint64_t start, uint64_t end, const char* extdata)
 {
-    auto it = _thread_id_map.find(thread_id);
+    measure_time t{ "insert_thread_info" };
+    auto         it = _thread_id_map.find(thread_id);
 
     if(it != _thread_id_map.end())
     {
@@ -588,6 +657,7 @@ void
 data_processor::flush()
 {
     // Flush all pending data to the database
+    measure_time::print_total();
     _database->flush();
 }
 

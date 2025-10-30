@@ -36,6 +36,54 @@ namespace rocprofsys
 namespace trace_cache
 {
 
+struct statistic
+{
+    size_t duration;
+    size_t count;
+};
+
+std::map<std::string, std::map<size_t, statistic>> total_time;
+
+struct measure_time
+{
+    measure_time(const char* _cat)
+    : cat{ _cat }
+    {
+        start = std::chrono::high_resolution_clock::now();
+    }
+    ~measure_time()
+    {
+        static thread_local auto tid = gettid();
+        auto duration                = std::chrono::high_resolution_clock::now() - start;
+        total_time[cat][tid].duration +=
+            std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+        total_time[cat][tid].count++;
+    }
+
+    static void print_total()
+    {
+        static thread_local auto tid = gettid();
+        float                    tt{ 0 };
+        std::cout << "===========================================================\n";
+        std::cout << "TID: " << tid << std::endl;
+        for(auto& [category, stat] : total_time)
+        {
+            std::cout << "Category: " << category << "\n\tCount: " << stat[tid].count
+                      << "\n\tDuration: " << (float) stat[tid].duration / 1000 / 1000
+                      << "s "
+                      << "(" << stat[tid].duration << "us)\n";
+            tt += (float) stat[tid].duration / 1000 / 1000;
+        }
+        std::cout << "===========================================================\n";
+        std::cout << "Total time: " << tt << "s\n";
+        std::cout << "===========================================================\n";
+    }
+
+private:
+    std::string                                    cat;
+    std::chrono::high_resolution_clock::time_point start;
+};
+
 storage_parser::storage_parser(std::string _filename)
 : m_filename(std::move(_filename))
 {}
@@ -60,6 +108,7 @@ storage_parser::consume_storage()
 {
     ROCPROFSYS_VERBOSE(0, "Consuming buffered storage with filename: %s\n",
                        m_filename.c_str());
+    auto s1 = std::chrono::high_resolution_clock::now();
 
     std::ifstream ifs(m_filename, std::ios::binary);
     if(!ifs)
@@ -81,7 +130,10 @@ storage_parser::consume_storage()
 
     while(!ifs.eof() && _parsing_needed)
     {
-        ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
+        {
+            measure_time ifs_read_header{ "ifs_read_header" };
+            ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
+        }
 
         if(header.sample_size == 0 || ifs.eof())
         {
@@ -89,8 +141,14 @@ storage_parser::consume_storage()
         }
 
         std::vector<uint8_t> sample;
-        sample.reserve(header.sample_size);
-        ifs.read(reinterpret_cast<char*>(sample.data()), header.sample_size);
+        {
+            measure_time sample_r{ "sample_r" };
+            sample.reserve(header.sample_size);
+        }
+        {
+            measure_time ifs_read_header{ "ifs_read_data" };
+            ifs.read(reinterpret_cast<char*>(sample.data()), header.sample_size);
+        }
 
         if(ifs.bad())
         {
@@ -105,6 +163,7 @@ storage_parser::consume_storage()
         {
             case entry_type::kernel_dispatch:
             {
+                measure_time           s{ "et::_kernel_dispatch_sample" };
                 kernel_dispatch_sample _kernel_dispatch_sample;
                 parse_data(sample.data(), _kernel_dispatch_sample.start_timestamp,
                            _kernel_dispatch_sample.end_timestamp,
@@ -130,6 +189,7 @@ storage_parser::consume_storage()
             }
             case entry_type::memory_copy:
             {
+                measure_time       s{ "et::_memory_copy_sample" };
                 memory_copy_sample _memory_copy_sample;
                 parse_data(
                     sample.data(), _memory_copy_sample.start_timestamp,
@@ -145,7 +205,7 @@ storage_parser::consume_storage()
                 invoke_callbacks(header.type, _memory_copy_sample);
                 break;
             }
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case entry_type::memory_alloc:
             {
                 memory_allocate_sample _memory_allocate_sample;
@@ -167,6 +227,7 @@ storage_parser::consume_storage()
 #endif
             case entry_type::region:
             {
+                measure_time  s{ "et::_region_sample" };
                 region_sample _region_sample;
                 parse_data(sample.data(), _region_sample.thread_id, _region_sample.name,
                            _region_sample.correlation_id_internal,
@@ -174,12 +235,15 @@ storage_parser::consume_storage()
                            _region_sample.start_timestamp, _region_sample.end_timestamp,
                            _region_sample.call_stack, _region_sample.args_str,
                            _region_sample.category);
-
-                invoke_callbacks(header.type, _region_sample);
+                {
+                    measure_time s{ "et::_region_sample::invoke_callbacks" };
+                    invoke_callbacks(header.type, _region_sample);
+                }
                 break;
             }
             case entry_type::in_time_sample:
             {
+                measure_time   s{ "et::_in_time_sample" };
                 in_time_sample _in_time_sample;
                 parse_data(sample.data(), _in_time_sample.track_name,
                            _in_time_sample.timestamp_ns, _in_time_sample.event_metadata,
@@ -191,6 +255,7 @@ storage_parser::consume_storage()
             }
             case entry_type::pmc_event_with_sample:
             {
+                measure_time          s{ "et::_pmc_event_with_sample" };
                 pmc_event_with_sample _pmc_event_with_sample;
                 parse_data(
                     sample.data(), _pmc_event_with_sample.track_name,
@@ -250,12 +315,16 @@ storage_parser::consume_storage()
     ifs.close();
     ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system\n",
                      m_filename.c_str());
-    std::remove(m_filename.c_str());
+    // std::remove(m_filename.c_str());
 
     if(m_on_finished_callback != nullptr)
     {
         (*m_on_finished_callback)();
     }
+    auto e1 = std::chrono::high_resolution_clock::now();
+    std::cout << getpid() << ". Consume storage TOTAL time "
+              << std::chrono::duration_cast<std::chrono::seconds>(e1 - s1).count()
+              << "\n";
 }
 
 void
@@ -270,6 +339,7 @@ storage_parser::invoke_callbacks(entry_type type, const storage_parsed_type_base
 
     for(auto& cb : _callback_list->second)
     {
+        measure_time s{ "cb(parsed)" };
         cb(parsed);
     }
 }

@@ -51,12 +51,60 @@ namespace trace_cache
 namespace
 {
 
+struct statistic
+{
+    size_t duration;
+    size_t count;
+};
+
+std::map<std::string, std::map<size_t, statistic>> total_time;
+
+struct measure_time
+{
+    measure_time(const char* _cat)
+    : cat{ _cat }
+    {
+        start = std::chrono::high_resolution_clock::now();
+    }
+    ~measure_time()
+    {
+        static thread_local auto tid = gettid();
+        auto duration                = std::chrono::high_resolution_clock::now() - start;
+        total_time[cat][tid].duration +=
+            std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+        total_time[cat][tid].count++;
+    }
+
+    static void print_total()
+    {
+        static thread_local auto tid = gettid();
+        float                    tt{ 0 };
+        std::cout << "===========================================================\n";
+        std::cout << "TID: " << tid << std::endl;
+        for(auto& [category, stat] : total_time)
+        {
+            std::cout << "Category: " << category << "\n\tCount: " << stat[tid].count
+                      << "\n\tDuration: " << (float) stat[tid].duration / 1000 / 1000
+                      << "s "
+                      << "(" << stat[tid].duration << "us)\n";
+            tt += (float) stat[tid].duration / 1000 / 1000;
+        }
+        std::cout << "===========================================================\n";
+        std::cout << "Total time: " << tt << "s\n";
+        std::cout << "===========================================================\n";
+    }
+
+private:
+    std::string                                    cat;
+    std::chrono::high_resolution_clock::time_point start;
+};
+
 #if ROCPROFSYS_USE_ROCM > 0
 auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
     return code_object.agent_id.handle;
 #    else
     return code_object.rocp_agent.handle;
@@ -75,6 +123,7 @@ postprocessing_callback
 rocpd_post_processing::get_kernel_dispatch_callback() const
 {
     return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {
+        measure_time t{ "kernel_dispatch_callback" };
 #if ROCPROFSYS_USE_ROCM > 0
         auto _kds = static_cast<const struct kernel_dispatch_sample&>(parsed);
 
@@ -123,6 +172,7 @@ postprocessing_callback
 rocpd_post_processing::get_memory_copy_callback() const
 {
     return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {
+        measure_time t{ "memory_copy_callback" };
 #if ROCPROFSYS_USE_ROCM > 0
         auto _mcs = static_cast<const struct memory_copy_sample&>(parsed);
 
@@ -164,7 +214,7 @@ rocpd_post_processing::get_memory_copy_callback() const
     };
 }
 
-#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
+#if (ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
 postprocessing_callback
 rocpd_post_processing::get_memory_allocate_callback() const
 {
@@ -211,6 +261,7 @@ rocpd_post_processing::get_memory_allocate_callback() const
 #    endif
 
     return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {
+        measure_time t{ "memory_allocate_callback" };
 #    if ROCPROFSYS_USE_ROCM > 0
         auto  _mas           = static_cast<const struct memory_allocate_sample&>(parsed);
         auto  data_processor = get_data_processor();
@@ -304,11 +355,12 @@ rocpd_post_processing::get_region_callback() const
 
     return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {
 #if ROCPROFSYS_USE_ROCM > 0
-        auto  _rs            = static_cast<const struct region_sample&>(parsed);
-        auto  data_processor = get_data_processor();
-        auto& n_info         = node_info::get_instance();
-        auto  process        = m_metadata.get_process_info();
-        auto  thread_primary_key =
+        measure_time t{ "region_callback" };
+        auto         _rs            = static_cast<const struct region_sample&>(parsed);
+        auto         data_processor = get_data_processor();
+        auto&        n_info         = node_info::get_instance();
+        auto         process        = m_metadata.get_process_info();
+        auto         thread_primary_key =
             data_processor->map_thread_id_to_primary_key(_rs.thread_id);
 
         auto name_primary_key     = data_processor->insert_string(_rs.name.c_str());
@@ -318,11 +370,12 @@ rocpd_post_processing::get_region_callback() const
         size_t parent_stack_id = _rs.correlation_id_ancestor;
         size_t correlation_id  = 0;
 
+        auto args = parse_args(_rs.args_str);
+
         auto event_primary_key =
             data_processor->insert_event(category_primary_key, stack_id, parent_stack_id,
                                          correlation_id, _rs.call_stack.c_str());
 
-        auto args = parse_args(_rs.args_str);
         for(const auto& arg : args)
         {
             data_processor->insert_args(event_primary_key, arg.arg_number,
@@ -333,6 +386,7 @@ rocpd_post_processing::get_region_callback() const
         data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
                                       _rs.start_timestamp, _rs.end_timestamp,
                                       name_primary_key, event_primary_key);
+
 #endif
     };
 }
@@ -341,6 +395,8 @@ postprocessing_callback
 rocpd_post_processing::get_backtrace_sample_callback() const
 {
     return [&](const storage_parsed_type_base& parsed) {
+        measure_time t{ "backtrace_sample_callback" };
+
         auto  _bts           = static_cast<const struct backtrace_region_sample&>(parsed);
         auto  data_processor = get_data_processor();
         auto& n_info         = node_info::get_instance();
@@ -381,8 +437,9 @@ postprocessing_callback
 rocpd_post_processing::get_pmc_event_with_sample_callback() const
 {
     return [&](const storage_parsed_type_base& parsed) {
-        auto _pmc              = static_cast<const struct pmc_event_with_sample&>(parsed);
-        auto data_processor    = get_data_processor();
+        measure_time t{ "pmc_event_with_sample_callback" };
+        auto         _pmc = static_cast<const struct pmc_event_with_sample&>(parsed);
+        auto         data_processor = get_data_processor();
         auto track_primary_key = data_processor->insert_string(_pmc.track_name.c_str());
 
         auto agent_primary_key =
@@ -474,7 +531,8 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
     };
 
     return [&](const storage_parsed_type_base& parsed) {
-        auto _amd_smi = static_cast<const struct amd_smi_sample&>(parsed);
+        measure_time t{ "amd_smi_sample_callback" };
+        auto         _amd_smi = static_cast<const struct amd_smi_sample&>(parsed);
 
         auto data_processor = get_data_processor();
 
@@ -614,6 +672,7 @@ rocpd_post_processing::get_cpu_freq_sample_callback() const
     };
 
     return [&](const storage_parsed_type_base& parsed) {
+        measure_time t{ "cpu_freq_sample_callback" };
         auto _cpu_freq_sample = static_cast<const struct cpu_freq_sample&>(parsed);
 
         auto        data_processor   = get_data_processor();
@@ -667,6 +726,8 @@ rocpd_post_processing::rocpd_post_processing(metadata_registry& md,
       std::make_shared<rocpd::data_storage::database>(pid, ppid)))
 {}
 
+rocpd_post_processing::~rocpd_post_processing() { measure_time::print_total(); }
+
 void
 rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser& parser)
 {
@@ -679,7 +740,7 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
     parser.register_type_callback(entry_type::kernel_dispatch,
                                   get_kernel_dispatch_callback());
     parser.register_type_callback(entry_type::memory_copy, get_memory_copy_callback());
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
     parser.register_type_callback(entry_type::memory_alloc,
                                   get_memory_allocate_callback());
 #    endif
