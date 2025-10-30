@@ -254,6 +254,10 @@ struct hsa_kfd_fmm_context
 	unsigned int gpu_mem_count;
 	gpu_mem_t *first_gpu_mem;
 
+	/* GPU node array for default mappings */
+	uint32_t all_gpu_id_array_size;
+	uint32_t *all_gpu_id_array;
+
 #define DRM_FIRST_RENDER_NODE 128
 #define DRM_LAST_RENDER_NODE 255
 
@@ -308,10 +312,6 @@ static manageable_aperture_t cpuvm_aperture = INIT_MANAGEABLE_APERTURE(0, 0);
  * its size is 47bits.
 */
 static manageable_aperture_t mem_handle_aperture = INIT_MANAGEABLE_APERTURE(START_NON_CANONICAL_ADDR, (START_NON_CANONICAL_ADDR + (1ULL << 47)));
-
-/* GPU node array for default mappings */
-static uint32_t all_gpu_id_array_size;
-static uint32_t *all_gpu_id_array;
 
 /* IPC structures and helper functions */
 typedef enum _HSA_APERTURE {
@@ -2952,11 +2952,11 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	if (ret != HSAKMT_STATUS_SUCCESS)
 		goto get_aperture_ioctl_failed;
 
-	all_gpu_id_array_size = 0;
-	all_gpu_id_array = NULL;
+	assert(fmm_ctx->all_gpu_id_array_size == 0);
+	assert(fmm_ctx->all_gpu_id_array == NULL);
 	if (num_of_sysfs_nodes > 0) {
-		all_gpu_id_array = malloc(sizeof(uint32_t) * gpu_mem_count);
-		if (!all_gpu_id_array) {
+		fmm_ctx->all_gpu_id_array = malloc(sizeof(uint32_t) * gpu_mem_count);
+		if (!fmm_ctx->all_gpu_id_array) {
 			ret = HSAKMT_STATUS_NO_MEMORY;
 			goto get_aperture_ioctl_failed;
 		}
@@ -2975,11 +2975,11 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		if (gpu_mem_id < 0)
 			continue;
 
-		if (all_gpu_id_array_size == gpu_mem_count) {
+		if (fmm_ctx->all_gpu_id_array_size == gpu_mem_count) {
 			ret = HSAKMT_STATUS_ERROR;
 			goto aperture_init_failed;
 		}
-		all_gpu_id_array[all_gpu_id_array_size++] = process_apertures[i].gpu_id;
+		fmm_ctx->all_gpu_id_array[fmm_ctx->all_gpu_id_array_size++] = process_apertures[i].gpu_id;
 
 		/* Add this GPU to the usable_peer_id_arrays of all GPUs that
 		 * this GPU has an IO link to. This GPU can map memory
@@ -3061,7 +3061,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		if (ret != HSAKMT_STATUS_SUCCESS)
 			goto aperture_init_failed;
 	}
-	all_gpu_id_array_size *= sizeof(uint32_t);
+	fmm_ctx->all_gpu_id_array_size *= sizeof(uint32_t);
 
 	if (svm_limit) {
 		/* At least one GPU uses GPUVM in canonical address
@@ -3132,8 +3132,8 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 aperture_init_failed:
 init_svm_failed:
 set_memory_policy_failed:
-	free(all_gpu_id_array);
-	all_gpu_id_array = NULL;
+	free(fmm_ctx->all_gpu_id_array);
+	fmm_ctx->all_gpu_id_array = NULL;
 get_aperture_ioctl_failed:
 	free(process_apertures);
 sysfs_parse_failed:
@@ -3148,11 +3148,11 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 
 	release_mmio(ctx);
 
-	if (all_gpu_id_array) {
-		free(all_gpu_id_array);
-		all_gpu_id_array = NULL;
+	if (fmm_ctx->all_gpu_id_array) {
+		free(fmm_ctx->all_gpu_id_array);
+		fmm_ctx->all_gpu_id_array = NULL;
 	}
-	all_gpu_id_array_size = 0;
+	fmm_ctx->all_gpu_id_array_size = 0;
 
 	if (fmm_ctx->gpu_mem) {
 		while (fmm_ctx->gpu_mem_count-- > 0)
@@ -3356,8 +3356,8 @@ static HSAKMT_STATUS _fmm_map_to_gpu(HsaKFDContext *ctx,
 			args.n_devices =
 				fmm_ctx->gpu_mem[gpu_mem_id].usable_peer_id_num;
 		} else {
-			args.device_ids_array_ptr = (uint64_t)all_gpu_id_array;
-			args.n_devices = all_gpu_id_array_size / sizeof(uint32_t);
+			args.device_ids_array_ptr = (uint64_t)fmm_ctx->all_gpu_id_array;
+			args.n_devices = fmm_ctx->all_gpu_id_array_size / sizeof(uint32_t);
 		}
 	}
 
@@ -3463,6 +3463,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 	void *svm_addr;
 	HSAuint32 page_offset = (HSAuint64)addr & (PAGE_SIZE-1);
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 
 	aperture = svm.dgpu_aperture;
 
@@ -3472,8 +3473,8 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 	if (!object && hsakmt_is_svm_api_supported) {
 		svm_addr = (void*)((HSAuint64)addr - page_offset);
 		if (!nodes_to_map) {
-			nodes_to_map = all_gpu_id_array;
-			nodes_array_size = all_gpu_id_array_size;
+			nodes_to_map = fmm_ctx->all_gpu_id_array;
+			nodes_array_size = fmm_ctx->all_gpu_id_array_size;
 		}
 		pr_debug("%s Mapping Address %p size aligned: %ld offset: %x\n",
 			__func__, svm_addr, PAGE_ALIGN_UP(page_offset + size), page_offset);
@@ -4403,8 +4404,8 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(HsaKFDContext *ctx,
 	}
 
 	/* Verify that all nodes to map are registered already */
-	registered_node_id_array = all_gpu_id_array;
-	registered_node_id_array_size = all_gpu_id_array_size;
+	registered_node_id_array = fmm_ctx->all_gpu_id_array;
+	registered_node_id_array_size = fmm_ctx->all_gpu_id_array_size;
 	if (object->registered_device_id_array_size > 0 &&
 			object->registered_device_id_array) {
 		registered_node_id_array = object->registered_device_id_array;
