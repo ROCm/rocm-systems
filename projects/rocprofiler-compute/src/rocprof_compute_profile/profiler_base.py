@@ -410,11 +410,6 @@ class RocProfCompute_Base:
         status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
         print_status(status_msg)
 
-        # Run profiling on each input file
-        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
-        total_runs = len(input_files)
-        total_profiling_time = 0.0
-
         native_tool_path = None
         # Native counter collection tool is only compatible with
         # rocprofiler-sdk public API for ROCm version >= 7.x.x
@@ -467,25 +462,17 @@ class RocProfCompute_Base:
                 if not success:
                     console_error("Failed to build native counter collection tool.")
 
-        for i, fname in enumerate(input_files):
-            run_number = i + 1
+        if self.__profiler == "rocprofiler-sdk":
+            options = self.get_profiler_options(native_tool_path=native_tool_path)
+        else:
+            options = self.get_profiler_options()
 
-            # Log progress and time estimation
-            if i > 0:
-                avg_time = total_profiling_time / i
-                time_left_seconds = (total_runs - run_number) * avg_time
-                time_left = format_time(time_left_seconds)
-                console_log(
-                    f"[Run {run_number}/{total_runs}]"
-                    f"[Approximate profiling time left: {time_left}]..."
-                )
-            else:
-                console_log(
-                    f"[Run {run_number}/{total_runs}]"
-                    "[Approximate profiling time left: "
-                    "pending first measurement...]"
-                )
+        # Run profiling on each input file
+        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
+        total_runs = len(input_files)
+        total_profiling_time = 0.0
 
+        for fname in input_files:
             # Kernel filtering (in-place replacement)
             if not args.kernel == None:
                 success, output = capture_subprocess_output([
@@ -502,7 +489,7 @@ class RocProfCompute_Base:
                     console_debug(output)
 
             # Dispatch filtering (inplace replacement)
-            if not args.dispatch == None:
+            if args.dispatch is not None:
                 success, output = capture_subprocess_output([
                     "sed",
                     "-i",
@@ -516,12 +503,20 @@ class RocProfCompute_Base:
                 else:
                     console_debug(output)
 
-            console_log("profiling", f"Current input file: {fname}")
-            if self.__profiler == "rocprofiler-sdk":
-                options = self.get_profiler_options(native_tool_path=native_tool_path)
+        def profile(
+            fnames: Union[list[Path], Path], options: Union[list[str], dict[str, Any]]
+        ) -> float:
+            if isinstance(fnames, list):
+                console_log(
+                    "profiling", f"Current input files: {', '.join(map(str, fnames))}"
+                )
+                str_fnames = [str(fname) for fname in fnames]
             else:
-                options = self.get_profiler_options()
+                console_log("profiling", f"Current input file: {fnames}")
+                str_fnames = str(fnames)
+
             start_time = time.time()
+
             if self.__profiler == "rocprofv3" or self.__profiler == "rocprofiler-sdk":
                 # Only 1-run case is permitted for attach/detach
                 if (isinstance(options, list) and "--pid" in options) or (
@@ -538,7 +533,7 @@ class RocProfCompute_Base:
                             f"to adjust or reduce the requested performance metrics!"
                         )
                 run_prof(
-                    fname=str(fname),
+                    fnames=str_fnames,
                     profiler_options=options,
                     workload_dir=args.path,
                     mspec=self._soc._mspec,
@@ -546,16 +541,49 @@ class RocProfCompute_Base:
                     format_rocprof_output=args.format_rocprof_output,
                     retain_rocpd_output=args.retain_rocpd_output,
                 )
+
                 end_time = time.time()
                 duration = end_time - start_time
-                total_profiling_time += duration
 
                 console_debug(
                     f"The time of run_prof of {fname} is {int(duration / 60)} min"
                     f" {duration % 60} sec"
                 )
+                return duration
             else:
                 console_error("Profiler not supported")
+                return 0.0
+
+        if args.iteration_multiplexing is not None:
+            console_log(f"Iteration multiplexing: {args.iteration_multiplexing}")
+            profile(input_files, options)
+        else:
+            console_log("Iteration multiplexing: Disabled")
+
+            total_runs = len(input_files)
+            total_profiling_time = 0.0
+
+            for i, fname in enumerate(input_files):
+                run_number = i + 1
+
+                # Log progress and time estimation
+                if i > 0:
+                    avg_time = total_profiling_time / i
+                    time_left_seconds = (total_runs - run_number) * avg_time
+                    time_left = format_time(time_left_seconds)
+                    console_log(
+                        f"[Run {run_number}/{total_runs}]"
+                        f"[Approximate profiling time left: {time_left}]..."
+                    )
+                else:
+                    console_log(
+                        f"[Run {run_number}/{total_runs}]"
+                        "[Approximate profiling time left: "
+                        "pending first measurement...]"
+                    )
+
+                duration = profile(fname, options)
+                total_profiling_time += duration
 
         # Delete temporary native tool if created
         if native_tool_path and native_tool_path.startswith("/tmp"):

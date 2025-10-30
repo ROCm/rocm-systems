@@ -685,7 +685,7 @@ def parse_text(text_file: str) -> list[str]:
 
 
 def run_prof(
-    fname: str,
+    fnames: Union[list[str], str],
     profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
     workload_dir: str,
     mspec: Any,  # noqa: ANN401
@@ -693,9 +693,28 @@ def run_prof(
     format_rocprof_output: str,
     retain_rocpd_output: bool = False,
 ) -> None:
-    fpath = Path(fname)
+    multiple_files = isinstance(fnames, list)
+    if multiple_files and (
+        (
+            isinstance(profiler_options, dict)
+            and profiler_options.get("ROCPROF_ITERATION_MULTIPLEXING") is None
+        )
+        or (
+            isinstance(profiler_options, list)
+            and "--iteration-multiplexing" not in profiler_options
+        )
+    ):
+        console_error(
+            "Multiple pmc files detected but ROCPROF_ITERATION_MULTIPLEXING is not set."
+        )
+        return
+
+    fpath = Path(fnames[0]) if multiple_files else Path(fnames)
     fbase = fpath.stem
-    console_debug(f"pmc file: {fpath.name}")
+    if multiple_files:
+        console_debug(f"pmc files: {', '.join([Path(fname).name for fname in fnames])}")
+    else:
+        console_debug(f"pmc file: {fpath.name}")
 
     is_mode_live_attach = (
         isinstance(profiler_options, list) and "--pid" in profiler_options
@@ -707,10 +726,21 @@ def run_prof(
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
         options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
-        options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_text(fname))}"
+        if multiple_files:
+            options["ROCPROF_COUNTERS"] = ", ".join([
+                f"pmc: {' '.join(parse_text(fname))}" for fname in fnames
+            ])
+        else:
+            options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_text(fnames))}"
         options["ROCPROF_AGENT_INDEX"] = "absolute"
     else:
-        default_options = ["-i", fname]
+        if multiple_files:
+            console_error(
+                "Multiple pmc files detected but rocprofv3 does not "
+                "support multiple input files."
+            )
+            return
+        default_options = ["-i", fnames]
         options = default_options + cast(list[str], profiler_options)
         options = ["-A", "absolute"] + options
 
@@ -725,11 +755,12 @@ def run_prof(
     ) as file:
         counter_defs = yaml.safe_load(file)
     # Extra counter definitions
-    if Path(fname).with_suffix(".yaml").exists():
-        with open(Path(fname).with_suffix(".yaml")) as file:
-            counter_defs["rocprofiler-sdk"]["counters"].extend(
-                yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
-            )
+    for fname in fnames if multiple_files else [fnames]:
+        if Path(fname).with_suffix(".yaml").exists():
+            with open(Path(fname).with_suffix(".yaml")) as file:
+                counter_defs["rocprofiler-sdk"]["counters"].extend(
+                    yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
+                )
     # Write counter definitions to a temporary file
     tmpfile_path = (
         Path(tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp"))
@@ -756,6 +787,9 @@ def run_prof(
         new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
 
     time_1 = time.time()
+
+    output_path = Path(workload_dir + "/out/pmc_1")
+    output_path.mkdir(parents=True, exist_ok=True)
 
     if rocprof_cmd == "rocprofiler-sdk":
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
