@@ -208,12 +208,12 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
 
-    auto buffer_packet = rocprofiler::hsa::SQTTBufferingPackets(control_packet->GetHandle());
-    if(buffer_packet.header)
+    auto buffer_packet = std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(control_packet->GetHandle());
+    if(buffer_packet->header)
         params.shader_cb_fn(agent_id,
                             0,
-                            &buffer_packet.header,
-                            sizeof(buffer_packet.header),
+                            &buffer_packet->header,
+                            sizeof(buffer_packet->header),
                             ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
                             params.callback_userdata);
 
@@ -227,15 +227,24 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
 
     if(params.triple_buffering)
     {
-        auto worker_data             = triple_buffer_worker_data_t{};
-        worker_data.callback_fn      = params.shader_cb_fn;
-        worker_data.userdata         = params.callback_userdata;
-        worker_data.queue            = queue;
-        worker_data.running_flag     = std::move(flag);
-        worker_data.start_pkt_signal = shared_signal;
-        worker_data.control_packet   = std::move(control_packet);
+        auto worker_data            = std::make_shared<triple_buffer_shared_data_t>();
+        worker_data->queue          = queue;
 
-        worked_thread = std::thread{worker_loop, std::move(buffer_packet), std::move(worker_data)};
+        auto producer_data = triple_buffer_producer_data_t{};
+        producer_data.producer_running = std::move(flag);
+        producer_data.start_pkt_signal = shared_signal;
+        producer_data.control_packet   = std::move(control_packet);
+        producer_data.copy_data_fn     = copy_data_sync;
+        producer_data.shared           = worker_data;
+        producer_data.buffer_packet    = std::move(buffer_packet);
+
+        auto consumer_data = triple_buffer_consumer_data_t{};
+        consumer_data.callback_fn = params.shader_cb_fn;
+        consumer_data.userdata    = params.callback_userdata;
+        consumer_data.shared      = worker_data;
+
+        producer = std::thread{producer_loop, std::move(producer_data)};
+        consumer = std::thread{consumer_loop, std::move(consumer_data)};
     }
     return shared_signal;
 }
@@ -247,7 +256,8 @@ ThreadTracerAgent::stop_thread_trace()
 
     if(params.triple_buffering)
     {
-        worked_thread.join();
+        producer.join();
+        consumer.join();
         return nullptr;
     }
     else

@@ -2,11 +2,8 @@ rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
 
-set(ROCPROFILER_THREAD_TRACE_TEST_SOURCES "att_packet_test.cpp")
-
 add_executable(thread-trace-packet-test)
-
-target_sources(thread-trace-packet-test PRIVATE ${ROCPROFILER_THREAD_TRACE_TEST_SOURCES})
+target_sources(thread-trace-packet-test PRIVATE att_packet_test.cpp)
 
 target_link_libraries(
     thread-trace-packet-test

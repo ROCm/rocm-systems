@@ -116,7 +116,8 @@ private:
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
-    std::thread worked_thread{};
+    std::thread consumer{};
+    std::thread producer{};
 };
 
 class DispatchThreadTracer
