@@ -22,4 +22,4 @@ jobs:
       # optional tweaks:
       cmake_config_args: "-DROCPROFILER_BUILD_DEBUG=ON"
       cmake_build_type: "RelWithDebInfo"
-      install_packages: "libsqlite3-dev"
+      install_packages: "libsqlite3-dev libdw-dev"
