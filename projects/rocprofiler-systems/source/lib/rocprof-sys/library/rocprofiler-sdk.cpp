@@ -786,8 +786,6 @@ tool_tracing_callback_stop(
                     tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ts);
                     tracing::add_perfetto_annotation(ctx, "stack_id",
                                                      record.correlation_id.internal);
-                    tracing::add_perfetto_annotation(ctx, "parent_stack_id",
-                                                     record.correlation_id.ancestor);
                     if(stream_id.handle != 0)
                         tracing::add_perfetto_annotation(ctx, "stream_id",
                                                          stream_id.handle);
@@ -1128,8 +1126,6 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
                     tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ts);
                     tracing::add_perfetto_annotation(ctx, "stack_id",
                                                      record.correlation_id.internal);
-                    tracing::add_perfetto_annotation(ctx, "parent_stack_id",
-                                                     record.correlation_id.ancestor);
                     if(stream_id.handle != 0)
                         tracing::add_perfetto_annotation(ctx, "stream_id",
                                                          stream_id.handle);
