@@ -2,7 +2,6 @@ name: Rocprofiler-SDK ABI Guard
 on:
   pull_request:
   workflow_dispatch:
-  push:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

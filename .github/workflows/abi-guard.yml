@@ -131,16 +131,19 @@ jobs:
     #         cmake-${{ runner.os }}-head-
 
       - name: Configure
-        working-directory: ${{ github.workspace }}
         run: cmake -S ${{ inputs.source_directory }} -B ${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
 
       - name: Build
-        working-directory: ${{ github.workspace }}
+        run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target all --parallel 8
+
+      - name: Install
         run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target install --parallel 8
+
+      - name: Cleanup build object and static library files
+        run: find ${BUILD_DIR} -type f \( -name '*.o' -o -name '*.a' \) -delete
 
       - name: List Files
         shell: bash
-        working-directory: ${{ github.workspace }}
         run: |
           set -euov pipefail
           pwd
@@ -226,7 +229,13 @@ jobs:
         run: cmake -S ${{ inputs.source_directory }} -B ${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
 
       - name: Build
+        run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target all --parallel 8
+
+      - name: Install
         run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target install --parallel 8
+
+      - name: Cleanup build object and static library files
+        run: find ${BUILD_DIR} -type f \( -name '*.o' -o -name '*.a' \) -delete
 
       - name: List Files
         shell: bash
@@ -255,7 +264,7 @@ jobs:
       - name: Install libabigail
         run: |
           sudo apt-get update
-          sudo apt-get install -y libabigail libabigail-tools
+          sudo apt-get install -y libabigail abigail-tools
       - name: Download HEAD artifact
         uses: actions/download-artifact@v4
         with:
