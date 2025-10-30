@@ -36,9 +36,15 @@ ROCPROFILER_EXTERN_C_INIT
  * @{
  */
 
+/**
+ * @brief Types of Thread Trace buffering  modes
+ * ::ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_NONE defines no preference
+ *
+ */
 typedef enum rocprofiler_thread_trace_parameter_buffering_mode_t
 {
     ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_NONE = 0,
+    ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_SINGLE_BUFFER,
     ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER,
     ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_LAST
 } rocprofiler_thread_trace_parameter_buffering_mode_t;
@@ -102,7 +108,7 @@ typedef enum rocprofiler_thread_trace_shader_data_flags_t
     /// @var ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END
     /// @brief This is the last record for shader engine.
     /// @var ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL
-    /// @brief Trace was interrupted due to GPU buffer full. For double buffering, this usually happens when the
+    /// @brief Trace was interrupted due to GPU buffer full. For triple buffering, this usually happens when the
     /// profiler was unable to retrieve data from the GPU fast enough. For single buffer, this usually happens when the buffer is not large enough.
     /// @var ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL
     /// @brief Trace was interrupted due to CPU buffer locked. This usually happens when the user
