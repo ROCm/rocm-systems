@@ -1009,6 +1009,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   // Check for queue full and wait if needed.
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
+  uint64_t read = Hsa::queue_load_read_index_relaxed(gpu_queue_);
   fence_dirty_ = true;
 
   if (addSystemScope_) {
