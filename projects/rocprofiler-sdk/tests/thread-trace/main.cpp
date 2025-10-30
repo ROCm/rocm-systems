@@ -25,6 +25,8 @@
 #    undef NDEBUG
 #endif
 
+#include <rocprofiler-sdk-roctx/roctx.h>
+
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -32,7 +34,7 @@
 #include "hip/hip_runtime.h"
 
 // Two waves per SIMD on MI300
-#define DATA_SIZE          (304 * 64 * 4 * 2)
+#define DATA_SIZE          (304 * 256 * 8)
 #define HIP_API_CALL(CALL) assert((CALL) == hipSuccess)
 
 #define SHM_SIZE  64
@@ -46,7 +48,8 @@ looping_lds_kernel(float* __restrict__ a,
                    const float* __restrict__ b,
                    const float* __restrict__ c,
                    size_t size,
-                   size_t loopcount);
+                   size_t loopcount,
+                   uint32_t ttracedata);
 
 class hipMemory
 {
@@ -71,13 +74,20 @@ main(int /*argc*/, char** /*argv*/)
     hipMemory dst(DATA_SIZE);
 
     HIP_API_CALL(hipDeviceSynchronize());
+    roctxProfilerResume(0);
 
-    for(size_t i = 0; i < LOOPCOUNT; i++)
+    bool is_double_buffer = std::getenv("DOUBLEBUFFER") ? atoi(std::getenv("DOUBLEBUFFER")) : false;
+
+    int loopcount = LOOPCOUNT;
+    if (is_double_buffer) loopcount = 30000;
+
+    for(int i = 0; i < loopcount; i++)
     {
         hipLaunchKernelGGL(
             branching_kernel, dim3(DATA_SIZE / 64), dim3(64), 0, 0, dst.ptr, src1.ptr, src2.ptr);
         HIP_API_CALL(hipGetLastError());
 
+        uint32_t tracedata = is_double_buffer ? i : 0xDEADBEEF;
         hipLaunchKernelGGL(looping_lds_kernel,
                            dim3(DATA_SIZE / 64),
                            dim3(64),
@@ -87,10 +97,12 @@ main(int /*argc*/, char** /*argv*/)
                            src1.ptr,
                            src2.ptr,
                            DATA_SIZE,
-                           LOOPCOUNT);
+                           LOOPCOUNT,
+                           tracedata);
         HIP_API_CALL(hipGetLastError());
         HIP_API_CALL(hipDeviceSynchronize());
     }
+    roctxProfilerPause(0);
 
     return 0;
 }
