@@ -22,6 +22,12 @@ on:
         type: string
         default: "RelWithDebInfo"
 
+      # directory containing source to build (i.e. top-level CMakeLists.txt)
+      source_directory:
+        description: "Path to source directory."
+        required: true
+        type: string
+
       cmake_generator:
         description: "CMake generator."
         required: false
@@ -97,7 +103,7 @@ jobs:
     #         cmake-${{ runner.os }}-head-
 
       - name: Configure
-        run: cmake -S . -B ${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
+        run: cmake -S ${{ inputs.source_directory }} -B ${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
 
       - name: Build
         run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target install --parallel 8
@@ -166,7 +172,7 @@ jobs:
     #         cmake-${{ runner.os }}-baseline-
 
       - name: Configure
-        run: cmake -S . -B ${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
+        run: cmake -S ${{ inputs.source_directory }} -B ${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
 
       - name: Build
         run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target install --parallel 8
