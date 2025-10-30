@@ -29,25 +29,51 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <condition_variable>
 
 namespace rocprofiler
 {
 namespace thread_trace
 {
-struct triple_buffer_worker_data_t
+void
+copy_data_sync(void* dst, const void* src, hsa_agent_t dst_agent, hsa_agent_t src_agent, size_t size, Signal* dependency);
+
+typedef decltype(copy_data_sync) copy_data_t;
+
+struct triple_buffer_shared_data_t
+{
+    std::shared_ptr<HsaATTQueue> queue{};
+    std::atomic<bool>            consumer_running{true};
+    std::condition_variable      write_cv{};
+    std::atomic<size_t>          write_index{0};
+    std::atomic<size_t>          read_index{0};
+
+    std::array<std::pair<std::mutex, int>, 2> mut{};
+};
+
+struct triple_buffer_consumer_data_t
 {
     rocprofiler_thread_trace_shader_data_callback_t callback_fn{};
     rocprofiler_user_data_t                         userdata{};
+    std::shared_ptr<triple_buffer_shared_data_t>    shared{};
+};
 
-    std::shared_ptr<HsaATTQueue>       queue{};
-    std::shared_ptr<std::atomic<bool>> running_flag{};
-
-    std::shared_ptr<Signal>                     start_pkt_signal{};
-    std::unique_ptr<hsa::TraceControlAQLPacket> control_packet{};
+struct triple_buffer_producer_data_t
+{
+    copy_data_t*                                 copy_data_fn{};
+    std::shared_ptr<std::atomic<bool>>           producer_running{};
+    std::shared_ptr<Signal>                      start_pkt_signal{};
+    std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
+    std::shared_ptr<triple_buffer_shared_data_t> shared{};
+    std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};
 };
 
 void
-worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t parameters);
+producer_loop(triple_buffer_producer_data_t parameters);
+
+void
+consumer_loop(triple_buffer_consumer_data_t parameters);
 
 };  // namespace thread_trace
 };  // namespace rocprofiler
