@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Utilities that wrap HSA primitives used by thread trace triple buffering.
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -38,7 +39,7 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-constexpr size_t QUEUE_SIZE = 256;
+constexpr size_t QUEUE_SIZE = 256;  // Small dedicated queue for SQTT control traffic
 
 Signal::Signal(hsa_ext_amd_aql_pm4_packet_t* packet): Signal()
 {
