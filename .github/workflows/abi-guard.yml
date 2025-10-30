@@ -106,8 +106,7 @@ jobs:
         run: |
           set -euov pipefail
           pwd
-          ls
-          ls -R ${{ github.workspace }}
+          ls -la ${PWD}
           set +v
           echo -n "Branch: "
           git branch --show-current
@@ -133,8 +132,7 @@ jobs:
         run: |
           set -euov pipefail
           pwd
-          ls
-          ls -R ${{ github.workspace }}
+          ls -la ${PWD}
 
       - name: Upload HEAD build
         uses: actions/upload-artifact@v4
@@ -195,8 +193,7 @@ jobs:
         run: |
           set -euov pipefail
           pwd
-          ls
-          ls -R ${{ github.workspace }}
+          ls -la ${PWD}
           set +v
           echo -n "Branch: "
           git branch --show-current
@@ -222,8 +219,7 @@ jobs:
         run: |
           set -euov pipefail
           pwd
-          ls
-          ls -R ${{ github.workspace }}
+          ls -la ${PWD}
 
       - name: Upload baseline build
         uses: actions/upload-artifact@v4
