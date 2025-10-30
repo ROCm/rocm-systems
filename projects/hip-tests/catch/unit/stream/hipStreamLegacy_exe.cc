@@ -18,7 +18,7 @@ THE SOFTWARE.
 */
 
 #include <iostream>
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 
 static constexpr int N = 2 * 1024 * 1024;
 static constexpr size_t NBYTES = N * sizeof(int);

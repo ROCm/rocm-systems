@@ -19,7 +19,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 
 extern "C" __global__ void copy_ker(int* Ad, int* Bd, size_t size) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;

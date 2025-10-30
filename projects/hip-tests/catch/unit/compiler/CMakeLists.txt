@@ -94,14 +94,14 @@ if(HIP_PLATFORM MATCHES "amd")
   # SWDEV-548807 skip building hipSpirvTest
   if(false)
     add_custom_target(hipSpirvTest ALL
-                    COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
+                    COMMAND ${CMAKE_CXX_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                     -I${Catch2_SOURCE_DIR}/src
                     -I${Catch2_BINARY_DIR}/generated-includes
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson
-                    -I${HIP_PATH}/include/ --hip-path=${HIP_PATH} --offload-arch=amdgcnspirv
+                    --offload-arch=amdgcnspirv
                     -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/compiler/hipSpirvTest)
     add_dependencies(CompilerTest hipSpirvTest)
   endif()
