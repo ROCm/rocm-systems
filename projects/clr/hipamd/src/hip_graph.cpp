@@ -1517,6 +1517,13 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
   }
   graph->clone(*pGraphExec, true);
 
+  hipError_t scheduleStatus = (*pGraphExec)->ScheduleNodes();
+  if (scheduleStatus != hipSuccess) {
+    delete *pGraphExec;
+    *pGraphExec = nullptr;
+    return scheduleStatus;
+  }
+
   if (DEBUG_HIP_GRAPH_DOT_PRINT) {
     static int i = 1;
     std::string filename =
@@ -1525,13 +1532,6 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
     if (status == hipSuccess) {
       LogPrintfInfo("[hipGraph] graph dump:%s", filename.c_str());
     }
-  }
-
-  hipError_t scheduleStatus = (*pGraphExec)->ScheduleNodes();
-  if (scheduleStatus != hipSuccess) {
-    delete *pGraphExec;
-    *pGraphExec = nullptr;
-    return scheduleStatus;
   }
 
   graph->SetGraphInstantiated(true);
@@ -3093,12 +3093,16 @@ hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNod
     HIP_RETURN(hipErrorInvalidValue);
   }
   clonedNode->SetEnabled(isEnabled);
-  // Update packet batches when node is enabled/disabled
-  hipError_t status = graphExec->UpdatePacketBatchesForNodeEnableDisable(clonedNode, isEnabled != 0);
-  if (status != hipSuccess) {
-    HIP_RETURN(status);
+
+  hipError_t status = hipSuccess;
+  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
+    // Update packet batches when node is enabled/disabled
+    status = graphExec->UpdatePacketBatchesForNodeEnableDisable(clonedNode, isEnabled != 0);
+    if (status != hipSuccess) {
+      HIP_RETURN(status);
+    }
   }
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN(status);
 }
 
 hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
