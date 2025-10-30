@@ -263,6 +263,27 @@ Examples:
             "\t\t\t(e.g. 1 3:5 captures 1st, 3rd, 4th and 5th iterations)."
         ),
     )
+    profile_group.add_argument(
+        "--iteration-multiplexing",
+        type=str,
+        dest="iteration_multiplexing",
+        metavar="",
+        required=False,
+        nargs="?",
+        choices=[
+            "simple",
+            "kernel",
+            "launch",
+        ],
+        const="launch",
+        help=(
+            "\t\t\tChoose the iteration multiplexing method: (DEFAULT: launch).\n"
+            "\t\t\t   simple (i.e. Round robin over all kernel dispatches\n"
+            "\t\t\t   kernel (i.e. Round robin over unique kernel dispatches)\n"
+            "\t\t\t   launch (i.e. Round robin over unique kernel+launch config"
+            "dispatches)"
+        ),
+    )
 
     profile_group.add_argument(
         "--list-available-metrics",
