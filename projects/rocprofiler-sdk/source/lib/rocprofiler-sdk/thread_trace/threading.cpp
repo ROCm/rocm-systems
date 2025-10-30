@@ -84,16 +84,9 @@ worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t param
             }
             if(!consumer_running && write_index <= read_index) return;
 
-            auto t0 = std::chrono::system_clock::now();
-            // std::this_thread::sleep_for(std::chrono::milliseconds(20));
-
             parameters.callback_fn(
                 queue.agent_id, 0, buffer.at(parity), buffer_size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE, parameters.userdata);
             read_index.fetch_add(1);
-
-            auto duration = (std::chrono::system_clock::now() - t0).count();
-            std::cout << "callback time taken: " << duration * 1E-6f
-                      << "ms. BW: " << buffer_size * 1.0f / duration << " Gb/s\n";
         }
     }};
 
@@ -148,12 +141,10 @@ worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t param
                     size_t                       parity = write_index % buffer.size();
                     std::unique_lock<std::mutex> lock(mut.at(parity));
 
-                    //auto err = copy_fn(buffer.at(parity), status->data, buffer_size);
                     copy_sync(buffer.at(parity), status->data);
                     auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
-                    ROCP_WARNING << "Copy: " << copy_time << " s. BW: " << buffer_size / float(copy_time);
+                    ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << buffer_size / float(copy_time);
 
-                    //ROCP_FATAL_IF(err != HSA_STATUS_SUCCESS) << "Memory copy error: " << err;
                     write_index.fetch_add(1);
                     write_cv.notify_all();
                 }
@@ -173,7 +164,7 @@ worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t param
     stop_consumer();
 
     auto end_t0 = std::chrono::system_clock::now();
-    ROCP_WARNING << "Total trace size: " << (end_t0 - start_t0).count() * 1E-9f << " s.";
+    ROCP_INFO << "Total trace size: " << (end_t0 - start_t0).count() * 1E-9f << " s.";
 }
 }  // namespace thread_trace
 }  // namespace rocprofiler
