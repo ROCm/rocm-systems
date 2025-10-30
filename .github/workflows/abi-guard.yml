@@ -257,14 +257,19 @@ jobs:
     if: ${{ !inputs.use_external_build_artifacts }}
     needs: [build-head, build-baseline]
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
     env:
       VERSIONING_SPEC: ${{ inputs.versioning_spec }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: ${{ github.workspace }}
       - name: Install libabigail
         run: |
           sudo apt-get update
-          sudo apt-get install -y abigail-tools
+          sudo apt-get install -y abigail-tools python3 python3-pip
       - name: Download HEAD artifact
         uses: actions/download-artifact@v4
         with:
@@ -277,6 +282,9 @@ jobs:
           path: build-baseline/
       - name: Run ABI Guard (Python)
         run: |
+          pwd
+          ls -la ${PWD}
+          python3 -m pip install -r scripts/requirements.txt
           python3 scripts/abi_guard.py check \
             -i "build-head/${{ inputs.versioning_spec }}" \
             -b "build-baseline/${{ inputs.versioning_spec }}" \
@@ -297,14 +305,19 @@ jobs:
   abi-guard-external:
     if: ${{ inputs.use_external_build_artifacts }}
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
     env:
       VERSIONING_SPEC: ${{ inputs.versioning_spec }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: ${{ github.workspace }}
       - name: Install libabigail
         run: |
           sudo apt-get update
-          sudo apt-get install -y abigail-tools
+          sudo apt-get install -y abigail-tools python3 python3-pip
       - name: Download HEAD artifact
         uses: actions/download-artifact@v4
         with:
@@ -317,6 +330,9 @@ jobs:
           path: build-baseline/
       - name: Run ABI Guard (Python)
         run: |
+          pwd
+          ls -la ${PWD}
+          python3 -m pip install -r scripts/requirements.txt
           python3 scripts/abi_guard.py check \
             -i "build-head/${{ inputs.versioning_spec }}" \
             -b "build-baseline/${{ inputs.versioning_spec }}" \
