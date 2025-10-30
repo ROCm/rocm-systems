@@ -99,7 +99,9 @@ jobs:
           sudo apt-get install -y git pkg-config build-essential cmake ninja-build ${{ inputs.install_packages }}
 
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          set-safe-directory: ${{ github.workspace }}
 
       - name: Show git branch
         shell: bash
@@ -169,6 +171,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.base_ref || github.event.repository.default_branch }}
+          set-safe-directory: ${{ github.workspace }}
 
     #   - name: Determine baseline tag
     #     id: tag
