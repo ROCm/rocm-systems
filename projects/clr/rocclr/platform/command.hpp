@@ -502,7 +502,7 @@ class OneMemoryArgCommand : public Command {
     memory_->retain();
   }
 
-  virtual void releaseResources() {
+  virtual void releaseResources() override {
     memory_->release();
     DEBUG_ONLY(memory_ = NULL);
     Command::releaseResources();
@@ -510,14 +510,14 @@ class OneMemoryArgCommand : public Command {
   }
 
   //! Release all pinned memory for this command
-  virtual void ReleasePinnedMemory() {
+  virtual void ReleasePinnedMemory() override {
     for (auto it : pinned_memory_) {
       it->release();
     }
     pinned_memory_.clear();
   }
   //! Release all pinned memory for this command
-  virtual bool IsMemoryPinned() const { return !pinned_memory_.empty(); }
+  virtual bool IsMemoryPinned() const override { return !pinned_memory_.empty(); }
 
   //! Adds pinned memory, used in this command for later release
   virtual void AddPinnedMemory(Memory* pinned) override { pinned_memory_.push_back(pinned); }

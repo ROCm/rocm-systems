@@ -220,16 +220,16 @@ class IPCEvent : public Event {
   }
   IPCEvent() : Event(hipEventInterprocess) {}
   bool createIpcEventShmemIfNeeded();
-  hipError_t GetHandle(ihipIpcEventHandle_t* handle);
-  hipError_t OpenHandle(ihipIpcEventHandle_t* handle);
-  hipError_t synchronize();
-  hipError_t query();
+  hipError_t GetHandle(ihipIpcEventHandle_t* handle) override;
+  hipError_t OpenHandle(ihipIpcEventHandle_t* handle) override;
+  hipError_t synchronize() override;
+  hipError_t query() override;
 
-  hipError_t streamWait(hip::Stream* stream, uint flags);
+  hipError_t streamWait(hip::Stream* stream, uint flags) override;
 
   hipError_t recordCommand(amd::Command*& command, amd::HostQueue* queue, uint32_t flags = 0,
                            bool batch_flush = true) override;
-  hipError_t enqueueRecordCommand(hip::Stream* stream, amd::Command* command);
+  hipError_t enqueueRecordCommand(hip::Stream* stream, amd::Command* command) override;
 };
 
 
