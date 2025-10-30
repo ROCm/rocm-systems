@@ -80,7 +80,7 @@ on:
 jobs:
   build-head:
     if: ${{ !inputs.use_external_build_artifacts }}
-    name: Build (HEAD)
+    name: Build (${{ github.ref_name || 'HEAD' }})
     runs-on: ubuntu-latest
     env:
       BUILD_DIR: build
@@ -126,7 +126,7 @@ jobs:
 
   build-baseline:
     if: ${{ !inputs.use_external_build_artifacts }}
-    name: Build (baseline tag)
+    name: Build (${{ github.base_ref || github.event.repository.default_branch }})
     runs-on: ubuntu-latest
     # outputs:
     #   tag: ${{ steps.tag.outputs.tag }}
