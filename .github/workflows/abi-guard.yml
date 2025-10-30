@@ -156,6 +156,7 @@ jobs:
           path: |
             ${{ github.workspace }}/
           if-no-files-found: error
+          retention-days: 1
 
   build-baseline:
     if: ${{ !inputs.use_external_build_artifacts }}
@@ -251,6 +252,7 @@ jobs:
           path: |
             ${{ github.workspace }}/
           if-no-files-found: error
+          retention-days: 1
 
   # Runs when you are building inside this workflow
   abi-guard-internal:
@@ -298,7 +300,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: abi-guard-diff-reports
-          path: abi-guard/diff-reports/
+          path: abi-guard/
           if-no-files-found: ignore
 
   # Runs when caller provides external artifacts (no build deps)
@@ -346,5 +348,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: abi-guard-diff-reports
-          path: abi-guard/diff-reports/
+          path: abi-guard/
           if-no-files-found: ignore
