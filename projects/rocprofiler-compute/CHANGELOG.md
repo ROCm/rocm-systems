@@ -20,6 +20,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 
 ### Removed
+* Removed `database` mode from `rocprofiler-compute`. This is to move our focus from grafana
+  and mongodb integration to other visualization methods such as:
+  * Analysis DB based Visualizer (upcoming)
+  * Plotly server based standalone GUI
+  * Commandline based Textual User Interface
 
 ### Optimized
 

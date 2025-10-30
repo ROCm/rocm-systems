@@ -445,31 +445,6 @@ class RocProfCompute:
         self.__soc[self.__mspec.gpu_arch].post_profiling()
 
     @demarcate
-    def update_db(self) -> None:
-        self.print_graphic()
-
-        console_warning(
-            "Database update mode is deprecated and will "
-            "be removed in a future release "
-            "and no fixes will be made for this mode."
-        )
-
-        from utils.db_connector import DatabaseConnector
-
-        db_connection = DatabaseConnector(self.__args)
-
-        # -----------------------
-        # run database workflow
-        # -----------------------
-        db_connection.pre_processing()
-        if self.__args.upload:
-            db_connection.db_import()
-        else:
-            db_connection.db_remove()
-
-        return
-
-    @demarcate
     def run_analysis(self) -> None:
         self.print_graphic()
         console_log(f"Analysis mode = {self.__analyze_mode}")
