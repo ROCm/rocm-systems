@@ -44,7 +44,7 @@ public:
     void WaitOn() const;
 
     hsa_signal_t getSignal() const { return signal; }
-    void reset();
+    void         reset();
 
 private:
     hsa_signal_t      signal{};
@@ -63,7 +63,7 @@ public:
     HsaATTQueue& operator=(HsaATTQueue& other) = delete;
 
     std::unique_ptr<Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const;
-    virtual void Submit(hsa_ext_amd_aql_pm4_packet_t* packet, Signal* completion) const;
+    virtual void            Submit(hsa_ext_amd_aql_pm4_packet_t* packet, Signal* completion) const;
 
     /// Enqueues a sequence of packets and returns the completion signal of the last entry.
     template <typename VecType>
