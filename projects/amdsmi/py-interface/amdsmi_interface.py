@@ -605,6 +605,11 @@ class AmdSmiAffinityScope(IntEnum):
     SOCKET_SCOPE = amdsmi_wrapper.AMDSMI_AFFINITY_SCOPE_SOCKET
 
 
+class AmdSmiPowerCapType(IntEnum):
+    PPT0 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT0
+    PPT1 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT1
+
+
 class AmdSmiEventReader:
     def __init__(
         self,
@@ -2154,9 +2159,32 @@ def amdsmi_get_gpu_kfd_info(
 
     return kfd_info
 
+def amdsmi_get_supported_power_cap(
+    processor_handle: processor_handle_t) ->Dict[str, Any]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    CONST_AMDSMI_MAX_POWER_SENSORS = 2
+
+    sensor_count = ctypes.c_uint32()
+    sensor_ind = (ctypes.c_uint32 * CONST_AMDSMI_MAX_POWER_SENSORS)()
+    sensor_types = (amdsmi_wrapper.amdsmi_power_cap_type_t * CONST_AMDSMI_MAX_POWER_SENSORS)()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_supported_power_cap(
+            processor_handle, ctypes.byref(sensor_count), sensor_ind, sensor_types
+        )
+    )
+
+    return {
+        "sensor_inds": [sensor_ind[i] for i in range(sensor_count.value)],
+        "sensor_types": [AmdSmiPowerCapType(sensor_types[i]) for i in range(sensor_count.value)]
+    }
 
 def amdsmi_get_power_cap_info(
     processor_handle: processor_handle_t,
+    sensor_ind: int = 0
 ) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
@@ -2166,7 +2194,7 @@ def amdsmi_get_power_cap_info(
     power_cap_info = amdsmi_wrapper.amdsmi_power_cap_info_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_power_cap_info(
-            processor_handle, ctypes.c_uint32(0), ctypes.byref(power_cap_info)
+            processor_handle, sensor_ind, ctypes.byref(power_cap_info)
         )
     )
 
@@ -2175,7 +2203,6 @@ def amdsmi_get_power_cap_info(
             "dpm_cap": power_cap_info.dpm_cap,
             "min_power_cap": power_cap_info.min_power_cap,
             "max_power_cap": power_cap_info.max_power_cap}
-
 
 def _get_name_value(num, data) -> List[Dict[str, int]]:
     """

@@ -815,26 +815,50 @@ class AMDSMIHelpers():
 
     def get_power_caps(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
-        power_cap_min = amdsmi_interface.MaxUIntegerTypes.UINT64_T # start out at max and min and then find real min and max
-        power_cap_max = 0
+        power_limit_types = {
+            'ppt0': {
+                'power_cap_min': amdsmi_interface.MaxUIntegerTypes.UINT64_T,
+                'power_cap_max': 0
+            },
+            'ppt1': {
+                'power_cap_min': amdsmi_interface.MaxUIntegerTypes.UINT64_T,
+                'power_cap_max': 0
+            }
+        }
+
         for dev in device_handles:
             try:
-                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev)
-                if power_cap_info['max_power_cap'] > power_cap_max:
-                    power_cap_max = power_cap_info['max_power_cap']
-                if power_cap_info['min_power_cap'] < power_cap_max:
-                    power_cap_min = power_cap_info['min_power_cap']
-            except amdsmi_interface.AmdSmiLibraryException as e:
+                power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(dev)
+                for sensor in power_cap_types['sensor_inds']:
+                    power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev, sensor)
+                    if power_cap_info['max_power_cap'] > power_limit_types[f'ppt{sensor}']['power_cap_max']:
+                        power_limit_types[f'ppt{sensor}']['power_cap_max'] = power_cap_info['max_power_cap']
+                    if power_cap_info['min_power_cap'] < power_limit_types[f'ppt{sensor}']['power_cap_min']:
+                        power_limit_types[f'ppt{sensor}']['power_cap_min'] = power_cap_info['min_power_cap']
+            except (amdsmi_interface.AmdSmiLibraryException, KeyError) as e:
                 logging.debug(f"AMDSMIHelpers.get_power_caps - Unable to get power cap info for device {dev}: {str(e)}")
                 continue
 
         # If we never found a real min or max, set them to N/A
-        if power_cap_min == amdsmi_interface.MaxUIntegerTypes.UINT64_T:
-            power_cap_min = "N/A"
-        if power_cap_max == 0:
-            power_cap_max = "N/A"
+        for ppt_key in ['ppt0', 'ppt1']:
+            if power_limit_types[ppt_key]['power_cap_min'] == amdsmi_interface.MaxUIntegerTypes.UINT64_T:
+                power_limit_types[ppt_key]['power_cap_min'] = "N/A"
+            if power_limit_types[ppt_key]['power_cap_max'] == 0:
+                power_limit_types[ppt_key]['power_cap_max'] = "N/A"
 
-        return (power_cap_min, power_cap_max)
+        ppt0_power_cap_max = self.format_power_cap(power_limit_types['ppt0']['power_cap_min'])
+        ppt0_power_cap_min = self.format_power_cap(power_limit_types['ppt0']['power_cap_max'])
+        ppt1_power_cap_max = self.format_power_cap(power_limit_types['ppt1']['power_cap_max'])
+        ppt1_power_cap_min = self.format_power_cap(power_limit_types['ppt1']['power_cap_min'])
+
+        return (ppt0_power_cap_min, ppt0_power_cap_min, ppt1_power_cap_max, ppt1_power_cap_min)
+
+
+    def format_power_cap(self, value):
+        if value != "N/A":
+            converted = self.convert_SI_unit(value, AMDSMIHelpers.SI_Unit.MICRO)
+            return f"{converted} W"
+        return value
 
 
     def get_soc_pstates(self):

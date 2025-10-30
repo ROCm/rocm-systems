@@ -243,7 +243,7 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device, amd
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, int *cap)
+amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint32_t sensor_ind, int *cap)
 {
     constexpr int DATA_SIZE = 16;
     char val[DATA_SIZE];
@@ -257,7 +257,7 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, int 
     if (ret)
         return ret;
 
-    fullpath += "/power1_cap";
+    fullpath += "/power" + std::to_string(sensor_ind + 1) + "_cap";
     std::ifstream file(fullpath.c_str(), std::ifstream::in);
     if (!file.is_open()) {
         return AMDSMI_STATUS_API_FAILED;

@@ -3435,39 +3435,21 @@ amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle,
 
     int power_cap = 0;
     int dpm = 0;
-    auto smi_power_cap_status = smi_amdgpu_get_power_cap(gpudevice, &power_cap);
-    if ((smi_power_cap_status == AMDSMI_STATUS_SUCCESS) && !set_ret_success)
-        set_ret_success = true;
-    info->power_cap = power_cap;
+    auto smi_power_cap_status = rsmi_wrapper(rsmi_dev_power_cap_get, processor_handle, 0,
+                sensor_ind, &(info->power_cap));
+
     status = smi_amdgpu_get_ranges(gpudevice, AMDSMI_CLK_TYPE_GFX,
             NULL, NULL, &dpm, NULL);
-    if ((status == AMDSMI_STATUS_SUCCESS) && !set_ret_success)
-        set_ret_success = true;
     info->dpm_cap = dpm;
-
-    if (smi_power_cap_status != AMDSMI_STATUS_SUCCESS) {
-        status = rsmi_wrapper(rsmi_dev_power_cap_get, processor_handle, 0,
-                sensor_ind, &(info->power_cap));
-        if ((status == AMDSMI_STATUS_SUCCESS) && !set_ret_success)
-            set_ret_success = true;
-    }
 
     // Get other information from rocm-smi
     status = rsmi_wrapper(rsmi_dev_power_cap_default_get, processor_handle, 0,
-                        &(info->default_power_cap));
-
-    if ((status == AMDSMI_STATUS_SUCCESS) && !set_ret_success)
-        set_ret_success = true;
-
+                          sensor_ind, &(info->default_power_cap));
 
     status = rsmi_wrapper(rsmi_dev_power_cap_range_get, processor_handle, 0,
                           sensor_ind, &(info->max_power_cap), &(info->min_power_cap));
 
-
-    if ((status == AMDSMI_STATUS_SUCCESS) && !set_ret_success)
-        set_ret_success = true;
-
-    return set_ret_success ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
+    return smi_power_cap_status;
 }
 
 amdsmi_status_t
@@ -3476,6 +3458,19 @@ amdsmi_set_power_cap(amdsmi_processor_handle processor_handle,
 
     return rsmi_wrapper(rsmi_dev_power_cap_set, processor_handle, 0,
             sensor_ind, cap);
+}
+
+amdsmi_status_t
+amdsmi_get_supported_power_cap(amdsmi_processor_handle processor_handle, uint32_t *sensor_count,
+                                 uint32_t *sensor_inds, amdsmi_power_cap_type_t *sensor_types) {
+    AMDSMI_CHECK_INIT();
+    if (!sensor_count || !sensor_inds || !sensor_types) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    return rsmi_wrapper(rsmi_dev_supported_power_cap_get, processor_handle, 0,
+                    sensor_count, sensor_inds,
+                    reinterpret_cast<rsmi_power_cap_type_t*>(sensor_types));
 }
 
 amdsmi_status_t
@@ -4482,7 +4477,8 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     }
 
     int power_limit = 0;
-    amdsmi_status_t status2 = smi_amdgpu_get_power_cap(gpu_device, &power_limit);
+    // default the sensor_ind here to 0
+    amdsmi_status_t status2 = smi_amdgpu_get_power_cap(gpu_device, 0, &power_limit);
     if (status2 == AMDSMI_STATUS_SUCCESS) {
         info->power_limit = power_limit;
     }

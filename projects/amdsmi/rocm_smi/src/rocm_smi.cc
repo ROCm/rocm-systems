@@ -3970,19 +3970,19 @@ rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t *power,
 }
 
 rsmi_status_t
-rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint64_t *default_cap) {
+rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *default_cap) {
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  uint32_t sensor_ind = 1; // power sysfs files have 1-based indices
-  CHK_SUPPORT_SUBVAR_ONLY(default_cap, sensor_ind)
+  uint32_t sensor_ind_adjust = sensor_ind + 1; // power sysfs files have 1-based indices
+  CHK_SUPPORT_SUBVAR_ONLY(default_cap, sensor_ind_adjust)
 
   rsmi_status_t ret;
 
   DEVICE_MUTEX
-  ret = get_dev_mon_value(amd::smi::kMonPowerCapDefault, dv_ind, sensor_ind, default_cap);
+  ret = get_dev_mon_value(amd::smi::kMonPowerCapDefault, dv_ind, sensor_ind_adjust, default_cap);
 
   return ret;
   CATCH
@@ -4102,6 +4102,58 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t dummy,
   rsmi_status_t ret = set_power_profile(dv_ind, profile);
 
   return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
+                                 uint32_t *sensor_inds, rsmi_power_cap_type_t *sensor_types) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  if (!sensor_count || !sensor_inds || !sensor_types) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  GET_DEV_FROM_INDX
+  DEVICE_MUTEX
+
+  const uint8_t RSMI_MAX_POWER_CAP_SENSORS = 2;
+  uint32_t sensor_count_local = 0;
+  // try to read the power*_label file. If the read succeeds, that indicates that exists and update the sensor count and sensor indices accordingly
+  for (uint32_t i = 0; i < RSMI_MAX_POWER_CAP_SENSORS; ++i) {
+    // skip if monitor doesn't exist (e.g., in virtualized/partitioned environments)
+    if (dev->monitor() == nullptr) {
+      continue;
+    }
+
+    std::string val;
+    // sensor_ind for power starts at 1
+    uint32_t adjusted_index = i + 1;
+    rsmi_status_t ret = amd::smi::ErrnoToRsmiStatus(dev->monitor()->readMonitor(amd::smi::kMonPowerLabel, adjusted_index, &val));
+    if (ret != RSMI_STATUS_SUCCESS) {
+      // if the read fails, then the sensor does not exist or is otherwise inaccessible for some reason
+      continue;
+    }
+    // if val is PPT, then sensor_type is PPT0. If val is PPT1 then sensor_type is PPT1
+    if (val == "PPT") {
+      sensor_types[sensor_count_local] = RSMI_POWER_CAP_TYPE_PPT0;
+    }
+    else if (val == "PPT1") {
+      sensor_types[sensor_count_local] = RSMI_POWER_CAP_TYPE_PPT1;
+    }
+    sensor_inds[sensor_count_local] = i;
+    sensor_count_local++;
+  }
+
+  // If no sensors were found, return not supported
+  if (sensor_count_local == 0) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  *sensor_count = sensor_count_local;
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 

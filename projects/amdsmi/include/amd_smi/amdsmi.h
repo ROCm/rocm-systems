@@ -834,6 +834,16 @@ typedef struct {
 } amdsmi_power_cap_info_t;
 
 /**
+ * @brief Power Cap Package Power Tracking (PPT) type
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+    AMDSMI_POWER_CAP_TYPE_PPT0,       //!< PPT0 power cap; lower limit, filtered input
+    AMDSMI_POWER_CAP_TYPE_PPT1,       //!< PPT1 power cap; higher limit, raw input
+} amdsmi_power_cap_type_t;
+
+/**
  * @brief VBios Information
  *
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
@@ -3276,6 +3286,29 @@ amdsmi_status_t amdsmi_set_power_cap(amdsmi_processor_handle processor_handle,
 amdsmi_status_t
 amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_handle, uint32_t reserved,
                              amdsmi_power_profile_preset_masks_t profile);
+
+/**
+ *  @brief Query the supported power cap sensors and their types for a device.
+ *
+ *  @ingroup tagPowerControl
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function returns the list of supported power cap sensors for the given device,
+ *  including their sensor indices and types (e.g., PPT0, PPT1).
+ *
+ *  @param[in]  processor_handle A processor handle.
+ *  @param[out] sensor_count Pointer to a uint32_t that will be set to the number of supported sensors.
+ *  @param[out] sensor_inds Pointer to an array of uint32_t to be filled with sensor indices.
+ *                          The array must be allocated by the caller with enough space.
+ *  @param[out] sensor_types Pointer to an array of amdsmi_power_cap_type_t to be filled with sensor types.
+ *                          The array must be allocated by the caller with enough space.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ */
+amdsmi_status_t 
+amdsmi_get_supported_power_cap(amdsmi_processor_handle processor_handle, uint32_t *sensor_count,
+                                 uint32_t *sensor_inds, amdsmi_power_cap_type_t *sensor_types);
 
 /**
  *  @brief Get the socket power.

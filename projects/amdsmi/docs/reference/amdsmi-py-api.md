@@ -434,6 +434,7 @@ on the given GPU. It is not supported on virtual machine guest
 Input parameters:
 
 * `processor_handle` device which to query
+* `sensor_ind` The Package Power Tracking (PPT) type to query
 
 Output: Dictionary with fields
 
@@ -460,12 +461,49 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            power_cap_info = amdsmi_get_power_cap_info(device)
+            power_cap_info = amdsmi_get_power_cap_info(device, 0)
             print(power_cap_info['power_cap'])
             print(power_cap_info['dpm_cap'])
             print(power_cap_info['default_power_cap'])
             print(power_cap_info['min_power_cap'])
             print(power_cap_info['max_power_cap'])
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_supported_power_cap
+
+Description: Returns dictionary of Package Power Tracking (PPT) types as currently 
+configured on the given GPU. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Description | Units
+---|---
+`sensor_inds` | List of integer indices of the supported ppt types. 0 indicates PPT0 and 1 indicates PPT1. Should be used as input for `amdsmi_get_power_cap_info` and `amdsmi_set_power_cap_info`.
+`sensor_types` | Enum `AmdSmiPowerCapType` that corresponds to the ppt types that are supported on the device.
+
+Exceptions that can be thrown by `amdsmi_get_supported_power_cap` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            power_cap_types = amdsmi_get_supported_power_cap(device)
+            print(power_cap_types['sensor_inds'])
+            print(power_cap_types['sensor_types'])
 except AmdSmiException as e:
     print(e)
 ```

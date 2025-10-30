@@ -168,6 +168,7 @@ from .amdsmi_interface import amdsmi_get_xgmi_plpd
 from .amdsmi_interface import amdsmi_clean_gpu_local_data
 from .amdsmi_interface import amdsmi_get_gpu_process_isolation
 from .amdsmi_interface import amdsmi_set_gpu_process_isolation
+from .amdsmi_interface import amdsmi_get_supported_power_cap
 
 # # Physical State Queries
 from .amdsmi_interface import amdsmi_get_gpu_fan_rpms

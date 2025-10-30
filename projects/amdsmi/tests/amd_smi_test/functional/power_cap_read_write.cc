@@ -66,7 +66,7 @@ void TestPowerCapReadWrite::Close() {
   TestBase::Close();
 }
 
-void TestPowerCapReadWrite::SetCheckPowerCap(std::string msg, uint32_t dv_ind, uint64_t &curr_cap,
+void TestPowerCapReadWrite::SetCheckPowerCap(std::string msg, uint32_t dv_ind, uint32_t sensor_ind, uint64_t &curr_cap,
                                              uint64_t &new_cap, amdsmi_status_t &ret) {
     amdsmi_status_t ret_expected;
     amdsmi_power_cap_info_t info;
@@ -81,7 +81,7 @@ void TestPowerCapReadWrite::SetCheckPowerCap(std::string msg, uint32_t dv_ind, u
       std::cout << "[Before Set]  Setting new cap to " << new_cap << "..." << std::endl;
     }
     start = clock();
-    ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], 0, new_cap);
+    ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], sensor_ind, new_cap);
     end = clock();
     cpu_time_used = (static_cast<double>(end - start)) * 1000000UL / CLOCKS_PER_SEC;
 
@@ -98,7 +98,7 @@ void TestPowerCapReadWrite::SetCheckPowerCap(std::string msg, uint32_t dv_ind, u
         return;
     }
 
-    ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, &info);
+    ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], sensor_ind, &info);
     CHK_ERR_ASRT(ret)
 
     curr_cap = info.power_cap;
@@ -133,170 +133,190 @@ void TestPowerCapReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 
+    // verify amdsmi_get_supported_power_cap_info() works
     amdsmi_power_cap_info_t info;
-    // Verify api support checking functionality is working
-    ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, nullptr);
+    uint32_t sensor_count = 0;
+    uint32_t sensor_inds[2];
+    amdsmi_power_cap_type_t sensor_types[2];
+    ret = amdsmi_get_supported_power_cap(processor_handles_[dv_ind], &sensor_count, sensor_inds, nullptr);
     ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
 
-    ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, &info);
-    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**amdsmi_get_power_cap_info(): Not supported on this machine" << std::endl;
-      ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
-      continue;
-    }
-    min_cap = info.min_power_cap;
-    max_cap = info.max_power_cap;
-    default_cap = info.default_power_cap;
-    curr_cap = info.power_cap;
-    orig_cap = curr_cap;
-
-    new_cap = (max_cap + min_cap)/2;
-    IF_VERB(STANDARD) {
-      std::cout << "[Before Set]  Default Power Cap: " << default_cap << " uW" << std::endl;
-      std::cout << "[Before Set]  Current Power Cap: " << curr_cap << " uW" << std::endl;
-      std::cout << "[Before Set]  Power Cap Range [max to min]: "
-                << max_cap << " uW to " << min_cap << " uW" << std::endl;
-      std::cout << "[Before Set]  Setting new cap to " << new_cap << "..." << std::endl;
+    ret = amdsmi_get_supported_power_cap(processor_handles_[dv_ind], &sensor_count, sensor_inds, sensor_types);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
+        std::cout << "\t**amdsmi_get_supported_power_cap(): No supported Package Power Tracking Types on this machine" << std::endl;
+        continue;
     }
 
-    // Check if power cap is within the range
-    // skip the test otherwise
-    if (new_cap < min_cap || new_cap > max_cap || curr_cap == 0) {
-      std::cout << "\t** Requested Power cap (" << new_cap
-                << " uW) cannot be changed for device #" << dv_ind << "."
-                << "\nCurrent Power Cap: " << curr_cap
-                << " uW, Min Power Cap: " << min_cap
-                << " uW, Max Power Cap: " << max_cap
-                << " uW.\n[WARN] If current power cap is 0 uW, this means we cannot change"
-                << " this device's current power cap. Skipping test for this device."
-                << std::endl;
-      continue;
-    }
-    ret = AMDSMI_STATUS_SUCCESS;
-    SetCheckPowerCap("Setting to Average Power Cap", dv_ind, curr_cap, new_cap, ret);
-    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-      continue;
-    }
-    IF_VERB(STANDARD) {
-      if (!new_cap)
-        std::cout << "\t** Power cap requested (" << new_cap
-                  << " uW) is failed to set for " << dv_ind << std::endl;
-    }
+    for (uint32_t i = 0; i < sensor_count; ++i) {
+      std::cout << "\tPower Cap Sensor Index: " << sensor_inds[i]
+                << ", Type: ppt" << (sensor_types[i]) << std::endl;
 
-    if (min_cap > 0) {
-      new_cap = min_cap;
+      amdsmi_power_cap_info_t info;
+      // Verify api support checking functionality is working
+      ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], sensor_inds[i], nullptr);
+      ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
+
+      ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], sensor_inds[i], &info);
+      if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+        std::cout << "\t**amdsmi_get_power_cap_info(): Not supported on this machine" << std::endl;
+        ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
+        continue;
+      }
+      min_cap = info.min_power_cap;
+      max_cap = info.max_power_cap;
+      default_cap = info.default_power_cap;
+      curr_cap = info.power_cap;
+      orig_cap = curr_cap;
+
+      new_cap = (max_cap + min_cap)/2;
+      IF_VERB(STANDARD) {
+        std::cout << "[Before Set]  Default Power Cap: " << default_cap << " uW" << std::endl;
+        std::cout << "[Before Set]  Current Power Cap: " << curr_cap << " uW" << std::endl;
+        std::cout << "[Before Set]  Power Cap Range [max to min]: "
+                  << max_cap << " uW to " << min_cap << " uW" << std::endl;
+        std::cout << "[Before Set]  Setting new cap to " << new_cap << "..." << std::endl;
+      }
+
+      // Check if power cap is within the range
+      // skip the test otherwise
+      if (new_cap < min_cap || new_cap > max_cap || curr_cap == 0) {
+        std::cout << "\t** Requested Power cap (" << new_cap
+                    << " uW) cannot be changed for device #" << dv_ind << "."
+                    << "\nCurrent Power Cap: " << curr_cap
+                    << " uW, Min Power Cap: " << min_cap
+                    << " uW, Max Power Cap: " << max_cap
+                    << " uW.\n[WARN] If current power cap is 0 uW, this means we cannot change"
+                    << " this device's current power cap. Skipping test for this device."
+                    << std::endl;
+        continue;
+      }
       ret = AMDSMI_STATUS_SUCCESS;
-      SetCheckPowerCap("Setting to Min Power Cap", dv_ind, curr_cap, new_cap, ret);
+      SetCheckPowerCap("Setting to Average Power Cap", dv_ind, sensor_inds[i], curr_cap, new_cap, ret);
+      if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+        continue;
+      }
       IF_VERB(STANDARD) {
         if (!new_cap)
           std::cout << "\t** Power cap requested (" << new_cap
                     << " uW) is failed to set for " << dv_ind << std::endl;
       }
 
-      new_cap = uint64_t(min_cap - 1);
+      if (min_cap > 0) {
+        new_cap = min_cap;
+        ret = AMDSMI_STATUS_SUCCESS;
+        SetCheckPowerCap("Setting to Min Power Cap", dv_ind, sensor_inds[i], curr_cap, new_cap, ret);
+        IF_VERB(STANDARD) {
+          if (!new_cap)
+            std::cout << "\t** Power cap requested (" << new_cap
+                        << " uW) is failed to set for " << dv_ind << std::endl;
+        }
+
+        new_cap = uint64_t(min_cap - 1);
+        ret = AMDSMI_STATUS_INVAL;
+        SetCheckPowerCap("Setting to Min Power Cap - 1", dv_ind, sensor_inds[i], curr_cap, new_cap, ret);
+        if (ret != AMDSMI_STATUS_INVAL) {
+          IF_VERB(STANDARD) {
+            if (!new_cap)
+                std::cout << "\t** Power cap requested (" << new_cap
+                        << " uW) is failed to set for " << dv_ind << std::endl;
+          }
+        }
+
+        new_cap = uint64_t(static_cast<float>(min_cap) * 0.10F);
+        ret = AMDSMI_STATUS_INVAL;
+        SetCheckPowerCap("Setting to Min Power Cap * 0.10", dv_ind, sensor_inds[i], curr_cap, new_cap, ret);
+        if (ret != AMDSMI_STATUS_INVAL) {
+          IF_VERB(STANDARD) {
+            if (!new_cap)
+              std::cout << "\t** Power cap requested (" << new_cap << " uW) is failed to set for "
+                        << dv_ind << std::endl;
+            }
+        }
+        } else {
+          std::cout << "\tPower cap requested is less than or equal to 0, skipping test for device #"
+                    << dv_ind << std::endl;
+        }
+
+      new_cap = max_cap;
+      ret = AMDSMI_STATUS_SUCCESS;
+      SetCheckPowerCap("Setting to Max Power Cap", dv_ind, sensor_inds[i], curr_cap, new_cap, ret);
+      IF_VERB(STANDARD) {
+        if (!new_cap)
+          std::cout << "\t** Power cap requested (" << new_cap
+                    << " uW) is failed to set for " << dv_ind << std::endl;
+      }
+
+      new_cap = uint64_t(max_cap + 1);
       ret = AMDSMI_STATUS_INVAL;
-      SetCheckPowerCap("Setting to Min Power Cap - 1", dv_ind, curr_cap, new_cap, ret);
+      SetCheckPowerCap("Setting to Max Power Cap + 1", dv_ind, sensor_inds[i], curr_cap, new_cap, ret);
       if (ret != AMDSMI_STATUS_INVAL) {
         IF_VERB(STANDARD) {
           if (!new_cap)
             std::cout << "\t** Power cap requested (" << new_cap
-                      << " uW) is failed to set for " << dv_ind << std::endl;
+                        << " uW) failed to set for " << dv_ind << std::endl;
         }
       }
 
-      new_cap = uint64_t(static_cast<float>(min_cap) * 0.10F);
+      new_cap = uint64_t(max_cap * 10);
       ret = AMDSMI_STATUS_INVAL;
-      SetCheckPowerCap("Setting to Min Power Cap * 0.10", dv_ind, curr_cap, new_cap, ret);
+      SetCheckPowerCap("Setting to Max Power Cap * 10", dv_ind, sensor_inds[i], curr_cap, new_cap, ret);
       if (ret != AMDSMI_STATUS_INVAL) {
         IF_VERB(STANDARD) {
-          if (!new_cap)
-            std::cout << "\t** Power cap requested (" << new_cap << " uW) is failed to set for "
-                      << dv_ind << std::endl;
+            if (!new_cap)
+              std::cout << "\t** Power cap requested (" << new_cap
+                        << " uW) is failed to set for " << dv_ind << std::endl;
         }
       }
-    } else {
-      std::cout << "\tPower cap requested is less than or equal to 0, skipping test for device #"
-                << dv_ind << std::endl;
-    }
 
-    new_cap = max_cap;
-    ret = AMDSMI_STATUS_SUCCESS;
-    SetCheckPowerCap("Setting to Max Power Cap", dv_ind, curr_cap, new_cap, ret);
-    IF_VERB(STANDARD) {
-      if (!new_cap)
-        std::cout << "\t** Power cap requested (" << new_cap
-                  << " uW) is failed to set for " << dv_ind << std::endl;
-    }
-
-    new_cap = uint64_t(max_cap + 1);
-    ret = AMDSMI_STATUS_INVAL;
-    SetCheckPowerCap("Setting to Max Power Cap + 1", dv_ind, curr_cap, new_cap, ret);
-    if (ret != AMDSMI_STATUS_INVAL) {
+      // Reset to default power cap -> which is typically the same as the max power cap
       IF_VERB(STANDARD) {
-        if (!new_cap)
-          std::cout << "\t** Power cap requested (" << new_cap
-                    << " uW) failed to set for " << dv_ind << std::endl;
+        std::cout << "Setting to default power Cap" << std::endl;
+        std::cout << "[Before Set] Current Power Cap: " << curr_cap << " uW" << std::endl;
+        std::cout << "[Before Set] Default Power Cap (default_cap): "
+                  << default_cap << "..." << std::endl;
       }
-    }
+      ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], sensor_inds[i], default_cap);
+      CHK_ERR_ASRT(ret)
 
-    new_cap = uint64_t(max_cap * 10);
-    ret = AMDSMI_STATUS_INVAL;
-    SetCheckPowerCap("Setting to Max Power Cap * 10", dv_ind, curr_cap, new_cap, ret);
-    if (ret != AMDSMI_STATUS_INVAL) {
+      ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], sensor_inds[i], &info);
+      CHK_ERR_ASRT(ret)
+      curr_cap = info.power_cap;
+
       IF_VERB(STANDARD) {
-        if (!new_cap)
-          std::cout << "\t** Power cap requested (" << new_cap
-                    << " uW) is failed to set for " << dv_ind << std::endl;
+        std::cout << "[After Set] Current Power Cap: " << curr_cap << " uW" << std::endl;
+        std::cout << "[After Set] Requested Power Cap (default_cap): " << default_cap << " uW"
+                  << std::endl;
+        std::cout << "[After Set] Power Cap Range [max to min]: " << max_cap << " uW to "
+                  << min_cap << " uW" << std::endl;
       }
+      // Confirm in watts the values are equal
+      ASSERT_EQ(default_cap/MICRO_CONVERSION, curr_cap/MICRO_CONVERSION);
+
+      // Reset to system's original power cap before the test started
+      IF_VERB(STANDARD) {
+        std::cout << "Resetting Power Cap to original power cap" << std::endl;
+        std::cout << "[Before Reset] Current Power Cap: " << curr_cap << " uW" << std::endl;
+        std::cout << "[Before Reset] Original Power Cap (orig_cap): "
+                  << orig_cap << "..." << std::endl;
+      }
+      ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], sensor_inds[i], orig_cap);
+      CHK_ERR_ASRT(ret)
+
+      ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], sensor_inds[i], &info);
+      CHK_ERR_ASRT(ret)
+      curr_cap = info.power_cap;
+
+      IF_VERB(STANDARD) {
+        std::cout << "[After Reset] Current Power Cap: " << curr_cap << " uW" << std::endl;
+        std::cout << "[After Reset] Requested Power Cap (orig_cap): " << orig_cap << " uW"
+                  << std::endl;
+        std::cout << "[After Reset] Power Cap Range [max to min]: " << max_cap << " uW to "
+                  << min_cap << " uW" << std::endl;
+      }
+
+      // Confirm in watts the values are equal
+      ASSERT_EQ(orig_cap/MICRO_CONVERSION, curr_cap/MICRO_CONVERSION);
     }
-
-    // Reset to default power cap -> which is typically the same as the max power cap
-    IF_VERB(STANDARD) {
-      std::cout << "Setting to default power Cap" << std::endl;
-      std::cout << "[Before Set] Current Power Cap: " << curr_cap << " uW" << std::endl;
-      std::cout << "[Before Set] Default Power Cap (default_cap): "
-                << default_cap << "..." << std::endl;
-    }
-    ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], 0, default_cap);
-    CHK_ERR_ASRT(ret)
-
-    ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, &info);
-    CHK_ERR_ASRT(ret)
-    curr_cap = info.power_cap;
-
-    IF_VERB(STANDARD) {
-      std::cout << "[After Set] Current Power Cap: " << curr_cap << " uW" << std::endl;
-      std::cout << "[After Set] Requested Power Cap (default_cap): " << default_cap << " uW"
-                << std::endl;
-      std::cout << "[After Set] Power Cap Range [max to min]: " << max_cap << " uW to "
-                << min_cap << " uW" << std::endl;
-    }
-    // Confirm in watts the values are equal
-    ASSERT_EQ(default_cap/MICRO_CONVERSION, curr_cap/MICRO_CONVERSION);
-
-    // Reset to system's original power cap before the test started
-    IF_VERB(STANDARD) {
-      std::cout << "Resetting Power Cap to original power cap" << std::endl;
-      std::cout << "[Before Reset] Current Power Cap: " << curr_cap << " uW" << std::endl;
-      std::cout << "[Before Reset] Original Power Cap (orig_cap): "
-                << orig_cap << "..." << std::endl;
-    }
-    ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], 0, orig_cap);
-    CHK_ERR_ASRT(ret)
-
-    ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, &info);
-    CHK_ERR_ASRT(ret)
-    curr_cap = info.power_cap;
-
-    IF_VERB(STANDARD) {
-      std::cout << "[After Reset] Current Power Cap: " << curr_cap << " uW" << std::endl;
-      std::cout << "[After Reset] Requested Power Cap (orig_cap): " << orig_cap << " uW"
-                << std::endl;
-      std::cout << "[After Reset] Power Cap Range [max to min]: " << max_cap << " uW to "
-                << min_cap << " uW" << std::endl;
-    }
-
-    // Confirm in watts the values are equal
-    ASSERT_EQ(orig_cap/MICRO_CONVERSION, curr_cap/MICRO_CONVERSION);
   }
 }

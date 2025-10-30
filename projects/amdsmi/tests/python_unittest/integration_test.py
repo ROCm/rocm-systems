@@ -733,7 +733,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 power_info['power_limit']))
             try:
                 print("\n###Test amdsmi_get_power_cap_info \n")
-                power_cap_info = amdsmi.amdsmi_get_power_cap_info(processors[i])
+                power_cap_info = amdsmi.amdsmi_get_power_cap_info(processors[i], 0)
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue

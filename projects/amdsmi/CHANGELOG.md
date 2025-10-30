@@ -55,9 +55,41 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amd-smi static --vram` & `amdsmi_get_gpu_vram_info()` now support the following types:
   - DDR5, LPDDR4, LPDDR5, and HBM3E
 
+- **Added support for PPT1 power limit information**.  
+  - Support has been added for querying and setting the PPT (Package Power Tracking) limits
+    - There are two PPT limits, PPT0 has lower limit and tracks a filtered version of the input power and PPT1 has higher limit but tracks the raw input power. This is to catch spikes in the raw data.  
+  - See the Changed section for changes made to the `set` and `static` commands regarding support for PPT1.  
+
 ### Changed
 
-- N/A
+- **`amd-smi set --power-cap` now requires sepcification of the power cap type**.  
+  - command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`
+  - acceptable power cap types are "ppt0" and "ppt1"
+
+  ```console
+  $ sudo amd-smi set --power-cap ppt1 1150
+  GPU: 0
+    POWERCAP: Successfully set ppt1 power cap to 1150W
+    ...
+  ```
+
+- **`amd-smi static --limit` now has a PPT1 section when PPT1 is available**.  
+
+  ```console
+  $ amd-smi static --limit
+  GPU: 0
+    LIMIT:
+        PPT0:
+            MAX_POWER_LIMIT: 1000
+            MIN_POWER_LIMIT: 0
+            SOCKET_POWER_LIMIT: 1000
+        PPT1:
+            MAX_POWER_LIMIT: 1300
+            MIN_POWER_LIMIT: 1100
+            SOCKET_POWER_LIMIT: 1250
+        SLOWDOWN_EDGE_TEMPERATURE: N/A
+        ...
+  ```
 
 ### Removed
 
