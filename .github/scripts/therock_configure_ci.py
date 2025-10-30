@@ -83,7 +83,7 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
 
 def retrieve_projects(args):
     if args.get("is_pull_request"):
-        subtrees = args.get("input_subtrees").split("\n")
+        subtrees = list(subtree_to_project_map.keys())
 
     if args.get("is_workflow_dispatch"):
         if args.get("input_projects") == "all":
@@ -111,9 +111,12 @@ def retrieve_projects(args):
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
-    for project in projects:
-        if project in project_map:
-            project_to_run.append(project_map.get(project))
+    # Currently as we have no tests, we just build all packages available if an applicable change is made. 
+    # As we start to get an idea of test times, we can divide test jobs.
+    if projects:
+        for project in ["all"]:
+            if project in project_map:
+                project_to_run.append(project_map.get(project))
 
     return project_to_run
 
