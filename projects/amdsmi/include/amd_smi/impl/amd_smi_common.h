@@ -74,6 +74,10 @@ const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
     {7, AMDSMI_VRAM_TYPE_DDR3},
     {8, AMDSMI_VRAM_TYPE_DDR4},
     {9, AMDSMI_VRAM_TYPE_GDDR6},
+    {10, AMDSMI_VRAM_TYPE_DDR5},
+    {11, AMDSMI_VRAM_TYPE_LPDDR4},
+    {12, AMDSMI_VRAM_TYPE_LPDDR5},
+    {13, AMDSMI_VRAM_TYPE_HBM3E},
 };
 
 amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status);

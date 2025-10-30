@@ -27,24 +27,22 @@ import threading
 import unittest
 
 
-# Default path for AMDSMI_CLI_PATH is "/opt/rocm/libexec/amdsmi_cli/"
-amdsmi_cli_path = os.environ.get("AMDSMI_CLI_PATH", "/opt/rocm/libexec/amdsmi_cli/")
-if not os.path.exists(amdsmi_cli_path):
-    raise FileNotFoundError(f"AMDSMI_CLI_PATH '{amdsmi_cli_path}' does not exist. Please set the correct path in your environment.")
-sys.path.append(amdsmi_cli_path)
+amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
+if not os.path.exists(amdsmi_path):
+    raise FileNotFoundError(f"AMDSMI_PATH '{amdsmi_path}' does not exist. Please set the correct path in your environment.")
+sys.path.append(amdsmi_path)
+
 try:
-    import amdsmi, amdsmi.amdsmi_wrapper
-except ImportError:
-    raise ImportError(f"Could not import the 'amdsmi' module from '{amdsmi_cli_path}'")
+    import amdsmi
+except ImportError as exc:
+    raise ImportError(f'Could not import {amdsmi_path}') from exc
 
 class TestAmdSmiInit(unittest.TestCase):
-    
     def test_init(self):
         amdsmi.amdsmi_init()
         amdsmi.amdsmi_shut_down()
 
 class TestAmdSmiPythonInterface(unittest.TestCase):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 

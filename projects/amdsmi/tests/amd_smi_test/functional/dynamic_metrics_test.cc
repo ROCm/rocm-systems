@@ -76,7 +76,8 @@ auto GetExpectedMetricVersionFlag(uint16_t major, uint16_t minor, bool is_partit
 }
 
 // pass a header we want to test against
-auto BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t new_header) -> std::vector<uint8_t> {
+auto BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t new_header)
+  -> std::vector<uint8_t> {
   if (new_header.m_structure_size < sizeof(new_header)) {
     throw std::runtime_error("Header size too small");
   }
@@ -119,7 +120,7 @@ TEST(AmdSmiDynamicMetricTest, GPUMetricDynamicVersionSupported) {
     const auto blob = BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t{
         .m_structure_size = sizeof(amd::smi::AMDGpuMetricsHeader_v1_t),
         .m_format_revision = 1,
-        .m_content_revision = static_cast<uint16_t>(ver),  // Known minor versions
+        .m_content_revision = static_cast<uint8_t>(ver),  // Known minor versions
     });
     const auto fake_path =
         WriteBlobToTempFile(blob, "amdsmi_fake_gpu_metrics_v1" + std::to_string(ver) + ".bin");
@@ -170,7 +171,7 @@ TEST(AmdSmiDynamicMetricTest, XCPMetricDynamicVersionSupported) {
     const auto blob = BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t{
         .m_structure_size = sizeof(amd::smi::AMDGpuMetricsHeader_v1_t),
         .m_format_revision = 1,
-        .m_content_revision = static_cast<uint16_t>(ver),  // Known minor versions
+        .m_content_revision = static_cast<uint8_t>(ver),  // Known minor versions
     });
     const auto fake_path =
         WriteBlobToTempFile(blob, "amdsmi_fake_xcp_metrics_v1" + std::to_string(ver) + ".bin");

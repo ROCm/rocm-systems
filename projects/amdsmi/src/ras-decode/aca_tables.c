@@ -33,30 +33,22 @@
  */
 
 #include "aca_tables.h"
-#include "ras_decode_constants.h"
-#include <stdint.h>
+
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
+
+#include "ras_decode_constants.h"
 
 /**
  * @brief Mapping table for hardware IDs and ACA types to bank names
  */
 const aca_bank_entry_t bank_table[] = {
-    {0x2E, 0x02, "cs"},
-    {0x2E, 0x01, "pie"},
-    {0x96, 0x00, "umc"},
-    {0xFF, 0x01, "psp"},
-    {0x01, 0x01, "smu"},
-    {0x18, 0x00, "nbio"},
-    {0x46, 0x01, "pcie"},
-    {0x05, 0x00, "pb"},
-    {0x259, 0x00, "kpx_serdes"},
-    {0x2E, 0x04, "mall"},
-    {0x267, 0x00, "kpx_wafl"},
-    {0x50, 0x00, "pcs_xgmi"},
-    {0x6C, 0x00, "nbif"},
-    {0x80, 0x00, "shub"},
-    {0x170, 0x00, "usr_dp"},
+    {0x2E, 0x02, "cs"},     {0x2E, 0x01, "pie"},       {0x96, 0x00, "umc"},
+    {0xFF, 0x01, "psp"},    {0x01, 0x01, "smu"},       {0x18, 0x00, "nbio"},
+    {0x46, 0x01, "pcie"},   {0x05, 0x00, "pb"},        {0x259, 0x00, "kpx_serdes"},
+    {0x2E, 0x04, "mall"},   {0x267, 0x00, "kpx_wafl"}, {0x50, 0x00, "pcs_xgmi"},
+    {0x6C, 0x00, "nbif"},   {0x80, 0x00, "shub"},      {0x170, 0x00, "usr_dp"},
     {0x180, 0x00, "usr_cp"}};
 
 /**
@@ -253,74 +245,27 @@ const aca_error_type_t error_table[] = {
  * @brief Error GFX mapping table for XCD errors
  */
 const aca_error_entry_t xcd_error_table[] = {
-    {0x0, "GfxGcError"},
-    {0x1, "GfxGcError"},
-    {0x2, "GfxGcError"},
-    {0x3, "GfxGcError"},
-    {0x4, "GfxGcError"},
-    {0x5, "GfxGcError"},
-    {0x6, "GfxGcError"},
-    {0x7, "GfxGcError"},
-    {0x8, "GfxGcError"},
-    {0x9, "GfxGcError"},
-    {0xa, "GfxGcError"},
-    {0xb, "GfxGcError"},
-    {0xc, "GfxGcError"},
-    {0xd, "GfxGcError"},
-    {0xe, "GfxGcError"},
-    {0xf, "GfxGcError"},
-    {0x10, "GfxGcError"},
-    {0x28, "Reserved"},
-    {0x2a, "Reserved"}};
+    {0x0, "GfxGcError"},  {0x1, "GfxGcError"}, {0x2, "GfxGcError"}, {0x3, "GfxGcError"},
+    {0x4, "GfxGcError"},  {0x5, "GfxGcError"}, {0x6, "GfxGcError"}, {0x7, "GfxGcError"},
+    {0x8, "GfxGcError"},  {0x9, "GfxGcError"}, {0xa, "GfxGcError"}, {0xb, "GfxGcError"},
+    {0xc, "GfxGcError"},  {0xd, "GfxGcError"}, {0xe, "GfxGcError"}, {0xf, "GfxGcError"},
+    {0x10, "GfxGcError"}, {0x28, "Reserved"},  {0x2a, "Reserved"}};
 
 /**
  * @brief Error GFX mapping table for AID errors
  */
 const aca_error_entry_t aid_error_table[] = {
-    {0x0, "GfxGcError"},
-    {0x1, "GfxGcError"},
-    {0x2, "GfxGcError"},
-    {0x3, "GfxGcError"},
-    {0x4, "GfxGcError"},
-    {0x5, "GfxMmhubError"},
-    {0x6, "GfxMmhubError"},
-    {0x7, "GfxMmhubError"},
-    {0x8, "GfxMmhubError"},
-    {0x9, "GfxMmhubError"},
-    {0xa, "GfxMmhubError"},
-    {0xb, "GfxMmhubError"},
-    {0xc, "GfxMmhubError"},
-    {0xd, "GfxGcError"},
-    {0xe, "GfxVcnError"},
-    {0xf, "GfxVcnError"},
-    {0x10, "GfxVcnError"},
-    {0x11, "GfxVcnError"},
-    {0x12, "GfxVcnError"},
-    {0x13, "GfxVcnError"},
-    {0x14, "GfxVcnError"},
-    {0x15, "GfxVcnError"},
-    {0x16, "GfxVcnError"},
-    {0x17, "GfxVcnError"},
-    {0x18, "GfxVcnError"},
-    {0x19, "GfxVcnError"},
-    {0x1a, "GfxVcnError"},
-    {0x1b, "GfxVcnError"},
-    {0x1c, "GfxVcnError"},
-    {0x1d, "GfxVcnError"},
-    {0x1e, "GfxVcnError"},
-    {0x1f, "GfxVcnError"},
-    {0x20, "GfxVcnError"},
-    {0x21, "GfxSdmaError"},
-    {0x22, "GfxSdmaError"},
-    {0x23, "GfxSdmaError"},
-    {0x24, "GfxSdmaError"},
-    {0x25, "GfxHdpError"},
-    {0x26, "GfxAthubError"},
-    {0x27, "GfxGcError"},
-    {0x28, "Reserved"},
-    {0x29, "Reserved"},
-    {0x2a, "Reserved"},
-    {0x2b, "Reserved"}};
+    {0x0, "GfxGcError"},    {0x1, "GfxGcError"},    {0x2, "GfxGcError"},     {0x3, "GfxGcError"},
+    {0x4, "GfxGcError"},    {0x5, "GfxMmhubError"}, {0x6, "GfxMmhubError"},  {0x7, "GfxMmhubError"},
+    {0x8, "GfxMmhubError"}, {0x9, "GfxMmhubError"}, {0xa, "GfxMmhubError"},  {0xb, "GfxMmhubError"},
+    {0xc, "GfxMmhubError"}, {0xd, "GfxGcError"},    {0xe, "GfxVcnError"},    {0xf, "GfxVcnError"},
+    {0x10, "GfxVcnError"},  {0x11, "GfxVcnError"},  {0x12, "GfxVcnError"},   {0x13, "GfxVcnError"},
+    {0x14, "GfxVcnError"},  {0x15, "GfxVcnError"},  {0x16, "GfxVcnError"},   {0x17, "GfxVcnError"},
+    {0x18, "GfxVcnError"},  {0x19, "GfxVcnError"},  {0x1a, "GfxVcnError"},   {0x1b, "GfxVcnError"},
+    {0x1c, "GfxVcnError"},  {0x1d, "GfxVcnError"},  {0x1e, "GfxVcnError"},   {0x1f, "GfxVcnError"},
+    {0x20, "GfxVcnError"},  {0x21, "GfxSdmaError"}, {0x22, "GfxSdmaError"},  {0x23, "GfxSdmaError"},
+    {0x24, "GfxSdmaError"}, {0x25, "GfxHdpError"},  {0x26, "GfxAthubError"}, {0x27, "GfxGcError"},
+    {0x28, "Reserved"},     {0x29, "Reserved"},     {0x2a, "Reserved"},      {0x2b, "Reserved"}};
 
 /**
  * @brief Table mapping instance_id_hi to OAM and AID values
@@ -349,114 +294,113 @@ static const oam_aid_map_t oam_aid_table[] = {
 /**
  * @brief Table mapping bank and instance ID to instance names
  */
-static const aca_instance_entry_t instance_table[] = {
-    {"cs", 0x1F002000, "cmp0"},
-    {"cs", 0x1F000000, "cs0"},
-    {"cs", 0x1F000A00, "cs10"},
-    {"cs", 0x1F000B00, "cs11"},
-    {"cs", 0x1F000C00, "cs12"},
-    {"cs", 0x1F000D00, "cs13"},
-    {"cs", 0x1F000E00, "cs14"},
-    {"cs", 0x1F000F00, "cs15"},
-    {"cs", 0x1F001000, "cs16"},
-    {"cs", 0x1F001100, "cs17"},
-    {"cs", 0x1F001200, "cs18"},
-    {"cs", 0x1F001300, "cs19"},
-    {"cs", 0x1F000100, "cs1"},
-    {"cs", 0x1F001400, "cs20"},
-    {"cs", 0x1F001500, "cs21"},
-    {"cs", 0x1F001600, "cs22"},
-    {"cs", 0x1F001700, "cs23"},
-    {"cs", 0x1F001800, "cs24"},
-    {"cs", 0x1F001900, "cs25"},
-    {"cs", 0x1F001A00, "cs26"},
-    {"cs", 0x1F001B00, "cs27"},
-    {"cs", 0x1F001C00, "cs28"},
-    {"cs", 0x1F001D00, "cs29"},
-    {"cs", 0x1F000200, "cs2"},
-    {"cs", 0x1F001E00, "cs30"},
-    {"cs", 0x1F001F00, "cs31"},
-    {"cs", 0x1F000300, "cs3"},
-    {"cs", 0x1F000400, "cs4"},
-    {"cs", 0x1F000500, "cs5"},
-    {"cs", 0x1F000600, "cs6"},
-    {"cs", 0x1F000700, "cs7"},
-    {"cs", 0x1F000800, "cs8"},
-    {"cs", 0x1F000900, "cs9"},
-    {"mall", 0x1F005900, "mall0"},
-    {"mall", 0x1F006300, "mall10"},
-    {"mall", 0x1F006400, "mall11"},
-    {"mall", 0x1F006500, "mall12"},
-    {"mall", 0x1F006600, "mall13"},
-    {"mall", 0x1F006700, "mall14"},
-    {"mall", 0x1F006800, "mall15"},
-    {"mall", 0x1F006900, "mall16"},
-    {"mall", 0x1F006A00, "mall17"},
-    {"mall", 0x1F006B00, "mall18"},
-    {"mall", 0x1F006C00, "mall19"},
-    {"mall", 0x1F005A00, "mall1"},
-    {"mall", 0x1F006D00, "mall20"},
-    {"mall", 0x1F006E00, "mall21"},
-    {"mall", 0x1F006F00, "mall22"},
-    {"mall", 0x1F007000, "mall23"},
-    {"mall", 0x1F007100, "mall24"},
-    {"mall", 0x1F007200, "mall25"},
-    {"mall", 0x1F007300, "mall26"},
-    {"mall", 0x1F007400, "mall27"},
-    {"mall", 0x1F007500, "mall28"},
-    {"mall", 0x1F007600, "mall29"},
-    {"mall", 0x1F005B00, "mall2"},
-    {"mall", 0x1F007700, "mall30"},
-    {"mall", 0x1F007800, "mall31"},
-    {"mall", 0x1F005C00, "mall3"},
-    {"mall", 0x1F005D00, "mall4"},
-    {"mall", 0x1F005E00, "mall5"},
-    {"mall", 0x1F005F00, "mall6"},
-    {"mall", 0x1F006000, "mall7"},
-    {"mall", 0x1F006100, "mall8"},
-    {"mall", 0x1F006200, "mall9"},
-    {"pb", 0x5EA00, "pb"},
-    {"pb", 0x30082900, "ccd0 pbccd"},
-    {"pb", 0x32082900, "ccd1 pbccd"},
-    {"pb", 0x34082900, "ccd2 pbccd"},
-    {"pb", 0x36082900, "xcd0 pbccd"},
-    {"pb", 0x38082900, "xcd1 pbccd"},
-    {"umc", 0x90F00, "ch0 umc0"},
-    {"umc", 0x290F00, "ch0 umc1"},
-    {"umc", 0x490F00, "ch0 umc2"},
-    {"umc", 0x690F00, "ch0 umc3"},
-    {"umc", 0x91F00, "ch1 umc0"},
-    {"umc", 0x291F00, "ch1 umc1"},
-    {"umc", 0x491F00, "ch1 umc2"},
-    {"umc", 0x691F00, "ch1 umc3"},
-    {"umc", 0x92F00, "ch2 umc0"},
-    {"umc", 0x292F00, "ch2 umc1"},
-    {"umc", 0x492F00, "ch2 umc2"},
-    {"umc", 0x692F00, "ch2 umc3"},
-    {"umc", 0x93F00, "ch3 umc0"},
-    {"umc", 0x293F00, "ch3 umc1"},
-    {"umc", 0x493F00, "ch3 umc2"},
-    {"umc", 0x693F00, "ch3 umc3"},
-    {"umc", 0x190F00, "ch4 umc0"},
-    {"umc", 0x390F00, "ch4 umc1"},
-    {"umc", 0x590F00, "ch4 umc2"},
-    {"umc", 0x790F00, "ch4 umc3"},
-    {"umc", 0x191F00, "ch5 umc0"},
-    {"umc", 0x391F00, "ch5 umc1"},
-    {"umc", 0x591F00, "ch5 umc2"},
-    {"umc", 0x791F00, "ch5 umc3"},
-    {"umc", 0x192F00, "ch6 umc0"},
-    {"umc", 0x392F00, "ch6 umc1"},
-    {"umc", 0x592F00, "ch6 umc2"},
-    {"umc", 0x792F00, "ch6 umc3"},
-    {"umc", 0x193F00, "ch7 umc0"},
-    {"umc", 0x393F00, "ch7 umc1"},
-    {"umc", 0x593F00, "ch7 umc2"},
-    {"umc", 0x793F00, "ch7 umc3"},
-    {"pcs_xgmi", 0x11A09200, "serdes a pcs0"},
-    {"pcs_xgmi", 0x12109200, "serdes b pcs7"},
-    {"pcs_xgmi", 0x12209200, "serdes b pcs8"},
-    {"pcs_xgmi", 0x11B09200, "xgmi pcs"}};
+static const aca_instance_entry_t instance_table[] = {{"cs", 0x1F002000, "cmp0"},
+                                                      {"cs", 0x1F000000, "cs0"},
+                                                      {"cs", 0x1F000A00, "cs10"},
+                                                      {"cs", 0x1F000B00, "cs11"},
+                                                      {"cs", 0x1F000C00, "cs12"},
+                                                      {"cs", 0x1F000D00, "cs13"},
+                                                      {"cs", 0x1F000E00, "cs14"},
+                                                      {"cs", 0x1F000F00, "cs15"},
+                                                      {"cs", 0x1F001000, "cs16"},
+                                                      {"cs", 0x1F001100, "cs17"},
+                                                      {"cs", 0x1F001200, "cs18"},
+                                                      {"cs", 0x1F001300, "cs19"},
+                                                      {"cs", 0x1F000100, "cs1"},
+                                                      {"cs", 0x1F001400, "cs20"},
+                                                      {"cs", 0x1F001500, "cs21"},
+                                                      {"cs", 0x1F001600, "cs22"},
+                                                      {"cs", 0x1F001700, "cs23"},
+                                                      {"cs", 0x1F001800, "cs24"},
+                                                      {"cs", 0x1F001900, "cs25"},
+                                                      {"cs", 0x1F001A00, "cs26"},
+                                                      {"cs", 0x1F001B00, "cs27"},
+                                                      {"cs", 0x1F001C00, "cs28"},
+                                                      {"cs", 0x1F001D00, "cs29"},
+                                                      {"cs", 0x1F000200, "cs2"},
+                                                      {"cs", 0x1F001E00, "cs30"},
+                                                      {"cs", 0x1F001F00, "cs31"},
+                                                      {"cs", 0x1F000300, "cs3"},
+                                                      {"cs", 0x1F000400, "cs4"},
+                                                      {"cs", 0x1F000500, "cs5"},
+                                                      {"cs", 0x1F000600, "cs6"},
+                                                      {"cs", 0x1F000700, "cs7"},
+                                                      {"cs", 0x1F000800, "cs8"},
+                                                      {"cs", 0x1F000900, "cs9"},
+                                                      {"mall", 0x1F005900, "mall0"},
+                                                      {"mall", 0x1F006300, "mall10"},
+                                                      {"mall", 0x1F006400, "mall11"},
+                                                      {"mall", 0x1F006500, "mall12"},
+                                                      {"mall", 0x1F006600, "mall13"},
+                                                      {"mall", 0x1F006700, "mall14"},
+                                                      {"mall", 0x1F006800, "mall15"},
+                                                      {"mall", 0x1F006900, "mall16"},
+                                                      {"mall", 0x1F006A00, "mall17"},
+                                                      {"mall", 0x1F006B00, "mall18"},
+                                                      {"mall", 0x1F006C00, "mall19"},
+                                                      {"mall", 0x1F005A00, "mall1"},
+                                                      {"mall", 0x1F006D00, "mall20"},
+                                                      {"mall", 0x1F006E00, "mall21"},
+                                                      {"mall", 0x1F006F00, "mall22"},
+                                                      {"mall", 0x1F007000, "mall23"},
+                                                      {"mall", 0x1F007100, "mall24"},
+                                                      {"mall", 0x1F007200, "mall25"},
+                                                      {"mall", 0x1F007300, "mall26"},
+                                                      {"mall", 0x1F007400, "mall27"},
+                                                      {"mall", 0x1F007500, "mall28"},
+                                                      {"mall", 0x1F007600, "mall29"},
+                                                      {"mall", 0x1F005B00, "mall2"},
+                                                      {"mall", 0x1F007700, "mall30"},
+                                                      {"mall", 0x1F007800, "mall31"},
+                                                      {"mall", 0x1F005C00, "mall3"},
+                                                      {"mall", 0x1F005D00, "mall4"},
+                                                      {"mall", 0x1F005E00, "mall5"},
+                                                      {"mall", 0x1F005F00, "mall6"},
+                                                      {"mall", 0x1F006000, "mall7"},
+                                                      {"mall", 0x1F006100, "mall8"},
+                                                      {"mall", 0x1F006200, "mall9"},
+                                                      {"pb", 0x5EA00, "pb"},
+                                                      {"pb", 0x30082900, "ccd0 pbccd"},
+                                                      {"pb", 0x32082900, "ccd1 pbccd"},
+                                                      {"pb", 0x34082900, "ccd2 pbccd"},
+                                                      {"pb", 0x36082900, "xcd0 pbccd"},
+                                                      {"pb", 0x38082900, "xcd1 pbccd"},
+                                                      {"umc", 0x90F00, "ch0 umc0"},
+                                                      {"umc", 0x290F00, "ch0 umc1"},
+                                                      {"umc", 0x490F00, "ch0 umc2"},
+                                                      {"umc", 0x690F00, "ch0 umc3"},
+                                                      {"umc", 0x91F00, "ch1 umc0"},
+                                                      {"umc", 0x291F00, "ch1 umc1"},
+                                                      {"umc", 0x491F00, "ch1 umc2"},
+                                                      {"umc", 0x691F00, "ch1 umc3"},
+                                                      {"umc", 0x92F00, "ch2 umc0"},
+                                                      {"umc", 0x292F00, "ch2 umc1"},
+                                                      {"umc", 0x492F00, "ch2 umc2"},
+                                                      {"umc", 0x692F00, "ch2 umc3"},
+                                                      {"umc", 0x93F00, "ch3 umc0"},
+                                                      {"umc", 0x293F00, "ch3 umc1"},
+                                                      {"umc", 0x493F00, "ch3 umc2"},
+                                                      {"umc", 0x693F00, "ch3 umc3"},
+                                                      {"umc", 0x190F00, "ch4 umc0"},
+                                                      {"umc", 0x390F00, "ch4 umc1"},
+                                                      {"umc", 0x590F00, "ch4 umc2"},
+                                                      {"umc", 0x790F00, "ch4 umc3"},
+                                                      {"umc", 0x191F00, "ch5 umc0"},
+                                                      {"umc", 0x391F00, "ch5 umc1"},
+                                                      {"umc", 0x591F00, "ch5 umc2"},
+                                                      {"umc", 0x791F00, "ch5 umc3"},
+                                                      {"umc", 0x192F00, "ch6 umc0"},
+                                                      {"umc", 0x392F00, "ch6 umc1"},
+                                                      {"umc", 0x592F00, "ch6 umc2"},
+                                                      {"umc", 0x792F00, "ch6 umc3"},
+                                                      {"umc", 0x193F00, "ch7 umc0"},
+                                                      {"umc", 0x393F00, "ch7 umc1"},
+                                                      {"umc", 0x593F00, "ch7 umc2"},
+                                                      {"umc", 0x793F00, "ch7 umc3"},
+                                                      {"pcs_xgmi", 0x11A09200, "serdes a pcs0"},
+                                                      {"pcs_xgmi", 0x12109200, "serdes b pcs7"},
+                                                      {"pcs_xgmi", 0x12209200, "serdes b pcs8"},
+                                                      {"pcs_xgmi", 0x11B09200, "xgmi pcs"}};
 
 const size_t NUM_OAM_AID_ENTRIES = sizeof(oam_aid_table) / sizeof(oam_aid_table[0]);
 const size_t NUM_BANKS = sizeof(bank_table) / sizeof(bank_table[0]);
@@ -465,101 +409,81 @@ const size_t NUM_XCD_ERRORS = sizeof(xcd_error_table) / sizeof(xcd_error_table[0
 const size_t NUM_AID_ERRORS = sizeof(aid_error_table) / sizeof(aid_error_table[0]);
 const size_t NUM_INSTANCES = sizeof(instance_table) / sizeof(instance_table[0]);
 
-int find_bank_name(uint16_t hw_id, uint16_t aca_type, const char **bank_name)
-{
-    if (!bank_name)
-    {
-        return -1;
-    }
+int find_bank_name(uint16_t hw_id, uint16_t aca_type, const char **bank_name) {
+  if (!bank_name) {
+    return -1;
+  }
 
-    for (size_t i = 0; i < NUM_BANKS; i++)
-    {
-        if (bank_table[i].hw_id == hw_id &&
-            bank_table[i].aca_type == aca_type)
-        {
-            *bank_name = bank_table[i].name;
-            return 0;
-        }
+  for (size_t i = 0; i < NUM_BANKS; i++) {
+    if (bank_table[i].hw_id == hw_id && bank_table[i].aca_type == aca_type) {
+      *bank_name = bank_table[i].name;
+      return 0;
     }
+  }
 
-    *bank_name = RAS_DECODE_SEVERITY_UNKNOWN;
-    return 1;
+  *bank_name = RAS_DECODE_SEVERITY_UNKNOWN;
+  return 1;
 }
 
-int find_error_type_by_bank(const char *bank, uint32_t error_code, const char **error_type)
-{
-    if (!bank || !error_type)
-    {
-        return -1;
-    }
+int find_error_type_by_bank(const char *bank, uint32_t error_code, const char **error_type) {
+  if (!bank || !error_type) {
+    return -1;
+  }
 
-    for (size_t i = 0; i < NUM_ERRORS; i++)
-    {
-        if (error_code == error_table[i].error_code &&
-            strcmp(bank, error_table[i].bank) == 0)
-        {
-            *error_type = error_table[i].type;
-            return 0;
-        }
+  for (size_t i = 0; i < NUM_ERRORS; i++) {
+    if (error_code == error_table[i].error_code && strcmp(bank, error_table[i].bank) == 0) {
+      *error_type = error_table[i].type;
+      return 0;
     }
+  }
 
-    *error_type = RAS_DECODE_SEVERITY_UNKNOWN;
-    return 1;
+  *error_type = RAS_DECODE_SEVERITY_UNKNOWN;
+  return 1;
 }
 
-int find_error_in_table(const aca_error_entry_t *table, size_t table_size,
-                        uint32_t error_code, const char **error_type)
-{
-    if (!table || !error_type)
-    {
-        return -1;
-    }
+int find_error_in_table(const aca_error_entry_t *table, size_t table_size, uint32_t error_code,
+                        const char **error_type) {
+  if (!table || !error_type) {
+    return -1;
+  }
 
-    for (size_t i = 0; i < table_size; i++)
-    {
-        if (table[i].error_code == error_code)
-        {
-            *error_type = table[i].type;
-            return 0;
-        }
+  for (size_t i = 0; i < table_size; i++) {
+    if (table[i].error_code == error_code) {
+      *error_type = table[i].type;
+      return 0;
     }
+  }
 
-    *error_type = RAS_DECODE_SEVERITY_UNKNOWN;
-    return 1;
+  *error_type = RAS_DECODE_SEVERITY_UNKNOWN;
+  return 1;
 }
 
-int find_oam_aid(uint8_t instance_id_hi, oam_aid_map_t *oam_aid)
-{
-    if (!oam_aid || instance_id_hi >= NUM_OAM_AID_ENTRIES)
-    {
-        return -1;
-    }
+int find_oam_aid(uint8_t instance_id_hi, oam_aid_map_t *oam_aid) {
+  if (!oam_aid || instance_id_hi >= NUM_OAM_AID_ENTRIES) {
+    return -1;
+  }
 
-    oam_aid->oam = oam_aid_table[instance_id_hi].oam;
-    oam_aid->aid = oam_aid_table[instance_id_hi].aid;
-    return 0;
+  oam_aid->oam = oam_aid_table[instance_id_hi].oam;
+  oam_aid->aid = oam_aid_table[instance_id_hi].aid;
+  return 0;
 }
 
-int find_instance_name(const char *bank, uint32_t instance_id_lo, const char **instance_name)
-{
-    if (!bank || !instance_name)
-    {
-        return -1;
+int find_instance_name(const char *bank, uint32_t instance_id_lo, const char **instance_name) {
+  if (!bank || !instance_name) {
+    return -1;
+  }
+
+  // Mask off the lower 2 bits as specified
+  uint32_t masked_id = instance_id_lo & 0xFFFFFFFC;
+
+  for (size_t i = 0; i < NUM_INSTANCES; i++) {
+    if (instance_table[i].instance_id_lo == masked_id &&
+        strcmp(bank, instance_table[i].bank) == 0) {
+      *instance_name = instance_table[i].name;
+      return 0;
     }
+  }
 
-    // Mask off the lower 2 bits as specified
-    uint32_t masked_id = instance_id_lo & 0xFFFFFFFC;
-
-    for (size_t i = 0; i < NUM_INSTANCES; i++)
-    {
-        if (instance_table[i].instance_id_lo == masked_id &&
-            strcmp(bank, instance_table[i].bank) == 0)
-        {
-            *instance_name = instance_table[i].name;
-            return 0;
-        }
-    }
-
-    *instance_name = RAS_DECODE_SEVERITY_UNKNOWN;
-    return 1;
+  *instance_name = RAS_DECODE_SEVERITY_UNKNOWN;
+  return 1;
 }

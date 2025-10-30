@@ -167,6 +167,10 @@ _libraries = {}
 from pathlib import Path
 # libamd_smi.so can be located in several different places.
 # Look for it with below priority:
+# 0. Relative to amdsmi_wrapper.py in TheRock:
+#    `amdsmi_wrapper.py` is located in
+#    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
+#    `_rocm_sdk_core/lib`.
 # 1. ROCM_HOME/ROCM_PATH environment variables
 #    - ROCM_HOME/lib
 #    - ROCM_PATH/lib (usually set to /opt/rocm/)
@@ -179,6 +183,9 @@ from pathlib import Path
 def find_smi_library():
     err = OSError("Could not load libamd_smi.so")
     possible_locations = []
+    # 0.
+    libamd_smi_path = Path(__file__).resolve().parent.parent.parent.parent / "lib/libamd_smi.so"
+    possible_locations.append(libamd_smi_path)
     # 1.
     rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
     if rocm_path:
@@ -782,6 +789,7 @@ amdsmi_vram_type_t__enumvalues = {
     10: 'AMDSMI_VRAM_TYPE_DDR2',
     11: 'AMDSMI_VRAM_TYPE_DDR3',
     12: 'AMDSMI_VRAM_TYPE_DDR4',
+    13: 'AMDSMI_VRAM_TYPE_DDR5',
     17: 'AMDSMI_VRAM_TYPE_GDDR1',
     18: 'AMDSMI_VRAM_TYPE_GDDR2',
     19: 'AMDSMI_VRAM_TYPE_GDDR3',
@@ -789,7 +797,9 @@ amdsmi_vram_type_t__enumvalues = {
     21: 'AMDSMI_VRAM_TYPE_GDDR5',
     22: 'AMDSMI_VRAM_TYPE_GDDR6',
     23: 'AMDSMI_VRAM_TYPE_GDDR7',
-    23: 'AMDSMI_VRAM_TYPE__MAX',
+    30: 'AMDSMI_VRAM_TYPE_LPDDR4',
+    31: 'AMDSMI_VRAM_TYPE_LPDDR5',
+    31: 'AMDSMI_VRAM_TYPE__MAX',
 }
 AMDSMI_VRAM_TYPE_UNKNOWN = 0
 AMDSMI_VRAM_TYPE_HBM = 1
@@ -800,6 +810,7 @@ AMDSMI_VRAM_TYPE_HBM3E = 5
 AMDSMI_VRAM_TYPE_DDR2 = 10
 AMDSMI_VRAM_TYPE_DDR3 = 11
 AMDSMI_VRAM_TYPE_DDR4 = 12
+AMDSMI_VRAM_TYPE_DDR5 = 13
 AMDSMI_VRAM_TYPE_GDDR1 = 17
 AMDSMI_VRAM_TYPE_GDDR2 = 18
 AMDSMI_VRAM_TYPE_GDDR3 = 19
@@ -807,7 +818,9 @@ AMDSMI_VRAM_TYPE_GDDR4 = 20
 AMDSMI_VRAM_TYPE_GDDR5 = 21
 AMDSMI_VRAM_TYPE_GDDR6 = 22
 AMDSMI_VRAM_TYPE_GDDR7 = 23
-AMDSMI_VRAM_TYPE__MAX = 23
+AMDSMI_VRAM_TYPE_LPDDR4 = 30
+AMDSMI_VRAM_TYPE_LPDDR5 = 31
+AMDSMI_VRAM_TYPE__MAX = 31
 amdsmi_vram_type_t = ctypes.c_uint32 # enum
 class struct_amdsmi_range_t(Structure):
     pass
@@ -964,21 +977,6 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('max_pcie_interface_version', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 9),
-]
-
 class struct_pcie_metric_(Structure):
     pass
 
@@ -997,6 +995,21 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
+]
+
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('max_pcie_interface_version', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 9),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -1397,7 +1410,8 @@ struct_amdsmi_proc_info_t._fields_ = [
     ('memory_usage', struct_memory_usage_),
     ('container_name', ctypes.c_char * 256),
     ('cu_occupancy', ctypes.c_uint32),
-    ('reserved', ctypes.c_uint32 * 11),
+    ('evicted_time', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint32 * 10),
 ]
 
 amdsmi_proc_info_t = struct_amdsmi_proc_info_t
@@ -2196,7 +2210,7 @@ struct_amdsmi_process_info_t._fields_ = [
     ('vram_usage', ctypes.c_uint64),
     ('sdma_usage', ctypes.c_uint64),
     ('cu_occupancy', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('evicted_time', ctypes.c_uint32),
 ]
 
 amdsmi_process_info_t = struct_amdsmi_process_info_t
@@ -3326,16 +3340,17 @@ __all__ = \
     'AMDSMI_VOLT_TYPE_LAST', 'AMDSMI_VOLT_TYPE_VDDBOARD',
     'AMDSMI_VOLT_TYPE_VDDGFX', 'AMDSMI_VRAM_TYPE_DDR2',
     'AMDSMI_VRAM_TYPE_DDR3', 'AMDSMI_VRAM_TYPE_DDR4',
-    'AMDSMI_VRAM_TYPE_GDDR1', 'AMDSMI_VRAM_TYPE_GDDR2',
-    'AMDSMI_VRAM_TYPE_GDDR3', 'AMDSMI_VRAM_TYPE_GDDR4',
-    'AMDSMI_VRAM_TYPE_GDDR5', 'AMDSMI_VRAM_TYPE_GDDR6',
-    'AMDSMI_VRAM_TYPE_GDDR7', 'AMDSMI_VRAM_TYPE_HBM',
-    'AMDSMI_VRAM_TYPE_HBM2', 'AMDSMI_VRAM_TYPE_HBM2E',
-    'AMDSMI_VRAM_TYPE_HBM3', 'AMDSMI_VRAM_TYPE_HBM3E',
-    'AMDSMI_VRAM_TYPE_UNKNOWN', 'AMDSMI_VRAM_TYPE__MAX',
-    'AMDSMI_XGMI_LINK_DISABLE', 'AMDSMI_XGMI_LINK_DOWN',
-    'AMDSMI_XGMI_LINK_UP', 'AMDSMI_XGMI_STATUS_ERROR',
-    'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
+    'AMDSMI_VRAM_TYPE_DDR5', 'AMDSMI_VRAM_TYPE_GDDR1',
+    'AMDSMI_VRAM_TYPE_GDDR2', 'AMDSMI_VRAM_TYPE_GDDR3',
+    'AMDSMI_VRAM_TYPE_GDDR4', 'AMDSMI_VRAM_TYPE_GDDR5',
+    'AMDSMI_VRAM_TYPE_GDDR6', 'AMDSMI_VRAM_TYPE_GDDR7',
+    'AMDSMI_VRAM_TYPE_HBM', 'AMDSMI_VRAM_TYPE_HBM2',
+    'AMDSMI_VRAM_TYPE_HBM2E', 'AMDSMI_VRAM_TYPE_HBM3',
+    'AMDSMI_VRAM_TYPE_HBM3E', 'AMDSMI_VRAM_TYPE_LPDDR4',
+    'AMDSMI_VRAM_TYPE_LPDDR5', 'AMDSMI_VRAM_TYPE_UNKNOWN',
+    'AMDSMI_VRAM_TYPE__MAX', 'AMDSMI_XGMI_LINK_DISABLE',
+    'AMDSMI_XGMI_LINK_DOWN', 'AMDSMI_XGMI_LINK_UP',
+    'AMDSMI_XGMI_STATUS_ERROR', 'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
     'AMDSMI_XGMI_STATUS_NO_ERRORS', 'CLK_LIMIT_MAX', 'CLK_LIMIT_MIN',
     'RD_BW0', 'WR_BW0', 'amd_metrics_table_header_t',
     'amdsmi_accelerator_partition_profile_config_t',
