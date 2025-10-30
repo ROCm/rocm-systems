@@ -23,6 +23,11 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
+find_package(rocprofiler-sdk-roctx REQUIRED)
+
+set(COMMON_LINK_LIBRARIES
+            rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::tests-common-library rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -47,10 +52,7 @@ add_executable(thread-trace-api-single-test)
 target_sources(
     thread-trace-api-single-test PRIVATE main.cpp trace_callbacks.cpp single_dispatch.cpp
                                          kernel_branch.cpp kernel_lds.cpp)
-target_link_libraries(
-    thread-trace-api-single-test
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+target_link_libraries(thread-trace-api-single-test PRIVATE ${COMMON_LINK_LIBRARIES})
 
 add_test(NAME thread-trace-api-single-test
          COMMAND $<TARGET_FILE:thread-trace-api-single-test>)
@@ -75,8 +77,7 @@ target_sources(
                                         kernel_branch.cpp kernel_lds.cpp)
 target_link_libraries(
     thread-trace-api-multi-test
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+    PRIVATE ${COMMON_LINK_LIBRARIES})
 
 add_test(NAME thread-trace-api-multi-test
          COMMAND $<TARGET_FILE:thread-trace-api-multi-test>)
@@ -100,8 +101,7 @@ target_sources(thread-trace-api-agent-test PRIVATE main.cpp trace_callbacks.cpp 
                                                    kernel_branch.cpp kernel_lds.cpp)
 target_link_libraries(
     thread-trace-api-agent-test
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+    PRIVATE ${COMMON_LINK_LIBRARIES})
 
 add_test(NAME thread-trace-api-agent-test
          COMMAND $<TARGET_FILE:thread-trace-api-agent-test>)
@@ -152,3 +152,25 @@ set_tests_properties(
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
                ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+
+# Double buffer test
+add_executable(thread-trace-api-double-buffer-test)
+target_sources(thread-trace-api-double-buffer-test PRIVATE double_buffer.cpp main.cpp
+                                                   kernel_branch.cpp kernel_lds.cpp)
+target_link_libraries(
+    thread-trace-api-double-buffer-test
+    PRIVATE ${COMMON_LINK_LIBRARIES})
+
+add_test(NAME thread-trace-api-double-buffer-test
+         COMMAND $<TARGET_FILE:thread-trace-api-double-buffer-test>)
+
+set_tests_properties(
+    thread-trace-api-double-buffer-test
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

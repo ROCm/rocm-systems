@@ -36,7 +36,7 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-constexpr double SQTT_BANDIWDTH = 16E9f * 5;  // 16GB/s, times 5 for wiggle room
+constexpr double SQTT_BANDIWDTH = 17E9f * 3;  // 17GB/s, times 4 for wiggle room
 
 namespace
 {
@@ -61,7 +61,6 @@ worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t param
     auto& flag  = *CHECK_NOTNULL(parameters.running_flag);
 
     const size_t buffer_size           = queue.buffer_size;
-    const auto   copy_fn               = CHECK_NOTNULL(hsa::get_core_table())->hsa_memory_copy_fn;
     const auto   buffer                = queue.get_double_buffer_memory();
     const auto   interval_microseconds = static_cast<size_t>(1E6 * buffer_size / SQTT_BANDIWDTH);
 
