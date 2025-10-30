@@ -40,12 +40,18 @@ constexpr double SQTT_BANDWIDTH = 17E9f * 4;  // 17GB/s, times 4 for wiggle room
 
 // Performs a synchronous GPU-to-CPU copy using the async engine, chaining the supplied dependency
 // and reusing a thread-local completion signal to avoid allocation churn.
-void copy_data_sync(void* dst, const void* src, hsa_agent_t dst_agent, hsa_agent_t src_agent, size_t size, Signal* dependency)
+void
+copy_data_sync(void*       dst,
+               const void* src,
+               hsa_agent_t dst_agent,
+               hsa_agent_t src_agent,
+               size_t      size,
+               Signal*     dependency)
 {
     ROCP_FATAL_IF(dependency == nullptr) << "Dependency must not be null";
 
     thread_local Signal signal{};
-    auto dep = dependency->getSignal();
+    auto                dep = dependency->getSignal();
 
     auto copy_fn = CHECK_NOTNULL(hsa::get_amd_ext_table())->hsa_amd_memory_async_copy_fn;
 
@@ -79,7 +85,8 @@ consumer_loop(triple_buffer_consumer_data_t parameters)
 
         if(!running && write_index <= read_index) return;
 
-        auto flags = static_cast<rocprofiler_thread_trace_shader_data_flags_t>(mut.at(parity).second);
+        auto flags =
+            static_cast<rocprofiler_thread_trace_shader_data_flags_t>(mut.at(parity).second);
         callback_fn(agent_id, 0, buffer.at(parity), buffer_size, flags, userdata);
         read_index.fetch_add(1);
     }
@@ -151,14 +158,15 @@ producer_loop(triple_buffer_producer_data_t parameters)
                     size_t parity = write_index % buffer.size();
                     auto   lock   = std::unique_lock{mut.at(parity).first};
 
-                    if (should_stop)
+                    if(should_stop)
                         flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
 
                     mut.at(parity).second = flags;
 
                     copy_sync(buffer.at(parity), status->data);
                     auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
-                    ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << buffer_size / float(copy_time);
+                    ROCP_TRACE << "Copy: " << copy_time
+                               << " s. BW: " << buffer_size / float(copy_time);
 
                     write_index.fetch_add(1);
                     write_cv.notify_all();

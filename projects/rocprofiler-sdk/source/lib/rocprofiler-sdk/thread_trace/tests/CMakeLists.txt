@@ -27,7 +27,6 @@ set_tests_properties(
     PROPERTIES TIMEOUT 10 LABELS "unittests" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-
 add_executable(thread-trace-producer-consumer-test)
 target_sources(thread-trace-producer-consumer-test PRIVATE producer_consumer.cpp)
 

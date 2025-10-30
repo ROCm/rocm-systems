@@ -161,7 +161,12 @@ TEST(thread_trace, configure_test)
                rocprofiler_dispatch_id_t,
                void*,
                rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
-            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_thread_trace_shader_data_flags_t, rocprofiler_user_data_t) {},
+            [](rocprofiler_agent_id_t,
+               int64_t,
+               void*,
+               size_t,
+               rocprofiler_thread_trace_shader_data_flags_t,
+               rocprofiler_user_data_t) {},
             nullptr);
     }
 
@@ -218,7 +223,12 @@ TEST(thread_trace, perfcounters_configure_test)
                rocprofiler_dispatch_id_t,
                void*,
                rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
-            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_thread_trace_shader_data_flags_t, rocprofiler_user_data_t) {},
+            [](rocprofiler_agent_id_t,
+               int64_t,
+               void*,
+               size_t,
+               rocprofiler_thread_trace_shader_data_flags_t,
+               rocprofiler_user_data_t) {},
             nullptr);
     }
 
@@ -304,7 +314,12 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
             agent->id,
             params.data(),
             params.size(),
-            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_thread_trace_shader_data_flags_t, rocprofiler_user_data_t) {},
+            [](rocprofiler_agent_id_t,
+               int64_t,
+               void*,
+               size_t,
+               rocprofiler_thread_trace_shader_data_flags_t,
+               rocprofiler_user_data_t) {},
             rocprofiler_user_data_t{});
     }
     return ROCPROFILER_STATUS_SUCCESS;

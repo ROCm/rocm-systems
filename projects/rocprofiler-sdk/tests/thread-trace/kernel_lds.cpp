@@ -34,8 +34,8 @@ __global__ void
 looping_lds_kernel(float* __restrict__ a,
                    const float* __restrict__ b,
                    const float* __restrict__ c,
-                   size_t size,
-                   size_t loopcount,
+                   size_t   size,
+                   size_t   loopcount,
                    uint32_t ttracedata)
 {
     __shared__ float interm[SHM_SIZE];

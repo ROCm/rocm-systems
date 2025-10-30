@@ -120,7 +120,7 @@ gen_output_stream()
     std::vector<Element> sorted(latencies->begin(), latencies->end());
     std::stable_sort(sorted.begin(), sorted.end(), [](const Element& a, const Element& b) {
         return a.second.latency > b.second.latency;
-        //return a.first.address < b.first.address;
+        // return a.first.address < b.first.address;
     });
 
     output << "Top 20 hotspots for trace (cycles):\n";
@@ -241,11 +241,14 @@ parse_output()
         }
     };
 
-    std::cout << "Total size: " << output_size/1024/1024 << " MB" << std::endl;
-    DECODER_CALL(
-        rocprofiler_trace_decode(decoder, parse, output_buffer.data(), std::min(output_size.load(), output_buffer.size()), nullptr));
+    std::cout << "Total size: " << output_size / 1024 / 1024 << " MB" << std::endl;
+    DECODER_CALL(rocprofiler_trace_decode(decoder,
+                                          parse,
+                                          output_buffer.data(),
+                                          std::min(output_size.load(), output_buffer.size()),
+                                          nullptr));
     output_size = 0;
-    std::cout << "Total instructions: " << total_insts/1000000 << " M" << std::endl;
+    std::cout << "Total instructions: " << total_insts / 1000000 << " M" << std::endl;
 };
 
 void
@@ -262,7 +265,7 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
     void*  output   = output_buffer.data();
 
     // Discard
-    if (location >= output_buffer.size()) return;
+    if(location >= output_buffer.size()) return;
 
     data_size = std::min(data_size, output_buffer.size() - location);
 

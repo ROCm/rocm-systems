@@ -93,9 +93,10 @@ typedef struct rocprofiler_thread_trace_parameter_t
 /**
  * @brief Flags for the data received in rocprofiler_thread_trace_shader_data_callback_t
  * The last record takes on the flag ::ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END.
- * If the GPU buffer cannot be flushed during the trace, the trace will be interrupted and one (or both) of the buffer full flags will be set. When
- * this happens, ::ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END will mark the last buffer. Once
- * the buffers are cleared, the trace is restarted.
+ * If the GPU buffer cannot be flushed during the trace, the trace will be interrupted and one (or
+ * both) of the buffer full flags will be set. When this happens,
+ * ::ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END will mark the last buffer. Once the buffers are
+ * cleared, the trace is restarted.
  */
 typedef enum rocprofiler_thread_trace_shader_data_flags_t
 {
@@ -108,8 +109,9 @@ typedef enum rocprofiler_thread_trace_shader_data_flags_t
     /// @var ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END
     /// @brief This is the last record for shader engine.
     /// @var ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL
-    /// @brief Trace was interrupted due to GPU buffer full. For triple buffering, this usually happens when the
-    /// profiler was unable to retrieve data from the GPU fast enough. For single buffer, this usually happens when the buffer is not large enough.
+    /// @brief Trace was interrupted due to GPU buffer full. For triple buffering, this usually
+    /// happens when the profiler was unable to retrieve data from the GPU fast enough. For single
+    /// buffer, this usually happens when the buffer is not large enough.
     /// @var ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL
     /// @brief Trace was interrupted due to CPU buffer locked. This usually happens when the user
     /// handling of rocprofiler_thread_trace_shader_data_callback_t takes too long.

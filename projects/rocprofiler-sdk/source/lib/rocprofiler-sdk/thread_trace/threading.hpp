@@ -28,9 +28,9 @@
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
-#include <condition_variable>
 
 namespace rocprofiler
 {
@@ -38,7 +38,12 @@ namespace thread_trace
 {
 /// Performs a blocking async copy while honoring the supplied signal dependency.
 void
-copy_data_sync(void* dst, const void* src, hsa_agent_t dst_agent, hsa_agent_t src_agent, size_t size, Signal* dependency);
+copy_data_sync(void*       dst,
+               const void* src,
+               hsa_agent_t dst_agent,
+               hsa_agent_t src_agent,
+               size_t      size,
+               Signal*     dependency);
 
 typedef decltype(copy_data_sync) copy_data_t;
 

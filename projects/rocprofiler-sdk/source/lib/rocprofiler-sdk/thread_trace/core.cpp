@@ -168,7 +168,12 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 {
     auto& cb_data = *static_cast<cbdata_t*>(callback_data);
 
-    cb_data.cb_fn(cb_data.agent, shader, buffer, size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END, *cb_data.userdata);
+    cb_data.cb_fn(cb_data.agent,
+                  shader,
+                  buffer,
+                  size,
+                  ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END,
+                  *cb_data.userdata);
     // The iterator guarantees the last chunk is tagged with END; here we just
     // ferry the data to the user callback.
     return HSA_STATUS_SUCCESS;
@@ -179,7 +184,7 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
 {
     cbdata_t cb_dt{};
 
-    cb_dt.agent    = agent_id;
+    cb_dt.agent = agent_id;
     // Walk each buffer produced by the ATT runtime and forward it to the
     // registered shader callback.
     cb_dt.cb_fn    = params.shader_cb_fn;
@@ -228,7 +233,8 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
 
-    auto buffer_packet = std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(control_packet->GetHandle());
+    auto buffer_packet =
+        std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(control_packet->GetHandle());
     // Emit the optional buffer header first so consumers can prime state
     // before the main payload arrives.
     if(buffer_packet->header)
@@ -249,10 +255,10 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
 
     if(params.triple_buffering)
     {
-        auto worker_data            = std::make_shared<triple_buffer_shared_data_t>();
-        worker_data->queue          = queue;
+        auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
+        worker_data->queue = queue;
 
-        auto producer_data = triple_buffer_producer_data_t{};
+        auto producer_data             = triple_buffer_producer_data_t{};
         producer_data.producer_running = std::move(flag);
         producer_data.start_pkt_signal = shared_signal;
         producer_data.control_packet   = std::move(control_packet);
@@ -260,7 +266,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
         producer_data.shared           = worker_data;
         producer_data.buffer_packet    = std::move(buffer_packet);
 
-        auto consumer_data = triple_buffer_consumer_data_t{};
+        auto consumer_data        = triple_buffer_consumer_data_t{};
         consumer_data.callback_fn = params.shader_cb_fn;
         consumer_data.userdata    = params.callback_userdata;
         consumer_data.shared      = worker_data;
@@ -286,13 +292,13 @@ ThreadTracerAgent::stop_thread_trace()
     {
         auto control_packet = get_control(true);
         control_packet->clear();
-            // Join helpers and emit the final set of packets so the GPU drains.
+        // Join helpers and emit the final set of packets so the GPU drains.
         control_packet->populate_after();
         return queue->SubmitAndSignalLast(control_packet->after_krn_pkt);
     }
 }
 
-            // Single buffering: inject the stop packets directly and return.
+// Single buffering: inject the stop packets directly and return.
 void
 DispatchThreadTracer::resource_init()
 {

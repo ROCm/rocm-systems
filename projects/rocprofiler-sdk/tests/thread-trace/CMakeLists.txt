@@ -26,8 +26,8 @@ find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 
 set(COMMON_LINK_LIBRARIES
-            rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+    rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+    rocprofiler-sdk::tests-common-library rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -75,9 +75,7 @@ add_executable(thread-trace-api-multi-test)
 target_sources(
     thread-trace-api-multi-test PRIVATE main.cpp trace_callbacks.cpp multi_dispatch.cpp
                                         kernel_branch.cpp kernel_lds.cpp)
-target_link_libraries(
-    thread-trace-api-multi-test
-    PRIVATE ${COMMON_LINK_LIBRARIES})
+target_link_libraries(thread-trace-api-multi-test PRIVATE ${COMMON_LINK_LIBRARIES})
 
 add_test(NAME thread-trace-api-multi-test
          COMMAND $<TARGET_FILE:thread-trace-api-multi-test>)
@@ -99,9 +97,7 @@ set_tests_properties(
 add_executable(thread-trace-api-agent-test)
 target_sources(thread-trace-api-agent-test PRIVATE main.cpp trace_callbacks.cpp agent.cpp
                                                    kernel_branch.cpp kernel_lds.cpp)
-target_link_libraries(
-    thread-trace-api-agent-test
-    PRIVATE ${COMMON_LINK_LIBRARIES})
+target_link_libraries(thread-trace-api-agent-test PRIVATE ${COMMON_LINK_LIBRARIES})
 
 add_test(NAME thread-trace-api-agent-test
          COMMAND $<TARGET_FILE:thread-trace-api-agent-test>)
@@ -155,48 +151,52 @@ set_tests_properties(
 
 # Double buffer tests
 add_executable(thread-trace-api-double-buffer-test)
-target_sources(thread-trace-api-double-buffer-test PRIVATE double_buffer.cpp main.cpp
-                                                   kernel_branch.cpp kernel_lds.cpp)
-target_link_libraries(thread-trace-api-double-buffer-test PRIVATE ${COMMON_LINK_LIBRARIES})
+target_sources(thread-trace-api-double-buffer-test
+               PRIVATE double_buffer.cpp main.cpp kernel_branch.cpp kernel_lds.cpp)
+target_link_libraries(thread-trace-api-double-buffer-test
+                      PRIVATE ${COMMON_LINK_LIBRARIES})
 
 add_test(NAME thread-trace-api-double-buffer-consistency-test
          COMMAND $<TARGET_FILE:thread-trace-api-double-buffer-test>)
 
 set_tests_properties(
     thread-trace-api-double-buffer-consistency-test
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES
+        TIMEOUT
+        120
+        LABELS
+        "integration-tests"
+        ENVIRONMENT
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
+        FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_test(NAME thread-trace-api-double-buffer-hammer-test
          COMMAND $<TARGET_FILE:thread-trace-api-double-buffer-test>)
 
 set_tests_properties(
     thread-trace-api-double-buffer-hammer-test
-    PROPERTIES TIMEOUT
-               240
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1;ATT_NODETAIL=0;ATT_SLOW_CALLBACK=0"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES
+        TIMEOUT
+        240
+        LABELS
+        "integration-tests"
+        ENVIRONMENT
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1;ATT_NODETAIL=0;ATT_SLOW_CALLBACK=0"
+        FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_test(NAME thread-trace-api-double-buffer-slow-test
          COMMAND $<TARGET_FILE:thread-trace-api-double-buffer-test>)
 
 set_tests_properties(
     thread-trace-api-double-buffer-slow-test
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES
+        TIMEOUT
+        120
+        LABELS
+        "integration-tests"
+        ENVIRONMENT
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};DOUBLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
+        FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
