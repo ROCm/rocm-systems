@@ -75,7 +75,7 @@ Below is an example of a a complete configuration file that can be used to instr
 .. note::
    OMPT callbacks will not be traced if the system does not have a GPU.
 
-Instrumenting and running a Fortran program
+Instrumenting and running a Fortran program that uses GPU offloading
 ===================================
 
 .. tip::
