@@ -48,6 +48,7 @@
 namespace color = tim::log::color;
 namespace path  = rocprofsys::common::path;
 using namespace timemory::join;
+using rocprofsys::common::remove_env;
 using tim::get_env;
 using tim::log::monochrome;
 using tim::log::stream;
@@ -243,22 +244,6 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
     }
     _environ.emplace_back(
         strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
-}
-
-void
-remove_env(std::vector<char*>& _environ, std::string_view _env_var)
-{
-    auto _key   = join("", _env_var, "=");
-    auto _match = [&_key](auto itr) { return std::string_view{ itr }.find(_key) == 0; };
-
-    _environ.erase(std::remove_if(_environ.begin(), _environ.end(), _match),
-                   _environ.end());
-
-    for(const auto& itr : original_envs)
-    {
-        if(std::string_view{ itr }.find(_key) == 0)
-            _environ.emplace_back(strdup(itr.c_str()));
-    }
 }
 
 std::vector<char*>

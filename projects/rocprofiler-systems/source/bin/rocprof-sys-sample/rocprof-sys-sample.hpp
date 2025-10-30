@@ -48,8 +48,5 @@ void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
            update_mode&& _mode = UPD_REPLACE, std::string_view _join_delim = ":");
 
-void
-remove_env(std::vector<char*>& _environ, std::string_view _env_var);
-
 std::vector<char*>
 parse_args(int argc, char** argv, std::vector<char*>& envp);

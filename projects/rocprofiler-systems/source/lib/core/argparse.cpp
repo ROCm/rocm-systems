@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "argparse.hpp"
+#include "common/environment.hpp"
 #include "common/join.hpp"
 #include "common/path.hpp"
 #include "config.hpp"
@@ -42,6 +43,7 @@ namespace
 namespace filepath   = ::tim::filepath;
 namespace path       = rocprofsys::common::path;
 using array_config_t = ::timemory::join::array_config;
+using rocprofsys::common::remove_env;
 using ::tim::get_env;
 using ::timemory::join::join;
 
@@ -146,24 +148,6 @@ update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
     }
     _data.current.emplace_back(
         strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
-}
-
-void
-remove_env(parser_data& _data, std::string_view _env_var)
-{
-    auto _key   = join("", _env_var, "=");
-    auto _match = [&_key](auto itr) { return std::string_view{ itr }.find(_key) == 0; };
-
-    auto& _environ = _data.current;
-    _environ.erase(std::remove_if(_environ.begin(), _environ.end(), _match),
-                   _environ.end());
-
-    auto& _initial = _data.initial;
-    for(const auto& itr : _initial)
-    {
-        if(std::string_view{ itr }.find(_key) == 0)
-            _environ.emplace_back(strdup(itr.c_str()));
-    }
 }
 
 }  // namespace
@@ -631,7 +615,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                    remove_env(_data, "KOKKOS_TOOLS_LIBS");
+                    remove_env(_data.current, "KOKKOS_TOOLS_LIBS");
             });
 
         _data.processed_environs.emplace("exclude");

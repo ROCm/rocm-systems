@@ -58,9 +58,6 @@ template <typename Tp>
 void
 add_default_env(std::vector<char*>&, std::string_view, Tp&&);
 
-void
-remove_env(std::vector<char*>&, std::string_view);
-
 std::vector<char*>
 parse_args(int argc, char** argv, std::vector<char*>&,
            std::vector<std::map<std::string_view, std::string>>&);
