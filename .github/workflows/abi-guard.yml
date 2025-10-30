@@ -93,13 +93,13 @@ jobs:
       BUILD_DIR: build
       INSTALL_DIR: install
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-
       - name: Install toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y git pkg-config build-essential cmake ninja-build ${{ inputs.install_packages }}
+
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
       - name: Show git branch
         shell: bash
@@ -160,6 +160,11 @@ jobs:
       INSTALL_DIR: install
       OLD_SRC: baseline-src
     steps:
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git pkg-config build-essential cmake ninja-build ${{ inputs.install_packages }}
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -182,11 +187,6 @@ jobs:
 
     #   - name: Prepare worktree
     #     run: git worktree add "$OLD_SRC" "${{ steps.tag.outputs.tag }}"
-
-      - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git pkg-config build-essential cmake ninja-build ${{ inputs.install_packages }}
 
       - name: Show git branch
         shell: bash
