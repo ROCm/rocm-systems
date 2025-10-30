@@ -4587,7 +4587,6 @@ class AMDSMICommands():
                         args.power_cap is not None,
                         args.soc_pstate is not None,
                         args.xgmi_plpd is not None,
-                        args.pcie is not None,
                         args.clk_level is not None,
                         args.clk_limit is not None,
                         args.process_isolation is not None]):
@@ -5112,7 +5111,7 @@ class AMDSMICommands():
         gpu_args_enabled = False
         gpu_attributes = ["fan", "perf_level", "profile", "perf_determinism", "compute_partition",
                           "memory_partition", "power_cap", "soc_pstate", "xgmi_plpd",
-                          "process_isolation", "clk_limit", "clk_level", "pcie"]
+                          "process_isolation", "clk_limit", "clk_level"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr) is not None:
