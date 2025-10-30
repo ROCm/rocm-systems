@@ -80,7 +80,7 @@ set(COMPONENT_NAME_tests "rocprofiler-sdk-tests")
 set(COMPONENT_NAME_roctx "rocprofiler-sdk-roctx")
 set(COMPONENT_NAME_rocpd "rocprofiler-sdk-rocpd")
 set(COMPONENT_NAME_benchmark "rocprofiler-sdk-benchmark")
-set(COMPONENT_NAME_rocattach "rocprofiler-sdk-rocattch")
+set(COMPONENT_NAME_rocattach "rocprofiler-sdk-rocattach")
 
 set(COMPONENT_DEP_core
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
