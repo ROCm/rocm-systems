@@ -77,13 +77,10 @@ hsa_status_t CountedQueuePoolManager::AcquireQueue(
     void (*callback)(hsa_status_t, hsa_queue_t*, void*), void* data, uint64_t flags,
     hsa_queue_t** out_queue) {
   // Validate parameters
-  if (!out_queue) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (!out_queue || !IsValidPriority(priority)) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   // support only multi-producer queues
   if (type != HSA_QUEUE_TYPE_MULTI) return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
-
-  // validate priority
-  if (!IsValidPriority(priority)) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   // Validate agent
   core::Agent* gpu_agent = core::Agent::Convert(agent);
