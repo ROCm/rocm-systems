@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+struct hsa_kfd_topology_context;
 struct hsa_kfd_queue_context;
 struct hsa_kfd_fmm_context;
 struct hsa_kfd_event_context;
@@ -62,6 +63,9 @@ typedef struct _HsaKFDContext
     /* whether to check all dGPUs in the topology support SVM API */
     bool hsakmt_is_svm_api_supported;
 
+    /* Topology context for managing systems topology */
+    struct hsa_kfd_topology_context *topology_context;
+
     /* Queue context for managing user queues */
     struct hsa_kfd_queue_context *queue_context;
 
@@ -77,6 +81,7 @@ void hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx);
 // Release all resources associated with the given KFD context
 void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx);
 
+struct hsa_kfd_topology_context *hsakmt_kfdcontext_get_topology_context(HsaKFDContext *ctx);
 struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx);
 struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext *ctx);
 struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx);

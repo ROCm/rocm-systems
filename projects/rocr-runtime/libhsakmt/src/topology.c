@@ -96,8 +96,41 @@ static const char *supported_processor_vendor_name[] = {
 	"\n"			// POWER requires a different search method
 };
 
+/*
+ * KFD Topology Context
+ * The hsa_system_props and hsa_node_props pointers in each topology context
+ * reference the global g_system and g_props objects. As a result, all contexts
+ * share the same topology data. These two pointers are initialized only once
+ * per context and are used to set up resources required by that context.
+ */
+struct hsa_kfd_topology_context
+{
+	HsaSystemProperties* hsa_system_props;
+	node_props_t *hsa_node_props;
+};
+
+struct hsa_kfd_topology_context *hsakmt_kfdcontext_get_topology_context(HsaKFDContext *ctx)
+{
+	assert(ctx);
+	if (!ctx) {
+		pr_err("Expected a non-null ptr for HsaKFDContext");
+		return NULL;
+	}
+
+	if (ctx->topology_context)
+		return ctx->topology_context;
+
+	ctx->topology_context = calloc(1, sizeof(struct hsa_kfd_topology_context));
+	if (!ctx->topology_context) {
+		pr_err("Alloc memory failed for struct hsa_kfd_topology_context size %zu\n",
+				 sizeof(struct hsa_kfd_topology_context));
+		return NULL;
+	}
+	return ctx->topology_context;
+}
+
 static HSAKMT_STATUS topology_take_snapshot(HsaKFDContext *ctx);
-static void topology_drop_snapshot(void);
+static void topology_drop_snapshot(HsaKFDContext *ctx);
 
 static const struct hsa_gfxip_table gfxip_lookup_table[] = {
 	/* Kaveri Family */
@@ -2137,10 +2170,22 @@ err:
 }
 
 /* Drop the Snapshot of the HSA topology information. Assume lock is held. */
-void topology_drop_snapshot(void)
+void topology_drop_snapshot(HsaKFDContext *ctx)
 {
 	if (!!g_system != !!g_props)
 		pr_warn("Probably inconsistency?\n");
+
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+	if (topology_ctx && topology_ctx->hsa_system_props) {
+		topology_ctx->hsa_system_props = NULL;
+		topology_ctx->hsa_node_props = NULL;
+	}
+
+	/* Only the primary context is responsible for cleaning up the global topology.
+	 * Secondary contexts skip this cleanup to avoid interfering with shared resources.
+	 */
+	if (!ctx->hsakmt_is_primary_ctx)
+		return;
 
 	if (g_props) {
 		/* Remove state */
@@ -2187,30 +2232,45 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemPropertiesCtx(HsaKFDContext *ctx,
 				        HsaSystemProperties *SystemProperties)
 {
 	HSAKMT_STATUS err = HSAKMT_STATUS_SUCCESS;
-
-	CHECK_KFD_OPEN();
+	struct hsa_kfd_topology_context *topology_ctx = NULL;
 
 	if (!SystemProperties)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
+	CHECK_KFD_OPEN();
 	pthread_mutex_lock(&hsakmt_mutex);
+
+	topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+	if (!topology_ctx) {
+		err = HSAKMT_STATUS_NO_MEMORY;
+		goto out;
+	}
+
+	/* If topology_ctx->hsa_system_props is valid,
+	 * the ctx topology has already been initialized.
+	 */
+	if (topology_ctx->hsa_system_props) {
+		*SystemProperties = *topology_ctx->hsa_system_props;
+		goto out;
+	}
 
 	/* We already have a valid snapshot. Avoid double initialization that
 	 * would leak memory.
 	 */
-	if (g_system) {
-		*SystemProperties = *g_system;
-		goto out;
+	if (!g_system) {
+		err = topology_take_snapshot(ctx);
+		if (err != HSAKMT_STATUS_SUCCESS)
+			goto out;
 	}
-
-	err = topology_take_snapshot(ctx);
-	if (err != HSAKMT_STATUS_SUCCESS)
-		goto out;
 
 	assert(g_system);
 
 	if (hsakmt_use_model)
 		model_init();
+
+	// Initialize resources used by ctx
+	topology_ctx->hsa_system_props = g_system;
+	topology_ctx->hsa_node_props = g_props;
 
 	err = hsakmt_fmm_init_process_apertures(ctx, g_system->NumNodes);
 	if (err != HSAKMT_STATUS_SUCCESS)
@@ -2220,14 +2280,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemPropertiesCtx(HsaKFDContext *ctx,
 	if (err != HSAKMT_STATUS_SUCCESS)
 		goto init_doorbells_failed;
 
-	*SystemProperties = *g_system;
+	*SystemProperties = *topology_ctx->hsa_system_props;
 
 	goto out;
 
 init_doorbells_failed:
 	hsakmt_fmm_destroy_process_apertures(ctx);
 init_process_apertures_failed:
-	topology_drop_snapshot();
+	topology_drop_snapshot(ctx);
 
 out:
 	pthread_mutex_unlock(&hsakmt_mutex);
@@ -2240,7 +2300,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemPropertiesCtx(HsaKFDContext *ctx)
 
 	hsakmt_destroy_process_doorbells(ctx);
 	hsakmt_fmm_destroy_process_apertures(ctx);
-	topology_drop_snapshot();
+	topology_drop_snapshot(ctx);
 
 	pthread_mutex_unlock(&hsakmt_mutex);
 

@@ -47,6 +47,11 @@ void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx)
     if (!ctx)
         return;
 
+    if (ctx->topology_context) {
+        free(ctx->topology_context);
+        ctx->topology_context = NULL;
+    }
+
     if (ctx->queue_context) {
         free(ctx->queue_context);
         ctx->queue_context = NULL;
