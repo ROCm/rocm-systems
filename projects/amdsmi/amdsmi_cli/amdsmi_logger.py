@@ -1129,9 +1129,8 @@ class AMDSMILogger():
                     cu_occupancy = (str(round(process['cu_occupancy']['current_cu'] / process['cu_occupancy']['total_num_cu'] * 100, 1)) + " %").rjust(7)
                 else:
                     cu_occupancy = "N/A"
-                evicted_time = str(process['evicted_time']).rjust(9)
-                print("| {0:4.4s}  {1:9.9s}  {2:19.19s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:7.7s}  {7:9.9s} |".format(
-                         gpu_id, pid, process_name, gtt_mem, vram_mem, mem_usage, cu_occupancy, evicted_time))
+                print("| {0:4.4s}  {1:9.9s}  {2:19.19s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:7.7s} |".format(
+                         gpu_id, pid, process_name, gtt_mem, vram_mem, mem_usage, cu_occupancy))
                 if process['name'] == "N/A":
                     elevated_permission_error = True
         else:

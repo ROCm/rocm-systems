@@ -7262,7 +7262,6 @@ class AMDSMICommands():
 
         gpu_info_list = []
         all_process_list = []
-        all_process_list = []
 
         # get info for each processor to display in default output
         for processor in processors:
@@ -7390,7 +7389,7 @@ class AMDSMICommands():
             try:
                 raw_process_list = amdsmi_interface.amdsmi_get_gpu_process_list(processor)
                 for proc in raw_process_list:
-                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A","gtt": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A", "evicted_time" : "N/A"}
+                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A","gtt": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A"}
                     proc_info_dict['gpu'] = gpu_id
                     proc_info_dict['pid'] = proc['pid']
                     proc_info_dict['name'] = proc['name']
@@ -7406,7 +7405,6 @@ class AMDSMICommands():
                             proc_info_dict['cu_occupancy'] = {"current_cu": "N/A", "total_num_cu": total_num_cu}
                     except (ValueError, TypeError):
                         proc_info_dict['cu_occupancy'] = {"current_cu": "N/A", "total_num_cu": total_num_cu}
-                    proc_info_dict['evicted_time'] = proc['evicted_time']
 
                     all_process_list.append(proc_info_dict)
             except amdsmi_exception.AmdSmiLibraryException as e:
