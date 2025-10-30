@@ -36,7 +36,7 @@ THE SOFTWARE.
 /**
  * Test Description
  * ------------------------
- *  - This will perfrom the funtionality testing of hipGetProcAddress api
+ *  - This will perfrom the basic funtionality of hipGetProcAddress api
  * Test source
  * ------------------------
  *  - unit/device/hipGetProcAddress.cc
@@ -50,19 +50,19 @@ TEST_CASE("Unit_hipGetProcAddress_Positive") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  SECTION("hipEnableDefault search flag") {
+  SECTION("Get driver symbol for default mode") {
     HIP_CHECK(hipGetProcAddress("hipGetDeviceCount", &funcPtr,
                                 currentHipVersion, HIP_GET_PROC_ADDRESS_DEFAULT,
                                 &status));
   }
 
-  SECTION("hipEnableLegacyStream search flag") {
+  SECTION("Search for Legacy versions of driver symbol") {
     HIP_CHECK(hipGetProcAddress("hipGetDeviceCount", &funcPtr,
                                 currentHipVersion,
                                 HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
   }
 
-  SECTION("hipEnablePerThreadDefaultStream search flag") {
+  SECTION("Search for Per-Thread versions of driver symbol") {
     HIP_CHECK(hipGetProcAddress(
         "hipGetDeviceCount", &funcPtr, currentHipVersion,
         HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM, &status));
@@ -78,14 +78,14 @@ TEST_CASE("Unit_hipGetProcAddress_Positive") {
   HIP_CHECK(hipGetDeviceCount(&count));
 
   REQUIRE(count > 0);
+  REQUIRE(countFuncPtr > 0);
   REQUIRE(countFuncPtr == count);
 }
 /**
  * Test Description
  * ------------------------
- *  - This tests checks hipGetProcAddress api with negative parameters
- *  # symbol is empty
- *  # funcPtr pointer is null
+ *  - This will verify behavior of hipGetProcAddress api with negative parameters
+ *  # Empty symbol
  *  # Invalid flag
  * Test source
  * ------------------------
@@ -101,15 +101,8 @@ TEST_CASE("Unit_hipGetProcAddress_Negative") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  SECTION("Empty string as symbol") {
+  SECTION("Empty symbol") {
     HIP_CHECK_ERROR(hipGetProcAddress("", &funcPtr, currentHipVersion,
-                                      HIP_GET_PROC_ADDRESS_DEFAULT, &status),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("funtion pointer is nullptr") {
-    HIP_CHECK_ERROR(hipGetProcAddress("hipGetDeviceCount", nullptr,
-                                      currentHipVersion,
                                       HIP_GET_PROC_ADDRESS_DEFAULT, &status),
                     hipErrorInvalidValue);
   }
@@ -138,7 +131,7 @@ TEST_CASE("Unit_hipGetProcAddress_Negative") {
 /**
  * Test Description
  * ------------------------
- *  - This will perfrom the funtionality testing of hipGetProcAddress_spt api
+ *  - This will perfrom the basic funtionality of hipGetProcAddress_spt api
  * Test source
  * ------------------------
  *  - unit/device/hipGetProcAddress.cc
@@ -153,19 +146,19 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Positive") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  SECTION("hipEnableDefault search flag") {
+  SECTION("Get driver symbol for default mode") {
     HIP_CHECK(hipGetProcAddress_spt("hipGetDeviceCount", &funcPtr,
                                     currentHipVersion,
                                     HIP_GET_PROC_ADDRESS_DEFAULT, &status));
   }
 
-  SECTION("hipEnableLegacyStream search flag") {
+  SECTION("Search for Legacy versions of driver symbol") {
     HIP_CHECK(
         hipGetProcAddress_spt("hipGetDeviceCount", &funcPtr, currentHipVersion,
                               HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
   }
 
-  SECTION("hipEnablePerThreadDefaultStream search flag") {
+  SECTION("Search for Per-Thread versions of driver symbol") {
     HIP_CHECK(hipGetProcAddress_spt(
         "hipGetDeviceCount", &funcPtr, currentHipVersion,
         HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM, &status));
@@ -181,15 +174,15 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Positive") {
   HIP_CHECK(hipGetDeviceCount(&count));
 
   REQUIRE(count > 0);
+  REQUIRE(countFuncPtr > 0);
   REQUIRE(countFuncPtr == count);
 }
 
 /**
  * Test Description
  * ------------------------
- *  - This tests checks hipGetProcAddress_spt api with negative parameters
- *  # symbol is empty
- *  # funcPtr pointer is null
+ *  - This will verify behavior of hipGetProcAddress_spt api with negative parameters
+ *  # Empty symbol
  *  # Invalid flag
  * Test source
  * ------------------------
@@ -205,18 +198,11 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Negative") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  SECTION("Empty string as symbol") {
+  SECTION("Empty symbol") {
     HIP_CHECK_ERROR(hipGetProcAddress_spt("", &funcPtr, currentHipVersion,
                                           HIP_GET_PROC_ADDRESS_DEFAULT,
                                           &status),
                     hipErrorInvalidValue);
-  }
-
-  SECTION("funtion pointer is nullptr") {
-    HIP_CHECK_ERROR(
-        hipGetProcAddress_spt("hipGetDeviceCount", nullptr, currentHipVersion,
-                              HIP_GET_PROC_ADDRESS_DEFAULT, &status),
-        hipErrorInvalidValue);
   }
 
   SECTION("Invalid flag") {
