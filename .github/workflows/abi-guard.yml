@@ -202,7 +202,7 @@ jobs:
           set -euov pipefail
           pwd
           ls -la ${PWD}
-          git config --global --add safe.directory ${{ github.workspace }}
+          git config --global --add safe.directory ${PWD}
           set +v
           echo -n "Branch: "
           git branch --show-current
