@@ -61,7 +61,7 @@ public:
     HsaATTQueue& operator=(HsaATTQueue& other) = delete;
 
     std::unique_ptr<Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const;
-    void Submit(hsa_ext_amd_aql_pm4_packet_t* packet, Signal* completion) const;
+    virtual void Submit(hsa_ext_amd_aql_pm4_packet_t* packet, Signal* completion) const;
 
     template <typename VecType>
     std::unique_ptr<Signal> SubmitAndSignalLast(VecType vec)
@@ -81,7 +81,8 @@ public:
 
     const hsa_agent_t hsa_agent;
     const hsa_agent_t near_cpu;
-private:
+
+protected:
     hsa_queue_t*         queue{nullptr};
     std::array<void*, 2> double_buffer_memory{};
 };

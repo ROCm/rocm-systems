@@ -180,10 +180,6 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-size_t total_occupancy{0};
-size_t total_waves_traced{0};
-size_t total_instructions{0};
-
 void
 cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t* /* user_data */,
