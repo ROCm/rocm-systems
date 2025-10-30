@@ -79,6 +79,7 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
                      int64_t /* se_id */,
                      void*  se_data,
                      size_t data_size,
+                     rocprofiler_thread_trace_shader_data_flags_t /* flags */,
                      rocprofiler_user_data_t /* userdata */)
 {
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
