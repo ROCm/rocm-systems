@@ -152,15 +152,15 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
         # Configure the changelog file
         configure_file(
             "${CMAKE_SOURCE_DIR}/CHANGELOG.md"
-            "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
+            "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md"
             @ONLY
         )
 
         # Install Change Log
         find_program ( DEB_GZIP_EXEC gzip )
-        if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
+        if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md" )
             execute_process(
-            COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
+            COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md"
             WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN"
             RESULT_VARIABLE result
             OUTPUT_VARIABLE output
@@ -192,7 +192,7 @@ function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DE
     set( DEB_MAINTAINER_EMAIL         "${DEB_MAINTAINER_EMAIL_T}" CACHE STRING "Debian Package Maintainer Email" )
     set( DEB_COPYRIGHT_YEAR           "2025" CACHE STRING "Debian Package Copyright Year" )
     set( DEB_LICENSE                  "MIT" CACHE STRING "Debian Package License Type" )
-    set( DEB_CHANGELOG_INSTALL_FILENM "changelog.Debian.gz" CACHE STRING "Debian Package ChangeLog File Name" )
+    set( DEB_CHANGELOG_INSTALL_FILENM "CHANGELOG.md.gz" CACHE STRING "Debian Package ChangeLog File Name" )
 
     # Get TimeStamp
     find_program( DEB_DATE_TIMESTAMP_EXEC date )
