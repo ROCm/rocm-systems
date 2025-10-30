@@ -103,6 +103,66 @@ for the agent and returns a pointer to it.
 
 namespace {
 
+// Multiplexing modes enum
+enum class iteration_multiplexing_mode_t {
+  DISABLED,
+  SIMPLE,
+  KERNEL,
+  LAUNCH
+};
+
+// Kernel dispatch info struct for iteration multiplexing
+struct kernel_dispatch_info_t {
+  uint64_t kernel_id;
+  uint64_t queue_id;
+  rocprofiler_dim3_t workgroup_size;
+  rocprofiler_dim3_t grid_size;
+  uint32_t LDS_memory_size;
+
+  // Overload operator< for strict weak ordering
+  bool operator<(const kernel_dispatch_info_t other) const {
+    // Compare based on kernel_id first, then queue_id, then workgroup_size,
+    // then grid_size, and finally LDS_memory_size
+    return std::tie(
+      kernel_id,
+      queue_id,
+      workgroup_size.x,
+      workgroup_size.y,
+      workgroup_size.z,
+      grid_size.x,
+      grid_size.y,
+      grid_size.z,
+      LDS_memory_size
+    ) < std::tie(
+      other.kernel_id,
+      other.queue_id,
+      other.workgroup_size.x,
+      other.workgroup_size.y,
+      other.workgroup_size.z,
+      other.grid_size.x, 
+      other.grid_size.y,
+      other.grid_size.z,
+      other.LDS_memory_size
+    );
+  }
+};
+
+// Iteration multiplexing data struct
+union iteration_multiplexing_dispatch_record_t {
+  std::size_t config;
+  std::map<uint64_t, std::size_t> kernel_config;
+  std::map<kernel_dispatch_info_t, std::size_t> dispatch_config;
+  std::size_t num_counter_groups;
+
+  iteration_multiplexing_dispatch_record_t() {
+    kernel_config = {};
+  }
+
+  ~iteration_multiplexing_dispatch_record_t() {
+    // No dynamic memory to free
+  }
+};
+
 // Struct to store a single counter info record
 struct counter_info_record_t {
   uint64_t dispatch_id;
@@ -122,6 +182,7 @@ struct tool_data_t {
   std::vector<std::pair<uint64_t, uint64_t>> kernel_filter_ranges{};
   std::vector<counter_info_record_t> counter_records;
   std::set<uint64_t> target_kernel_ids{};
+  iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
 };
 
 using kernel_symbol_data_t =
@@ -130,6 +191,35 @@ using kernel_symbol_data_t =
 rocprofiler_context_id_t &get_client_ctx() {
   static rocprofiler_context_id_t ctx{0};
   return ctx;
+}
+
+iteration_multiplexing_mode_t iteration_multiplexing_mode(const std::string& mode){
+    if (mode == "simple")
+        return iteration_multiplexing_mode_t::SIMPLE;
+      else if (mode == "kernel")
+        return iteration_multiplexing_mode_t::KERNEL;
+      else if (mode == "launch")
+        return iteration_multiplexing_mode_t::LAUNCH;
+      else
+        return iteration_multiplexing_mode_t::DISABLED;
+}
+
+std::vector<std::string> split_by_regex(const std::string& s, const std::string& regex_pattern) {
+    std::vector<std::string> tokens;
+    std::regex re(regex_pattern);
+    
+    // -1 indicates to return the submatches that are not part of the delimiter itself
+    std::sregex_token_iterator iter(s.begin(), s.end(), re, -1);
+    std::sregex_token_iterator end;
+
+    while (iter != end) {
+        // Ensure that empty strings resulting from consecutive delimiters are not added
+        if (!iter->str().empty()) {
+            tokens.push_back(*iter);
+        }
+        ++iter;
+    }
+    return tokens;
 }
 
 void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
@@ -538,6 +628,9 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t *id) {
   // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
   if (const char *v = getenv("ROCPROF_COUNTERS"))
     tool_data->requested_counters = v;
+
+  if (const char *v = getenv("ROCPROF_ITERATION_MULTIPLEXING"))
+    tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode(v);
 
   // ROCPROF_KERNEL_FILTER_INCLUDE_REGEX env. var. is a regex string like
   // kernel_name_1|kernel_name_2|... Used to collect counters only for kernels
