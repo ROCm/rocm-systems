@@ -283,9 +283,6 @@ class VersioningSpec(object):
         if self.tree is None:
             raise argparse.ArgumentError(None, message="-t / --tree must be specified.")
 
-        if self.tree is None:
-            self.tree = "source-tree"
-
         for itr, attrib in zip(
             ["source-tree", "build-tree", "install-tree"], ["source", "build", "install"]
         ):
@@ -660,10 +657,10 @@ def main() -> None:
         description="ABI Guard using libabigail (abidw/abidiff)"
     )
 
-    logging_choices = dict(
-        [level.lower(), getattr(logging, level)]
+    logging_choices = {
+        level.lower(): getattr(logging, level)
         for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-    )
+    }
 
     parser.add_argument(
         "--log-level",
@@ -1124,8 +1121,6 @@ def main() -> None:
             if base_rc != 0 or head_rc != 0:
                 logging.critical("::error title=ABI / Version policy:: abidw failed.")
                 sys.exit(1)
-
-            incompatible = 0
 
             # Compare with abidiff
             def run_abidiff(option):
