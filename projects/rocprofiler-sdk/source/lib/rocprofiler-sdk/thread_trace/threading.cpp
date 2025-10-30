@@ -140,11 +140,15 @@ producer_loop(triple_buffer_producer_data_t parameters)
                 }
 
                 {
+                    int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
+
                     size_t parity = write_index % buffer.size();
                     auto   lock   = std::unique_lock{mut.at(parity).first};
 
                     if (should_stop)
-                        mut.at(parity).second = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
+                        flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
+
+                    mut.at(parity).second = flags;
 
                     copy_sync(buffer.at(parity), status->data);
                     auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;

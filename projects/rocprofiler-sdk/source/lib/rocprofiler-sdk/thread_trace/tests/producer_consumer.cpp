@@ -369,3 +369,9 @@ TEST(thread_trace, slow_cpu)
 
     ASSERT_EQ(interrupt_received.load(), true);
 }
+
+TEST(thread_trace, slow_gpu)
+{
+    rocprofiler::thread_trace::test_init();
+    // TODO: Implement
+}

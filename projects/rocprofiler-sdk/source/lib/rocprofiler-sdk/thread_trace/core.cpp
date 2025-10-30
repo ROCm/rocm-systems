@@ -156,7 +156,7 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 {
     auto& cb_data = *static_cast<cbdata_t*>(callback_data);
 
-    cb_data.cb_fn(cb_data.agent, shader, buffer, size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE, *cb_data.userdata);
+    cb_data.cb_fn(cb_data.agent, shader, buffer, size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END, *cb_data.userdata);
     return HSA_STATUS_SUCCESS;
 }
 
