@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "storage_parser.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "trace_cache/sample_type.hpp"
 #include <cstdint>
 #include <cstdio>
@@ -49,10 +49,10 @@ storage_parser::register_type_callback(
 void
 storage_parser::consume_storage()
 {
-    ROCPROFSYS_DEBUG("Consuming buffered storage with filename: %s", filename.c_str());
+    ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "Consuming buffered storage with filename: %s", filename.c_str());
     if(m_pid != getpid())
     {
-        ROCPROFSYS_DEBUG(
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, 
             "Storage parser is not created in same process as shutting down..");
         return;
     }
@@ -90,7 +90,7 @@ storage_parser::consume_storage()
 
         if(ifs.bad())
         {
-            ROCPROFSYS_WARNING(
+            ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 
                 1,
                 "Bad read while consuming buffered storage. Filename: %s. Bytes read: %d",
                 filename.c_str(), static_cast<int>(ifs.tellg()));
@@ -231,7 +231,7 @@ storage_parser::consume_storage()
     }
 
     ifs.close();
-    ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system",
+    ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "File parsing finished. Removing %s from file system",
                      filename.c_str());
     std::remove(filename.c_str());
 }
@@ -242,7 +242,7 @@ storage_parser::invoke_callbacks(entry_type type, const storage_parsed_type_base
     auto _callback_list = m_callbacks.find(type);
     if(_callback_list == m_callbacks.end())
     {
-        ROCPROFSYS_VERBOSE(1, "Callback not found for cache postprocessing");
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 1, "Callback not found for cache postprocessing");
         return;
     }
 

@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "library/perf.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -59,14 +59,6 @@
         }
 #endif
 
-#if !defined(ROCPROFSYS_FATAL)
-#    define ROCPROFSYS_FATAL TIMEMORY_FATAL
-#endif
-
-#if !defined(ROCPROFSYS_ASSERT)
-#    define ROCPROFSYS_ASSERT(COND) (COND) ? ::tim::log::base() : TIMEMORY_FATAL
-#endif
-
 namespace rocprofsys
 {
 namespace perf
@@ -98,7 +90,7 @@ perf_event::perf_event(perf_event&& rhs) noexcept
     if(m_fd != -1 && m_fd != rhs.m_fd)
     {
         ::close(m_fd);
-        ROCPROFSYS_VERBOSE(1, "Closed perf event fd %li\n", m_fd);
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 1, "Closed perf event fd %li\n", m_fd);
     }
 
     if(m_mapping != nullptr && m_mapping != rhs.m_mapping) munmap(m_mapping, sizes.mmap);
@@ -247,8 +239,7 @@ uint64_t
 perf_event::get_count() const
 {
     uint64_t count;
-    ROCPROFSYS_REQUIRE(read(m_fd, &count, sizeof(uint64_t)) == sizeof(uint64_t))
-        << "Failed to read event count from perf_event file";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(read(m_fd, &count, sizeof(uint64_t)) == sizeof(uint64_t), "Failed to read event count from perf_event file");
     return count;
 }
 
@@ -259,8 +250,7 @@ perf_event::start() const
     if(m_fd != -1)
     {
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-        ROCPROFSYS_REQUIRE(ioctl(m_fd, PERF_EVENT_IOC_ENABLE, 0) != -1)
-            << "Failed to start perf event: " << strerror(errno);
+        ROCPROFSYS_REQUIRE_SPDLOGIMPL(ioctl(m_fd, PERF_EVENT_IOC_ENABLE, 0) != -1, "Failed to start peft event {}", strerror(errno));
     }
     return (m_fd != -1);
 }
@@ -272,8 +262,7 @@ perf_event::stop() const
     if(m_fd != -1)
     {
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-        ROCPROFSYS_REQUIRE(ioctl(m_fd, PERF_EVENT_IOC_DISABLE, 0) != -1)
-            << "Failed to stop perf event: " << strerror(errno) << " (" << m_fd << ")";
+        ROCPROFSYS_REQUIRE_SPDLOGIMPL(ioctl(m_fd, PERF_EVENT_IOC_DISABLE, 0) != -1, "Failed to stop peft event {} ({})", strerror(errno), m_fd);
     }
     return (m_fd != -1);
 }
@@ -308,16 +297,13 @@ perf_event::set_ready_signal(int sig) const
 {
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
     // Set the perf_event file to async
-    ROCPROFSYS_REQUIRE(fcntl(m_fd, F_SETFL, fcntl(m_fd, F_GETFL, 0) | O_ASYNC) != -1)
-        << "failed to set perf_event file to async mode";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(fcntl(m_fd, F_SETFL, fcntl(m_fd, F_GETFL, 0) | O_ASYNC) != -1, "Failed to set perf_event file to async mode");
 
     // Set the notification signal for the perf file
-    ROCPROFSYS_REQUIRE(fcntl(m_fd, F_SETSIG, sig) != -1)
-        << "failed to set perf_event file signal";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(fcntl(m_fd, F_SETSIG, sig) != -1, "Failed to set perf_event file signal");
 
     // Set the current thread as the owner of the file (to target signal delivery)
-    ROCPROFSYS_REQUIRE(fcntl(m_fd, F_SETOWN, gettid()) != -1)
-        << "failed to set the owner of the perf_event file";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(fcntl(m_fd, F_SETOWN, gettid()) != -1, "Failed to set the owner of the perf_event file");
 }
 
 void
@@ -448,69 +434,56 @@ perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* _mapping, ptrdiff
 uint64_t
 perf_event::record::get_ip() const
 {
-    ROCPROFSYS_ASSERT(is_sample() && m_source != nullptr &&
-                      m_source->is_sampling(sample::ip))
-        << "Record does not have an ip field (" << is_sample() << "|" << m_source << ")";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(is_sample() && m_source != nullptr &&
+                      m_source->is_sampling(sample::ip) , "Record does not have an `ip` field ({}|{})", is_sample(), m_source);
     return *locate_field<sample::ip, uint64_t*>();
 }
 
 uint64_t
 perf_event::record::get_pid() const
 {
-    ROCPROFSYS_ASSERT(is_sample() && m_source != nullptr &&
-                      m_source->is_sampling(sample::pid_tid))
-        << "Record does not have a `pid` field (" << is_sample() << "|" << m_source
-        << ")";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(is_sample() && m_source != nullptr &&
+                      m_source->is_sampling(sample::pid_tid), "Record does not have a `pid` field ({}|{})", is_sample(), m_source);
     return locate_field<sample::pid_tid, uint32_t*>()[0];
 }
 
 uint64_t
 perf_event::record::get_tid() const
 {
-    ROCPROFSYS_ASSERT(is_sample() && m_source != nullptr &&
-                      m_source->is_sampling(sample::pid_tid))
-        << "Record does not have a `tid` field (" << is_sample() << "|" << m_source
-        << ")";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(is_sample() && m_source != nullptr &&
+                      m_source->is_sampling(sample::pid_tid), "Record does not have a `tid` field ({}|{})", is_sample(), m_source);
     return locate_field<sample::pid_tid, uint32_t*>()[1];
 }
 
 uint64_t
 perf_event::record::get_time() const
 {
-    ROCPROFSYS_ASSERT(is_sample() && m_source != nullptr &&
-                      m_source->is_sampling(sample::time))
-        << "Record does not have a 'time' field (" << is_sample() << "|" << m_source
-        << ")";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(is_sample() && m_source != nullptr &&
+                      m_source->is_sampling(sample::time), "Record does not have a `time` field ({}|{})", is_sample(), m_source);
     return *locate_field<sample::time, uint64_t*>();
 }
 
 uint64_t
 perf_event::record::get_period() const
 {
-    ROCPROFSYS_ASSERT(is_sample() && m_source != nullptr &&
-                      m_source->is_sampling(sample::period))
-        << "Record does not have a 'period' field (" << is_sample() << "|" << m_source
-        << ")";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(is_sample() && m_source != nullptr &&
+                      m_source->is_sampling(sample::period), "Record does not have a `period` field ({}|{})", is_sample(), m_source);
     return *locate_field<sample::period, uint64_t*>();
 }
 
 uint32_t
 perf_event::record::get_cpu() const
 {
-    ROCPROFSYS_ASSERT(is_sample() && m_source != nullptr &&
-                      m_source->is_sampling(sample::cpu))
-        << "Record does not have a 'cpu' field (" << is_sample() << "|" << m_source
-        << ")";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(is_sample() && m_source != nullptr &&
+                      m_source->is_sampling(sample::cpu), "Record does not have a `cpu` field ({}|{})", is_sample(), m_source);
     return *locate_field<sample::cpu, uint32_t*>();
 }
 
 container::c_array<uint64_t>
 perf_event::record::get_callchain() const
 {
-    ROCPROFSYS_ASSERT(is_sample() && m_source != nullptr &&
-                      m_source->is_sampling(sample::callchain))
-        << "Record does not have a callchain field (" << is_sample() << "|" << m_source
-        << ")";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(is_sample() && m_source != nullptr &&
+                      m_source->is_sampling(sample::callchain), "Record does not have a `callchain` field ({}|{})", is_sample(), m_source);
 
     uint64_t* _base = locate_field<sample::callchain, uint64_t*>();
     uint64_t  _size = *_base;
@@ -616,23 +589,29 @@ perf_event::record::locate_field() const
 
     // branch_stack
     if constexpr(SampleT == sample::branch_stack) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::branch_stack))
-        ROCPROFSYS_FATAL << "Branch stack sampling is not supported";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(
+        !(m_source != nullptr && m_source->is_sampling(sample::branch_stack)),
+        "Branch stack sampling is not supported"
+    );
 
     // regs
     if constexpr(SampleT == sample::regs) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::regs))
-        ROCPROFSYS_FATAL << "Register sampling is not supported";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(
+        !(m_source != nullptr && m_source->is_sampling(sample::regs)),
+        "Register sampling is not supported"
+    );
 
     // stack
     if constexpr(SampleT == sample::stack) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::stack))
-        ROCPROFSYS_FATAL << "Stack sampling is not supported";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(
+        !(m_source != nullptr && m_source->is_sampling(sample::stack)),
+        "Stack sampling is not supported"
+    );
 
     // end
     if constexpr(SampleT == sample::last) return reinterpret_cast<Tp>(p);
 
-    ROCPROFSYS_FATAL << "Unsupported sample field requested!";
+    ROCPROFSYS_FAIL_SPDLOGIMPL(true, true, "Unsupported sample field requested!");
 
     if constexpr(std::is_pointer<Tp>::value)
         return nullptr;

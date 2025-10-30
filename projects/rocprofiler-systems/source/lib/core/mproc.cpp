@@ -22,7 +22,7 @@
 
 #include "mproc.hpp"
 #include "common.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 
 #include <fstream>
 #include <set>
@@ -46,7 +46,7 @@ get_concurrent_processes(int _ppid)
         std::ifstream _ifs{ _inp };
         if(!_ifs)
         {
-            ROCPROFSYS_VERBOSE_F(2, "Warning! File '%s' cannot be read\n", _inp.c_str());
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 2, "Warning! File '%s' cannot be read\n", _inp.c_str());
             return _children;
         }
 

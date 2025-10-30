@@ -26,7 +26,7 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/defines.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
@@ -180,7 +180,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
         _desc.set_name(_name);
         ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
-        ROCPROFSYS_VERBOSE_F(4, "[%s] Created %s(%zu) with description: \"%s\"\n",
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 4, "[%s] Created %s(%zu) with description: \"%s\"\n",
                              trait::name<CategoryT>::value, demangle<TrackT>().c_str(),
                              _uuid, _name.c_str());
 
@@ -191,7 +191,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
     // overhead of generating string during releases
 #if defined(ROCPROFSYS_CI) && ROCPROFSYS_CI > 0
     auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
-    ROCPROFSYS_CI_THROW(_track_uuids.at(_uuid) != _name,
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, _track_uuids.at(_uuid) != _name,
                         "Error! Multiple invocations of UUID %zu produced different "
                         "descriptions: \"%s\" and \"%s\"\n",
                         _uuid, _track_uuids.at(_uuid).c_str(), _name.c_str());
@@ -323,7 +323,7 @@ get_timemory(CategoryT, std::string_view name)
     auto& _data = tracing::get_instrumentation_bundles();
     if(ROCPROFSYS_UNLIKELY(_data == nullptr || _data->empty()))
     {
-        ROCPROFSYS_DEBUG("[%s] skipped %s :: empty bundle stack\n",
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "[%s] skipped %s :: empty bundle stack\n",
                          "rocprofsys_pop_trace", name.data());
         return return_type{ nullptr, -1 };
     }

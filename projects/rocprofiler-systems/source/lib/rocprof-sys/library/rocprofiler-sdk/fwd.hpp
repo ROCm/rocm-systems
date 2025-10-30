@@ -281,7 +281,7 @@ as_client_data(void* _ptr)
                     << "] failed with error code "                                       \
                     << ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__)                      \
                     << " :: " << status_msg;                                             \
-                ROCPROFSYS_WARNING(0, "%s\n", msg.str().c_str());                        \
+                ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 0, "%s\n", msg.str().c_str());                        \
             }                                                                            \
         }
 #endif

@@ -187,7 +187,7 @@ rocprofsys::component::activate_mpip()
             ss << "rocprofsys-mpip-" << demangle<Toolset>() << "-" << demangle<Tag>();
             return ss.str();
         }();
-        ROCPROFSYS_BASIC_DEBUG_F("Adding cleanup for %s", _label.c_str());
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(false, true, "Adding cleanup for %s", _label.c_str());
         tim::manager::instance()->add_cleanup(_label, cleanup_functor);
         return 1;
     }
@@ -211,7 +211,7 @@ rocprofsys::component::deactivate_mpip(uint64_t id)
             ss << "rocprofsys-mpip-" << demangle<Toolset>() << "-" << demangle<Tag>();
             return ss.str();
         }();
-        ROCPROFSYS_BASIC_DEBUG_F("Removing cleanup for %s", _label.c_str());
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(false, true, "Removing cleanup for %s", _label.c_str());
         tim::manager::instance()->cleanup(_label);
         return 0;
     }

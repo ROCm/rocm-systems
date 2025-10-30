@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "utility.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 
 namespace rocprofsys
 {
@@ -71,7 +71,7 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     {
         if(_v.find_first_not_of("0123456789-:") != std::string::npos)
         {
-            ROCPROFSYS_BASIC_VERBOSE_F(
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, true,  
                 0,
                 "Invalid %s specification. Only numerical values (e.g., 0), ranges "
                 "(e.g., 0-7), and ranges with increments (e.g. 20-40:10) are permitted. "
@@ -92,7 +92,7 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
         if(_v.find('-') != std::string::npos)
         {
             auto _vv = tim::delimit(_v, "-");
-            ROCPROFSYS_CONDITIONAL_THROW(
+            ROCPROFSYS_CONDITIONAL_THROW_SPDLOGIMPL(true, true, 
                 _vv.size() != 2,
                 "Invalid %s range specification: %s. Required format N-M, e.g. 0-4",
                 _label.c_str(), _v.c_str());

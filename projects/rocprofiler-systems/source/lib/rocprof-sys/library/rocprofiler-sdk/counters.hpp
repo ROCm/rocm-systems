@@ -23,7 +23,7 @@
 #pragma once
 
 #include "common/synchronized.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"

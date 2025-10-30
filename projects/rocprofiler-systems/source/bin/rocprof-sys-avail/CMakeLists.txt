@@ -22,6 +22,7 @@ target_sources(
         ${CMAKE_CURRENT_LIST_DIR}/get_categories.hpp
         ${CMAKE_CURRENT_LIST_DIR}/info_type.cpp
         ${CMAKE_CURRENT_LIST_DIR}/info_type.hpp
+        # ${CMAKE_CURRENT_LIST_DIR}/spdlogtest.hpp
 )
 
 target_include_directories(rocprofiler-systems-avail PRIVATE ${CMAKE_CURRENT_LIST_DIR})

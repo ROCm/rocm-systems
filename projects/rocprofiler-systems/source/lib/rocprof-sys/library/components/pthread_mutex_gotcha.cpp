@@ -22,7 +22,7 @@
 
 #include "library/components/pthread_mutex_gotcha.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/utility.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
@@ -76,12 +76,12 @@ pthread_mutex_gotcha::get_hashes()
             else
             {
                 if(_skip.count(i) > 0) continue;
-                ROCPROFSYS_VERBOSE(
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
                     1,
                     "WARNING!!! pthread_mutex_gotcha tool id at index %zu was empty!\n",
                     i);
             }
-            ROCPROFSYS_CI_FAIL(
+ROCPROFSYS_CI_FAIL_SPDLOGIMPL(true, false, 
                 _id.empty() || _init.at(i) == 0,
                 "pthread_mutex_gotcha tool id at index %zu has no hash value\n", i);
         }
@@ -183,7 +183,7 @@ pthread_mutex_gotcha::operator()(uintptr_t&&, int (*_callee)(Args...),
         {
             if(m_data)
             {
-                ROCPROFSYS_PRINT("Warning! nullptr to %s\n", m_data->tool_id.c_str());
+                ROCPROFSYS_PRINT_SPDLOGIMPL(true, false,"Warning! nullptr to %s\n", m_data->tool_id.c_str());
             }
             return EINVAL;
         }

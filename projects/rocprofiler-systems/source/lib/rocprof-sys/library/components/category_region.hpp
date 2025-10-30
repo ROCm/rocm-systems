@@ -155,7 +155,7 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
-    ROCPROFSYS_CONDITIONAL_PRINT(
+    ROCPROFSYS_CONDITIONAL_PRINT_SPDLOGIMPL(true, false, 
         tracing::debug_push,
         "[%s][PID=%i][state=%s][thread_state=%s] rocprofsys_push_region(%s)\n",
         category_name, process::get_id(), std::to_string(get_state()).c_str(),
@@ -215,7 +215,7 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
-    ROCPROFSYS_CONDITIONAL_PRINT(
+    ROCPROFSYS_CONDITIONAL_PRINT_SPDLOGIMPL(true, false, 
         tracing::debug_pop,
         "[%s][PID=%i][state=%s][thread_state=%s] rocprofsys_pop_region(%s)\n",
         category_name, process::get_id(), std::to_string(get_state()).c_str(),
@@ -261,7 +261,7 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     else
     {
         static auto _debug = get_debug_env();
-        ROCPROFSYS_CONDITIONAL_BASIC_PRINT(
+        ROCPROFSYS_CONDITIONAL_PRINT_SPDLOGIMPL(false, false, 
             _debug, "[%s] rocprofsys_pop_region(%s) ignored :: state = %s\n",
             category_name, name.data(), std::to_string(get_state()).c_str());
     }
@@ -292,7 +292,7 @@ category_region<CategoryT>::mark(std::string_view name, Args&&...)
 
     if(get_use_causal())
     {
-        ROCPROFSYS_CONDITIONAL_PRINT(
+        ROCPROFSYS_CONDITIONAL_PRINT_SPDLOGIMPL(true, false, 
             tracing::debug_mark,
             "[%s][PID=%i][state=%s][thread_state=%s] rocprofsys_progress(%s)\n",
             category_name, process::get_id(), std::to_string(get_state()).c_str(),

@@ -22,7 +22,7 @@
 
 #include "database.hpp"
 #include "common/md5sum.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "node_info.hpp"
 
 #include <config.hpp>
@@ -62,7 +62,7 @@ database::database()
     auto db_name     = std::string_view{ "rocpd.db" };
     auto abs_db_path = rocprofsys::get_database_absolute_path(db_name);
     create_directory_for_database_file(abs_db_path);
-    ROCPROFSYS_VERBOSE(0, "Database: %s\r\n", abs_db_path.c_str());
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "Database: %s\r\n", abs_db_path.c_str());
 
     validate_sqlite3_result(sqlite3_open(":memory:", &_sqlite3_db_temp), "",
                             "database open failed!");

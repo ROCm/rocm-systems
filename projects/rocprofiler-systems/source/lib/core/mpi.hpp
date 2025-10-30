@@ -27,7 +27,7 @@
 
 #pragma once
 
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include <timemory/timemory.hpp>
 
 #include <timemory/environment/declaration.hpp>

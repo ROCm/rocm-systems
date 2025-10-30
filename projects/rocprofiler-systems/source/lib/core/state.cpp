@@ -23,7 +23,7 @@
 #include "state.hpp"
 #include "common/static_object.hpp"
 #include "config.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "utility.hpp"
 
 #include <atomic>
@@ -79,11 +79,13 @@ get_thread_state()
 State
 set_state(State _n)
 {
-    ROCPROFSYS_CONDITIONAL_PRINT_F(get_debug_init(), "Setting state :: %s -> %s\n",
+    ::rocprofsys::debug::init_ddebug();
+    std::cerr << "[ROCPROFILER-SYSTEMS-CHECK] Calling get_debug_init() through SPDLOG" << std::endl;
+    ROCPROFSYS_CONDITIONAL_PRINT_SPDLOGIMPL(true, true, get_debug_init(), "Setting state :: %s -> %s\n",
                                    std::to_string(get_state()).c_str(),
                                    std::to_string(_n).c_str());
     // state should always be increased, not decreased
-    ROCPROFSYS_CI_BASIC_THROW(
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(false, true, 
         _n < get_state(), "State is being assigned to a lesser value :: %s -> %s",
         std::to_string(get_state()).c_str(), std::to_string(_n).c_str());
     auto _v = get_state();

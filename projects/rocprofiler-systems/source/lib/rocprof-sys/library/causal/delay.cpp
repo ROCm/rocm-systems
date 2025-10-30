@@ -72,12 +72,12 @@ compute_sleep_for_overhead()
         int64_t _end = tracing::now();
         if(i < _nwarm) continue;
         auto _diff = (_end - _beg);
-        ROCPROFSYS_CONDITIONAL_THROW(
+        ROCPROFSYS_CONDITIONAL_THROW_SPDLOGIMPL(true, true, 
             _diff < _val, "Error! sleep_for(%zu) [nanoseconds] >= %zu", _val, _diff);
         _stats += (_diff - _val);
     }
 
-    ROCPROFSYS_BASIC_VERBOSE(2,
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 2,
                              "[causal] overhead of std::this_thread::sleep_for(...) "
                              "invocation = %6.3f usec +/- %e\n",
                              _stats.get_mean() / units::usec,

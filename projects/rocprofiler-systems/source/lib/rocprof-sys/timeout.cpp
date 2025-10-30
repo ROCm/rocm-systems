@@ -22,7 +22,7 @@
 
 #include "core/categories.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "library/components/pthread_gotcha.hpp"
@@ -76,7 +76,7 @@ ci_timeout_backtrace(int)
 
     static auto _mutex = locking::atomic_mutex{};
     auto        _lk    = locking::atomic_lock{ _mutex };
-    ROCPROFSYS_PRINT("%s\n", _err.str().c_str());
+    ROCPROFSYS_PRINT_SPDLOGIMPL(true, false,"%s\n", _err.str().c_str());
 
     ++ci_timeout_backtrace_global_done;
 }
@@ -127,14 +127,14 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
                 const auto& _info = thread_info::get(_handle);
                 if(_info)
                 {
-                    ROCPROFSYS_WARNING_F(
+                    ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, 
                         0, "pthread_kill(%zu, %i) failed for thread %zi (info: %s)\n",
                         _handle, timeout_signal_v, _info->index_data->sequent_value,
                         _info->as_string().c_str());
                 }
                 else
                 {
-                    ROCPROFSYS_WARNING_F(
+                    ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, 
                         0,
                         "pthread_kill(%zu, %i) failed. executing generic "
                                 "kill(%i, %i)...\n",
@@ -151,7 +151,7 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
         };
 
         _tids.erase(main_thread_native_handle);
-        ROCPROFSYS_WARNING_F(-127,
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, -127,
                              "timeout after %8.3f seconds... Generating backtraces for "
                              "%zu threads...\n",
                              _ci_timeout_seconds, _tids.size() + 1);
@@ -176,7 +176,7 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
         }
     }
 
-    ROCPROFSYS_WARNING_F(0, "timeout thread exiting...\n");
+    ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, 0, "timeout thread exiting...\n");
 }
 }  // namespace
 

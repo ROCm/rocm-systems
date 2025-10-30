@@ -22,7 +22,7 @@
 
 #include "dynamic_library.hpp"
 #include "common.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "defines.hpp"
 
 #include <timemory/environment.hpp>
@@ -100,7 +100,7 @@ dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flag
             }
             else if(_env_val.find('/') == 0)
             {
-                ROCPROFSYS_VERBOSE_F(
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 
                     1,
                     "Ignoring environment variable %s=\"%s\" because the "
                     "filepath does not exist. Using \"%s\" instead...\n",
@@ -108,7 +108,7 @@ dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flag
             }
             else if(_env_val.find('/') != 0 && filename.find('/') == 0)
             {
-                ROCPROFSYS_VERBOSE_F(
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 
                     1,
                     "Ignoring environment variable %s=\"%s\" because the "
                     "filepath is relative. Using absolute path \"%s\" instead...\n",
@@ -130,7 +130,7 @@ dynamic_library::open()
         handle = dlopen(filename.c_str(), flags);
         if(!handle)
         {
-            ROCPROFSYS_VERBOSE(2, "[dynamic_library] Error opening %s=\"%s\" :: %s.\n",
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 2, "[dynamic_library] Error opening %s=\"%s\" :: %s.\n",
                                envname.c_str(), filename.c_str(), dlerror());
         }
         dlerror();  // Clear any existing error

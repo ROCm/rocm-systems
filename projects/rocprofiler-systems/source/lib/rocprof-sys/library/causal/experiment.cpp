@@ -26,7 +26,7 @@
 #include "binary/symbol.hpp"
 #include "common/defines.h"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/state.hpp"
 #include "library/causal/components/backtrace.hpp"
 #include "library/causal/components/progress_point.hpp"
@@ -251,7 +251,7 @@ experiment::start()
     init_progress   = component::progress_point::get_progress_points();
     start_time      = tracing::now();
 
-    ROCPROFSYS_VERBOSE(0, "Starting causal experiment #%-3u: %s\n", index,
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "Starting causal experiment #%-3u: %s\n", index,
                        as_string().c_str());
 
     if(get_state() < State::Finalized)
@@ -320,7 +320,7 @@ experiment::stop()
 
     if(_lowv <= 3 && (_mean < 5 || _medi < 5))
     {
-        ROCPROFSYS_VERBOSE(2,
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 2,
                            "[progress points] increasing experiment time :: low: %6.3f, "
                            "high: %6.3f, mean: %6.3f, median: %zi\n",
                            _lowv, _high, _mean, _medi);
@@ -330,7 +330,7 @@ experiment::stop()
     }
     else if(_mean > 10 && _lowv >= 8 && global_scaling > 1)
     {
-        ROCPROFSYS_VERBOSE(2,
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 2,
                            "[progress points] decreasing experiment time :: low: %6.3f, "
                            "high: %6.3f, mean: %6.3f, median: %zi\n",
                            _lowv, _high, _mean, _medi);
@@ -340,7 +340,7 @@ experiment::stop()
 
     if(ROCPROFSYS_UNLIKELY(global_scaling_increments >= 5))
     {
-        ROCPROFSYS_WARNING(
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 
             0,
             "Warning! causal experimentation hasn't seen at least 5 progress points "
             "in the last %li experiments. Progress points are necessary for measuring "
@@ -522,7 +522,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             }
         }
 
-        ROCPROFSYS_VERBOSE_F(1, "Processing line info for %zu sampled addresses...\n",
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 1, "Processing line info for %zu sampled addresses...\n",
                              _total_samples.size());
 
         for(const auto& itr : _total_samples)
@@ -570,7 +570,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         }
         else
         {
-            ROCPROFSYS_THROW("Error opening causal experiments output file: %s",
+            ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Error opening causal experiments output file: %s",
                              _fname.c_str());
         }
     }
@@ -613,7 +613,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                                     ? _line_info.func
                                     : join(":", _line_info.file, _line_info.line);
 
-            ROCPROFSYS_CONDITIONAL_THROW(
+            ROCPROFSYS_CONDITIONAL_THROW_SPDLOGIMPL(true, true, 
                 _name.empty(),
                 "Error! causal experiment selection has no name: address=%s, file=%s, "
                 "line=%u, func=%s",
@@ -666,7 +666,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
     }
     else
     {
-        ROCPROFSYS_THROW("Error opening causal experiments output file: %s",
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Error opening causal experiments output file: %s",
                          _fname.c_str());
     }
 }
@@ -704,7 +704,7 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
     {
         if(_throw_on_error)
         {
-            ROCPROFSYS_THROW("Error opening causal experiments input file: %s",
+            ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Error opening causal experiments input file: %s",
                              _fname.c_str());
         }
     }

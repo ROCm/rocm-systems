@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "perf.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 
 #include <timemory/units.hpp>
 
@@ -101,7 +101,7 @@ get_hw_config(std::string_view _v)
         return hw_config::reference_cpu_cycles;
     else
     {
-        ROCPROFSYS_THROW("Unknown perf hardware config: %s", _v.data());
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Unknown perf hardware config: %s", _v.data());
     }
 
 #undef HW_CONFIG_REGEX
@@ -134,7 +134,7 @@ get_sw_config(std::string_view _v)
         return sw_config::emulation_faults;
     else
     {
-        ROCPROFSYS_THROW("Unknown perf hw cache config: %s", _v.data());
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Unknown perf hw cache config: %s", _v.data());
     }
 
 #undef SW_CONFIG_REGEX
@@ -165,7 +165,7 @@ get_hw_cache_config(std::string_view _v)
     else if(HW_CACHE_CONFIG_REGEX("NODE"))
         _value |= static_cast<int>(hw_cache_config::node);
     else
-        ROCPROFSYS_THROW("Unknown perf software config: %s", _v.data());
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Unknown perf software config: %s", _v.data());
 
 #undef HW_CACHE_CONFIG_REGEX
 #define HW_CACHE_OP_REGEX(KEY)                                                           \
@@ -226,7 +226,7 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
         case PERF_TYPE_MAX:
         default:
         {
-            ROCPROFSYS_THROW("unsupported perf type");
+            ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "unsupported perf type");
         }
     };
 

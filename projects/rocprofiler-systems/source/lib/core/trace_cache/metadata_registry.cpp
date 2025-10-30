@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "metadata_registry.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include <algorithm>
 #include <cstdint>
 
@@ -333,10 +333,10 @@ metadata_registry::overwrite_callback_names(
             modified_ops[i] = extract_operations(i);
         }
 
-        ROCPROFSYS_CI_THROW(modified_ops.find(callback_kind) != modified_ops.end(),
+        ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, modified_ops.find(callback_kind) != modified_ops.end(),
                             "Overwriting a previously overwritten entry is forbidden");
 
-        ROCPROFSYS_CI_THROW(!modified_ops.empty() &&
+        ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, !modified_ops.empty() &&
                                 callback_kind >= modified_ops.begin()->first,
                             "Category must have a larger enum value than all previously "
                             "modified_ops categories");
@@ -345,7 +345,7 @@ metadata_registry::overwrite_callback_names(
         auto operation_names = extract_operations(callback_kind);
         for(const auto& [index, new_value] : category_info.second)
         {
-            ROCPROFSYS_CI_THROW(index < 0 ||
+            ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, index < 0 ||
                                     static_cast<size_t>(index) >= operation_names.size(),
                                 "Index is invalid");
             operation_names[index] = new_value;
@@ -361,7 +361,7 @@ metadata_registry::overwrite_callback_names(
     {
         auto renaming_entry = modified_ops.find(i);
 
-        ROCPROFSYS_CI_THROW(renaming_entry == modified_ops.end(),
+        ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, renaming_entry == modified_ops.end(),
                             "A category that needs to be emplaced is missing");
 
         const auto& operations_vec = renaming_entry->second;

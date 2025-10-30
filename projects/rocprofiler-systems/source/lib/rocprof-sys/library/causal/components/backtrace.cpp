@@ -23,7 +23,7 @@
 #include "library/causal/components/backtrace.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
@@ -218,7 +218,7 @@ backtrace::sample(int _sig)
     }
     else
     {
-        ROCPROFSYS_THROW("unhandled signal %i\n", _sig);
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "unhandled signal %i\n", _sig);
     }
 
     ++_protect_flag;

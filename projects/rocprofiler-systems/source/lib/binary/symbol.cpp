@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 
 #if !defined(TIMEMORY_USE_BFD)
 #    error "BFD support not enabled"

@@ -22,7 +22,7 @@
 
 #include "constraint.hpp"
 #include "config.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "state.hpp"
 #include "utility.hpp"
 
@@ -101,7 +101,7 @@ find_clock_identifier(const Tp& _v)
         }
     }
 
-    ROCPROFSYS_THROW("Unknown clock id %s: %s. Valid choices: %s\n", _descript,
+    ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Unknown clock id %s: %s. Valid choices: %s\n", _descript,
                      timemory::join::join("", _v).c_str(),
                      timemory::join::join("", accepted_clock_ids).c_str());
 }
@@ -267,7 +267,7 @@ spec::operator()(const stages& _stages) const
             return _ret;
         };
 
-        ROCPROFSYS_VERBOSE(2,
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 2,
                            "Executing constraint spec %lu of %lu :: delay: %6.3f, "
                            "duration: %6.3f, clock: %s\n",
                            i, _spec.repeat, _spec.delay, _spec.duration,

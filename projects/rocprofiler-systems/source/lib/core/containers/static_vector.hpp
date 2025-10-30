@@ -24,7 +24,7 @@
 
 #include "core/common.hpp"
 #include "core/containers/c_array.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/exception.hpp"
 
 #include <timemory/utility/demangle.hpp>

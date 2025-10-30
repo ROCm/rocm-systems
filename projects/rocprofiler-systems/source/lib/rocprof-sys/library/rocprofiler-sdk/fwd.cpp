@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "library/rocprofiler-sdk/fwd.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/state.hpp"
 
 #include <timemory/utility/join.hpp>
@@ -224,7 +224,7 @@ client_data::initialize_event_info()
         }
     } catch(std::exception& _e)
     {
-        ROCPROFSYS_WARNING_F(1, "Constructing ROCm event info failed: %s\n", _e.what());
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, 1, "Constructing ROCm event info failed: %s\n", _e.what());
     }
 }
 

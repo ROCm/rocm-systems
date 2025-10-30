@@ -56,6 +56,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
 rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
                                           "Use SQLite3 for rocpd data storage"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
+                                          "Provides spdlog library"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
                                           "Provides timemory libraries"
 )
@@ -559,6 +562,14 @@ if(ROCPROFSYS_BUILD_DEVICETRACE)
 
     add_subdirectory(external/elfio)
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# spdlog 
+#
+# ----------------------------------------------------------------------------------------#
+
+include(Spdlog)
 
 # ----------------------------------------------------------------------------------------#
 #

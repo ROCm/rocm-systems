@@ -24,7 +24,7 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
@@ -78,8 +78,8 @@ init_index_data(int64_t _tid, bool _offset = false)
     {
         threading::offset_this_id(_offset);
         itr = thread_index_data{};
-
-        ROCPROFSYS_CONDITIONAL_THROW(itr->internal_value != _tid,
+            std::cerr << "[ROCPROFILER-SYSTEMS-CHECK] SANITY2" << std::endl;
+        ROCPROFSYS_CONDITIONAL_THROW_SPDLOGIMPL(true, true, itr->internal_value != _tid,
                                      "Error! thread_info::init_index_data was called for "
                                      "thread %zi on thread %zi\n",
                                      _tid, itr->internal_value);
@@ -89,15 +89,17 @@ init_index_data(int64_t _tid, bool _offset = false)
         if(get_state() >= State::Finalized && _offset) _verb += 2;
         if(!config::settings_are_configured())
         {
-            ROCPROFSYS_BASIC_VERBOSE_F(_verb,
+                std::cerr << "[ROCPROFILER-SYSTEMS-CHECK] SANITY3" << std::endl;
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, true,  _verb,
                                        "Thread %li on PID %i (rank: %i) assigned "
                                        "rocprof-sys TID %li (internal: %li)\n",
                                        itr->system_value, process::get_id(), dmp::rank(),
                                        itr->sequent_value, itr->internal_value);
+            std::cerr << "[ROCPROFILER-SYSTEMS-CHECK] SANITY3 PASSED" << std::endl;
         }
         else
         {
-            ROCPROFSYS_VERBOSE_F(
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 
                 _verb,
                 "Thread %li on PID %i (rank: %i) assigned rocprof-sys TID "
                 "%li (internal: %li)\n",
@@ -235,7 +237,7 @@ thread_info::get(native_handle_t&& _tid)
         }
     }
 
-    ROCPROFSYS_CI_THROW(unknown_thread, "Unknown thread has been assigned a value");
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, unknown_thread, "Unknown thread has been assigned a value");
     return unknown_thread;
 }
 
@@ -251,7 +253,7 @@ thread_info::get(std::thread::id _tid)
         }
     }
 
-    ROCPROFSYS_CI_THROW(unknown_thread, "Unknown thread has been assigned a value");
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, unknown_thread, "Unknown thread has been assigned a value");
     return unknown_thread;
 }
 
@@ -286,16 +288,16 @@ thread_info::get(int64_t _tid, ThreadIdType _type)
     }
     else if(_type == ThreadIdType::PthreadID)
     {
-        ROCPROFSYS_THROW("rocprof-sys does not support thread_info::get(int64_t, "
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "rocprof-sys does not support thread_info::get(int64_t, "
                          "ThreadIdType) with ThreadIdType::PthreadID\n");
     }
     else if(_type == ThreadIdType::StlThreadID)
     {
-        ROCPROFSYS_THROW("rocprof-sys does not support thread_info::get(int64_t, "
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "rocprof-sys does not support thread_info::get(int64_t, "
                          "ThreadIdType) with ThreadIdType::StlThreadID\n");
     }
 
-    ROCPROFSYS_CI_THROW(unknown_thread, "Unknown thread has been assigned a value");
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, unknown_thread, "Unknown thread has been assigned a value");
     return unknown_thread;
 }
 

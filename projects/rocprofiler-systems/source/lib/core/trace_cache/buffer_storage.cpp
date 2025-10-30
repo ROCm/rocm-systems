@@ -24,7 +24,7 @@
 #include "PTL/Task.hh"
 #include "PTL/TaskGroup.hh"
 #include "PTL/ThreadPool.hh"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "library/runtime.hpp"
 #include <chrono>
 #include <memory>
@@ -96,7 +96,7 @@ buffer_storage::buffer_storage(pid_t _pid)
             }
         };
 
-        ROCPROFSYS_DEBUG("Starting buffered storage flushing thread for pid %d",
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "Starting buffered storage flushing thread for pid %d",
                          static_cast<int>(_pid));
         m_created_process = _pid;
         std::mutex _shutdown_condition_mutex;
@@ -119,13 +119,13 @@ buffer_storage::buffer_storage(pid_t _pid)
 void
 buffer_storage::shutdown()
 {
-    ROCPROFSYS_DEBUG("Buffer storage shutting down..");
+    ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "Buffer storage shutting down..");
     m_running = false;
     m_shutdown_condition.notify_all();
 
     if(m_created_process != getpid())
     {
-        ROCPROFSYS_DEBUG(
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, 
             "Buffer storage is not created in same process as shutting down..");
         return;
     }

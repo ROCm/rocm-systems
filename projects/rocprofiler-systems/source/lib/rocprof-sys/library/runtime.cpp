@@ -23,7 +23,7 @@
 #include "library/runtime.hpp"
 #include "api.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/defines.hpp"
 #include "core/utility.hpp"
 #include "library/thread_data.hpp"
@@ -192,7 +192,7 @@ setup_gotchas()
     if(_initialized) return;
     _initialized = true;
 
-    ROCPROFSYS_BASIC_DEBUG(
+    ROCPROFSYS_DEBUG_SPDLOGIMPL(false, false, 
         "Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n");
 
     component::mpi_gotcha::configure();

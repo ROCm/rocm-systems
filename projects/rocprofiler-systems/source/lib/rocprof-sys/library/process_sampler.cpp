@@ -22,7 +22,7 @@
 
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "library/amd_smi.hpp"
 #include "library/cpu_freq.hpp"
 #include "library/runtime.hpp"
@@ -83,7 +83,7 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     for(auto& itr : instances)
         itr->config();
 
-    ROCPROFSYS_VERBOSE(
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
         1, "Background process sampling polling at an interval of %f seconds...\n",
         std::chrono::duration_cast<std::chrono::duration<double>>(_interval).count());
 
@@ -113,14 +113,14 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 
     if(_has_duration && _now >= _end && get_state() < State::Finalized)
     {
-        ROCPROFSYS_VERBOSE(
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
             1,
             "Background process sampling duration of %f seconds has elapsed. "
             "Shutting down process sampling...\n",
             _duration);
     }
 
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT(get_debug(),
+    ROCPROFSYS_CONDITIONAL_PRINT_SPDLOGIMPL(false, false, get_debug(),
                                        "Thread sampler polling completed...\n");
 
     if(polling_finished) polling_finished->set_value();
@@ -131,11 +131,11 @@ sampler::setup()
 {
     if(!get_use_process_sampling())
     {
-        ROCPROFSYS_DEBUG("Background sampler is disabled...\n");
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "Background sampler is disabled...\n");
         return;
     }
 
-    ROCPROFSYS_VERBOSE(1, "Setting up background sampler...\n");
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 1, "Setting up background sampler...\n");
 
     // shutdown if already running
     shutdown();
@@ -204,7 +204,7 @@ sampler::shutdown()
         }
 
         // during CI, throw an error if polling_finished is not valid
-        ROCPROFSYS_CI_THROW(!polling_finished, "polling_finished is not valid\n");
+        ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, !polling_finished, "polling_finished is not valid\n");
         if(polling_finished)
         {
             // wait for the thread to finish

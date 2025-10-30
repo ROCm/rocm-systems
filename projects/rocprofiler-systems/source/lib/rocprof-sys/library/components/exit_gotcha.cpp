@@ -23,7 +23,7 @@
 #include "library/components/exit_gotcha.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "library/runtime.hpp"
@@ -64,13 +64,13 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
     {
         if(config::settings_are_configured())
         {
-            ROCPROFSYS_VERBOSE(0, "finalizing %s before calling %s(%s)...\n",
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "finalizing %s before calling %s(%s)...\n",
                                get_exe_name().c_str(), _data.tool_id.c_str(),
                                JOIN(", ", _args...).c_str());
         }
         else
         {
-            ROCPROFSYS_BASIC_VERBOSE(0, "finalizing %s before calling %s(%s)...\n",
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 0, "finalizing %s before calling %s(%s)...\n",
                                      get_exe_name().c_str(), _data.tool_id.c_str(),
                                      JOIN(", ", _args...).c_str());
         }
@@ -80,18 +80,18 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
 
     if(config::settings_are_configured())
     {
-        ROCPROFSYS_VERBOSE(0, "calling %s(%s) in %s...\n", _data.tool_id.c_str(),
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "calling %s(%s) in %s...\n", _data.tool_id.c_str(),
                            JOIN(", ", _args...).c_str(), get_exe_name().c_str());
     }
     else
     {
-        ROCPROFSYS_BASIC_VERBOSE(0, "calling %s(%s) in %s...\n", _data.tool_id.c_str(),
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 0, "calling %s(%s) in %s...\n", _data.tool_id.c_str(),
                                  JOIN(", ", _args...).c_str(), get_exe_name().c_str());
     }
 
     if(_exit_info.is_known && _exit_info.exit_code != 0)
     {
-        ROCPROFSYS_BASIC_VERBOSE(0, "%s exiting with non-zero exit code: %i...\n",
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 0, "%s exiting with non-zero exit code: %i...\n",
                                  get_exe_name().c_str(), _exit_info.exit_code);
     }
 

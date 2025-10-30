@@ -22,7 +22,7 @@
 
 #include "core/rocprofiler-sdk.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "timemory.hpp"
 #include <regex>
 
@@ -54,7 +54,7 @@
                     << "rocprofiler-sdk call [" << #result                               \
                     << "] failed with error code " << CHECKSTATUS                        \
                     << " :: " << status_msg;                                             \
-                ROCPROFSYS_WARNING(0, "%s\n", msg.str().c_str());                        \
+                ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 0, "%s\n", msg.str().c_str());                        \
             }                                                                            \
         }
 
@@ -84,7 +84,7 @@ get_setting_name(std::string _v)
                                        __VA_ARGS__ });                                   \
             if(!_ret.second)                                                             \
             {                                                                            \
-                ROCPROFSYS_PRINT("Warning! Duplicate setting: %s / %s\n",                \
+                ROCPROFSYS_PRINT_SPDLOGIMPL(true, false,"Warning! Duplicate setting: %s / %s\n",                \
                                  get_setting_name(ENV_NAME).c_str(), ENV_NAME);          \
             }                                                                            \
             return _config->find(ENV_NAME)->second;                                      \
@@ -131,7 +131,7 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
 
     auto _val = get_setting_value<std::string>(optname);
 
-    ROCPROFSYS_CONDITIONAL_ABORT_F(!_val, "no setting %s\n", optname.c_str());
+    ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, !_val, "no setting %s\n", optname.c_str());
 
     if(_val->empty()) return std::unordered_set<int32_t>{};
 
@@ -143,7 +143,7 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
             auto _re = std::regex{ itr, std::regex_constants::icase };
             if(iitr.second && std::regex_search(iitr.second->data(), _re))
             {
-                ROCPROFSYS_PRINT_F("%s ('%s') matched: %s\n", optname.c_str(),
+                ROCPROFSYS_PRINT_SPDLOGIMPL(true, true,"%s ('%s') matched: %s\n", optname.c_str(),
                                    itr.c_str(), iitr.second->data());
                 _ret.emplace(iitr.first);
             }
@@ -172,7 +172,7 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
 
     auto _val = get_setting_value<std::string>(optname);
 
-    ROCPROFSYS_CONDITIONAL_ABORT_F(!_val, "no setting %s\n", optname.c_str());
+    ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, !_val, "no setting %s\n", optname.c_str());
 
     if(_val->empty()) return std::unordered_set<int32_t>{};
 
@@ -184,7 +184,7 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
             auto _re = std::regex{ itr, std::regex_constants::icase };
             if(iitr.second && std::regex_search(iitr.second->data(), _re))
             {
-                ROCPROFSYS_PRINT_F("%s ('%s') matched: %s\n", optname.c_str(),
+                ROCPROFSYS_PRINT_SPDLOGIMPL(true, true,"%s ('%s') matched: %s\n", optname.c_str(),
                                    itr.c_str(), iitr.second->data());
                 _ret.emplace(iitr.first);
             }
@@ -406,7 +406,7 @@ get_callback_domains()
     };
 
     auto _version = get_version();
-    ROCPROFSYS_WARNING_IF(_version.formatted == 0,
+    ROCPROFSYS_WARNING_IF_SPDLOGIMPL(true, false, _version.formatted == 0,
                           "Warning! rocprofiler-sdk version not initialized\n");
 
 #    if(ROCPROFILER_VERSION >= 600)
@@ -458,7 +458,7 @@ get_callback_domains()
     {
         if(invalid_domain(itr))
         {
-            ROCPROFSYS_THROW("unsupported ROCPROFSYS_ROCM_DOMAINS value: %s\n",
+            ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "unsupported ROCPROFSYS_ROCM_DOMAINS value: %s\n",
                              itr.c_str());
         }
 
@@ -531,7 +531,7 @@ get_buffered_domains()
     {
         if(invalid_domain(itr))
         {
-            ROCPROFSYS_THROW("unsupported ROCPROFSYS_ROCM_DOMAINS value: %s\n",
+            ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "unsupported ROCPROFSYS_ROCM_DOMAINS value: %s\n",
                              itr.c_str());
         }
 
@@ -602,9 +602,9 @@ get_group_by_queue(void)
 std::vector<int32_t>
 get_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
-    ROCPROFSYS_CONDITIONAL_ABORT_F(
+    ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, 
         callback_operation_option_names.count(kindv) == 0,
-        "callback_operation_operation_names does not have value for %i\n", kindv);
+        "callback_operation_operation_names does not have value for {}\n", static_cast<int>(kindv));
 
     auto _complete = get_operations_impl(kindv);
     auto _include  = get_operations_impl(
@@ -618,9 +618,9 @@ get_operations(rocprofiler_callback_tracing_kind_t kindv)
 std::vector<int32_t>
 get_operations(rocprofiler_buffer_tracing_kind_t kindv)
 {
-    ROCPROFSYS_CONDITIONAL_ABORT_F(
+    ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, 
         buffered_operation_option_names.count(kindv) == 0,
-        "buffered_operation_option_names does not have value for %i\n", kindv);
+        "buffered_operation_option_names does not have value for {}\n", static_cast<int>(kindv));
 
     auto _complete = get_operations_impl(kindv);
     auto _include  = get_operations_impl(
@@ -634,9 +634,9 @@ get_operations(rocprofiler_buffer_tracing_kind_t kindv)
 std::unordered_set<int32_t>
 get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
-    ROCPROFSYS_CONDITIONAL_ABORT_F(
+    ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, 
         callback_operation_option_names.count(kindv) == 0,
-        "callback_operation_operation_names does not have value for %i\n", kindv);
+        "callback_operation_operation_names does not have value for {}\n", static_cast<int>(kindv));
 
     auto _data = get_operations_impl(
         kindv, callback_operation_option_names.at(kindv).operations_annotate_backtrace);
@@ -650,9 +650,9 @@ get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
 std::unordered_set<int32_t>
 get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
 {
-    ROCPROFSYS_CONDITIONAL_ABORT_F(
+    ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, 
         buffered_operation_option_names.count(kindv) == 0,
-        "buffered_operation_option_names does not have value for %i\n", kindv);
+        "buffered_operation_option_names does not have value for {}\n", static_cast<int>(kindv));
 
     auto _data = get_operations_impl(
         kindv, buffered_operation_option_names.at(kindv).operations_annotate_backtrace);

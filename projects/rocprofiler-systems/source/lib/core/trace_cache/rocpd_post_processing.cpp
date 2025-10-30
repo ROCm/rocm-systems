@@ -24,7 +24,7 @@
 #include "agent_manager.hpp"
 #include "common.hpp"
 #include "config.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "library/thread_info.hpp"
 #include "node_info.hpp"
 #include "rocpd/data_processor.hpp"
@@ -663,7 +663,7 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
                                   get_amd_smi_sample_callback());
     parser.register_type_callback(entry_type::cpu_freq_sample,
                                   get_cpu_freq_sample_callback());
-    ROCPROFSYS_DEBUG("Buffer parser callbacks are registered..");
+    ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "Buffer parser callbacks are registered..");
 #endif
 }
 
@@ -675,7 +675,7 @@ rocpd_post_processing::post_process_metadata()
     {
         return;
     }
-    ROCPROFSYS_DEBUG("Post processing metadata..");
+    ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "Post processing metadata..");
     auto& data_processor = get_data_processor();
     auto& agent_mngr     = agent_manager::get_instance();
     auto  n_info         = node_info::get_instance();

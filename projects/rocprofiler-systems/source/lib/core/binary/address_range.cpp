@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "binary/address_range.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 
 namespace rocprofsys
 {

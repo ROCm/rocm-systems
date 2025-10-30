@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "binary/address_range.hpp"
 #include "locking.hpp"
 #include "state.hpp"

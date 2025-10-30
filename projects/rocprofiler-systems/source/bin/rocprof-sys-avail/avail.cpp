@@ -29,6 +29,7 @@
 #include "generate_config.hpp"
 #include "get_availability.hpp"
 #include "info_type.hpp"
+// #include "spdlogtest.hpp"
 
 #include "api.hpp"
 #include "core/config.hpp"
@@ -493,6 +494,10 @@ main(int argc, char** argv)
     parser.add_positional_argument("REGEX_FILTER").set_default(std::string{});
 
     auto err = parser.parse(argc, argv);
+
+    // std::cerr << "Got here0.5" << std::endl;
+    //     spdlog_tester_to_delete();
+        
 
     if(parser.exists("help"))
     {

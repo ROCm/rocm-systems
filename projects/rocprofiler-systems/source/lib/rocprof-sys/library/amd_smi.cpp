@@ -39,7 +39,7 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/gpu.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
@@ -298,7 +298,7 @@ get_version()
     {
         auto _err = amdsmi_get_lib_version(&_v);
         if(_err != AMDSMI_STATUS_SUCCESS)
-            ROCPROFSYS_THROW(
+            ROCPROFSYS_THROW_SPDLOGIMPL(true, true, 
                 "amdsmi_get_version failed. No version information available.");
     }
 
@@ -319,11 +319,11 @@ check_error(const char* _file, int _line, amdsmi_status_t _code, bool* _option =
     const char* _msg = nullptr;
     auto        _err = amdsmi_status_code_to_string(_code, &_msg);
     if(_err != AMDSMI_STATUS_SUCCESS)
-        ROCPROFSYS_THROW(
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, 
             "amdsmi_status_code_to_string failed. No error message available. "
             "Error code %i originated at %s:%i\n",
             static_cast<int>(_code), _file, _line);
-    ROCPROFSYS_THROW("[%s:%i] Error code %i :: %s", _file, _line, static_cast<int>(_code),
+    ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "[%s:%i] Error code %i :: %s", _file, _line, static_cast<int>(_code),
                      _msg);
 }
 
@@ -463,7 +463,7 @@ data::sample(uint32_t _device_id)
             ROCPROFSYS_AMD_SMI_CALL(FUNCTION(__VA_ARGS__), &OPTION);                     \
         } catch(std::runtime_error & _e)                                                 \
         {                                                                                \
-            ROCPROFSYS_VERBOSE_F(                                                        \
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true,                                                         \
                 0, "[%s] Exception: %s. Disabling future samples from amd-smi...\n",     \
                 #FUNCTION, _e.what());                                                   \
             get_state().store(State::Disabled);                                          \
@@ -608,11 +608,11 @@ sample()
     for(auto itr : data::device_list)
     {
         if(amd_smi::get_state() != State::Active) continue;
-        ROCPROFSYS_DEBUG_F("Polling amd-smi for device %u...\n", itr);
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(true, true, "Polling amd-smi for device %u...\n", itr);
         auto& _data = *_bundle_data.at(itr);
         if(!_data) continue;
         _data->emplace_back(data{ itr });
-        ROCPROFSYS_DEBUG_F("    %s\n", TIMEMORY_JOIN("", _data->back()).c_str());
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(true, true, "    %s\n", TIMEMORY_JOIN("", _data->back()).c_str());
     }
 }
 
@@ -673,10 +673,10 @@ data::post_process(uint32_t _dev_id)
     auto        _amd_smi     = (_amd_smi_v) ? *_amd_smi_v : std::deque<amd_smi::data>{};
     const auto& _thread_info = thread_info::get(0, InternalTID);
 
-    ROCPROFSYS_VERBOSE(1, "Post-processing %zu amd-smi samples from device %u\n",
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 1, "Post-processing %zu amd-smi samples from device %u\n",
                        _amd_smi.size(), _dev_id);
 
-    ROCPROFSYS_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, !_thread_info, "Missing thread info for thread 0");
     if(!_thread_info) return;
 
     auto _settings = get_settings(_dev_id);
@@ -743,7 +743,7 @@ data::post_process(uint32_t _dev_id)
             {
                 if(itr.m_xcp_metrics.empty())
                 {
-                    ROCPROFSYS_VERBOSE(
+                    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
                         1, "No VCN activity data collected from device %u\n", _dev_id);
                 }
                 else if(gpu::is_vcn_activity_supported(_dev_id))
@@ -771,7 +771,7 @@ data::post_process(uint32_t _dev_id)
             {
                 if(itr.m_xcp_metrics.empty())
                 {
-                    ROCPROFSYS_VERBOSE(
+                    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
                         1, "No JPEG activity data collected from device %u\n", _dev_id);
                 }
                 else if(gpu::is_jpeg_activity_supported(_dev_id))
@@ -872,13 +872,13 @@ setup()
 
     if(!gpu::initialize_amdsmi())
     {
-        ROCPROFSYS_WARNING_F(0,
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, 0,
                              "AMD SMI is not available. Disabling AMD SMI sampling...");
         return;
     }
 
     amdsmi_version_t _version = get_version();
-    ROCPROFSYS_VERBOSE_F(0, "AMD SMI version: %u.%u.%u - str: %s.\n", _version.major,
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 0, "AMD SMI version: %u.%u.%u - str: %s.\n", _version.major,
                          _version.minor, _version.release, _version.build);
 
     data::device_count = gpu::device_count();
@@ -910,7 +910,7 @@ setup()
         {
             if(itr.find_first_not_of("0123456789-") != std::string::npos)
             {
-                ROCPROFSYS_THROW("Invalid GPU specification: '%s'. Only numerical values "
+                ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Invalid GPU specification: '%s'. Only numerical values "
                                  "(e.g., 0) or ranges (e.g., 0-7) are permitted.",
                                  itr.c_str());
             }
@@ -918,7 +918,7 @@ setup()
             if(itr.find('-') != std::string::npos)
             {
                 auto _v = tim::delimit(itr, "-");
-                ROCPROFSYS_CONDITIONAL_THROW(_v.size() != 2,
+                ROCPROFSYS_CONDITIONAL_THROW_SPDLOGIMPL(true, true, _v.size() != 2,
                                              "Invalid GPU range specification: '%s'. "
                                              "Required format N-M, e.g. 0-4",
                                              itr.c_str());
@@ -964,9 +964,9 @@ setup()
                     {
                         auto iitr = supported.find(metric);
                         if(iitr == supported.end())
-                            ROCPROFSYS_FAIL_F("unsupported amd-smi metric: %s\n",
+                            ROCPROFSYS_FAIL_SPDLOGIMPL(true, true, "unsupported amd-smi metric: %s\n",
                                               metric.c_str());
-                        ROCPROFSYS_VERBOSE_F(
+                        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 
                             1, "Enabling amd-smi metric '%s' on device [%u]\n",
                             metric.c_str(), itr);
                         iitr->second = true;
@@ -980,7 +980,7 @@ setup()
 
     } catch(std::runtime_error& _e)
     {
-        ROCPROFSYS_VERBOSE(0, "Exception thrown when initializing amd-smi: %s\n",
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "Exception thrown when initializing amd-smi: %s\n",
                            _e.what());
         data::device_list = {};
     }
@@ -992,7 +992,7 @@ shutdown()
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
     if(!is_initialized()) return;
-    ROCPROFSYS_VERBOSE_F(1, "Shutting down amd-smi...\n");
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 1, "Shutting down amd-smi...\n");
 
     try
     {
@@ -1002,7 +1002,7 @@ shutdown()
         }
     } catch(std::runtime_error& _e)
     {
-        ROCPROFSYS_VERBOSE(0, "Exception thrown when shutting down amd-smi: %s\n",
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "Exception thrown when shutting down amd-smi: %s\n",
                            _e.what());
     }
 
@@ -1014,7 +1014,7 @@ post_process()
 {
     for(auto itr : data::device_list)
     {
-        ROCPROFSYS_VERBOSE(2, "Post-processing amd-smi data for device: %d", itr);
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 2, "Post-processing amd-smi data for device: %d", itr);
         data::post_process(itr);
     }
 }

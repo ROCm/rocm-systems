@@ -23,7 +23,7 @@
 #include "cache_manager.hpp"
 #include "core/config.hpp"
 #include "core/trace_cache/storage_parser.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "trace_cache/rocpd_post_processing.hpp"
 
 namespace rocprofsys
@@ -49,14 +49,14 @@ cache_manager::post_process()
 {
     if(m_storage.is_running())
     {
-        ROCPROFSYS_WARNING(2, "Postprocessing called without previously shutting down "
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 2, "Postprocessing called without previously shutting down "
                               "cache storage. Calling shutdown explicitly..\n");
         shutdown();
     }
 
     if(get_use_rocpd())
     {
-        ROCPROFSYS_PRINT(
+        ROCPROFSYS_PRINT_SPDLOGIMPL(true, false,
             "Generating rocpd with collected data. This may take a while..\n");
     }
     post_process_metadata();

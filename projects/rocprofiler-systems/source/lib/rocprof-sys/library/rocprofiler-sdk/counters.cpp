@@ -176,7 +176,7 @@ counter_storage::write(counter_storage_type* storage, std::string metric_name,
 {
     if(!trait::runtime_enabled<counter_data_tracker>::get())
     {
-        ROCPROFSYS_WARNING_F(
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, 
             1, "%s counter_data_tracker is disabled. Can't write storage.\n",
             metric_name.c_str());
         return;

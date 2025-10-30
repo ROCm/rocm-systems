@@ -23,7 +23,7 @@
 #include "library/components/vaapi_gotcha.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"

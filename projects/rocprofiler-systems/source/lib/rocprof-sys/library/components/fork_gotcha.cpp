@@ -23,7 +23,7 @@
 #include "api.hpp"
 
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/state.hpp"
@@ -75,9 +75,9 @@ prefork_setup()
     tim::set_env("ROCPROFSYS_PRELOAD", "0", 1);
     tim::set_env("ROCPROFSYS_ROOT_PROCESS", process::get_id(), 0);
     rocprofsys_reset_preload_hidden();
-    ROCPROFSYS_BASIC_VERBOSE(0, "fork() called on PID %i (rank: %i), TID %li\n",
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 0, "fork() called on PID %i (rank: %i), TID %li\n",
                              process::get_id(), dmp::rank(), threading::get_id());
-    ROCPROFSYS_BASIC_DEBUG(
+    ROCPROFSYS_DEBUG_SPDLOGIMPL(false, false, 
         "Warning! Calling fork() within an OpenMPI application using libfabric "
         "may result is segmentation fault\n");
     TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
@@ -111,9 +111,7 @@ postfork_child()
 {
     if(postfork_child_lock) return;
 
-    ROCPROFSYS_REQUIRE(is_child_process())
-        << "Error! child process " << process::get_id()
-        << " believes it is the root process " << get_root_process_id() << "\n";
+    ROCPROFSYS_REQUIRE_SPDLOGIMPL(is_child_process(), "Child process {} believes it is the root process {}", process::get_id(), get_root_process_id());
 
     settings::enabled() = false;
     settings::verbose() = -127;
@@ -155,7 +153,7 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
 
     if(_pid != 0)
     {
-        ROCPROFSYS_BASIC_VERBOSE(0, "fork() called on PID %i created PID %i\n", getpid(),
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 0, "fork() called on PID %i created PID %i\n", getpid(),
                                  _pid);
 
         postfork_parent();
@@ -167,7 +165,7 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
 
     if(!settings::use_output_suffix())
     {
-        ROCPROFSYS_BASIC_VERBOSE(
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 
             0, "Application which make calls to fork() should enable using an process "
                "identifier output suffix (i.e. set ROCPROFSYS_USE_PID=ON)\n");
     }

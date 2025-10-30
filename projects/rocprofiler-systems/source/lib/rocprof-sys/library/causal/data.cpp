@@ -29,7 +29,7 @@
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
@@ -87,7 +87,7 @@ auto speedup_dist      = []() {
     size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
     std::sort(_v.begin(), _v.end());
-    ROCPROFSYS_CI_THROW(_v.back() > 100, "Error! last value is too large: %i\n",
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, _v.back() > 100, "Error! last value is too large: %i\n",
                              (int) _v.back());
     return _v;
 }();
@@ -191,13 +191,13 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         if(_former_include != _current_include)
         {
             if(!_binary_include.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] binary scope     : %s\n",
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "[causal] binary scope     : %s\n",
                                    _binary_include.c_str());
             if(!_source_include.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] source scope     : %s\n",
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "[causal] source scope     : %s\n",
                                    _source_include.c_str());
             if(!_function_include.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] function scope   : %s\n",
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "[causal] function scope   : %s\n",
                                    _function_include.c_str());
             _former_include = _current_include;
         }
@@ -229,13 +229,13 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         if(_former_exclude != _current_exclude)
         {
             if(!_binary_exclude.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] binary exclude   : %s\n",
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "[causal] binary exclude   : %s\n",
                                    _binary_exclude.c_str());
             if(!_source_exclude.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] source exclude   : %s\n",
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "[causal] source exclude   : %s\n",
                                    _source_exclude.c_str());
             if(!_function_exclude.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] function exclude : %s\n",
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "[causal] function exclude : %s\n",
                                    _function_exclude.c_str());
             _former_exclude = _current_exclude;
         }
@@ -341,7 +341,7 @@ compute_eligible_lines_impl()
         }
     }
 
-    ROCPROFSYS_VERBOSE(
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
         0, "[causal] eligible address ranges: %zu, coarse address range: %zu [%s]\n",
         _eligible_ar.size(), _eligible_ar.range_size(),
         _eligible_ar.get_coarse_range().as_string().c_str());
@@ -354,7 +354,7 @@ compute_eligible_lines_impl()
         save_line_info(_cfg, config::get_verbose());
     }
 
-    ROCPROFSYS_CONDITIONAL_THROW(
+    ROCPROFSYS_CONDITIONAL_THROW_SPDLOGIMPL(true, true, 
         _eligible_ar.empty(),
         "Error! binary analysis (after filters) resulted in zero eligible instruction "
         "pointer addresses for causal experimentation");
@@ -469,7 +469,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
     const auto& _thr_info = thread_info::init(true);
     set_thread_state(ThreadState::Disabled);
-    ROCPROFSYS_CONDITIONAL_THROW(!_thr_info->is_offset,
+    ROCPROFSYS_CONDITIONAL_THROW_SPDLOGIMPL(true, true, !_thr_info->is_offset,
                                  "Error! causal profiling thread should be offset");
 
     if(!perform_experiment_impl_completed)
@@ -504,7 +504,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
     if(_delay_sec > 0.0)
     {
-        ROCPROFSYS_VERBOSE(1, "[causal] delaying experimentation for %.2f seconds...\n",
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 1, "[causal] delaying experimentation for %.2f seconds...\n",
                            _delay_sec);
         uint64_t _delay_nsec = _delay_sec * units::sec;
         std::this_thread::yield();
@@ -519,7 +519,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
             auto _elapsed = clock_type::now() - _start_time;
             if(_elapsed >= _duration_nsec)
             {
-                ROCPROFSYS_VERBOSE(
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
                     1,
                     "[causal] stopping experimentation after %.2f seconds "
                     "(elapsed: %.2f seconds)...\n",
@@ -544,7 +544,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
             {
                 if(_impl_no > 0) return;
 
-                ROCPROFSYS_VERBOSE(
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
                     0,
                     "[causal] experiment failed to start. Number of PC candidates: %zu\n",
                     eligible_pc_candidates.load());
@@ -621,7 +621,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                     }
                 }
 
-                ROCPROFSYS_PRINT_COLOR(fatal, "causal experiment never started\n");
+                ROCPROFSYS_PRINT_SPDLOGIMPL(true, false, "causal experiment never started\n");
 
                 std::cerr << std::flush;
                 auto _cerr = tim::log::warning_stream(std::cerr);
@@ -643,7 +643,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
                 if(!(get_causal_end_to_end() && _omni_causal_launcher))
                 {
-                    ROCPROFSYS_CONDITIONAL_THROW(_impl_no == 0,
+                    ROCPROFSYS_CONDITIONAL_THROW_SPDLOGIMPL(true, true, _impl_no == 0,
                                                  "causal experiment never started");
                 }
 
@@ -651,14 +651,14 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
             }
             else
             {
-                ROCPROFSYS_VERBOSE(
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
                     1,
                     "[causal] experiment failed to start. Number of PC candidates: %zu\n",
                     eligible_pc_candidates.load());
             }
         }
 
-        ROCPROFSYS_VERBOSE(3,
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 3,
                            "[causal] experiment started. Number of PC candidates: %zu\n",
                            eligible_pc_candidates.load());
 
@@ -792,7 +792,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
         // kept because of size() - 1 in distribution range
         if(ROCPROFSYS_UNLIKELY(_address_vec.empty()))
         {
-            ROCPROFSYS_WARNING(0, "no addresses for sample selection...\n");
+            ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 0, "no addresses for sample selection...\n");
             return selected_entry{};
         }
 
@@ -834,7 +834,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                 {
                     if(ROCPROFSYS_UNLIKELY(config::get_debug()))
                     {
-                        ROCPROFSYS_WARNING(
+                        ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 
                             0, "[%s][%s][%s][%s] %s [%s:%i][%s][%zu]\n",
                             as_hex(_lookup_addr).c_str(), as_hex(_addr).c_str(),
                             as_hex(_sym_addr).c_str(),
@@ -866,7 +866,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
         {
             if(ROCPROFSYS_UNLIKELY(!aitr))
             {
-                ROCPROFSYS_WARNING(0, "invalid atomic pc...\n");
+                ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 0, "invalid atomic pc...\n");
                 continue;
             }
 
@@ -937,7 +937,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                     for(const auto& itr : ditr.get_debug_line_info(_filters))
                     {
                         if(!_ipaddr.contains(itr.ipaddr()))
-                            ROCPROFSYS_THROW(
+                            ROCPROFSYS_THROW_SPDLOGIMPL(true, true, 
                                 "Error! debug line info ipaddr (%s) is not contained in "
                                        "symbol ipaddr (%s)",
                                 as_hex(itr.ipaddr()).c_str(), as_hex(_ipaddr).c_str());
@@ -1059,7 +1059,7 @@ start_experimenting()
         speedup_dist.clear();
         for(auto itr : _user_speedup_dist)
         {
-            ROCPROFSYS_CONDITIONAL_ABORT_F(itr > 100,
+            ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, itr > 100,
                                            "Virtual speedups must be in range [0, 100]. "
                                            "Invalid virtual speedup: %lu\n",
                                            itr);

@@ -22,7 +22,7 @@
 
 #include "perfetto.hpp"
 #include "config.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "library/runtime.hpp"
 #include "perfetto_fwd.hpp"
 #include "utility.hpp"
@@ -89,7 +89,7 @@ setup()
 
     for(const auto& itr : config::get_disabled_categories())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Disabling perfetto track event category: %s\n",
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 1, "Disabling perfetto track event category: %s\n",
                              itr.c_str());
         track_event_cfg.add_disabled_categories(itr);
     }
@@ -127,12 +127,12 @@ start()
         }
     }
 
-    ROCPROFSYS_VERBOSE(2, "Setup perfetto...\n");
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 2, "Setup perfetto...\n");
     int   _fd = (_tmp_file) ? _tmp_file->fd : -1;
     auto& cfg = get_config();
     tracing_session->SetOnErrorCallback([](::perfetto::TracingError _err) {
         if(_err.code == ::perfetto::TracingError::kTracingFailed)
-            ROCPROFSYS_WARNING(0, "perfetto encountered a tracing error: %s\n",
+            ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 0, "perfetto encountered a tracing error: %s\n",
                                _err.message.c_str());
     });
     tracing_session->Setup(cfg, _fd);
@@ -146,17 +146,17 @@ stop()
 
     auto& tracing_session = get_perfetto_session();
 
-    ROCPROFSYS_CI_THROW(tracing_session == nullptr,
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, tracing_session == nullptr,
                         "Null pointer to the tracing session");
 
     if(tracing_session)
     {
         // Make sure the last event is closed
-        ROCPROFSYS_VERBOSE(2, "Flushing the perfetto trace data...\n");
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 2, "Flushing the perfetto trace data...\n");
         ::perfetto::TrackEvent::Flush();
         tracing_session->FlushBlocking();
 
-        ROCPROFSYS_VERBOSE(2, "Stopping the perfetto trace session (blocking)...\n");
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 2, "Stopping the perfetto trace session (blocking)...\n");
         tracing_session->StopBlocking();
     }
 }
@@ -181,7 +181,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 
             if(!_fdata)
             {
-                ROCPROFSYS_VERBOSE(
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
                     -1, "Error! perfetto temp trace file '%s' could not be read",
                     _tmp_file->filename.c_str());
                 return char_vec_t{ tracing_session->ReadTraceBlocking() };
@@ -195,7 +195,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
             auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
             ::fclose(_fdata);
 
-            ROCPROFSYS_CI_THROW(
+            ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, 
                 _fnum_read != _fnum_elem,
                 "Error! read %zu elements from perfetto trace file '%s'. Expected %zu\n",
                 _fnum_read, _tmp_file->filename.c_str(), _fnum_elem);
@@ -266,7 +266,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
     }
     else if(dmp::rank() == 0)
     {
-        ROCPROFSYS_VERBOSE(
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
             0, "perfetto trace data is empty. File '%s' will not be written...\n",
             _filename.c_str());
     }
@@ -286,7 +286,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
         // Test that the script exists
         if(!filepath::exists(_script_path))
         {
-            ROCPROFSYS_VERBOSE(0, "Script not found: %s\n", _script_path.c_str());
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "Script not found: %s\n", _script_path.c_str());
         }
         else
         {
@@ -297,11 +297,11 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 
             if(result != 0)
             {
-                ROCPROFSYS_VERBOSE(0, "Failed to execute: %s\n", _command.c_str());
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "Failed to execute: %s\n", _command.c_str());
             }
             else
             {
-                ROCPROFSYS_VERBOSE(0, "Successfully executed: %s\n", _command.c_str());
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "Successfully executed: %s\n", _command.c_str());
             }
         }
     }

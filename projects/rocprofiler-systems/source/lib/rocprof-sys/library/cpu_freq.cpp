@@ -25,7 +25,7 @@
 #include "core/agent_manager.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
@@ -331,7 +331,7 @@ write_perfetto_counter_track(index&& _idx, Args... _args)
 void
 post_process()
 {
-    ROCPROFSYS_VERBOSE(1,
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 1,
                        "Post-processing %zu cpu frequency and memory usage entries...\n",
                        data.size());
 
@@ -341,7 +341,7 @@ post_process()
         using freq_track = perfetto_counter_track<category::cpu_freq>;
 
         const auto& _thread_info = thread_info::get(0, InternalTID);
-        ROCPROFSYS_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+        ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, !_thread_info, "Missing thread info for thread 0");
         if(!_thread_info) return;
 
         if(!freq_track::exists(_idx))
@@ -378,7 +378,7 @@ post_process()
         }
 
         const auto& _thread_info = thread_info::get(0, InternalTID);
-        ROCPROFSYS_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+        ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, !_thread_info, "Missing thread info for thread 0");
         if(!_thread_info) return;
 
         for(auto& itr : data)

@@ -26,7 +26,7 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/rocpd/data_processor.hpp"
@@ -207,7 +207,7 @@ rocpd_init_tracks(int64_t _tid)
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            ROCPROFSYS_CI_THROW(_desc.empty(), "Empty description for %s\n", itr.c_str());
+            ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, _desc.empty(), "Empty description for %s\n", itr.c_str());
 
             std::string track_name = JOIN(' ', "Thread", _desc, _tid_name, "(S)");
             data_processor.insert_track(track_name.c_str(), n_info.id, getpid(),
@@ -246,7 +246,7 @@ rocpd_initialize_backtrace_metrics_pmc(size_t dev_id, const char* units, int64_t
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            ROCPROFSYS_CI_THROW(_desc.empty(), "Empty description for %s\n", itr.c_str());
+            ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, _desc.empty(), "Empty description for %s\n", itr.c_str());
 
             std::string track_name = JOIN(' ', "Thread", _desc, _tid_name, "(S)");
 
@@ -356,7 +356,7 @@ backtrace_metrics::configure(bool _setup, int64_t _tid)
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
             perfetto_counter_track<hw_counters>::init();
-            ROCPROFSYS_DEBUG("HW COUNTER: starting...\n");
+            ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "HW COUNTER: starting...\n");
             if(get_papi_vector(_tid))
             {
                 get_papi_vector(_tid)->start();
@@ -366,7 +366,7 @@ backtrace_metrics::configure(bool _setup, int64_t _tid)
     }
     else if(!_setup && _is_running)
     {
-        ROCPROFSYS_DEBUG("Destroying sampler for thread %lu...\n", _tid);
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "Destroying sampler for thread %lu...\n", _tid);
         *_running = false;
 
         if constexpr(tim::trait::is_available<hw_counters>::value)
@@ -374,10 +374,10 @@ backtrace_metrics::configure(bool _setup, int64_t _tid)
             if(_tid == threading::get_id())
             {
                 if(get_papi_vector(_tid)) get_papi_vector(_tid)->stop();
-                ROCPROFSYS_DEBUG("HW COUNTER: stopped...\n");
+                ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "HW COUNTER: stopped...\n");
             }
         }
-        ROCPROFSYS_DEBUG("Sampler destroyed for thread %lu\n", _tid);
+        ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "Sampler destroyed for thread %lu\n", _tid);
     }
 }
 
@@ -411,7 +411,7 @@ backtrace_metrics::init_perfetto(int64_t _tid, valid_array_t _valid)
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            ROCPROFSYS_CI_THROW(_desc.empty(), "Empty description for %s\n", itr.c_str());
+            ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, _desc.empty(), "Empty description for %s\n", itr.c_str());
             perfetto_counter_track<hw_counters>::emplace(
                 _tid, JOIN(' ', "Thread", _desc, _tid_name, "(S)"));
         }
@@ -424,7 +424,7 @@ backtrace_metrics::fini_perfetto(int64_t _tid, valid_array_t _valid)
     auto        _hw_cnt_labels = *get_papi_labels(_tid);
     const auto& _thread_info   = thread_info::get(_tid, SequentTID);
 
-    ROCPROFSYS_CI_THROW(!_thread_info, "Error! missing thread info for tid=%li\n", _tid);
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, !_thread_info, "Error! missing thread info for tid=%li\n", _tid);
     if(!_thread_info) return;
 
     uint64_t _ts         = _thread_info->get_stop();
@@ -512,7 +512,7 @@ backtrace_metrics::fini_rocpd(int64_t _tid, valid_array_t _valid)
 {
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
 
-    ROCPROFSYS_CI_THROW(!_thread_info, "Error! missing thread info for tid=%li\n", _tid);
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, !_thread_info, "Error! missing thread info for tid=%li\n", _tid);
     if(!_thread_info) return;
 
     uint64_t _ts = _thread_info->get_stop();

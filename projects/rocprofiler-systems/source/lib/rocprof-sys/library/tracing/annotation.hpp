@@ -24,7 +24,7 @@
 
 #include "core/common.hpp"
 #include "core/concepts.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/defines.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
@@ -183,7 +183,7 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
             if(!(_annotation.type > ROCPROFSYS_VALUE_NONE &&
                  _annotation.type < ROCPROFSYS_VALUE_LAST))
             {
-                ROCPROFSYS_FAIL_F(
+                ROCPROFSYS_FAIL_SPDLOGIMPL(true, true, 
                     "Error! annotation '%s' has an invalid type designation "
                     "%lu which is outside of acceptable range [%i, %i]\n",
                     _annotation.name, _annotation.type, ROCPROFSYS_VALUE_NONE + 1,

@@ -26,7 +26,7 @@
 #include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/containers/stable_vector.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/gpu.hpp"
 #include "core/perfetto.hpp"
 #include "core/rocpd/json.hpp"
@@ -219,7 +219,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             name_v        = itr.substr(0, pos);
             auto dev_id_s = itr.substr(pos + device_qualifier.length());
 
-            ROCPROFSYS_CONDITIONAL_ABORT(dev_id_s.empty() ||
+            ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, false, dev_id_s.empty() ||
                                              dev_id_s.find_first_not_of("0123456789") !=
                                                  std::string::npos,
                                          "invalid device qualifier format (':device=N) "
@@ -228,7 +228,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
 
             auto dev_id_v = std::stoul(dev_id_s);
 
-            ROCPROFSYS_PRINT_F("tool agent device id=%lu, name=%s, device_id=%lu\n",
+            ROCPROFSYS_PRINT_SPDLOGIMPL(true, true,"tool agent device id=%lu, name=%s, device_id=%lu\n",
                                tool_agent_v->device_id, name_v.c_str(), dev_id_v);
 
             // skip this counter if the counter is for a specific device id (which
@@ -248,13 +248,13 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
 
         if(name_v != _old_name_v)
         {
-            ROCPROFSYS_PRINT_F("tool agent device id=%lu, old_name=%s, name=%s\n",
+            ROCPROFSYS_PRINT_SPDLOGIMPL(true, true,"tool agent device id=%lu, old_name=%s, name=%s\n",
                                tool_agent_v->device_id, _old_name_v.c_str(),
                                name_v.c_str());
         }
         else if(name_v == itr)
         {
-            ROCPROFSYS_PRINT_F("tool agent device id=%lu, name=%s\n",
+            ROCPROFSYS_PRINT_SPDLOGIMPL(true, true,"tool agent device id=%lu, name=%s\n",
                                tool_agent_v->device_id, name_v.c_str());
         }
 
@@ -276,7 +276,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         auto found_counters =
             timemory::join::join(timemory::join::array_config{ ", ", "", "" }, found_v);
 
-        ROCPROFSYS_ABORT_F(
+        ROCPROFSYS_ABORT_SPDLOGIMPL(true, true, 
             "Unable to find all counters for agent %i (gpu-%li, %s) in %s. Found: %s\n",
             tool_agent_v->agent->node_id, tool_agent_v->device_id,
             tool_agent_v->agent->name.c_str(), requested_counters.c_str(),
@@ -730,7 +730,7 @@ tool_tracing_callback_stop(
             {
                 case ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop:
                 {
-                    ROCPROFSYS_CONDITIONAL_ABORT_F(
+                    ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, 
                         get_marker_pushed_ranges().empty(),
                         "roctxRangePop does not have corresponding roctxRangePush on "
                         "this thread");
@@ -743,7 +743,7 @@ tool_tracing_callback_stop(
                 }
                 case ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop:
                 {
-                    ROCPROFSYS_CONDITIONAL_ABORT_F(
+                    ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, 
                         get_marker_started_ranges().empty(),
                         "roctxRangeStop does not have corresponding roctxRangeStart "
                         "on "
@@ -1283,7 +1283,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     if(rocprofsys::get_state() != rocprofsys::State::Active)
     {
-        ROCPROFSYS_WARNING_F(0, "Callback called when tool is not active.\n\t%s\n",
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, 0, "Callback called when tool is not active.\n\t%s\n",
                              info.str().c_str());
         return;
     }
@@ -1359,13 +1359,13 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
-                ROCPROFSYS_CI_ABORT(true, "unhandled callback record kind: %i\n",
-                                    record.kind);
+                ROCPROFSYS_CI_ABORT_SPDLOGIMPL(true, false, true, "unhandled callback record kind: %i\n",
+                                    static_cast<int>(record.kind));
                 break;
             }
             default:
             {
-                ROCPROFSYS_CI_ABORT(true, "Unhandled callback record: \n\t%s\n",
+                ROCPROFSYS_CI_ABORT_SPDLOGIMPL(true, false, true, "Unhandled callback record: \n\t%s\n",
                                     info.str().c_str());
                 break;
             }
@@ -1444,13 +1444,13 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
-                ROCPROFSYS_CI_ABORT(true, "unhandled callback record kind: %i\n",
-                                    record.kind);
+                ROCPROFSYS_CI_ABORT_SPDLOGIMPL(true, false, true, "unhandled callback record kind: %i\n",
+                                    static_cast<int>(record.kind));
                 break;
             }
             default:
             {
-                ROCPROFSYS_CI_ABORT(true, "Unhandled callback record\n\t%s\n",
+                ROCPROFSYS_CI_ABORT_SPDLOGIMPL(true, false, true, "Unhandled callback record\n\t%s\n",
                                     info.str().c_str());
                 break;
             }
@@ -1537,7 +1537,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                         break;
                     }
                     default:
-                        ROCPROFSYS_WARNING_F(
+                        ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, 
                             1,
                             "tool_tracing_callback: unhandled PHASE_NONE "
                             "callback record\n\t%s\n",
@@ -1548,7 +1548,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 #endif
             default:
             {
-                ROCPROFSYS_WARNING_F(1,
+                ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, 1,
                                      "tool_tracing_callback: unhandled PHASE_NONE "
                                      "callback record\n\t%s\n",
                                      info.str().c_str());
@@ -1558,8 +1558,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
     else
     {
-        ROCPROFSYS_CI_ABORT(true, "unhandled callback record phase: %i\n", record.phase);
-        ROCPROFSYS_WARNING_F(1,
+        ROCPROFSYS_CI_ABORT_SPDLOGIMPL(true, false, true, "unhandled callback record phase: %i\n", static_cast<int>(record.phase));
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, true, 1,
                              "tool_tracing_callback: unhandled callback record\n\t%s\n",
                              info.str().c_str());
     }
@@ -1842,7 +1842,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
             }
             else
             {
-                ROCPROFSYS_THROW(
+                ROCPROFSYS_THROW_SPDLOGIMPL(true, true, 
                     "unexpected rocprofiler_record_header_t buffer tracing category "
                     "kind. category: %i, kind: %i\n",
                     header->category, header->kind);
@@ -1850,7 +1850,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
         }
         else
         {
-            ROCPROFSYS_THROW("unexpected rocprofiler_record_header_t tracing category "
+            ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "unexpected rocprofiler_record_header_t tracing category "
                              "kind. category: %i, kind: %i\n",
                              header->category, header->kind);
         }
@@ -1930,10 +1930,10 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
             const auto* _agent = tool_data->get_gpu_tool_agent(_agent_id);
             const auto* _info  = tool_data->get_tool_counter_info(_agent_id, itr.first);
 
-            ROCPROFSYS_CONDITIONAL_ABORT_F(
+            ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, 
                 !_agent, "unable to find tool agent for agent (id=%zu)\n",
                 _agent_id.handle);
-            ROCPROFSYS_CONDITIONAL_ABORT_F(!_info,
+            ROCPROFSYS_CONDITIONAL_ABORT_SPDLOGIMPL(true, true, !_info,
                                            "unable to find counter info for counter "
                                            "(id=%zu) on agent (id=%zu)\n",
                                            itr.first.handle, _agent_id.handle);
@@ -2038,11 +2038,11 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
     // STREAM_HANDLE_CREATE and DESTROY are no-ops
     if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
     {
-        ROCPROFSYS_VERBOSE_F(3, " operation = ROCPROFILER_HIP_STREAM_CREATE\n");
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 3, " operation = ROCPROFILER_HIP_STREAM_CREATE\n");
     }
     else if(record.operation == ROCPROFILER_HIP_STREAM_DESTROY)
     {
-        ROCPROFSYS_VERBOSE_F(3, " operation = ROCPROFILER_HIP_STREAM_DESTROY\n");
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 3, " operation = ROCPROFILER_HIP_STREAM_DESTROY\n");
     }
     else if(record.operation == ROCPROFILER_HIP_STREAM_SET)
     {
@@ -2050,7 +2050,7 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
         // called
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
         {
-            ROCPROFSYS_VERBOSE_F(3,
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 3,
                                  " operation = ROCPROFILER_HIP_STREAM_SET, phase = "
                                  "ROCPROFILER_CALLBACK_PHASE_ENTER, stream_id=%lu\n",
                                  (unsigned long) stream_id.handle);
@@ -2059,7 +2059,7 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
         // Pop stream ID off of stream stack after underlying HIP function is completed
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
-            ROCPROFSYS_VERBOSE_F(3,
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 3,
                                  "operation = ROCPROFILER_HIP_STREAM_SET, phase = "
                                  "ROCPROFILER_CALLBACK_PHASE_EXIT, stream_id=%lu\n",
                                  (unsigned long) stream_id.handle);
@@ -2068,7 +2068,7 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
     }
     else
     {
-        ROCPROFSYS_FAIL_F("Unknown operation for hip_stream_callback!");
+        ROCPROFSYS_FAIL_SPDLOGIMPL(true, true, "Unknown operation for hip_stream_callback!");
     }
 }
 #endif
@@ -2078,15 +2078,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 {
     auto domains = settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS");
 
-    ROCPROFSYS_VERBOSE_F(1, "Available ROCm Domains:\n");
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 1, "Available ROCm Domains:\n");
     for(const auto& itr : domains->get_choices())
-        ROCPROFSYS_VERBOSE_F(1, "- %s\n", itr.c_str());
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 1, "- %s\n", itr.c_str());
 
     auto _callback_domains = rocprofiler_sdk::get_callback_domains();
     auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
     auto _counter_events   = rocprofiler_sdk::get_rocm_events();
     auto _version          = rocprofiler_sdk::get_version();
-    ROCPROFSYS_WARNING_IF(_version.formatted == 0,
+    ROCPROFSYS_WARNING_IF_SPDLOGIMPL(true, false, _version.formatted == 0,
                           "Warning! rocprofiler-sdk version not initialized\n");
 
     auto* _data        = as_client_data(user_data);
@@ -2200,7 +2200,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             &_data->memory_alloc_buffer));
         if(_data->memory_alloc_buffer.handle == 0UL)
         {
-            ROCPROFSYS_CI_ABORT(true, "Failed to create memory allocation buffer\n");
+            ROCPROFSYS_CI_ABORT_SPDLOGIMPL(true, false, true, "Failed to create memory allocation buffer\n");
         }
         auto _ops =
             rocprofiler_sdk::get_operations(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
@@ -2279,7 +2279,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Setting amd_smi state to active...\n");
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 1, "Setting amd_smi state to active...\n");
         amd_smi::set_state(State::Active);
     }
 
@@ -2434,8 +2434,8 @@ rocprofiler_configure(uint32_t version, const char* runtime_version, uint32_t pr
     info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "."
          << patch << " (" << runtime_version << ")";
 
-    ROCPROFSYS_VERBOSE_F(0, "%s\n", info.str().c_str());
-    ROCPROFSYS_VERBOSE_F(2, "client_id=%u, priority=%u\n", id->handle, priority);
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 0, "%s\n", info.str().c_str());
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 2, "client_id=%u, priority=%u\n", id->handle, priority);
 
     ROCPROFILER_CALL(rocprofiler_at_internal_thread_create(
         rocprofsys::rocprofiler_sdk::thread_precreate,

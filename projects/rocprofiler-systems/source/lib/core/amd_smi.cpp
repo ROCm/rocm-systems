@@ -23,7 +23,7 @@
 #include "core/amd_smi.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/gpu.hpp"
 #include "timemory.hpp"
 
@@ -54,7 +54,7 @@ get_setting_name(std::string _v)
                                        __VA_ARGS__ });                                   \
             if(!_ret.second)                                                             \
             {                                                                            \
-                ROCPROFSYS_PRINT("Warning! Duplicate setting: %s / %s\n",                \
+                ROCPROFSYS_PRINT_SPDLOGIMPL(true, false,"Warning! Duplicate setting: %s / %s\n",                \
                                  get_setting_name(ENV_NAME).c_str(), ENV_NAME);          \
             }                                                                            \
             return _config->find(ENV_NAME)->second;                                      \

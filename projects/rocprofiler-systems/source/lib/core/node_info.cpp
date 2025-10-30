@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "node_info.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -36,12 +36,12 @@ node_info::node_info()
     auto ifs = std::ifstream{ "/etc/machine-id" };
     if(!ifs.is_open())
     {
-        ROCPROFSYS_WARNING(0, "Error: Unable to open /etc/machine-id!");
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 0, "Error: Unable to open /etc/machine-id!");
         return;
     }
     if(!(ifs >> machine_id) || machine_id.empty())
     {
-        ROCPROFSYS_WARNING(0, "Error: Unable to read machine ID from /etc/machine-id!");
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 0, "Error: Unable to read machine ID from /etc/machine-id!");
     }
 
     hash = std::hash<std::string>{}(machine_id) % std::numeric_limits<int64_t>::max();
@@ -50,7 +50,7 @@ node_info::node_info()
     struct utsname _sys_info;
     if(uname(&_sys_info))
     {
-        ROCPROFSYS_WARNING(0, "Error: Unable to get system information!");
+        ROCPROFSYS_WARNING_SPDLOGIMPL(true, false, 0, "Error: Unable to get system information!");
         return;
     }
 

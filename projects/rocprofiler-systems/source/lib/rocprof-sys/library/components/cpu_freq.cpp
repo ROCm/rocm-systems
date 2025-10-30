@@ -24,7 +24,7 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/spdlogdebug.hpp"
 #include "core/defines.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
@@ -98,7 +98,7 @@ cpu_freq::configure()
         {
             if(_v.find_first_not_of("0123456789-") != std::string::npos)
             {
-                ROCPROFSYS_VERBOSE_F(
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 
                     0,
                     "Invalid CPU specification. Only numerical values (e.g., 0) or "
                     "ranges (e.g., 0-7) are permitted. Ignoring %s...",
@@ -108,7 +108,7 @@ cpu_freq::configure()
             if(_v.find('-') != std::string::npos)
             {
                 auto _vv = tim::delimit(_v, "-");
-                ROCPROFSYS_CONDITIONAL_THROW(
+                ROCPROFSYS_CONDITIONAL_THROW_SPDLOGIMPL(true, true, 
                     _vv.size() != 2,
                     "Invalid CPU range specification: %s. Required format N-M, e.g. 0-4",
                     _v.c_str());
@@ -137,19 +137,19 @@ cpu_freq::configure()
             _enabled_freqs.emplace(itr);
         else
         {
-            ROCPROFSYS_VERBOSE(
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 
                 0, "[cpu_freq::config] Warning! Removing invalid cpu %zu...\n", itr);
         }
     }
 
     if(!cpuinfo::freq{})
     {
-        ROCPROFSYS_VERBOSE(0, "[cpu_freq::config] Warning! CPU frequencies are disabled "
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, false, 0, "[cpu_freq::config] Warning! CPU frequencies are disabled "
                               ":: unable to open /proc/cpuinfo");
         _enabled_freqs.clear();
     }
 
-    ROCPROFSYS_CI_FAIL(!cpuinfo::freq{},
+ROCPROFSYS_CI_FAIL_SPDLOGIMPL(true, false, !cpuinfo::freq{},
                        "[cpu_freq::config] CPU frequencies are disabled "
                        ":: unable to open /proc/cpuinfo");
 

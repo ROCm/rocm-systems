@@ -25,7 +25,7 @@
 #include "common/defines.h"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
-#include "debug.hpp"
+#include "spdlogdebug.hpp"
 #include "defines.hpp"
 #include "gpu.hpp"
 #include "mproc.hpp"
@@ -143,7 +143,7 @@ using utility::parse_numeric_range;
                                    __VA_ARGS__ });                                       \
         if(!_ret.second)                                                                 \
         {                                                                                \
-            ROCPROFSYS_PRINT("Warning! Duplicate setting: %s / %s\n",                    \
+            ROCPROFSYS_PRINT_SPDLOGIMPL(true, false,"Warning! Duplicate setting: %s / %s\n",                    \
                              get_setting_name(ENV_NAME).c_str(), ENV_NAME);              \
         }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
@@ -157,7 +157,7 @@ using utility::parse_numeric_range;
             std::set<std::string>{ "custom", "rocprofsys", __VA_ARGS__ });               \
         if(!_ret.second)                                                                 \
         {                                                                                \
-            ROCPROFSYS_PRINT("Warning! Duplicate setting: %s / %s\n",                    \
+            ROCPROFSYS_PRINT_SPDLOGIMPL(true, false,"Warning! Duplicate setting: %s / %s\n",                    \
                              get_setting_name(ENV_NAME).c_str(), ENV_NAME);              \
         }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
@@ -174,7 +174,7 @@ using utility::parse_numeric_range;
             std::vector<std::string>{ CMD_LINE });                                       \
         if(!_ret.second)                                                                 \
         {                                                                                \
-            ROCPROFSYS_PRINT("Warning! Duplicate setting: %s / %s\n",                    \
+            ROCPROFSYS_PRINT_SPDLOGIMPL(true, false,"Warning! Duplicate setting: %s / %s\n",                    \
                              get_setting_name(ENV_NAME).c_str(), ENV_NAME);              \
         }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
@@ -191,7 +191,7 @@ auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
 void
 finalize()
 {
-    ROCPROFSYS_DEBUG("[rocprofsys_finalize] Disabling signal handling...\n");
+    ROCPROFSYS_DEBUG_SPDLOGIMPL(true, false, "[rocprofsys_finalize] Disabling signal handling...\n");
     tim::signals::disable_signal_detection();
     _settings_are_configured() = false;
     for(const auto& itr : cfg_fini_callbacks)
@@ -216,7 +216,7 @@ configure_settings(bool _init)
     if(is_ci_value && get_state() < State::Init)
     {
         timemory_print_demangled_backtrace<64>();
-        ROCPROFSYS_THROW("config::configure_settings() called before "
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "config::configure_settings() called before "
                          "rocprofsys_init_library. state = %s",
                          std::to_string(get_state()).c_str());
     }
@@ -857,7 +857,7 @@ configure_settings(bool _init)
         {
             if(_config->get<bool>("ROCPROFSYS_CI"))
             {
-                ROCPROFSYS_THROW("Error! Setting '%s' not found!", _name.c_str());
+                ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Error! Setting '%s' not found!", _name.c_str());
             }
         }
     };
@@ -917,12 +917,12 @@ configure_settings(bool _init)
 
     if(_paranoid > 2 && !_has_cap_sys_admin)
     {
-        ROCPROFSYS_BASIC_VERBOSE(
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 
             0,
             "/proc/sys/kernel/perf_event_paranoid has a value of %i. "
             "Disabling PAPI (requires a value <= 2)...\n",
             _paranoid);
-        ROCPROFSYS_BASIC_VERBOSE(
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 
             0, "In order to enable PAPI support, run 'echo N | sudo tee "
                "/proc/sys/kernel/perf_event_paranoid' where N is <= 2\n");
         trait::runtime_enabled<comp::papi_config>::set(false);
@@ -978,7 +978,7 @@ configure_settings(bool _init)
     {
         if(_config->get_suppress_config()) continue;
 
-        ROCPROFSYS_BASIC_VERBOSE(1, "Reading config file %s\n", itr.c_str());
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 1, "Reading config file %s\n", itr.c_str());
         if(_config->read(itr) && _main_proc &&
            ((_config->get<bool>("ROCPROFSYS_CI") && settings::verbose() >= 0) ||
             settings::verbose() >= 1 || settings::debug()))
@@ -994,7 +994,7 @@ configure_settings(bool _init)
             }
             if(!_iss.str().empty())
             {
-                ROCPROFSYS_BASIC_VERBOSE(1, "config file '%s':\n%s\n", fitr.c_str(),
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 1, "config file '%s':\n%s\n", fitr.c_str(),
                                          _iss.str().c_str());
             }
         }
@@ -1065,7 +1065,7 @@ configure_settings(bool _init)
     configure_signal_handler(_config);
     configure_disabled_settings(_config);
 
-    ROCPROFSYS_BASIC_VERBOSE(2, "configuration complete\n");
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 2, "configuration complete\n");
 
     if(auto opt = get_setting_value<int>("ROCPROFSYS_VERBOSE"); opt) verbose_value = *opt;
     if(auto opt = get_setting_value<bool>("ROCPROFSYS_DEBUG"); opt) debug_value = *opt;
@@ -1080,14 +1080,14 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     auto _set = [](const std::string& _name, bool _v) {
         if(!set_setting_value(_name, _v))
         {
-            ROCPROFSYS_BASIC_VERBOSE(
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 
                 4, "[configure_mode_settings] No configuration setting named '%s'...\n",
                 _name.data());
         }
         else
         {
             bool _changed = get_setting_value<bool>(_name).value_or(!_v) != _v;
-            ROCPROFSYS_BASIC_VERBOSE(
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 
                 1 && _changed,
                 "[configure_mode_settings] Overriding %s to %s in %s mode...\n",
                 _name.c_str(), JOIN("", std::boolalpha, _v).c_str(),
@@ -1128,7 +1128,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     if(gpu::device_count() == 0)
     {
 #if ROCPROFSYS_ROCM_VERSION > 0
-        ROCPROFSYS_BASIC_VERBOSE(
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 
             1, "No ROCm devices were found: disabling rocm and amd_smi...\n");
 #endif
         _set("ROCPROFSYS_USE_ROCM", false);
@@ -1149,7 +1149,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
                 _message =
                     JOIN("", " (forced. Previous value: '", _current_kokkosp_lib, "')");
             }
-            ROCPROFSYS_BASIC_VERBOSE_F(1, "Setting KOKKOS_TOOLS_LIBS=%s%s\n",
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, true,  1, "Setting KOKKOS_TOOLS_LIBS=%s%s\n",
                                        "librocprof-sys.so", _message.c_str());
             tim::set_env("KOKKOS_TOOLS_LIBS", "librocprof-sys.so", _force);
         }
@@ -1195,7 +1195,7 @@ rocprofsys_exit_action(int nsig)
 {
     tim::signals::block_signals(get_sampling_signals(),
                                 tim::signals::sigmask_scope::process);
-    ROCPROFSYS_BASIC_PRINT("Finalizing after signal %i :: %s\n", nsig,
+    ROCPROFSYS_PRINT_SPDLOGIMPL(false, false,"Finalizing after signal %i :: %s\n", nsig,
                            signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
     auto _handler = get_signal_handler().load();
     if(_handler) (*_handler)();
@@ -1205,16 +1205,18 @@ rocprofsys_exit_action(int nsig)
 void
 rocprofsys_trampoline_handler(int _v)
 {
-    if(get_verbose_env() >= 1)
-    {
-        ::rocprofsys::debug::flush();
-        ::rocprofsys::debug::lock _debug_lk{};
-        ROCPROFSYS_FPRINTF_STDERR_COLOR(warning);
-        fprintf(::rocprofsys::debug::get_file(),
-                "signal %i ignored (ROCPROFSYS_IGNORE_DYNINST_TRAMPOLINE=ON)\n", _v);
-        ::rocprofsys::debug::flush();
-        timemory_print_demangled_backtrace<64>();
-    }
+    // if(get_verbose_env() >= 1)
+    // {
+        // TODO: Why do we print the backtrace if this is a warning?
+        ROCPROFSYS_WARNING_SPDLOGIMPL(false, false, 1, "signal %i ignored (ROCPROFSYS_IGNORE_DYNINST_TRAMPOLINE=ON)\n", _v);
+        // ::rocprofsys::debug::flush();
+        // ::rocprofsys::debug::lock _debug_lk{};
+        // ROCPROFSYS_FPRINTF_STDERR_COLOR(warning);
+        // fprintf(::rocprofsys::debug::get_file(),
+        //         "signal %i ignored (ROCPROFSYS_IGNORE_DYNINST_TRAMPOLINE=ON)\n", _v);
+        // ::rocprofsys::debug::flush();
+        // timemory_print_demangled_backtrace<64>();
+    //}
 }
 }  // namespace
 
@@ -1316,7 +1318,7 @@ get_sampling_signals(int64_t)
         if(get_use_sampling() && !get_use_sampling_cputime() &&
            !get_use_sampling_realtime() && !get_use_sampling_overflow())
         {
-            ROCPROFSYS_VERBOSE_F(1, "sampling enabled by cputime/realtime/overflow not "
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(true, true, 1, "sampling enabled by cputime/realtime/overflow not "
                                     "specified. defaulting to cputime...\n");
             set_setting_value("ROCPROFSYS_SAMPLING_CPUTIME", true);
         }
@@ -1339,13 +1341,13 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
             auto _disabled = _config->disable_category(_category);
             _config->enable(_opt);
             for(auto&& itr : _disabled)
-                ROCPROFSYS_BASIC_VERBOSE(3, "[%s=OFF]    disabled option :: '%s'\n",
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 3, "[%s=OFF]    disabled option :: '%s'\n",
                                          _opt.c_str(), itr.c_str());
             return false;
         }
         auto _enabled = _config->enable_category(_category);
         for(auto&& itr : _enabled)
-            ROCPROFSYS_BASIC_VERBOSE(3, "[%s=ON]      enabled option :: '%s'\n",
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 3, "[%s=ON]      enabled option :: '%s'\n",
                                      _opt.c_str(), itr.c_str());
         return true;
     };
@@ -1452,7 +1454,7 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
 
     if(_old_setting == _config->end()) return;
 
-    ROCPROFSYS_CI_THROW(_new_setting == _config->end(),
+    ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, _new_setting == _config->end(),
                         "New configuration setting not found: '%s'", _new.c_str());
 
     if(_old_setting->second->get_environ_updated() ||
@@ -1462,13 +1464,13 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
             std::array<char, 79> _v = {};
             _v.fill('=');
             _v.back() = '\0';
-            ROCPROFSYS_BASIC_VERBOSE(_verbose, "#%s#\n", _v.data());
+            ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, _verbose, "#%s#\n", _v.data());
         };
         _separator();
-        ROCPROFSYS_BASIC_VERBOSE(_verbose, "#\n");
-        ROCPROFSYS_BASIC_VERBOSE(_verbose, "# DEPRECATION NOTICE:\n");
-        ROCPROFSYS_BASIC_VERBOSE(_verbose, "#   %s is deprecated!\n", _old.c_str());
-        ROCPROFSYS_BASIC_VERBOSE(_verbose, "#   Use %s instead!\n", _new.c_str());
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, _verbose, "#\n");
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, _verbose, "# DEPRECATION NOTICE:\n");
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, _verbose, "#   %s is deprecated!\n", _old.c_str());
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, _verbose, "#   Use %s instead!\n", _new.c_str());
 
         if(!_new_setting->second->get_environ_updated() &&
            !_new_setting->second->get_config_updated())
@@ -1481,15 +1483,15 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
             {
                 std::string _cause =
                     (_old_setting->second->get_environ_updated()) ? "environ" : "config";
-                ROCPROFSYS_BASIC_VERBOSE(_verbose, "#\n");
-                ROCPROFSYS_BASIC_VERBOSE(_verbose, "# %s :: '%s' -> '%s'\n", _new.c_str(),
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, _verbose, "#\n");
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, _verbose, "# %s :: '%s' -> '%s'\n", _new.c_str(),
                                          _before.c_str(), _after.c_str());
-                ROCPROFSYS_BASIC_VERBOSE(_verbose, "#   via %s (%s)\n", _old.c_str(),
+                ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, _verbose, "#   via %s (%s)\n", _old.c_str(),
                                          _cause.c_str());
             }
         }
 
-        ROCPROFSYS_BASIC_VERBOSE(_verbose, "#\n");
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, _verbose, "#\n");
         _separator();
     }
 }
@@ -1547,7 +1549,7 @@ print_settings(
     std::ostream&                                                                _ros,
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter)
 {
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT(true, "configuration:\n");
+    ROCPROFSYS_CONDITIONAL_PRINT_SPDLOGIMPL(false, false, true, "configuration:\n");
 
     std::stringstream _os{};
 
@@ -1730,7 +1732,7 @@ get_mode()
         for(const auto& itr : _v->second->get_choices())
             _ss << ", " << itr;
         auto _msg = (_ss.str().length() > 2) ? _ss.str().substr(2) : std::string{};
-        ROCPROFSYS_THROW("[%s] invalid mode %s. Choices: %s\n", __FUNCTION__,
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "[%s] invalid mode %s. Choices: %s\n", __FUNCTION__,
                          _mode.c_str(), _msg.c_str());
     }
     return Mode::Trace;
@@ -1767,6 +1769,8 @@ get_is_continuous_integration()
 bool
 get_debug_init()
 {
+    std::cerr << "[ROCPROFILER-SYSTEMS-CHECK] Calling init_ddebug() from get_debug_init()" << std::endl;
+    ::rocprofsys::debug::init_ddebug();
     return tim::get_env<bool>("ROCPROFSYS_DEBUG_INIT", get_debug_env());
 }
 
@@ -1857,7 +1861,7 @@ get_use_sampling()
     static auto _v = get_config()->find("ROCPROFSYS_USE_SAMPLING");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
-    ROCPROFSYS_THROW("Error! sampling was enabled but rocprof-sys was not built with "
+    ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Error! sampling was enabled but rocprof-sys was not built with "
                      "libunwind support");
     static bool _v = false;
     return _v;
@@ -2058,12 +2062,12 @@ get_category_config()
         }
         else
         {
-            ROCPROFSYS_ABORT(
+            ROCPROFSYS_ABORT_SPDLOGIMPL(true, false,
                 "Error! Conflicting options ROCPROFSYS_ENABLE_CATEGORIES and "
                 "ROCPROFSYS_DISABLE_CATEGORIES were both provided.");
         }
 
-        ROCPROFSYS_CI_THROW(_enabled.size() + _disabled.size() != _avail.size(),
+        ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, _enabled.size() + _disabled.size() != _avail.size(),
                             "Error! Internal error for categories: %zu (enabled) + %zu "
                             "(disabled) != %zu (total)\n",
                             _enabled.size(), _disabled.size(), _avail.size());
@@ -2411,7 +2415,7 @@ tmp_file::touch() const
 bool
 tmp_file::open(int _mode, int _perms)
 {
-    ROCPROFSYS_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 2, "Opening temporary file '%s'...\n", filename.c_str());
 
     touch();
     m_pid = getpid();
@@ -2423,7 +2427,7 @@ tmp_file::open(int _mode, int _perms)
 bool
 tmp_file::open(std::ios::openmode _mode)
 {
-    ROCPROFSYS_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 2, "Opening temporary file '%s'...\n", filename.c_str());
 
     touch();
 
@@ -2436,7 +2440,7 @@ tmp_file::open(std::ios::openmode _mode)
 bool
 tmp_file::fopen(const char* _mode)
 {
-    ROCPROFSYS_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
+    ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 2, "Opening temporary file '%s'...\n", filename.c_str());
 
     touch();
 
@@ -2527,7 +2531,7 @@ tmp_file::remove()
     close();
     if(filepath::exists(filename))
     {
-        ROCPROFSYS_BASIC_VERBOSE(2, "Removing temporary file '%s'...\n",
+        ROCPROFSYS_VERBOSE_SPDLOGIMPL(false, false, 2, "Removing temporary file '%s'...\n",
                                  filename.c_str());
         auto _ret = ::remove(filename.c_str());
         return (_ret == 0);
@@ -2576,7 +2580,7 @@ get_tmp_file(std::string _basename, std::string _ext)
 
     if(_fname.empty() || _fname.front() != '/')
     {
-        ROCPROFSYS_THROW("Error! temporary file '%s' (based on '%s.%s') is either empty "
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, "Error! temporary file '%s' (based on '%s.%s') is either empty "
                          "or is not an absolute path",
                          _fname.c_str(), _basename.c_str(), _ext.c_str());
     }
@@ -2604,7 +2608,7 @@ get_causal_backend()
     } catch(std::runtime_error& _e)
     {
         auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-        ROCPROFSYS_THROW(
+        ROCPROFSYS_THROW_SPDLOGIMPL(true, true, 
             "[%s] invalid causal backend %s. Choices: %s\n", __FUNCTION__, _mode.c_str(),
             timemory::join::join(timemory::join::array_config{ ", ", "", "" },
                                  _v->second->get_choices())
@@ -2636,7 +2640,7 @@ get_causal_mode()
         } catch(std::runtime_error& _e)
         {
             auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-            ROCPROFSYS_THROW(
+            ROCPROFSYS_THROW_SPDLOGIMPL(true, true, 
                 "[%s] invalid causal mode %s. Choices: %s\n", __FUNCTION__, _mode.c_str(),
                 timemory::join::join(timemory::join::array_config{ ", ", "", "" },
                                      _v->second->get_choices())

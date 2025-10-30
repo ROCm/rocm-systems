@@ -525,7 +525,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, size_t 
     }
     else
     {
-        ROCPROFSYS_CI_THROW(true, "RCCL function not handled: %s", _data.tool_id.c_str());
+        ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, true, "RCCL function not handled: %s", _data.tool_id.c_str());
     }
 
     if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
@@ -588,7 +588,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
     }
     else
     {
-        ROCPROFSYS_CI_THROW(true, "RCCL function not handled: %s", _data.tool_id.c_str());
+        ROCPROFSYS_CI_THROW_SPDLOGIMPL(true, true, true, "RCCL function not handled: %s", _data.tool_id.c_str());
     }
 
     if(rocprofsys::get_use_timemory()) add(_data, count * _size);
