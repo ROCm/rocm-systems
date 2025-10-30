@@ -47,8 +47,8 @@ __global__ void
 looping_lds_kernel(float* __restrict__ a,
                    const float* __restrict__ b,
                    const float* __restrict__ c,
-                   size_t size,
-                   size_t loopcount,
+                   size_t   size,
+                   size_t   loopcount,
                    uint32_t ttracedata);
 
 class hipMemory
@@ -79,7 +79,7 @@ main(int /*argc*/, char** /*argv*/)
     bool is_double_buffer = std::getenv("DOUBLEBUFFER") ? atoi(std::getenv("DOUBLEBUFFER")) : false;
 
     int loopcount = LOOPCOUNT;
-    if (is_double_buffer) loopcount = 30000;
+    if(is_double_buffer) loopcount = 30000;
 
     for(int i = 0; i < loopcount; i++)
     {
