@@ -67,7 +67,7 @@ struct HardwareQueue {
 };
 
 // Wrapper around HW queue to provide unique logical handles to multiple users, even when same HW
-// queue is used Also store callbacks per logical handle, not HW handle (???)
+// queue is used. Also store callbacks per logical handle, not HW handle
 struct CountedQueue {
   HardwareQueue* hw_queue;  // Pointer to shared hardware queue
   // callback per unique logical handle, not hardware handle

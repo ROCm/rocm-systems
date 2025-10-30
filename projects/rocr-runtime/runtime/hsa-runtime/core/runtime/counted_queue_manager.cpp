@@ -55,6 +55,12 @@ static std::map<hsa_amd_queue_priority_t, HSA_QUEUE_PRIORITY> priomap = {
     {HSA_AMD_QUEUE_PRIORITY_HIGH, HSA_QUEUE_PRIORITY_HIGH},
 };
 
+// Validate priority enum value
+static bool IsValidPriority(hsa_amd_queue_priority_t priority) {
+  return priority == HSA_AMD_QUEUE_PRIORITY_LOW || priority == HSA_AMD_QUEUE_PRIORITY_NORMAL ||
+      priority == HSA_AMD_QUEUE_PRIORITY_HIGH;
+}
+
 // Generate a 64-bit unique key using agent+priority combination for hw queue pool lookup
 static uint64_t MakePoolKey(hsa_agent_t agent, hsa_amd_queue_priority_t priority) {
   return (static_cast<uint64_t>(agent.handle) << 32) | static_cast<uint64_t>(priority);
@@ -70,10 +76,20 @@ hsa_status_t CountedQueuePoolManager::AcquireQueue(
     hsa_agent_t agent, hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
     void (*callback)(hsa_status_t, hsa_queue_t*, void*), void* data, uint64_t flags,
     hsa_queue_t** out_queue) {
+  // Validate parameters
+  if (!out_queue) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   // support only multi-producer queues
   if (type != HSA_QUEUE_TYPE_MULTI) return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
 
-  // Find or create a hardware queue
+  // validate priority
+  if (!IsValidPriority(priority)) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Validate agent
+  core::Agent* gpu_agent = core::Agent::Convert(agent);
+  if (!gpu_agent || !gpu_agent->IsValid()) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  // Find existing or create a new hardware queue
   std::lock_guard<std::mutex> lock(mutex_);
   HardwareQueue* hw_queue = FindOrCreateHardwareQueue(agent, type, priority, callback, data, flags);
   if (!hw_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -102,7 +118,7 @@ HardwareQueue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
   // Check if the number of queues on this agent has hit the limit
   max_hw_queues_ = core::Runtime::runtime_singleton_->flag().cp_queues_limit();
   if (pool.size() >= max_hw_queues_) {
-    // Get the least used hw queue, create new unique handle for it and return
+    // Get the least used hw queue
     HardwareQueue* leastSharedQueue = nullptr;
     uint32_t min_count = UINT32_MAX;
 
@@ -124,8 +140,9 @@ HardwareQueue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
   if (status != HSA_STATUS_SUCCESS) return nullptr;
   assert(cmd_queue != nullptr);
 
-  // status = cmd_queue->SetPriority(priomap[priority]); how to set queue priority? what else needs
-  // to be set after above API call?
+  status = cmd_queue->SetPriority(priomap[priority]);
+  // is this how queue priority is set?
+  // what else needs to be set after above API call?
   if (status != HSA_STATUS_SUCCESS) return nullptr;
 
   new_hw_queue = core::Queue::Convert(cmd_queue);
@@ -171,9 +188,9 @@ hsa_status_t CountedQueuePoolManager::GetQueueInfo(hsa_queue_t* queue,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  std::lock_guard<std::mutex> lock(mutex_);
   switch (attribute) {
     case HSA_QUEUE_INFO_USE_COUNT: {
+      std::lock_guard<std::mutex> lock(mutex_);
       auto it = counted_queues_.find(queue);
       if (it == counted_queues_.end()) {
         // Queue has not been created using hsa_amd_counted_queue_acquire API
@@ -185,6 +202,7 @@ hsa_status_t CountedQueuePoolManager::GetQueueInfo(hsa_queue_t* queue,
     }
 
     case HSA_QUEUE_INFO_HW_ID: {
+      std::lock_guard<std::mutex> lock(mutex_);
       // Check counted queues map which contains HardwareQueue*
       auto it = counted_queues_.find(queue);
       if (it != counted_queues_.end()) {
@@ -200,18 +218,27 @@ hsa_status_t CountedQueuePoolManager::GetQueueInfo(hsa_queue_t* queue,
 }
 
 void CountedQueuePoolManager::TriggerCallback(hsa_queue_t* queue, hsa_status_t status) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  void (*callback)(hsa_status_t, hsa_queue_t*, void*) = nullptr;
+  void* callback_data = nullptr;
 
-  // Find this logical handle
-  auto it = counted_queues_.find(queue);
-  if (it == counted_queues_.end()) {
-    return;  // Not a counted queue or already released
+  {
+    // Use mutex while searching counted_queues_ only
+    // release and then execute the callback function
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = counted_queues_.find(queue);
+    if (it == counted_queues_.end()) {
+      return;
+    }
+
+    CountedQueue* cq = it->second.get();
+    callback = cq->callback;
+    callback_data = cq->callback_data;
   }
 
-  CountedQueue* cq = it->second.get();
-  // Invoke the callback registered for this handle
-  if (cq->callback) {
-    cq->callback(status, queue, cq->callback_data);
+  // Execute the found callback, if any
+  if (callback) {
+    callback(status, queue, callback_data);
   }
 }
 
