@@ -137,11 +137,11 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                      size_t record_count,
                      rocprofiler_user_data_t /* user_data */,
                      void *callback_data_args) {
+  auto *tool_data_ptr = static_cast<std::unique_ptr<tool_data_t> *>(callback_data_args);
   tool_data_t *tool;
   {
-    std::lock_guard<std::mutex> lock(
-        static_cast<tool_data_t *>(callback_data_args)->mut);
-    tool = static_cast<tool_data_t *>(callback_data_args);
+    std::lock_guard<std::mutex> lock(tool_data_ptr->get()->mut);
+    tool = tool_data_ptr->get();
   }
 
   // For each counter, write: dispatch_id, counter_id, counter_name,
@@ -183,7 +183,8 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     // check if regex can be found in kernel name matches regex from tool data,
     // if matches store kernel id
-    auto *tool = static_cast<tool_data_t *>(callback_data);
+    auto *tool_data_ptr = static_cast<std::unique_ptr<tool_data_t> *>(callback_data);
+    auto *tool = tool_data_ptr->get();
     // Lock before modifying target_kernel_ids
     std::lock_guard<std::mutex> lock(tool->mut);
     if (!tool->kernel_filter_include_regex.empty()) {
@@ -375,11 +376,11 @@ void dispatch_callback(
   }
 
   // static cast tool
+  auto *tool_data_ptr = static_cast<std::unique_ptr<tool_data_t> *>(callback_data_args);
   tool_data_t *tool;
   {
-    std::lock_guard<std::mutex> lock(
-        static_cast<tool_data_t *>(callback_data_args)->mut);
-    tool = static_cast<tool_data_t *>(callback_data_args);
+    std::lock_guard<std::mutex> lock(tool_data_ptr->get()->mut);
+    tool = tool_data_ptr->get();
   }
 
   // kernel filtering
@@ -470,17 +471,16 @@ void tool_fini(void *user_data) {
   std::clog << "[rocprofiler-compute] In tool fini\n";
   rocprofiler_stop_context(get_client_ctx());
 
-  auto *tool_data = static_cast<tool_data_t *>(user_data);
-  generate_output(tool_data);
+  auto *tool_data_ptr = static_cast<std::unique_ptr<tool_data_t> *>(user_data);
+  generate_output(tool_data_ptr->get());
 
-  delete tool_data;
+  delete tool_data_ptr;
 }
 
 } // namespace
 
-
-tool_data_t* create_tool_data(rocprofiler_client_id_t* id) {
-  auto *tool_data = new tool_data_t{};
+std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* id) {
+  auto tool_data = std::make_unique<tool_data_t>();
 
   // Generate a unique output filename using a random hex string (no libuuid dependency)
   std::random_device rd;
@@ -587,12 +587,12 @@ rocprofiler_configure(uint32_t version, const char *runtime_version,
   std::clog << info.str() << std::endl;
 
   // init tool data
-  auto *tool_data = create_tool_data(id);
+  auto tool_data = create_tool_data(id);
 
   // create configure data
   static auto cfg = rocprofiler_tool_configure_result_t{
       sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini,
-      static_cast<void *>(tool_data)};
+      static_cast<void *>(new std::unique_ptr<tool_data_t>(std::move(tool_data)))};
 
   // return pointer to configure data
   return &cfg;
