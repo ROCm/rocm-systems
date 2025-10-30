@@ -142,4 +142,25 @@ std::string cxa_demangle(std::string_view _mangled_name, int *_status) {
   return _demangled_name;
 }
 
+std::vector<std::string> split_by_regex(const std::string &s,
+                                        const std::string &regex_pattern) {
+  std::vector<std::string> tokens;
+  std::regex re(regex_pattern);
+
+  // -1 indicates to return the submatches that are not part of the delimiter
+  // itself
+  std::sregex_token_iterator iter(s.begin(), s.end(), re, -1);
+  std::sregex_token_iterator end;
+
+  while (iter != end) {
+    // Ensure that empty strings resulting from consecutive delimiters are not
+    // added
+    if (!iter->str().empty()) {
+      tokens.push_back(*iter);
+    }
+    ++iter;
+  }
+  return tokens;
+}
+
 } // namespace helper_utils

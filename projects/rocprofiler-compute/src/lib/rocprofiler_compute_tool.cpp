@@ -77,8 +77,8 @@ for the agent and returns a pointer to it.
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <random>
-#include <regex>
 #include <set>
 #include <shared_mutex>
 #include <sstream>
@@ -204,24 +204,6 @@ iteration_multiplexing_mode_t iteration_multiplexing_mode(const std::string& mod
         return iteration_multiplexing_mode_t::DISABLED;
 }
 
-std::vector<std::string> split_by_regex(const std::string& s, const std::string& regex_pattern) {
-    std::vector<std::string> tokens;
-    std::regex re(regex_pattern);
-    
-    // -1 indicates to return the submatches that are not part of the delimiter itself
-    std::sregex_token_iterator iter(s.begin(), s.end(), re, -1);
-    std::sregex_token_iterator end;
-
-    while (iter != end) {
-        // Ensure that empty strings resulting from consecutive delimiters are not added
-        if (!iter->str().empty()) {
-            tokens.push_back(*iter);
-        }
-        ++iter;
-    }
-    return tokens;
-}
-
 void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                      rocprofiler_counter_record_t *record_data,
                      size_t record_count,
@@ -336,60 +318,31 @@ bool is_targetted_dispatch(const tool_data_t *tool, uint64_t kernel_id,
   return true;
 }
 
-/**
- * @brief Creates a counter collection profile for performance monitoring on a
- * specific GPU agent.
- *
- * This function parses the requested counters from the tool configuration,
- * validates them against the counters supported by the target GPU agent, and
- * creates a rocprofiler counter configuration for collecting the available
- * requested counters during dispatch profiling.
- *
- * @param tool Pointer to tool data containing the requested counters string and
- * counter mappings
- * @param dispatch_data Dispatch counting service data containing agent
- * information for the target GPU
- *
- * @return rocprofiler_counter_config_id_t A valid counter configuration profile
- * ID that can be used for counter collection, or an invalid profile (handle =
- * 0) if creation fails
- *
- * @details
- * The function performs the following operations:
- * 1. Parses the requested counters from tool->requested_counters string
- * (format: "prefix:counter1 counter2 ...")
- * 2. Queries all counters supported by the specified GPU agent
- * 3. Filters the supported counters to match only those requested
- * 4. Logs warnings for any requested counters that are not supported by the
- * agent
- * 5. Creates and returns a rocprofiler counter configuration for the valid
- * counters
- * 6. Updates the tool's counter ID to name mapping for later reference
- *
- * @note If no counters are requested or none of the requested counters are
- * supported, an empty profile may be created. Unsupported counters are logged
- * as warnings but do not cause the function to fail.
- */
-rocprofiler_counter_config_id_t create_counter_collection_profile(
-    tool_data_t *tool,
-    rocprofiler_dispatch_counting_service_data_t dispatch_data) {
+void update_counter_collection_cache(
+  tool_data_t *tool,
+  rocprofiler_agent_id_t agent_id,
+  std::unordered_map<uint64_t, std::vector<std::vector<rocprofiler_counter_id_t>>>& cache) {
   // get counters to collect
-  std::set<std::string> counters_to_collect;
-  const std::string &counters_str = tool->requested_counters;
-  if (!counters_str.empty()) {
-    auto pos = counters_str.find(':');
-    if (pos != std::string::npos) {
-      std::istringstream ss(counters_str.substr(pos + 1));
-      for (std::string token; ss >> token;)
-        counters_to_collect.insert(token);
+  std::set<std::set<std::string>> counters_to_collect;
+  for (const std::string &counters_str: helper_utils::split_by_regex(tool->requested_counters, "[,]")){
+    if (!counters_str.empty()) {
+      auto pos = counters_str.find(':');
+      if (pos != std::string::npos) {
+        std::istringstream ss(counters_str.substr(pos + 1));
+        std::set<std::string> counters;
+        for (std::string token; ss >> token;){
+          counters.insert(token);
+        }
+        counters_to_collect.insert(counters);
+      }
     }
   }
-
+  
   // Get available counters for this agent
   std::vector<rocprofiler_counter_id_t> gpu_counters;
   ROCPROFILER_CALL(
       rocprofiler_iterate_agent_supported_counters(
-          dispatch_data.dispatch_info.agent_id,
+          agent_id,
           [](rocprofiler_agent_id_t, rocprofiler_counter_id_t *counters,
              size_t num_counters, void *user_data) {
             std::vector<rocprofiler_counter_id_t> *vec =
@@ -402,30 +355,39 @@ rocprofiler_counter_config_id_t create_counter_collection_profile(
           static_cast<void *>(&gpu_counters)),
       "fetch supported counters");
 
-  // Identify counters requested to collect which are available
-  std::vector<rocprofiler_counter_id_t> collect_counters;
-  std::vector<std::string> collect_counters_names;
+  std::vector<std::string> gpu_counter_names;
+  std::map<std::string, rocprofiler_counter_id_t> gpu_counter_map;
   for (auto &counter : gpu_counters) {
     rocprofiler_counter_info_v0_t info;
     ROCPROFILER_CALL(rocprofiler_query_counter_info(
                          counter, ROCPROFILER_COUNTER_INFO_VERSION_0,
                          static_cast<void *>(&info)),
-                     "query counter info");
-    if (counters_to_collect.count(std::string(info.name)) > 0) {
-      collect_counters.push_back(counter);
-      collect_counters_names.push_back(std::string(info.name));
-      tool->counter_id_name_map[counter.handle] = std::string(info.name);
-    }
+                      "query counter info");
+    gpu_counter_names.push_back(std::string(info.name));
+    gpu_counter_map.insert({std::string(info.name), counter});
   }
 
-  // Log unsupported counters in a concise, comma-separated line
+  // Identify counters requested to collect which are available
+  std::vector<std::vector<std::string>> collect_counter_names;
+  std::vector<std::vector<rocprofiler_counter_id_t>> collect_counters;
   std::vector<std::string> unsupported_counters;
-  for (const auto &requested : counters_to_collect) {
-    if (std::find(collect_counters_names.begin(), collect_counters_names.end(),
-                  requested) == collect_counters_names.end()) {
-      unsupported_counters.push_back(requested);
-    }
+  for (const auto &counters : counters_to_collect) {
+    std::vector<std::string> counter_names;
+    std::vector<rocprofiler_counter_id_t> counter_ids;
+    for (const auto &counter_name : counters) {
+      if (std::find(gpu_counter_names.begin(), gpu_counter_names.end(),
+                    counter_name) != gpu_counter_names.end()) {
+        counter_names.push_back(counter_name);
+        counter_ids.push_back(gpu_counter_map[counter_name]);
+        tool->counter_id_name_map[gpu_counter_map[counter_name].handle] = counter_name;
+      } else {
+        unsupported_counters.push_back(counter_name);
+      }
+    } 
+    collect_counter_names.push_back(counter_names);
+    collect_counters.push_back(counter_ids);
   }
+
   if (!unsupported_counters.empty()) {
     std::clog << "\033[33m[rocprofiler-compute] [" << __FUNCTION__
               << "] WARNING: Requested counters not available: ";
@@ -437,14 +399,58 @@ rocprofiler_counter_config_id_t create_counter_collection_profile(
     std::clog << "\033[0m" << std::endl;
   }
 
-  // Create and return collection profile for the counters
-  rocprofiler_counter_config_id_t profile = {.handle = 0};
-  ROCPROFILER_CALL(
-      rocprofiler_create_counter_config(dispatch_data.dispatch_info.agent_id,
-                                        collect_counters.data(),
-                                        collect_counters.size(), &profile),
-      "construct profile cfg");
-  return profile;
+  cache[agent_id.handle] = collect_counters;
+}
+
+void update_iteration_multiple_dispatch_record(
+    const kernel_dispatch_info_t& dispatch_info,
+    iteration_multiplexing_mode_t multiplexing_mode,
+    iteration_multiplexing_dispatch_record_t& iteration_multiplexing_data,
+    std::optional<std::size_t> num_counter_groups = std::nullopt,
+    std::optional<bool> is_new_record = std::nullopt) {
+  if (is_new_record.has_value() && is_new_record.value()) {
+    if (!num_counter_groups.has_value()) {
+      throw std::runtime_error(
+        "[" + std::string(__FUNCTION__) + "] num_counter_groups must be provided for new record");
+    }
+    else if (num_counter_groups.value() == 0) {
+      throw std::runtime_error(
+        "[" + std::string(__FUNCTION__) + "] num_counter_groups must be greater than zero");
+    }
+  }
+  
+  switch (multiplexing_mode)
+  {
+    case iteration_multiplexing_mode_t::SIMPLE:
+      if (num_counter_groups.has_value()){
+        iteration_multiplexing_data.num_counter_groups = num_counter_groups.value();
+        iteration_multiplexing_data.config = -2;
+      }
+      iteration_multiplexing_data.config =
+          (iteration_multiplexing_data.config + 1) % iteration_multiplexing_data.num_counter_groups;
+      return;
+
+    case iteration_multiplexing_mode_t::KERNEL:
+      if (num_counter_groups.has_value()){
+        iteration_multiplexing_data.num_counter_groups = num_counter_groups.value();
+        iteration_multiplexing_data.kernel_config[dispatch_info.kernel_id] = -2;
+      }
+      iteration_multiplexing_data.kernel_config[dispatch_info.kernel_id] =
+          (iteration_multiplexing_data.kernel_config[dispatch_info.kernel_id] + 1) % iteration_multiplexing_data.num_counter_groups;
+      return;
+
+    case iteration_multiplexing_mode_t::LAUNCH:
+      if (num_counter_groups.has_value()){
+        iteration_multiplexing_data.num_counter_groups = num_counter_groups.value();
+        iteration_multiplexing_data.dispatch_config[dispatch_info] = -2;
+      }
+      iteration_multiplexing_data.dispatch_config[dispatch_info] =
+          (iteration_multiplexing_data.dispatch_config[dispatch_info] + 1) % iteration_multiplexing_data.num_counter_groups;
+      return;
+    
+    default:
+      return;
+  }
 }
 
 /**
@@ -462,6 +468,7 @@ void dispatch_callback(
     rocprofiler_user_data_t * /*user_data*/, void *callback_data_args) {
 
   auto kernel_id = dispatch_data.dispatch_info.kernel_id;
+  auto agent_id = dispatch_data.dispatch_info.agent_id.handle;
 
   // create static map of kernel_id to number of dispatches (zero indexed) and
   // update it
@@ -493,32 +500,108 @@ void dispatch_callback(
   static std::shared_mutex m_mutex = {};
   static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t>
       profile_cache = {};
+  static std::unordered_map<uint64_t, std::vector<std::vector<rocprofiler_counter_id_t>>> counter_cache = {};
+  static iteration_multiplexing_dispatch_record_t iteration_multiplexing_data = {};
 
   // check cache for existing profile for this agent
-  auto search_cache = [&]() {
+  auto search_profile_cache = [&]() {
     if (auto pos =
-            profile_cache.find(dispatch_data.dispatch_info.agent_id.handle);
+            profile_cache.find(agent_id);
         pos != profile_cache.end()) {
       *config = pos->second;
       return true;
     }
     return false;
   };
+
+  // check cache for existing counters for this agent
+  auto search_counter_cache = [&]()
+  {
+    if (auto pos =
+            counter_cache.find(agent_id);
+        pos != counter_cache.end())
+      return true;
+    return false;
+  };
+
   {
     auto rlock = std::shared_lock{m_mutex};
-    if (search_cache())
+    if ((tool->iteration_multiplexing_mode == iteration_multiplexing_mode_t::DISABLED) && search_profile_cache())
       return;
   }
 
   // get write lock to update cache
   auto wlock = std::unique_lock{m_mutex};
-  if (search_cache())
+  if ((tool->iteration_multiplexing_mode == iteration_multiplexing_mode_t::DISABLED) && search_profile_cache())
     return;
 
-  // cache the profile for this agent
-  rocprofiler_counter_config_id_t profile =
-      create_counter_collection_profile(tool, dispatch_data);
-  profile_cache.emplace(dispatch_data.dispatch_info.agent_id.handle, profile);
+  if (!search_counter_cache()){
+    update_counter_collection_cache(tool, dispatch_data.dispatch_info.agent_id, counter_cache);
+    if (tool->iteration_multiplexing_mode != iteration_multiplexing_mode_t::DISABLED){
+      update_iteration_multiple_dispatch_record(
+        kernel_dispatch_info_t{
+          dispatch_data.dispatch_info.kernel_id,
+          dispatch_data.dispatch_info.queue_id.handle,
+          dispatch_data.dispatch_info.workgroup_size,
+          dispatch_data.dispatch_info.grid_size,
+          dispatch_data.dispatch_info.group_segment_size},
+        tool->iteration_multiplexing_mode,
+        iteration_multiplexing_data,
+        counter_cache[agent_id].size(),
+        true);
+    }
+  }
+
+  rocprofiler_counter_config_id_t profile = {.handle = 0};
+  std::vector<rocprofiler_counter_id_t> collect_counters;
+  switch (tool->iteration_multiplexing_mode)
+  {
+    case iteration_multiplexing_mode_t::DISABLED:
+      collect_counters = counter_cache[agent_id][0];
+      break;
+    
+    case iteration_multiplexing_mode_t::SIMPLE:
+      collect_counters = counter_cache[agent_id][(iteration_multiplexing_data.config+1) % iteration_multiplexing_data.num_counter_groups];
+      break;
+
+    case iteration_multiplexing_mode_t::KERNEL:
+      collect_counters = counter_cache[agent_id][(iteration_multiplexing_data.kernel_config[kernel_id] + 1) % iteration_multiplexing_data.num_counter_groups];
+      break;
+
+    case iteration_multiplexing_mode_t::LAUNCH:
+      collect_counters = counter_cache[agent_id][(iteration_multiplexing_data.dispatch_config[kernel_dispatch_info_t{
+          dispatch_data.dispatch_info.kernel_id,
+          dispatch_data.dispatch_info.queue_id.handle,
+          dispatch_data.dispatch_info.workgroup_size,
+          dispatch_data.dispatch_info.grid_size,
+          dispatch_data.dispatch_info.group_segment_size}] + 1) % iteration_multiplexing_data.num_counter_groups];
+      break;
+
+    default:
+      break;
+  }
+  ROCPROFILER_CALL(
+      rocprofiler_create_counter_config(dispatch_data.dispatch_info.agent_id,
+                                        collect_counters.data(),
+                                        collect_counters.size(), &profile),
+      "construct profile cfg");
+
+  if (tool->iteration_multiplexing_mode != iteration_multiplexing_mode_t::DISABLED){
+    profile_cache.emplace(agent_id, profile);
+  }
+  else {
+    kernel_dispatch_info_t dispatch_info{
+      dispatch_data.dispatch_info.kernel_id,
+      dispatch_data.dispatch_info.queue_id.handle,
+      dispatch_data.dispatch_info.workgroup_size,
+      dispatch_data.dispatch_info.grid_size,
+      dispatch_data.dispatch_info.group_segment_size};
+    update_iteration_multiple_dispatch_record(
+        dispatch_info,
+        tool->iteration_multiplexing_mode,
+        iteration_multiplexing_data);
+  }
+  
   // Return the profile to collect those counters for this dispatch
   *config = profile;
 }
