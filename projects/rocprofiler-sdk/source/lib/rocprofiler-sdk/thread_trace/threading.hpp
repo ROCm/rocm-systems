@@ -36,11 +36,13 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
+/// Performs a blocking async copy while honoring the supplied signal dependency.
 void
 copy_data_sync(void* dst, const void* src, hsa_agent_t dst_agent, hsa_agent_t src_agent, size_t size, Signal* dependency);
 
 typedef decltype(copy_data_sync) copy_data_t;
 
+/// Shared state used to coordinate the producer and consumer sides of the triple buffer.
 struct triple_buffer_shared_data_t
 {
     std::shared_ptr<HsaATTQueue> queue{};
@@ -52,6 +54,7 @@ struct triple_buffer_shared_data_t
     std::array<std::pair<std::mutex, int>, 2> mut{};
 };
 
+/// Parameters passed into the consumer worker thread.
 struct triple_buffer_consumer_data_t
 {
     rocprofiler_thread_trace_shader_data_callback_t callback_fn{};
@@ -59,6 +62,7 @@ struct triple_buffer_consumer_data_t
     std::shared_ptr<triple_buffer_shared_data_t>    shared{};
 };
 
+/// Parameters passed into the producer worker thread.
 struct triple_buffer_producer_data_t
 {
     copy_data_t*                                 copy_data_fn{};

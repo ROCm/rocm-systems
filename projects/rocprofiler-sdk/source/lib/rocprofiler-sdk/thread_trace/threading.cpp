@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Implements the CPU-side producer/consumer loops that service ATT triple buffering.
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -37,6 +38,8 @@ namespace thread_trace
 {
 constexpr double SQTT_BANDWIDTH = 17E9f * 4;  // 17GB/s, times 4 for wiggle room
 
+// Performs a synchronous GPU-to-CPU copy using the async engine, chaining the supplied dependency
+// and reusing a thread-local completion signal to avoid allocation churn.
 void copy_data_sync(void* dst, const void* src, hsa_agent_t dst_agent, hsa_agent_t src_agent, size_t size, Signal* dependency)
 {
     ROCP_FATAL_IF(dependency == nullptr) << "Dependency must not be null";
@@ -71,6 +74,7 @@ consumer_loop(triple_buffer_consumer_data_t parameters)
         size_t parity = read_index % buffer.size();
         auto   lock   = std::unique_lock{mut.at(parity).first};
 
+        // Wait until the producer signals that a new buffer is ready or the trace shuts down.
         write_cv.wait(lock, [&]() { return write_index > read_index || !running; });
 
         if(!running && write_index <= read_index) return;
@@ -133,6 +137,8 @@ producer_loop(triple_buffer_producer_data_t parameters)
                 const bool should_stop = read_index + 1 < write_index;
                 if(should_stop)
                 {
+                    // Slow-consumer path exercised by slow_cpu test: we stop producing when the
+                    // reader lags by more than one buffer and flag the payload accordingly.
                     ROCP_WARNING << "SQTT buffer full!";
                     stop_trace();  // Check is_running so we dont send twice
                     while(read_index + 1 < write_index)
@@ -160,12 +166,14 @@ producer_loop(triple_buffer_producer_data_t parameters)
 
                 if(should_stop)
                 {
+                    // Wake the consumer so it can drain outstanding buffers before we exit.
                     parameters.shared->consumer_running.store(false);
                     write_cv.notify_all();
                     return;
                 }
             }
-            // If a buffer flip has happened, we dont want to sleep due to transfer delay
+            // The status_query test verifies we immediately poll again after consuming a
+            // buffer, so skip the backoff when a flip just occurred.
             do_sleep = false;
             submit_signal.WaitOn();
         }
