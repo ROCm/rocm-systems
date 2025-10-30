@@ -114,17 +114,18 @@ std::string cxa_demangle(std::string_view _mangled_name, int *_status) {
     break;
   }
   case -1: {
-    std::clog << "[rocprofiler-compute] memory allocation failure occurred demangling "
-          << _demangled_name << std::endl;
+    std::clog << "[rocprofiler-compute] memory allocation failure occurred "
+                 "demangling "
+              << _demangled_name << std::endl;
     break;
   }
   case -2: {
     break;
   }
   case -3: {
-    std::clog << "[rocprofiler-compute] Invalid argument in: (\"" << _demangled_name
-          << "\", nullptr, nullptr, " << static_cast<void *>(_status) << ")"
-          << std::endl;
+    std::clog << "[rocprofiler-compute] Invalid argument in: (\""
+              << _demangled_name << "\", nullptr, nullptr, "
+              << static_cast<void *>(_status) << ")" << std::endl;
     break;
   }
   default:

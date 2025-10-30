@@ -51,6 +51,7 @@ from utils.utils import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
+    get_panel_alias,
     is_tcc_channel_counter,
     mibench,
     parse_sets_yaml,
