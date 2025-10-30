@@ -251,7 +251,7 @@ API is including the project's headers and linking to the shared library, the sy
 exported[^1]. Thus, we define `rocprofiler_sdk_EXPORTS` when building the shared library -- with the expectation
 that consumer software linking to the shared library will not define `rocprofiler_sdk_EXPORTS`.
 CMake, by default, when building shared libraries, defines `<target-name>_EXPORTS`. It can be overridden via
-the `DEFINE_SYMBOL` target property (which is useful overridding the output library name via the `OUTPUT_NAME` target property):
+the `DEFINE_SYMBOL` target property (which is useful overriding the output library name via the `OUTPUT_NAME` target property):
 
 ```cmake
 set_target_properties(
