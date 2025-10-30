@@ -55,7 +55,7 @@ add_test(
         --kokkos-trace=no --rocdecode-trace=no --rocjpeg-trace=no --hip-runtime-trace=no
         --hip-compiler-trace=no --hsa-core-trace=no --hsa-amd-trace=no
         --hsa-image-trace=no --hsa-finalizer-trace=no --advanced-thread-trace=no
-        --kernel-rename=no --summary --echo -- ${CMAKE_COMMAND})
+        --kfd-trace=no --kernel-rename=no --summary --echo -- ${CMAKE_COMMAND})
 
 set_tests_properties(
     rocprofv3-test-negate-aggregate-tracing-options-cmd-line

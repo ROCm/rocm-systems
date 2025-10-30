@@ -23,4 +23,5 @@ jobs:
     hsa_image_trace: False
     hsa_finalizer_trace: False
     advanced_thread_trace: False
+    kfd_trace: False
     kernel_rename: False
