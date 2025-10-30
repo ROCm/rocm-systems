@@ -80,8 +80,12 @@ on:
 jobs:
   build-head:
     if: ${{ !inputs.use_external_build_artifacts }}
-    name: Build (${{ github.ref_name || 'HEAD' }})
+    name: Build (HEAD)
     runs-on: ubuntu-latest
+    container:
+        image: rocm/dev-ubuntu-22.04:latest
+        env:
+          DEBIAN_FRONTEND: noninteractive
     env:
       BUILD_DIR: build
       INSTALL_DIR: install
@@ -126,8 +130,12 @@ jobs:
 
   build-baseline:
     if: ${{ !inputs.use_external_build_artifacts }}
-    name: Build (${{ github.base_ref || github.event.repository.default_branch }})
+    name: Build (BASELINE)
     runs-on: ubuntu-latest
+    container:
+        image: rocm/dev-ubuntu-22.04:latest
+        env:
+          DEBIAN_FRONTEND: noninteractive
     # outputs:
     #   tag: ${{ steps.tag.outputs.tag }}
     env:
