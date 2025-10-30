@@ -151,7 +151,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
 
       # Configure the changelog file
       configure_file(
-        "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in"
+        "${CMAKE_SOURCE_DIR}/CHANGELOG.md"
         "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
         @ONLY
       )
