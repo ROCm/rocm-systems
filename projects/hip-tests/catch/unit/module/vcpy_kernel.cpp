@@ -16,7 +16,7 @@ LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 
 extern "C" __global__ void hello_world(float* a, float* b) {
   int tx = threadIdx.x;

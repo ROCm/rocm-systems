@@ -17,7 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 
 #define ARR_SIZE (32 * 32)
 #define SIZE (ARR_SIZE * sizeof(int))

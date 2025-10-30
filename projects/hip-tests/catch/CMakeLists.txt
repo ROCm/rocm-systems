@@ -27,8 +27,10 @@ find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
 if(UNIX)
     find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
-    find_program(GCC_C gcc)
-    find_program(GXX_C g++)
+    find_program(GCC_EXEC gcc)
+    find_program(GXX_EXEC g++)
+else() # Win32
+    find_program(LLVM_RC_EXEC llvm-rc)
 endif()
 
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
@@ -59,7 +61,7 @@ execute_process(COMMAND ${HIPCONFIG_EXEC} --version
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 if(result AND NOT result EQUAL 0)
-  message(FATAL_ERROR "Failure trying to obtain HIP version via command: ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version: ${result}")
+  message(FATAL_ERROR "Failure trying to obtain HIP version via command: ${HIPCONFIG_EXEC} --version: ${result}")
 endif()
 
 if(NOT WIN32)
@@ -343,8 +345,8 @@ else()
 endif()
 
 
-# get_cmake_property(_variableNames VARIABLES)                
-# list (SORT _variableNames)                                  
-# foreach (_variableName ${_variableNames})                   
-#   message(STATUS "${_variableName}=${${_variableName}}")  
-# endforeach()       
+# get_cmake_property(_variableNames VARIABLES)
+# list (SORT _variableNames)
+# foreach (_variableName ${_variableNames})
+#   message(STATUS "${_variableName}=${${_variableName}}")
+# endforeach()
