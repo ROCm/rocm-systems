@@ -31,6 +31,7 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
+/// RAII wrapper around an HSA signal used to synchronize packet submission.
 class Signal
 {
 public:
@@ -50,6 +51,7 @@ private:
     std::atomic<bool> released{false};
 };
 
+/// Helper queue that owns the async DMA path used by thread trace copies.
 class HsaATTQueue
 {
     using code_object_id_t = uint64_t;
@@ -63,6 +65,7 @@ public:
     std::unique_ptr<Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const;
     virtual void Submit(hsa_ext_amd_aql_pm4_packet_t* packet, Signal* completion) const;
 
+    /// Enqueues a sequence of packets and returns the completion signal of the last entry.
     template <typename VecType>
     std::unique_ptr<Signal> SubmitAndSignalLast(VecType vec)
     {
