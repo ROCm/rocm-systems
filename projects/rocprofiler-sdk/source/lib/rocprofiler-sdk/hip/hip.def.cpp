@@ -637,6 +637,10 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetLibrary, hipKernelGetLibrary, hipKernelGetLibrary_fn, library, kernel);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetName, hipKernelGetName, hipKernelGetName_fn, name, kernel);
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 18
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyAvailableDynamicSMemPerBlock, hipOccupancyAvailableDynamicSMemPerBlock, hipOccupancyAvailableDynamicSMemPerBlock_fn, dynamicSmemSize, f, numBlocks, blockSize);
+#endif
 // clang-format on
 
 #else
