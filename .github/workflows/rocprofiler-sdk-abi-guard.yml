@@ -23,3 +23,4 @@ jobs:
       cmake_config_args: "-DROCPROFILER_BUILD_DEBUG=ON"
       cmake_build_type: "RelWithDebInfo"
       install_packages: "libsqlite3-dev libdw-dev"
+      container: "rocm/dev-ubuntu-22.04:7.0.2"
