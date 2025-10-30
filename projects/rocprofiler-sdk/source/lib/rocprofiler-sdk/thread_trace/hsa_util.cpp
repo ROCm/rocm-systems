@@ -41,7 +41,8 @@ namespace thread_trace
 {
 constexpr size_t QUEUE_SIZE = 256;  // Small dedicated queue for SQTT control traffic
 
-Signal::Signal(hsa_ext_amd_aql_pm4_packet_t* packet): Signal()
+Signal::Signal(hsa_ext_amd_aql_pm4_packet_t* packet)
+: Signal()
 {
     packet->completion_signal = signal;
     reset();
@@ -69,13 +70,16 @@ Signal::WaitOn() const
     {}
 }
 
-void Signal::reset()
+void
+Signal::reset()
 {
     CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_store_screlease_fn(signal, 1);
 }
 
 HsaATTQueue::HsaATTQueue(const hsa::AgentCache& agent, size_t double_buffer_size)
-: agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id), hsa_agent(agent.get_hsa_agent()), near_cpu(agent.near_cpu())
+: agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id)
+, hsa_agent(agent.get_hsa_agent())
+, near_cpu(agent.near_cpu())
 , buffer_size(double_buffer_size)
 {
     ROCP_TRACE << "Constructing Async queue.";
@@ -135,10 +139,11 @@ HsaATTQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet, Signal* completion) co
     const auto* slot_data = reinterpret_cast<const uint32_t*>(packet);
 
     memcpy(&queue_slot[1], &slot_data[1], sizeof(hsa_ext_amd_aql_pm4_packet_t) - sizeof(uint32_t));
-    if (completion)
+    if(completion)
     {
         completion->reset();
-        reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(queue_slot)->completion_signal = completion->getSignal();
+        reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(queue_slot)->completion_signal =
+            completion->getSignal();
     }
     auto* header = reinterpret_cast<std::atomic<uint32_t>*>(queue_slot);
 
@@ -150,7 +155,7 @@ std::unique_ptr<Signal>
 HsaATTQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const
 {
     auto signal = std::unique_ptr<Signal>{nullptr};
-    if (bWait) signal = std::make_unique<Signal>();
+    if(bWait) signal = std::make_unique<Signal>();
 
     Submit(packet, signal.get());
     return signal;
