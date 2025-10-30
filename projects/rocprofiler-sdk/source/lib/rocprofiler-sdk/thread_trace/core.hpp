@@ -56,6 +56,9 @@ class AQLPacket;
 
 namespace thread_trace
 {
+/// Collection of user-provided knobs that steer an ATT capture session.
+/// The struct mirrors the public C API parameters and is validated before any
+/// hardware programming happens.
 struct thread_trace_parameter_pack
 {
     rocprofiler_context_id_t                        context_id{0};
@@ -82,6 +85,7 @@ struct thread_trace_parameter_pack
     static constexpr size_t DEFAULT_SE_MASK     = 0x1;
     static constexpr size_t DEFAULT_BUFFER_SIZE = 0x8000000;
 
+    /// Ensures the provided parameters match the hardware contract and public API.
     bool are_params_valid() const;
 };
 
@@ -90,13 +94,18 @@ class ThreadTracerAgent
     using code_object_id_t = uint64_t;
 
 public:
+    /// Owns the lifetime of an ATT queue for a single GPU agent.
     ThreadTracerAgent(thread_trace_parameter_pack _params, rocprofiler_agent_id_t);
     virtual ~ThreadTracerAgent();
 
+    /// Register the provided code object so trace markers have symbol context.
     void load_codeobj(code_object_id_t id, uint64_t addr, uint64_t size);
+    /// Remove a previously registered code object.
     void unload_codeobj(code_object_id_t id);
 
+    /// Acquire a copy of the control packet bundle for a dispatch boundary.
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
+    /// Relay data buffers produced by the ATT to the user-mode callback.
     void iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data);
 
     thread_trace_parameter_pack  params;
@@ -104,7 +113,9 @@ public:
 
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
+    /// Start the trace and spawn helper threads when triple buffering is used.
     std::shared_ptr<Signal> start_thread_trace(std::shared_ptr<std::atomic<bool>> running_flag);
+    /// Stop the trace and flush the outstanding hardware packets.
     std::unique_ptr<Signal> stop_thread_trace();
 
 private:
@@ -130,6 +141,7 @@ public:
     DispatchThreadTracer()  = default;
     ~DispatchThreadTracer() = default;
 
+    /// Initializes shared resources needed by dispatch-based tracing.
     void start_context();
     void stop_context();
     void resource_init();
@@ -147,6 +159,7 @@ public:
                                                     rocprofiler_user_data_t*       user_data,
                                                     const context::correlation_id* corr_id);
 
+    /// Inject the trailing packets once a kernel finishes.
     void        post_kernel_call(inst_pkt_t& aql, const hsa::queue_info_session& session);
     const auto& get_agents() const { return agents; }
 
@@ -164,6 +177,7 @@ public:
     DeviceThreadTracer()  = default;
     ~DeviceThreadTracer() = default;
 
+    /// Initializes shared resources needed by device-wide tracing.
     void start_context();
     void stop_context();
     void resource_init();
@@ -190,9 +204,11 @@ private:
     std::shared_ptr<std::atomic<bool>> worker_flag{nullptr};
 };
 
+/// Install the thread trace service for newly created contexts.
 void
 initialize(HsaApiTable* table);
 
+/// Tear down shared resources when the runtime shuts down.
 void
 finalize();
 
