@@ -344,6 +344,8 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
     if(registration::get_fini_status() > 0)
     {
         auto* _data = static_cast<async_copy_data*>(arg);
+        // Decrement the active signals counter before cleanup
+        if(get_active_signals()) get_active_signals()->fetch_sub(1);
         delete _data;
         return false;
     }
