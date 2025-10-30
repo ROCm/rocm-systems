@@ -1947,6 +1947,8 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   amd::Event& event = CallbackCommand->event();
   constexpr bool kBlocking = false;
   if (!event.setCallback(CL_COMPLETE, GraphExec::DecrementRefCount, this, kBlocking)) {
+    this->release();
+    CallbackCommand->release();
     return hipErrorInvalidHandle;
   }
   CallbackCommand->enqueue();
