@@ -17,6 +17,7 @@ jobs:
     with:
       # required inputs:
       versioning_spec: "project/rocprofiler-sdk/versioning.yml"
+      source_directory: "projects/rocprofiler-sdk"
       # optional tweaks:
       cmake_config_args: "-DROCPROFILER_BUILD_DEBUG=ON -DROCPROFILER_BUILD_CI=ON"
       cmake_build_type: "RelWithDebInfo"
