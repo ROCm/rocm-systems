@@ -49,6 +49,7 @@ class AMDSMILogger():
         self.store_core_json_output = []
         self.store_gpu_json_output = []
         self.store_xgmi_metric_json_output = []
+        self.store_xgmi_source_status_json_output = []
         self.store_xgmi_link_status_json_output = []
         self.store_current_partition_json_output = []
         self.store_memory_partition_json_output = []
@@ -230,7 +231,7 @@ class AMDSMILogger():
                         # Add N/A for empty process_info
                         table_values += "N/A".rjust(17) + "N/A".rjust(9) + "N/A".rjust(10) + \
                                         "N/A".rjust(10) + "N/A".rjust(10) + "N/A".rjust(10) + \
-                                        "N/A".rjust(9) + '\n'
+                                        "N/A".rjust(9) + "N/A".rjust(10) + '\n'
                     else:
                         #Fix this herre
                         for process_key, process_value in process_dict['process_info'].items():
@@ -250,6 +251,8 @@ class AMDSMILogger():
                             elif process_key == "mem_usage":
                                 table_values += string_process_value.rjust(10)
                             elif process_key == "cu_occupancy":
+                                table_values += string_process_value.rjust(9)
+                            elif process_key == "evicted_time":
                                 table_values += string_process_value.rjust(9)
                                 # Add the stored gpu and stored timestamp to the next line
                                 table_values += '\n'
@@ -604,6 +607,8 @@ class AMDSMILogger():
             combined_json["gpu_data"] = self.store_gpu_json_output
         if self.store_xgmi_metric_json_output:
             combined_json["xgmi_metric"] = self.store_xgmi_metric_json_output
+        if self.store_xgmi_source_status_json_output:
+            combined_json["link_port_status"] = self.store_xgmi_source_status_json_output
         if self.store_xgmi_link_status_json_output:
             combined_json["link_status"] = self.store_xgmi_link_status_json_output
         if self.store_current_partition_json_output:

@@ -1,36 +1,41 @@
 #!/usr/bin/env python3
 #
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) Advanced Micro Devices. All rights reserved.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import ctypes
 import inspect
 import json
+import os
 import sys
 import unittest
-sys.path.append("/opt/rocm/libexec/amdsmi_cli/")
+
+
+amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
+if not os.path.exists(amdsmi_path):
+    raise FileNotFoundError(f"AMDSMI_PATH '{amdsmi_path}' does not exist. Please set the correct path in your environment.")
+sys.path.append(amdsmi_path)
 
 try:
     import amdsmi
 except ImportError as exc:
-    raise ImportError("Could not import /opt/rocm/libexec/amdsmi_cli/amdsmi_cli.py") from exc
+    raise ImportError(f'Could not import {amdsmi_path}') from exc
 
 not_supported_error_codes = \
 [
@@ -220,26 +225,26 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
         # expect retry error to raise SmiRetryException
         with self.assertRaises(amdsmi.AmdSmiRetryException) as retry_test:
             amdsmi.amdsmi_interface._check_res(
-                (lambda: amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_RETRY)())
+                (lambda: amdsmi.amdsmi_wrapper.AMDSMI_STATUS_RETRY)())
         # except retry error to have AMDSMI_STATUS_RETRY error code
         self.assertEqual(retry_test.exception.get_error_code(),
-                         amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_RETRY)
+                         amdsmi.amdsmi_wrapper.AMDSMI_STATUS_RETRY)
 
         # expect timeout error to raise SmiTimeoutException
         with self.assertRaises(amdsmi.AmdSmiTimeoutException) as timeout_test:
             amdsmi.amdsmi_interface._check_res(
-                (lambda: amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT)())
+                (lambda: amdsmi.amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT)())
         # except timeout error to have AMDSMI_STATUS_RETRY error code
         self.assertEqual(timeout_test.exception.get_error_code(),
-                         amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT)
+                         amdsmi.amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT)
 
         # expect invalid args error to raise AmdSmiLibraryException
         with self.assertRaises(amdsmi.AmdSmiLibraryException) as inval_test:
             amdsmi.amdsmi_interface._check_res(
-                (lambda: amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL)())
+                (lambda: amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)())
         # expect invalid args error to have AMDSMI_STATUS_INVAL error code
         self.assertEqual(inval_test.exception.get_error_code(),
-                         amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
+                         amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
 
 class TestAmdSmiPython(unittest.TestCase):
 
@@ -257,6 +262,10 @@ class TestAmdSmiPython(unittest.TestCase):
                     msg = f'asic info(gpu={i})'
                     ret = amdsmi.amdsmi_get_gpu_asic_info(gpu)
                     self._print(msg, ret)
+                except amdsmi.AmdSmiLibraryException as e:
+                    raise e
+            for i, gpu in enumerate(self.processors):
+                try:
                     # Print board info
                     msg = f'board info(gpu={i})'
                     ret = amdsmi.amdsmi_get_gpu_board_info(gpu)
@@ -347,9 +356,9 @@ class TestAmdSmiPython(unittest.TestCase):
 
     io_bw_encodings = \
     [
-        ('AGG_BW0', amdsmi.amdsmi_interface.amdsmi_wrapper.AGG_BW0, PASS),
-        ('RD_BW0', amdsmi.amdsmi_interface.amdsmi_wrapper.RD_BW0, PASS),
-        ('WR_BW0', amdsmi.amdsmi_interface.amdsmi_wrapper.WR_BW0, PASS)
+        ('AGG_BW0', amdsmi.amdsmi_wrapper.AGG_BW0, PASS),
+        ('RD_BW0', amdsmi.amdsmi_wrapper.RD_BW0, PASS),
+        ('WR_BW0', amdsmi.amdsmi_wrapper.WR_BW0, PASS)
     ]
 
     event_groups = \
@@ -567,10 +576,10 @@ class TestAmdSmiPython(unittest.TestCase):
                     print(msg, end='')
                 else:
                     print(msg)
-                if isinstance(data, str) or isinstance(data, int):
-                    print(data)
-                else:
+                if isinstance(data, dict) or isinstance(data, list):
                     print(json.dumps(data, sort_keys=False, indent=4), flush=True)
+                else:
+                    print(data)
         return
 
     def _print_func_name(self, msg):
@@ -1794,8 +1803,6 @@ class TestAmdSmiPython(unittest.TestCase):
 
     def test_get_gpu_reg_table_info(self):
         self._print_func_name('')
-        if self.TODO_SKIP_FAIL:
-            self.skipTest("Skipping test_get_gpu_reg_table_info as it fails on MI300.")
         for i, gpu in enumerate(self.processors):
             for reg_type_name, reg_type, reg_type_cond in self.reg_types:
                 msg = f'gpu({i}): reg_type({reg_type_name}):'
@@ -2179,7 +2186,7 @@ class TestAmdSmiPython(unittest.TestCase):
                 ret = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
                 if gpu.value != ret.value:
                     msg += f'{msg}Expected: {gpu.value}, Received: {ret.value}'
-                    self.raise_exception = amdsmi.AmdSmiLibraryException(amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
+                    self.raise_exception = amdsmi.AmdSmiLibraryException(amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
                 else:
                     self._print(msg)
             except amdsmi.AmdSmiLibraryException as e:

@@ -40,12 +40,14 @@ function(generic_package)
         set(ASAN_LINKER_FLAGS "-fsanitize=address")
 
         if(BUILD_SHARED_LIBS)
-            set(ASAN_COMPILER_FLAGS "${ASAN_COMPILER_FLAGS} -shared-libsan")
-            set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -shared-libsan")
+            # Clang-specific flag for shared ASAN library
+            if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+                set(ASAN_COMPILER_FLAGS "${ASAN_COMPILER_FLAGS} -shared-libsan")
+                set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -shared-libsan")
+            endif()
         else()
             set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -static-libsan")
         endif()
-
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ASAN_COMPILER_FLAGS}" PARENT_SCOPE)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_COMPILER_FLAGS}" PARENT_SCOPE)
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ASAN_LINKER_FLAGS}" PARENT_SCOPE)

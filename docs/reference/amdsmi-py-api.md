@@ -1186,6 +1186,7 @@ Field | Description
 `engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
 `memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage in Bytes</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage in Bytes</td></tr><tr><td>`vram_mem`</td><td>Process VRAM memory usage in Bytes</td></tr> </tbody></table>
 `cu_occupancy` | Number of Compute Units utilized
+`evicted_time` | Time that queues are evicted on a GPU in milliseconds
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 
@@ -3534,6 +3535,7 @@ Field | Description
 `vram_usage` | VRAM usage
 `sdma_usage` | SDMA usage in microseconds
 `cu_occupancy` | Compute Unit usage in percents
+`evicted_time` | Time that queues are evicted on a GPU in milliseconds
 
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info` function:
 
@@ -3568,6 +3570,7 @@ Field | Description
 `vram_usage` | VRAM usage
 `sdma_usage` | SDMA usage in microseconds
 `cu_occupancy` | Compute Unit usage in percents
+`evicted_time` | Time that queues are evicted on a GPU in milliseconds
 
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info_by_pid` function:
 

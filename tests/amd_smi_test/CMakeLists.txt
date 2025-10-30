@@ -1,15 +1,10 @@
-# Required Defines first:
-option(INSTALL_GTEST "Install GTest (only useful if GTest is not already installed)" OFF)
-
 # Help tests find libraries at runtime
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags")
 set(CMAKE_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
     CACHE STRING "RUNPATH for tests. Helps find libgtest.so and libamd_smi.so")
 
-# Download and compile googletest
-include(FetchContent)
-FetchContent_Declare(googletest GIT_REPOSITORY https://github.com/google/googletest.git GIT_TAG v1.14.0)
-FetchContent_MakeAvailable(googletest)
+# Use system-installed GTest
+find_package(GTest REQUIRED)
 
 enable_testing()
 
@@ -50,7 +45,7 @@ include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})
-target_link_libraries(${TEST} ${AMD_SMI} GTest::gtest_main c stdc++ pthread)
+target_link_libraries(${TEST} ${AMD_SMI} GTest::gtest c stdc++ pthread)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9")
@@ -65,11 +60,5 @@ install(
 
 install(
     FILES amdsmitst.exclude
-    DESTINATION ${SHARE_INSTALL_PREFIX}/tests
-    COMPONENT ${TESTS_COMPONENT})
-
-# Install googletest libraries with tests
-install(
-    TARGETS gtest gtest_main
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT})

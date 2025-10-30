@@ -45,32 +45,33 @@ set(INC_LIST
     "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_utils.h")
 
 set(RAS_DECODE "ras-decode")
-set(ACA_SRC_DIR "${PROJECT_SOURCE_DIR}/src/${RAS_DECODE}")
-set(SRC_LIST ${SRC_LIST} 
-    ${ACA_SRC_DIR}/aca_decode.c
-    ${ACA_SRC_DIR}/aca_fields.c
-    ${ACA_SRC_DIR}/aca_tables.c
-    ${ACA_SRC_DIR}/aca_version.c
-    ${ACA_SRC_DIR}/boot_decode.c
-    ${ACA_SRC_DIR}/error_map.c
-    ${ACA_SRC_DIR}/json_printer.c
-    ${ACA_SRC_DIR}/json_util.c
-    # ${ACA_SRC_DIR}/main.c
-    ${ACA_SRC_DIR}/ras_decode_api.c
-)
-set(ACA_INC_DIR "${PROJECT_SOURCE_DIR}/include/${RAS_DECODE}")
-set(INC_LIST ${INC_LIST} 
-    ${ACA_INC_DIR}/aca_decode.h
-    ${ACA_INC_DIR}/aca_fields.h
-    ${ACA_INC_DIR}/aca_tables.h
-    ${ACA_INC_DIR}/aca_version.h
-    ${ACA_INC_DIR}/boot_decode.h
-    ${ACA_INC_DIR}/error_map.h
-    ${ACA_INC_DIR}/json_printer.h
-    ${ACA_INC_DIR}/json_util.h
-    ${ACA_INC_DIR}/ras_decode_api.h
-    ${ACA_INC_DIR}/ras_decode_constants.h
-)
+set(RAS_DECODE_REPO "git@github.amd.com:dctools/ras-decode-instinct-staging.git")
+set(RAS_DECODE_SRC_DIR "${PROJECT_SOURCE_DIR}/src/${RAS_DECODE}")
+set(RAS_DECODE_INC_DIR "${PROJECT_SOURCE_DIR}/include/${RAS_DECODE}")
+find_package(Git QUIET)
+if(GIT_FOUND)
+    add_custom_target(
+        ${RAS_DECODE}
+        COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}
+        COMMAND ${GIT_EXECUTABLE} clone ${RAS_DECODE_REPO} -b main ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}
+        COMMAND ${CMAKE_COMMAND} -E remove_directory ${RAS_DECODE_SRC_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}/src ${RAS_DECODE_SRC_DIR}
+        COMMAND ${CMAKE_COMMAND} -E remove_directory ${RAS_DECODE_INC_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}/include ${RAS_DECODE_INC_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Cloning ${RAS_DECODE_REPO} from GitHub"
+        VERBATIM
+    )
+else()
+    message(WARNING "Git not found, cannot clone ${RAS_DECODE_REPO}.")
+endif()
+file(GLOB RAS_DECODE_INCLUDES "${RAS_DECODE_INC_DIR}/*.h")
+file(GLOB RAS_DECODE_SOURCES "${RAS_DECODE_SRC_DIR}/*.c")
+list(REMOVE_ITEM RAS_DECODE_SOURCES "main.c") 
+
+set(SRC_LIST ${SRC_LIST} ${RAS_DECODE_SOURCES})
+set(INC_LIST ${INC_LIST} ${RAS_DECODE_INCLUDES})
+
 if(ENABLE_ESMI_LIB)
     list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi.h)
     list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi_monitor.h)
@@ -92,7 +93,7 @@ target_include_directories(${AMD_SMI} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} 
     ${PROJECT_SOURCE_DIR}/rocm_smi/include
     ${PROJECT_SOURCE_DIR}/common/shared_mutex 
-    ${ACA_INC_DIR}
+    ${RAS_DECODE_INC_DIR}
     ${DRM_INCLUDE_DIRS}
     ${DRM_AMDGPU_INCLUDE_DIRS}                                          
 )

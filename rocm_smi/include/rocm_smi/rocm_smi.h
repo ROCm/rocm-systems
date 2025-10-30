@@ -1471,10 +1471,11 @@ typedef struct {
     uint64_t vram_usage;      //!< VRAM usage
     uint64_t sdma_usage;      //!< SDMA usage in microseconds
     uint32_t cu_occupancy;    //!< Compute Unit usage in percent
+    uint32_t evicted_time;    //!< Time that queues are evicted on a GPU in milliseconds
 } rsmi_process_info_t;
 
 //! CU occupancy invalidation value for the GFX revisions not providing cu_occupancy debugfs method
-#define CU_OCCUPANCY_INVALID 0xFFFFFFFF
+#define KFD_STATS_INVALID 0xFFFFFFFF
 
 /**
  * @brief Opaque handle to function-support object
