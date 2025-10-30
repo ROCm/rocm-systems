@@ -86,6 +86,9 @@ jobs:
         image: rocm/dev-ubuntu-22.04:latest
         env:
           DEBIAN_FRONTEND: noninteractive
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
     env:
       BUILD_DIR: build
       INSTALL_DIR: install
@@ -99,7 +102,13 @@ jobs:
           sudo apt-get install -y git pkg-config build-essential cmake ninja-build ${{ inputs.install_packages }}
 
       - name: Show git branch
+        shell: bash
         run: |
+          set -euov pipefail
+          pwd
+          ls
+          ls -R ${{ github.workspace }}
+          set +v
           echo -n "Branch: "
           git branch --show-current
           echo -n "Commit: "
@@ -143,6 +152,9 @@ jobs:
         image: rocm/dev-ubuntu-22.04:latest
         env:
           DEBIAN_FRONTEND: noninteractive
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
     # outputs:
     #   tag: ${{ steps.tag.outputs.tag }}
     env:
@@ -179,7 +191,13 @@ jobs:
           sudo apt-get install -y git pkg-config build-essential cmake ninja-build ${{ inputs.install_packages }}
 
       - name: Show git branch
+        shell: bash
         run: |
+          set -euov pipefail
+          pwd
+          ls
+          ls -R ${{ github.workspace }}
+          set +v
           echo -n "Branch: "
           git branch --show-current
           echo -n "Commit: "
