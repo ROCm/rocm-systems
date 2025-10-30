@@ -95,7 +95,7 @@ class CountedQueuePoolManager {
 
  private:
   CountedQueuePoolManager() : max_hw_queues_(0) {}
-  ~CountedQueuePoolManager() { /* destroy all hw queues? */ }
+  ~CountedQueuePoolManager();
 
   // Disable copy and assignment
   CountedQueuePoolManager(const CountedQueuePoolManager&) = delete;
@@ -111,7 +111,7 @@ class CountedQueuePoolManager {
   // Map from (agent+priority) to the list of hardware queues each combination of (agent,priority) has
   std::map<uint64_t, std::vector<std::unique_ptr<HardwareQueue>>> hw_queue_pools_;
 
-  // Map from unique queue handle to CountedQueue metadata (includes the hw_queue and callbacks)
+  // Map from unique queue handle to CountedQueue metadata (includes the hw_queue and callbacks used by the appl)
   std::map<hsa_queue_t*, std::unique_ptr<CountedQueue>> counted_queues_;
 
   uint32_t max_hw_queues_;

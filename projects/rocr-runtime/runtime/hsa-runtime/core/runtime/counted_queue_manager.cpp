@@ -242,6 +242,17 @@ void CountedQueuePoolManager::TriggerCallback(hsa_queue_t* queue, hsa_status_t s
   }
 }
 
+CountedQueuePoolManager::~CountedQueuePoolManager() {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  // Delete all logical handles created for users
+  for (auto& q : counted_queues_) {
+    hsa_queue_t* handle = q.first;
+    delete handle;  // free the copy we created with new
+  }
+  counted_queues_.clear();
+}
+
 
 }  // namespace core
 }  // namespace rocr
