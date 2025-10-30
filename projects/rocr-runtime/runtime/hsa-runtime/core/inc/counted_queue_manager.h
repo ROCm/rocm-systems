@@ -93,6 +93,10 @@ class CountedQueuePoolManager {
   hsa_status_t GetQueueInfo(hsa_queue_t* queue, hsa_counted_queue_info_attribute_t attribute,
                             void* value);
 
+  static bool IsInstanceCreated();
+
+  bool IsCountedQueue(hsa_queue_t* queue);
+
  private:
   CountedQueuePoolManager() : max_hw_queues_(0) {}
   ~CountedQueuePoolManager();
@@ -109,11 +113,12 @@ class CountedQueuePoolManager {
   // Map from (agent+priority) to the list of hardware queues each combination of (agent,priority) has
   std::map<uint64_t, std::vector<std::unique_ptr<HardwareQueue>>> hw_queue_pools_;
 
-  // Map from unique queue handle to CountedQueue metadata (includes the hw_queue and callbacks used by the appl)
+  // Map from unique queue handle to CountedQueue metadata (includes the hw_queue and callbacks used)
   std::map<hsa_queue_t*, std::unique_ptr<CountedQueue>> counted_queues_;
 
   uint32_t max_hw_queues_;
   std::mutex mutex_;
+  static std::atomic<bool> instance_created_;
 };
 
 

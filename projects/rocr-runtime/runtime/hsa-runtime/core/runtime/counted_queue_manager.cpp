@@ -50,6 +50,7 @@ namespace rocr {
 namespace core {
 
 constexpr size_t DEFAULT_QUEUE_SIZE = 16384;
+std::atomic<bool> CountedQueuePoolManager::instance_created_{false};
 
 static std::map<hsa_amd_queue_priority_t, HSA_QUEUE_PRIORITY> priomap = {
     {HSA_AMD_QUEUE_PRIORITY_LOW, HSA_QUEUE_PRIORITY_MINIMUM},
@@ -71,7 +72,16 @@ static uint64_t MakePoolKey(hsa_agent_t agent, hsa_amd_queue_priority_t priority
 // Singleton accessor
 CountedQueuePoolManager& CountedQueuePoolManager::Instance() {
   static CountedQueuePoolManager instance;
+  instance_created_ = true;
   return instance;
+}
+
+bool CountedQueuePoolManager::IsInstanceCreated() { return instance_created_.load(); }
+
+bool CountedQueuePoolManager::IsCountedQueue(hsa_queue_t* queue) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (counted_queues_.find(queue) == counted_queues_.end()) return false;
+  return true;
 }
 
 hsa_status_t CountedQueuePoolManager::AcquireQueue(
@@ -142,7 +152,7 @@ HardwareQueue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
   // set given priority
   status = cmd_queue->SetPriority(priomap[priority]);
   if (status != HSA_STATUS_SUCCESS) return nullptr;
-  
+
   // enable profiling
   cmd_queue->SetProfiling(true);
 
@@ -226,6 +236,7 @@ CountedQueuePoolManager::~CountedQueuePoolManager() {
     delete handle;  // free the copy we created with new
   }
   counted_queues_.clear();
+  instance_created_ = false;
 }
 
 

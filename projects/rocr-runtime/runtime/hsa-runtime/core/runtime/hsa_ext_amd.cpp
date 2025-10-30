@@ -715,6 +715,16 @@ hsa_status_t hsa_amd_queue_cu_set_mask(const hsa_queue_t* queue, uint32_t num_cu
 
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
+
+  // Check if queue is counted or non-counted type 
+  // Nack if it is counted type
+  if (core::CountedQueuePoolManager::IsInstanceCreated()) {
+    auto& mgr = core::CountedQueuePoolManager::Instance();
+    if (mgr.IsCountedQueue(const_cast<hsa_queue_t*>(queue))) {
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
+
   if (num_cu_mask_count != 0) IS_BAD_PTR(cu_mask);
   if (num_cu_mask_count % 32 != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   return cmd_queue->SetCUMasking(num_cu_mask_count, cu_mask);
@@ -1184,6 +1194,15 @@ hsa_status_t hsa_amd_queue_set_priority(hsa_queue_t* queue,
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
 
+  // Check if queue is counted or non-counted type 
+  // Nack if it is counted type
+  if (core::CountedQueuePoolManager::IsInstanceCreated()) {
+    auto& mgr = core::CountedQueuePoolManager::Instance();
+    if (mgr.IsCountedQueue(queue)) {
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
+
   // Highest queue priority allowed for HSA user is HSA_QUEUE_PRIORITY_HIGH
   // HSA_QUEUE_PRIORITY_MAXIMUM is reserved for PC Sampling and can only be allocated internally
   // in ROCR
@@ -1584,15 +1603,6 @@ hsa_status_t hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t t
                                            void* data, uint64_t flags, hsa_queue_t** queue) {
   TRY;
   IS_OPEN();
-
-  // support only multi-producer queues in the pool
-  if (type != HSA_QUEUE_TYPE_MULTI) return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
-
-  if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
-  // Create queue pool manager instance if it does not already exist
-  // if it does not exist, create a singleton instance of it
-  // Call acquire queue via manager object
   return core::CountedQueuePoolManager::Instance().AcquireQueue(agent, type, priority, callback, data,
                                                          flags, queue);
   CATCH;
