@@ -156,7 +156,7 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 {
     auto& cb_data = *static_cast<cbdata_t*>(callback_data);
 
-    cb_data.cb_fn(cb_data.agent, shader, buffer, size, *cb_data.userdata);
+    cb_data.cb_fn(cb_data.agent, shader, buffer, size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE, *cb_data.userdata);
     return HSA_STATUS_SUCCESS;
 }
 
@@ -214,6 +214,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
                             0,
                             &buffer_packet.header,
                             sizeof(buffer_packet.header),
+                            ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
                             params.callback_userdata);
 
     auto control_packet = get_control(true);
