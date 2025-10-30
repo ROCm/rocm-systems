@@ -891,6 +891,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     for (auto streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
+          stream->finish();
           constexpr bool kForceDestroy = true;
           hip::Stream::Destroy(stream, kForceDestroy);
         }
@@ -963,8 +964,18 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
   void FindStreamsReqPerDevForSegments();
+  //! Get the parallel streams map for synchronization before destruction
+  const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
+    return parallel_streams_;
+  }
 
  protected:
+  //! Assign streams to segments at a given dependency level
+  void AssignStreamsToSegments(
+      const std::vector<int>& segments_at_level,
+      hip::Stream* launch_stream,
+      const std::vector<hip::Stream*>& streams,
+      std::unordered_map<int, hip::Stream*>& segment_to_stream);
   //! Topological order of the graph doesn't include nodes embedded as part of the child graph
   std::vector<Node> topoOrder_;
   //! parallel streams per device
@@ -1013,8 +1024,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   };
 
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
-  //! Each entry links a packet batch to its segment
-  std::vector<SegmentBatch> segmentBatches_;
+  //! Map from segment ID to SegmentBatch for O(1) lookup
+  std::unordered_map<int, SegmentBatch> segmentBatches_;
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
