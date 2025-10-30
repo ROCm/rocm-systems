@@ -23,6 +23,11 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
+find_package(rocprofiler-sdk-roctx REQUIRED)
+
+set(COMMON_LINK_LIBRARIES
+            rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::tests-common-library rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -47,10 +52,7 @@ add_executable(thread-trace-api-single-test)
 target_sources(
     thread-trace-api-single-test PRIVATE main.cpp trace_callbacks.cpp single_dispatch.cpp
                                          kernel_branch.cpp kernel_lds.cpp)
-target_link_libraries(
-    thread-trace-api-single-test
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+target_link_libraries(thread-trace-api-single-test PRIVATE ${COMMON_LINK_LIBRARIES})
 
 rocprofiler_add_integration_execute_test(
     thread-trace-api-single-test
@@ -66,8 +68,7 @@ target_sources(
                                         kernel_branch.cpp kernel_lds.cpp)
 target_link_libraries(
     thread-trace-api-multi-test
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+    PRIVATE ${COMMON_LINK_LIBRARIES})
 
 rocprofiler_add_integration_execute_test(
     thread-trace-api-multi-test
@@ -83,8 +84,7 @@ target_sources(thread-trace-api-agent-test PRIVATE main.cpp trace_callbacks.cpp 
                                                    kernel_branch.cpp kernel_lds.cpp)
 target_link_libraries(
     thread-trace-api-agent-test
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+    PRIVATE ${COMMON_LINK_LIBRARIES})
 
 rocprofiler_add_integration_execute_test(
     thread-trace-api-agent-test
