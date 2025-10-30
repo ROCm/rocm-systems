@@ -15,9 +15,9 @@ set(TEST_SRC
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code
                    COMMAND ${CMAKE_CXX_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
-                   ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc
-                   -I${HIP_PATH}/include/
-                   -o simple_kernel.code --hip-path=${HIP_PATH}
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc
+                   -o simple_kernel.code
+                   -I${HIP_INCLUDE_DIR}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc)
 
 add_custom_target(simple_kernel ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code)

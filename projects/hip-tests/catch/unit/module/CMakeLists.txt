@@ -39,38 +39,42 @@ set(TEST_SRC
 )
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc
+                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc
+                    -I${HIP_INCLUDE_DIR}
                    -o get_function_module.code
-                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc)
 add_custom_target(get_function_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code)
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   -I${HIP_INCLUDE_DIR}
                    -o launch_kernel_module.code
-                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
 add_custom_target(launch_kernel_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/get_global_test_module.cc
+                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/get_global_test_module.cc
+                   -I${HIP_INCLUDE_DIR}
                    -o get_global_test_module.code
-                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_global_test_module.cc)
 add_custom_target(get_global_test_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code)
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/get_tex_ref_module.cc
+                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/get_tex_ref_module.cc
+                   -I${HIP_INCLUDE_DIR}
                    -o get_tex_ref_module.code
-                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_tex_ref_module.cc)
 add_custom_target(get_tex_ref_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code)
 
 add_custom_target(coopKernel.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
-                  ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/coopKernel.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt
@@ -122,17 +126,20 @@ add_custom_target(copyKernel.code
                   COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 --cuda-device-only
                   ${OFFLOAD_ARCH_STR} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernel.code
+                  -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copyKernel.s
                   COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernel.s
+                  -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(addKernel.code
                   COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 --cuda-device-only -x hip ${OFFLOAD_ARCH_STR}
                   ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/addKernel.code
+                  -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(addKernel.spv
@@ -140,33 +147,47 @@ add_custom_target(addKernel.spv
                   --no-gpu-bundle-output
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
+                  -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(addKernel-bundle.spv
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
+                  -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copyKernelCompressed.code
                   COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 --offload-compress --cuda-device-only ${OFFLOAD_ARCH_STR}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernelCompressed.code
+                  -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
-set(OFFLOAD_ARCH_GENERIC_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
+set(OFFLOAD_ARCH_GENERIC_STR
+  --offload-arch=gfx9-generic
+  --offload-arch=gfx9-4-generic:sramecc+:xnack-
+  --offload-arch=gfx9-4-generic:sramecc-:xnack-
+  --offload-arch=gfx9-4-generic:xnack+
+  --offload-arch=gfx10-1-generic
+  --offload-arch=gfx10-3-generic
+  --offload-arch=gfx11-generic
+  --offload-arch=gfx12-generic
+)
+#set(OFFLOAD_ARCH_GENERIC_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
 add_custom_target(copyKernelGenericTarget.code
                   COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=6 --cuda-device-only ${OFFLOAD_ARCH_GENERIC_STR}
-                  ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernelGenericTarget.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copyKernelGenericTargetCompressed.code
-                  COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=6 --offload-compress --cuda-device-only ${OFFLOAD_ARCH_GENERIC_STR}
-                  ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=6 --offload-compress --cuda-device-only
+                  ${OFFLOAD_ARCH_GENERIC_STR}
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernelGenericTargetCompressed.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
@@ -186,49 +207,49 @@ set(TEST_SRC
 
 add_custom_target(copiousArgKernel.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
-                  ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel0.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=0
-                  ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel0.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel1.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=1
-                  ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel1.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel2.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=2
-                  ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel2.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel3.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=3
-                  ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel3.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel16.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=16
-                  ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel16.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copiousArgKernel17.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
                   -mllvm -amdgpu-kernarg-preload-count=17
-                  ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel17.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
@@ -306,15 +327,30 @@ endif()
 hip_add_exe_to_target(NAME module
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-add_custom_target(managed_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/managed_kernel.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
+add_custom_target(managed_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
+  ${OFFLOAD_ARCH_STR} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp
+  -o ${CMAKE_CURRENT_BINARY_DIR}/../module/managed_kernel.code
+  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
-add_custom_target(vcpy_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/vcpy_kernel.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
+add_custom_target(vcpy_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
+  ${OFFLOAD_ARCH_STR} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp
+  -o ${CMAKE_CURRENT_BINARY_DIR}/../module/vcpy_kernel.code
+  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
-add_custom_target(matmul.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/matmul.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
+add_custom_target(matmul.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
+  -x hip ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp -o
+  ${CMAKE_CURRENT_BINARY_DIR}/../module/matmul.code
+  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
-add_custom_target(kernel_count.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/kernel_count.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
+add_custom_target(kernel_count.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
+  ${OFFLOAD_ARCH_STR} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp -o
+  ${CMAKE_CURRENT_BINARY_DIR}/../module/kernel_count.code
+  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include )
 
-add_custom_target(emptyModuleCount.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/emptyModuleCount.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/emptyModuleCount.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
+add_custom_target(emptyModuleCount.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
+  ${OFFLOAD_ARCH_STR} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/emptyModuleCount.cpp -o
+  ${CMAKE_CURRENT_BINARY_DIR}/../module/emptyModuleCount.code
+  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_dependencies(ModuleTest managed_kernel.code)
 add_dependencies(ModuleTest vcpy_kernel.code)
@@ -322,7 +358,10 @@ add_dependencies(ModuleTest matmul.code)
 add_dependencies(ModuleTest kernel_count.code)
 add_dependencies(ModuleTest emptyModuleCount.code)
 
-add_custom_target(kernel_composite_test.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/kernel_composite_test.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/kernel_composite_test.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
+add_custom_target(kernel_composite_test.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
+  ${OFFLOAD_ARCH_STR} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kernel_composite_test.cpp -o
+  ${CMAKE_CURRENT_BINARY_DIR}/../module/kernel_composite_test.code
+  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code
   ${CMAKE_CURRENT_BINARY_DIR}/matmul.code
