@@ -560,8 +560,15 @@ void Graph::FindPathsRecursiveHierarchical(Node node,
       }
       current_path.clear();
 
+      // For nodes that are both fork and join, save them as their own segment
+      if (saved_join_node != nullptr && is_fork) {
+        std::vector<Node> fork_join_segment = {saved_join_node};
+        savePath(fork_join_segment, saved_join_node->GetDeviceId());
+      }
+
       // Put the join node back in current_path for further traversal
-      if (saved_join_node != nullptr) {
+      // But not if it's also a fork node, because we'll traverse branches separately
+      if (saved_join_node != nullptr && !is_fork) {
         current_path.push_back(saved_join_node);
       }
     }
@@ -627,6 +634,7 @@ void Graph::CreateSegmentsFromPaths(const hip::Graph::GraphExecutionPaths& exec_
     // Map each node in this segment to the segment ID (local to this graph)
     for (const auto& node : segment.nodes) {
       node_to_segment_id_[node] = segment_id;
+      node->segment_id_ = segment_id;
     }
 
     segment_id++;
@@ -1050,9 +1058,9 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
     }
 
     // Create a SegmentBatch for this segment
-    segmentBatches_.emplace_back(segment.id);
+    auto [it, inserted] = segmentBatches_.emplace(segment.id, segment.id);
     // Initialize node_capture_status for this segment
-    auto& currentSegBatch = segmentBatches_.back();
+    auto& currentSegBatch = it->second;
     currentSegBatch.node_capture_status.resize(segment.nodes.size(), false);
     for (size_t i = 0; i < segment.nodes.size(); ++i) {
       auto& node = segment.nodes[i];
@@ -1209,89 +1217,89 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
 
   int segmentId = segIdIt->second;
 
-  // Find the segment batch for this segment ID
-  for (auto& segBatch : segmentBatches_) {
-    if (segBatch.segment_id != segmentId) {
-      continue;
-    }
+  // Find the segment batch for this segment ID using O(1) map lookup
+  auto segBatchIt = segmentBatches_.find(segmentId);
+  if (segBatchIt == segmentBatches_.end()) {
+    return hipSuccess;  // Segment not found
+  }
 
-    // Search only within this segment's packet batches
-    for (auto& packetBatch : segBatch.packet_batches) {
-      auto it = packetBatch.nodeToRangeIndex.find(node);
-      if (it != packetBatch.nodeToRangeIndex.end()) {
-        // Found the batch containing this node - update packets
-        PacketBatch::NodeRange& range = packetBatch.nodeRanges[it->second];
+  auto& segBatch = segBatchIt->second;
 
-        // Capture new packets for this node
-        std::vector<uint8_t*> newPackets;
-        std::vector<std::string> newKernelNames;
-        hipError_t status = node->CaptureAndFormPacket(kernArgManager_, &newPackets,
-                                                                        &newKernelNames);
-        if (status != hipSuccess) {
-          return status;
-        }
-        // Number of packets per node can change
-        const size_t oldPacketCount = range.packetCount;
-        const size_t newPacketCount = newPackets.size();
+  // Search only within this segment's packet batches
+  for (auto& packetBatch : segBatch.packet_batches) {
+    auto it = packetBatch.nodeToRangeIndex.find(node);
+    if (it != packetBatch.nodeToRangeIndex.end()) {
+      // Found the batch containing this node - update packets
+      PacketBatch::NodeRange& range = packetBatch.nodeRanges[it->second];
 
-        if (newPacketCount != oldPacketCount) {
-          const size_t rangeIdx = it->second;
-          const int64_t packetDelta =
-              static_cast<int64_t>(newPacketCount) - static_cast<int64_t>(oldPacketCount);
-
-          ClPrint(
-              amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] Packet count change for node (type=%d): %zu -> %zu packets (delta=%ld)",
-              node->GetType(), oldPacketCount, newPacketCount, packetDelta);
-
-          if (packetDelta > 0) {
-            // Insert additional packet slots at the end of this node's range
-            const size_t insertPos = range.startIndex + oldPacketCount;
-            packetBatch.dispatchPackets.insert(packetBatch.dispatchPackets.begin() + insertPos,
-                                               static_cast<size_t>(packetDelta), nullptr);
-            packetBatch.dispatchKernelNames.insert(
-                packetBatch.dispatchKernelNames.begin() + insertPos,
-                static_cast<size_t>(packetDelta), std::string());
-          } else {
-            // Negative packetDelta, remove excess packet slots from the end of this node's range
-            const size_t removePos = range.startIndex + newPacketCount;
-            const size_t removeCount = oldPacketCount - newPacketCount;
-
-            // Validate bounds before erasing
-            if (removePos + removeCount > packetBatch.dispatchPackets.size()) {
-              ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                      "[hipGraph] Invalid packet removal bounds: pos=%zu, count=%zu, size=%zu",
-                      removePos, removeCount, packetBatch.dispatchPackets.size());
-              return hipErrorInvalidValue;
-            }
-
-            packetBatch.dispatchPackets.erase(
-                packetBatch.dispatchPackets.begin() + removePos,
-                packetBatch.dispatchPackets.begin() + removePos + removeCount);
-            packetBatch.dispatchKernelNames.erase(
-                packetBatch.dispatchKernelNames.begin() + removePos,
-                packetBatch.dispatchKernelNames.begin() + removePos + removeCount);
-          }
-
-          // Update this node's packet count and adjust startIndex for all subsequent nodes
-          range.packetCount = newPacketCount;
-          for (size_t i = rangeIdx + 1; i < packetBatch.nodeRanges.size(); ++i) {
-            packetBatch.nodeRanges[i].startIndex = static_cast<size_t>(
-                static_cast<int64_t>(packetBatch.nodeRanges[i].startIndex) + packetDelta);
-          }
-        }
-
-        // Update dispatch packets (always update regardless of enabled state)
-        // The enabled/disabled check happens during dispatch, not here
-        for (size_t i = 0; i < range.packetCount && i < newPackets.size(); ++i) {
-          size_t packetIndex = range.startIndex + i;
-          packetBatch.dispatchPackets[packetIndex] = newPackets[i];
-          packetBatch.dispatchKernelNames[packetIndex] = newKernelNames[i];
-        }
-        return hipSuccess;
+      // Capture new packets for this node
+      std::vector<uint8_t*> newPackets;
+      std::vector<std::string> newKernelNames;
+      hipError_t status = node->CaptureAndFormPacket(kernArgManager_, &newPackets,
+                                                                      &newKernelNames);
+      if (status != hipSuccess) {
+        return status;
       }
+      // Number of packets per node can change
+      const size_t oldPacketCount = range.packetCount;
+      const size_t newPacketCount = newPackets.size();
+
+      if (newPacketCount != oldPacketCount) {
+        const size_t rangeIdx = it->second;
+        const int64_t packetDelta =
+            static_cast<int64_t>(newPacketCount) - static_cast<int64_t>(oldPacketCount);
+
+        ClPrint(
+            amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] Packet count change for node (type=%d): %zu -> %zu packets (delta=%ld)",
+            node->GetType(), oldPacketCount, newPacketCount, packetDelta);
+
+        if (packetDelta > 0) {
+          // Insert additional packet slots at the end of this node's range
+          const size_t insertPos = range.startIndex + oldPacketCount;
+          packetBatch.dispatchPackets.insert(packetBatch.dispatchPackets.begin() + insertPos,
+                                             static_cast<size_t>(packetDelta), nullptr);
+          packetBatch.dispatchKernelNames.insert(
+              packetBatch.dispatchKernelNames.begin() + insertPos,
+              static_cast<size_t>(packetDelta), std::string());
+        } else {
+          // Negative packetDelta, remove excess packet slots from the end of this node's range
+          const size_t removePos = range.startIndex + newPacketCount;
+          const size_t removeCount = oldPacketCount - newPacketCount;
+
+          // Validate bounds before erasing
+          if (removePos + removeCount > packetBatch.dispatchPackets.size()) {
+            ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+                    "[hipGraph] Invalid packet removal bounds: pos=%zu, count=%zu, size=%zu",
+                    removePos, removeCount, packetBatch.dispatchPackets.size());
+            return hipErrorInvalidValue;
+          }
+
+          packetBatch.dispatchPackets.erase(
+              packetBatch.dispatchPackets.begin() + removePos,
+              packetBatch.dispatchPackets.begin() + removePos + removeCount);
+          packetBatch.dispatchKernelNames.erase(
+              packetBatch.dispatchKernelNames.begin() + removePos,
+              packetBatch.dispatchKernelNames.begin() + removePos + removeCount);
+        }
+
+        // Update this node's packet count and adjust startIndex for all subsequent nodes
+        range.packetCount = newPacketCount;
+        for (size_t i = rangeIdx + 1; i < packetBatch.nodeRanges.size(); ++i) {
+          packetBatch.nodeRanges[i].startIndex = static_cast<size_t>(
+              static_cast<int64_t>(packetBatch.nodeRanges[i].startIndex) + packetDelta);
+        }
+      }
+
+      // Update dispatch packets (always update regardless of enabled state)
+      // The enabled/disabled check happens during dispatch, not here
+      for (size_t i = 0; i < range.packetCount && i < newPackets.size(); ++i) {
+        size_t packetIndex = range.startIndex + i;
+        packetBatch.dispatchPackets[packetIndex] = newPackets[i];
+        packetBatch.dispatchKernelNames[packetIndex] = newKernelNames[i];
+      }
+      return hipSuccess;
     }
-    break;  // Found the segment, no need to continue
   }
   return hipSuccess;  // Node not in any batch
 }
@@ -1312,22 +1320,22 @@ hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* no
 
   int segmentId = segIdIt->second;
 
-  // Find the segment batch for this segment ID
-  for (auto& segBatch : segmentBatches_) {
-    if (segBatch.segment_id != segmentId) {
-      continue;
-    }
+  // Find the segment batch for this segment ID using O(1) map lookup
+  auto segBatchIt = segmentBatches_.find(segmentId);
+  if (segBatchIt == segmentBatches_.end()) {
+    return hipSuccess; // Segment not found
+  }
 
-    // Search only within this segment's packet batches
-    for (auto& packetBatch : segBatch.packet_batches) {
-      auto it = packetBatch.nodeToRangeIndex.find(node);
-      if (it != packetBatch.nodeToRangeIndex.end()) {
-        // Found the batch containing this node - update enabled state
-        packetBatch.setEnabled(node, isEnabled);
-        return hipSuccess;
-      }
+  auto& segBatch = segBatchIt->second;
+
+  // Search only within this segment's packet batches
+  for (auto& packetBatch : segBatch.packet_batches) {
+    auto it = packetBatch.nodeToRangeIndex.find(node);
+    if (it != packetBatch.nodeToRangeIndex.end()) {
+      // Found the batch containing this node - update enabled state
+      packetBatch.setEnabled(node, isEnabled);
+      return hipSuccess;
     }
-    break; // Found the segment, no need to continue
   }
   return hipSuccess;
 }
@@ -1337,6 +1345,46 @@ hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* no
 void GraphExec::DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data) {
   GraphExec* graphExec = reinterpret_cast<GraphExec*>(user_data);
   graphExec->release();
+}
+
+// ================================================================================================
+void GraphExec::AssignStreamsToSegments(
+    const std::vector<int>& segments_at_level,
+    hip::Stream* launch_stream,
+    const std::vector<hip::Stream*>& streams,
+    std::unordered_map<int, hip::Stream*>& segment_to_stream) {
+
+  // Assign streams to segments at this level using round-robin
+  for (size_t idx = 0; idx < segments_at_level.size(); ++idx) {
+    int segment_id = segments_at_level[idx];
+    const auto& segment = segments_[segment_id];
+
+    // Determine device ID for this segment from its first node
+    int segment_device_id = launch_stream->DeviceId();
+    if (!segment.nodes.empty() && segment.first_node != nullptr) {
+      segment_device_id = segment.first_node->GetDeviceId();
+    }
+
+    hip::Stream* assigned_stream = nullptr;
+
+    // Use collision-handled streams if provided (single-device case)
+    if (!streams.empty()) {
+      // Round-robin across the collision-handled streams
+      size_t stream_idx = idx % streams.size();
+      assigned_stream = streams[stream_idx];
+    } else if (parallel_streams_.find(segment_device_id) != parallel_streams_.end() &&
+               !parallel_streams_[segment_device_id].empty()) {
+      // Multi-device case: Use device-aware stream selection from parallel_streams_
+      const auto& device_streams = parallel_streams_[segment_device_id];
+      size_t stream_idx = idx % (device_streams.size() + 1);
+      assigned_stream = (stream_idx == 0) ? launch_stream : device_streams[stream_idx - 1];
+    } else {
+      // Fallback to launch stream if no parallel streams available
+      assigned_stream = launch_stream;
+    }
+
+    segment_to_stream[segment_id] = assigned_stream;
+  }
 }
 
 // ================================================================================================
@@ -1385,36 +1433,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     }
 
     // Assign streams to segments at this level
-    for (size_t idx = 0; idx < segments_at_level.size(); ++idx) {
-      int segment_id = segments_at_level[idx];
-      const auto& segment = segments_[segment_id];
-
-      // Determine device ID for this segment from its first node
-      int segment_device_id = launch_stream->DeviceId();
-      if (!segment.nodes.empty() && segment.first_node != nullptr) {
-        segment_device_id = segment.first_node->GetDeviceId();
-      }
-
-      hip::Stream* assigned_stream = nullptr;
-
-      // Use collision-handled streams if provided (single-device case)
-      if (!streams.empty()) {
-        // Round-robin across the collision-handled streams
-        size_t stream_idx = idx % streams.size();
-        assigned_stream = streams[stream_idx];
-      } else if (parallel_streams_.find(segment_device_id) != parallel_streams_.end() &&
-                 !parallel_streams_[segment_device_id].empty()) {
-        // Multi-device case: Use device-aware stream selection from parallel_streams_
-        const auto& device_streams = parallel_streams_[segment_device_id];
-        size_t stream_idx = idx % (device_streams.size() + 1);
-        assigned_stream = (stream_idx == 0) ? launch_stream : device_streams[stream_idx - 1];
-      } else {
-        // Fallback to launch stream if no parallel streams available
-        assigned_stream = launch_stream;
-      }
-
-      segment_to_stream[segment_id] = assigned_stream;
-    }
+    AssignStreamsToSegments(segments_at_level, launch_stream, streams, segment_to_stream);
 
     // Process each segment at this level
     for (int segment_id : segments_at_level) {
@@ -1554,13 +1573,11 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
                                      amd::AccumulateCommand* accumulate) {
   hipError_t status = hipSuccess;
 
-  // Find the SegmentBatch for this segment
+  // Find the SegmentBatch for this segment using O(1) map lookup
   SegmentBatch* segBatch = nullptr;
-  for (auto& sb : segmentBatches_) {
-    if (sb.segment_id == segment.id) {
-      segBatch = &sb;
-      break;
-    }
+  auto segBatchIt = segmentBatches_.find(segment.id);
+  if (segBatchIt != segmentBatches_.end()) {
+    segBatch = &segBatchIt->second;
   }
 
   size_t batchIndex = 0;
@@ -1609,7 +1626,9 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
   // Process all nodes in this segment
   for (size_t i = 0; i < segment.nodes.size(); ++i) {
     auto& node = segment.nodes[i];
-
+    if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+      node->stream_id_ = stream->GetStreamId();
+    }
     if (!node->GraphCaptureEnabled()) {
       // Node doesn't support capture - execute individually
       node->SetStream(stream);
@@ -1645,7 +1664,11 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
             return status;
           }
         }
-
+        if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+          for(int j = i; j < i + packetBatch.nodeRanges.size(); j++) {
+            segment.nodes[j]->stream_id_ = stream->GetStreamId();
+          }
+        }
         // Skip all consecutive captured nodes that belong to this batch
         i += packetBatch.nodeRanges.size() - 1;  // -1 because loop will increment
         ++batchIndex;
@@ -1857,6 +1880,8 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
   return true;
 }
 
+hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned int flags);
+
 // ================================================================================================
 hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   hipError_t status = hipSuccess;
@@ -1922,6 +1947,16 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     if (last_cmd != nullptr) {
       last_cmd->release();
     }
+    if (DEBUG_HIP_GRAPH_DOT_PRINT && !graph_dumped_) {
+      graph_dumped_ = true;
+      std::string filename =
+        "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_1";
+      hipError_t status = ihipGraphDebugDotPrint(this, filename.c_str(), 0);
+      if (status == hipSuccess) {
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] graph dump:%s",
+                filename.c_str());
+      }
+    }
   } else if (max_streams_ == 1 && instantiateDeviceId_ != launch_stream->DeviceId()) {
     for (int i = 0; i < topoOrder_.size(); i++) {
       topoOrder_[i]->SetStream(launch_stream);
@@ -1947,6 +1982,8 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   amd::Event& event = CallbackCommand->event();
   constexpr bool kBlocking = false;
   if (!event.setCallback(CL_COMPLETE, GraphExec::DecrementRefCount, this, kBlocking)) {
+    this->release();
+    CallbackCommand->release();
     return hipErrorInvalidHandle;
   }
   CallbackCommand->enqueue();
