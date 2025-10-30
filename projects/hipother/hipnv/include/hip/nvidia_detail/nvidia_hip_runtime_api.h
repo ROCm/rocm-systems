@@ -3179,6 +3179,12 @@ inline static hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, 
       gridSize, blockSize, f, NULL, dynSharedMemPerBlk, blockSizeLimit));
 }
 
+inline static hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* func,
+                                                                  int numBlocks, int blockSize) {
+  return hipCUDAErrorTohipError(cudaOccupancyAvailableDynamicSMemPerBlock(
+      dynamicSmemSize, func, numBlocks, blockSize));
+}
+
 // TODO - Match CUoccupancyB2DSize
 inline static hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
     int* gridSize, int* blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit,
@@ -3672,6 +3678,19 @@ inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrar
   return hipCUResultTohipError(cuLibraryGetKernelCount(count, library));
 }
 
+inline static hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library) {
+  return hipCUResultTohipError(cuLibraryEnumerateKernels(kernels, numKernels, library));
+}
+
+inline static hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
+  return hipCUResultTohipError(cuKernelGetLibrary(library, kernel));
+}
+
+inline static hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
+  return hipCUResultTohipError(cuKernelGetName(name, kernel));
+}
+
 inline static hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
                                          dim3 dimBlocks, void** args, size_t sharedMemBytes,
                                          hipStream_t stream) {
@@ -4030,6 +4049,13 @@ inline static hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
     int* numBlocks, T func, int blockSize, size_t dynamicSMemSize, unsigned int flags) {
   return hipCUDAErrorTohipError(cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
       numBlocks, func, blockSize, dynamicSMemSize, flags));
+}
+
+template <class T>
+inline static hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, T func,
+                                                                  int numBlocks, int blockSize) {
+  return hipCUDAErrorTohipError(cudaOccupancyAvailableDynamicSMemPerBlock(
+      dynamicSmemSize, func, numBlocks, blockSize));
 }
 
 #if CUDA_VERSION < CUDA_12000
