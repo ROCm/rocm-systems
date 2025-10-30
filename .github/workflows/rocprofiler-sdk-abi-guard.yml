@@ -1,0 +1,23 @@
+name: Rocprofiler-SDK ABI Guard
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  abi:
+    uses: ./.github/workflows/abi-guard.yml
+    with:
+      # required inputs:
+      versioning_spec: "project/rocprofiler-sdk/versioning.yml"
+      # optional tweaks:
+      cmake_config_args: "-DROCPROFILER_BUILD_DEBUG=ON -DROCPROFILER_BUILD_CI=ON"
+      cmake_build_type: "RelWithDebInfo"
+      install_packages: "libsqlite3-dev"

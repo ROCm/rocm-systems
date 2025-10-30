@@ -1,0 +1,234 @@
+name: ABI Guard Workflow using libabigail
+
+on:
+  workflow_call:
+    inputs:
+      versioning_spec:
+        description: "Path to versioning specification file."
+        required: true
+        type: string
+
+      # MODE
+      use_external_build_artifacts:
+        description: "If true, skip building here and use artifacts supplied by the caller."
+        required: false
+        type: boolean
+        default: false
+
+      # Build / repo inputs (used when not using external artifacts)
+      cmake_build_type:
+        description: "CMAKE_BUILD_TYPE for both builds."
+        required: false
+        type: string
+        default: "RelWithDebInfo"
+
+      cmake_generator:
+        description: "CMake generator."
+        required: false
+        type: string
+        default: "Ninja"
+
+      cmake_config_args:
+        description: "Extra CMake configure args (space-separated)."
+        required: false
+        type: string
+        default: ""
+
+      install_packages:
+        description: "Extra apt packages to install (space-separated)."
+        required: false
+        type: string
+        default: ""
+
+      tag_pattern:
+        description: "Pattern for baseline semver tags."
+        required: false
+        type: string
+        default: "v[0-9]*.[0-9]*.[0-9]*"
+
+      # Artifact/glob inputs
+      head_artifact_name:
+        description: "Artifact name for HEAD build (when use_external_build_artifacts=true)."
+        required: false
+        type: string
+        default: "build-head"
+
+      baseline_artifact_name:
+        description: "Artifact name for baseline build (when use_external_build_artifacts=true)."
+        required: false
+        type: string
+        default: "build-baseline"
+
+      abidw_args:
+        description: "Additional args for abidw."
+        required: false
+        type: string
+        default: ""
+
+      abidiff_args:
+        description: "Additional args for abidiff."
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  build-head:
+    if: ${{ !inputs.use_external_build_artifacts }}
+    name: Build (HEAD)
+    runs-on: ubuntu-latest
+    env:
+      BUILD_DIR: build
+      INSTALL_DIR: install
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config build-essential cmake ninja-build ${{ inputs.install_packages }}
+
+    #   - name: Cache CMake build (HEAD)
+    #     uses: actions/cache@v4
+    #     with:
+    #       path: ${{ env.BUILD_DIR }}
+    #       key: cmake-${{ runner.os }}-head-${{ hashFiles('CMakeLists.txt', '**/*.cmake', inputs.version_file) }}
+    #       restore-keys: |
+    #         cmake-${{ runner.os }}-head-
+
+      - name: Configure
+        run: cmake -S . -B ${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
+
+      - name: Build
+        run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target install --parallel 8
+
+      - name: List Files
+        shell: bash
+        run: |
+          set -euov pipefail
+          pwd
+          ls
+          ls -R ${{ github.workspace }}
+
+      - name: Upload HEAD build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-head
+          path: |
+            ${{ github.workspace }}/
+          if-no-files-found: error
+
+  build-baseline:
+    if: ${{ !inputs.use_external_build_artifacts }}
+    name: Build (baseline tag)
+    runs-on: ubuntu-latest
+    # outputs:
+    #   tag: ${{ steps.tag.outputs.tag }}
+    env:
+      BUILD_DIR: build
+      INSTALL_DIR: install
+      OLD_SRC: baseline-src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.base_ref || github.event.repository.default_branch }}
+
+    #   - name: Determine baseline tag
+    #     id: tag
+    #     shell: bash
+    #     run: |
+    #       set -euo pipefail
+    #       git fetch --tags --force
+    #       BASE_BRANCH="${{ github.base_ref || github.event.repository.default_branch }}"
+    #       MB=$(git merge-base HEAD "origin/${BASE_BRANCH}")
+    #       TAG=$(git tag --merged "$MB" --list '${{ inputs.tag_pattern }}' --sort=-version:refname | head -n1)
+    #       if [[ -z "$TAG" ]]; then
+    #         echo "No baseline tag found matching pattern: ${{ inputs.tag_pattern }}"
+    #         exit 1
+    #       fi
+    #       echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+    #   - name: Prepare worktree
+    #     run: git worktree add "$OLD_SRC" "${{ steps.tag.outputs.tag }}"
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config build-essential cmake ninja-build ${{ inputs.install_packages }}
+
+    #   - name: Cache CMake build (baseline)
+    #     uses: actions/cache@v4
+    #     with:
+    #       path: ${{ env.BUILD_DIR }}
+    #       key: cmake-${{ runner.os }}-baseline-${{ steps.tag.outputs.tag }}-${{ hashFiles(format('{0}/CMakeLists.txt', env.OLD_SRC), format('{0}/**/*.cmake', env.OLD_SRC)) }}
+    #       restore-keys: |
+    #         cmake-${{ runner.os }}-baseline-
+
+      - name: Configure
+        run: cmake -S . -B ${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
+
+      - name: Build
+        run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target install --parallel 8
+
+      - name: List Files
+        shell: bash
+        run: |
+          set -euov pipefail
+          pwd
+          ls
+          ls -R ${{ github.workspace }}
+
+      - name: Upload baseline build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-baseline
+          path: |
+            ${{ github.workspace }}/
+          if-no-files-found: error
+
+  abi-guard:
+    name: ABI Guard
+    runs-on: ubuntu-latest
+    needs: ${{ inputs.use_external_build_artifacts && fromJSON('[]') || fromJSON('["build-head","build-baseline"]') }}
+    env:
+      VERSIONING_SPEC: ${{ inputs.versioning_spec }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Install libabigail
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libabigail libabigail-tools
+
+      - name: Download HEAD artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.use_external_build_artifacts && inputs.head_artifact_name || 'build-head' }}
+          path: build-head/
+
+      - name: Download baseline artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.use_external_build_artifacts && inputs.baseline_artifact_name || 'build-baseline' }}
+          path: build-baseline/
+
+      - name: Run ABI Guard (Python)
+        run: |
+          python3 scripts/abi_guard.py check \
+            -i "build-head/${{ inputs.versioning_spec }}" \
+            -b "build-baseline/${{ inputs.versioning_spec }}" \
+            --abidw-args "${{ inputs.abidw_args }}" \
+            --abidiff-args "${{ inputs.abidiff_args }}" \
+            --report-dir "abi-guard/diff-reports" \
+            --abi-base-dir "abi-guard/abi-base" \
+            --abi-head-dir "abi-guard/abi-head"
+
+      - name: Upload abidiff reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: abi-guard-diff-reports
+          path: abi-guard/diff-reports/
+          if-no-files-found: ignore
