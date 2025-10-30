@@ -89,7 +89,7 @@ worker_loop(hsa::SQTTBufferingPackets packets, triple_buffer_worker_data_t param
             // std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
             parameters.callback_fn(
-                queue.agent_id, 0, buffer.at(parity), buffer_size, parameters.userdata);
+                queue.agent_id, 0, buffer.at(parity), buffer_size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE, parameters.userdata);
             read_index.fetch_add(1);
 
             auto duration = (std::chrono::system_clock::now() - t0).count();
