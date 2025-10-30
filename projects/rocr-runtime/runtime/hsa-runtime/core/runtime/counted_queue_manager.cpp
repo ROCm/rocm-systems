@@ -49,6 +49,8 @@ namespace rocr {
 
 namespace core {
 
+constexpr size_t DEFAULT_QUEUE_SIZE = 16384;
+
 static std::map<hsa_amd_queue_priority_t, HSA_QUEUE_PRIORITY> priomap = {
     {HSA_AMD_QUEUE_PRIORITY_LOW, HSA_QUEUE_PRIORITY_MINIMUM},
     {HSA_AMD_QUEUE_PRIORITY_NORMAL, HSA_QUEUE_PRIORITY_NORMAL},
@@ -133,17 +135,18 @@ HardwareQueue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
   core::Queue* cmd_queue = nullptr;
   core::Agent* gpu_agent = core::Agent::Convert(agent);
   hsa_status_t status =
-      gpu_agent->QueueCreate(0, type, 0, callback, data, 0, 0, &cmd_queue);  // size of queue??
+      gpu_agent->QueueCreate(DEFAULT_QUEUE_SIZE, type, 0, callback, data, 0, 0, &cmd_queue);
   if (status != HSA_STATUS_SUCCESS) return nullptr;
   assert(cmd_queue != nullptr);
 
+  // set given priority
   status = cmd_queue->SetPriority(priomap[priority]);
-  // is this how queue priority is set?
-  // what else needs to be set after above API call?
   if (status != HSA_STATUS_SUCCESS) return nullptr;
+  
+  // enable profiling
+  cmd_queue->SetProfiling(true);
 
   new_hw_queue = core::Queue::Convert(cmd_queue);
-
   // Create HardwareQueue wrapper for newly created hwQueue
   auto hw_queue = std::make_unique<HardwareQueue>(new_hw_queue, priority, agent);
   HardwareQueue* result = hw_queue.get();
@@ -211,31 +214,6 @@ hsa_status_t CountedQueuePoolManager::GetQueueInfo(hsa_queue_t* queue,
 
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-}
-
-void CountedQueuePoolManager::TriggerCallback(hsa_queue_t* queue, hsa_status_t status) {
-  void (*callback)(hsa_status_t, hsa_queue_t*, void*) = nullptr;
-  void* callback_data = nullptr;
-
-  {
-    // Use mutex while searching counted_queues_ only
-    // release and then execute the callback function
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    auto it = counted_queues_.find(queue);
-    if (it == counted_queues_.end()) {
-      return;
-    }
-
-    CountedQueue* cq = it->second.get();
-    callback = cq->callback;
-    callback_data = cq->callback_data;
-  }
-
-  // Execute the found callback, if any
-  if (callback) {
-    callback(status, queue, callback_data);
   }
 }
 

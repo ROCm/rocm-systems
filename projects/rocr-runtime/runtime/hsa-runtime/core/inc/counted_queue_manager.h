@@ -106,8 +106,6 @@ class CountedQueuePoolManager {
                                            void (*callback)(hsa_status_t, hsa_queue_t*, void*),
                                            void* data, uint64_t flags);
 
-  void TriggerCallback(hsa_queue_t* queue, hsa_status_t status);  // where to call this?
-
   // Map from (agent+priority) to the list of hardware queues each combination of (agent,priority) has
   std::map<uint64_t, std::vector<std::unique_ptr<HardwareQueue>>> hw_queue_pools_;
 
