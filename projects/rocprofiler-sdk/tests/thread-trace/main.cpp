@@ -38,7 +38,7 @@
 #define HIP_API_CALL(CALL) assert((CALL) == hipSuccess)
 
 #define SHM_SIZE  64
-#define LOOPCOUNT 4
+#define LOOPCOUNT 15
 
 __global__ void
 branching_kernel(float* __restrict__ a, const float* __restrict__ b, const float* __restrict__ c);
