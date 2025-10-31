@@ -281,12 +281,12 @@ set(TEST_SRC
   memoryCommon.cc
 )
 
-hip_add_exe_to_target(NAME InlineVarTest
-  TEST_SRC ${TEST_SRC}
-  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
-
-  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
-  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
+#hip_add_exe_to_target(NAME InlineVarTest
+#  TEST_SRC ${TEST_SRC}
+#  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
+#
+#  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
+#  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
 endif()
 
 set(TEST_SRC

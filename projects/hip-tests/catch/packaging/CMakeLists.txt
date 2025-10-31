@@ -66,6 +66,7 @@ get_property(INSTALL_EXE_TARGETS GLOBAL PROPERTY G_INSTALL_EXE_TARGETS)
 get_property(INSTALL_CUSTOM_TARGETS GLOBAL PROPERTY G_INSTALL_CUSTOM_TARGETS)
 get_property(INSTALL_SRC_FILES GLOBAL PROPERTY G_INSTALL_SRC_FILES)
 get_property(INSTALL_HEADER_FILES GLOBAL PROPERTY G_INSTALL_HEADER_FILES)
+get_property(INSTALL_SCRIPT_FILES GLOBAL PROPERTY G_INSTALL_SCRIPT_TARGETS)
 # Create top level CTestTestfile.cmake
 file(WRITE ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/CTestTestfile.cmake ${_autogen})
 foreach(CTEST_INCLUDE_FILE ${INSTALL_CTEST_INCLUDE_FILES})
@@ -127,6 +128,9 @@ set(CPACK_SYSTEM_NAME "")
 set(CPACK_GENERATOR "ZIP" CACHE STRING "Windows package types for catch tests")
 set(CPACK_TEST_ZIP "ON")
 set(CPACK_ZIP_TEST_PACKAGE_NAME "catch")
+set(CPACK_PKG_DIRS
+    ${CMAKE_BINARY_DIR}/_CPack_Packages/${CPACK_GENERATOR}/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME})
+set(INSTALL_DIR ${CPACK_PKG_DIRS})
 endif()
 
 set(INSTALL_DIR_TESTS ${INSTALL_DIR}/${CATCH_BUILD_DIR})
@@ -134,10 +138,10 @@ set(INSTALL_DIR_SCRIPT ${INSTALL_DIR}/${CATCH_BUILD_DIR}/script)
 set(INSTALL_DIR_SRC ${INSTALL_DIR}/${CATCH_BUILD_DIR}/src)
 set(INSTALL_DIR_HEADERS ${INSTALL_DIR}/${CATCH_BUILD_DIR}/headers)
 # install catch scripts
-install(FILES
-        ${ADD_SCRIPT_PATH}
-        ${CATCH_INCLUDE_PATH}
-        DESTINATION ${INSTALL_DIR_SCRIPT})
+foreach(CATCH_SCRIPT_FILE ${INSTALL_SCRIPT_FILES})
+  install(FILES ${CATCH_SCRIPT_FILE} DESTINATION ${INSTALL_DIR_SCRIPT})
+endforeach()
+
 # install cmake include files
 foreach(CTEST_INCLUDE_FILE ${INSTALL_CTEST_INCLUDE_FILES})
   install(FILES ${CTEST_INCLUDE_FILE} DESTINATION ${INSTALL_DIR_SCRIPT})
@@ -172,4 +176,12 @@ install(FILES ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt DESTINATION
 install(DIRECTORY
         ${HIP_TEST_CONFIG_BINARY_DIR}
         DESTINATION ${INSTALL_DIR_TESTS})
+# workaround to make the built test binaries portable
+# CPACK_GENERATOR executes this packaging/CMakeLists.txt multiple times
+# there is no way to check which generator is being used. 
+# So had to be written in a config file for each generator to replace and execute
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/catch_package.cmake.in
+               ${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake @ONLY)
+set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake")
+
 include(CPack)

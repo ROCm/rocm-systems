@@ -54,6 +54,7 @@ function(hip_add_exe_to_target)
       if(EXISTS "${PROP_RC}/catchProp.res")
         set(_LINKER_LIBS ${_LINKER_LIBS} "${PROP_RC}/catchProp.res")
       endif()
+      #set_property(TARGET ${_EXE_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
     endif()
 
     if(DEFINED _LINKER_LIBS)
@@ -74,7 +75,9 @@ function(hip_add_exe_to_target)
     endforeach()
     # add binary to global list of binaries to install
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ${_EXE_NAME})
-    catch_discover_tests("${_EXE_NAME}" PROPERTIES SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST")
+    catch_discover_tests("${_EXE_NAME}" DISCOVERY_MODE PRE_TEST PROPERTIES SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST")
+    file(GLOB CTEST_INC_FILES "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}-*_include.cmake")
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${CTEST_INC_FILES})
 
     if(NOT STANDALONE_TESTS EQUAL "1")
       break()
