@@ -36,6 +36,7 @@ constexpr auto kernel_name2 = "copy_ker";
  * Test Description
  * ------------------------
  * - Test case verifies the positive case of hipModuleGetLoadingMode API.
+ * - Verifies the default mode. Default mode is Lazy.
  * Test source
  * ------------------------
  * - catch/unit/module/hipModuleGetLoadingMode.cc
@@ -43,15 +44,31 @@ constexpr auto kernel_name2 = "copy_ker";
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_UnitTest_1") {
+TEST_CASE("Unit_hipModuleGetLoadingMode_DefaultModeCheck") {
   hipModuleLoadingMode_t mode;
-  if (setenv("HIP_MODULE_LOADING", "EAGER", 1) != 0) {
+  HIP_CHECK(hipModuleGetLoadingMode(&mode));
+  REQUIRE(mode == HIP_MODULE_LAZY_LOADING);
+}
+/**
+ * Test Description
+ * ------------------------
+ * - Test case verifies the positive case of hipModuleGetLoadingMode API.
+ * - Verifies the Eager mode after setting the env var HIP_MODULE_LOADING.
+ * Test source
+ * ------------------------
+ * - catch/unit/module/hipModuleGetLoadingMode.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipModuleGetLoadingMode_EagerModeCheck") {
+  hipModuleLoadingMode_t mode;
+  if (setenv("HIP_MODULE_LOADING", "EAGER", 1) != 0 ) {
     HIP_CHECK(hipModuleGetLoadingMode(&mode));
-    REQUIRE(mode == HIP_MODULE_LAZY_LOADING); // Default mode is lazy mode
+    REQUIRE(mode == HIP_MODULE_LAZY_LOADING);  // Default mode is lazy mode
   } else {
     HIP_CHECK(hipModuleGetLoadingMode(&mode));
-    REQUIRE(mode ==
-            HIP_MODULE_EAGER_LOADING); // if env var HIP_MODULE_LOADING = EAGER
+    REQUIRE(mode == HIP_MODULE_EAGER_LOADING);  // if env var HIP_MODULE_LOADING = EAGER
   }
   unsetenv("HIP_MODULE_LOADING");
 }
@@ -66,7 +83,7 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_UnitTest_1") {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_UnitTest_2") {
+TEST_CASE("Unit_hipModuleGetLoadingMode_modeBasedKernel") {
   float *Ad, *Bd;
   std::vector<float> A(LEN, 1.0f), B(LEN, 0.0f);
 
@@ -82,7 +99,8 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_UnitTest_2") {
   if (mode == HIP_MODULE_EAGER_LOADING) {
     HIP_CHECK(hipModuleLoad(&Module, codeObjFile1));
     HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name1));
-  } else if (mode == HIP_MODULE_LAZY_LOADING) {
+  }
+  else if (mode == HIP_MODULE_LAZY_LOADING) {
     HIP_CHECK(hipModuleLoad(&Module, codeObjFile2));
     HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name2));
   }
@@ -90,17 +108,17 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_UnitTest_2") {
   HIP_CHECK(hipStreamCreate(&stream));
 
   struct {
-    void *_Ad;
-    void *_Bd;
+    void* _Ad;
+    void* _Bd;
   } args;
-  args._Ad = reinterpret_cast<void *>(Ad);
-  args._Bd = reinterpret_cast<void *>(Bd);
+  args._Ad = reinterpret_cast<void*>(Ad);
+  args._Bd = reinterpret_cast<void*>(Bd);
   size_t size = sizeof(args);
 
-  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+                    HIP_LAUNCH_PARAM_END};
   HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
-                                  reinterpret_cast<void **>(&config)));
+                                  reinterpret_cast<void**>(&config)));
 
   HIP_CHECK(hipStreamDestroy(stream));
 
@@ -114,9 +132,11 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_UnitTest_2") {
   HIP_CHECK(hipModuleUnload(Module));
 }
 
-void setMode() { setenv("HIP_MODULE_LOADING", "EAGER", 1); }
+void setMode() {
+  setenv("HIP_MODULE_LOADING", "EAGER", 1);
+}
 
-void ChkMode() {
+void ChkMode(){
   hipModuleLoadingMode_t mode;
   HIP_CHECK(hipModuleGetLoadingMode(&mode));
   REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
