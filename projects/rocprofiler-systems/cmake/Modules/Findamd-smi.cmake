@@ -70,7 +70,6 @@ find_package_handle_standard_args(
 
 if(amd-smi_FOUND)
     add_library(amd-smi::amd-smi INTERFACE IMPORTED)
-    add_library(amd-smi::roctx INTERFACE IMPORTED)
     set(amd-smi_INCLUDE_DIRS ${amd-smi_INCLUDE_DIR})
     set(amd-smi_LIBRARIES ${amd-smi_LIBRARY})
     set(amd-smi_LIBRARY_DIRS ${amd-smi_LIBRARY_DIR})
