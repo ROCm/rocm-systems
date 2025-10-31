@@ -54,10 +54,6 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
-#ifdef ROCCLR_SUPPORT_NUMA_POLICY
-#include <numa.h>
-#include <numaif.h>
-#endif  // ROCCLR_SUPPORT_NUMA_POLICY
 #include <sstream>
 #include <vector>
 
@@ -2039,30 +2035,17 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
 // ================================================================================================
 void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const {
   void* ptr = nullptr;
-#ifndef ROCCLR_SUPPORT_NUMA_POLICY
-  ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
-#else
-  int mode = MPOL_DEFAULT;
-  int maxNodes = numa_num_possible_nodes();
-  bitmask* nodeMask = numa_bitmask_alloc(maxNodes);
-  auto cpuCount = cpu_agents_.size();
-
-  long res = get_mempolicy(&mode, nodeMask->maskp, nodeMask->size, NULL, 0);
-  if (res) {
-    LogPrintfError("get_mempolicy failed with error %ld", res);
-    return ptr;
+  auto numa_node_count = cpu_agents_.size(); // count of host numa nodes
+  numa::NumaPolicy np(numa_node_count);
+  if (!np.GetMemPolicy()) {
+    return hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
   }
-  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE,
-          "get_mempolicy() succeed with mode %d, nodeMask 0x%lx, cpuCount %zu", mode,
-          *nodeMask->maskp, cpuCount);
-
-  switch (mode) {
-    // For details, see "man get_mempolicy".
-    case MPOL_BIND:
-    case MPOL_PREFERRED:
+  switch (np.GetPolicy()) {
+    case numa::NumaPolicy::Policy::kPrefered:
+    case numa::NumaPolicy::Policy::kBind:
       // We only care about the first CPU node
-      for (unsigned int i = 0; i < cpuCount; i++) {
-        if ((1u << i) & *nodeMask->maskp) {
+      for (unsigned int i = 0; i < numa_node_count; i++) {
+        if (np.IsPolicySetAt(i)) {
           ptr = hostAlloc(size, alignment, mem_seg, &cpu_agents_[i]);
           break;
         }
@@ -2072,8 +2055,6 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
       //  All other modes fall back to default mode
       ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
   }
-  numa_free_cpumask(nodeMask);
-#endif  // ROCCLR_SUPPORT_NUMA_POLICY
   return ptr;
 }
 

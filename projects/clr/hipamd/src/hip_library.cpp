@@ -36,10 +36,48 @@ void LibraryContainer::Register(std::string name, int device, hipKernel_t k) {
   auto key = std::make_pair(name, device);
   if (kernels_.find(key) == kernels_.end()) {
     kernels_.insert(std::make_pair(std::make_pair(name, device), k));
-    if (!hip::PlatformState::instance().RegisterLibraryFunction(k)) {
+    auto lib = reinterpret_cast<hipLibrary_t>(this);
+    if (!hip::PlatformState::instance().RegisterLibraryFunction(k, lib)) {
       LogPrintfInfo("Already registered: %p", k);
     }
   }
+}
+
+hipError_t LibraryContainer::GetKernelName(const char** name, hipKernel_t kernel) {
+  if (kernels_.empty()) {
+    return hipErrorInvalidValue;
+  }
+
+  for (const auto &it : kernels_) {
+    if (it.second == kernel) {
+      *name = it.first.first.c_str(); 
+      return hipSuccess;
+    }
+  }
+  return hipErrorInvalidValue;
+}
+
+hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKernels) {
+  auto maxCount = (maxKernels > functions_.size()) ? functions_.size() : maxKernels;
+  auto device_id = hip::ihipGetDevice();
+  auto m = fatbin_->Module(device_id);
+  auto count = 0;
+  for (const auto&f : functions_) {
+    if (count >= maxCount) break;
+    hipKernel_t kern;
+    // build library only for un-registered kernels
+    if (auto ki = kernels_.find(std::make_pair(f.first, device_id)); ki!= kernels_.end()) {
+      kern = ki->second;
+    } else {
+      auto ret = f.second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(&kern), m);
+      if (ret != hipSuccess) {
+        return ret;
+      }
+      Register(f.first, device_id, kern);
+    }
+    k[count++] = kern;
+  }
+  return hipSuccess;
 }
 
 hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
@@ -54,7 +92,9 @@ hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
     return hipErrorNotFound;
   }
   auto ret = f->second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
-
+  if (ret != hipSuccess) {
+    return ret;
+  }
   // Register it, basically make it available for query though the hip context.
   Register(name, device_id, *k);
   return hipSuccess;
@@ -93,9 +133,11 @@ hipError_t LibraryContainer::BuildIt() {
   IHIP_RETURN_ONFAIL(fatbin_->BuildProgram(device_id));
 
   auto program =
-      fatbin_->GetProgram(device_id)->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
+    fatbin_->GetProgram(device_id)->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
+  auto mod =
+    fatbin_->Module(device_id);
 
-  // Process Functions
+  // Process Functions and create kernel handles
   std::vector<std::string> function_names;
   program->getGlobalFuncFromCodeObj(&function_names);
   for (auto& name : function_names) {
@@ -177,4 +219,55 @@ hipError_t hipLibraryGetKernel(hipKernel_t* kernel, hipLibrary_t library, const 
   ret = l->Kernel(kernel, kname);
   HIP_RETURN(ret);
 }
+
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library) {
+  HIP_INIT_API(hipLibraryEnumerateKernels, kernels, numKernels, library);
+  if (kernels == nullptr || library == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  auto l = reinterpret_cast<hip::LibraryContainer*>(library);
+  auto ret = l->BuildIt();
+  if (ret != hipSuccess) {
+    HIP_RETURN(ret);
+  }
+
+  if (numKernels == 0) {
+    HIP_RETURN(hipSuccess);
+  }
+
+  HIP_RETURN(l->EnumerateKernels(kernels, numKernels));
+}
+
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
+  HIP_INIT_API(hipKernelGetLibrary, library, kernel);
+  if (library == nullptr || kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (!hip::PlatformState::instance().GetFunctionLibrary(kernel, library)) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
+  HIP_INIT_API(hipKernelGetName, name, kernel);
+  if (name == nullptr || kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  hipLibrary_t library;
+  if (!hip::PlatformState::instance().GetFunctionLibrary(kernel, &library)) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+
+  auto l = reinterpret_cast<hip::LibraryContainer*>(library);
+  auto ret = l->GetKernelName(name, kernel);
+
+  HIP_RETURN(ret);
+}
+
 }  // namespace hip

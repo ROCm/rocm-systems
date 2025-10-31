@@ -67,13 +67,6 @@ endif()
 
 #target_include_directories(rocclr PRIVATE ${AMD_HSA_INCLUDE_DIR}/..)
 
-find_package(NUMA)
-if(NUMA_FOUND)
-  target_compile_definitions(rocclr PUBLIC ROCCLR_SUPPORT_NUMA_POLICY)
-  target_include_directories(rocclr PUBLIC ${NUMA_INCLUDE_DIR})
-  target_link_libraries(rocclr PUBLIC ${NUMA_LIBRARIES})
-endif()
-
 find_package(OpenGL REQUIRED)
 
 target_sources(rocclr PRIVATE

@@ -481,7 +481,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
-  deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_ * info.numRTCUs_;
+  deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_;
   deviceProps.regsPerBlock = info.availableRegistersPerCU_;
   deviceProps.warpSize = info.wavefrontWidth_;
   deviceProps.maxThreadsPerBlock = info.maxWorkGroupSize_;

@@ -143,8 +143,6 @@ def main() -> None:
     # major rocprofiler-compute execution modes
     if mode == "profile":
         rocprof_compute.run_profiler()
-    elif mode == "database":
-        rocprof_compute.update_db()
     elif mode == "analyze":
         rocprof_compute.run_analysis()
     else:
