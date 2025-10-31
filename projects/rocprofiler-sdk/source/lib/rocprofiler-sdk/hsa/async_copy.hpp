@@ -51,5 +51,8 @@ async_copy_sync();
 
 void
 async_copy_fini();
+
+void
+wait_for_pending_signal(hsa_signal_t signal);
 }  // namespace hsa
 }  // namespace rocprofiler

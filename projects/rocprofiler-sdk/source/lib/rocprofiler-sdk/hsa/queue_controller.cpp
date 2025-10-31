@@ -234,8 +234,6 @@ QueueController::destroy_queue(hsa_queue_t* id)
     ROCP_INFO << "destroying queue...";
 
     queue->sync();
-    // Sync all pending async copy operations after queue sync
-    async_copy_sync();
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
     _queues.wlock([&](auto& map) { map.erase(id); });
 

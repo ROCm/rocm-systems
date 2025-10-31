@@ -26,6 +26,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
 #include "lib/rocprofiler-sdk/hsa/pc_sampling.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
@@ -329,6 +330,15 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
 
     if(callback_contexts.empty() && buffered_contexts.empty())
     {
+        // Wait for pending async handler if this is hsa_signal_destroy
+        if constexpr(TableIdx == ROCPROFILER_HSA_TABLE_ID_Core &&
+                     OpIdx == ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy)
+        {
+            // Extract the signal from the first argument
+            auto signal = std::get<0>(std::tie(args...));
+            wait_for_pending_signal(signal);
+        }
+
         [[maybe_unused]] auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
         if constexpr(!std::is_void<RetT>::value)
             return _ret;
@@ -374,6 +384,15 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
 
     // decrement the reference count before invoking
     corr_id->sub_ref_count();
+
+    // Wait for pending async handler if this is hsa_signal_destroy
+    if constexpr(TableIdx == ROCPROFILER_HSA_TABLE_ID_Core &&
+                 OpIdx == ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy)
+    {
+        // Extract the signal from the first argument
+        auto signal = std::get<0>(std::tie(args...));
+        wait_for_pending_signal(signal);
+    }
 
     auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
 

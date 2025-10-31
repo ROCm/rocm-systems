@@ -26,6 +26,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -143,6 +144,69 @@ context_filter(const context::context* ctx)
     return (has_buffered || has_callback);
 }
 
+// Registry for tracking signals with pending async handlers
+// Allows waiting for handler completion before signal destruction
+struct pending_signal_registry
+{
+    using signal_map_t = std::unordered_map<hsa_signal_t, std::atomic<bool>*>;
+
+    common::Synchronized<signal_map_t> pending_signals_;
+
+    // Register a signal when async handler is created
+    void register_signal(hsa_signal_t signal, std::atomic<bool>* completion_flag)
+    {
+        pending_signals_.wlock([&](signal_map_t& map) {
+            map[signal] = completion_flag;
+            ROCP_ERROR << "[SIGNAL_REGISTRY] Registered signal "
+                       << std::hex << signal.handle << std::dec
+                       << " with completion flag";
+        });
+    }
+
+    // Unregister when handler completes
+    void unregister_signal(hsa_signal_t signal)
+    {
+        pending_signals_.wlock([&](signal_map_t& map) {
+            map.erase(signal);
+            ROCP_ERROR << "[SIGNAL_REGISTRY] Unregistered signal "
+                       << std::hex << signal.handle << std::dec;
+        });
+    }
+
+    // Check if signal has pending handler and wait if needed
+    void wait_for_signal(hsa_signal_t signal)
+    {
+        // First check if signal is in the registry and get the completion flag
+        std::atomic<bool>* completion_flag = pending_signals_.rlock([&](const signal_map_t& map) -> std::atomic<bool>* {
+            auto it = map.find(signal);
+            if (it == map.end()) {
+                return nullptr; // No pending handler
+            }
+            return it->second;
+        });
+
+        // Wait for handler to complete (outside the lock to avoid deadlock)
+        if (completion_flag) {
+            ROCP_ERROR << "[SIGNAL_REGISTRY] Waiting for async handler to complete before destroying signal "
+                      << std::hex << signal.handle << std::dec;
+
+            // Spin-wait for completion
+            while (!completion_flag->load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+
+            ROCP_ERROR << "[SIGNAL_REGISTRY] Async handler completed for signal "
+                      << std::hex << signal.handle << std::dec;
+        }
+    }
+};
+
+pending_signal_registry& get_pending_signals()
+{
+    static pending_signal_registry registry;
+    return registry;
+}
+
 struct async_copy_data
 {
     using timestamp_t     = rocprofiler_timestamp_t;
@@ -161,6 +225,13 @@ struct async_copy_data
     uint64_t                            start_ts       = 0;
     context::correlation_id*            correlation_id = nullptr;
     tracing::tracing_data               tracing_data   = {};
+
+    // Debug tracking
+    static std::atomic<uint64_t> s_global_id_counter;
+    uint64_t                     debug_id             = s_global_id_counter.fetch_add(1);
+
+    // Signal completion tracking
+    std::atomic<bool>            handler_completed{false};
 
     callback_data_t get_callback_data(timestamp_t _beg = 0, timestamp_t _end = 0) const;
     buffered_data_t get_buffered_record(const context_t* _ctx,
@@ -212,6 +283,9 @@ async_copy_data::get_buffered_record(const context_t* _ctx,
                                           dst_address,
                                           src_address);
 }
+
+// Define static member
+std::atomic<uint64_t> async_copy_data::s_global_id_counter{1};
 
 struct active_signals
 {
@@ -280,12 +354,22 @@ active_signals::sync()
     constexpr auto timeout =
         std::chrono::duration_cast<std::chrono::nanoseconds>(timeout_sec).count();
 
+    auto initial_count = m_count.load();
+    ROCP_ERROR << "[ASYNC_COPY_DEBUG] active_signals::sync() called, initial count=" << initial_count
+              << ", signal handle=" << std::hex << m_signal.handle << std::dec;
+
     if(m_count.load() > 0)
     {
         auto _cnt_beg      = m_count.load();
+        ROCP_ERROR << "[ASYNC_COPY_DEBUG] Waiting for " << _cnt_beg << " async copy signals to complete (timeout=" << timeout_sec.count() << "s)";
+
         auto _signal_value = get_core_table()->hsa_signal_wait_scacquire_fn(
             m_signal, HSA_SIGNAL_CONDITION_LT, 1, timeout, HSA_WAIT_STATE_ACTIVE);
         auto _cnt_end = m_count.load();
+
+        ROCP_ERROR << "[ASYNC_COPY_DEBUG] Wait completed: signal_value=" << _signal_value
+                  << ", count_before=" << _cnt_beg << ", count_after=" << _cnt_end;
+
         if(_signal_value != 0)
         {
             ROCP_CI_LOG_IF(WARNING, _cnt_end > 0)
@@ -295,6 +379,10 @@ active_signals::sync()
                 << " completion callbacks were not delivered";
         }
     }
+    else
+    {
+        ROCP_ERROR << "[ASYNC_COPY_DEBUG] No pending async copy signals, skipping wait";
+    }
 }
 
 void
@@ -303,7 +391,9 @@ active_signals::fetch_add(int v)
     create();
     if(m_signal.handle == 0) return;
 
-    m_count.fetch_add(1);
+    auto old_count = m_count.fetch_add(1);
+    ROCP_ERROR << "[ASYNC_COPY_DEBUG] fetch_add: count " << old_count << " -> " << (old_count + 1)
+               << " [signal_id=" << (old_count + 1) << "]";
     get_core_table()->hsa_signal_add_screlease_fn(m_signal, v);
 }
 
@@ -316,7 +406,11 @@ active_signals::fetch_sub(int v)
     ROCP_CI_LOG_IF(WARNING, _cnt == 0) << "active_signals count (currently = 0) was requested to "
                                           "decrement more times than it was incremented";
 
-    if(_cnt > 0) m_count.fetch_sub(1);
+    if(_cnt > 0)
+    {
+        auto old_count = m_count.fetch_sub(1);
+        ROCP_ERROR << "[ASYNC_COPY_DEBUG] fetch_sub: count " << old_count << " -> " << (old_count - 1);
+    }
     get_core_table()->hsa_signal_subtract_screlease_fn(m_signal, v);
 }
 
@@ -340,18 +434,27 @@ convert_hsa_handle(Up _hsa_object)
 bool
 async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 {
+    auto* _data = static_cast<async_copy_data*>(arg);
+
+    ROCP_ERROR << "[ASYNC_COPY_DEBUG] async_copy_handler CALLED [id=" << _data->debug_id
+              << "] signal_value=" << signal_value
+              << " signal_handle=" << std::hex << _data->rocp_signal.handle << std::dec
+              << " tid=" << _data->tid;
+
     // if we have fully finalized, delete the data and return
     if(registration::get_fini_status() > 0)
     {
-        auto* _data = static_cast<async_copy_data*>(arg);
+        ROCP_ERROR << "[ASYNC_COPY_DEBUG] Finalization in progress [id=" << _data->debug_id << "]";
         // Decrement the active signals counter before cleanup
         if(get_active_signals()) get_active_signals()->fetch_sub(1);
+        // Mark completed and unregister signal before cleanup
+        _data->handler_completed.store(true, std::memory_order_release);
+        get_pending_signals().unregister_signal(_data->orig_signal);
         delete _data;
         return false;
     }
 
     auto  ts               = common::timestamp_ns();
-    auto* _data            = static_cast<async_copy_data*>(arg);
     auto  _lk              = _data->get_lock();
     auto  copy_time        = hsa_amd_profiling_async_copy_time_t{};
     auto  copy_time_status = get_amd_ext_table()->hsa_amd_profiling_get_async_copy_time_fn(
@@ -443,8 +546,15 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         get_core_table()->hsa_signal_store_screlease_fn(_data->orig_signal, signal_value);
     }
 
-    ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
+    // Mark handler as completed and unregister signal BEFORE returning
+    // This allows any waiting hsa_destroy_signal calls to proceed
+    _data->handler_completed.store(true, std::memory_order_release);
+    get_pending_signals().unregister_signal(_data->orig_signal);
 
+    // DON'T destroy the signal here - let it leak for now to avoid runtime corruption
+    // The runtime appears to still need the signal after the handler returns
+    // TODO: Find proper cleanup mechanism
+    ROCP_ERROR << "[ASYNC_COPY_DEBUG] async_copy_handler completed [id=" << _data->debug_id << "] (signal " << std::hex << _data->rocp_signal.handle << std::dec << " NOT destroyed to avoid corruption)";
     return false;
 }
 
@@ -664,7 +774,20 @@ async_copy_impl(Args... args)
         }
     }
 
+    // Set orig_signal BEFORE registering handler to avoid race condition
+    _data->orig_signal = _completion_signal;
+
     {
+        ROCP_ERROR << "[ASYNC_COPY_DEBUG] REGISTERING async handler [id=" << _data->debug_id
+                   << "] signal_handle=" << std::hex << _data->rocp_signal.handle << std::dec
+                   << " orig_signal=" << std::hex << _data->orig_signal.handle << std::dec
+                   << " tid=" << _data->tid
+                   << " bytes=" << _data->bytes_copied;
+
+        // Register orig_signal in pending set BEFORE registering HSA handler
+        // This prevents race where handler completes before we register it
+        get_pending_signals().register_signal(_data->orig_signal, &_data->handler_completed);
+
         auto _status = get_amd_ext_table()->hsa_amd_signal_async_handler_fn(_data->rocp_signal,
                                                                             HSA_SIGNAL_CONDITION_LT,
                                                                             _completion_signal_val,
@@ -673,7 +796,10 @@ async_copy_impl(Args... args)
 
         if(_status != HSA_STATUS_SUCCESS)
         {
-            ROCP_ERROR << "hsa_amd_signal_async_handler returned non-zero error code " << _status;
+            ROCP_ERROR << "[id=" << _data->debug_id << "] hsa_amd_signal_async_handler returned non-zero error code " << _status;
+
+            // Unregister signal since handler registration failed
+            get_pending_signals().unregister_signal(_data->orig_signal);
 
             ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal))
                 << ":: failed to destroy signal after async handler failed";
@@ -730,7 +856,6 @@ async_copy_impl(Args... args)
                                                _tracer_data);
     }
 
-    _data->orig_signal = _completion_signal;
     _completion_signal = _data->rocp_signal;
 
     ROCP_INFO << "Memcpy Original Signal " << std::hex << _data->orig_signal.handle << std::dec
@@ -823,6 +948,7 @@ async_copy_wrap(hsa_amd_ext_table_t* _orig, std::index_sequence<OpIdx...>)
 
 using async_copy_index_seq_t =
     std::index_sequence<async_copy_id, async_copy_on_engine_id, async_copy_rect_id>;
+
 }  // namespace
 
 // check out the assembly here... this compiles to a switch statement
@@ -878,9 +1004,16 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
 void
 async_copy_sync()
 {
-    if(!async_copy::get_active_signals()) return;
+    ROCP_ERROR << "[ASYNC_COPY_DEBUG] async_copy_sync() called";
+
+    if(!async_copy::get_active_signals())
+    {
+        ROCP_ERROR << "[ASYNC_COPY_DEBUG] async_copy_sync() - no active signals object";
+        return;
+    }
 
     async_copy::get_active_signals()->sync();
+    ROCP_ERROR << "[ASYNC_COPY_DEBUG] async_copy_sync() completed";
 }
 
 void
@@ -890,6 +1023,12 @@ async_copy_fini()
 
     async_copy_sync();
     async_copy::get_active_signals()->destroy();
+}
+
+void
+wait_for_pending_signal(hsa_signal_t signal)
+{
+    async_copy::get_pending_signals().wait_for_signal(signal);
 }
 }  // namespace hsa
 }  // namespace rocprofiler
