@@ -254,34 +254,24 @@ void RdciDmonSubSystem::show_help() const {
 }
 
 void RdciDmonSubSystem::create_temp_group() {
+  // If user provided a group (-g), do nothing
+  if (options_.find(OPTIONS_GROUP_ID) != options_.end()) {
+    return;
+  }
   if (device_indexes_.size() == 0) {
     return;
   }
 
   const std::string group_name("rdci-dmon-group");
-  // Check if temp group already exists by searching for existing groups
-  rdc_gpu_group_t group_id_list[RDC_MAX_NUM_GROUPS];
-  uint32_t count = 0;
-  rdc_status_t result = rdc_group_get_all_ids(rdc_handle_, group_id_list, &count);
-  if (result == RDC_ST_OK) {
-    for (uint32_t i = 0; i < count; i++) {
-      rdc_group_info_t group_info;
-      result = rdc_group_gpu_get_info(rdc_handle_, group_id_list[i], &group_info);
-      if (result == RDC_ST_OK && std::string(group_info.group_name) == group_name) {
-        // Temp group already exists, reuse it
-        options_.insert({OPTIONS_GROUP_ID, group_id_list[i]});
-        need_cleanup_ = true;
-        return;
-      }
-    }
-  }
-
-  rdc_gpu_group_t group_id;
-  result = rdc_group_gpu_create(rdc_handle_, RDC_GROUP_EMPTY, group_name.c_str(), &group_id);
+  rdc_gpu_group_t group_id = 0;
+  rdc_status_t result =
+      rdc_group_gpu_create(rdc_handle_, RDC_GROUP_EMPTY, group_name.c_str(), &group_id);
   if (result != RDC_ST_OK) {
     throw RdcException(result, "Fail to create the dmon group");
   }
   need_cleanup_ = true;
+  // mark that we created the temp gpu group so cleanup won't touch user groups
+  options_.insert({OPTIONS_CREATED_TEMP_GROUP, 1});
 
   for (unsigned int device_index : device_indexes_) {
     result = rdc_group_gpu_add(rdc_handle_, group_id, device_index);
@@ -294,6 +284,10 @@ void RdciDmonSubSystem::create_temp_group() {
 }
 
 void RdciDmonSubSystem::create_temp_field_group() {
+  // If user provided a field group (-f), do nothing
+  if (options_.find(OPTIONS_FIELD_GROUP_ID) != options_.end()) {
+    return;
+  }
   if (field_ids_.size() == 0) {
     return;
   }
@@ -313,6 +307,8 @@ void RdciDmonSubSystem::create_temp_field_group() {
 
   need_cleanup_ = true;
   options_.insert({OPTIONS_FIELD_GROUP_ID, group_id});
+  // mark that we created the temp field group
+  options_.insert({OPTIONS_CREATED_TEMP_FIELD_GROUP, 1});
 }
 
 void RdciDmonSubSystem::resolve_device_indexes() {
@@ -324,8 +320,13 @@ void RdciDmonSubSystem::resolve_device_indexes() {
   }
 
   // If neither group or device_index was specified, default to all
+  // BUT: if a user-supplied group (-g) exists, do not populate device_indexes_
   if (raw_device_indexes_.empty()) {
-    device_indexes_.assign(device_list, device_list + count);
+    if (options_.find(OPTIONS_GROUP_ID) == options_.end()) {
+      device_indexes_.assign(device_list, device_list + count);
+    } else {
+      device_indexes_.clear();
+    }
     return;
   }
 
@@ -601,6 +602,8 @@ void RdciDmonSubSystem::process() {
       rdc_handle_, options_[OPTIONS_GROUP_ID], options_[OPTIONS_FIELD_GROUP_ID],
       static_cast<uint64_t>(options_[OPTIONS_DELAY]) * 1000, max_keep_age, max_keep_samples);
   need_cleanup_ = true;
+  // mark that watch started so we can unwatch safely
+  options_.insert({OPTIONS_STARTED_WATCH, 1});
 
   std::stringstream ss;
   amd::rdc::fld_id2name_map_t& field_id_to_descript = amd::rdc::get_field_id_description_from_id();
@@ -686,25 +689,29 @@ void RdciDmonSubSystem::clean_up() {
     return;
   }
 
-  // Not throw the errors in order to clean up all resources created
-  if (options_.find(OPTIONS_GROUP_ID) != options_.end() &&
-      options_.find(OPTIONS_FIELD_GROUP_ID) != options_.end()) {
+  // Best-effort teardown: only clean artifacts we created in this run
+  auto has_group = options_.find(OPTIONS_GROUP_ID) != options_.end();
+  auto has_field_group = options_.find(OPTIONS_FIELD_GROUP_ID) != options_.end();
+
+  // Unwatch only if watch actually started
+  if (options_.find(OPTIONS_STARTED_WATCH) != options_.end() && has_group && has_field_group) {
     rdc_field_unwatch(rdc_handle_, options_[OPTIONS_GROUP_ID], options_[OPTIONS_FIELD_GROUP_ID]);
   }
 
-  if (device_indexes_.size() == 0) {
-    auto group = options_.find(OPTIONS_GROUP_ID);
-    if (group != options_.end()) {
-      rdc_group_gpu_destroy(rdc_handle_, group->second);
-    }
+  // Only destroy the GPU group if we created a temporary one
+  if (options_.find(OPTIONS_CREATED_TEMP_GROUP) != options_.end() && has_group) {
+    rdc_group_gpu_destroy(rdc_handle_, options_[OPTIONS_GROUP_ID]);
   }
 
-  if (field_ids_.size() != 0) {
-    auto fgroup = options_.find(OPTIONS_FIELD_GROUP_ID);
-    if (fgroup != options_.end()) {
-      rdc_group_field_destroy(rdc_handle_, fgroup->second);
-    }
+  // Only destroy the field group if we created a temporary one
+  if (options_.find(OPTIONS_CREATED_TEMP_FIELD_GROUP) != options_.end() && has_field_group) {
+    rdc_group_field_destroy(rdc_handle_, options_[OPTIONS_FIELD_GROUP_ID]);
   }
+
+  // Reset flags
+  options_.erase(OPTIONS_STARTED_WATCH);
+  options_.erase(OPTIONS_CREATED_TEMP_GROUP);
+  options_.erase(OPTIONS_CREATED_TEMP_FIELD_GROUP);
 
   need_cleanup_ = false;
 }

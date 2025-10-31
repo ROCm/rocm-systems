@@ -62,7 +62,10 @@ class RdciDmonSubSystem : public RdciSubSystem {
     OPTIONS_COUNT,
     OPTIONS_DELAY,
     OPTIONS_FIELD_GROUP_ID,
-    OPTIONS_GROUP_ID
+    OPTIONS_GROUP_ID,
+    OPTIONS_CREATED_TEMP_GROUP,
+    OPTIONS_CREATED_TEMP_FIELD_GROUP,
+    OPTIONS_STARTED_WATCH
   };
 
   std::map<OPTIONS, uint32_t> options_;
