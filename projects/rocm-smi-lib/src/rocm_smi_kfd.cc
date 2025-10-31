@@ -685,7 +685,7 @@ KFDNode::Initialize(void) {
 
   std::map<uint32_t, std::shared_ptr<IOLink>>::iterator it;
   uint32_t node_to;
-  uint64_t node_to_gpu_id;
+  uint64_t node_to_gpu_id = 0;
   std::shared_ptr<IOLink> link;
   bool numa_node_found = false;
   for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
