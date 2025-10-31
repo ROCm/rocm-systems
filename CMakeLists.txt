@@ -239,6 +239,8 @@ configure_file ( librocdxg.pc.in librocdxg.pc @ONLY )
 
 install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/librocdxg.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev )
 
+install(CODE "execute_process(COMMAND ldconfig)")
+
 ###########################
 # Packaging directives
 ###########################
