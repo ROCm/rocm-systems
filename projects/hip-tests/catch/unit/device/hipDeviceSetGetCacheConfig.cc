@@ -20,6 +20,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include "../hip_test_config.hh"
 
 /**
  * @addtogroup hipDeviceSetCacheConfig hipDeviceSetCacheConfig
@@ -46,7 +47,9 @@ constexpr std::array<hipFuncCache_t, 4> kCacheConfigs{
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceSetCacheConfig_Positive_Basic") {
+TEST_CASE("Unit_hipDeviceSetCacheConfig_Positive_Basic", "[Level_1][device]") {
+  auto& cfg = HIP_TEST_CONFIG(1);
+  INFO("Running at level: " << cfg.levelName);
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device is: " << device);
@@ -81,7 +84,9 @@ TEST_CASE("Unit_hipDeviceSetCacheConfig_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetCacheConfig_Positive_Default") {
+TEST_CASE("Unit_hipDeviceGetCacheConfig_Positive_Default", "[Level_1][device]") {
+  auto& cfg = HIP_TEST_CONFIG(1);
+  INFO("Running at level: " << cfg.levelName);
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device is: " << device);

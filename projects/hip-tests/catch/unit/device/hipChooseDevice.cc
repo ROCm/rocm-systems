@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include "../hip_test_config.hh"
 
 /**
  * @addtogroup hipChooseDevice hipChooseDevice
@@ -41,7 +42,9 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipChooseDevice_ValidateDevId") {
+TEST_CASE("Unit_hipChooseDevice_ValidateDevId", "[Level_1][device]") {
+  auto& cfg = HIP_TEST_CONFIG(1);
+  INFO("Running at level: " << cfg.levelName << " (" << cfg.useCase << ")");
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   int numDevices = 0;
@@ -67,7 +70,9 @@ TEST_CASE("Unit_hipChooseDevice_ValidateDevId") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipChooseDevice_NegTst") {
+TEST_CASE("Unit_hipChooseDevice_NegTst", "[Level_2][device]") {
+  auto& cfg = HIP_TEST_CONFIG(2);
+  INFO("Running negative test at level: " << cfg.levelName);
   hipDeviceProp_t prop;
   int dev = -1;
 

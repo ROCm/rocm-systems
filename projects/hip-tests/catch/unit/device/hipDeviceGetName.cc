@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include "../hip_test_config.hh"
 #include <cstddef>
 #include <cstring>
 #include <cstdio>
@@ -55,7 +56,9 @@ constexpr size_t LEN = 256;
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetName_NegTst") {
+TEST_CASE("Unit_hipDeviceGetName_NegTst", "[Level_3][device]") {
+  auto& cfg = HIP_TEST_CONFIG(3);
+  INFO("Running negative test at level: " << cfg.levelName);
   std::array<char, LEN> name;
 
   int numDevices = 0;
@@ -114,7 +117,9 @@ TEST_CASE("Unit_hipDeviceGetName_NegTst") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetName_CheckPropName") {
+TEST_CASE("Unit_hipDeviceGetName_CheckPropName", "[Level_2][device]") {
+  auto& cfg = HIP_TEST_CONFIG(2);
+  INFO("Running at level: " << cfg.levelName << " (" << cfg.useCase << ")");
   int numDevices = 0;
   std::array<char, LEN> name;
   hipDevice_t device;

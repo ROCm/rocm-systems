@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include "../hip_test_config.hh"
 
 /**
  * @addtogroup hipDeviceTotalMem hipDeviceTotalMem
@@ -44,7 +45,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceTotalMem_NegTst") {
+TEST_CASE("Unit_hipDeviceTotalMem_NegTst", "[Level_3][device]") {
 #if HT_NVIDIA
   HIP_CHECK(hipInit(0));
 #endif
@@ -79,7 +80,10 @@ TEST_CASE("Unit_hipDeviceTotalMem_NegTst") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceTotalMem_ValidateTotalMem") {
+TEST_CASE("Unit_hipDeviceTotalMem_ValidateTotalMem", "[Level_0][device]") {
+  auto& cfg = HIP_TEST_CONFIG(0);  // Level_0 - Smoke test
+  INFO("Running at level: " << cfg.levelName);
+  
   size_t totMem;
   int numDevices = 0;
 

@@ -20,6 +20,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include "../hip_test_config.hh"
 
 /**
  * @addtogroup hipInit hipInit
@@ -41,7 +42,10 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipInit_Positive") {
+TEST_CASE("Unit_hipInit_Positive", "[Level_0][device]") {
+  auto& cfg = HIP_TEST_CONFIG(0);  // Level_0 - Smoke test
+  INFO("Running at level: " << cfg.levelName << " (" << cfg.useCase << ")");
+  
   HIP_CHECK(hipInit(0));
 
   // Verify that HIP runtime is successfully initialized by calling a HIP API
@@ -63,7 +67,10 @@ TEST_CASE("Unit_hipInit_Positive") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipInit_Negative") {
+TEST_CASE("Unit_hipInit_Negative", "[Level_3][device]") {
+  auto& cfg = HIP_TEST_CONFIG(3);  // Level_3 - Complex/Negative cases
+  INFO("Running negative test at level: " << cfg.levelName);
+  
   // If initialization is attempted with invalid flag, error shall be reported
   unsigned int invalid_flag = 1;
   HIP_CHECK_ERROR(hipInit(invalid_flag), hipErrorInvalidValue);
