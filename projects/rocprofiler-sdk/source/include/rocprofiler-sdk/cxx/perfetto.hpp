@@ -103,6 +103,7 @@ ROCPROFILER_DEFINE_CATEGORY(category, rocjpeg_api, "rocJPEG API function")
 ROCPROFILER_DEFINE_CATEGORY(category, counter_collection, "Counter Collection")
 ROCPROFILER_DEFINE_CATEGORY(category, kfd_events, "KFD events collection")
 ROCPROFILER_DEFINE_CATEGORY(category, scratch_memory, "Scratch Memory Allocation")
+ROCPROFILER_DEFINE_CATEGORY(category, timer_sampling, "Timer sampling")
 ROCPROFILER_DEFINE_CATEGORY(category, generic_sample, "Generic Sample for CPU/GPU Counters")
 
 ROCPROFILER_DEFINE_CATEGORY(category, none, "Unknown category")
@@ -120,6 +121,7 @@ ROCPROFILER_DEFINE_CATEGORY(category, none, "Unknown category")
         ROCPROFILER_PERFETTO_CATEGORY(category::rocdecode_api),                                    \
         ROCPROFILER_PERFETTO_CATEGORY(category::rocjpeg_api),                                      \
         ROCPROFILER_PERFETTO_CATEGORY(category::scratch_memory),                                   \
+        ROCPROFILER_PERFETTO_CATEGORY(category::timer_sampling),                                   \
         ROCPROFILER_PERFETTO_CATEGORY(category::generic_sample),                                   \
         ROCPROFILER_PERFETTO_CATEGORY(category::none)
 

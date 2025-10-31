@@ -43,6 +43,22 @@ namespace output
 {
 namespace tool = ::rocprofiler::tool;
 
+class PerfettoTrackGenerator
+{
+
+public:
+    PerfettoTrackGenerator();
+    ~PerfettoTrackGenerator() = default;
+    const ::perfetto::Track& get_this_pid_track() const;
+    const ::perfetto::Track& get_perfetto_track(pid_t pid, std::string_view name = {}) const;
+    const ::perfetto::Track& get_perfetto_track(std::string_view name) const;
+
+private:
+    mutable uint64_t track_counter_;
+    mutable std::map<std::pair<pid_t, std::string>, ::perfetto::Track> tracks_;
+    const ::perfetto::Track this_pid_track_;
+};
+
 struct PerfettoSession
 {
     PerfettoSession(const tool::output_config&);
