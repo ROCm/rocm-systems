@@ -3657,7 +3657,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
     case HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE: {
       if (memObj) {
         if (getMemoryType(memObj) == hipMemoryTypeHost) {
-	  // host pointer, pinned or registered memory
+	      // host pointer, pinned or registered memory
           *reinterpret_cast<int*>(data) = 0;
         } else if ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) {
           // managed allocation
