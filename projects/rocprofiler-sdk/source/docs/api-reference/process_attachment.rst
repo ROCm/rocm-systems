@@ -16,7 +16,7 @@ This document provides the technical details needed to implement a process attac
 Python Functions
 ===================================
 
-The python file ``rocprof-attach.py`` defines a main function that can be used for attachment:
+The python file ``rocprof-attach`` defines a main function that can be used for attachment:
 
 .. code-block:: python
 
