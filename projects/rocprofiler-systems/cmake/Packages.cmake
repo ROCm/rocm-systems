@@ -162,11 +162,6 @@ endforeach()
 # ----------------------------------------------------------------------------------------#
 
 if(ROCPROFSYS_USE_ROCM)
-    string(ASCII 27 Esc)
-    set(Reset "${Esc}[0m")
-    set(Red "${Esc}[31m")
-    set(Green "${Esc}[32m")
-
     find_package(ROCmVersion)
 
     if(NOT ROCmVersion_FOUND)
@@ -177,7 +172,6 @@ if(ROCPROFSYS_USE_ROCM)
             HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
             PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
         )
-        message(STATUS "${Green}[DFG] After find HIP - ROCM_PATH = ${ROCM_PATH}, hip_VERSION = ${hip_VERSION}${Reset}")
         find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
     endif()
 
@@ -204,13 +198,6 @@ if(ROCPROFSYS_USE_ROCM)
     set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
     set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
 
-    message(STATUS "${Green}Triple Version: ${ROCmVersion_TRIPLE_VERSION}${Reset}")
-    message(STATUS "${Green}Full Version: ${ROCmVersion_FULL_VERSION}${Reset}")
-    message(STATUS "${Green}ROCm version: ${ROCPROFSYS_ROCM_VERSION}${Reset}")
-    message(STATUS "${Green}ROCm major version: ${ROCPROFSYS_ROCM_VERSION_MAJOR}${Reset}")
-    message(STATUS "${Green}ROCm minor version: ${ROCPROFSYS_ROCM_VERSION_MINOR}${Reset}")
-    message(STATUS "${Green}ROCm patch version: ${ROCPROFSYS_ROCM_VERSION_PATCH}${Reset}")
-
     rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
                                     "ROCm version used by rocprofiler-systems"
     )
@@ -228,6 +215,7 @@ endif()
 # ----------------------------------------------------------------------------------------#
 
 if(ROCPROFSYS_USE_ROCM)
+    # ROCProfiler SDK
     find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
     rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm
                                                    INTERFACE ROCPROFSYS_USE_ROCM
@@ -237,7 +225,41 @@ if(ROCPROFSYS_USE_ROCM)
         INTERFACE rocprofiler-sdk::rocprofiler-sdk
     )
 
-    find_package(amd_smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+    # Find DRM libraries. amd-smi requires both drm and drm_amdgpu.
+    find_library(
+        drm_LIBRARY
+        NAMES drm
+        HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATH_SUFFIXES lib lib64
+        REQUIRED
+    )
+
+    find_library(
+        drm_amdgpu_LIBRARY
+        NAMES drm_amdgpu
+        HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATH_SUFFIXES lib lib64
+        REQUIRED
+    )
+
+    get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
+    get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
+
+    set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
+    list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
+
+    # AMD SMI and link directories to the DRM libraries (amd-smi requires both drm and drm_amdgpu in rocm 6.4.0).
+    find_package(
+        amd_smi
+        ${rocprofiler_systems_FIND_QUIETLY}
+        HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        REQUIRED
+    )
+    target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
+
     target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 endif()
 
