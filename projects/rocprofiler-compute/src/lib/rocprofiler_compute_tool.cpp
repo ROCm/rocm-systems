@@ -157,7 +157,9 @@ struct iteration_multiplexing_dispatch_record_t {
 // Struct to store a single counter info record
 struct counter_info_record_t {
   uint64_t dispatch_id;
+  uint64_t agent_id;
   uint64_t kernel_id;
+  uint32_t LDS_memory_size;
   uint64_t counter_id;
   std::string counter_name;
   double counter_value;
@@ -218,7 +220,9 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 
     // Store the counter info record in tool_data
     counter_info_record_t record{dispatch_data.dispatch_info.dispatch_id,
+                                 dispatch_data.dispatch_info.agent_id.handle,
                                  dispatch_data.dispatch_info.kernel_id,
+                                 dispatch_data.dispatch_info.group_segment_size,
                                  counter_id.handle,
                                  tool->counter_id_name_map[counter_id.handle],
                                  record_data[i].counter_value};
@@ -524,7 +528,6 @@ void dispatch_callback(
       case iteration_multiplexing_mode_t::SIMPLE:
         iteration_multiplexing_data[agent_id].config =
             (iteration_multiplexing_data[agent_id].config + 1) % profile_cache[agent_id].size();
-                      << iteration_multiplexing_data[agent_id].config << std::endl;
         *config = profile_cache[agent_id][iteration_multiplexing_data[agent_id].config];
         return;
 
@@ -616,8 +619,12 @@ void generate_output(tool_data_t *tool_data) {
   // Write collected counter records and clean up
   if (auto &os = tool_data->output_stream) {
     for (const auto &r : tool_data->counter_records)
-      *os << r.dispatch_id << ',' << r.counter_id << ',' << r.counter_name
-          << ',' << r.counter_value << '\n';
+      *os << r.dispatch_id << ',' << 
+        r.agent_id << ',' <<
+        r.LDS_memory_size << ',' <<
+        r.counter_id << ',' <<
+        r.counter_name << ',' <<
+        r.counter_value << '\n';
     os->flush();
   }
 }
@@ -670,7 +677,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t *id) {
   tool_data->output_stream = std::move(ofs);
   // Write header at the beginning of the file
   *tool_data->output_stream
-      << "dispatch_id,counter_id,counter_name,counter_value\n";
+      << "dispatch_id,gpu_id,lds_per_workgroup,counter_id,counter_name,counter_value\n";
   tool_data->output_stream->flush();
 
   // Write to clog the path of the logging file
