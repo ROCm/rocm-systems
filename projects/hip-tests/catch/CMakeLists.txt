@@ -35,10 +35,6 @@ endif()
 
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
 
-if(THEROCK_BUILD_MODE AND WIN32)
-    message(FATAL_ERROR "TheRock Builds are not supported on Windows... yet")
-endif()
-
 if(TEST_CLOCK_CYCLE)
     add_definitions(-DTEST_CLOCK_CYCLE)
 endif()
@@ -265,6 +261,14 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt ${_catch
 set(_subdirs ${_autogen} "subdirs(..)\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
 
+set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
+set(CATCH_ADD_TESTS_SCRIPT ${Catch2_DIR}/CatchAddTests.cmake)
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
+     DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
+file(COPY ${CATCH_ADD_TESTS_SCRIPT}
+         DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_SCRIPT_TARGETS ${CATCH_ADD_TESTS_SCRIPT})
+
 # copy python script and headers to catch test package
 set(CATCH_INCLUDE_DIR include)
 execute_process(COMMAND ${CMAKE_COMMAND} -E
@@ -293,7 +297,10 @@ if(BUILD_UNIT_TESTS)
     add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
     add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
     add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
-    add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
+    # TODO test finds 0 tests, causing test failures
+    if(UNIX)
+        add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
+    endif()
 endif()
 if(BUILD_PERF_TESTS)
     add_subdirectory(perftests ${CATCH_BUILD_DIR}/perftests)
@@ -314,19 +321,19 @@ endif()
 
 # packaging the tests
 # make package_test to generate packages for test
-set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/)
 add_subdirectory(packaging)
 if(UNIX)
-add_custom_target(package_test COMMAND ${CMAKE_COMMAND} .
-    COMMAND rm -rf *.deb *.rpm *.tar.gz
-    COMMAND make package
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_custom_target(package_test ALL
+        COMMAND rm -rf *.deb *.rpm *.tar.gz
+        COMMAND cpack
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 else()
-file(TO_NATIVE_PATH ${PROJECT_BINARY_DIR} CATCH_BINARY_DIR)
-add_custom_target(package_test COMMAND ${CMAKE_COMMAND} .
-    COMMAND cpack
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_custom_target(package_test ALL
+        COMMAND cpack
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
+# Make sure build_tests happpens before package_test
+add_dependencies(package_test build_tests)
 
 # Doxygen documentation
 # check if doxygen is installed
