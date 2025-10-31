@@ -174,7 +174,7 @@ struct pending_signal_registry
     }
 
     // Check if signal has pending handler and wait if needed
-    void wait_for_signal(hsa_signal_t signal)
+    void wait_for_signal(hsa_signal_t signal) const
     {
         // First check if signal is in the registry and get the completion flag
         std::atomic<bool>* completion_flag = pending_signals_.rlock([&](const signal_map_t& map) -> std::atomic<bool>* {
