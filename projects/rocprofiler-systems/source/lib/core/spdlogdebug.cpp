@@ -48,7 +48,7 @@ init_ddebug()
     spdlog::flush_on(spdlog::level::trace); // TODO: *not do this* Flush on every log (also terribly inneficient)
     spdlog::set_level(spdlog::level::trace);
 
-    constexpr size_t megabyte = 1048576;
+    // constexpr size_t megabyte = 1048576;
 
 
     constexpr const char* logger_color_info = "\033[1;34m";
