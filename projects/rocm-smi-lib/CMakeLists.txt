@@ -39,6 +39,10 @@ set(SHARE_INSTALL_PREFIX
 # provide git to utilities
 find_program (GIT NAMES git)
 
+# Set Lintian Support Flags
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+
 # sets DRM_INCLUDE_DIRS
 pkg_check_modules(DRM REQUIRED libdrm)
 
@@ -279,9 +283,12 @@ install(EXPORT rocm_smiTargets
 set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
 # install license file in share/doc/rocm-smi-lib-asan folder
 if( ENABLE_ASAN_PACKAGING )
+  set( COMP_TYPE "asan" )
   install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
 	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}-asan RENAME LICENSE.md
         COMPONENT asan)
+else()
+  set( COMP_TYPE "dev" )
 endif()
 install( FILES ${CPACK_RESOURCE_FILE_LICENSE}
 	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE} RENAME LICENSE.md
@@ -299,7 +306,9 @@ else()
   set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
 endif()
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
-set(CPACK_PACKAGE_CONTACT "RocmSMILib Support <rocm-smi.support@amd.com>")
+set(PKG_MAINTAINER_NM     "RocmSMILib Support")
+set(PKG_MAINTAINER_EMAIL  "rocm-smi.support@amd.com")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD System Management libraries")
 
 #Make proper version for appending
@@ -384,6 +393,9 @@ set ( CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post
 #Set the names now using CPACK utility
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+
+# Configure Lintian Specific Package Data
+configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
 
 include (CPack)
 
