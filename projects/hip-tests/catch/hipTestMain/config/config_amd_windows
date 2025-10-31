@@ -939,9 +939,6 @@
         "Unit_hipClock_Positive_Basic",
         "Unit_hipWallClock64_Positive_Basic",
         "====================================================",
-        "==================SWDEV-556645==================================",
-        "Unit_TexObjectCreate_TypePitch2D_IncompleteInit",
-        "====================================================",
         "Unit_hipEventRecord",
     #endif
         "=== Following tests disabled as it should be a local perf test",
