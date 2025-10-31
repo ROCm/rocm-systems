@@ -44,6 +44,16 @@ Functional Scenarios:
 behaviour
 */
 
+#define checkVMMSupported(device) {                                                              \
+  int value = 0;                                                                                 \
+  hipDeviceAttribute_t attr = hipDeviceAttributeVirtualMemoryManagementSupported;                \
+  HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
+  if (value == 0) {                                                                              \
+    printf("Machine does not support VMM. Skipping this test..");                                \
+    return;                                                                                      \
+  }                                                                                              \
+}
+
 #include <hip_test_common.hh>
 #include <string>
 static constexpr auto NUM_W{16};
@@ -309,12 +319,6 @@ TEST_CASE("Unit_hipPointerGetAttribute_Negative") {
                                    reinterpret_cast<hipDeviceptr_t>(A_d)) == hipErrorNotSupported);
   }
   SECTION(
-      "Pass HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE"
-      "not supported by HIP") {
-    REQUIRE(hipPointerGetAttribute(&data, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
-                                   reinterpret_cast<hipDeviceptr_t>(A_d)) == hipErrorNotSupported);
-  }
-  SECTION(
       "Pass HIP_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES"
       "not supported by HIP") {
     REQUIRE(hipPointerGetAttribute(&data, HIP_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES,
@@ -323,4 +327,97 @@ TEST_CASE("Unit_hipPointerGetAttribute_Negative") {
 #endif
   HIP_CHECK(hipFree(A_d));
   free(A_h);
+}
+
+/* Allocate memory using different Allocation APIs and check whether
+   IPC CAPABLE attribute returns correctly */
+TEST_CASE("Unit_hipPointerGetAttribute_ipc_capable") {
+
+  HIP_CHECK(hipSetDevice(0));
+  size_t Nbytes = N * sizeof(int);
+  unsigned int datatype;
+
+  SECTION("Malloc Allocation") {
+    int *A_d;
+    HIP_CHECK(hipMalloc(&A_d, Nbytes));
+    HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
+                                     reinterpret_cast<hipDeviceptr_t>(A_d)));
+    REQUIRE(datatype == 1);
+  }
+
+  size_t pitch_A;
+  size_t width{NUM_W * sizeof(char)};
+  SECTION("Malloc Pitch Allocation") {
+    CHECK_IMAGE_SUPPORT
+    char* A_d;
+    HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
+    HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
+                                     reinterpret_cast<hipDeviceptr_t>(A_d)));
+
+    REQUIRE(datatype == 1);
+  }
+#if HT_AMD
+  SECTION("Malloc Array Allocation") {
+    CHECK_IMAGE_SUPPORT
+    hipArray_t B_d;
+    hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
+    HIP_CHECK(hipMallocArray(&B_d, &desc, NUM_W, NUM_H, hipArrayDefault));
+    HIP_CHECK_ERROR(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
+                                           reinterpret_cast<hipDeviceptr_t>(B_d)),
+                                           hipErrorInvalidValue);
+    HIP_CHECK(hipFreeArray(B_d));
+  }
+
+  SECTION("Malloc 3D Array Allocation") {
+    CHECK_IMAGE_SUPPORT
+    int width = 10, height = 10, depth = 10;
+    hipArray_t arr;
+
+    hipChannelFormatDesc channelDesc =
+        hipCreateChannelDesc(sizeof(float) * 8, 0, 0, 0, hipChannelFormatKindFloat);
+    HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, depth),
+                               hipArrayDefault));
+    HIP_CHECK_ERROR(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
+                                           reinterpret_cast<hipDeviceptr_t>(arr)),
+                                           hipErrorInvalidValue);
+    HIP_CHECK(hipFreeArray(arr));
+  }
+#endif
+
+  SECTION("VMM Memory Allocation") {
+    size_t granularity = 0;
+    int deviceId = 0;
+    size_t buffer_size = N * sizeof(int);
+    hipDevice_t device;
+    HIP_CHECK(hipDeviceGet(&device, deviceId));
+    checkVMMSupported(device);
+    hipMemAllocationProp prop{};
+
+    prop.type = hipMemAllocationTypePinned;
+    prop.location.type = hipMemLocationTypeDevice;
+    prop.location.id = device;  // Current Devices
+    HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+    REQUIRE(granularity > 0);
+    size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
+    hipMemGenericAllocationHandle_t handle;
+    // Allocate physical memory
+    HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+    // Allocate virtual address range
+    void* ptrA;
+    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+    HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+    // Set access
+    hipMemAccessDesc accessDesc = {};
+    accessDesc.location.type = hipMemLocationTypeDevice;
+    accessDesc.location.id = device;
+    accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+    // Make the address accessible to GPU 0
+    HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+    HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
+                                     reinterpret_cast<hipDeviceptr_t>(ptrA)));
+
+    REQUIRE(datatype == 0);
+ }
+
 }
