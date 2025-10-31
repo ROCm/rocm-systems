@@ -381,7 +381,6 @@ write_perfetto(
                 auto  _name      = itr.name;
                 auto  _operation = itr.name;
 
-                /* Temporary crash fix
                 if(itr.has_extdata())
                 {
                     auto _extdata = itr.get_extdata();
@@ -390,7 +389,6 @@ write_perfetto(
                     if(_extdata.operation && !_extdata.operation->empty())
                         _operation = _extdata.operation.value();
                 }
-                */
 
                 const char* category_name = get_category_string(itr.category);
 
