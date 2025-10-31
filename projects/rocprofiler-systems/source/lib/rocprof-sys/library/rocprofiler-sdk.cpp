@@ -332,8 +332,9 @@ iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/, int32_t /*op
 {
     auto* _data = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
-        _data->emplace_back(
-            argument_info{ arg_number, demangle(arg_type), arg_name, arg_value_str });
+        _data->emplace_back(argument_info{ arg_number,
+                                           rocprofsys::utility::demangle_cached(arg_type),
+                                           arg_name, arg_value_str });
     return 0;
 }
 
@@ -385,8 +386,8 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data
                 (_linfo && _linfo.line > 0)
                            ? join("", _linfo.line)
                            : ((itr.lineno == 0) ? std::string{ "?" } : join("", itr.lineno));
-            auto _entry                              = join("", demangle(*_func), " @ ",
-                                                            join(':', ::basename(_loc->c_str()), _line));
+            auto _entry = join("", rocprofsys::utility::demangle_cached(*_func), " @ ",
+                               join(':', ::basename(_loc->c_str()), _line));
             backtrace[join("", "frame#", _bt_cnt++)] = _entry;
         }
     }
@@ -808,8 +809,8 @@ tool_tracing_callback_stop(
                                              : ((itr.lineno == 0) ? std::string{ "?" }
                                                                   : join("", itr.lineno));
                             auto _entry =
-                                join("", demangle(*_func), " @ ",
-                                     join(':', ::basename(_loc->c_str()), _line));
+                                join("", rocprofsys::utility::demangle_cached(*_func),
+                                     " @ ", join(':', ::basename(_loc->c_str()), _line));
                             if(_bt_cnt < 10)
                             {
                                 // Prepend zero for better ordering in UI. Only one
@@ -1178,12 +1179,13 @@ ompt_tracing_callback_stop(
                             (_linfo && !_linfo.location.empty())
                                 ? &_linfo.location
                                 : ((itr.location.empty()) ? &_unk : &itr.location);
-                        auto _line  = (_linfo && _linfo.line > 0)
-                                          ? join("", _linfo.line)
-                                          : ((itr.lineno == 0) ? std::string{ "?" }
-                                                               : join("", itr.lineno));
-                        auto _entry = join("", demangle(*_func), " @ ",
-                                           join(':', ::basename(_loc->c_str()), _line));
+                        auto _line = (_linfo && _linfo.line > 0)
+                                         ? join("", _linfo.line)
+                                         : ((itr.lineno == 0) ? std::string{ "?" }
+                                                              : join("", itr.lineno));
+                        auto _entry =
+                            join("", rocprofsys::utility::demangle_cached(*_func), " @ ",
+                                 join(':', ::basename(_loc->c_str()), _line));
                         if(_bt_cnt < 10)
                         {
                             // Prepend zero for better ordering in UI. Only one zero
@@ -1583,7 +1585,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 const auto* _kern_sym_data =
                     get_kernel_symbol_info(record->dispatch_info.kernel_id);
 
-                auto        _name     = tim::demangle(_kern_sym_data->kernel_name);
+                auto _name =
+                    rocprofsys::utility::demangle_cached(_kern_sym_data->kernel_name);
                 auto        _corr_id  = record->correlation_id.internal;
                 auto        _beg_ns   = record->start_timestamp;
                 auto        _end_ns   = record->end_timestamp;

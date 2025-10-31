@@ -37,7 +37,9 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <timemory/utility/demangle.hpp>
+
+#include "core/utility.hpp"
+
 #if ROCPROFSYS_USE_ROCM > 0
 #    include "library/rocprofiler-sdk/fwd.hpp"
 #    include <rocprofiler-sdk/context.h>
@@ -99,7 +101,7 @@ rocpd_post_processing::get_kernel_dispatch_callback() const
         }
 
         auto region_name_primary_key = data_processor->insert_string(
-            tim::demangle(kernel_symbol->kernel_name).c_str());
+            rocprofsys::utility::demangle_cached(kernel_symbol->kernel_name).c_str());
 
         auto stack_id        = _kds.correlation_id_internal;
         auto parent_stack_id = _kds.correlation_id_ancestor;
@@ -787,7 +789,8 @@ rocpd_post_processing::post_process_metadata()
     auto _kernel_symbols_list = m_metadata.get_kernel_symbol_list();
     for(const auto& kernel_symbol : _kernel_symbols_list)
     {
-        auto kernel_name = tim::demangle(kernel_symbol.kernel_name);
+        auto kernel_name =
+            rocprofsys::utility::demangle_cached(kernel_symbol.kernel_name);
         data_processor->insert_kernel_symbol(
             kernel_symbol.kernel_id, n_info.id, process_info.pid,
             kernel_symbol.code_object_id, kernel_symbol.kernel_name, kernel_name.c_str(),

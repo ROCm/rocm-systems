@@ -26,6 +26,7 @@
 
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/utility/delimit.hpp>
+#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/join.hpp>
 
 #include <algorithm>
@@ -36,6 +37,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace rocprofsys
@@ -261,5 +263,9 @@ parse_numeric_range<int64_t, std::vector<int64_t>>(std::string, const std::strin
 extern template std::unordered_set<int64_t>
 parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
                                                           long);
+
+std::string
+demangle_cached(std::string_view mangled);
+
 }  // namespace utility
 }  // namespace rocprofsys

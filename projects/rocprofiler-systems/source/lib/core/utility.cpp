@@ -23,6 +23,8 @@
 #include "utility.hpp"
 #include "debug.hpp"
 
+#include <unordered_map>
+
 namespace rocprofsys
 {
 namespace utility
@@ -119,5 +121,23 @@ parse_numeric_range<int64_t, std::vector<int64_t>>(std::string, const std::strin
 template std::unordered_set<int64_t>
 parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
                                                           long);
+
+std::string
+demangle_cached(std::string_view mangled)
+{
+    static std::unordered_map<std::string_view, std::string_view> demangle_cache;
+
+    auto it = demangle_cache.find(mangled);
+    if(it != demangle_cache.end())
+    {
+        return std::string{ it->second };
+    }
+    else
+    {
+        auto demangled = tim::demangle(mangled);
+        demangle_cache.emplace(mangled, demangled);
+        return demangled;
+    }
+}
 }  // namespace utility
 }  // namespace rocprofsys

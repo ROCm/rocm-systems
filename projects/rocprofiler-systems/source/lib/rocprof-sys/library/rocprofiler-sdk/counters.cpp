@@ -94,7 +94,9 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
     const auto* _kern_sym_data =
         tool_data->get_kernel_symbol_info(_dispatch_info.kernel_id);
 
-    auto _bundle = counter_bundle_t{ tim::demangle(_kern_sym_data->kernel_name), _scope };
+    auto _bundle = counter_bundle_t{
+        rocprofsys::utility::demangle_cached(_kern_sym_data->kernel_name), _scope
+    };
 
     _bundle.push(_dispatch_info.queue_id.handle)
         .start()
