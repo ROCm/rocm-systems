@@ -98,6 +98,12 @@ class RocProfCompute_Base:
                 "Access denied. Cannot access parent directories in path (i.e. ../)"
             )
 
+        if args.no_native_tool and args.iteration_multiplexing is not None:
+            console_error(
+                "--no-native-tool cannot be used with --iteration-multiplexing. "
+                "Please remove one of these options."
+            )
+
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
         if args.remaining:
