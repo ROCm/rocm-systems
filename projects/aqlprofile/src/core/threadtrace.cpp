@@ -41,17 +41,6 @@
 #define THREAD_TRACE_PREFIX_SIZE 0x100
 #define DEFAULT_TRACE_BUFFER_SIZE (3 << 26)
 
-typedef enum {
-  ATT_MARKER_HEADER_CHANNEL = 0,
-  ATT_MARKER_SIZE_LO_CHANNEL,
-  ATT_MARKER_ADDR_LO_CHANNEL,
-  ATT_MARKER_ADDR_HI_CHANNEL,
-  ATT_MARKER_SIZE_HI_CHANNEL,
-  ATT_MARKER_ID_LO_CHANNEL,
-  ATT_MARKER_ID_HI_CHANNEL,
-  ATT_MARKER_WAIT_FOR_HEADER = 32
-} att_marker_state;
-
 typedef union {
   struct {
     uint32_t isUnload : 1;    // 0 if code object is being loaded, 1 for unload
@@ -327,10 +316,10 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
   pm4_builder::CmdBuffer commands;
 
   if (!data.isUnload) {
-    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.addr), ATT_MARKER_ADDR_LO_CHANNEL);
-    sqttbuilder->InsertCodeobjMarker(&commands, data.addr >> 32, ATT_MARKER_ADDR_HI_CHANNEL);
-    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.size), ATT_MARKER_SIZE_LO_CHANNEL);
-    sqttbuilder->InsertCodeobjMarker(&commands, data.size >> 32, ATT_MARKER_SIZE_HI_CHANNEL);
+    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.addr), ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_LO);
+    sqttbuilder->InsertCodeobjMarker(&commands, data.addr >> 32, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_HI);
+    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.size), ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_LO);
+    sqttbuilder->InsertCodeobjMarker(&commands, data.size >> 32, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_HI);
   }
 
   aqlprofile_att_header_marker_t header{};
@@ -338,12 +327,12 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
   header.isUnload = data.isUnload;
 
   if (data.id >= (1 << 30)) {
-    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.id), ATT_MARKER_ID_LO_CHANNEL);
-    sqttbuilder->InsertCodeobjMarker(&commands, data.id >> 32, ATT_MARKER_ID_HI_CHANNEL);
+    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.id), ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_LO);
+    sqttbuilder->InsertCodeobjMarker(&commands, data.id >> 32, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_HI);
   } else
     header.legacy_id = data.id;
 
-  sqttbuilder->InsertCodeobjMarker(&commands, header.raw, ATT_MARKER_HEADER_CHANNEL);
+  sqttbuilder->InsertCodeobjMarker(&commands, header.raw, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_TAIL);
 
   auto memorymgr = std::make_shared<CodeobjMemoryManager>(data.agent, alloc_cb, dealloc_cb,
                                                           commands.Size(), userdata);
