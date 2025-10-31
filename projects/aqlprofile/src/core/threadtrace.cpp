@@ -41,15 +41,6 @@
 #define THREAD_TRACE_PREFIX_SIZE 0x100
 #define DEFAULT_TRACE_BUFFER_SIZE (3 << 26)
 
-typedef union {
-  struct {
-    uint32_t isUnload : 1;    // 0 if code object is being loaded, 1 for unload
-    uint32_t bFromStart : 1;  // Has this code object been loaded before thread trace started?
-    uint32_t legacy_id : 30;  // Legacy code object ID, if it fits in 30 bits.
-  };
-  uint32_t raw;
-} aqlprofile_att_header_marker_t;
-
 inline rocprof_trace_decoder_gfx9_header_t getHeaderPacket(int SE, int CU, int SIMD, aql_profile::gpu_id_t id, bool double_buffer) {
   rocprof_trace_decoder_gfx9_header_t header{.raw = 0};
   // Requires decoder version 0.1.2 or higher
@@ -322,7 +313,7 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
     sqttbuilder->InsertCodeobjMarker(&commands, data.size >> 32, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_HI);
   }
 
-  aqlprofile_att_header_marker_t header{};
+  rocprof_trace_decoder_codeobj_marker_tail_t header{};
   header.bFromStart = data.fromStart;
   header.isUnload = data.isUnload;
 
