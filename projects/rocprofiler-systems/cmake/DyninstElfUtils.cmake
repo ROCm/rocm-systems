@@ -189,8 +189,7 @@ else()
             [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] <SOURCE_DIR>/configure
             --enable-install-elfh --prefix=${_eu_root} --disable-libdebuginfod
             --disable-debuginfod --enable-thread-safety --disable-nls
-            ${ElfUtils_CONFIG_OPTIONS}
-            --libdir=${_eu_root}/lib
+            ${ElfUtils_CONFIG_OPTIONS} --libdir=${_eu_root}/lib
         BUILD_COMMAND make install
         BUILD_BYPRODUCTS ${_eu_build_byproducts}
         INSTALL_COMMAND ""
