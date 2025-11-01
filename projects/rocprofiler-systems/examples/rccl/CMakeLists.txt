@@ -36,30 +36,17 @@ if(ROCPROFSYS_DISABLE_EXAMPLES)
     endif()
 endif()
 
-function(rccl_message _MSG_TYPE)
-    if(
-        "${CMAKE_PROJECT_NAME}" STREQUAL "rocprofiler-systems"
-        AND "$ENV{ROCPROFSYS_CI}"
-        AND "${_MSG_TYPE}" MATCHES "WARNING"
-    )
-        set(_MSG_TYPE STATUS) # don't generate warnings during CI
-    endif()
-    if("${CMAKE_PROJECT_NAME}" STREQUAL "rocprofiler-systems")
-        rocprofiler_systems_message(${_MSG_TYPE} ${ARGN})
-    else()
-        message(${_MSG_TYPE} ${ARGN})
-    endif()
-endfunction()
-
+# Find HIP
 find_package(hip HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
 if(NOT hip_FOUND)
     message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing HIP...")
     return()
 endif()
 
+# Find RCCL
 find_package(RCCL HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
 if(NOT RCCL_FOUND)
-    message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing RCCL...")
+    message(AUTHOR_WARNING "rccl-tests skipped. Missing RCCL...")
     return()
 else()
     message(STATUS "RCCL found: ${RCCL_INCLUDE_DIRS}")
@@ -67,13 +54,17 @@ else()
     message(STATUS "RCCL version: ${RCCL_VERSION}")
 endif()
 
+# Build rccl-tests
 if(hip_FOUND AND RCCL_FOUND)
     # Setup source and build directories
     set(rccl-tests_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rccl-tests")
     set(rccl-tests_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/rccl-tests")
 
     if(NOT EXISTS "${rccl-tests_SOURCE_DIR}")
-        rccl_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing rccl-tests source at ${rccl-tests_SOURCE_DIR}")
+        message(
+            AUTHOR_WARNING
+            "rccl-tests skipped. Missing rccl-tests source at ${rccl-tests_SOURCE_DIR}"
+        )
         return()
     endif()
 
@@ -148,6 +139,4 @@ if(hip_FOUND AND RCCL_FOUND)
     endforeach()
 
     set(RCCL_TEST_TARGETS "${_RCCL_TEST_TARGETS}" CACHE INTERNAL "rccl-test targets")
-
-    rccl_message(STATUS "rccl-tests will be built at build-time (not during configuration)")
 endif()
