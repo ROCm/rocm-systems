@@ -46,13 +46,27 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc)
 add_custom_target(get_function_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code)
 
-#add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
-#                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
-#                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
-#                   -I${HIP_INCLUDE_DIR}
-#                   -o launch_kernel_module.code
-#                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
-#add_custom_target(launch_kernel_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
+if (NOT WIN32)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
+                     COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
+                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                     -I${HIP_INCLUDE_DIR}
+                     -o launch_kernel_module.code
+                     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
+  add_custom_target(launch_kernel_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
+
+  add_custom_target(coopKernel.code
+                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/coopKernel.code
+                    -I${HIP_INCLUDE_DIR}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS 
+  ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
+  ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
+endif()
+
+
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code
                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
@@ -70,19 +84,10 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/get_tex_ref_module.cc)
 add_custom_target(get_tex_ref_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code)
 
-#add_custom_target(coopKernel.code
-#                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
-#                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
-#                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/coopKernel.code
-#                  -I${HIP_INCLUDE_DIR}
-#                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
-  ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code
-  ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
 )
 # Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900  --offload-arch=gfx906"
 # having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
@@ -127,21 +132,27 @@ add_custom_target(addKernel.code
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/addKernel.code
                   -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+# TODO - Rock build failure from clang
+if(NOT WIN32)
+  add_custom_target(addKernel.spv
+                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
+                    --no-gpu-bundle-output
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
+                    -I${HIP_INCLUDE_DIR}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
-add_custom_target(addKernel.spv
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
-                  --no-gpu-bundle-output
-                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
-                  -I${HIP_INCLUDE_DIR}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+  add_custom_target(addKernel-bundle.spv
+                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
+                    -I${HIP_INCLUDE_DIR}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+    ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
+    ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
+endif()
 
-add_custom_target(addKernel-bundle.spv
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
-                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
-                  -I${HIP_INCLUDE_DIR}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copyKernelCompressed.code
                   COMMAND ${CMAKE_HIP_COMPILER} -mcode-object-version=5 --offload-compress --cuda-device-only ${OFFLOAD_ARCH_STR}
@@ -180,8 +191,6 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
   ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
-  ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
-  ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code
@@ -264,9 +273,12 @@ hip_add_exe_to_target(NAME ModuleTest
   LINKER_LIBS ${RTCLIB}
   COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
-#add_dependencies(ModuleTest coopKernel.code)
+if(NOT WIN32)
+  add_dependencies(ModuleTest coopKernel.code)
+  add_dependencies(ModuleTest launch_kernel_module)
+endif()
+
 add_dependencies(ModuleTest get_function_module)
-#add_dependencies(ModuleTest launch_kernel_module)
 add_dependencies(ModuleTest get_global_test_module)
 add_dependencies(ModuleTest get_tex_ref_module)
 
@@ -274,8 +286,11 @@ if(HIP_PLATFORM MATCHES "amd")
 add_dependencies(build_tests empty_module.code)
 add_dependencies(build_tests copyKernel.code copyKernel.s)
 add_dependencies(build_tests addKernel.code)
-add_dependencies(build_tests addKernel.spv)
-add_dependencies(build_tests addKernel-bundle.spv)
+# TODO - Rock build failure from clang
+if(NOT WIN32)
+  add_dependencies(build_tests addKernel.spv)
+  add_dependencies(build_tests addKernel-bundle.spv)
+endif()
 add_dependencies(build_tests copyKernelCompressed.code)
 add_dependencies(build_tests copyKernelGenericTarget.code)
 add_dependencies(build_tests copyKernelGenericTargetCompressed.code)
