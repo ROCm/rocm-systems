@@ -781,9 +781,8 @@ class AMDSMIHelpers():
             logging.debug("AMDSMIHelpers.get_accelerator_choices_types_indices - Root, getting accelerator partition profiles")
         accelerator_partition_profiles = self.get_accelerator_partition_profile_config()
         if len(accelerator_partition_profiles['profile_types']) != 0:
-            compute_partitions_str = accelerator_partition_profiles['profile_types'] + accelerator_partition_profiles['profile_indices']
-            accelerator_choices = ", ".join(compute_partitions_str)
-            return_val = (accelerator_choices, accelerator_partition_profiles)
+            compute_partitions_list = accelerator_partition_profiles['profile_types'] + accelerator_partition_profiles['profile_indices']
+            return_val = (compute_partitions_list, accelerator_partition_profiles)
         return return_val
 
 
