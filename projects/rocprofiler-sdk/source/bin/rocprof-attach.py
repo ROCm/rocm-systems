@@ -48,9 +48,11 @@ def main(
     # Load the shared library into ctypes and attach
     try:
         c_lib = ctypes.CDLL(attach_library)
-        c_lib.attach.restype = ctypes.c_int
-        c_lib.attach.argtypes = [ctypes.c_uint]
-        attach_status = c_lib.attach(int(pid))
+        c_lib.rocattach_attach.restype = ctypes.c_int
+        c_lib.rocattach_attach.argtypes = [ctypes.c_int]
+        c_lib.rocattach_detach.restype = ctypes.c_int
+        c_lib.rocattach_detach.argtypes = [ctypes.c_int]
+        attach_status = c_lib.rocattach_attach(int(pid))
     except Exception as e:
         raise RuntimeError(f"Exception during library load and attachment: {e}")
 
@@ -65,7 +67,7 @@ def main(
         print("Detaching. Please wait, this can take up to 1-2 minutes")
         sys.stdout.flush()
         try:
-            detach_status = c_lib.detach()
+            detach_status = c_lib.rocattach_detach(int(pid))
         except Exception as e:
             print(f"Exception during detachment: {e}")
 
