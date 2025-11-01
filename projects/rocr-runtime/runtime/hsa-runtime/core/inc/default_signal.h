@@ -151,7 +151,7 @@ class BusyWaitSignal : public Signal {
   }
 
   /// @brief see the base class Signal
-  __forceinline HsaEvent* EopEvent() { return NULL; }
+  __forceinline std::shared_ptr<HsaEvent> EopEvent() { return NULL; }
 
  protected:
   bool _IsA(rtti_t id) const { return id == &rtti_id(); }

@@ -220,8 +220,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     ScopedAcquire<KernelMutex> _lock(&queue_lock());
     queue_count()--;
     if (queue_count() == 0) {
-      core::InterruptSignal::DestroyEvent(queue_event());
-      queue_event() = nullptr;
+      queue_event().reset();  // Call the queue_event deleter
     }
   });
 
@@ -390,8 +389,7 @@ AqlQueue::~AqlQueue() {
     ScopedAcquire<KernelMutex> lock(&queue_lock());
     queue_count()--;
     if (queue_count() == 0) {
-      core::InterruptSignal::DestroyEvent(queue_event());
-      queue_event() = nullptr;
+      queue_event().reset();  // call the queue_event deleter
     }
   }
   agent_->system_deallocator()(pm4_ib_buf_);

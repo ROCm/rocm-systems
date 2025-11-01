@@ -46,6 +46,7 @@
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <memory>
 
 #include "hsakmt/hsakmt.h"
 
@@ -63,7 +64,7 @@ class PcsRuntime {
   ~PcsRuntime() {}
 
   /// @brief Getter for the PcsRuntime singleton object.
-  static PcsRuntime* instance();
+  static std::shared_ptr<PcsRuntime> instance();
 
   bool SessionsActive() const;
 
@@ -151,19 +152,24 @@ class PcsRuntime {
   /// @brief Initialize singleton object, must be called once.
   static PcsRuntime* CreateSingleton();
 
-  /// Pointer to singleton object.
+  /// Pointer to singleton object
   static __forceinline std::atomic<PcsRuntime*>& get_instance() {
-    // This allocation is meant to last until the last thread has exited.
-    // It is intentionally not freed.
-    static std::atomic<PcsRuntime*>* instance_ = new std::atomic<PcsRuntime*>();
+    // Using shared_ptr to avoid static deallocation fiasco
+    static std::shared_ptr<std::atomic<PcsRuntime*>> instance_ =
+        std::make_shared<std::atomic<PcsRuntime*>>();
     return *instance_;
   }
+
+  static __forceinline std::shared_ptr<PcsRuntime>& get_shared_instance() {
+    static std::shared_ptr<PcsRuntime> shared_instance_;
+    return shared_instance_;
+  }
+
   static __forceinline std::mutex& instance_mutex() {
-    // This allocation is meant to last until the last thread has exited.
-    // It is intentionally not freed.
-   static std::mutex* instance_mutex_ = new std::mutex();
-   return *instance_mutex_;
-}
+    // Using shared_ptr to manage lifetime and avoid static deallocation fiasco.
+    static std::shared_ptr<std::mutex> instance_mutex_ = std::make_shared<std::mutex>();
+    return *instance_mutex_;
+  }
   // Map of pc sampling sessions indexed by hsa_ven_amd_pcs_t handle
   std::map<uint64_t, PcSamplingSession> pc_sampling_;
   KernelMutex pc_sampling_lock_;

@@ -401,7 +401,7 @@ class Signal {
 
   /// @brief Applies only to InterrupEvent type, returns the event used to.
   /// Returns NULL for DefaultEvent Type.
-  virtual HsaEvent* EopEvent() = 0;
+  virtual std::shared_ptr<HsaEvent> EopEvent() = 0;
 
   /// @brief Waits until multiple signals in the list satisfy their conditions
   /// or a timeout is reached.
@@ -667,7 +667,7 @@ class DoorbellSignal : public Signal {
   }
 
   /// @brief This operation is illegal
-  HsaEvent* EopEvent() final override {
+  std::shared_ptr<HsaEvent> EopEvent() final override {
     assert(false);
     return NULL;
   }

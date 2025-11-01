@@ -75,8 +75,8 @@ class InterruptSignal : private LocalSignal, public Signal {
 
     EventPool() : allEventsAllocated(false) {}
 
-    HsaEvent* alloc();
-    void free(HsaEvent* evt);
+    std::shared_ptr<HsaEvent> alloc();
+    void free(std::shared_ptr<HsaEvent> evt);
     void clear() {
       events_.clear();
       allEventsAllocated = false;
@@ -84,12 +84,12 @@ class InterruptSignal : private LocalSignal, public Signal {
 
    private:
     HybridMutex lock_;
-    std::vector<unique_event_ptr> events_;
+    std::vector<std::shared_ptr<HsaEvent>> events_;
     bool allEventsAllocated;
   };
 
-  static HsaEvent* CreateEvent(HSA_EVENTTYPE type, bool manual_reset);
-  static void DestroyEvent(HsaEvent* evt);
+  static std::shared_ptr<HsaEvent> CreateEvent(HSA_EVENTTYPE type, bool manual_reset);
+  static void DestroyEvent(HsaEvent *evt);
 
   /// @brief Determines if a Signal* can be safely converted to an
   /// InterruptSignal* via static_cast.
@@ -98,7 +98,7 @@ class InterruptSignal : private LocalSignal, public Signal {
   }
 
   explicit InterruptSignal(hsa_signal_value_t initial_value,
-                           HsaEvent* use_event = NULL);
+                           std::shared_ptr<HsaEvent> use_event = NULL);
 
   ~InterruptSignal();
 
@@ -188,14 +188,14 @@ class InterruptSignal : private LocalSignal, public Signal {
   }
 
   /// @brief See base class Signal.
-  __forceinline HsaEvent* EopEvent() { return event_; }
+  __forceinline std::shared_ptr<HsaEvent> EopEvent() {return event_;}
 
  protected:
   bool _IsA(rtti_t id) const { return id == &rtti_id(); }
 
  private:
   /// @variable KFD event on which the interrupt signal is based on.
-  HsaEvent* event_;
+  std::shared_ptr<HsaEvent> event_;
 
   /// @variable Indicates whether the signal should release the event when it
   /// closes or not.

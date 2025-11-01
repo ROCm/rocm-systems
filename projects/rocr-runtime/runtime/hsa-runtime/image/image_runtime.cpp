@@ -149,49 +149,53 @@ hsa_status_t ImageRuntime::CreateImageManager(hsa_agent_t agent, void* data) {
   return HSA_STATUS_SUCCESS;
 }
 
-ImageRuntime* ImageRuntime::instance() {
-  ImageRuntime* instance = get_instance().load(std::memory_order_acquire);
-  if (instance == NULL) {
+std::shared_ptr<ImageRuntime> ImageRuntime::instance() {
+  ImageRuntime* raw_instance = get_instance().load(std::memory_order_acquire);
+  if (raw_instance == NULL) {
     // Protect the initialization from multi threaded access.
     std::lock_guard<std::mutex> lock(instance_mutex());
 
     // Make sure we are not initializing it twice.
-    instance = get_instance().load(std::memory_order_relaxed);
-    if (instance != NULL) {
-      return instance;
+    raw_instance = get_instance().load(std::memory_order_relaxed);
+    if (raw_instance != NULL) {
+      return get_shared_instance();
     }
 
-    instance = CreateSingleton();
-    if (instance == NULL) {
-      return NULL;
+    raw_instance = CreateSingleton();
+    if (raw_instance == NULL) {
+      return nullptr;
     }
 
     // UnloadCallback = &ext_image::ImageRuntime::DestroySingleton;
   }
 
-  return instance;
+  // Return the shared_ptr (increments refcount for thread safety)
+  return get_shared_instance();
 }
 
 ImageRuntime* ImageRuntime::CreateSingleton() {
-  ImageRuntime* instance = new ImageRuntime();
+  auto shared_instance = std::make_shared<ImageRuntime>();
 
-  if (HSA_STATUS_SUCCESS != instance->blit_kernel_.Initialize()) {
-    instance->Cleanup();
-    delete instance;
+  if (HSA_STATUS_SUCCESS != shared_instance->blit_kernel_.Initialize()) {
+    shared_instance->Cleanup();
     return NULL;
   }
 
-  if (HSA_STATUS_SUCCESS != HSA::hsa_iterate_agents(CreateImageManager, instance)) {
-    instance->Cleanup();
-    delete instance;
+  if (HSA_STATUS_SUCCESS != HSA::hsa_iterate_agents(CreateImageManager, shared_instance.get())) {
+    shared_instance->Cleanup();
     return NULL;
   }
 
-  assert(instance->kernarg_pool_.handle != 0);
-  assert(instance->image_managers_.size() != 0);
+  assert(shared_instance->kernarg_pool_.handle != 0);
+  assert(shared_instance->image_managers_.size() != 0);
 
-  get_instance().store(instance, std::memory_order_release);
-  return instance;
+  // Store raw pointer in atomic for backward compatibility
+  get_instance().store(shared_instance.get(), std::memory_order_release);
+
+  // Store shared_ptr for actual ownership
+  get_shared_instance() = shared_instance;
+
+  return shared_instance.get();
 }
 
 void ImageRuntime::DestroySingleton() {
@@ -203,7 +207,9 @@ void ImageRuntime::DestroySingleton() {
   instance->Cleanup();
 
   get_instance().store(NULL, std::memory_order_release);
-  delete instance;
+
+  // Release the shared_ptr - object will be deleted when last reference goes away
+  get_shared_instance().reset();
 }
 
 hsa_status_t ImageRuntime::GetImageInfoMaxDimension(hsa_agent_t component,

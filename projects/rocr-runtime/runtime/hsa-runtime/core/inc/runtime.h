@@ -713,13 +713,11 @@ class Runtime {
     prefetch_map_t::iterator next;
   };
 
-  // Will be created before any user could call hsa_init but also could be
-  // destroyed before incorrectly written programs call hsa_shutdown.
-  static __forceinline KernelMutex& bootstrap_lock() {
-    // This allocation is meant to last until the last thread has exited.
-    // It is intentionally not freed.
-    static KernelMutex* bootstrap_lock_ = new KernelMutex;
-    return *bootstrap_lock_;
+  static __forceinline std::shared_ptr<KernelMutex> bootstrap_lock() {
+    // This static could probably be replaced with a constinit in C++20
+    // when we get there.
+    static std::shared_ptr<KernelMutex> bootstrap_lock_ = std::make_shared<KernelMutex>(); 
+    return bootstrap_lock_;
   }
   Runtime();
 
@@ -850,13 +848,13 @@ class Runtime {
   size_t num_nodes_;
 
   // @brief AMD HSA event to monitor for virtual memory access fault.
-  HsaEvent* vm_fault_event_;
+  std::shared_ptr<HsaEvent> vm_fault_event_;
 
   // @brief HSA signal to contain the VM fault event.
   Signal* vm_fault_signal_;
 
   // @brief AMD HSA event to monitor for HW exceptions.
-  HsaEvent* hw_exception_event_;
+  std::shared_ptr<HsaEvent> hw_exception_event_;
 
   // @brief HSA signal to contain the HW exceptionevent.
   Signal* hw_exception_signal_;

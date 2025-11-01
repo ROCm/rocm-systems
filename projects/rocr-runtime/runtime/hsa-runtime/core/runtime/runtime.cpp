@@ -119,7 +119,8 @@ bool g_use_mwaitx;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
-  ScopedAcquire<KernelMutex> boot(&bootstrap_lock());
+  std::shared_ptr<KernelMutex> lck = bootstrap_lock();
+  ScopedAcquire<KernelMutex> boot(lck.get());
 
   if (runtime_singleton_ == NULL) {
     memset(log_flags, 0, sizeof(log_flags));
@@ -146,7 +147,8 @@ hsa_status_t Runtime::Acquire() {
 }
 
 hsa_status_t Runtime::Release() {
-  ScopedAcquire<KernelMutex> boot(&bootstrap_lock());
+  std::shared_ptr<KernelMutex> lck = bootstrap_lock();
+  ScopedAcquire<KernelMutex> boot(lck.get());
 
   if (runtime_singleton_ == nullptr) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
@@ -1771,7 +1773,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
 
   // Prepares a list of events for a wait inside KFD
   auto PrepareInterrupt = [&](size_t idx, bool init_age) {
-    HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
+    HsaEvent* hsa_event = hsa_signals[idx]->EopEvent().get();
     // If any signal doesn't have an interrupt, then switch to polling
     if (hsa_event == nullptr) {
       unique_evts = 0;
@@ -1781,7 +1783,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           hsa_events.resize(unique_evts + 10);
           event_age.resize(unique_evts + 10);
       }
-      if (init_age || hsa_events[unique_evts] != hsa_event ) {
+      if (init_age || hsa_events[unique_evts] != hsa_event) {
         event_age[unique_evts] = runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
       }
       hsa_events[unique_evts] = hsa_event;
@@ -2089,7 +2091,7 @@ bool Runtime::HwExceptionHandler(hsa_signal_value_t val, void* arg) {
 
   if (hw_exception_signal == NULL) return false;
 
-  HsaEvent* exception_event = hw_exception_signal->EopEvent();
+  std::shared_ptr<HsaEvent> exception_event = hw_exception_signal->EopEvent();
 
   HsaHwException& exception = exception_event->EventData.EventData.HwException;
 
@@ -2144,7 +2146,7 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
     return false;
   }
 
-  HsaEvent* vm_fault_event = vm_fault_signal->EopEvent();
+  std::shared_ptr<HsaEvent> vm_fault_event = vm_fault_signal->EopEvent();
 
   HsaMemoryAccessFault& fault =
       vm_fault_event->EventData.EventData.MemoryAccessFault;
@@ -2455,14 +2457,14 @@ void Runtime::Unload() {
     vm_fault_signal_->DestroySignal();
     vm_fault_signal_ = nullptr;
   }
-  core::InterruptSignal::DestroyEvent(vm_fault_event_);
+  core::InterruptSignal::DestroyEvent(vm_fault_event_.get());
   vm_fault_event_ = nullptr;
 
   if (hw_exception_signal_ != nullptr) {
     hw_exception_signal_->DestroySignal();
     hw_exception_signal_ = nullptr;
   }
-  core::InterruptSignal::DestroyEvent(hw_exception_event_);
+  core::InterruptSignal::DestroyEvent(hw_exception_event_.get());
   hw_exception_event_ = nullptr;
 
   SharedSignalPool.clear();

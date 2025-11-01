@@ -229,7 +229,7 @@ class IsaRegistry final {
   static const Isa *GetIsa(const Isa::Version &version,
                            IsaFeature sramecc = IsaFeature::Any,
                            IsaFeature xnack = IsaFeature::Any);
-  static const std::unordered_map<std::string, unsigned int> &
+  static std::shared_ptr<const std::unordered_map<std::string, unsigned int>>
                                                 GetSupportedGenericVersions();
  private:
   /// @brief IsaRegistry's map type.
@@ -242,7 +242,7 @@ class IsaRegistry final {
   ~IsaRegistry() = default;
 
   /// @returns Supported instruction set architectures.
-  static const IsaMap& GetSupportedIsas();
+  static std::shared_ptr<const IsaMap> GetSupportedIsas();
 }; // class IsaRegistry
 
 } // namespace core

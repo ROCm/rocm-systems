@@ -332,25 +332,25 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   std::vector<uint32_t> cu_mask_;
 
   // Shared event used for queue errors
-  static __forceinline HsaEvent*& queue_event() {
-    static HsaEvent* queue_event_ = nullptr;
+  static __forceinline std::shared_ptr<HsaEvent> queue_event() {
+    static std::shared_ptr<HsaEvent> queue_event_;
     return queue_event_;
   }
   // Queue count - used to ref count queue_event_
   static __forceinline std::atomic<uint32_t>& queue_count() {
-    // This allocation is meant to last until the last thread has exited.
-    // It is intentionally not freed.
-    static std::atomic<uint32_t>* queue_count_ = new std::atomic<uint32_t>(0);
+    // Use shared_ptr to avoid static deallocation fiasco
+    static std::shared_ptr<std::atomic<uint32_t>> queue_count_ =
+                                std::make_shared<std::atomic<uint32_t>>(0);
     return *queue_count_;
   }
 
   // Mutex for queue_event_ manipulation
-KernelMutex& queue_lock() {
-  // This allocation is meant to last until the last thread has exited.
-  // It is intentionally not freed.
-  static KernelMutex* queue_lock_ = new KernelMutex();
-  return *queue_lock_;
-}
+  KernelMutex& queue_lock() {
+    // Use shared_ptr to avoid static deallocation fiasco
+    static std::shared_ptr<KernelMutex> queue_lock_ =
+                                            std::make_shared<KernelMutex>();
+    return *queue_lock_;
+  }
 
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;

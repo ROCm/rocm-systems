@@ -46,6 +46,7 @@
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <memory>
 
 #include "inc/hsa.h"
 
@@ -61,10 +62,16 @@ namespace image {
 class ImageRuntime {
  public:
   /// @brief Getter for the ImageRuntime singleton object.
-  static ImageRuntime* instance();
+  static std::shared_ptr<ImageRuntime> instance();
 
   /// @brief Destroy singleton object.
   static void DestroySingleton();
+
+  /// @brief Constructor - public to allow std::make_shared to construct.
+  ImageRuntime();
+
+  /// @brief Destructor - public to allow shared_ptr to delete.
+  ~ImageRuntime();
 
   /// @brief Retrieve maximum size of width, height, depth, array size in pixels
   /// for a particular geometry on a component.
@@ -156,24 +163,24 @@ class ImageRuntime {
 
   static hsa_status_t CreateImageManager(hsa_agent_t agent, void* data);
 
-  ImageRuntime();
-
-  ~ImageRuntime();
-
   void Cleanup();
 
-  /// Pointer to singleton object.
+  /// Pointer to singleton object
   static __forceinline std::atomic<ImageRuntime*>& get_instance() {
-    // This allocation is meant to last until the last thread has exited.
-    // It is intentionally not freed.
-    static std::atomic<ImageRuntime*>* instance_ = new std::atomic<ImageRuntime*>();
+    // Using shared_ptr to avoid static deallocation fiasco
+    static std::shared_ptr<std::atomic<ImageRuntime*>> instance_ =
+        std::make_shared<std::atomic<ImageRuntime*>>();
     return *instance_;
   }
 
+  static __forceinline std::shared_ptr<ImageRuntime>& get_shared_instance() {
+    static std::shared_ptr<ImageRuntime> shared_instance_;
+    return shared_instance_;
+  }
+
   static __forceinline std::mutex& instance_mutex() {
-    // This allocation is meant to last until the last thread has exited.
-    // It is intentionally not freed.
-    static std::mutex* instance_mutex_ = new std::mutex();
+    // Using shared_ptr to avoid deallocation fiasco
+    static std::shared_ptr<std::mutex> instance_mutex_ = std::make_shared<std::mutex>();
     return *instance_mutex_;
   }
 

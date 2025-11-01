@@ -89,14 +89,16 @@ class KfdVirtioDriver final : public core::Driver {
                                   const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
                                   const uint32_t* nodes) const override;
   hsa_status_t MakeMemoryUnresident(const void* mem) const override;
-  hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                           HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id, void* queue_addr,
-                           uint64_t queue_size_bytes, HsaEvent* event,
-                           HsaQueueResource& queue_resource) const override;
+  hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type,
+                  uint32_t queue_pct, HSA_QUEUE_PRIORITY priority,
+                  uint32_t sdma_engine_id, void* queue_addr,
+                  uint64_t queue_size_bytes, std::shared_ptr<HsaEvent> event,
+                             HsaQueueResource& queue_resource) const override;
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
   hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_percentage,
-                           HSA_QUEUE_PRIORITY priority, void* queue_mem, uint64_t queue_size,
-                           HsaEvent* event) const override;
+                  HSA_QUEUE_PRIORITY priority, void* queue_mem,
+                  uint64_t queue_size, std::shared_ptr<HsaEvent> event)
+                                                                const override;
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t num_cu_mask,
                               uint32_t* cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_GWS, uint32_t* GWS) const override;

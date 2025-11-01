@@ -46,6 +46,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <memory>
 
 #include "core/inc/memory_region.h"
 #include "hsakmt/hsakmttypes.h"
@@ -158,10 +159,12 @@ public:
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   /// @param[out] queue_resource Queue resource information populated by the driver.
-  virtual hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                                   HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
-                                   void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
-                                   HsaQueueResource& queue_resource) const = 0;
+  virtual hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type,
+                        uint32_t queue_pct, HSA_QUEUE_PRIORITY priority,
+                        uint32_t sdma_engine_id, void* queue_addr,
+                        uint64_t queue_size_bytes,
+                        std::shared_ptr<HsaEvent> event,
+                                  HsaQueueResource& queue_resource) const = 0;
 
   /// @brief Destroy a queue.
   /// @param queue_id Kernel-mode driver's assigned queue ID.
@@ -175,8 +178,9 @@ public:
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   virtual hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
-                                   HSA_QUEUE_PRIORITY priority, void* queue_addr,
-                                   uint64_t queue_size_bytes, HsaEvent* event) const = 0;
+                                   HSA_QUEUE_PRIORITY priority,
+                                   void* queue_addr, uint64_t queue_size_bytes,
+                                      std::shared_ptr<HsaEvent> event) const = 0;
 
   /// @brief Set the CU mask for a queue.
   /// @details This sets the CU bitmask for a queue. The CU mask determines which CUs

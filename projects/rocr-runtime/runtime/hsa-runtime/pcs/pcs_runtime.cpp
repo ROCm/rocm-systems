@@ -58,32 +58,38 @@ do {                                                           \
 } while (false)
 
 
-PcsRuntime* PcsRuntime::instance() {
-  PcsRuntime* instance = get_instance().load(std::memory_order_acquire);
-  if (instance == NULL) {
+std::shared_ptr<PcsRuntime> PcsRuntime::instance() {
+  PcsRuntime* raw_instance = get_instance().load(std::memory_order_acquire);
+  if (raw_instance == NULL) {
     // Protect the initialization from multi threaded access.
     std::lock_guard<std::mutex> lock(instance_mutex());
 
     // Make sure we are not initializing it twice.
-    instance = get_instance().load(std::memory_order_relaxed);
-    if (instance != NULL) {
-      return instance;
+    raw_instance = get_instance().load(std::memory_order_relaxed);
+    if (raw_instance != NULL) {
+      return get_shared_instance();
     }
 
-    instance = CreateSingleton();
-    if (instance == NULL) {
-      return NULL;
+    raw_instance = CreateSingleton();
+    if (raw_instance == NULL) {
+      return nullptr;
     }
   }
 
-  return instance;
+  // Return the shared_ptr (increments refcount for thread safety)
+  return get_shared_instance();
 }
 
 PcsRuntime* PcsRuntime::CreateSingleton() {
-  PcsRuntime* instance = new PcsRuntime();
+  auto shared_instance = std::make_shared<PcsRuntime>();
+  
+  // Store raw pointer in atomic for backward compatibility
+  get_instance().store(shared_instance.get(), std::memory_order_release);
 
-  get_instance().store(instance, std::memory_order_release);
-  return instance;
+  // Store shared_ptr for actual ownership
+  get_shared_instance() = shared_instance;
+
+  return shared_instance.get();
 }
 
 void PcsRuntime::DestroySingleton() {
@@ -93,7 +99,9 @@ void PcsRuntime::DestroySingleton() {
   }
 
   get_instance().store(NULL, std::memory_order_release);
-  delete instance;
+
+  // Release the shared_ptr - object will be deleted when last reference goes away
+  get_shared_instance().reset();
 }
 
 void ReleasePcSamplingRsrcs() { PcsRuntime::DestroySingleton(); }

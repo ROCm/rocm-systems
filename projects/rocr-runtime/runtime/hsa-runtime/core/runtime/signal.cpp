@@ -220,32 +220,41 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
   }
 
   const uint32_t small_size = 10;
-  HsaEvent* short_evts[small_size];
+//  HsaEvent* short_evts[small_size];
+  std::array<HsaEvent *, small_size> short_evts;
   HsaEvent** evts = NULL;
+  std::vector<HsaEvent *> evts_vec;
   uint32_t unique_evts = 0;
   if (wait_hint != HSA_WAIT_STATE_ACTIVE) {
-    if (signal_count > small_size)
-      evts = new HsaEvent* [signal_count];
-    else
-      evts = short_evts;
-    for (uint32_t i = 0; i < signal_count; i++)
-      evts[i] = signals[i]->EopEvent();
+    if (signal_count > small_size) {
+      //evts = new HsaEvent* [signal_count];
+      evts_vec.reserve(signal_count);
+      evts = evts_vec.data();
+    }
+    else {
+      evts = short_evts.data();
+    }
+    for (uint32_t i = 0; i < signal_count; i++){
+      evts[i] = signals[i]->EopEvent().get();
+    }
     std::sort(evts, evts + signal_count);
     HsaEvent** end = std::unique(evts, evts + signal_count);
     unique_evts = uint32_t(end - evts);
   }
-  MAKE_SCOPE_GUARD([&]() {
-    if (signal_count > small_size) delete[] evts;
-  });
-#if defined(__linux__)
-  uint64_t event_age[unique_evts];
-#else
-  auto event_age = reinterpret_cast<uint64_t*>(_alloca(unique_evts * sizeof(unique_evts)));
-#endif
-  memset(event_age, 0, unique_evts * sizeof(uint64_t));
+  // MAKE_SCOPE_GUARD([&]() {
+  //   if (signal_count > small_size) delete[] evts;
+  // });
+
+  std::vector<uint64_t> event_age_vec;
+// #if defined(__linux__)
+//   uint64_t event_age[unique_evts];
+// #else
+//   auto event_age = reinterpret_cast<uint64_t*>(_alloca(unique_evts * sizeof(unique_evts)));
+// #endif
+  // memset(event_age, 0, unique_evts * sizeof(uint64_t));
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_event_age)
     for (uint32_t i = 0; i < unique_evts; i++)
-      event_age[i] = 1;
+      event_age_vec[i] = 1;
 
   int64_t value;
 
@@ -326,7 +335,8 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
     uint64_t ct=timer::duration_cast<std::chrono::milliseconds>(
       time_remaining).count();
     wait_ms = (ct>0xFFFFFFFEu) ? 0xFFFFFFFEu : ct;
-    HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, wait_on_all, wait_ms, event_age));
+    HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts,
+                                wait_on_all, wait_ms, event_age_vec.data()));
   }
 }
 
@@ -367,7 +377,7 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
 
   for (uint32_t i = 0; i < signal_count; i++) {
     assert(signals[i]->EopEvent() != NULL);
-    evts[i] = signals[i]->EopEvent();
+    evts[i] = signals[i]->EopEvent().get();
   }
 
   std::sort(evts, evts + signal_count);

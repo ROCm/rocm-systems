@@ -48,6 +48,7 @@
 #include <iostream>
 #include <sstream>
 #include <utility>
+#include <memory>
 
 namespace rocr {
 namespace core {
@@ -79,10 +80,10 @@ bool Isa::IsCompatible(const Isa &code_object_isa,
                        const Isa &agent_isa, unsigned int codeGenericVersion) {
 
   bool code_obj_isa_is_generic = false;
-  auto generic_it = IsaRegistry::GetSupportedGenericVersions().find(
-                                                 code_object_isa.GetIsaName());
+  auto generic_versions = IsaRegistry::GetSupportedGenericVersions();
+  auto generic_it = generic_versions->find(code_object_isa.GetIsaName());
 
-  if (generic_it != IsaRegistry::GetSupportedGenericVersions().end()) {
+  if (generic_it != generic_versions->end()) {
     code_obj_isa_is_generic = true;
   }
 
@@ -230,14 +231,16 @@ hsa_round_method_t Isa::GetRoundMethod(
 }
 
 const Isa *IsaRegistry::GetIsa(const std::string &full_name) {
-  auto isareg_iter = GetSupportedIsas().find(full_name);
-  return isareg_iter == GetSupportedIsas().end() ?
+  auto map = GetSupportedIsas();
+  auto isareg_iter = map->find(full_name);
+  return isareg_iter == map->end() ?
                                               nullptr : &isareg_iter->second;
 }
 
 const Isa *IsaRegistry::GetIsa(const Isa::Version &version, IsaFeature sramecc, IsaFeature xnack) {
-  auto isareg_iter = std::find_if(GetSupportedIsas().begin(),
-                                  GetSupportedIsas().end(),
+  auto map = GetSupportedIsas();
+  auto isareg_iter = std::find_if(map->begin(),
+                                  map->end(),
                                   [&](const IsaMap::value_type& isareg) {
                                     return isareg.second.GetVersion() == version &&
                                         (isareg.second.GetSramecc() == IsaFeature::Unsupported ||
@@ -245,48 +248,45 @@ const Isa *IsaRegistry::GetIsa(const Isa::Version &version, IsaFeature sramecc, 
                                         (isareg.second.GetXnack() == IsaFeature::Unsupported ||
                                          isareg.second.GetXnack() == xnack);
                                   });
-  return isareg_iter == GetSupportedIsas().end() ?
+  return isareg_iter == map->end() ?
                                               nullptr : &isareg_iter->second;
 }
 
 
 // TODO: c++20 use constexpr or consteval
-const std::unordered_map<std::string, unsigned int> &
+std::shared_ptr<const std::unordered_map<std::string, unsigned int>>
 IsaRegistry::GetSupportedGenericVersions() {
-  static const
-    std::unordered_map<std::string, unsigned int> * min_gen_versions =
-                          new std::unordered_map<std::string, unsigned int> {
-    {prepend_isa_prefix("gfx9-generic"), 1},
-    {prepend_isa_prefix("gfx9-generic:xnack-"), 1},
-    {prepend_isa_prefix("gfx9-generic:xnack+"), 1},
-    {prepend_isa_prefix("gfx9-4-generic"), 1},
-    {prepend_isa_prefix("gfx9-4-generic:xnack-"), 1},
-    {prepend_isa_prefix("gfx9-4-generic:xnack+"), 1},
-    {prepend_isa_prefix("gfx9-4-generic:sramecc-"), 1},
-    {prepend_isa_prefix("gfx9-4-generic:sramecc+"), 1},
-    {prepend_isa_prefix("gfx9-4-generic:sramecc-:xnack-"), 1},
-    {prepend_isa_prefix("gfx9-4-generic:sramecc-:xnack+"), 1},
-    {prepend_isa_prefix("gfx9-4-generic:sramecc+:xnack-"), 1},
-    {prepend_isa_prefix("gfx9-4-generic:sramecc+:xnack+"), 1},
-    {prepend_isa_prefix("gfx10-1-generic"), 1},
-    {prepend_isa_prefix("gfx10-1-generic:xnack-"), 1},
-    {prepend_isa_prefix("gfx10-1-generic:xnack+"), 1},
-    {prepend_isa_prefix("gfx10-3-generic"), 1},
-    {prepend_isa_prefix("gfx11-generic"), 1},
-    {prepend_isa_prefix("gfx12-generic"), 1}
-  };
-  return *min_gen_versions;
+  static const std::shared_ptr<std::unordered_map<std::string, unsigned int>> min_gen_versions =
+      std::make_shared<std::unordered_map<std::string, unsigned int>>(
+          std::unordered_map<std::string, unsigned int>{
+              {prepend_isa_prefix("gfx9-generic"), 1},
+              {prepend_isa_prefix("gfx9-generic:xnack-"), 1},
+              {prepend_isa_prefix("gfx9-generic:xnack+"), 1},
+              {prepend_isa_prefix("gfx9-4-generic"), 1},
+              {prepend_isa_prefix("gfx9-4-generic:xnack-"), 1},
+              {prepend_isa_prefix("gfx9-4-generic:xnack+"), 1},
+              {prepend_isa_prefix("gfx9-4-generic:sramecc-"), 1},
+              {prepend_isa_prefix("gfx9-4-generic:sramecc+"), 1},
+              {prepend_isa_prefix("gfx9-4-generic:sramecc-:xnack-"), 1},
+              {prepend_isa_prefix("gfx9-4-generic:sramecc-:xnack+"), 1},
+              {prepend_isa_prefix("gfx9-4-generic:sramecc+:xnack-"), 1},
+              {prepend_isa_prefix("gfx9-4-generic:sramecc+:xnack+"), 1},
+              {prepend_isa_prefix("gfx10-1-generic"), 1},
+              {prepend_isa_prefix("gfx10-1-generic:xnack-"), 1},
+              {prepend_isa_prefix("gfx10-1-generic:xnack+"), 1},
+              {prepend_isa_prefix("gfx10-3-generic"), 1},
+              {prepend_isa_prefix("gfx11-generic"), 1},
+              {prepend_isa_prefix("gfx12-generic"), 1}});
+  return min_gen_versions;
 }
 
-const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
+std::shared_ptr<const IsaRegistry::IsaMap> IsaRegistry::GetSupportedIsas() {
   // agent, and vendor name length limit excluding terminating nul character.
   constexpr size_t hsa_name_size = 63;
-  // This allocation is meant to last until the last thread has exited.
-  // It is intentionally not freed.
-  static IsaMap* supported_isas = new IsaMap();
+  static std::shared_ptr<IsaMap> supported_isas = std::make_shared<IsaMap>();
 
   if (supported_isas->size() > 0) {
-    return *supported_isas;
+    return supported_isas;
   }
   
   auto parse_out_minor_ver = [&](const std::string& generic_name) -> int32_t {
@@ -438,7 +438,7 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx1201",                12, 0, 1, unsupported, unsupported, 32, "gfx12-generic")
 #undef ISAREG_ENTRY_GEN
 
-  return *supported_isas;
+  return supported_isas;
 }
 
 } // namespace core

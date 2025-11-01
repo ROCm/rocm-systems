@@ -47,28 +47,29 @@
 namespace rocr {
 namespace core {
 
-HsaEvent* InterruptSignal::EventPool::alloc() {
+std::shared_ptr<HsaEvent> InterruptSignal::EventPool::alloc() {
   ScopedAcquire<HybridMutex> lock(&lock_);
   if (events_.empty()) {
     if (!allEventsAllocated) {
-      HsaEvent* evt = InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false);
+      std::shared_ptr<HsaEvent> evt =
+                    InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false);
       if (evt == nullptr) allEventsAllocated = true;
       return evt;
     }
     return nullptr;
   }
-  HsaEvent* ret = events_.back().release();
+  std::shared_ptr<HsaEvent> ret = events_.back();
   events_.pop_back();
   return ret;
 }
 
-void InterruptSignal::EventPool::free(HsaEvent* evt) {
+void InterruptSignal::EventPool::free(std::shared_ptr<HsaEvent> evt) {
   if (evt == nullptr) return;
   ScopedAcquire<HybridMutex> lock(&lock_);
-  events_.push_back(unique_event_ptr(evt));
+  events_.push_back(evt);
 }
 
-HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
+std::shared_ptr<HsaEvent> InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
   HsaEventDescriptor event_descriptor;
   event_descriptor.EventType = type;
   event_descriptor.SyncVar.SyncVar.UserData = NULL;
@@ -86,13 +87,20 @@ HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
     }
   }
 
-  return ret;
+  return std::shared_ptr<HsaEvent>(ret, [](HsaEvent* evt) {
+      if (evt) {
+        HSAKMT_CALL(hsaKmtDestroyEvent)(evt);
+      }
+  });}
+
+void InterruptSignal::DestroyEvent(HsaEvent *evt) {
+  HSAKMT_CALL(hsaKmtDestroyEvent(evt));
+  evt = nullptr;
 }
 
-void InterruptSignal::DestroyEvent(HsaEvent* evt) { HSAKMT_CALL(hsaKmtDestroyEvent(evt)); }
-
-InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, HsaEvent* use_event)
-    : LocalSignal(initial_value, false), Signal(signal()) {
+InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value,
+                                  std::shared_ptr<HsaEvent> use_event)
+                    : LocalSignal(initial_value, false), Signal(signal()) {
   if (use_event != nullptr) {
     event_ = use_event;
     free_event_ = false;
@@ -194,7 +202,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
       static_cast<uint32_t>(signal_abort_timeout ? signal_abort_timeout * 1000 : 0xFFFFFFFFUL)
     );
 
-    HSAKMT_CALL(hsaKmtWaitOnEvent_Ext(event_, wait_ms, &event_age));
+    HSAKMT_CALL(hsaKmtWaitOnEvent_Ext(event_.get(), wait_ms, &event_age));
   }
 }
 
@@ -372,7 +380,7 @@ hsa_signal_value_t InterruptSignal::CasAcqRel(hsa_signal_value_t expected,
 }
   /// @brief Notify driver of signal value change if necessary.
   void InterruptSignal::SetEvent() {
-    if (InWaiting()) HSAKMT_CALL(hsaKmtSetEvent(event_));
+    if (InWaiting()) HSAKMT_CALL(hsaKmtSetEvent(event_.get()));
   }
 
 }  // namespace core

@@ -369,13 +369,16 @@ hsa_status_t KfdDriver::FreeMemory(void *mem, size_t size) {
   return FreeKfdMemory(mem, size) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                                    HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
-                                    void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
+hsa_status_t
+KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type,
+            uint32_t queue_pct, HSA_QUEUE_PRIORITY priority,
+            uint32_t sdma_engine_id, void* queue_addr,
+            uint64_t queue_size_bytes, std::shared_ptr<HsaEvent> event,
                                     HsaQueueResource& queue_resource) const {
-  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, priority, sdma_engine_id,
-                                       queue_addr, queue_size_bytes, event, &queue_resource)) !=
-      HSAKMT_STATUS_SUCCESS) {
+  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, priority,
+                    sdma_engine_id, queue_addr, queue_size_bytes,
+                                        event.get(), &queue_resource)) !=
+                                                      HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   return HSA_STATUS_SUCCESS;
@@ -388,11 +391,13 @@ hsa_status_t KfdDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
-                                    HSA_QUEUE_PRIORITY priority, void* queue_addr,
-                                    uint64_t queue_size, HsaEvent* event) const {
+hsa_status_t
+KfdDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
+                       HSA_QUEUE_PRIORITY priority, void* queue_addr,
+                       uint64_t queue_size,
+                                      std::shared_ptr<HsaEvent> event) const {
   if (HSAKMT_CALL(hsaKmtUpdateQueue(queue_id, queue_pct, priority, queue_addr, queue_size,
-                                    event)) != HSAKMT_STATUS_SUCCESS) {
+                                    event.get())) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
   return HSA_STATUS_SUCCESS;
