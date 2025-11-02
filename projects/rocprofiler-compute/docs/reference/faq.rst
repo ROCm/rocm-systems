@@ -9,18 +9,6 @@ FAQ
 
 Frequently asked questions and troubleshooting tips.
 
-How do I export profiling data I have already generated using ROCm Compute Profiler?
-====================================================================================
-
-To interact with the Grafana GUI, you must sync data with the MongoDB
-backend. You can do this using :ref:`database <modes-database>` mode.
-
-Pass in the directory of your desired workload as follows.
-
-.. code-block:: shell
-
-    $ rocprof-compute database --import -w <path-to-results> -H <hostname> -u <username> -t <team-name>
-
 python ast error: 'Constant' object has no attribute 'kind'
 ===========================================================
 

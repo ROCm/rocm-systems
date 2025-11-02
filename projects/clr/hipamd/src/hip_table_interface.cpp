@@ -1337,6 +1337,12 @@ extern "C" hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
 hipError_t hipModuleUnload(hipModule_t module) {
   return hip::GetHipDispatchTable()->hipModuleUnload_fn(module);
 }
+extern "C" hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
+                                                               int numBlocks, int blockSize) {
+  return hip::GetHipDispatchTable()->hipOccupancyAvailableDynamicSMemPerBlock_fn(dynamicSmemSize,
+                                                                                 f, numBlocks,
+                                                                                 blockSize);
+}
 extern "C" hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f,
                                                                    int blockSize,
                                                                    size_t dynSharedMemPerBlk) {
