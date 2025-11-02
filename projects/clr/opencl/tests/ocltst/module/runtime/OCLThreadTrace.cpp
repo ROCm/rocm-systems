@@ -189,7 +189,7 @@ static void DumpTraceSI(unsigned int index, cl_ushort* tracePtr, size_t numOfByt
   FILE* outFile;
   char file_name[31] = {0};
   static unsigned int iii = 0;
-  sprintf(file_name, "TTrace%d%d.out", index, iii++);
+  snprintf(file_name, sizeof(file_name), "TTrace%d%d.out", index, iii++);
 
   outFile = fopen(file_name, "w");
 
