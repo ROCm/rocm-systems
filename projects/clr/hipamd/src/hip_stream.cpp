@@ -936,6 +936,10 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
 hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
   HIP_INIT_API(hipStreamCopyAttributes, dst, src);
 
+  if (!hip::isValid(src) || !hip::isValid(dst)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+
   getStreamPerThread(src);
   getStreamPerThread(dst);
 
