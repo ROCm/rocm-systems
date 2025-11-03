@@ -21,7 +21,6 @@
 #pragma once
 
 #include "top.hpp"
-#include "library.hpp"
 #include "palDevice.h"
 
 /*! \addtogroup pal PAL Resource Implementation
