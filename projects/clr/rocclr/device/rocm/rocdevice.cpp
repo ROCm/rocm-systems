@@ -2324,8 +2324,7 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_access_permission_t perms;
 
-  size_t discard_offset = 0;
-  amd::Memory* va_mem_obj = amd::MemObjMap::FindMemObj(va_addr, &discard_offset);
+  amd::Memory* va_mem_obj = amd::MemObjMap::FindMemObj(va_addr);
   if (va_mem_obj == nullptr) {
     LogPrintfError("Failed to get Memory Object for va_addr: 0x%x", va_addr);
     return false;

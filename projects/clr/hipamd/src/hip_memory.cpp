@@ -535,6 +535,15 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src,
   amd::Memory* srcMemory = getMemoryObject(src, sOffset);
   size_t dOffset = 0;
   amd::Memory* dstMemory = getMemoryObject(dst, dOffset);
+
+  // Compute sOffset and dOffset
+  if (srcMemory != nullptr)
+    sOffset =
+        reinterpret_cast<uint64_t>(src) - srcMemory->getOriginalDeviceMemory()->virtualAddress();
+  if (dstMemory != nullptr)
+    dOffset =
+        reinterpret_cast<uint64_t>(dst) - dstMemory->getOriginalDeviceMemory()->virtualAddress();
+
   amd::Device* queueDevice = &stream.device();
   amd::CopyMetadata copyMetadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
   hip::MemcpyType type = ihipGetMemcpyType(src, dst, kind);
