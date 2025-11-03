@@ -3341,21 +3341,21 @@ typedef union rocprofiler_hip_api_args_t
     struct
     {
         hipLibrary_t* library;
-        hipKernel_t kernel;
+        hipKernel_t   kernel;
     } hipKernelGetLibrary;
     struct
     {
         const char** name;
-        hipKernel_t kernel;
+        hipKernel_t  kernel;
     } hipKernelGetName;
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 18
     struct
     {
-        size_t* dynamicSmemSize;
+        size_t*     dynamicSmemSize;
         const void* f;
-        int numBlocks;
-        int blockSize;
+        int         numBlocks;
+        int         blockSize;
     } hipOccupancyAvailableDynamicSMemPerBlock;
 #endif
 } rocprofiler_hip_api_args_t;
