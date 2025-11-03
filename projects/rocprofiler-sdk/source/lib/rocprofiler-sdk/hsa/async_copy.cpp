@@ -1099,16 +1099,22 @@ async_copy_fini()
 {
     if(!async_copy::get_active_signals()) return;
 
-    // LAYER 2: Set finalization flag to prevent new handlers from doing work
+    // OPTION 2: Wait for async copies to complete FIRST
+    // This ensures handlers finish normally and retire correlation IDs properly
+    ROCP_ERROR << "[ASYNC_COPY_DEBUG] async_copy_fini() - calling async_copy_sync() first "
+               << "to allow handlers to complete normally";
+    async_copy_sync();
+
+    // THEN set finalization flag to prevent new handlers from starting
     // This signals to any handlers that are invoked after this point to exit early
     auto& sync_state = async_copy::get_sync_state();
     sync_state.is_finalizing.store(true, std::memory_order_release);
 
     ROCP_ERROR << "[ASYNC_COPY_DEBUG] async_copy_fini() - finalization flag set, "
-               << "waiting for active handlers to complete...";
+               << "waiting for any remaining active handlers...";
 
-    // Wait for currently active handlers to complete
-    // This ensures no handler is mid-execution when we proceed to table cleanup
+    // Wait for any remaining active handlers to complete
+    // Since we called async_copy_sync() first, there should be few or no active handlers
 #if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
     constexpr auto timeout_sec = std::chrono::seconds{5};
 #else
@@ -1135,14 +1141,10 @@ async_copy_fini()
     ROCP_ERROR << "[ASYNC_COPY_DEBUG] Active handler wait completed, "
                << "active_handlers=" << final_count;
 
-    // Now wait for HSA runtime to finish invoking any queued handlers
-    async_copy_sync();
-
-    // LAYER 3: Add grace period before allowing table destruction
-    // This gives any racing handlers (that might be queued but not yet started)
-    // time to check is_finalizing and bail out before tables are destroyed
-    ROCP_ERROR << "[ASYNC_COPY_DEBUG] Adding grace period before table destruction...";
-    std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    // Reduced grace period since async_copy_sync() already waited for handlers
+    // Just a brief pause to catch any edge cases
+    ROCP_ERROR << "[ASYNC_COPY_DEBUG] Adding brief grace period before table destruction...";
+    std::this_thread::sleep_for(std::chrono::milliseconds{10});
 
     ROCP_ERROR << "[ASYNC_COPY_DEBUG] async_copy_fini() completed, destroying signals";
     async_copy::get_active_signals()->destroy();
