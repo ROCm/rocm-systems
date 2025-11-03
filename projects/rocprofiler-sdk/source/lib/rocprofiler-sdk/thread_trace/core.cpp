@@ -112,8 +112,8 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
     auto* agent =
         CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
 
-    size_t double_buffer_size = params.triple_buffering ? params.buffer_size : 0ul;
-    queue                     = std::make_shared<HsaATTQueue>(*agent, double_buffer_size);
+    size_t triple_buffer_size = params.triple_buffering ? params.buffer_size : 0ul;
+    queue                     = std::make_shared<HsaATTQueue>(*agent, triple_buffer_size);
 
     factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(*agent, this->params, *core, *ext);
     control_packet = factory->construct_control_packet();
@@ -257,6 +257,11 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
     {
         auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
         worker_data->queue = queue;
+
+        // Initialize buffer memory pointers from the queue's double buffer
+        auto buffer_memory = worker_data->queue->get_double_buffer_memory();
+        for (size_t i=0; i<buffer_memory.size(); i++)
+            worker_data->buffers.at(i).memory = buffer_memory.at(i);
 
         auto producer_data             = triple_buffer_producer_data_t{};
         producer_data.producer_running = std::move(flag);
