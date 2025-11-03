@@ -247,13 +247,14 @@ struct sqtt_buffer_status_t
 class SQTTBufferingPackets
 {
 public:
-    SQTTBufferingPackets(aqlprofile_handle_t handle);
+    SQTTBufferingPackets(aqlprofile_handle_t handle, int shader_engine_id);
 
     hsa_ext_amd_aql_pm4_packet_t                query_status{};
     virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
 
     const aqlprofile_handle_t handle;
     uint64_t                  header{0};
+    const int                 shader_engine_id;
 
 private:
     size_t                                    current_buffer{0};
