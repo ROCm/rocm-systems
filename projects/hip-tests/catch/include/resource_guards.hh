@@ -72,11 +72,21 @@ template <typename T> class LinearAllocGuard {
         break;
       case LinearAllocs::hipMalloc:
         HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr_), size));
+	if constexpr(!std::is_same<T, void>::value && !std::is_same<T, void*>::value) {
+          for (int i = 0; i < size / sizeof(T); i++) {
+	    ptr()[i] = rand(); // add some rubbish
+	  }
+	}
         break;
       case LinearAllocs::hipMallocManaged:
         HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&ptr_), size, flags ? flags : 1u));
         host_ptr_ = ptr_;
-        break;
+	if constexpr(!std::is_same<T, void>::value && !std::is_same<T, void*>::value) {
+          for (int i = 0; i < size / sizeof(T); i++) {
+	    ptr()[i] = rand(); // add some rubbish
+	  }
+	}
+	break;
       case LinearAllocs::noAlloc:
         break;
     }
