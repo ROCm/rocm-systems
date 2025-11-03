@@ -472,6 +472,51 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 }  // namespace hip_impl
 
 namespace hip {
+hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
+                                                    int numBlocks, int blockSize){
+  HIP_INIT_API(hipOccupancyAvailableDynamicSMemPerBlock, dynamicSmemSize, f, numBlocks, blockSize);
+  if (dynamicSmemSize == nullptr || numBlocks <= 0 || blockSize <= 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  hipFunction_t func;
+  int dev_id = ihipGetDevice();
+  hipError_t hip_error = PlatformState::instance().getStatFunc(&func, f, dev_id);
+
+  if (hip_error != hipSuccess || func == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
+  if (function == nullptr) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+
+  hipDeviceProp_t prop = {0};
+  HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, dev_id));
+
+  const amd::Device& device = *hip::getCurrentDevice()->devices()[dev_id];
+  const amd::Kernel& kernel = *function->kernel();
+  const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel.getDeviceKernel(device)->workGroupInfo();
+
+  const int staticSharedMemoryUsage = wrkGrpInfo->usedLDSSize_;
+  const int maxDynamicSharedSizeBytes = wrkGrpInfo->maxDynamicSharedSizeBytes_;
+  const int maxNumBlocks = static_cast<int>(floor((prop.maxThreadsPerMultiProcessor) / blockSize));
+  const int maxSharedMemoryPerMultiProcessor = prop.maxSharedMemoryPerMultiProcessor - staticSharedMemoryUsage * std::min(numBlocks,
+                                                                                                                          maxNumBlocks);
+  const size_t maxDynamicSmemSize = std::min(static_cast<int>(floor(maxSharedMemoryPerMultiProcessor / maxNumBlocks)),
+                                                                      maxDynamicSharedSizeBytes);
+  const int alignmentSize = device.isa().ldsAlignment();
+
+  size_t dynamic_smem_size = 0;
+  dynamic_smem_size = std::min(static_cast<int>(floor(maxSharedMemoryPerMultiProcessor / numBlocks)),
+                               maxDynamicSharedSizeBytes);
+  dynamic_smem_size = std::max(maxDynamicSmemSize, dynamic_smem_size);
+  *dynamicSmemSize = amd::alignDown(dynamic_smem_size, alignmentSize);
+
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, const void* f,
                                              size_t dynSharedMemPerBlk, int blockSizeLimit) {
   HIP_INIT_API(hipOccupancyMaxPotentialBlockSize, f, dynSharedMemPerBlk, blockSizeLimit);

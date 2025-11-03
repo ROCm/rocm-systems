@@ -150,12 +150,21 @@ hsa_status_t Runtime::Release() {
 
   if (runtime_singleton_ == nullptr) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
-  if (runtime_singleton_->ref_count_ == 1) {
+  if (runtime_singleton_->ref_count_-- == 1) {
+    auto system_event_handlers = runtime_singleton_->GetSystemEventHandlers();
+
+    if (!system_event_handlers.empty()) {
+      hsa_amd_event_t system_shutdown_event = {} ;
+      system_shutdown_event.event_type = HSA_AMD_SYSTEM_SHUTDOWN_EVENT;
+      /* Remaining fields hsa_amd_event_t are empty */
+
+      for (auto& callback : system_event_handlers) {
+        callback.first(&system_shutdown_event, callback.second);
+      }
+    }
     // Release all registered memory, then unload backends
     runtime_singleton_->Unload();
   }
-
-  runtime_singleton_->ref_count_--;
 
   if (runtime_singleton_->ref_count_ == 0) {
     delete runtime_singleton_;
@@ -543,7 +552,7 @@ hsa_status_t Runtime::CopyMemory(void* dst, const void* src, size_t size) {
   const auto& locked_copy = [&](void*& ptr, core::Agent* locking_agent) {
     void* tmp;
     hsa_agent_t agent = locking_agent->public_handle();
-    hsa_status_t err = system_region->Lock(1, &agent, ptr, size, &tmp);
+    hsa_status_t err = system_region->Lock(1, &agent, ptr, size, 0, &tmp);
     if (err != HSA_STATUS_SUCCESS) throw AMD::hsa_exception(err, "Lock failed in hsa_memory_copy.");
     gpuPtr = ptr;
     ptr = tmp;
@@ -832,7 +841,6 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
                                             hsa_signal_value_t value,
                                             hsa_amd_signal_handler handler,
                                             void* arg) {
-
   struct AsyncEventsInfo* asyncInfo = &asyncSignals_;
   int priority = runtime_singleton_->flag().async_events_thread_priority();
 
@@ -847,7 +855,6 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
     }
   }
 
-  ScopedAcquire<HybridMutex> scope_lock(&asyncInfo->control.lock);
 
   // Lazy initializer
   if (asyncInfo->control.async_events_thread_ == NULL) {
@@ -977,7 +984,8 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
 
         for (auto agentPermsIt = mappedHandleIt->second.allowed_agents.begin();
              agentPermsIt != mappedHandleIt->second.allowed_agents.end(); agentPermsIt++) {
-          allowed_agents.push_back((*agentPermsIt).second.targetAgent->public_handle());
+          if ((*agentPermsIt).second.permissions != HSA_ACCESS_PERMISSION_NONE)
+            allowed_agents.push_back((*agentPermsIt).second.targetAgent->public_handle());
         }
 
         AMD::callback_t<decltype(alloc)> Alloc(alloc);
@@ -1885,26 +1893,19 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     // Insert new signals and find plain functions
     typedef std::pair<void (*)(void*), void*> func_arg_t;
     std::vector<func_arg_t> functions;
-    {
-      ScopedAcquire<HybridMutex> scope_lock(&async_events_control_.lock);
-      for (size_t i = 0; i < new_async_events_.Size(); i++) {
-        if (new_async_events_.signal_[i].handle == 0) {
-          functions.push_back(
-              func_arg_t((void (*)(void*))new_async_events_.handler_[i],
-                         new_async_events_.arg_[i]));
-          continue;
-        }
-        async_events_.PushBack(
-            new_async_events_.signal_[i], new_async_events_.cond_[i],
-            new_async_events_.value_[i], new_async_events_.handler_[i],
-            new_async_events_.arg_[i]);
+    std::vector<AsyncEventItem> new_events;
+    new_async_events_.GetAllEvents(new_events);
+    for (const auto& event : new_events) {
+      if (event.signal.handle == 0) {
+        functions.push_back(func_arg_t((void (*)(void*))event.handler, event.arg));
+        continue;
       }
-      new_async_events_.Clear();
+      async_events_.PushBack(event.signal, event.cond, event.value, event.handler,event.arg);
     }
-
     // Call plain functions
-    for (size_t i = 0; i < functions.size(); i++)
+    for (size_t i = 0; i < functions.size(); i++) {
       functions[i].first(functions[i].second);
+    }
     functions.clear();
   }
 
@@ -1913,9 +1914,129 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     hsa_signal_handle(async_events_.signal_[i])->Release();
   async_events_.Clear();
 
-  for (size_t i = 0; i < new_async_events_.Size(); i++)
-    hsa_signal_handle(new_async_events_.signal_[i])->Release();
+  std::vector<AsyncEventItem> remaining_events;
+  new_async_events_.GetAllEvents(remaining_events);
+  for (const auto& event : remaining_events) {
+    if (event.signal.handle != 0) {
+      hsa_signal_handle(event.signal)->Release();
+    }
+  }
   new_async_events_.Clear();
+}
+
+void Runtime::AsyncEventsPool::clear() {
+  ifdebug {
+    size_t capacity = 0;
+    for (auto& block : block_list_) capacity += block.second;
+    if (capacity != free_list_.size())
+      debug_print("Warning: Resource leak detected by AsyncEventsPool, %ld items leaked.\n",
+                  capacity - free_list_.size());
+  }
+
+  for (auto& block : block_list_) free_()(block.first);
+  block_list_.clear();
+  free_list_.clear();
+}
+
+Runtime::AsyncEventItem* Runtime::AsyncEventsPool::alloc() {
+  ScopedAcquire<HybridMutex> lock(&lock_);
+  if (free_list_.empty()) {
+    AsyncEventItem* block = reinterpret_cast<AsyncEventItem*>(
+        allocate_()(block_size_ * sizeof(AsyncEventItem), __alignof(AsyncEventItem), core::MemoryRegion::AllocateNonPaged, 0));
+    if (block == nullptr) {
+      block_size_ = minblock_;
+      block = reinterpret_cast<AsyncEventItem*>(
+          allocate_()(block_size_ * sizeof(AsyncEventItem), __alignof(AsyncEventItem), core::MemoryRegion::AllocateNonPaged, 0));
+      if (block == nullptr) throw std::bad_alloc();
+    }
+
+    MAKE_NAMED_SCOPE_GUARD(throwGuard, [&]() { free_()(block); });
+    block_list_.push_back(std::make_pair(block, block_size_));
+    throwGuard.Dismiss();
+
+    for (int i = 0; i < block_size_; i++) {
+      free_list_.push_back(&block[i]);
+    }
+    if (block_size_ > maxblocksize_)
+      block_size_ *= 2;
+  }
+  AsyncEventItem* ret = free_list_.back();
+  new (ret) AsyncEventItem();
+  free_list_.pop_back();
+  return ret;
+}
+
+void Runtime::AsyncEventsPool::free(AsyncEventItem* ptr) {
+  if (ptr == nullptr) return;
+
+  ptr->~AsyncEventItem();
+  ScopedAcquire<HybridMutex> lock(&lock_);
+
+  ifdebug {
+    bool valid = false;
+    for (auto& block : block_list_) {
+      if ((block.first <= ptr) &&
+          (uintptr_t(ptr) < uintptr_t(block.first) + block.second * sizeof(AsyncEventItem))) {
+        valid = true;
+        break;
+      }
+    }
+    assert(valid && "Object does not belong to pool.");
+  }
+  free_list_.push_back(ptr);
+}
+void Runtime::ConcurrentAsyncEvents::PushBack(hsa_signal_t signal,
+                                             hsa_signal_condition_t cond,
+                                             hsa_signal_value_t value,
+                                             hsa_amd_signal_handler handler, void* arg) {
+  // Allocate memory for the new event item
+  AsyncEventItem* item = asyncEventPool_.alloc();
+  item->init(signal, cond, value, handler, arg);
+  event_queue_.enqueue(item);
+}
+
+void Runtime::ConcurrentAsyncEvents::Clear() {
+  // Dequeue all items to clear the queue
+  while (!event_queue_.empty()) {
+    AsyncEventItem* item = event_queue_.dequeue();
+    asyncEventPool_.free(item);
+  }
+  asyncEventPool_.clear();
+}
+
+bool Runtime::ConcurrentAsyncEvents::GetEvent(AsyncEventItem& event) {
+  AsyncEventItem* item = event_queue_.dequeue();
+  if (item != nullptr) {
+    event = *item;
+    asyncEventPool_.free(item);
+    return true;
+  }
+  return false;
+}
+
+bool Runtime::ConcurrentAsyncEvents::GetAllEvents(std::vector<AsyncEventItem>& all_events) {
+  AsyncEventItem* item = nullptr;
+  while (!event_queue_.empty()) {
+    item = event_queue_.dequeue();
+    if (item == nullptr) {
+      return false;
+    }
+    all_events.emplace_back(*item);
+    asyncEventPool_.free(item);
+  }
+  return true;
+}
+
+void Runtime::ConcurrentAsyncEvents::AddEventsBack(const std::vector<AsyncEventItem>& events) {
+  for (const auto& event : events) {
+    AsyncEventItem* item = asyncEventPool_.alloc();
+    *item = event;
+    event_queue_.enqueue(item);
+  }
+}
+
+size_t Runtime::ConcurrentAsyncEvents::Size() {
+  return event_queue_.size();
 }
 
 void Runtime::BindErrorHandlers() {
@@ -3519,7 +3640,7 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
 
   mapped_handle_map_.emplace(
       std::piecewise_construct, std::forward_as_tuple(va),
-      std::forward_as_tuple(&memoryHandleIt->second, addressHandle, offset, size, drm_fd,
+      std::forward_as_tuple(&memoryHandleIt->second, addressHandle, va, offset, size, drm_fd,
                             reinterpret_cast<void*>(drm_cpu_addr), HSA_ACCESS_PERMISSION_NONE,
                             shareable_handle));
 
@@ -3655,17 +3776,43 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-  #if defined(__linux__)
-    if (munmap(va, size) != 0)
-      return HSA_STATUS_ERROR;
-  #else
-    assert(!"Unimplemented!");
-  #endif
-    return HSA_STATUS_SUCCESS;
+    if (permissions != HSA_ACCESS_PERMISSION_NONE) {
+      if (munmap(va, size) != 0) return HSA_STATUS_ERROR;
+
+      /* We need to keep the CPU mapping. So change it to PROT_NONE */
+      void* mapped_ptr = mmap(va, mappedHandle->size, PROT_NONE, MAP_SHARED | MAP_FIXED,
+                mappedHandle->drm_fd,
+                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
+      if (mapped_ptr != va)
+        return HSA_STATUS_ERROR;
+
+      permissions = HSA_ACCESS_PERMISSION_NONE;
+    }
   } else {
     return targetAgent->driver().Unmap(
         shareable_handle, va, mappedHandle->offset, mappedHandle->size);
   }
+  return HSA_STATUS_SUCCESS;
+}
+
+Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *address_handle,
+                 void* va, uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
+                 hsa_access_permission_t perm, ShareableHandle shareable_handle)
+  : mem_handle(mem_handle), address_handle(address_handle), offset(offset),
+    size(size), drm_fd(drm_fd), drm_cpu_addr(drm_cpu_addr),
+    shareable_handle(shareable_handle)
+{
+  /* Create a CPU mapping with PROT_NONE */
+  auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
+  auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
+                       std::forward_as_tuple(cpu_agent),
+                       std::forward_as_tuple(this, cpu_agent, va,
+                                             size, HSA_ACCESS_PERMISSION_NONE))
+                      .first;
+
+  auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
+  if (ret != HSA_STATUS_SUCCESS)
+    throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
 }
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held

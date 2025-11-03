@@ -39,16 +39,29 @@ set(TEST_SRC
 )
 
 if(HIP_PLATFORM MATCHES "amd")
-  set(TEST_SRC
-      ${TEST_SRC}
-      hipPerfHostNumaAlloc.cc)
-
-hip_add_exe_to_target(NAME perfMemoryTest
+  if(WIN32)
+    set(TEST_SRC ${TEST_SRC} hipPerfHostNumaAllocWin.cc)
+    hip_add_exe_to_target(NAME perfMemoryTest
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME perf_test)
+  else()
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+    find_package(NUMA)
+    if(NUMA_FOUND)
+      # Test code still use libnuma apis
+      set(TEST_SRC ${TEST_SRC} hipPerfHostNumaAlloc.cc)
+      hip_add_exe_to_target(NAME perfMemoryTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME perf_test
                       LINKER_LIBS numa)
+    else()
+      hip_add_exe_to_target(NAME perfMemoryTest
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME perf_test)
+    endif()
+  endif()
 else()
-hip_add_exe_to_target(NAME perfMemoryTest
+  hip_add_exe_to_target(NAME perfMemoryTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME perf_test)
 endif()

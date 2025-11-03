@@ -36,7 +36,12 @@ import config
 from utils import mem_chart, parser, schema
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, console_warning
-from utils.utils import convert_metric_id_to_panel_info, get_uuid
+from utils.utils import (
+    METRIC_ID_RE,
+    convert_metric_id_to_panel_info,
+    get_panel_alias,
+    get_uuid,
+)
 
 
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
@@ -140,7 +145,9 @@ def is_roofline_shown(
     )
 
     if not has_roofline_style or (
-        args.filter_metrics and "4" not in args.filter_metrics
+        args.filter_metrics
+        and "4" not in args.filter_metrics
+        and "roof" not in args.filter_metrics
     ):
         return False
 
@@ -433,21 +440,33 @@ def show_all(
     Show all panels with their data in plain text mode.
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
-    filter_panel_ids = profiling_config.get("filter_blocks", [])
+    raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
     csv_dir = None
 
-    if isinstance(filter_panel_ids, dict):
+    if isinstance(raw_filter_panel_ids, dict):
         # For backward compatibility
-        filter_panel_ids = [
+        raw_filter_panel_ids = [
             name
-            for name, table_type in filter_panel_ids.items()
+            for name, table_type in raw_filter_panel_ids.items()
             if table_type == "metric_id"
         ]
-    filter_panel_ids = [
-        int(result[0])
-        for metric_id in filter_panel_ids
-        if (result := convert_metric_id_to_panel_info(metric_id)) is not None
-    ]
+
+    panel_alias = get_panel_alias()  # alias -> panel_id (string or int)
+
+    filter_panel_ids = set()
+    for bid in raw_filter_panel_ids:
+        bid_s = str(bid)
+
+        # If it's not already an ID, resolve alias -> ID
+        if not METRIC_ID_RE.match(bid_s):
+            try:
+                bid_s = str(panel_alias[bid_s])
+            except KeyError as e:
+                raise KeyError(f"Unknown panel alias: {bid_s!r}") from e
+
+        file_id, _, _ = convert_metric_id_to_panel_info(bid_s)
+        if file_id is not None:
+            filter_panel_ids.add(int(file_id))
 
     if args.include_cols:
         hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
@@ -467,19 +486,19 @@ def show_all(
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        panel_content = ""  # store content of all data_source from one panel
+        if panel_id == 400 and not is_roofline_shown(
+            args, runs, output, panel, roof_plot, hidden_cols
+        ):
+            continue
 
-        if panel_id == 400:
-            if is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols):
-                continue
+        panel_content = ""  # store content of all data_source from one panel
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
-                # If block filtering was used during analysis, then don't use profiling
-                # config. If block filtering was used in profiling config, only show
-                # those panels. If block filtering not used in profiling config, show
-                # all panels. Skip this table if table id or panel id is not present
-                # in block filters. However, always show panel id <= 100.
+                # Block-filter logic:
+                # - If analysis used --filter-metrics, ignore profiling block filters
+                # - If profiling had block filters, only show selected tables/panels
+                # - Always show panels with id <= 100
                 if (
                     not args.filter_metrics
                     and filter_panel_ids
@@ -497,9 +516,8 @@ def show_all(
                     )
                     continue
 
-                # Metrics baseline comparison mode
+                # Metrics baseline comparison mode: only show common metrics across runs
                 # We cannot guarantee that all runs have the same metrics.
-                # Only show common metrics.
                 if (
                     table_type == "metric_table"
                     and "Metric" in table_config["header"].values()
