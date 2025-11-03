@@ -18,7 +18,7 @@
 #include <openssl/sha.h>
 
 // Static instance for C API
-static CuidDeviceManager& mgr = CuidDeviceManager::instance();
+static AmdCuidDeviceManager& mgr = AmdCuidDeviceManager::instance();
 
 amdcuid_status_t amdcuid_init(amdcuid_device_type_set_t device_types) {
     return mgr.init(device_types);
@@ -55,7 +55,7 @@ amdcuid_status_t amdcuid_get_handles(
 
 amdcuid_status_t amdcuid_get_primary_cuid(amdcuid_handle handle, amdcuid *primary_cuid) {
     if (!handle.impl || !primary_cuid) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    CuidDevice* dev = mgr.get_device_by_handle<CuidDevice>(handle.impl);
+    AmdCuidDevice* dev = mgr.get_device_by_handle<AmdCuidDevice>(handle.impl);
     if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     amdcuid id = {};
     amdcuid_status_t status = (amdcuid_status_t)dev->get_primary_cuid(reinterpret_cast<amdcuid&>(id));
@@ -66,11 +66,10 @@ amdcuid_status_t amdcuid_get_primary_cuid(amdcuid_handle handle, amdcuid *primar
 
 amdcuid_status_t amdcuid_get_secondary_cuid(amdcuid_handle handle, amdcuid *secondary_cuid) {
     if (!handle.impl || !secondary_cuid) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    CuidDevice* dev = mgr.get_device_by_handle<CuidDevice>(handle.impl);
+    AmdCuidDevice* dev = mgr.get_device_by_handle<AmdCuidDevice>(handle.impl);
     if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     amdcuid id = {};
-    amdcuid_salt_t salt = {};
-    amdcuid_status_t status = (amdcuid_status_t)dev->get_secondary_cuid(reinterpret_cast<amdcuid_salt_t&>(salt), reinterpret_cast<amdcuid&>(id));
+    amdcuid_status_t status = (amdcuid_status_t)dev->get_secondary_cuid(reinterpret_cast<amdcuid&>(id));
     if (status != AMDCUID_STATUS_SUCCESS) return AMDCUID_STATUS_UNSUPPORTED;
     std::memcpy(secondary_cuid->bytes, id.bytes, 16);
     return AMDCUID_STATUS_SUCCESS;
@@ -78,7 +77,7 @@ amdcuid_status_t amdcuid_get_secondary_cuid(amdcuid_handle handle, amdcuid *seco
 
 amdcuid_status_t amdcuid_get_device_type(amdcuid_handle handle, amdcuid_device_type_t *dev_type) {
     if (!handle.impl || !dev_type) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    CuidDevice* dev = static_cast<CuidDevice*>(handle.impl);
+    AmdCuidDevice* dev = static_cast<AmdCuidDevice*>(handle.impl);
     if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     *dev_type = dev->type();
     return AMDCUID_STATUS_SUCCESS;
@@ -86,15 +85,15 @@ amdcuid_status_t amdcuid_get_device_type(amdcuid_handle handle, amdcuid_device_t
 
 amdcuid_status_t amdcuid_get_vendor_id(amdcuid_handle handle, uint16_t *vendor_id) {
     if (!handle.impl || !vendor_id) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    CuidDevice* dev = static_cast<CuidDevice*>(handle.impl);
+    AmdCuidDevice* dev = static_cast<AmdCuidDevice*>(handle.impl);
     if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     amdcuid_device_type_t type = dev->type();
     switch (type) {
         case AMDCUID_DEVICE_TYPE_CPU:
-            *vendor_id = static_cast<CuidCpu*>(dev)->get_info().header.vid;
+            *vendor_id = static_cast<AmdCuidCpu*>(dev)->get_info().header.fields.cpu.vendor_id;
             return AMDCUID_STATUS_SUCCESS;
         case AMDCUID_DEVICE_TYPE_GPU:
-            *vendor_id = static_cast<CuidGpu*>(dev)->get_info().header.vid;
+            *vendor_id = static_cast<AmdCuidGpu*>(dev)->get_info().header.fields.gpu.vendor_id;
             return AMDCUID_STATUS_SUCCESS;
         default:
             *vendor_id = 0;
@@ -104,15 +103,15 @@ amdcuid_status_t amdcuid_get_vendor_id(amdcuid_handle handle, uint16_t *vendor_i
 
 amdcuid_status_t amdcuid_get_revision_id(amdcuid_handle handle, uint16_t *revision_id) {
     if (!handle.impl || !revision_id) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    CuidDevice* dev = static_cast<CuidDevice*>(handle.impl);
+    AmdCuidDevice* dev = static_cast<AmdCuidDevice*>(handle.impl);
     if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     amdcuid_device_type_t type = dev->type();
     switch (type) {
         case AMDCUID_DEVICE_TYPE_CPU:
-            *revision_id = static_cast<CuidCpu*>(dev)->get_info().header.revision;
+            *revision_id = static_cast<AmdCuidCpu*>(dev)->get_info().header.fields.cpu.revision_id;
             return AMDCUID_STATUS_SUCCESS;
         case AMDCUID_DEVICE_TYPE_GPU:
-            *revision_id = static_cast<CuidGpu*>(dev)->get_info().header.revision_id;
+            *revision_id = static_cast<AmdCuidGpu*>(dev)->get_info().header.fields.gpu.revision_id;
             return AMDCUID_STATUS_SUCCESS;
         default:
             *revision_id = 0;
@@ -122,12 +121,12 @@ amdcuid_status_t amdcuid_get_revision_id(amdcuid_handle handle, uint16_t *revisi
 
 amdcuid_status_t amdcuid_get_partition_info(amdcuid_handle handle, uint32_t *partition_info) {
     if (!handle.impl || !partition_info) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    CuidDevice* dev = static_cast<CuidDevice*>(handle.impl);
+    AmdCuidDevice* dev = static_cast<AmdCuidDevice*>(handle.impl);
     if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     amdcuid_device_type_t type = dev->type();
     switch (type) {
         case AMDCUID_DEVICE_TYPE_GPU:
-            *partition_info = static_cast<CuidGpu*>(dev)->get_info().header.partition_info;
+            *partition_info = static_cast<AmdCuidGpu*>(dev)->get_info().header.fields.gpu.unit_id;
             return AMDCUID_STATUS_SUCCESS;
         default:
             *partition_info = 0;
@@ -137,12 +136,12 @@ amdcuid_status_t amdcuid_get_partition_info(amdcuid_handle handle, uint32_t *par
 
 amdcuid_status_t amdcuid_get_bdf(amdcuid_handle handle, char *bdf, uint32_t *length) {
     if (!handle.impl || !bdf || !length) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    CuidDevice* dev = static_cast<CuidDevice*>(handle.impl);
+    AmdCuidDevice* dev = static_cast<AmdCuidDevice*>(handle.impl);
     if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     amdcuid_device_type_t type = dev->type();
     switch (type) {
         case AMDCUID_DEVICE_TYPE_GPU: {
-            const amdcuid_gpu_info& info = static_cast<CuidGpu*>(dev)->get_info();
+            const amdcuid_gpu_info& info = static_cast<AmdCuidGpu*>(dev)->get_info();
             if (info.bdf.empty()) {
                 *length = 0;
                 bdf[0] = '\0';
@@ -166,12 +165,12 @@ amdcuid_status_t amdcuid_get_bdf(amdcuid_handle handle, char *bdf, uint32_t *len
 
 amdcuid_status_t amdcuid_get_render_node(amdcuid_handle handle, char *render_node, uint32_t *length) {
     if (!handle.impl || !render_node || !length) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    CuidDevice* dev = static_cast<CuidDevice*>(handle.impl);
+    AmdCuidDevice* dev = static_cast<AmdCuidDevice*>(handle.impl);
     if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     amdcuid_device_type_t type = dev->type();
     switch (type) {
         case AMDCUID_DEVICE_TYPE_GPU: {
-            const amdcuid_gpu_info& info = static_cast<CuidGpu*>(dev)->get_info();
+            const amdcuid_gpu_info& info = static_cast<AmdCuidGpu*>(dev)->get_info();
             if (info.render_node.empty()) {
                 *length = 0;
                 render_node[0] = '\0';
@@ -195,7 +194,7 @@ amdcuid_status_t amdcuid_get_render_node(amdcuid_handle handle, char *render_nod
 
 amdcuid_status_t amdcuid_get_cpu_core(amdcuid_handle handle, uint16_t *core) {
     if (!handle.impl || !core) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    CuidDevice* dev = static_cast<CuidDevice*>(handle.impl);
+    AmdCuidDevice* dev = static_cast<AmdCuidDevice*>(handle.impl);
     if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     amdcuid_device_type_t type = dev->type();
     switch (type) {
@@ -211,7 +210,7 @@ amdcuid_status_t amdcuid_get_cpu_core(amdcuid_handle handle, uint16_t *core) {
 
 amdcuid_status_t amdcuid_get_network_interface(amdcuid_handle handle, char *network_interface, uint32_t *length) {
     if (!handle.impl || !network_interface || !length) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    CuidDevice* dev = static_cast<CuidDevice*>(handle.impl);
+    AmdCuidDevice* dev = static_cast<AmdCuidDevice*>(handle.impl);
     if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     amdcuid_device_type_t type = dev->type();
     switch (type) {
@@ -225,5 +224,4 @@ amdcuid_status_t amdcuid_get_network_interface(amdcuid_handle handle, char *netw
             return AMDCUID_STATUS_UNSUPPORTED;
     }
 }
-
 

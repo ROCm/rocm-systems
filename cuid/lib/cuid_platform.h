@@ -6,17 +6,22 @@
 #include <vector>
 #include <memory>
 
-class CuidPlatform : public CuidDevice {
+struct amdcuid_platform_info {
+    amdcuid_cuid_fields header;
+    // Add more fields as needed
+};
+
+class AmdCuidPlatform : public AmdCuidDevice {
 public:
-    CuidPlatform(const amdcuid_header_platform& i);
+    AmdCuidPlatform(const amdcuid_cuid_fields& i);
     amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_PLATFORM; }
     amdcuid_status_t get_primary_cuid(amdcuid& id) const override;
     amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
     static amdcuid_status_t discover(std::vector<DevicePtr> &platforms);
 
-    const amdcuid_header_platform& get_info() const;
+    const amdcuid_platform_info& get_info() const;
 private:
-    amdcuid_header_platform m_info;
+    amdcuid_platform_info m_info;
 };
 
 #endif // CUID_PLATFORM_H

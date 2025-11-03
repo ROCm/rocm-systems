@@ -4,20 +4,19 @@
 
 #include "cuid_device.h"
 #include "cuid.h"
-#include "cuid_spec.h"
 #include <vector>
 #include <memory>
 #include <string>
 
 struct amdcuid_gpu_info {
-    amdcuid_header_gpu header;
+    amdcuid_cuid_fields header;
     std::string render_node;
     std::string bdf;
 };
 
-class CuidGpu : public CuidDevice {
+class AmdCuidGpu : public AmdCuidDevice {
 public:
-    CuidGpu(const amdcuid_gpu_info& i);
+    AmdCuidGpu(const amdcuid_gpu_info& i);
     amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_GPU; }
     amdcuid_status_t get_primary_cuid(amdcuid& id) const override;
     amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;

@@ -19,17 +19,7 @@ typedef struct {
     uint8_t bytes[16] = {0};
 } amdcuid;
 
-struct amdcuid_cuid_fields {
-    amdcuid_device_type_t device_type;
-    union amdcuid_fields {
-        amdcuid_cuid_fields_cpu cpu;
-        amdcuid_cuid_fields_gpu gpu;
-        amdcuid_cuid_fields_nic nic;
-        amdcuid_cuid_fields_platform platform;
-    }
-};
-
-struct amdcuid_cuid_fields_cpu {     // The following structs are derived from the primary CUID, ultimately for display to the user
+typedef struct {
     uint16_t vendor_id;
     uint16_t family;
     uint16_t model;
@@ -38,26 +28,36 @@ struct amdcuid_cuid_fields_cpu {     // The following structs are derived from t
     uint16_t unit_id;
     uint16_t core;
     uint16_t physical_id;
-} __attribute__((packed));
+} amdcuid_cuid_fields_cpu;
 
-struct amdcuid_cuid_fields_gpu {
+typedef struct {
     uint16_t vendor_id;
     uint16_t device_id;
     uint16_t pci_class;
     uint8_t revision_id;
     uint16_t unit_id;
-} __attribute__((packed));
+} amdcuid_cuid_fields_gpu;
 
-struct amdcuid_cuid_fields_nic {
+typedef struct {
     uint16_t vendor_id;
     uint16_t device_id;
     uint16_t pci_class;
     uint8_t revision_id;
-} __attribute__((packed));
+} amdcuid_cuid_fields_nic;
 
-struct amdcuid_cuid_fields_platform {
+typedef struct {
     uint8_t system_information[14]; // System Information (Type1)
-} __attribute__((packed));
+} amdcuid_cuid_fields_platform;
+
+typedef struct amdcuid_cuid_fields {
+    amdcuid_device_type_t device_type;
+    union {
+        amdcuid_cuid_fields_cpu cpu;
+        amdcuid_cuid_fields_gpu gpu;
+        amdcuid_cuid_fields_nic nic;
+        amdcuid_cuid_fields_platform platform;
+    } fields;
+} amdcuid_cuid_fields;
 
 /**
  * @brief Status codes returned by CUID API functions.
@@ -88,8 +88,7 @@ typedef enum {
  * device.
  */
 typedef struct {
-    amdcuid secondary_cuid;
-    amdcuid_device_type_t device_type;
+    void* impl;
 } amdcuid_handle;
 
 

@@ -4,20 +4,19 @@
 
 #include "cuid_device.h"
 #include "cuid.h"
-#include "cuid_spec.h"
 #include <vector>
 #include <memory>
 #include <string>
 
 struct amdcuid_nic_info {
-    amdcuid_header_nic header;
+    amdcuid_cuid_fields header;
     std::string bdf;
     std::string network_interface;
 };
 
-class CuidNic : public CuidDevice {
+class AmdCuidNic : public AmdCuidDevice {
 public:
-    CuidNic(const amdcuid_nic_info& i);
+    AmdCuidNic(const amdcuid_nic_info& i);
     amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_NIC; }
     amdcuid_status_t get_primary_cuid(amdcuid& id) const override;
     amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;

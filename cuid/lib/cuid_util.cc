@@ -172,7 +172,7 @@ amdcuid_status_t AmdCuidUtilities::generate_secondary_cuid(const amdcuid* primar
 amdcuid_status_t AmdCuidUtilities::generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                  uint8_t revision_id, uint16_t device_id, uint16_t vendor_id,
                                  uint8_t component_type, amdcuid* id) {
-    amdcuid id = {};
+    // amdcuid id = {};
 
     // Build 122-bit value in little-endian order
     uint8_t id_bits[16] = {0}; // 128 bits total (122 bits + 6 bits padding)

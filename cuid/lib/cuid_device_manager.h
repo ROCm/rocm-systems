@@ -6,9 +6,9 @@
 #include <vector>
 #include <memory>
 
-class CuidDeviceManager {
+class AmdCuidDeviceManager {
 public:
-    static CuidDeviceManager& instance();
+    static AmdCuidDeviceManager& instance();
     amdcuid_status_t init(amdcuid_device_type_set_t device_types);
     amdcuid_status_t shutdown();
 
@@ -27,10 +27,10 @@ public:
     bool is_initialized() const { return initialized_; }
 
 private:
-    CuidDeviceManager() : initialized_(false) {}
-    ~CuidDeviceManager() = default;
-    CuidDeviceManager(const CuidDeviceManager&) = delete;
-    CuidDeviceManager& operator=(const CuidDeviceManager&) = delete;
+    AmdCuidDeviceManager() : initialized_(false) {}
+    ~AmdCuidDeviceManager() = default;
+    AmdCuidDeviceManager(const AmdCuidDeviceManager&) = delete;
+    AmdCuidDeviceManager& operator=(const AmdCuidDeviceManager&) = delete;
 
     std::vector<DevicePtr> devices_;
     bool initialized_;

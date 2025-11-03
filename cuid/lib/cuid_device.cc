@@ -15,14 +15,13 @@
 #include <iostream>
 #include <openssl/sha.h>
 
-
-// TODO: If the primary cuid cannot be obtained directly, then using the CUID files.
-amdcuid_status_t CuidDevice::get_secondary_cuid(amdcuid_salt_t salt, amdcuid& id) const {
+// get secondary CUID from cuid file?
+amdcuid_status_t AmdCuidDevice::get_secondary_cuid(amdcuid& id) const {
     amdcuid primary;
     amdcuid_status_t status = get_primary_cuid(primary);
     if (status != AMDCUID_STATUS_SUCCESS) {
         return status;
     }
-    id = CuidUtilities::get_secondary_cuid(salt, &primary);
+    AmdCuidUtilities::generate_secondary_cuid(&primary, &id);
     return AMDCUID_STATUS_SUCCESS;
 }

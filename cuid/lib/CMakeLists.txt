@@ -16,7 +16,6 @@ set(CUID_SOURCES
 
 set(CUID_HEADERS
     cuid.h
-    cuid_spec.h
     cuid_util.h
     cuid_device.h
     cuid_device_manager.h

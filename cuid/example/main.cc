@@ -12,7 +12,6 @@ inline const char* cuid_status_to_string(amdcuid_status_t status) {
         case AMDCUID_STATUS_INVALID_ARGUMENT: return "INVALID_ARGUMENT";
         case AMDCUID_STATUS_PERMISSION_DENIED: return "PERMISSION_DENIED";
         case AMDCUID_STATUS_UNSUPPORTED: return "UNSUPPORTED";
-        case AMDCUID_STATUS_NOT_INIT: return "NOT_INIT";
         case AMDCUID_STATUS_WRONG_DEVICE_TYPE: return "WRONG_DEVICE_TYPE";
         case AMDCUID_STATUS_INSUFFICIENT_SIZE: return "INSUFFICIENT_SIZE";
         case AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND: return "AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND";
@@ -65,22 +64,22 @@ int main() {
             device_node[0] = '\0';
         }
 
-        amdcuid secondary_id = {};
-        err = amdcuid_get_secondary_cuid(gpu_handles[i], &secondary_id);
-        if (err != AMDCUID_STATUS_SUCCESS) {
-            std::cerr << "Failed to get secondary CUID for GPU #" << i << ". Error code: " << err
-                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
-        }
+        // amdcuid secondary_id = {};
+        // err = amdcuid_get_secondary_cuid(gpu_handles[i], &secondary_id);
+        // if (err != AMDCUID_STATUS_SUCCESS) {
+        //     std::cerr << "Failed to get secondary CUID for GPU #" << i << ". Error code: " << err
+        //               << " (" << cuid_status_to_string(err) << ")" << std::endl;
+        // }
 
-        std::cout << "GPU #" << i
-                  << std::dec
-                  << " BDF: " << bdf
-                  << " DeviceNode: " << device_node
-                  << "  CUID: ";
-        for (int j = 0; j < 16; ++j) {
-            printf("%02x", secondary_id.bytes[j]);
-        }
-        std::cout << std::endl;
+        // std::cout << "GPU #" << i
+        //           << std::dec
+        //           << " BDF: " << bdf
+        //           << " DeviceNode: " << device_node
+        //           << "  CUID: ";
+        // for (int j = 0; j < 16; ++j) {
+        //     printf("%02x", secondary_id.bytes[j]);
+        // }
+        // std::cout << std::endl;
     }
     return 0;
 }

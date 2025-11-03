@@ -4,19 +4,18 @@
 
 #include "cuid_device.h"
 #include "cuid.h"
-#include "cuid_spec.h"
 #include <vector>
 #include <memory>
 #include <string>
 
 struct amdcuid_cpu_info {
-    amdcuid_header_cpu header;
+    amdcuid_cuid_fields header;
     // Add more fields as needed (e.g., model name, apic id, etc.)
 };
 
-class CuidCpu : public CuidDevice {
+class AmdCuidCpu : public AmdCuidDevice {
 public:
-    CuidCpu(const amdcuid_cpu_info& i);
+    AmdCuidCpu(const amdcuid_cpu_info& i);
     amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_CPU; }
     amdcuid_status_t get_primary_cuid(amdcuid& id) const override;
     amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
