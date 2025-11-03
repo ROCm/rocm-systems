@@ -208,6 +208,31 @@ struct AqlPacket {
   }
 };
 
+struct AqlMetadataPrefetchPacket {
+  typedef struct header_s {
+    uint8_t type;
+    uint8_t reserved[2];
+    uint8_t version_minor:5;
+    uint8_t version_major:3;
+  } header_t;
+
+  union {
+    struct {
+      header_t header0;
+      uint32_t event_id;
+      uint8_t user_data0[56];
+      header_t header1;
+      uint8_t user_data1[60];
+      header_t header2;
+      uint8_t user_data2[60];
+      header_t header3;
+      uint8_t user_data3[60];
+    } packet;
+    hsa_amd_metadata_kernel_dispatch_packet_t dispatch;
+    hsa_amd_metadata_barrier_packet_t barrier;
+  };
+};
+
 class Queue;
 
 /// @brief Helper structure to simplify conversion of amd_queue_v2_t and

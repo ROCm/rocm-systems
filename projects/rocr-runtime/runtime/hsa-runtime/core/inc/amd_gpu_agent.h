@@ -336,7 +336,7 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                            core::HsaEventCallback event_callback, void* data,
                            uint32_t private_segment_size, uint32_t group_segment_size,
-                           core::Queue** queue) override;
+                           bool metadata_queue, core::Queue** queue) override;
 
   // @brief Decrement GWS ref count.
   void GWSRelease();
@@ -541,14 +541,14 @@ class GpuAgent : public GpuAgentInt {
   const uint32_t maxAqlSize_ = 0x20000;  // 8MB max
 
   // @brief Create an internal queue allowing tools to be notified.
-  core::Queue* CreateInterceptibleQueue(const uint32_t size = 0) {
-    return CreateInterceptibleQueue(core::Queue::DefaultErrorHandler, nullptr, size);
+  core::Queue* CreateInterceptibleQueue(bool metadata_prefetch, const uint32_t size = 0) {
+    return CreateInterceptibleQueue(core::Queue::DefaultErrorHandler, nullptr, metadata_prefetch, size);
   }
 
   // @brief Create an internal queue, with a custom error handler, allowing tools to be
   // notified.
   core::Queue* CreateInterceptibleQueue(void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
-                                        void* data, const uint32_t size);
+                                        void* data, bool metadata_prefetch, const uint32_t size);
 
   // @brief Create SDMA blit object.
   //

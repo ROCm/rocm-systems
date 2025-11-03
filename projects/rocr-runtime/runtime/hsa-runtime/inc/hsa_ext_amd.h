@@ -71,9 +71,10 @@
  * - 1.18 - hsa_amd_pointer_info: Added alloc_flags field to hsa_amd_pointer_info_t
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
+ * - 1.21 - hsa_amd_signal_get_event_id
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 20
+#define HSA_AMD_INTERFACE_VERSION_MINOR 21
 
 #ifdef __cplusplus
 extern "C" {
@@ -623,6 +624,165 @@ typedef struct hsa_amd_aie_ert_packet_s {
 /** \defgroup error-codes Error codes
  *  @{
  */
+
+/**
+ * @brief Sub-fields of the @a header field that is present in any metadata
+ * packet. The offset (with respect to the address of @a header) of a sub-field
+ * is identical to its enumeration constant. The width of each sub-field is
+ * determined by the corresponding value in ::hsa_packet_header_width_t. The
+ * offset and the width are expressed in bits.
+ */
+typedef enum {
+  /**
+   * Packet type. The value of this sub-field must be one of
+   * ::hsa_packet_type_t. If the type is ::HSA_PACKET_TYPE_VENDOR_SPECIFIC, the
+   * packet layout is vendor-specific.
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_TYPE = 0,
+  /**
+   * Reserved
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_RESERVED = 8,
+  /**
+   * Packet version major.
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_VERSION_MAJOR = 24,
+  /**
+   * Packet version minor.
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_VERSION_MINOR = 27,
+} hsa_amd_metadata_packet_header_t;
+
+/**
+ * @brief Width (in bits) of the sub-fields in ::hsa_amd_metadata_packet_header_t.
+ */
+typedef enum hsa_amd_metadata_packet_header_width_s {
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_TYPE = 8,
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_RESERVED = 16,
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_VERSION_MAJOR = 3,
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_VERSION_MINOR = 5,
+} hsa_amd_metadata_packet_header_width_t;
+
+/**
+ * @brief Number of valid kernarg preload d-words in meta-data packet
+ */
+typedef struct hsa_amd_metadata_preload_s {
+  /* The number of dwords from the kernarg segment to preload into User SGPRs */
+  uint16_t length : 7;
+  /* Offset in dwords into the kernarg segment to begin preloading data into User SGPRs */
+  uint16_t offset : 9;
+} hsa_amd_metadata_preload_t;
+
+/**
+ * @brief AMD meta-data Kernel Dispatch Descriptor fields
+ */
+typedef struct hsa_amd_metadata_kernel_descriptor_s {
+  int64_t kernel_code_entry_byte_offset;
+  uint8_t reserved1[20];
+  uint32_t compute_pgm_rsrc3;
+  uint32_t compute_pgm_rsrc1;
+  uint32_t compute_pgm_rsrc2;
+  uint16_t kernel_code_properties;
+  hsa_amd_metadata_preload_t kernarg_preload;
+  uint8_t reserved2[4];
+} hsa_amd_metadata_kernel_descriptor_t;
+
+/**
+ * @brief AMD meta-data Kernel Dispatch packet.
+ */
+typedef struct hsa_amd_metadata_kernel_dispatch_packet_s {
+  /**
+   * Packet header. Used to configure multiple packet parameters such as the
+   * packet type. The parameters are described by hsa_amd_metadata_packet_header_t.
+   */
+  uint32_t header0;
+  /**
+   * Event ID. HW ID of the completion signal. This corresponds to the event_id
+   * of amd_signal_t
+   */
+  uint32_t event_id;
+  /**
+   * Kernel descriptor pre-load fields
+   */
+  hsa_amd_metadata_kernel_descriptor_t kernel_descriptor;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved0[8];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header1;
+  /**
+   * Kernarg preload 0 through 14
+   */
+  uint32_t kernarg_preload_0_14[15];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header2;
+  /**
+   * Kernarg preload 15 through 29
+   */
+  uint32_t kernarg_preload_15_29[15];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header3;
+  /**
+   * Kernarg preload 30 through 31
+   */
+  uint32_t kernarg_preload_30_31[2];
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved1[52];
+} hsa_amd_metadata_kernel_dispatch_packet_t;
+
+/**
+ * @brief AMD meta-data Kernel Dispatch packet.
+ */
+typedef struct hsa_amd_metadata_barrier_packet_s {
+  /**
+   * Packet header. Used to configure multiple packet parameters such as the
+   * packet type. The parameters are described by hsa_amd_metadata_packet_header_t.
+   */
+  uint32_t header0;
+  /**
+   * Event ID. HW ID of the completion signal. This corresponds to the event_id
+   * of amd_signal_t
+   */
+  uint32_t event_id;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved0[56];
+
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header1;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved1[60];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header2;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved2[60];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header3;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved3[60];
+} hsa_amd_metadata_barrier_packet_t;
 
 /**
  * @brief Enumeration constants added to ::hsa_status_t.
@@ -1524,6 +1684,21 @@ uint32_t HSA_API
                             hsa_signal_value_t* values, uint64_t timeout_hint,
                             hsa_wait_state_t wait_hint,
                             hsa_signal_value_t* satisfying_value);
+
+/**
+ * @brief Get the underlying event-id for a HSA signal
+ *
+ * @details Returns the underlying HW event ID for an existing HSA signal.
+ *
+ * @param[in] signal The HSA signal
+ * @param[out] event_id The returned event_id. The returned event_id may be 0
+ * if the HSA signal is not a HW backed signal.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT The signal is invalid
+ */
+hsa_status_t HSA_API
+  hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id);
 
 /** @} */
 
@@ -4299,17 +4474,51 @@ typedef enum {
    */
   HSA_AMD_QUEUE_INFO_DOORBELL_ID,
   /*
-  * Returns how many times the underlying hardware queue has been shared.
-  * @p value will be set to -1 if this queue was not allocated using
-  * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
-  */
+   * Returns how many times the underlying hardware queue has been shared.
+   * @p value will be set to -1 if this queue was not allocated using
+   * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
+   */
   HSA_QUEUE_INFO_USE_COUNT,
   /*
-  * Returns a unique ID representing the HW resource used by a counted queue. Two queues
-  * with the same HW_ID use the same underlying hardware queue. This query can be
-  * used on counted and non-counted queues. The type of this attribute is uint32_t.
-  */
+   * Returns a unique ID representing the HW resource used by a counted queue. Two queues
+   * with the same HW_ID use the same underlying hardware queue. This query can be
+   * used on counted and non-counted queues. The type of this attribute is uint32_t.
+   */
   HSA_QUEUE_INFO_HW_ID,
+  /*
+   * Major version of metadata prefetch dispatch packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR,
+  /*
+   * Minor version of metadata prefetch dispatch packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR,
+  /*
+   * Major version of metadata prefetch barrier packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MAJOR,
+  /*
+   * Minor version of metadata prefetch barrier packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MINOR,
+  /*
+   * If supported by the underlying HW, returns the address of the metadata ring
+   * buffer. The type of this attribute is uint64_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+  /*
+   * Bit-mask indicating properties of this queue.
+   * The type of this attribute is uint8_t[8].
+   */
+  HSA_AMD_QUEUE_INFO_PROPERTIES,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,

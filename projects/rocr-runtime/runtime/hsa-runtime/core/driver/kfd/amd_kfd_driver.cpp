@@ -389,14 +389,14 @@ hsa_status_t KfdDriver::FreeMemory(void *mem, size_t size) {
 
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                     HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
-                                    void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
-                                    HsaQueueResource& queue_resource) const {
+                                    void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
+                                    HsaEvent* event, HsaQueueResource& queue_resource) const {
   // Convert from ROCR internal priority type to KFD type
   HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
 
-  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
-                                       queue_addr, queue_size_bytes, event, &queue_resource)) !=
-      HSAKMT_STATUS_SUCCESS) {
+  if (HSAKMT_CALL(hsaKmtCreateQueueV2(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
+                                         queue_addr, queue_size_bytes, queue_metadata_size_bytes,
+                                         event, &queue_resource)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   return HSA_STATUS_SUCCESS;
