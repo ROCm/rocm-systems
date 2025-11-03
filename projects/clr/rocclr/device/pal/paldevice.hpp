@@ -253,16 +253,15 @@ class Device : public NullDevice {
     uint32_t index_;                 //!< HW queue index for scratch buffer access
     amd::Monitor queue_lock_;        //!< Queue lock for access
     AqlPacketMgmt aql_packet_mgmt_;  //!< AQL packets management class for debugger support
-    QueueRecycleInfo(const Device& dev)
+    QueueRecycleInfo()
         : counter_(1),
           engineType_(Pal::EngineTypeCompute),
           index_(0),
-          queue_lock_(true) /* Queue lock for sharing */,
-          aql_packet_mgmt_(dev) {}
+          queue_lock_(true) /* Queue lock for sharing */ {}
 
-    //! Returns the MQD's read_dispatch_id's address.
-    uintptr_t DebuggerData() const {
-      return reinterpret_cast<uintptr_t>(&aql_packet_mgmt_.amd_queue_.read_dispatch_id);
+    //! Returns the aql packet list
+    uintptr_t AqlPacketList() const {
+      return reinterpret_cast<uintptr_t>(&aql_packet_mgmt_.aql_packets_);
     }
   };
 
