@@ -233,18 +233,6 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
 
-    auto buffer_packet =
-        std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(control_packet->GetHandle(), 0);
-    // Emit the optional buffer header first so consumers can prime state
-    // before the main payload arrives.
-    if(buffer_packet->header)
-        params.shader_cb_fn(agent_id,
-                            0,
-                            &buffer_packet->header,
-                            sizeof(buffer_packet->header),
-                            ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
-                            params.callback_userdata);
-
     auto control_packet = get_control(true);
     control_packet->clear();
     control_packet->populate_before();
@@ -255,6 +243,26 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
 
     if(params.triple_buffering)
     {
+        // Find unique shader engine ID from mask
+        uint64_t shader_engine_id = 0;
+        for(uint64_t i = 0; (params.shader_engine_mask >> i) != 0; i++)
+            if((params.shader_engine_mask >> i) % 2 == 1) shader_engine_id = i;
+
+        ROCP_WARNING << "SE_ID: " << shader_engine_id;
+        auto buffer_packet = std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(
+            control_packet->GetHandle(), shader_engine_id);
+        // Emit the optional buffer header first so consumers can prime state
+        // before the main payload arrives.
+        if(buffer_packet->header)
+        {
+            params.shader_cb_fn(agent_id,
+                                0,
+                                &buffer_packet->header,
+                                sizeof(buffer_packet->header),
+                                ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
+                                params.callback_userdata);
+        }
+
         auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
         worker_data->queue = queue;
 

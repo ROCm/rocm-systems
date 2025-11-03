@@ -46,6 +46,8 @@ namespace ATTTest
 {
 namespace TripleBuffer
 {
+constexpr size_t MIN_TRACE_SIZE = 10 << 20;
+
 struct agent_output_buffer_t
 {
     agent_output_buffer_t(rocprofiler_agent_id_t _id)
@@ -235,6 +237,9 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             auto&    buffer        = output_buffer.output_buffer;
             size_t   output_size   = std::min(output_buffer.output_size.exchange(0), buffer.size());
             rocprofiler_trace_decode(decoder, parse, buffer.data(), output_size, &current_sdata);
+
+            if(output_size < MIN_TRACE_SIZE)
+                throw std::runtime_error("Trace is unexpectedly small!");
         }
     }
     else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
