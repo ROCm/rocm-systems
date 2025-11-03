@@ -37,7 +37,7 @@ env:
   ROCM_VERSION: "7.0.0"
   PYTHON_VENV_PATH: "rocprofiler-sdk"
   PYTHON_VENV_ACTIVATE: "rocprofiler-sdk/bin/activate"
-  GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
+  GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
 
   ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
