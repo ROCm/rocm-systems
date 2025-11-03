@@ -216,18 +216,19 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
 SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle)
 : handle(_handle)
 {
-    uint64_t num_buffers{6};
-    buffer_swap.resize(num_buffers);
+    // We sometimes need 2x the number of packets as there are buffers.
+    uint64_t num_packets{6};
+    buffer_swap.resize(num_packets);
 
     std::vector<hsa_ext_amd_aql_pm4_packet_t*> buffer_ptr{};
     for(auto& buffer : buffer_swap)
         buffer_ptr.emplace_back(&buffer);
 
     auto status = aqlprofile_att_get_buffer_packets(
-        &header, &query_status, buffer_ptr.data(), &num_buffers, handle, SHADER_ENGINE_ID, 0);
+        &header, &query_status, buffer_ptr.data(), &num_packets, handle, SHADER_ENGINE_ID, 0);
     CHECK_HSA(status, "failed to create ATT double buffer packet");
 
-    buffer_swap.resize(num_buffers);
+    buffer_swap.resize(num_packets);  // Discard unused packets
 
     query_status.header = VENDOR_BIT | BARRIER_BIT;
     for(auto& buffer : buffer_swap)
@@ -244,6 +245,7 @@ SQTTBufferingPackets::query_buffer_status()
 
     if(!ret.needs_swap) return {};
 
+    // Ensure aqlprofile and SDK agrees on which is the current buffer
     ROCP_FATAL_IF((current_buffer++) != ret.num_swaps) << "Mismatch of AQL and SDK buffer states!";
 
     auto query   = sqtt_buffer_status_t{};

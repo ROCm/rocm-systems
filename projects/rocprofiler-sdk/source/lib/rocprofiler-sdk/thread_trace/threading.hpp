@@ -50,13 +50,21 @@ typedef decltype(copy_data_sync) copy_data_t;
 /// Shared state used to coordinate the producer and consumer sides of the triple buffer.
 struct triple_buffer_shared_data_t
 {
+    /// Per-buffer state: mutex for synchronization, flags for buffer status, and CPU-side memory
+    struct buffer_slot_t
+    {
+        std::mutex mutex{};
+        int        flags{};
+        void*      memory{nullptr};
+    };
+
     std::shared_ptr<HsaATTQueue> queue{};
     std::atomic<bool>            consumer_running{true};
     std::condition_variable      write_cv{};
     std::atomic<size_t>          write_index{0};
     std::atomic<size_t>          read_index{0};
 
-    std::array<std::pair<std::mutex, int>, 2> mut{};
+    std::array<buffer_slot_t, 2> buffers{};
 };
 
 /// Parameters passed into the consumer worker thread.
