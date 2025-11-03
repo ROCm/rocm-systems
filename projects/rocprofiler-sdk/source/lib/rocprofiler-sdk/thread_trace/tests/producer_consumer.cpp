@@ -154,6 +154,11 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
     worker_data->queue = std::make_shared<QueueMock>(*agent);
 
+    // Initialize buffer memory pointers from the queue's double buffer
+    auto buffer_memory = worker_data->queue->get_double_buffer_memory();
+    for (size_t i=0; i<buffer_memory.size(); i++)
+        worker_data->buffers.at(i).memory = buffer_memory.at(i);
+
     auto producer_data             = triple_buffer_producer_data_t{};
     producer_data.producer_running = running_flag;
     producer_data.start_pkt_signal = std::make_shared<Signal>();

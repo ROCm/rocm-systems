@@ -20,10 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //
-// undefine NDEBUG so asserts are implemented
-#ifdef NDEBUG
-#    undef NDEBUG
-#endif
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -284,9 +280,9 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 
     int valid_ctx = 0;
     ROCPROFILER_CALL(rocprofiler_context_is_valid(agent_ctx, &valid_ctx), "validity check");
-    assert(valid_ctx != 0);
+    if(valid_ctx == 0) throw std::runtime_error("agent_ctx is not valid!");
     ROCPROFILER_CALL(rocprofiler_context_is_valid(tracing_ctx, &valid_ctx), "validity check");
-    assert(valid_ctx != 0);
+    if(valid_ctx == 0) throw std::runtime_error("tracing_ctx is not valid!");
 
     ROCPROFILER_CALL(rocprofiler_start_context(tracing_ctx), "context start");
 

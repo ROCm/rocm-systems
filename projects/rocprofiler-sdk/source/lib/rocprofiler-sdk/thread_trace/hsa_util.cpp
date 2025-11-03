@@ -28,11 +28,7 @@
 #define CHECK_HSA(fn, message)                                                                     \
     {                                                                                              \
         auto _status = (fn);                                                                       \
-        if(_status != HSA_STATUS_SUCCESS)                                                          \
-        {                                                                                          \
-            ROCP_ERROR << "HSA Err: " << _status << '\n';                                          \
-            throw std::runtime_error(message);                                                     \
-        }                                                                                          \
+        ROCP_FATAL_IF(_status != HSA_STATUS_SUCCESS) << "HSA Err: " << _status;                    \
     }
 
 namespace rocprofiler
