@@ -75,173 +75,137 @@ Metadata JSON Sample
 -----------------------------------------------------------------------
 
 .. code-block:: json
+   :linenos:
 
    {
-      "rocprofiler-systems": {
-         "metadata": {
-            "info": {
-            "CPU_MODEL": "AMD Ryzen 5 3600 6-Core Processor",
-            "CPU_VENDOR": "AuthenticAMD",
-            "HOME": "/home/rocm-dev",
-            "LAUNCH_DATE": "01/15/25",
-            "LAUNCH_TIME": "16:49",
-            "PWD": "/home/rocm-dev/code/rocprofiler-systems",
-            "ROCPROFSYS_COMPILER_ID": "GNU",
-            "ROCPROFSYS_COMPILER_VERSION": "11.4.0",
-            "ROCPROFSYS_GIT_DESCRIBE": "",
-            "ROCPROFSYS_GIT_REVISION": "3213dc652728f7ed01b62bf55f6af76c43bfcbdb",
-            "ROCPROFSYS_LIBRARY_ARCH": "x86_64-linux-gnu",
-            "ROCPROFSYS_ROCM_VERSION": "6.3.1",
-            "ROCPROFSYS_SYSTEM_NAME": "Linux",
-            "ROCPROFSYS_SYSTEM_PROCESSOR": "x86_64",
-            "ROCPROFSYS_SYSTEM_VERSION": "6.8.0-51-generic",
-            "ROCPROFSYS_VERSION": "1.0.0",
-            "SHELL": "/usr/bin/zsh",
-            "TIMEMORY_API": "tim::project::timemory",
-            "TIMEMORY_GIT_DESCRIBE": "v3.2.0-703-gba3c6486",
-            "TIMEMORY_GIT_REVISION": "ba3c648677b3c6f217abe147ef3198f36239e234",
-            "TIMEMORY_VERSION": "4.0.0rc0",
-            "USER": "rocm-dev",
-            "CPU_FREQUENCY": 1972,
-            "CPU_FEATURES": [
-               "fpu",
-               "vme",
-               "de",
-               "pse",
-               "tsc",
-               "msr",
-               "pae",
-               "... etc. ..."
-            ],
-            "HW_CONCURRENCY": 12,
-            "HW_PHYSICAL_CPU": 6,
-            "HW_L1_CACHE_SIZE": 32768,
-            "HW_L2_CACHE_SIZE": 524288,
-            "HW_L3_CACHE_SIZE": 16777216,
-            "ROCPROFSYS_VERSION_MAJOR": 1,
-            "ROCPROFSYS_VERSION_MINOR": 0,
-            "ROCPROFSYS_VERSION_PATCH": 0,
-            "ROCPROFSYS_ROCM_VERSION_MAJOR": 6,
-            "ROCPROFSYS_ROCM_VERSION_MINOR": 3,
-            "ROCPROFSYS_ROCM_VERSION_PATCH": 1,
-            "memory_maps_files": [
-               "/opt/rocm-6.3.1/lib/libhsa-amd-aqlprofile64.so.1.0.60301",
-               "/opt/rocm-6.3.1/lib/libhsa-runtime64.so.1.14.60301",
-               "/opt/rocm-6.3.1/lib/librocm_smi64.so.7.4.60301",
-               "/opt/rocm-6.3.1/lib/librocprofiler-register.so.0.4.0",
-               "/opt/rocm-6.3.1/lib/librocprofiler-sdk.so.0.5.0",
-               "/opt/rocm/lib/libhsa-amd-aqlprofile64.so.1",
-               "/opt/rocm/lib/libhsa-runtime64.so.1",
-               "/opt/rocm/lib/librocm_smi64.so.7",
-               "/opt/rocm/lib/librocprofiler-register.so.0",
-               "/opt/rocm/lib/librocprofiler-sdk.so.0",
-               "... etc. ..."
-               ],
-            "memory_maps": [
-               {
-                  "cereal_class_version": 0,
-                  "load_address": "76005b800000",
-                  "last_address": "76005b81b000",
-                  "permissions": "r---",
-                  "offset": "0",
-                  "device": "",
-                  "inode": 0,
-                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
+       "rocprofiler-systems": {
+           "metadata": {
+               "info": {
+                   "CPU_MODEL": "AMD Ryzen 5 3600 6-Core Processor",
+                   "CPU_VENDOR": "AuthenticAMD",
+                   "HOME": "/home/rocm-dev",
+                   "LAUNCH_DATE": "01/15/25",
+                   "LAUNCH_TIME": "16:49",
+                   "PWD": "/home/rocm-dev/code/rocprofiler-systems",
+                   "ROCPROFSYS_COMPILER_ID": "GNU",
+                   "ROCPROFSYS_COMPILER_VERSION": "11.4.0",
+                   "ROCPROFSYS_GIT_DESCRIBE": "",
+                   "ROCPROFSYS_GIT_REVISION": "3213dc652728f7ed01b62bf55f6af76c43bfcbdb",
+                   "ROCPROFSYS_LIBRARY_ARCH": "x86_64-linux-gnu",
+                   "ROCPROFSYS_ROCM_VERSION": "6.3.1",
+                   "ROCPROFSYS_SYSTEM_NAME": "Linux",
+                   "ROCPROFSYS_SYSTEM_PROCESSOR": "x86_64",
+                   "ROCPROFSYS_SYSTEM_VERSION": "6.8.0-51-generic",
+                   "ROCPROFSYS_VERSION": "1.0.0",
+                   "SHELL": "/usr/bin/zsh",
+                   "TIMEMORY_API": "tim::project::timemory",
+                   "TIMEMORY_GIT_DESCRIBE": "v3.2.0-703-gba3c6486",
+                   "TIMEMORY_GIT_REVISION": "ba3c648677b3c6f217abe147ef3198f36239e234",
+                   "TIMEMORY_VERSION": "4.0.0rc0",
+                   "USER": "rocm-dev",
+                   "CPU_FREQUENCY": 1972,
+                   "CPU_FEATURES": ["fpu", "vme", "de", "pse", "tsc", "msr", "pae"],
+                   "HW_CONCURRENCY": 12,
+                   "HW_PHYSICAL_CPU": 6,
+                   "HW_L1_CACHE_SIZE": 32768,
+                   "HW_L2_CACHE_SIZE": 524288,
+                   "HW_L3_CACHE_SIZE": 16777216,
+                   "ROCPROFSYS_VERSION_MAJOR": 1,
+                   "ROCPROFSYS_VERSION_MINOR": 0,
+                   "ROCPROFSYS_VERSION_PATCH": 0,
+                   "ROCPROFSYS_ROCM_VERSION_MAJOR": 6,
+                   "ROCPROFSYS_ROCM_VERSION_MINOR": 3,
+                   "ROCPROFSYS_ROCM_VERSION_PATCH": 1,
+                   "memory_maps_files": [
+                       "/opt/rocm-6.3.1/lib/libhsa-amd-aqlprofile64.so.1.0.60301",
+                       "/opt/rocm-6.3.1/lib/libhsa-runtime64.so.1.14.60301"
+                   ],
+                   "memory_maps": [
+                       {
+                           "cereal_class_version": 0,
+                           "load_address": "76005b800000",
+                           "last_address": "76005b81b000",
+                           "permissions": "r---",
+                           "offset": "0",
+                           "device": "",
+                           "inode": 0,
+                           "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
+                       },
+                       {
+                           "load_address": "76005b81b000",
+                           "last_address": "76005b93400d",
+                           "permissions": "r-x-",
+                           "offset": "1b000",
+                           "device": "",
+                           "inode": 0,
+                           "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
+                       }
+                   ]
                },
-               {
-                  "load_address": "76005b81b000",
-                  "last_address": "76005b93400d",
-                  "permissions": "r-x-",
-                  "offset": "1b000",
-                  "device": "",
-                  "inode": 0,
-                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
+               "settings": {
+                   "cereal_class_version": 2,
+                   "ROCPROFSYS_OUTPUT_PREFIX": {
+                       "name": "output_prefix",
+                       "environ": "ROCPROFSYS_OUTPUT_PREFIX",
+                       "description": "Explicitly specify a prefix for all output files",
+                       "count": 1,
+                       "max_count": -1,
+                       "cmdline": ["--rocprofiler-systems-output-prefix"],
+                       "categories": ["filename", "io", "librocprof-sys", "native", "rocprofsys"],
+                       "data_type": "string",
+                       "initial": "parallel-overhead-binary-rewrite/",
+                       "value": "parallel-overhead-binary-rewrite/",
+                       "updated": "config",
+                       "enabled": true
+                   },
+                   "command_line": [
+                       "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/parallel-overhead.inst",
+                       "--",
+                       "10",
+                       "12",
+                       "1000"
+                   ],
+                   "environment": [
+                       {
+                           "key": "LD_LIBRARY_PATH",
+                           "value": "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib:/opt/rocm/lib"
+                       },
+                       {
+                           "key": "LIBRARY_PATH",
+                           "value": ""
+                       }
+                   ]
                },
-               {
-                  "... etc. ..."
+               "output": {
+                   "json": [
+                       {
+                           "key": "wall_clock",
+                           "value": [
+                               "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.json"
+                           ]
+                       }
+                   ],
+                   "protobuf": [
+                       {
+                           "key": "perfetto",
+                           "value": [
+                               "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/perfetto-trace.proto"
+                           ]
+                       }
+                   ],
+                   "text": [
+                       {
+                           "key": "wall_clock",
+                           "value": [
+                               "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.txt"
+                           ]
+                       }
+                   ]
                }
-            ],
-         "settings": {
-            "cereal_class_version": 2,
-            "ROCPROFSYS_OUTPUT_PREFIX": {
-               "name": "output_prefix",
-               "environ": "ROCPROFSYS_OUTPUT_PREFIX",
-               "description": "Explicitly specify a prefix for all output files",
-               "count": 1,
-               "max_count": -1,
-               "cmdline": [
-                  "--rocprofiler-systems-output-prefix"
-               ],
-               "categories": [
-                  "filename",
-                  "io",
-                  "librocprof-sys",
-                  "native",
-                  "rocprofsys"
-               ],
-               "data_type": "string",
-               "initial": "parallel-overhead-binary-rewrite/",
-               "value": "parallel-overhead-binary-rewrite/",
-               "updated": "config",
-               "enabled": true
-            },
-            {
-               ... etc. ...
-            },
-            "command_line": [
-               "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/parallel-overhead.inst",
-               "--",
-               "10",
-               "12",
-               "1000"
-            ],
-            "environment": [
-                  ... etc . ...
-            ]
-         },
-         "environment": [
-            {
-               "key": "LD_LIBRARY_PATH",
-               "value": "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib:/opt/rocm/lib"
-            },
-            {
-               "key": "LIBRARY_PATH",
-               "value": ""
-            },
-            {
-               etc ...
-            }
-         ]
-         "output": {
-            "json": [
-               {
-                  "key": "wall_clock",
-                  "value": [
-                    "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.json"
-                  ]
-               }
-            ],
-            "protobuf": [
-               {
-                  "key": "perfetto",
-                  "value": [
-                   "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/perfetto-trace.proto"
-                  ]
-               }
-            ],
-            "text": [
-               {
-                  "key": "wall_clock",
-                  "value": [
-                     "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.txt"
-                  ]
-               }
-            ]
-         },
-      },
+           }
+       }
    }
-
-
+   
 Configuring the ROCm Systems Profiler output
 ============================================
 
