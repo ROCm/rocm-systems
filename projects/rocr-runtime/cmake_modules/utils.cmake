@@ -301,11 +301,6 @@ function( set_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DEB_MAINT
     set( DEB_LICENSE                  "MIT" CACHE STRING "Debian Package License Type" )
     set( DEB_CHANGELOG_INSTALL_FILENM "changelog.Debian.gz" CACHE STRING "Debian Package ChangeLog File Name" )
 
-    if( BUILD_ENABLE_LINTIAN_OVERRIDES )
-      set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_PACKAGE_NAME}" CACHE STRING "Debian Package Lintian Override File Name" )
-      set( DEB_OVERRIDES_INSTALL_PATH   "/usr/share/lintian/overrides/" CACHE STRING "Deb Pkg Lintian Override Install Loc" )
-    endif()
-
     # Get TimeStamp
     find_program( DEB_DATE_TIMESTAMP_EXEC date )
     set ( DEB_TIMESTAMP_FORMAT_OPTION "-R" )
