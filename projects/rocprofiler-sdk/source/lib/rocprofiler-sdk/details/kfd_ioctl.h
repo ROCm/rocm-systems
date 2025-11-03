@@ -629,7 +629,7 @@ enum KFD_SVM_UNMAP_TRIGGERS
     KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU      /* Unmap to free the buffer */
 };
 
-#define KFD_SMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) -1))
+#define KFD_SMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) - 1))
 #define KFD_SMI_EVENT_MSG_SIZE           96
 
 struct kfd_ioctl_smi_events_args
@@ -1775,6 +1775,18 @@ enum kfd_ioctl_pc_sample_op
     KFD_IOCTL_PCS_OP_DESTROY,
     KFD_IOCTL_PCS_OP_START,
     KFD_IOCTL_PCS_OP_STOP,
+    KFD_IOCTL_PCS_OP_START_PTL,
+    KFD_IOCTL_PCS_OP_STOP_PTL,
+};
+
+enum psp_gfx_format_type
+{
+    GFX_FTYPE_I8      = 0x00000000,
+    GFX_FTYPE_F16     = 0x00000001,
+    GFX_FTYPE_BF16    = 0x00000002,
+    GFX_FTYPE_F32     = 0x00000003,
+    GFX_FTYPE_F64     = 0x00000004,
+    GFX_FTYPE_INVALID = 0xFFFFFFFF,
 };
 
 /* Values have to be a power of 2*/
@@ -1805,6 +1817,9 @@ struct kfd_pc_sample_info
     __u64 flags;        /* [OUT] indicate potential restrictions e.g FLAG_POWER_OF_2 */
     __u32 method;       /* [IN/OUT] kfd_ioctl_pc_sample_method */
     __u32 type;         /* [IN/OUT] kfd_ioctl_pc_sample_type */
+    __u32 ptl_state;    /* [IN/OUT] */
+    __u32 pref_format1; /* [IN/OUT] */
+    __u32 pref_format2; /* [IN/OUT] */
 };
 
 #define KFD_IOCTL_PCS_QUERY_TYPE_FULL (1 << 0) /* If not set, return current */
