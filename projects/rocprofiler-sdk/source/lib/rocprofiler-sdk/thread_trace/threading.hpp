@@ -56,6 +56,7 @@ struct triple_buffer_shared_data_t
         std::mutex mutex{};
         int        flags{};
         void*      memory{nullptr};
+        size_t     size{};
     };
 
     std::shared_ptr<HsaATTQueue> queue{};

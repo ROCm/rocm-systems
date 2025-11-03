@@ -441,6 +441,88 @@ TEST(thread_trace, slow_gpu)
     ASSERT_EQ(interrupt_received.load(), true);
 }
 
+TEST(thread_trace, restart_after_overflow)
+{
+    rocprofiler::thread_trace::test_init();
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::QueueMock::BUFFER_SIZE;
+
+    struct callback_state_t
+    {
+        std::atomic<int>  total_callbacks{0};
+        std::atomic<int>  overflow_count{0};
+        std::atomic<int>  normal_count{0};
+        std::atomic<bool> seen_overflow{false};
+        std::atomic<bool> seen_normal_after_overflow{false};
+    };
+    auto state = std::make_shared<callback_state_t>();
+
+    // Track callbacks before, during, and after an overflow event to verify restart.
+    auto fetch_cb = [](rocprofiler_agent_id_t,
+                       int64_t,
+                       void*,
+                       size_t,
+                       rocprofiler_thread_trace_shader_data_flags_t flags,
+                       rocprofiler_user_data_t                      userdata) {
+        auto* s = static_cast<callback_state_t*>(userdata.ptr);
+        s->total_callbacks.fetch_add(1);
+
+        if(flags & (ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL |
+                    ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL))
+        {
+            s->overflow_count.fetch_add(1);
+            s->seen_overflow.store(true);
+        }
+        else if(s->seen_overflow.load())
+        {
+            // Normal callback after we've seen an overflow - trace has restarted
+            s->normal_count.fetch_add(1);
+            s->seen_normal_after_overflow.store(true);
+        }
+    };
+
+    auto input_buffer = std::vector<size_t>();
+    input_buffer.resize(BUFFER_SIZE / sizeof(size_t));
+
+    auto status_called = std::atomic<int>{0};
+    auto return_synced = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
+        auto called = status_called.fetch_add(1);
+
+        // Throttle to let consumer keep pace
+        if(called > state->total_callbacks + 1) return std::nullopt;
+
+        auto status = rocprofiler::hsa::sqtt_buffer_status_t{};
+        status.data = input_buffer.data();
+        status.size = BUFFER_SIZE;
+
+        // Set gpu_full on the very first callback to trigger overflow immediately
+        status.gpu_full = (called == 0);
+
+        return status;
+    };
+
+    auto userdata = rocprofiler_user_data_t{.ptr = state.get()};
+    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
+
+    // Wait for overflow to occur and then for normal callbacks to resume
+    while(!state->seen_normal_after_overflow.load())
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    threads.flag->store(false);
+    threads.consumer.join();
+    threads.producer.join();
+
+    // Verify that we saw both overflow and recovery
+    ASSERT_TRUE(state->seen_overflow.load()) << "Should have seen at least one overflow event";
+    ASSERT_TRUE(state->seen_normal_after_overflow.load())
+        << "Should have seen normal callbacks after overflow, indicating restart";
+    ASSERT_GT(state->overflow_count.load(), 0)
+        << "Should have received callbacks with overflow flags";
+    ASSERT_GT(state->normal_count.load(), 0)
+        << "Should have received normal callbacks after overflow";
+    ASSERT_GT(state->total_callbacks.load(), state->overflow_count.load())
+        << "Should have more total callbacks than just overflow events";
+}
+
 TEST(thread_trace, buffer_alternation)
 {
     rocprofiler::thread_trace::test_init();
