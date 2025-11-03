@@ -65,10 +65,9 @@ void
 consumer_loop(triple_buffer_consumer_data_t parameters)
 {
     const size_t buffer_size = parameters.shared->queue->buffer_size;
-    const auto   buffer      = parameters.shared->queue->get_double_buffer_memory();
+    auto&        buffers     = parameters.shared->buffers;
     auto&        running     = parameters.shared->consumer_running;
     auto&        write_cv    = parameters.shared->write_cv;
-    auto&        mut         = parameters.shared->mut;
     auto&        write_index = parameters.shared->write_index;
     auto&        read_index  = parameters.shared->read_index;
     auto         agent_id    = parameters.shared->queue->agent_id;
@@ -77,8 +76,8 @@ consumer_loop(triple_buffer_consumer_data_t parameters)
 
     while(true)
     {
-        size_t parity = read_index % buffer.size();
-        auto   lock   = std::unique_lock{mut.at(parity).first};
+        size_t parity = read_index % buffers.size();
+        auto   lock   = std::unique_lock{buffers.at(parity).mutex};
 
         // Wait until the producer signals that a new buffer is ready or the trace shuts down.
         write_cv.wait(lock, [&]() { return write_index > read_index || !running; });
@@ -86,12 +85,22 @@ consumer_loop(triple_buffer_consumer_data_t parameters)
         if(!running && write_index <= read_index) return;
 
         auto flags =
-            static_cast<rocprofiler_thread_trace_shader_data_flags_t>(mut.at(parity).second);
-        callback_fn(agent_id, 0, buffer.at(parity), buffer_size, flags, userdata);
+            static_cast<rocprofiler_thread_trace_shader_data_flags_t>(buffers.at(parity).flags);
+        callback_fn(agent_id, 0, buffers.at(parity).memory, buffer_size, flags, userdata);
         read_index.fetch_add(1);
     }
 }
 
+// Producer loop: Polls SQTT hardware status, copies GPU trace buffers to CPU memory,
+// and wakes the consumer thread when data is ready.
+//
+// The producer operates in three phases:
+// 1. Poll: Send status query packets to check if GPU buffer is full
+// 2. Copy: When buffer is full, perform async GPU->CPU memory copy
+// 3. Notify: Signal the consumer via condition variable that buffer is ready to process
+//
+// The loop uses adaptive polling with backoff based on estimated bandwidth to minimize
+// CPU overhead while ensuring timely buffer flips before GPU overflow.
 void
 producer_loop(triple_buffer_producer_data_t parameters)
 {
@@ -99,11 +108,10 @@ producer_loop(triple_buffer_producer_data_t parameters)
     auto& flag  = *CHECK_NOTNULL(parameters.producer_running);
 
     const size_t buffer_size           = queue.buffer_size;
-    const auto   buffer                = queue.get_double_buffer_memory();
+    auto&        buffers               = parameters.shared->buffers;
     const auto   interval_microseconds = static_cast<size_t>(1E6 * buffer_size / SQTT_BANDWIDTH);
 
     auto& write_cv      = parameters.shared->write_cv;
-    auto& mut           = parameters.shared->mut;
     auto& write_index   = parameters.shared->write_index;
     auto& read_index    = parameters.shared->read_index;
     auto& buffer_packet = *CHECK_NOTNULL(parameters.buffer_packet);
@@ -129,11 +137,18 @@ producer_loop(triple_buffer_producer_data_t parameters)
         if(do_sleep) std::this_thread::sleep_for(std::chrono::microseconds(interval_microseconds));
         do_sleep = true;  // Reset value
 
-        // Send query status packet and wait for result
+        // PHASE 1: Poll SQTT buffer status
+        // Send a query packet to the GPU asking if the trace buffer is full and ready to swap.
+        // This is a non-blocking query that completes via signal.
         queue.Submit(&buffer_packet.query_status, &submit_signal);
         submit_signal.WaitOn();
+
         if(auto status = buffer_packet.query_buffer_status())
         {
+            // PHASE 2: Copy GPU buffer to CPU memory
+            // The GPU has signaled that a buffer is full. We need to:
+            // a) Submit a packet to trigger GPU-side buffer swap
+            // b) Copy the full buffer from GPU memory to our CPU-side double buffer
             auto t0 = std::chrono::system_clock::now();
             // Query returned buffer full: Send packet to trigger a buffer swap
             queue.Submit(&status->packet, &submit_signal);
@@ -155,19 +170,23 @@ producer_loop(triple_buffer_producer_data_t parameters)
                 {
                     int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
 
-                    size_t parity = write_index % buffer.size();
-                    auto   lock   = std::unique_lock{mut.at(parity).first};
+                    size_t parity = write_index % buffers.size();
+                    auto   lock   = std::unique_lock{buffers.at(parity).mutex};
 
                     if(should_stop)
                         flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
 
-                    mut.at(parity).second = flags;
+                    buffers.at(parity).flags = flags;
 
-                    copy_sync(buffer.at(parity), status->data);
+                    // Perform the actual GPU->CPU memory copy into our double-buffer slot
+                    copy_sync(buffers.at(parity).memory, status->data);
                     auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
                     ROCP_TRACE << "Copy: " << copy_time
                                << " s. BW: " << buffer_size / float(copy_time);
 
+                    // PHASE 3: Wake up consumer thread
+                    // Increment write_index to signal a new buffer is available, then notify
+                    // the consumer via condition variable so it can process the data.
                     write_index.fetch_add(1);
                     write_cv.notify_all();
                 }

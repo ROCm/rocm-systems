@@ -33,7 +33,7 @@
 #include <iostream>
 #include "hip/hip_runtime.h"
 
-// Two waves per SIMD on MI300
+// Eight waves per SIMD on MI300
 #define DATA_SIZE          (304 * 256 * 8)
 #define HIP_API_CALL(CALL) assert((CALL) == hipSuccess)
 
