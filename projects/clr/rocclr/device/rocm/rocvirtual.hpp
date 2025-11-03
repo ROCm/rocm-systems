@@ -411,7 +411,7 @@ class VirtualGPU : public device::VirtualDevice {
   //! Returns memory dependency class
   MemoryDependency& memoryDependency() { return memoryDependency_; }
 
-  //! Detects memory dependency for HSAIL kernels and uses appropriate AQL header
+  //! Detects memory dependency for device kernels and uses appropriate AQL header
   bool processMemObjects(const amd::Kernel& kernel,  //!< AMD kernel object for execution
                          const_address params,       //!< Pointer to the param's store
                          size_t& ldsAddress,         //!< LDS usage

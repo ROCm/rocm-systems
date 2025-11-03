@@ -1083,9 +1083,6 @@ class ClBinary : public amd::HeapObject {
                       amd::Elf::ElfSections& elfSectionType  //!< LLVMIR binary is in SPIR format
   ) const;
 
-  //! Check if the binary is recompilable
-  bool isRecompilable(std::string& llvmBinary, amd::Elf::ElfPlatform thePlatform);
-
   void saveOrigBinary(const char* origBinary, size_t origSize) {
     origBinary_ = origBinary;
     origSize_ = origSize;
@@ -1455,9 +1452,6 @@ class Isa {
   /// @returns This Isa's target ID name.
   const char* targetId() const { return targetId_; }
 
-  /// @returns This Isa's name to use with the HSAIL compiler.
-  const char* hsailName() const { return hsailId_; }
-
   /// @returns If the ROCm runtime supports the ISA.
   bool runtimeRocSupported() const {
     if (!IS_HIP && (versionMajor_ == 8)) {
@@ -1534,13 +1528,12 @@ class Isa {
   static const Isa* end();
 
  private:
-  constexpr Isa(const char* targetId, const char* hsailId, bool runtimeRocSupported,
-                bool runtimePalSupported, uint32_t versionMajor, uint32_t versionMinor,
-                uint32_t versionStepping, Feature sramecc, Feature xnack, uint32_t simdPerCU,
-                uint32_t simdWidth, uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
+  constexpr Isa(const char* targetId, bool runtimeRocSupported, bool runtimePalSupported,
+                uint32_t versionMajor, uint32_t versionMinor, uint32_t versionStepping,
+                Feature sramecc, Feature xnack, uint32_t simdPerCU, uint32_t simdWidth,
+                uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
                 uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment)
       : targetId_(targetId),
-        hsailId_(hsailId),
         runtimeRocSupported_(runtimeRocSupported),
         runtimePalSupported_(runtimePalSupported),
         versionMajor_(versionMajor),
@@ -1562,11 +1555,6 @@ class Isa {
   // @brief Isa's target ID name. Used for LLVM COde Object Manager
   // compilations.
   const char* targetId_;
-
-  // @brief Isa's HSAIL name. Used for the Compiler Library for HSAIL
-  // compilation using the Shader Compiler Finalizer. Empty string if
-  // unsupported.
-  const char* hsailId_;
 
   bool runtimeRocSupported_;       //!< ROCm runtime is supported.
   bool runtimePalSupported_;       //!< PAL runtime is supported.

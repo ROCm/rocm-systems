@@ -53,22 +53,22 @@
 #endif
 
 /**
- * HSA image object size in bytes (see HSAIL spec)
+ * HSA image object size in bytes (see HSA spec)
  */
 #define HSA_IMAGE_OBJECT_SIZE 48
 
 /**
- * HSA image object alignment in bytes (see HSAIL spec)
+ * HSA image object alignment in bytes (see HSA spec)
  */
 #define HSA_IMAGE_OBJECT_ALIGNMENT 16
 
 /**
- * HSA sampler object size in bytes (see HSAIL spec)
+ * HSA sampler object size in bytes (see HSA spec)
  */
 #define HSA_SAMPLER_OBJECT_SIZE 32
 
 /**
- * HSA sampler object alignment in bytes (see HSAIL spec)
+ * HSA sampler object alignment in bytes (see HSA spec)
  */
 #define HSA_SAMPLER_OBJECT_ALIGNMENT 16
 

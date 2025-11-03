@@ -2377,7 +2377,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::PrintChildren(const pal::Kernel& hsaKernel, VirtualGPU* gpuDefQueue) {
+void VirtualGPU::PrintChildren(const pal::Kernel& devKernel, VirtualGPU* gpuDefQueue) {
   AmdAqlWrap* wraps = (AmdAqlWrap*)(&((AmdVQueueHeader*)gpuDefQueue->virtualQueue_->data())[1]);
   uint p = 0;
   for (uint i = 0; i < gpuDefQueue->vqHeader_->aql_slot_num; ++i) {
@@ -2413,7 +2413,7 @@ void VirtualGPU::PrintChildren(const pal::Kernel& hsaKernel, VirtualGPU* gpuDefQ
       print << wraps[i].aql.grid_size_z << "]\n";
 
       pal::Kernel* child = nullptr;
-      for (auto it = hsaKernel.prog().kernels().begin(); it != hsaKernel.prog().kernels().end();
+      for (auto it = devKernel.prog().kernels().begin(); it != devKernel.prog().kernels().end();
            ++it) {
         if (wraps[i].aql.kernel_object == static_cast<pal::Kernel*>(it->second)->gpuAqlCode()) {
           child = static_cast<pal::Kernel*>(it->second);
@@ -2480,7 +2480,7 @@ void VirtualGPU::PrintChildren(const pal::Kernel& hsaKernel, VirtualGPU* gpuDefQ
 }
 
 // ================================================================================================
-bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& hsaKernel,
+bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& devKernel,
                                   VirtualGPU** gpuDefQueue, uint64_t* vmDefQueue) {
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
   if (nullptr == defQueue) {
@@ -2500,7 +2500,7 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& 
   }
   *vmDefQueue = (*gpuDefQueue)->virtualQueue_->vmAddress();
 
-  (*gpuDefQueue)->writeVQueueHeader(*this, hsaKernel.prog().kernelTable());
+  (*gpuDefQueue)->writeVQueueHeader(*this, devKernel.prog().kernelTable());
 
   // Acquire USWC memory for the scheduler parameters
   (*gpuDefQueue)->schedParams_ = &xferWrite().Acquire(sizeof(SchedulerParam));
@@ -2513,7 +2513,7 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& 
 }
 
 // ================================================================================================
-void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& hsaKernel,
+void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& devKernel,
                                    VirtualGPU* gpuDefQueue, uint64_t vmDefQueue,
                                    uint64_t vmParentWrap, GpuEvent* gpuEvent) {
   uint32_t id = gpuEvent->id_;
@@ -2525,7 +2525,7 @@ void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel&
 
   if (GPU_PRINT_CHILD_KERNEL != 0) {
     waitForEvent(gpuEvent);
-    PrintChildren(hsaKernel, gpuDefQueue);
+    PrintChildren(devKernel, gpuDefQueue);
   }
 
   if (!dev().settings().useDeviceQueue_) {
@@ -2559,7 +2559,7 @@ void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel&
   param->dedicatedQueue = dev().settings().useDeviceQueue_;
 
   // Fill the scratch buffer information
-  if (hsaKernel.prog().maxScratchRegs() > 0) {
+  if (devKernel.prog().maxScratchRegs() > 0) {
     pal::Memory* scratchBuf = dev().scratch(gpuDefQueue->hwRing())->memObj_;
     param->scratchSize = scratchBuf->size();
     param->scratch = scratchBuf->vmAddress();
@@ -2575,7 +2575,7 @@ void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel&
 
   // Add all kernels in the program to the mem list.
   //! \note Runtime doesn't know which one will be called
-  hsaKernel.prog().fillResListWithKernels(*this);
+  devKernel.prog().fillResListWithKernels(*this);
 
   Pal::gpusize signalAddr = gpuDefQueue->schedParams_->vmAddress();
   gpuDefQueue->eventBegin(MainEngine);
@@ -2658,8 +2658,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
                                       uint32_t sharedMemBytes, bool anyOrder) {
   state_.anyOrder_ = anyOrder;
 
-  // Get the HSA kernel object
-  const pal::Kernel& hsaKernel = static_cast<const pal::Kernel&>(*(kernel.getDeviceKernel(dev())));
+  // Get the device kernel object
+  const pal::Kernel& devKernel = static_cast<const pal::Kernel&>(*(kernel.getDeviceKernel(dev())));
 
   // If RGP capturing is enabled, then start SQTT trace
   if (rgpCaptureEna()) {
@@ -2672,13 +2672,13 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       }
     }
     dev().captureMgr()->PreDispatch(
-        this, hsaKernel,
+        this, devKernel,
         // Report global size in workgroups, since that's the RGP trace semantics
         newGlobalSize[0] / newLocalSize[0], newGlobalSize[1] / newLocalSize[1],
         newGlobalSize[2] / newLocalSize[2]);
   }
 
-  bool printfEnabled = (hsaKernel.printfInfo().size() > 0) ? true : false;
+  bool printfEnabled = (devKernel.printfInfo().size() > 0) ? true : false;
   if (printfEnabled && !printfDbgHSA().init(*this, printfEnabled)) {
     LogError("Printf debug buffer initialization failed!");
     return false;
@@ -2686,20 +2686,20 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
   uint64_t vmDefQueue = 0;
   VirtualGPU* gpuDefQueue = nullptr;
-  if (hsaKernel.dynamicParallelism()) {
+  if (devKernel.dynamicParallelism()) {
     // Initialize GPU device queue for execution (gpuDefQueue)
-    if (!PreDeviceEnqueue(kernel, hsaKernel, &gpuDefQueue, &vmDefQueue)) {
+    if (!PreDeviceEnqueue(kernel, devKernel, &gpuDefQueue, &vmDefQueue)) {
       return false;
     }
   }
   size_t ldsSize;
 
-  ClPrint(amd::LOG_INFO, amd::LOG_KERN, "!\tkernel : %s\n", hsaKernel.name().c_str());
+  ClPrint(amd::LOG_INFO, amd::LOG_KERN, "!\tkernel : %s\n", devKernel.name().c_str());
 
   if (PAL_EMBED_KERNEL_MD) {
     char buf[256];
     sprintf(buf, "kernel: %s\n private mem size: %x\n group mem size: %x\n",
-            hsaKernel.name().c_str(), hsaKernel.spillSegSize(), hsaKernel.ldsSize());
+            devKernel.name().c_str(), devKernel.spillSegSize(), devKernel.ldsSize());
     iCmd()->CmdCommentString(buf);
   }
 
@@ -2731,16 +2731,16 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   // Dynamic call stack size is considered to calculate private segment size and scratch regs
   // in pal::Kernel::postLoad(). As it is not called during hipModuleLaunchKernel unlike
   // hipLaunchKernel/hipLaunchKernelGGL, Updated value is passed to dispatch packet.
-  size_t privateMemSize = hsaKernel.spillSegSize();
-  if ((hsaKernel.workGroupInfo()->usedStackSize_ & 0x1) == 0x1) {
+  size_t privateMemSize = devKernel.spillSegSize();
+  if ((devKernel.workGroupInfo()->usedStackSize_ & 0x1) == 0x1) {
     privateMemSize = std::max<uint32_t>(static_cast<uint32_t>(device().StackSize()),
-                                        hsaKernel.workGroupInfo()->scratchRegs_ * sizeof(uint32_t));
+                                        devKernel.workGroupInfo()->scratchRegs_ * sizeof(uint32_t));
     // Validate privateMemSize is more than max allowed.
     size_t maxStackSize = device().MaxStackSize();
     if (privateMemSize > maxStackSize) {
       ClPrint(amd::LOG_INFO, amd::LOG_KERN,
               "Scratch size (%zu) exceeds max allowed (%zu) for kernel : %s", privateMemSize,
-              maxStackSize, hsaKernel.name().c_str());
+              maxStackSize, devKernel.name().c_str());
       LogError("Scratch size exceeds max allowed.");
       return false;
     }
@@ -2756,11 +2756,11 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     dispatchParam.scratchOffset = scratch->offset_;
     dispatchParam.workitemPrivateSegmentSize = privateMemSize;
   }
-  dispatchParam.pCpuAqlCode = hsaKernel.cpuAqlKd();
+  dispatchParam.pCpuAqlCode = devKernel.cpuAqlKd();
   dispatchParam.hsaQueueVa = hsaQueueMem_->vmAddress();
   dispatchParam.wavesPerSh = 0;
   dispatchParam.useAtc = dev().settings().svmFineGrainSystem_ ? true : false;
-  dispatchParam.kernargSegmentSize = hsaKernel.argsBufferSize();
+  dispatchParam.kernargSegmentSize = devKernel.argsBufferSize();
   dispatchParam.aqlPacketIndex = aql_index;
 
   // Update the mqd's information about scratch memory.
@@ -2801,15 +2801,15 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   AqlPacketUpdateTs(aql_index, gpuEvent);
 
   // Execute scheduler for device enqueue
-  if (hsaKernel.dynamicParallelism()) {
-    PostDeviceEnqueue(kernel, hsaKernel, gpuDefQueue, vmDefQueue, vmParentWrap, &gpuEvent);
+  if (devKernel.dynamicParallelism()) {
+    PostDeviceEnqueue(kernel, devKernel, gpuDefQueue, vmDefQueue, vmParentWrap, &gpuEvent);
   }
 
   // Update the global GPU event
   constexpr bool kNeedFLush = false;
   setGpuEvent(gpuEvent, kNeedFLush);
 
-  if (printfEnabled && !printfDbgHSA().output(*this, printfEnabled, hsaKernel.printfInfo())) {
+  if (printfEnabled && !printfDbgHSA().output(*this, printfEnabled, devKernel.printfInfo())) {
     LogError("Couldn't read printf data from the buffer!\n");
     return false;
   }
@@ -3639,9 +3639,9 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
   bool srdResource = false;
   amd::Memory* const* memories =
       reinterpret_cast<amd::Memory* const*>(params + kernelParams.memoryObjOffset());
-  const pal::Kernel& hsaKernel = static_cast<const pal::Kernel&>(*(kernel.getDeviceKernel(dev())));
+  const pal::Kernel& devKernel = static_cast<const pal::Kernel&>(*(kernel.getDeviceKernel(dev())));
   const amd::KernelSignature& signature = kernel.signature();
-  ldsAddress = hsaKernel.ldsSize();
+  ldsAddress = devKernel.ldsSize();
 
   if (!nativeMem) {
     // Process cache coherency first, since the extra transfers may affect
@@ -3776,7 +3776,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
         size_t gpuPtr =
             static_cast<size_t>(cb(1)->UploadDataToHw(params + desc.offset_, desc.size_));
         // Then use a pointer in aqlArgBuffer to CB1
-        const auto it = hsaKernel.patch().find(desc.offset_);
+        const auto it = devKernel.patch().find(desc.offset_);
         // Patch the GPU VA address in the original arguments
         WriteAqlArgAt(const_cast<address>(params), gpuPtr, sizeof(size_t), it->second);
         addVmMemory(cb(1)->ActiveMemory());
@@ -3809,24 +3809,24 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
     return false;
   }
 
-  if (srdResource || hsaKernel.prog().isStaticSampler()) {
+  if (srdResource || devKernel.prog().isStaticSampler()) {
     dev().srds().fillResourceList(*this);
   }
 
   const static bool IsReadOnly = false;
-  for (const pal::Memory* mem : hsaKernel.prog().globalStores()) {
+  for (const pal::Memory* mem : devKernel.prog().globalStores()) {
     // Validate global store for a dependency in the queue
     memoryDependency().validate(*this, mem, IsReadOnly);
     addVmMemory(mem);
   }
-  if (hsaKernel.prog().hasGlobalStores()) {
+  if (devKernel.prog().hasGlobalStores()) {
     // Validate code object for a dependency in the queue
-    memoryDependency().validate(*this, &hsaKernel.prog().codeSegGpu(), IsReadOnly);
+    memoryDependency().validate(*this, &devKernel.prog().codeSegGpu(), IsReadOnly);
   }
 
-  addVmMemory(&hsaKernel.prog().codeSegGpu());
+  addVmMemory(&devKernel.prog().codeSegGpu());
 
-  if (hsaKernel.workGroupInfo()->scratchRegs_ > 0) {
+  if (devKernel.workGroupInfo()->scratchRegs_ > 0) {
     const Device::ScratchBuffer* scratch = dev().scratch(hwRing());
     // Validate scratch buffer to force sync mode, because
     // the current scratch logic is optimized for size and performance
