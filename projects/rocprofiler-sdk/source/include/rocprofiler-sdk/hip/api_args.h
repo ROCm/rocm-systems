@@ -3331,6 +3331,33 @@ typedef union rocprofiler_hip_api_args_t
         hipStream_t src;
     } hipStreamCopyAttributes;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 17
+    struct
+    {
+        hipKernel_t* kernels;
+        unsigned int numKernels;
+        hipLibrary_t library;
+    } hipLibraryEnumerateKernels;
+    struct
+    {
+        hipLibrary_t* library;
+        hipKernel_t kernel;
+    } hipKernelGetLibrary;
+    struct
+    {
+        const char** name;
+        hipKernel_t kernel;
+    } hipKernelGetName;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 18
+    struct
+    {
+        size_t* dynamicSmemSize;
+        const void* f;
+        int numBlocks;
+        int blockSize;
+    } hipOccupancyAvailableDynamicSMemPerBlock;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
