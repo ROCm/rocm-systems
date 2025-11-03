@@ -272,6 +272,14 @@ main()
                        gpuMatrix,
                        WIDTH);
     roctxProfilerPause(tid);
+    hipLaunchKernelGGL(nested_kernel,
+                       dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
+                       dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
+                       0,
+                       stream,
+                       gpuTransposeMatrix,
+                       gpuMatrix,
+                       WIDTH);
 
     // free the resources on device side
     checkHipErrors(hipFree(result));
