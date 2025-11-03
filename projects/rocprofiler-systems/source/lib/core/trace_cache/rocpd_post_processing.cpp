@@ -24,6 +24,7 @@
 #include "agent_manager.hpp"
 #include "config.hpp"
 #include "debug.hpp"
+#include "gpu.hpp"
 #include "library/thread_info.hpp"
 #include "node_info.hpp"
 #include "rocpd/data_processor.hpp"
@@ -404,6 +405,7 @@ rocpd_post_processing::get_pmc_event_with_sample_callback() const
 postprocessing_callback
 rocpd_post_processing::get_amd_smi_sample_callback() const
 {
+#if ROCPROFSYS_USE_ROCM > 0
     struct gpu_metrics_t
     {
         std::vector<uint16_t> vcn_busy;
@@ -626,11 +628,36 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         };
 
         // Process uint16_t vector-based metrics
-        insert_uint16_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
-                                     gpu_metrics.vcn_busy, std::nullopt);
+        // Check if VCN activity is supported and insert accordingly
+        if(gpu::is_vcn_activity_supported(_amd_smi.device_id))
+        {
+            insert_uint16_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
+                                         gpu_metrics.vcn_busy, std::nullopt);
+        }
+        else
+        {
+            for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+            {
+                insert_uint16_vector_metrics(category::amd_smi_vcn_activity{},
+                                             is_vcn_enabled, gpu_metrics.vcn_busy, xcp);
+            }
+        }
 
-        insert_uint16_vector_metrics(category::amd_smi_jpeg_activity{}, is_jpeg_enabled,
-                                     gpu_metrics.jpeg_busy, std::nullopt);
+        // Check if JPEG activity is supported and insert accordingly
+        if(gpu::is_jpeg_activity_supported(_amd_smi.device_id))
+        {
+            insert_uint16_vector_metrics(category::amd_smi_jpeg_activity{},
+                                         is_jpeg_enabled, gpu_metrics.jpeg_busy,
+                                         std::nullopt);
+        }
+        else
+        {
+            for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+            {
+                insert_uint16_vector_metrics(category::amd_smi_jpeg_activity{},
+                                             is_jpeg_enabled, gpu_metrics.jpeg_busy, xcp);
+            }
+        }
 
         // Insert XGMI metrics (scalar values)
         insert_event_and_sample(
@@ -681,6 +708,9 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
                 .c_str(),
             static_cast<double>(gpu_metrics.pcie_bandwidth_inst));
     };
+#else
+    return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {};
+#endif
 }
 
 postprocessing_callback
