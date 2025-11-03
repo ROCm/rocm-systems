@@ -588,7 +588,7 @@ class gfx12_cntx_prim {
   static uint32_t sqtt_zero_size_value() { return 0; }
 
   // Thread trace ctrl register value
-  static uint32_t sqtt_ctrl_value(bool on) {
+  static uint32_t sqtt_ctrl_value(bool on, bool double_buffer) {
     uint32_t sq_thread_trace_ctrl{0};
     sq_thread_trace_ctrl =
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, MODE, on ? SQ_TT_MODE_ON : SQ_TT_MODE_OFF) |
@@ -599,7 +599,8 @@ class gfx12_cntx_prim {
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, SQ_STALL_EN, 1) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, LOWATER_OFFSET, 3) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, GL1X_PREFETCH_PAGE, 13) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, AUTO_FLUSH_MODE, 1);
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, AUTO_FLUSH_MODE, 1) |
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, DOUBLE_BUFFER, double_buffer ? 1 : 0);
     return sq_thread_trace_ctrl;
   }
 

@@ -313,7 +313,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
                                               Primitives::sqtt_buffer_size_value(base_step, 0));
           // Program the thread trace ctrl register
           builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR,
-                                              Primitives::sqtt_ctrl_value(true));
+                                              Primitives::sqtt_ctrl_value(true, false));
           // Issue a CSPartialFlush cmd including cache flush
           builder.BuildWriteWaitIdlePacket(cmd_buffer);
           // Program the thread trace mode register, mode ON
@@ -353,8 +353,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
         const uint64_t sqtt_size = bMaskedIn ? base_step : config->capacity_per_disabled_se;
         if (sqtt_size == 0) continue;
 
-        uint32_t ctrl_val = Primitives::sqtt_ctrl_value(true);
-        if (!config->buffer_data.empty()) ctrl_val |= 1<<5;
+        uint32_t ctrl_val = Primitives::sqtt_ctrl_value(true, !config->buffer_data.empty());
 
         Select_GRBM_SE_SH0(cmd_buffer, index);
         builder.BuildPrimeL2(cmd_buffer, base_addr);
@@ -512,14 +511,12 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       // Initialize cache flush request object
       builder.BuildCacheFlushPacket(cmd_buffer, size_t(config->control_buffer_ptr),
                                     config->control_buffer_size);
-      //builder.BuildCacheFlushPacket(cmd_buffer, size_t(config->data_buffer_ptr),
-      //                              config->data_buffer_size);
       // Program zero size of thread trace buffer
       builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR,
                                          Primitives::sqtt_zero_size_value());
       // Program the thread trace ctrl register
       builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR,
-                                         Primitives::sqtt_ctrl_value(true));
+                                         Primitives::sqtt_ctrl_value(true, false));
       // Issue a CSPartialFlush cmd including cache flush
       builder.BuildWriteWaitIdlePacket(cmd_buffer);
     } else {
@@ -536,7 +533,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       }
 
       // Program the thread trace ctrl register to set mode to 0
-      const uint32_t ctrl_val = Primitives::sqtt_ctrl_value(false);
+      const uint32_t ctrl_val = Primitives::sqtt_ctrl_value(false, false);
       WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR, ctrl_val);
 
       {

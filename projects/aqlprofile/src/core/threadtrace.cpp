@@ -377,6 +377,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
 
   if (out->needs_swap)
   {
+    // Lockdown error signals we have overflown the buffer and the trace has already stopped
     out->is_too_late = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetLockDownFailMask()) != 0;
 
     auto& buffer_data = it->second;

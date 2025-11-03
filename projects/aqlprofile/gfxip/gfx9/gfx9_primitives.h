@@ -703,7 +703,7 @@ class gfx9_cntx_prim {
   static uint32_t sqtt_zero_size_value() { return 0; }
 
   // Thread trace ctrl register value
-  static uint32_t sqtt_ctrl_value(bool on) {
+  static uint32_t sqtt_ctrl_value(bool on, bool) {
     uint32_t sq_thread_trace_ctrl = SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, RESET_BUFFER, 1);
     return sq_thread_trace_ctrl;
   }
