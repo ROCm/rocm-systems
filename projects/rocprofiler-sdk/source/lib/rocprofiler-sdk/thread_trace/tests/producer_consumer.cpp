@@ -101,7 +101,7 @@ class MockPackets : public hsa::SQTTBufferingPackets
 {
 public:
     MockPackets(aqlprofile_handle_t handle, query_status_t _query)
-    : hsa::SQTTBufferingPackets(handle)
+    : hsa::SQTTBufferingPackets(handle, 0)
     , query_fn(_query){};
 
     std::optional<hsa::sqtt_buffer_status_t> query_buffer_status() override { return query_fn(); };

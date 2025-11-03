@@ -189,8 +189,6 @@ TraceMemoryPool::Copy(void* dst, const void* src, size_t size, void* data)
     return pool.api_copy_fn(dst, src, size);
 }
 
-constexpr int SHADER_ENGINE_ID = 0;
-
 TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tracepool,
                                              const aqlprofile_att_profile_t& p)
 : tracepool(std::make_shared<TraceMemoryPool>(_tracepool))
@@ -213,8 +211,9 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
     clear();
 };
 
-SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle)
+SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _shader_engine_id)
 : handle(_handle)
+, shader_engine_id(_shader_engine_id)
 {
     // We sometimes need 2x the number of packets as there are buffers.
     uint64_t num_packets{6};
@@ -225,7 +224,7 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle)
         buffer_ptr.emplace_back(&buffer);
 
     auto status = aqlprofile_att_get_buffer_packets(
-        &header, &query_status, buffer_ptr.data(), &num_packets, handle, SHADER_ENGINE_ID, 0);
+        &header, &query_status, buffer_ptr.data(), &num_packets, handle, shader_engine_id, 0);
     CHECK_HSA(status, "failed to create ATT double buffer packet");
 
     buffer_swap.resize(num_packets);  // Discard unused packets
@@ -240,7 +239,7 @@ SQTTBufferingPackets::query_buffer_status()
 {
     aqlprofile_att_buffer_status_v0_t ret{};
 
-    auto status = aqlprofile_att_update_buffer_status(&ret, handle, SHADER_ENGINE_ID, 0);
+    auto status = aqlprofile_att_update_buffer_status(&ret, handle, shader_engine_id, 0);
     CHECK_HSA(status, "failed to query ATT status");
 
     if(!ret.needs_swap) return {};
