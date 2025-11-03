@@ -10,6 +10,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added `config_delta/gfx950_diff.yaml` to analysis config yamls to track the revision between a gfx9 architecture against the latest supported architecture gfx950
 
+* Analysis db features
+  * Add support for per kernel metrics analysis.
+  * Add support for dispatch timeline analysis.
+  * Show duration as median in addition to mean in kernel view.
+
 ### Changed
 
 * `-b/--block` accepts block alias(es) (See block aliases using command-line option `--list-blocks <arch>`).
@@ -20,6 +25,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 
 ### Removed
+* Removed `database` mode from `rocprofiler-compute`. This is to move our focus from grafana
+  and mongodb integration to other visualization methods such as:
+  * Analysis DB based Visualizer (upcoming)
+  * Plotly server based standalone GUI
+  * Commandline based Textual User Interface
 
 ### Optimized
 
