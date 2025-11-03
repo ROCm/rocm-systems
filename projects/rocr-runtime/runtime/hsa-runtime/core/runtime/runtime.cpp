@@ -44,6 +44,7 @@
 #include <atomic>
 #include <climits>
 #include <cstring>
+#include <mutex>
 #include <regex>
 #include <string>
 #include <vector>
@@ -860,13 +861,22 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
   }
 
 
-  // Lazy initializer
-  if (asyncInfo->control.async_events_thread_ == NULL) {
+  // Lazy initializer - use std::call_once to prevent race condition
+  // We need separate once_flags for asyncSignals_ and asyncExceptions_
+  static std::once_flag init_flag_signals;
+  static std::once_flag init_flag_exceptions;
+  hsa_status_t init_status = HSA_STATUS_SUCCESS;
+
+  // Choose the appropriate once_flag based on which asyncInfo we're using
+  std::once_flag* init_flag = (asyncInfo == &asyncSignals_) ? &init_flag_signals : &init_flag_exceptions;
+
+  std::call_once(*init_flag, [&]() {
     // Create monitoring thread control signal
     auto err = HSA::hsa_signal_create(0, 0, NULL, &asyncInfo->control.wake);
     if (err != HSA_STATUS_SUCCESS) {
       assert(false && "Asyncronous events control signal creation error.");
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      init_status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      return;
     }
     asyncInfo->events.PushBack(asyncInfo->control.wake, HSA_SIGNAL_CONDITION_NE,
                           0, NULL, NULL);
@@ -877,8 +887,14 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
         os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
     if (asyncInfo->control.async_events_thread_ == NULL) {
       assert(false && "Asyncronous events thread creation error.");
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      init_status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      return;
     }
+  });
+
+  // Check if initialization failed
+  if (init_status != HSA_STATUS_SUCCESS) {
+    return init_status;
   }
 
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
@@ -1407,7 +1423,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   if (agent->device_type() == Agent::kAmdGpuDevice) {
 #if defined(__linux__)
-    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);    
+    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
     amdgpu_bo_import_result res;
 
     srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
@@ -1761,6 +1777,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     // Call handler for the known satisfied signal.
     assert(async_events_.handler_[index] != nullptr);
     bool keep = async_events_.handler_[index](value, async_events_.arg_[index]);
+
     if (!keep) {
       if (!wait_any) {
         hsa_signals[index]->WaitingDec();
@@ -1907,6 +1924,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     std::vector<func_arg_t> functions;
     std::vector<AsyncEventItem> new_events;
     new_async_events_.GetAllEvents(new_events);
+
     for (const auto& event : new_events) {
       if (event.signal.handle == 0) {
         functions.push_back(func_arg_t((void (*)(void*))event.handler, event.arg));
