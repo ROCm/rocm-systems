@@ -258,9 +258,9 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
         auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
         worker_data->queue = queue;
 
-        // Initialize buffer memory pointers from the queue's double buffer
-        auto buffer_memory = worker_data->queue->get_double_buffer_memory();
-        for (size_t i=0; i<buffer_memory.size(); i++)
+        // Initialize buffer memory pointers from the queue's triple buffer
+        auto buffer_memory = worker_data->queue->get_triple_buffer_memory();
+        for(size_t i = 0; i < buffer_memory.size(); i++)
             worker_data->buffers.at(i).memory = buffer_memory.at(i);
 
         auto producer_data             = triple_buffer_producer_data_t{};
