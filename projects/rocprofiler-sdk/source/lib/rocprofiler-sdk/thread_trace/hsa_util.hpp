@@ -31,6 +31,8 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
+constexpr size_t NUM_CPU_BUFFERS = 3;
+
 /// RAII wrapper around an HSA signal used to synchronize packet submission.
 class Signal
 {
@@ -86,8 +88,8 @@ public:
     const hsa_agent_t near_cpu;
 
 protected:
-    hsa_queue_t*         queue{nullptr};
-    std::array<void*, 3> triple_buffer_memory{};
+    hsa_queue_t*                       queue{nullptr};
+    std::array<void*, NUM_CPU_BUFFERS> triple_buffer_memory{};
 };
 
 };  // namespace thread_trace
