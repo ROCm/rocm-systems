@@ -411,6 +411,12 @@ namespace core {
       DRM_PFN(amdgpu_bo_va_op) = (DRM_DEF(amdgpu_bo_va_op)*)dlsym(thunk_handle, "amdgpu_bo_va_op");
       if (DRM_PFN(amdgpu_bo_va_op) == NULL) goto ERROR;
 
+      DRM_PFN(amdgpu_bo_query_info) = (DRM_DEF(amdgpu_bo_query_info)*)dlsym(thunk_handle, "amdgpu_bo_query_info");
+      if (DRM_PFN(amdgpu_bo_query_info) == NULL) goto ERROR;
+
+      DRM_PFN(amdgpu_bo_set_metadata) = (DRM_DEF(amdgpu_bo_set_metadata)*)dlsym(thunk_handle, "amdgpu_bo_set_metadata");
+      if (DRM_PFN(amdgpu_bo_set_metadata) == NULL) goto ERROR;
+
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)dlsym(thunk_handle, "drmCommandWriteRead");
       if (DRM_PFN(drmCommandWriteRead) == NULL) goto ERROR;
       debug_print("Load all DTIF APIs OK!\n");
@@ -524,6 +530,8 @@ ERROR:
       DRM_PFN(amdgpu_bo_export) = (DRM_DEF(amdgpu_bo_export)*)(&amdgpu_bo_export);
       DRM_PFN(amdgpu_bo_import) = (DRM_DEF(amdgpu_bo_import)*)(&amdgpu_bo_import);
       DRM_PFN(amdgpu_bo_va_op) = (DRM_DEF(amdgpu_bo_va_op)*)(&amdgpu_bo_va_op);
+      DRM_PFN(amdgpu_bo_query_info) = (DRM_DEF(amdgpu_bo_query_info)*)(&amdgpu_bo_query_info);
+      DRM_PFN(amdgpu_bo_set_metadata) = (DRM_DEF(amdgpu_bo_set_metadata)*)(&amdgpu_bo_set_metadata);
 #if defined(__linux__)
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)(&drmCommandWriteRead);
 #endif
