@@ -324,7 +324,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
           if (!config->buffer_data.empty())
           {
             builder.BuildWriteWaitIdlePacket(cmd_buffer);
-            uint64_t buf2_addr = reinterpret_cast<uint64_t>(config->buffer_data.at(0));
+            uint64_t buf2_addr = reinterpret_cast<uint64_t>(config->buffer_data.at(se_index).at(0));
 
             builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR,
                                                 Primitives::sqtt_base_value_lo(buf2_addr));
@@ -394,7 +394,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
         {
           if (Primitives::GFXIP_LEVEL != 12) throw std::runtime_error("Not supported");
 
-          uint64_t buf1_addr = reinterpret_cast<uint64_t>(config->buffer_data.at(0));
+          uint64_t buf1_addr = reinterpret_cast<uint64_t>(config->buffer_data.at(index).at(0));
           unsigned buff1_lo = Low32(buf1_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
           unsigned buff1_hi = High32(buf1_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
 
@@ -605,11 +605,10 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     rocprof_trace_decoder_packet_header_t header{};
     header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ;
     header.type = channel;
-    header.data20 = 0;
     auto userdata_channel = Primitives::SQ_THREAD_TRACE_USERDATA_2;
 
     SetGRBMToBroadcast(cmd_buffer);
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, 4 | (channel << 8));
+    builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, header.u32All);
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, data);
     return HSA_STATUS_SUCCESS;
   }

@@ -174,7 +174,7 @@ private:
 class DeviceThreadTracer
 {
 public:
-    DeviceThreadTracer()  = default;
+    DeviceThreadTracer();
     ~DeviceThreadTracer() = default;
 
     /// Initializes shared resources needed by device-wide tracing.

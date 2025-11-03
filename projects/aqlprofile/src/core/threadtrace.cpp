@@ -130,8 +130,8 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     char* sample_data_ptr = (char*)cpu_sample.data();
     if (memorymgr->isDoubleBuffer())
     {
-      size_t buf_num = memorymgr->config.buffer_data.size();
-      sample_ptr = memorymgr->config.buffer_data[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
+      size_t buf_num = memorymgr->config.buffer_data.at(se_index).size();
+      sample_ptr = memorymgr->config.buffer_data.at(se_index)[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
     }
     else if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID) {
       auto* header = reinterpret_cast<rocprof_trace_decoder_gfx9_header_t*>(cpu_sample.data());
@@ -229,21 +229,29 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
 
   if (buffer_num > 1)
   {
-    if (trace_config.se_mask != 1) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
-    for (int64_t i=1; i<buffer_num; i++)
-      trace_config.buffer_data.emplace_back(memorymgr->AddExtraOutputBuf());
-
-    // First == Last buf for ring
-    trace_config.buffer_data.emplace_back(memorymgr->GetOutputBuf());
-
-    if ((pm4_factory->GetGpuId() != aql_profile::GFX9_GPU_ID) && (buffer_num%2))
+    // Loop over all shader engines
+    for (int se_id = 0; (trace_config.se_mask>>se_id) != 0; se_id++)
     {
-      // For gfxip != 9, an odd number of buffers in the ring causes buf0 and buf1 to have swapped
-      // pointers after a round trip. We need two turns around the ring buffer to restore the state.
-      // Think about a Mobius Strip
-      for (int i=0; i<buffer_num; i++)
-        trace_config.buffer_data.emplace_back(trace_config.buffer_data.at(i));
+      bool is_enabled = (trace_config.se_mask >> se_id) & 2;
+      if (!(trace_config.se_mask >> se_id) & 2) continue;
+
+      auto& buffer_data = trace_config.buffer_data[se_id];
+      // Not supported: If more than one shader is enabled, return error
+      if (trace_config.buffer_data.size() > 1) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+      for (int64_t i=1; i<buffer_num; i++)
+        buffer_data.emplace_back(memorymgr->AddExtraOutputBuf());
+
+      // First == Last buf for ring
+      buffer_data.emplace_back(memorymgr->GetOutputBuf());
+
+      if ((pm4_factory->GetGpuId() != aql_profile::GFX9_GPU_ID) && (buffer_num%2))
+      {
+        // For gfxip != 9, an odd number of buffers in the ring causes buf0 and buf1 to have swapped
+        // pointers after a round trip. We need two turns around the ring to restore the state.
+        // Think about a Mobius Strip
+        for (int i=0; i<buffer_num; i++) buffer_data.emplace_back(buffer_data.at(i));
+      }
     }
   }
 
@@ -348,8 +356,6 @@ PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
   int flags
 )
 {
-  if(shader_engine_id != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
   auto generic_manager = MemoryManager::GetManager(handle.handle);
 
   auto* manager = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
@@ -362,14 +368,17 @@ PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
   out->is_too_late = false;
   out->needs_swap  = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetBufferFullMask()) != 0;
 
+  auto it = manager->config.buffer_data.find(shader_engine_id);
+  if(it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   if (out->needs_swap)
   {
     out->is_too_late = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetLockDownFailMask()) != 0;
 
-    auto& config    = manager->config;
-    out->read_size  = config.capacity_per_se;
-    out->num_swaps  = manager->buffer_swaps.fetch_add(1);
-    out->data       = config.buffer_data.at((out->num_swaps + config.buffer_data.size() - 1) % config.buffer_data.size());
+    auto& buffer_data = it->second;
+    out->read_size    = manager->config.capacity_per_se;
+    out->num_swaps    = manager->buffer_swaps.fetch_add(1);
+    out->data         = buffer_data.at((out->num_swaps + buffer_data.size() - 1) % buffer_data.size());
   }
 
   return HSA_STATUS_SUCCESS;
@@ -384,14 +393,15 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   int shader_engine_id,
   int flags)
 {
-  if(shader_engine_id != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
   auto generic_manager = MemoryManager::GetManager(handle.handle);
 
   auto* manager = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
   if (manager == nullptr) return HSA_STATUS_ERROR;
 
-  auto& buffers = manager->config.buffer_data;
+  auto it = manager->config.buffer_data.find(shader_engine_id);
+  if(it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  auto& buffers = it->second;
   if (buffers.size() < 2) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(manager->GetAgent());

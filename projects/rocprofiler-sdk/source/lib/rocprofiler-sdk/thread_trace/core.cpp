@@ -234,7 +234,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
 
     auto buffer_packet =
-        std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(control_packet->GetHandle());
+        std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(control_packet->GetHandle(), 0);
     // Emit the optional buffer header first so consumers can prime state
     // before the main payload arrives.
     if(buffer_packet->header)
@@ -454,6 +454,11 @@ DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-funct
     controller->disable_serialization();
 }
 
+DeviceThreadTracer::DeviceThreadTracer()
+{
+    worker_flag = std::make_shared<std::atomic<bool>>(false);
+}
+
 void
 DeviceThreadTracer::resource_init()
 {
@@ -490,7 +495,7 @@ DeviceThreadTracer::start_context()
         return;
     }
 
-    worker_flag    = std::make_shared<std::atomic<bool>>(true);
+    worker_flag->store(true);
     auto wait_list = std::vector<std::shared_ptr<Signal>>{};
 
     for(auto& [_, tracer] : agents)
