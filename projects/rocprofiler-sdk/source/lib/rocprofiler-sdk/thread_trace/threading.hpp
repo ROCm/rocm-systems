@@ -64,7 +64,7 @@ struct triple_buffer_shared_data_t
     std::atomic<size_t>          write_index{0};
     std::atomic<size_t>          read_index{0};
 
-    std::array<buffer_slot_t, 3> buffers{};
+    std::array<buffer_slot_t, NUM_CPU_BUFFERS> buffers{};
 };
 
 /// Parameters passed into the consumer worker thread.

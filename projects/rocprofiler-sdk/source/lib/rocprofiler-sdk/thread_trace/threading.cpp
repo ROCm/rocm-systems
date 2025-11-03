@@ -128,13 +128,18 @@ producer_loop(triple_buffer_producer_data_t parameters)
     };
 
     auto start_t0 = std::chrono::system_clock::now();
-    bool do_sleep = false;
+    bool do_sleep{false};
     // Wait until ATT start packets have been executed
     CHECK_NOTNULL(parameters.start_pkt_signal)->WaitOn();
 
+    auto sleep_fn = [&]() {
+        sched_yield();
+        std::this_thread::sleep_for(std::chrono::microseconds(interval_microseconds));
+    };
+
     while(flag.load())
     {
-        if(do_sleep) std::this_thread::sleep_for(std::chrono::microseconds(interval_microseconds));
+        if(do_sleep) sleep_fn();
         do_sleep = true;  // Reset value
 
         // PHASE 1: Poll SQTT buffer status
@@ -157,15 +162,15 @@ producer_loop(triple_buffer_producer_data_t parameters)
 
             {
                 // With triple buffering, stop when consumer lags by 2 buffers (all 3 slots full)
-                const bool should_stop = read_index + 2 < write_index;
-                if(should_stop)
+                // or when the GPU buffer has been tagged as full.
+                const bool cpu_full   = read_index + 2 < write_index;
+                const bool is_stopped = cpu_full || status->gpu_full;
+                if(is_stopped)
                 {
-                    // Slow-consumer path: we stop producing when the reader lags by more than
-                    // two buffers (meaning all 3 CPU buffers are full) and flag the payload.
-                    ROCP_WARNING << "SQTT buffer full!";
-                    stop_trace();  // Check is_running so we dont send twice
-                    while(read_index + 2 < write_index)
-                        std::this_thread::sleep_for(std::chrono::microseconds(10));
+                    stop_trace();
+                    // Wait consumer to catch up before adding to next buffer
+                    while(read_index < write_index)
+                        sleep_fn();
                 }
 
                 {
@@ -174,8 +179,10 @@ producer_loop(triple_buffer_producer_data_t parameters)
                     size_t parity = write_index % buffers.size();
                     auto   lock   = std::unique_lock{buffers.at(parity).mutex};
 
-                    if(should_stop)
-                        flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
+                    if(cpu_full)
+                        flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
+                    if(status->gpu_full)
+                        flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
 
                     buffers.at(parity).flags = flags;
 
@@ -192,7 +199,7 @@ producer_loop(triple_buffer_producer_data_t parameters)
                     write_cv.notify_all();
                 }
 
-                if(should_stop)
+                if(is_stopped)
                 {
                     // Wake the consumer so it can drain outstanding buffers before we exit.
                     parameters.shared->consumer_running.store(false);
