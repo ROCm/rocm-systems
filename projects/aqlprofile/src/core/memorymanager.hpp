@@ -208,7 +208,8 @@ class TraceMemoryManager : public MemoryManager {
   void* AddExtraCmdBuf(size_t size)
   {
     aqlprofile_buffer_desc_flags_t flags{};
-    flags.host_access = flags.device_access = true;
+    flags.host_access = true;
+    flags.device_access = true;
     flags.memory_hint = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
     extra_cmd_buffers.emplace_back(AllocMemory(size, flags));
     return extra_cmd_buffers.back().get();

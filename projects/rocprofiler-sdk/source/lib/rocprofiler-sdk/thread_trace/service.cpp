@@ -134,6 +134,9 @@ rocprofiler_configure_dispatch_thread_trace_service(
         if(status != ROCPROFILER_STATUS_SUCCESS) return status;
     }
 
+    // Triple buffer not supported in dispatch mode
+    if(pack.triple_buffering) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
     ctx->dispatch_thread_trace->add_agent(agent_id, pack);
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -171,6 +174,13 @@ rocprofiler_configure_device_thread_trace_service(
 
     // Serialization not supported in device mode
     if(pack.bSerialize) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if(pack.triple_buffering)
+    {
+        // For now, only one SE is allowed in triple buffering. Check mask is power of two.
+        if((pack.shader_engine_mask & (pack.shader_engine_mask - 1)) != 0)
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
 
     ctx->device_thread_trace->add_agent(agent_id, pack);
     return ROCPROFILER_STATUS_SUCCESS;

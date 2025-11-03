@@ -39,6 +39,7 @@ ROCPROFILER_EXTERN_C_INIT
 /**
  * @brief Types of Thread Trace buffering  modes
  * ::ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_NONE defines no preference
+ * TRIPLE_BUFFER is currently only available for a single shader engine at a time.
  *
  */
 typedef enum rocprofiler_thread_trace_parameter_buffering_mode_t

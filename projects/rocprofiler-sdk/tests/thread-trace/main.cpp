@@ -76,7 +76,7 @@ main(int /*argc*/, char** /*argv*/)
     HIP_API_CALL(hipDeviceSynchronize());
     roctxProfilerResume(0);
 
-    bool is_double_buffer = std::getenv("DOUBLEBUFFER") ? atoi(std::getenv("DOUBLEBUFFER")) : false;
+    bool is_double_buffer = std::getenv("TRIPLEBUFFER") ? atoi(std::getenv("TRIPLEBUFFER")) : false;
 
     int loopcount = LOOPCOUNT;
     if(is_double_buffer) loopcount = 30000;

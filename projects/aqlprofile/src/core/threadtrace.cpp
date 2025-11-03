@@ -229,15 +229,16 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
 
   if (buffer_num > 1)
   {
+    // Not supported: If more than one shader is enabled, return error
+    if ((trace_config.se_mask & (trace_config.se_mask-1)) != 0)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
     // Loop over all shader engines
     for (int se_id = 0; (trace_config.se_mask>>se_id) != 0; se_id++)
     {
-      bool is_enabled = (trace_config.se_mask >> se_id) & 2;
-      if (!(trace_config.se_mask >> se_id) & 2) continue;
+      if ((trace_config.se_mask >> se_id) % 2 == 0) continue;
 
       auto& buffer_data = trace_config.buffer_data[se_id];
-      // Not supported: If more than one shader is enabled, return error
-      if (trace_config.buffer_data.size() > 1) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
       for (int64_t i=1; i<buffer_num; i++)
         buffer_data.emplace_back(memorymgr->AddExtraOutputBuf());
