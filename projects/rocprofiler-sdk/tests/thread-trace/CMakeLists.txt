@@ -58,7 +58,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS thread-trace-api-single-test
     TIMEOUT 10
     LABELS "integration-tests"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 # Multi dispatch test
 add_executable(thread-trace-api-multi-test)
 target_sources(
@@ -75,7 +75,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS thread-trace-api-multi-test
     TIMEOUT 10
     LABELS "integration-tests"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
 # Agent profiling test
 add_executable(thread-trace-api-agent-test)
@@ -92,7 +92,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS thread-trace-api-agent-test
     TIMEOUT 10
     LABELS "integration-tests"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
 # Test large buffer sizes. 5120 == 5GB
 rocprofiler_add_integration_execute_test(

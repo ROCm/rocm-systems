@@ -11,7 +11,7 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED)
 
-set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
 # disable when GPU-0 is navi2, navi3, and navi4
 list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)

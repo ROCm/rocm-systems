@@ -34,7 +34,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS scratch-memory
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-scratch)
 
@@ -53,7 +53,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-scratch-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch)
@@ -72,6 +72,6 @@ rocprofiler_add_integration_validate_test(
     ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
          --pftrace-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
     TIMEOUT 120
-    LABELS "integration-tests;rocpd" PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+    LABELS "integration-tests;rocpd" PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch-generation)

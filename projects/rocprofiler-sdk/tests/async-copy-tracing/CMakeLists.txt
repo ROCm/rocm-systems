@@ -10,9 +10,10 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
     set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}:$<TARGET_FILE:rocprofiler-sdk-json-tool>")
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:rocprofiler-sdk-json-tool>"
+        )
 else()
     set(PRELOAD_ENV "$<TARGET_FILE:rocprofiler-sdk-json-tool>")
 endif()

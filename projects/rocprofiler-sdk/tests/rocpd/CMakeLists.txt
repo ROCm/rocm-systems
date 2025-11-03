@@ -30,7 +30,7 @@ foreach(_SUBPARSER "" "-convert" "-query" "-summary")
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 120
         LABELS "integration-tests;rocpd"
-        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         ENVIRONMENT "${rocpd-env}")
 endforeach()
 
@@ -41,6 +41,6 @@ foreach(_MODULE "csv" "pftrace" "otf2" "query" "summary")
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 120
         LABELS "integration-tests;rocpd"
-        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         ENVIRONMENT "${rocpd-env}")
 endforeach()
