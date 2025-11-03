@@ -398,7 +398,47 @@ TEST(thread_trace, slow_cpu)
 TEST(thread_trace, slow_gpu)
 {
     rocprofiler::thread_trace::test_init();
-    // TODO: Implement
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::QueueMock::BUFFER_SIZE;
+
+    auto interrupt_received = std::atomic<bool>{false};
+
+    // Simulate a GPU buffer overflow; the producer should flag a GPU buffer full
+    // condition when the hardware reports it cannot keep up.
+    auto fetch_cb = [](rocprofiler_agent_id_t,
+                       int64_t,
+                       void*,
+                       size_t,
+                       rocprofiler_thread_trace_shader_data_flags_t flags,
+                       rocprofiler_user_data_t                      userdata) {
+        if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL)
+            static_cast<std::atomic<bool>*>(userdata.ptr)->store(true);
+    };
+
+    auto input_buffer = std::vector<size_t>();
+    input_buffer.resize(BUFFER_SIZE / sizeof(size_t));
+
+    auto status_called = std::atomic<int>{0};
+    auto return_synced = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
+        // Return a full buffer with gpu_full flag set to simulate GPU overflow.
+        status_called.fetch_add(1);
+        auto status     = rocprofiler::hsa::sqtt_buffer_status_t{};
+        status.data     = input_buffer.data();
+        status.size     = BUFFER_SIZE;
+        status.gpu_full = true;  // Simulate GPU buffer overflow
+        return status;
+    };
+
+    auto userdata = rocprofiler_user_data_t{.ptr = &interrupt_received};
+    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
+
+    while(!interrupt_received)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    threads.flag->store(false);
+    threads.consumer.join();
+    threads.producer.join();
+
+    ASSERT_EQ(interrupt_received.load(), true);
 }
 
 TEST(thread_trace, buffer_alternation)
