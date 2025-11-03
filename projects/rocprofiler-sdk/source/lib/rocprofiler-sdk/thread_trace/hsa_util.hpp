@@ -57,7 +57,7 @@ class HsaATTQueue
     using code_object_id_t = uint64_t;
 
 public:
-    HsaATTQueue(const hsa::AgentCache& agent, size_t double_buffer_size);
+    HsaATTQueue(const hsa::AgentCache& agent, size_t triple_buffer_size);
     ~HsaATTQueue();
     HsaATTQueue(HsaATTQueue& other) = delete;
     HsaATTQueue& operator=(HsaATTQueue& other) = delete;
@@ -77,7 +77,7 @@ public:
         return nullptr;
     }
 
-    std::array<void*, 2> get_double_buffer_memory() const { return double_buffer_memory; }
+    std::array<void*, 3> get_triple_buffer_memory() const { return triple_buffer_memory; }
 
     const rocprofiler_agent_id_t agent_id;
     const size_t                 buffer_size;
@@ -87,7 +87,7 @@ public:
 
 protected:
     hsa_queue_t*         queue{nullptr};
-    std::array<void*, 2> double_buffer_memory{};
+    std::array<void*, 3> triple_buffer_memory{};
 };
 
 };  // namespace thread_trace
