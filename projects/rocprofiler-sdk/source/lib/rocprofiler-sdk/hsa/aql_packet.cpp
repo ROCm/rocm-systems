@@ -247,10 +247,11 @@ SQTTBufferingPackets::query_buffer_status()
     // Ensure aqlprofile and SDK agrees on which is the current buffer
     ROCP_FATAL_IF((current_buffer++) != ret.num_swaps) << "Mismatch of AQL and SDK buffer states!";
 
-    auto query   = sqtt_buffer_status_t{};
-    query.data   = ret.data;
-    query.size   = ret.read_size;
-    query.packet = buffer_swap.at(ret.num_swaps % buffer_swap.size());
+    auto query     = sqtt_buffer_status_t{};
+    query.data     = ret.data;
+    query.size     = ret.read_size;
+    query.gpu_full = ret.is_too_late;
+    query.packet   = buffer_swap.at(ret.num_swaps % buffer_swap.size());
 
     return query;
 }
