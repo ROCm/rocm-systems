@@ -445,7 +445,6 @@ if(${ENABLE_COVERAGE})
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
-        test_db_connector
         test_utils
         test_autogen_config
     )
@@ -541,12 +540,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
-)
-# grafana assets
-install(
-    DIRECTORY grafana
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
-    COMPONENT main
 )
 # samples
 install(
