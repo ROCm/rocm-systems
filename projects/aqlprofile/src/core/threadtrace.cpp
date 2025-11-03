@@ -113,6 +113,14 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
 
     sample_sizes.at(se_index) = sample_size;
     max_sample_size = std::max(sample_size, max_sample_size);
+
+    if (memorymgr->isDoubleBuffer())
+    {
+      size_t buf_num = memorymgr->config.buffer_data.at(se_index).size();
+      sample_ptr = memorymgr->config.buffer_data.at(se_index)[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
+      callback(se_index, sample_ptr, sample_size, userdata);
+      return status;
+    }
   }
 
   constexpr size_t gfx9_header_size = sizeof(rocprof_trace_decoder_gfx9_header_t);
@@ -128,12 +136,7 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     size_t sample_size_plus_header = sample_size;
 
     char* sample_data_ptr = (char*)cpu_sample.data();
-    if (memorymgr->isDoubleBuffer())
-    {
-      size_t buf_num = memorymgr->config.buffer_data.at(se_index).size();
-      sample_ptr = memorymgr->config.buffer_data.at(se_index)[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
-    }
-    else if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID) {
+    if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID) {
       auto* header = reinterpret_cast<rocprof_trace_decoder_gfx9_header_t*>(cpu_sample.data());
       *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetGpuId(), false);
       sample_data_ptr += gfx9_header_size;
