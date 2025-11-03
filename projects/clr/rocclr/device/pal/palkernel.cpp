@@ -172,10 +172,12 @@ const pal::Program& Kernel::prog() const {
   return reinterpret_cast<const pal::Program&>(prog_);
 }
 
-std::pair<hsa_kernel_dispatch_packet_t* /* packet address */, uint64_t /* packet id */>
-HSAILKernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
-                           const amd::NDRangeContainer& sizes, const_address params,
-			   size_t ldsAddress, uint64_t vmDefQueue, uint64_t* vmParentWrap) const {
+hsa_kernel_dispatch_packet_t* Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
+                                                         const amd::NDRangeContainer& sizes,
+                                                         const_address params, size_t ldsAddress,
+                                                         uint64_t vmDefQueue,
+                                                         uint64_t* vmParentWrap,
+                                                         uint32_t* aql_index) const {
   // Provide private and local heap addresses
   static constexpr uint AddressShift = LP64_SWITCH(0, 32);
   const_address parameters = params;
@@ -362,7 +364,7 @@ HSAILKernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
            std::min(static_cast<uint32_t>(argsBufferSize()), signature.paramsSize()));
   }
 
-  auto&& [hsaDisp, aql_packet_id] = gpu.GetAqlPacketSlot();
+  hsa_kernel_dispatch_packet_t* hsaDisp = gpu.GetAqlPacketSlot(aql_index);
 
   constexpr uint16_t kDispatchPacketHeader =
       (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
@@ -399,7 +401,7 @@ HSAILKernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
     gpu.addVmMemory(gpu.hsaQueueMem());
   }
 
-  return {hsaDisp, aql_packet_id};
+  return hsaDisp;
 }
 
 bool Kernel::setKernelDescriptor(amd::hsa::loader::Symbol* sym,

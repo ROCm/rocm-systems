@@ -25,6 +25,13 @@
 #
 include_guard(DIRECTORY)
 
+set(ROCPROFSYS_ABORT_FAIL_REGEX
+    "### ERROR ###|unknown-hash=|address of faulting memory reference|exiting with non-zero exit code|terminate called after throwing an instance|calling abort.. in |Exit code: [1-9]"
+    CACHE INTERNAL
+    "Regex to catch abnormal exits when a PASS_REGULAR_EXPRESSION is set"
+    FORCE
+)
+
 if(EXISTS /etc/os-release AND NOT IS_DIRECTORY /etc/os-release)
     file(READ /etc/os-release _OS_RELEASE_RAW)
 
@@ -1318,4 +1325,117 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 ${TEST_PROPERTIES}
         )
     endforeach()
+endfunction()
+
+# -------------------------------------------------------------------------------------- #
+#
+# Adds a ctest for executables
+#
+# -------------------------------------------------------------------------------------- #
+
+function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
+    cmake_parse_arguments(
+        TEST
+        "" # options
+        "NAME;TARGET;TIMEOUT;WORKING_DIRECTORY" # single value args
+        "ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND" # multiple
+        # value args
+        ${ARGN}
+    )
+
+    if(NOT TEST_WORKING_DIRECTORY)
+        set(TEST_WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+    endif()
+
+    if(NOT TEST_ENVIRONMENT)
+        set(TEST_ENVIRONMENT
+            "ROCPROFSYS_TRACE=ON"
+            "ROCPROFSYS_PROFILE=ON"
+            "ROCPROFSYS_USE_SAMPLING=ON"
+            "ROCPROFSYS_TIME_OUTPUT=OFF"
+            "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
+        )
+    endif()
+
+    # common
+    list(
+        APPEND
+        TEST_ENVIRONMENT
+        "ROCPROFSYS_CI=ON"
+        "ROCPROFSYS_CI_TIMEOUT=${TEST_TIMEOUT}"
+        "ROCPROFSYS_CONFIG_FILE="
+        "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+        "TWD=${TEST_WORKING_DIRECTORY}"
+    )
+    # copy for inverse
+    set(TEST_ENVIRONMENT_INV "${TEST_ENVIRONMENT}")
+
+    # different for regular test and inverse test
+    list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_OUTPUT_PREFIX=${TEST_NAME}/")
+    list(APPEND TEST_ENVIRONMENT_INV "ROCPROFSYS_OUTPUT_PREFIX=${TEST_NAME}-inverse/")
+
+    if(
+        NOT "${TEST_PASS_REGEX}" STREQUAL ""
+        AND NOT "${TEST_FAIL_REGEX}" STREQUAL ""
+        AND NOT "${TEST_FAIL_REGEX}" MATCHES "\\|ROCPROFSYS_ABORT_FAIL_REGEX"
+    )
+        rocprofiler_systems_message(
+            FATAL_ERROR
+            "${TEST_NAME} has set pass and fail regexes but fail regex does not include '|ROCPROFSYS_ABORT_FAIL_REGEX'"
+        )
+    endif()
+
+    if("${TEST_FAIL_REGEX}" STREQUAL "")
+        set(TEST_FAIL_REGEX "(${ROCPROFSYS_ABORT_FAIL_REGEX})")
+    else()
+        string(
+            REPLACE
+            "|ROCPROFSYS_ABORT_FAIL_REGEX"
+            "|${ROCPROFSYS_ABORT_FAIL_REGEX}"
+            TEST_FAIL_REGEX
+            "${TEST_FAIL_REGEX}"
+        )
+    endif()
+
+    if(TEST_COMMAND)
+        add_test(
+            NAME ${TEST_NAME}
+            COMMAND ${TEST_COMMAND} ${TEST_ARGS}
+            WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY}
+        )
+
+        set_tests_properties(
+            ${TEST_NAME}
+            PROPERTIES
+                ENVIRONMENT "${TEST_ENVIRONMENT}"
+                TIMEOUT ${TEST_TIMEOUT}
+                DEPENDS "${TEST_DEPENDS}"
+                LABELS "rocprofiler-systems-bin;${TEST_LABELS}"
+                PASS_REGULAR_EXPRESSION "${TEST_PASS_REGEX}"
+                FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
+                SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
+                ${TEST_PROPERTIES}
+        )
+    elseif(TARGET ${TEST_TARGET})
+        add_test(
+            NAME ${TEST_NAME}
+            COMMAND $<TARGET_FILE:${TEST_TARGET}> ${TEST_ARGS}
+            WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY}
+        )
+
+        set_tests_properties(
+            ${TEST_NAME}
+            PROPERTIES
+                ENVIRONMENT "${TEST_ENVIRONMENT}"
+                TIMEOUT ${TEST_TIMEOUT}
+                DEPENDS "${TEST_DEPENDS}"
+                LABELS "rocprofiler-systems-bin;${TEST_LABELS}"
+                PASS_REGULAR_EXPRESSION "${TEST_PASS_REGEX}"
+                FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
+                SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
+                ${TEST_PROPERTIES}
+        )
+    elseif(ROCPROFSYS_BUILD_TESTING)
+        message(FATAL_ERROR "Error! ${TEST_TARGET} does not exist")
+    endif()
 endfunction()

@@ -94,6 +94,7 @@ jobs:
           tar -xf ${{ env.ROCM_PATH }}-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+
       - name: Install os essentials
         timeout-minutes: 10
         shell: bash
@@ -104,12 +105,18 @@ jobs:
           apt-get update
           apt-get install -y git
           echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           sparse-checkout: projects/rocprofiler-sdk
           submodules: true
           set-safe-directory: true
+
+      - name: Setup
+        shell: bash
+        run: git config --global --add safe.directory '*'
+
       - name: Create Docs Directory
         shell: bash
         working-directory: projects/rocprofiler-sdk/
@@ -118,6 +125,7 @@ jobs:
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           mkdir -p source/docs/_doxygen/rocprofiler-sdk
           mkdir -p source/docs/_doxygen/roctx
+
       - name: Install requirements
         timeout-minutes: 10
         shell: bash
