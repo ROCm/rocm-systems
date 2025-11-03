@@ -91,8 +91,13 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters") {
   }
 
   SECTION("numDevices > device count") {
+#if HT_AMD
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernelMultiDevice(params_list.data(), device_count + 1, 0u),
+                    hipErrorInvalidDevice);
+#else
     HIP_CHECK_ERROR(hipLaunchCooperativeKernelMultiDevice(params_list.data(), device_count + 1, 0u),
                     hipErrorInvalidValue);
+#endif
   }
 
   SECTION("invalid flags") {
