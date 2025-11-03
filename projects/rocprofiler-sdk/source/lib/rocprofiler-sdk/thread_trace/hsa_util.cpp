@@ -46,8 +46,7 @@ Signal::Signal(hsa_ext_amd_aql_pm4_packet_t* packet)
 
 Signal::Signal()
 {
-    auto* core = CHECK_NOTNULL(hsa::get_core_table());
-    auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
+    auto* ext = CHECK_NOTNULL(hsa::get_amd_ext_table());
 
     ext->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &signal);
 }
@@ -63,7 +62,7 @@ Signal::WaitOn() const
 {
     auto wait_fn = hsa::get_core_table()->hsa_signal_wait_scacquire_fn;
     while(wait_fn(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
-    {}
+        sched_yield();
 }
 
 void
@@ -72,11 +71,11 @@ Signal::reset()
     CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_store_screlease_fn(signal, 1);
 }
 
-HsaATTQueue::HsaATTQueue(const hsa::AgentCache& agent, size_t double_buffer_size)
+HsaATTQueue::HsaATTQueue(const hsa::AgentCache& agent, size_t triple_buffer_size)
 : agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id)
+, buffer_size(triple_buffer_size)
 , hsa_agent(agent.get_hsa_agent())
 , near_cpu(agent.near_cpu())
-, buffer_size(double_buffer_size)
 {
     ROCP_TRACE << "Constructing Async queue.";
 
@@ -94,12 +93,12 @@ HsaATTQueue::HsaATTQueue(const hsa::AgentCache& agent, size_t double_buffer_size
 
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create thread trace async queue";
 
-    if(double_buffer_size)
+    if(triple_buffer_size)
     {
-        for(auto& memory : double_buffer_memory)
+        for(auto& memory : triple_buffer_memory)
         {
             CHECK_HSA(ext->hsa_amd_memory_pool_allocate_fn(
-                          agent.cpu_pool(), double_buffer_size, 0, &memory),
+                          agent.cpu_pool(), triple_buffer_size, 0, &memory),
                       "failed to allocate contiguous memory");
             CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &near_cpu, nullptr, memory),
                       "failed to allow cpu access");
@@ -116,7 +115,7 @@ HsaATTQueue::~HsaATTQueue()
     ROCP_TRACE << "Destroying Async Queue...";
     hsa::get_core_table()->hsa_queue_destroy_fn(this->queue);
 
-    for(auto memory : double_buffer_memory)
+    for(auto memory : triple_buffer_memory)
         hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(memory);
 }
 
