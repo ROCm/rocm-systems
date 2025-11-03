@@ -326,25 +326,29 @@ ROCm Profiling Data (rocpd) output
 
 Use the ``ROCPROFSYS_USE_ROCPD`` setting to trigger the ROCm Systems Profiler to output a
 SQLite3 database. The ROCm Profiling Data (or ``rocpd``) database will soon be the default output
-format. To output in `rocpd` format, ROCProfiler-SDK version 1.0.0 or later is required (introduced in ROCm 7.0.0).
+format. To output in ``rocpd`` format, ROCProfiler-SDK version 1.0.0 or later is required (introduced in ROCm 7.0.0).
 
-Features of rocpd format
------------------------------------------------
+Features
+--------------
 
-- **Comprehensive Data Model**: Consolidates all profiling artifacts including
+The features of ``rocpd`` output format are:
+
+* **Comprehensive Data Model**: Consolidates all profiling artifacts including
 execution traces, performance counters, hardware metrics, and contextual metadata
 within a single SQLite3 database file (`.db` extension).
-- **Standards-Compliant Access**: Supports querying through industry-standard SQL
+
+* **Standards-Compliant Access**: Supports querying through industry-standard SQL
 interfaces including command-line tools (``sqlite3`` CLI), programming language
 bindings (Python ``sqlite3`` module, C/C++ SQLite API), and database management
 applications.
-- **Advanced Analytics Integration**: Facilitates sophisticated post-processing
+
+* **Advanced Analytics Integration**: Facilitates sophisticated post-processing
 workflows through custom analytical scripts, automated reporting systems, and
 integration with third-party visualization and analysis frameworks that provide
 SQLite3 connectivity.
 
-Generating rocpd Output
-+++++++++++++++++++++++
+Generating rocpd output
+-------------------------
 
 To generate profiling data in the rocpd format, add "ROCPROFSYS_USE_ROCPD=ON" to your profiling configuration.
 
@@ -357,15 +361,15 @@ To generate profiling data in the rocpd format, add "ROCPROFSYS_USE_ROCPD=ON" to
 See :doc:`configuring runtime options <./configuring-runtime-options>` for additional
 details on setting up the profiling configuration options.
 
-Converting rocpd to Alternative Formats
-+++++++++++++++++++++++++++++++++++++
+Converting rocpd to alternative formats
+------------------------------------------
 
 ROCm provides a Python module to convert the ``rocpd`` database to alternative
 output formats for specialized analysis and visualization workflows. For example,
 (Open Trace Format 2) OTF2, Perfetto Protocol Buffers (PFTrace), and
 Comma-Separated Values (CSV) tables.
 
-See `rocpd tool documentation <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/docs/how-to/using-rocpd-output-format.rst>`_
+See :doc:`Using rocpd output format <rocprofiler-sdk:how-to/using-rocpd-output-format>` in ROCProfiler-SDK documentation
 for additional information on these conversion tools.
 
 Native Perfetto output
