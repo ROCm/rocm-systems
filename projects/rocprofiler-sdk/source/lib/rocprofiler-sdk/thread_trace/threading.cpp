@@ -230,7 +230,9 @@ producer_loop(triple_buffer_producer_data_t parameters)
 
                     // We need to resend the header is applicable
                     if(buffer_packet.header)
-                        send_to_consumer(&buffer_packet.header, sizeof(buffer_packet.header), ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE);
+                        send_to_consumer(&buffer_packet.header,
+                                         sizeof(buffer_packet.header),
+                                         ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE);
                     queue.SubmitAndSignalLast(parameters.control_packet->before_krn_pkt);
                 }
             }
