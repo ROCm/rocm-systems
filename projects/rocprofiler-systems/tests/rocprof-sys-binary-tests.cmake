@@ -1,5 +1,6 @@
-################################################################################
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -8,133 +9,22 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# -------------------------------------------------------------------------------------- #
 #
-################################################################################
-
-set(ROCPROFSYS_ABORT_FAIL_REGEX
-    "### ERROR ###|unknown-hash=|address of faulting memory reference|exiting with non-zero exit code|terminate called after throwing an instance|calling abort.. in |Exit code: [1-9]"
-    CACHE INTERNAL
-    "Regex to catch abnormal exits when a PASS_REGULAR_EXPRESSION is set"
-    FORCE
-)
-
-# adds a ctest for executable
-function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
-    cmake_parse_arguments(
-        TEST
-        "" # options
-        "NAME;TARGET;TIMEOUT;WORKING_DIRECTORY" # single value args
-        "ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND" # multiple
-        # value args
-        ${ARGN}
-    )
-
-    if(NOT TEST_WORKING_DIRECTORY)
-        set(TEST_WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-    endif()
-
-    if(NOT TEST_ENVIRONMENT)
-        set(TEST_ENVIRONMENT
-            "ROCPROFSYS_TRACE=ON"
-            "ROCPROFSYS_PROFILE=ON"
-            "ROCPROFSYS_USE_SAMPLING=ON"
-            "ROCPROFSYS_TIME_OUTPUT=OFF"
-            "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
-        )
-    endif()
-
-    # common
-    list(
-        APPEND
-        TEST_ENVIRONMENT
-        "ROCPROFSYS_CI=ON"
-        "ROCPROFSYS_CI_TIMEOUT=${TEST_TIMEOUT}"
-        "ROCPROFSYS_CONFIG_FILE="
-        "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
-        "TWD=${TEST_WORKING_DIRECTORY}"
-    )
-    # copy for inverse
-    set(TEST_ENVIRONMENT_INV "${TEST_ENVIRONMENT}")
-
-    # different for regular test and inverse test
-    list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_OUTPUT_PREFIX=${TEST_NAME}/")
-    list(APPEND TEST_ENVIRONMENT_INV "ROCPROFSYS_OUTPUT_PREFIX=${TEST_NAME}-inverse/")
-
-    if(
-        NOT "${TEST_PASS_REGEX}" STREQUAL ""
-        AND NOT "${TEST_FAIL_REGEX}" STREQUAL ""
-        AND NOT "${TEST_FAIL_REGEX}" MATCHES "\\|ROCPROFSYS_ABORT_FAIL_REGEX"
-    )
-        rocprofiler_systems_message(
-            FATAL_ERROR
-            "${TEST_NAME} has set pass and fail regexes but fail regex does not include '|ROCPROFSYS_ABORT_FAIL_REGEX'"
-        )
-    endif()
-
-    if("${TEST_FAIL_REGEX}" STREQUAL "")
-        set(TEST_FAIL_REGEX "(${ROCPROFSYS_ABORT_FAIL_REGEX})")
-    else()
-        string(
-            REPLACE
-            "|ROCPROFSYS_ABORT_FAIL_REGEX"
-            "|${ROCPROFSYS_ABORT_FAIL_REGEX}"
-            TEST_FAIL_REGEX
-            "${TEST_FAIL_REGEX}"
-        )
-    endif()
-
-    if(TEST_COMMAND)
-        add_test(
-            NAME ${TEST_NAME}
-            COMMAND ${TEST_COMMAND} ${TEST_ARGS}
-            WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY}
-        )
-
-        set_tests_properties(
-            ${TEST_NAME}
-            PROPERTIES
-                ENVIRONMENT "${TEST_ENVIRONMENT}"
-                TIMEOUT ${TEST_TIMEOUT}
-                DEPENDS "${TEST_DEPENDS}"
-                LABELS "rocprofiler-systems-bin;${TEST_LABELS}"
-                PASS_REGULAR_EXPRESSION "${TEST_PASS_REGEX}"
-                FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
-                SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
-                ${TEST_PROPERTIES}
-        )
-    elseif(TARGET ${TEST_TARGET})
-        add_test(
-            NAME ${TEST_NAME}
-            COMMAND $<TARGET_FILE:${TEST_TARGET}> ${TEST_ARGS}
-            WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY}
-        )
-
-        set_tests_properties(
-            ${TEST_NAME}
-            PROPERTIES
-                ENVIRONMENT "${TEST_ENVIRONMENT}"
-                TIMEOUT ${TEST_TIMEOUT}
-                DEPENDS "${TEST_DEPENDS}"
-                LABELS "rocprofiler-systems-bin;${TEST_LABELS}"
-                PASS_REGULAR_EXPRESSION "${TEST_PASS_REGEX}"
-                FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
-                SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
-                ${TEST_PROPERTIES}
-        )
-    elseif(ROCPROFSYS_BUILD_TESTING)
-        message(FATAL_ERROR "Error! ${TEST_TARGET} does not exist")
-    endif()
-endfunction()
+# Contains tests for executables
+#
+# -------------------------------------------------------------------------------------- #
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-instrument-help
@@ -441,107 +331,104 @@ file(
 "
 )
 
-add_executable(sleeper ${CMAKE_CURRENT_SOURCE_DIR}/sleeper.cpp)
-set_target_properties(
-    sleeper
-    PROPERTIES
-        BUILD_TYPE RelWithDebInfo
-        RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin/testing
-)
-
-rocprofiler_systems_add_bin_test(
-    NAME rocprofiler-systems-run-args
-    TARGET rocprofiler-systems-run
-    ARGS --monochrome
-         --debug=false
-         -v
-         1
-         -c
-         %env{TWD}%/rocprof-sys-tests-config/empty.cfg
-         -o
-         rocprof-sys-tests-output
-         rocprofiler-systems-run-args-output/
-         -TPHD
-         -S
-         cputime
-         realtime
-         --trace-wait=1.0e-12
-         --trace-duration=5.0
-         --wait=1.0
-         --duration=3.0
-         --trace-file=perfetto-run-args-trace.proto
-         --trace-buffer-size=100
-         --trace-fill-policy=ring_buffer
-         --profile-format
-         console
-         json
-         text
-         --process-freq
-         1000
-         --process-wait
-         0.0
-         --process-duration
-         10
-         --cpus
-         0-4
-         --gpus
-         0
-         -f
-         1000
-         --sampling-wait
-         1.0
-         --sampling-duration
-         10
-         -t
-         0-3
-         --sample-cputime
-         1000
-         1.0
-         0-3
-         --sample-realtime
-         10
-         0.5
-         0-3
-         -I
-         all
-         -E
-         mutex-locks
-         rw-locks
-         spin-locks
-         -C
-         perf::INSTRUCTIONS
-         --inlines
-         --hsa-interrupt
-         0
-         --use-causal=false
-         --use-kokkosp
-         --num-threads-hint=4
-         --sampling-allocator-size=32
-         --ci
-         --dl-verbose=3
-         --perfetto-annotations=off
-         --kokkosp-kernel-logger
-         --kokkosp-name-length-max=1024
-         --kokkosp-prefix="[kokkos]"
-         --tmpdir
-         ${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/tmpdir
-         --perfetto-backend
-         inprocess
-         --use-pid
-         false
-         --time-output
-         off
-         --thread-pool-size
-         0
-         --timemory-components
-         wall_clock
-         cpu_clock
-         peak_rss
-         page_rss
-         --fork
-         --
-         $<TARGET_FILE:sleeper>
-         5
-    TIMEOUT 45
-    LABELS "rocprofiler-systems-run"
-)
+find_program(SLEEP_CMD NAMES sleep)
+if(SLEEP_CMD)
+    rocprofiler_systems_add_bin_test(
+        NAME rocprofiler-systems-run-args
+        TARGET rocprofiler-systems-run
+        ARGS --monochrome
+            --debug=false
+            -v
+            1
+            -c
+            %env{TWD}%/rocprof-sys-tests-config/empty.cfg
+            -o
+            rocprof-sys-tests-output
+            rocprofiler-systems-run-args-output/
+            -TPHD
+            -S
+            cputime
+            realtime
+            --trace-wait=1.0e-12
+            --trace-duration=5.0
+            --wait=1.0
+            --duration=3.0
+            --trace-file=perfetto-run-args-trace.proto
+            --trace-buffer-size=100
+            --trace-fill-policy=ring_buffer
+            --profile-format
+            console
+            json
+            text
+            --process-freq
+            1000
+            --process-wait
+            0.0
+            --process-duration
+            10
+            --cpus
+            0-4
+            --gpus
+            0
+            -f
+            1000
+            --sampling-wait
+            1.0
+            --sampling-duration
+            10
+            -t
+            0-3
+            --sample-cputime
+            1000
+            1.0
+            0-3
+            --sample-realtime
+            10
+            0.5
+            0-3
+            -I
+            all
+            -E
+            mutex-locks
+            rw-locks
+            spin-locks
+            -C
+            perf::INSTRUCTIONS
+            --inlines
+            --hsa-interrupt
+            0
+            --use-causal=false
+            --use-kokkosp
+            --num-threads-hint=4
+            --sampling-allocator-size=32
+            --ci
+            --dl-verbose=3
+            --perfetto-annotations=off
+            --kokkosp-kernel-logger
+            --kokkosp-name-length-max=1024
+            --kokkosp-prefix="[kokkos]"
+            --tmpdir
+            ${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/tmpdir
+            --perfetto-backend
+            inprocess
+            --use-pid
+            false
+            --time-output
+            off
+            --thread-pool-size
+            0
+            --timemory-components
+            wall_clock
+            cpu_clock
+            peak_rss
+            page_rss
+            --fork
+            --
+            ${SLEEP_CMD}
+            5
+        TIMEOUT 45
+        LABELS "rocprofiler-systems-run"
+    )
+else()
+    rocprofiler_systems_message(WARNING "Sleep command not found. Disabling rocprofiler-systems-run-args ctest...")
+endif()

@@ -108,15 +108,11 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
             "SGPR": group_df["SGPR"].iloc[0],
             "Kernel_Name": group_df["Kernel_Name"].iloc[0],
             "Kernel_ID": group_df["Kernel_ID"].iloc[0],
+            "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
+            "End_Timestamp": group_df["End_Timestamp"].iloc[0],
         }
         # Each counter will become its own column
         row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
-        # Replace end timestamp with median of durations of group,
-        # start timestamp is set to 0
-        row["End_Timestamp"] = (
-            group_df["End_Timestamp"] - group_df["Start_Timestamp"]
-        ).median()
-        row["Start_Timestamp"] = 0.0
         data.append(row)
     df = pd.DataFrame(data)
     # Rank GPU IDs, map lowest number to 0, next to 1, etc.
