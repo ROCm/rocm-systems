@@ -38,6 +38,30 @@ namespace thread_trace
 {
 constexpr double SQTT_BANDWIDTH = 17E9f * 4;  // 17GB/s, times 4 for wiggle room
 
+namespace
+{
+struct trace_callback_data_t
+{
+    void*        data{};
+    uint64_t     size{};
+    hsa_status_t status{};
+};
+
+trace_callback_data_t
+iterate_data(aqlprofile_handle_t handle)
+{
+    auto thread_trace_callback = [](uint32_t, void* buffer, uint64_t size, void* userdata) {
+        auto& data = *static_cast<trace_callback_data_t*>(userdata);
+        data.data  = buffer;
+        data.size  = size;
+        return HSA_STATUS_SUCCESS;
+    };
+    trace_callback_data_t data{};
+    data.status = aqlprofile_att_iterate_data(handle, thread_trace_callback, &data);
+    return data;
+}
+};  // namespace
+
 // Performs a synchronous GPU-to-CPU copy using the async engine, chaining the supplied dependency
 // and reusing a thread-local completion signal to avoid allocation churn.
 void
@@ -64,29 +88,27 @@ copy_data_sync(void*       dst,
 void
 consumer_loop(triple_buffer_consumer_data_t parameters)
 {
-    const size_t buffer_size = parameters.shared->queue->buffer_size;
-    auto&        buffers     = parameters.shared->buffers;
-    auto&        running     = parameters.shared->consumer_running;
-    auto&        write_cv    = parameters.shared->write_cv;
-    auto&        write_index = parameters.shared->write_index;
-    auto&        read_index  = parameters.shared->read_index;
-    auto         agent_id    = parameters.shared->queue->agent_id;
-    auto         userdata    = parameters.userdata;
-    auto         callback_fn = parameters.callback_fn;
+    auto& buffers     = parameters.shared->buffers;
+    auto& running     = parameters.shared->consumer_running;
+    auto& write_cv    = parameters.shared->write_cv;
+    auto& write_index = parameters.shared->write_index;
+    auto& read_index  = parameters.shared->read_index;
+    auto  agent_id    = parameters.shared->queue->agent_id;
+    auto  userdata    = parameters.userdata;
+    auto  callback_fn = parameters.callback_fn;
 
     while(true)
     {
-        size_t parity = read_index % buffers.size();
-        auto   lock   = std::unique_lock{buffers.at(parity).mutex};
+        auto& buffer = buffers.at(read_index % buffers.size());
+        auto  lock   = std::unique_lock{buffer.mutex};
 
         // Wait until the producer signals that a new buffer is ready or the trace shuts down.
         write_cv.wait(lock, [&]() { return write_index > read_index || !running; });
 
         if(!running && write_index <= read_index) return;
 
-        auto flags =
-            static_cast<rocprofiler_thread_trace_shader_data_flags_t>(buffers.at(parity).flags);
-        callback_fn(agent_id, 0, buffers.at(parity).memory, buffer_size, flags, userdata);
+        auto flags = static_cast<rocprofiler_thread_trace_shader_data_flags_t>(buffer.flags);
+        callback_fn(agent_id, 0, buffer.memory, buffer.size, flags, userdata);
         read_index.fetch_add(1);
     }
 }
@@ -104,6 +126,8 @@ consumer_loop(triple_buffer_consumer_data_t parameters)
 void
 producer_loop(triple_buffer_producer_data_t parameters)
 {
+    CHECK_NOTNULL(parameters.copy_data_fn);
+
     auto& queue = *CHECK_NOTNULL(parameters.shared->queue);
     auto& flag  = *CHECK_NOTNULL(parameters.producer_running);
 
@@ -116,25 +140,52 @@ producer_loop(triple_buffer_producer_data_t parameters)
     auto& read_index    = parameters.shared->read_index;
     auto& buffer_packet = *CHECK_NOTNULL(parameters.buffer_packet);
 
-    auto stop_trace = [&]() {
-        queue.SubmitAndSignalLast(parameters.control_packet->after_krn_pkt);
-    };
-
     Signal submit_signal{};
-
-    auto copy_sync = [&](void* dst, const void* src) {
-        auto copy_data_fn = CHECK_NOTNULL(parameters.copy_data_fn);
-        copy_data_fn(dst, src, queue.near_cpu, queue.hsa_agent, buffer_size, &submit_signal);
-    };
 
     auto start_t0 = std::chrono::system_clock::now();
     bool do_sleep{false};
     // Wait until ATT start packets have been executed
     CHECK_NOTNULL(parameters.start_pkt_signal)->WaitOn();
 
+    auto send_to_consumer = [&](void* src, size_t size, int flags) {
+        auto t0 = std::chrono::system_clock::now();
+
+        auto& buffer = buffers.at(write_index % buffers.size());
+        auto  lock   = std::unique_lock{buffer.mutex};
+        buffer.flags = flags;
+        buffer.size  = size;
+
+        // Perform the actual GPU->CPU memory copy into our triple-buffer slot
+        parameters.copy_data_fn(
+            buffer.memory, src, queue.near_cpu, queue.hsa_agent, size, &submit_signal);
+        auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
+        ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << size / float(copy_time);
+
+        // PHASE 3: Wake up consumer thread
+        // Increment write_index to signal a new buffer is available, then notify
+        // the consumer via condition variable so it can process the data.
+        write_index.fetch_add(1);
+        write_cv.notify_all();
+    };
+
     auto sleep_fn = [&]() {
         sched_yield();
         std::this_thread::sleep_for(std::chrono::microseconds(interval_microseconds));
+    };
+
+    auto stop_trace = [&]() {
+        ROCP_INFO << "Stopping the trace";
+        queue.SubmitAndSignalLast(parameters.control_packet->after_krn_pkt);
+    };
+
+    auto iterate_trace = [&]() {
+        // Wait consumer to catch up before adding to next buffer
+        while(read_index < write_index)
+            sleep_fn();
+
+        auto wptr = iterate_data(parameters.control_packet->GetHandle());
+        ROCP_INFO << "Iterate data with size: " << wptr.size;
+        send_to_consumer(wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END);
     };
 
     while(flag.load())
@@ -154,7 +205,6 @@ producer_loop(triple_buffer_producer_data_t parameters)
             // The GPU has signaled that a buffer is full. We need to:
             // a) Submit a packet to trigger GPU-side buffer swap
             // b) Copy the full buffer from GPU memory to our CPU-side triple buffer
-            auto t0 = std::chrono::system_clock::now();
             // Query returned buffer full: Send packet to trigger a buffer swap
             queue.Submit(&status->packet, &submit_signal);
             ROCP_FATAL_IF(status->size != buffer_size)
@@ -163,48 +213,25 @@ producer_loop(triple_buffer_producer_data_t parameters)
             {
                 // With triple buffering, stop when consumer lags by 2 buffers (all 3 slots full)
                 // or when the GPU buffer has been tagged as full.
-                const bool cpu_full   = read_index + 2 < write_index;
-                const bool is_stopped = cpu_full || status->gpu_full;
-                if(is_stopped)
+                const bool cpu_full = read_index + 2 < write_index;
+                if(cpu_full || status->gpu_full) stop_trace();
+
+                int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
+                if(cpu_full) flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
+                if(status->gpu_full)
+                    flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
+
+                send_to_consumer(status->data, buffer_size, flags);
+
+                if(cpu_full || status->gpu_full)
                 {
-                    stop_trace();
-                    // Wait consumer to catch up before adding to next buffer
-                    while(read_index < write_index)
-                        sleep_fn();
-                }
+                    iterate_trace();
+                    ROCP_INFO << "Restarting the trace!";
 
-                {
-                    int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
-
-                    size_t parity = write_index % buffers.size();
-                    auto   lock   = std::unique_lock{buffers.at(parity).mutex};
-
-                    if(cpu_full)
-                        flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
-                    if(status->gpu_full)
-                        flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
-
-                    buffers.at(parity).flags = flags;
-
-                    // Perform the actual GPU->CPU memory copy into our triple-buffer slot
-                    copy_sync(buffers.at(parity).memory, status->data);
-                    auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
-                    ROCP_TRACE << "Copy: " << copy_time
-                               << " s. BW: " << buffer_size / float(copy_time);
-
-                    // PHASE 3: Wake up consumer thread
-                    // Increment write_index to signal a new buffer is available, then notify
-                    // the consumer via condition variable so it can process the data.
-                    write_index.fetch_add(1);
-                    write_cv.notify_all();
-                }
-
-                if(is_stopped)
-                {
-                    // Wake the consumer so it can drain outstanding buffers before we exit.
-                    parameters.shared->consumer_running.store(false);
-                    write_cv.notify_all();
-                    return;
+                    // We need to resend the header is applicable
+                    if(buffer_packet.header)
+                        send_to_consumer(&buffer_packet.header, sizeof(buffer_packet.header), ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE);
+                    queue.SubmitAndSignalLast(parameters.control_packet->before_krn_pkt);
                 }
             }
             // The status_query test verifies we immediately poll again after consuming a
@@ -214,6 +241,7 @@ producer_loop(triple_buffer_producer_data_t parameters)
         }
     }
     stop_trace();
+    iterate_trace();
     parameters.shared->consumer_running.store(false);
     write_cv.notify_all();
 
