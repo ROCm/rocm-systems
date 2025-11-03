@@ -241,6 +241,7 @@ Metadata JSON Sample
       },
    }
 
+
 Configuring the ROCm Systems Profiler output
 ============================================
 
@@ -333,19 +334,11 @@ Features
 
 The features of ``rocpd`` output format are:
 
-* **Comprehensive Data Model**: Consolidates all profiling artifacts including
-execution traces, performance counters, hardware metrics, and contextual metadata
-within a single SQLite3 database file (`.db` extension).
+* **Comprehensive Data Model**: Consolidates all profiling artifacts including execution traces, performance counters, hardware metrics, and contextual metadata within a single SQLite3 database file (`.db` extension).
 
-* **Standards-Compliant Access**: Supports querying through industry-standard SQL
-interfaces including command-line tools (``sqlite3`` CLI), programming language
-bindings (Python ``sqlite3`` module, C/C++ SQLite API), and database management
-applications.
+* **Standards-Compliant Access**: Supports querying through industry-standard SQL interfaces including command-line tools (``sqlite3`` CLI), programming language bindings (Python ``sqlite3`` module, C/C++ SQLite API), and database management applications.
 
-* **Advanced Analytics Integration**: Facilitates sophisticated post-processing
-workflows through custom analytical scripts, automated reporting systems, and
-integration with third-party visualization and analysis frameworks that provide
-SQLite3 connectivity.
+* **Advanced Analytics Integration**: Facilitates sophisticated post-processing workflows through custom analytical scripts, automated reporting systems, and integration with third-party visualization and analysis frameworks that provide SQLite3 connectivity.
 
 Generating rocpd output
 -------------------------
