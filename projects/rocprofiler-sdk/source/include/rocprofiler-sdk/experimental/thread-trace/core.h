@@ -94,9 +94,9 @@ typedef struct rocprofiler_thread_trace_parameter_t
 /**
  * @brief Flags for the data received in rocprofiler_thread_trace_shader_data_callback_t
  * The last record takes on the flag ::ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END.
- * If the GPU buffer cannot be flushed during the trace, the trace will be interrupted and one (or
- * both) of the buffer full flags will be set. When this happens, the trace will be disabled for
- * that agent and only reenabled by cyling stop_context()/start_context() again.
+ * If the CPU or GPU buffer cannot be flushed during the trace, the trace will be interrupted and
+ * one (or both) of the buffer full flags will be set. When this happens, the trace will be disabled
+ * for that agent until all the shader data is flushed and then re-enabled.
  */
 typedef enum rocprofiler_thread_trace_shader_data_flags_t
 {

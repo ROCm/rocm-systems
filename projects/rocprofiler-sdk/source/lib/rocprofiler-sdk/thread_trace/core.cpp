@@ -193,6 +193,9 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 void
 ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data)
 {
+    // Already executed by producer thread, skip
+    if(params.triple_buffering) return;
+
     cbdata_t cb_dt{};
 
     cb_dt.agent = agent_id;
@@ -311,6 +314,7 @@ ThreadTracerAgent::stop_thread_trace()
     {
         producer.join();
         consumer.join();
+        active_traces.fetch_sub(1);
         return nullptr;
     }
     else
