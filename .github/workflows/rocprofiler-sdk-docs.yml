@@ -115,7 +115,11 @@ jobs:
 
       - name: Setup
         shell: bash
-        run: git config --global --add safe.directory '*'
+        run: |
+          git config --global --add safe.directory '*'
+          rm -rf /usr/local/bin/git
+          ln -s /usr/bin/git /usr/local/bin/git
+          git --version
 
       - name: Create Docs Directory
         shell: bash
@@ -139,17 +143,17 @@ jobs:
         timeout-minutes: 60
         shell: bash
         working-directory: projects/rocprofiler-sdk/
-        run:
-          export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};
-          cmake -B build
-            -DROCPROFILER_DEP_ROCMCORE=ON
-            -DROCPROFILER_BUILD_DOCS=ON
-            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
-            -DCPACK_GENERATOR='DEB;RPM;TGZ'
-            -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
-            -DPython3_EXECUTABLE=$(which python3)
-            .;
-          cmake --build build --target docs --parallel 4;
-          cmake --build build --target all --parallel 12;
-          cmake --build build --target install --parallel 12;
+        run: |
+          CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH} \
+          cmake -B build \
+            -DROCPROFILER_DEP_ROCMCORE=ON \
+            -DROCPROFILER_BUILD_DOCS=ON \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk \
+            -DCPACK_GENERATOR='DEB;RPM;TGZ' \
+            -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)" \
+            -DPython3_EXECUTABLE=$(which python3) \
+            .
+          cmake --build build --target docs --parallel 4
+          cmake --build build --target all --parallel 12
+          cmake --build build --target install --parallel 12
           cmake --build build --target package --parallel 12
