@@ -350,7 +350,7 @@ SQLite3 connectivity.
 Generating rocpd output
 -------------------------
 
-To generate profiling data in the rocpd format, add "ROCPROFSYS_USE_ROCPD=ON" to your profiling configuration.
+To generate profiling data in the rocpd format, add ``ROCPROFSYS_USE_ROCPD=ON`` to your profiling configuration.
 
 .. code-block:: shell
 
@@ -369,7 +369,7 @@ output formats for specialized analysis and visualization workflows. For example
 (Open Trace Format 2) OTF2, Perfetto Protocol Buffers (PFTrace), and
 Comma-Separated Values (CSV) tables.
 
-See :doc:`Using rocpd output format <rocprofiler-sdk:how-to/using-rocpd-output-format>` in ROCProfiler-SDK documentation
+See :doc:`Using rocpd output format <rocprofiler-sdk:how-to/using-rocpd-output-format>` in ROCProfiler-SDK documentation,
 for additional information on these conversion tools.
 
 Native Perfetto output
