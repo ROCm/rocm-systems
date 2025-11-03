@@ -66,15 +66,13 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     DISABLED "${IS_DISABLED}")
 
-if(TARGET rocprofv3-list-avail)
-    rocprofiler_add_integration_validate_test(
-        rocprofv3-avail-test
-        TEST_PATHS validate.py
-        COPY conftest.py
-        CONFIG pytest.ini
-        ARGS --rocm-path ${CMAKE_BINARY_DIR}
-        TIMEOUT 45 PRELOAD "${PRELOAD_ENV}"
-        LABELS "integration-tests"
-        PYTHON_PATH "${CMAKE_BINARY_DIR}/bin"
-        DISABLED "${IS_DISABLED}")
-endif()
+rocprofiler_add_integration_validate_test(
+    rocprofv3-avail-test
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --rocm-path ${CMAKE_BINARY_DIR}
+    TIMEOUT 45 PRELOAD "${PRELOAD_ENV}"
+    LABELS "integration-tests"
+    PYTHON_PATH "${CMAKE_BINARY_DIR}/bin"
+    DISABLED "${IS_DISABLED}")

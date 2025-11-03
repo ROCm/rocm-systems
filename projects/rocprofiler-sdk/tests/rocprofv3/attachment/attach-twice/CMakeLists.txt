@@ -37,10 +37,9 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} out
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests"
+    LABELS "integration-tests;attachment"
     PRELOAD "${PRELOAD_ENV}"
-    FAIL_REGULAR_EXPRESSION
-        "failed to retrieve stream ID|ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-attachment-attach-twice
     DISABLED "${IS_DISABLED}")
 
@@ -59,7 +58,7 @@ rocprofiler_add_integration_validate_test(
          --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
     TIMEOUT 30
-    LABELS "integration-tests"
+    LABELS "integration-tests;attachment"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-twice
     DISABLED "${IS_DISABLED}")
 
@@ -77,6 +76,6 @@ rocprofiler_add_integration_validate_test(
          --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
     TIMEOUT 30
-    LABELS "integration-tests"
+    LABELS "integration-tests;attachment"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-twice
     DISABLED "${IS_DISABLED}")

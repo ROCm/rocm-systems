@@ -110,6 +110,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-relative
+                      rocprofv3-test-agent-index-json-absolute
     ARGS --agent-index
          relative
          --csv-kernel-input
@@ -131,6 +132,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-type-relative
+                      rocprofv3-test-agent-index-json-absolute
     ARGS --agent-index
          type-relative
          --csv-kernel-input

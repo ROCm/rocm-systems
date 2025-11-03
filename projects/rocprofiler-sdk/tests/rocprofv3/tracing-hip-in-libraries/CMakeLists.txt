@@ -30,8 +30,7 @@ foreach(_OUTPUT_FORMAT csv json pftrace otf2)
         TIMEOUT 120
         LABELS "integration-tests"
         PRELOAD "${PRELOAD_ENV}"
-        FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries
-        UNSTABLE)
+        FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries)
 endforeach()
 
 rocprofiler_add_integration_validate_test(
@@ -67,5 +66,4 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.otf2
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-trace-hip-in-libraries
-    UNSTABLE)
+    FIXTURES_REQUIRED rocprofv3-test-trace-hip-in-libraries)

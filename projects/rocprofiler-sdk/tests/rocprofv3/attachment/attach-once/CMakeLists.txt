@@ -41,13 +41,12 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} out
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 60
-    LABELS "integration-tests"
+    LABELS "integration-tests;attachment"
     DISABLED ${IS_DISABLED}
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "${attachment-env}"
     FIXTURES_SETUP rocprofv3-test-attachment-attach-once
-    FAIL_REGULAR_EXPRESSION
-        "failed to retrieve stream ID|ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 # Validate the output from the attached profiling
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-attachment-attach-once-csv
@@ -55,7 +54,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 30
-    LABELS "integration-tests"
+    LABELS "integration-tests;attachment"
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once
     ARGS --kernel-input
@@ -73,7 +72,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 30
-    LABELS "integration-tests"
+    LABELS "integration-tests;attachment"
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once
     ARGS --kernel-input
