@@ -1489,18 +1489,23 @@ TEST_CASE("Unit_hipMemSetAccessHost_devicealloc") {
 
   HIP_CHECK(hipMemMap(addr, mapSize, 0 /*offset*/, handle, 0 /*flags*/));
 
-  // Grant HOST access. 
+  // Grant HOST access.
   hipMemAccessDesc accHost{};
   accHost.flags = hipMemAccessFlagsProtReadWrite;
   accHost.location.type = hipMemLocationTypeHost;
   accHost.location.id = 0;
-  HIP_CHECK_ERROR(hipMemSetAccess(addr, mapSize, &accHost, 1), hipErrorInvalidValue);
+#if HT_AMD
+  // SWDEV-563752: we need to allow setAccess to the host even if location is set to
+  // hipMemLocationTypeDevice in hipMemCreate
+  HIP_CHECK(hipMemSetAccess(addr, mapSize, &accHost, 1));
+#else
+  HIP_CHECK_ERROR(hipMemSetAccess(addr, mapSize, &accHost, 1), hipErrorNotSupported);
+#endif
 
   HIP_CHECK(hipMemUnmap(addr, mapSize));
   HIP_CHECK(hipMemAddressFree(addr, mapSize));
   HIP_CHECK(hipMemRelease(handle));
 }
-
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}
