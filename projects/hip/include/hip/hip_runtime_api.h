@@ -6425,6 +6425,35 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
 
 /**
+ * @brief Retrieve kernel handles within a library
+ *
+ * @param [out] kernels Buffer for kernel handles
+ * @param [in] numKernels Maximum number of kernel handles to return to buffer
+ * @oaram [in] library Library handle to query from
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library);
+
+/**
+ * @brief Returns a Library Handle
+ *
+ * @param [out] library Returned Library handle
+ * @param [in] kernel Kernel to retrieve library Handle
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
+
+/**
+ * @brief Returns a Kernel Name
+ *
+ * @param [out] name Returned Kernel Name
+ * @param [in] kernel Kernel handle to retrieve name
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
+
+/**
  * @brief Find out attributes for a given function.
  * @ingroup Execution
  * @param [out] attr  Attributes of funtion
@@ -6892,6 +6921,23 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
  */
 hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, const void* f,
                                              size_t dynSharedMemPerBlk, int blockSizeLimit);
+/**
+ * @brief Returns dynamic shared memory available per block when launching numBlocks blocks on SM.
+ *
+ * @ingroup Occupancy
+ * Returns in \p *dynamicSmemSize the maximum size of dynamic shared memory /
+ * to allow numBlocks blocks per SM.
+ *
+ * @param [out] dynamicSmemSize Returned maximum dynamic shared memory.
+ * @param [in]  f               Kernel function for which occupancy is calculated.
+ * @param [in]  numBlocks       Number of blocks to fit on SM
+ * @param [in]  blockSize       Size of the block
+ *
+ * @return #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue,
+ * #hipErrorUnknown
+ */
+hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
+                                                    int numBlocks, int blockSize);
 // doxygen end Occupancy
 /**
  * @}
@@ -9831,6 +9877,28 @@ template <typename F> inline hipError_t hipOccupancyMaxPotentialBlockSize(int* g
                                                                           uint32_t blockSizeLimit) {
   return hipOccupancyMaxPotentialBlockSize(gridSize, blockSize, (hipFunction_t)kernel,
                                            dynSharedMemPerBlk, blockSizeLimit);
+}
+
+/**
+ * @brief Returns dynamic shared memory available per block when launching numBlocks blocks on SM.
+ *
+ * @ingroup Occupancy
+ * Returns in \p *dynamicSmemSize the maximum size of dynamic shared memory /
+ * to allow numBlocks blocks per SM.
+ *
+ * @param [out] dynamicSmemSize Returned maximum dynamic shared memory.
+ * @param [in]  f               Kernel function for which occupancy is calculated.
+ * @param [in]  numBlocks       Number of blocks to fit on SM
+ * @param [in]  blockSize       Size of the block
+ *
+ * @return #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue,
+ * #hipErrorUnknown
+ */
+template <typename F>
+inline hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, F f,
+                                                           int numBlocks, int blockSize) {
+    return hipOccupancyAvailableDynamicSMemPerBlock(dynamicSmemSize, reinterpret_cast<const void*>(f),
+                                                    numBlocks, blockSize);
 }
 /**
  * @brief Launches a device function

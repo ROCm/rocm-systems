@@ -31,7 +31,7 @@ Definitions
     ROCPROFILER_DIMENSION_XCC,            ///< XCC dimension of result
     ROCPROFILER_DIMENSION_AID,            ///< AID dimension of result
     ROCPROFILER_DIMENSION_SHADER_ENGINE,  ///< SE dimension of result
-    ROCPROFILER_DIMENSION_AGENT,          ///< Agent dimension
+    ROCPROFILER_DIMENSION_AGENT,          ///< Agent dimension (note: this field is not set externally)
     ROCPROFILER_DIMENSION_SHADER_ARRAY,   ///< Number of shader arrays
     ROCPROFILER_DIMENSION_WGP,            ///< Number of workgroup processors
     ROCPROFILER_DIMENSION_INSTANCE,       ///< From unspecified hardware register

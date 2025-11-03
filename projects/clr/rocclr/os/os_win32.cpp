@@ -313,33 +313,6 @@ const void* Os::createOsThread(Thread* thread) {
   return reinterpret_cast<const void*>(handle);
 }
 
-// This function only works with CPU core number <= 64.
-// SetThreadGroupAffinity does clear the thread's affinity to other processor groups.
-// No API yet to set multi-group affinity.
-// So only the last group will take affect in this function!
-void Os::setThreadAffinity(const void* handle, const Os::ThreadAffinityMask& mask) {
-  GROUP_AFFINITY group = {0};
-  for (WORD i = 0; i < sizeof(mask.mask_) / sizeof(KAFFINITY); ++i) {
-    group.Mask = mask.mask_[i];
-    group.Group = i;
-    if (group.Mask != 0) {
-      SetThreadGroupAffinity((HANDLE)handle, &group, NULL);
-    }
-  }
-}
-
-bool Os::setThreadAffinityToMainThread() {
-  if (AMD_CPU_AFFINITY) {
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Setting Affinity to the main thread's affinity");
-    if (!SetThreadGroupAffinity(GetCurrentThread(), &nativeMask_, nullptr)) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "Failed setting main thread affinity with error %d",
-          GetLastError());
-      return false;
-    }
-  }
-  return true;
-}
-
 void Os::yield() { ::SwitchToThread(); }
 
 uint64_t Os::timeNanos() {
@@ -526,25 +499,7 @@ uint64_t Os::offsetToEpochNanos() {
   return offset;
 }
 
-#ifdef _WIN64
-
 address Os::currentStackPtr() { return (address)_AddressOfReturnAddress() + sizeof(void*); }
-
-#else  // !_WIN64
-
-#pragma warning(disable : 4731)
-
-void __stdcall Os::setCurrentStackPtr(address newSp) {
-  newSp -= sizeof(void*);
-  *(void**)newSp = *(void**)_AddressOfReturnAddress();
-  __asm {
-        mov esp,newSp
-        mov ebp,[ebp]
-        ret
-  }
-}
-
-#endif  // !_WIN64
 
 size_t Os::getPhysicalMemSize() {
   MEMORYSTATUSEX statex;
