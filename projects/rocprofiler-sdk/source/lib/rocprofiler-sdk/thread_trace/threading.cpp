@@ -148,7 +148,7 @@ producer_loop(triple_buffer_producer_data_t parameters)
             // PHASE 2: Copy GPU buffer to CPU memory
             // The GPU has signaled that a buffer is full. We need to:
             // a) Submit a packet to trigger GPU-side buffer swap
-            // b) Copy the full buffer from GPU memory to our CPU-side double buffer
+            // b) Copy the full buffer from GPU memory to our CPU-side triple buffer
             auto t0 = std::chrono::system_clock::now();
             // Query returned buffer full: Send packet to trigger a buffer swap
             queue.Submit(&status->packet, &submit_signal);
@@ -156,14 +156,15 @@ producer_loop(triple_buffer_producer_data_t parameters)
                 << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
 
             {
-                const bool should_stop = read_index + 1 < write_index;
+                // With triple buffering, stop when consumer lags by 2 buffers (all 3 slots full)
+                const bool should_stop = read_index + 2 < write_index;
                 if(should_stop)
                 {
-                    // Slow-consumer path exercised by slow_cpu test: we stop producing when the
-                    // reader lags by more than one buffer and flag the payload accordingly.
+                    // Slow-consumer path: we stop producing when the reader lags by more than
+                    // two buffers (meaning all 3 CPU buffers are full) and flag the payload.
                     ROCP_WARNING << "SQTT buffer full!";
                     stop_trace();  // Check is_running so we dont send twice
-                    while(read_index + 1 < write_index)
+                    while(read_index + 2 < write_index)
                         std::this_thread::sleep_for(std::chrono::microseconds(10));
                 }
 
@@ -178,7 +179,7 @@ producer_loop(triple_buffer_producer_data_t parameters)
 
                     buffers.at(parity).flags = flags;
 
-                    // Perform the actual GPU->CPU memory copy into our double-buffer slot
+                    // Perform the actual GPU->CPU memory copy into our triple-buffer slot
                     copy_sync(buffers.at(parity).memory, status->data);
                     auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
                     ROCP_TRACE << "Copy: " << copy_time

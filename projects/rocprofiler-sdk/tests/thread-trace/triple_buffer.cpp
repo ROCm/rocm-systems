@@ -44,7 +44,7 @@
 
 namespace ATTTest
 {
-namespace DoubleBuffer
+namespace TripleBuffer
 {
 struct agent_output_buffer_t
 {
@@ -147,7 +147,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
 
         if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-            agent_buffers->emplace_back(ATTTest::DoubleBuffer::agent_output_buffer_t{agent->id});
+            agent_buffers->emplace_back(ATTTest::TripleBuffer::agent_output_buffer_t{agent->id});
     }
 
     uint64_t gpu_buffer_size = 64 << 20;
@@ -181,7 +181,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
                              agent.id,
                              parameters.data(),
                              parameters.size(),
-                             ATTTest::DoubleBuffer::shader_data_callback,
+                             ATTTest::TripleBuffer::shader_data_callback,
                              userdata),
                          "thread trace service configure");
     }
@@ -293,7 +293,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 void
 tool_fini(void*){};
 
-}  // namespace DoubleBuffer
+}  // namespace TripleBuffer
 }  // namespace ATTTest
 
 extern "C" rocprofiler_tool_configure_result_t*
@@ -311,8 +311,8 @@ rocprofiler_configure(uint32_t /* version */,
     // create configure data
     static auto cfg =
         rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
-                                            &ATTTest::DoubleBuffer::tool_init,
-                                            &ATTTest::DoubleBuffer::tool_fini,
+                                            &ATTTest::TripleBuffer::tool_init,
+                                            &ATTTest::TripleBuffer::tool_fini,
                                             nullptr};
 
     // return pointer to configure data
