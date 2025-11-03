@@ -26,6 +26,7 @@
 import inspect
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -752,7 +753,42 @@ def test_analyze_rocpd(
     assert code == 0
     assert os.path.isfile(f"{db_name}.db")
 
-    # Remove test.db
+    # Open the sqlite database and assert the schema
+    # Import Kernel from analysis_orm.py
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+    from utils.analysis_orm import (
+        Dispatch,
+        Kernel,
+        Metadata,
+        Metric,
+        RooflineData,
+        Value,
+        Workload,
+    )
+
+    table_name_map = {
+        "compute_workload": Workload,
+        "compute_metric": Metric,
+        "compute_roofline_data": RooflineData,
+        "compute_dispatch": Dispatch,
+        "compute_kernel": Kernel,
+        "compute_value": Value,
+        "compute_metadata": Metadata,
+    }
+
+    def check_cols(table_name, orm_obj):
+        conn = sqlite3.connect(f"{db_name}.db")
+        cursor = conn.cursor()
+        cursor.execute(f"PRAGMA table_info('{table_name}');")
+        columns = cursor.fetchall()
+        column_names = [column[1] for column in columns]
+        expected_columns = [col.name for col in orm_obj.__table__.columns]
+        assert column_names == expected_columns
+        conn.close()
+
+    for table_name, orm_obj in table_name_map.items():
+        check_cols(table_name, orm_obj)
+
     os.remove(f"{db_name}.db")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
