@@ -248,7 +248,6 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
         for(uint64_t i = 0; (params.shader_engine_mask >> i) != 0; i++)
             if((params.shader_engine_mask >> i) % 2 == 1) shader_engine_id = i;
 
-        ROCP_WARNING << "SE_ID: " << shader_engine_id;
         auto buffer_packet = std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(
             control_packet->GetHandle(), shader_engine_id);
         // Emit the optional buffer header first so consumers can prime state
@@ -284,8 +283,10 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
         consumer_data.userdata    = params.callback_userdata;
         consumer_data.shared      = worker_data;
 
+        internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
         producer = std::thread{producer_loop, std::move(producer_data)};
         consumer = std::thread{consumer_loop, std::move(consumer_data)};
+        internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
     }
     return shared_signal;
 }
