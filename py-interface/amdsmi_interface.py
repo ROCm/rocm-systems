@@ -3003,8 +3003,6 @@ def amdsmi_get_power_info(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
-    if not isinstance(sensor_ind, int):
-        raise AmdSmiParameterException(sensor_ind, int)
 
     power_info = amdsmi_wrapper.amdsmi_power_info_t()
     _check_res(
