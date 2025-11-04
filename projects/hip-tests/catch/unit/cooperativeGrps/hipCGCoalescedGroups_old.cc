@@ -353,20 +353,20 @@ static void test_shfl_any_to_any() {
 
     HIPCHECK(hipHostMalloc(&hPtr, arrSize));
     // Fill up the array
-    for (int i = 0; i < WAVE_SIZE; i++) {
-      hPtr[i] = rand() % 1000;
+    for (int j = 0; j < WAVE_SIZE; j++) {
+      hPtr[j] = rand() % 1000;
     }
 
     // Fill up the random array
-    for (int i = 0; i < group_size; i++) {
-      srcArr[i] = rand() % 1000;
-      srcArrCpu[i] = srcArr[i] % group_size;
+    for (int j = 0; j < group_size; j++) {
+      srcArr[j] = rand() % 1000;
+      srcArrCpu[j] = srcArr[j] % group_size;
     }
 
     /* Fill cpu results array so that we can verify with gpu computation */
     int* cpuResultsArr = (int*)malloc(group_size_in_bytes);
-    for (int i = 0; i < group_size; i++) {
-      cpuResultsArr[i] = hPtr[srcArrCpu[i]];
+    for (int j = 0; j < group_size; j++) {
+      cpuResultsArr[j] = hPtr[srcArrCpu[j]];
     }
 
     // printf("Array passed to GPU for computation\n");
@@ -430,8 +430,8 @@ static void test_shfl_broadcast() {
 
     HIPCHECK(hipHostMalloc(&hPtr, arrSize));
     // Fill up the array
-    for (int i = 0; i < WAVE_SIZE; i++) {
-      hPtr[i] = rand() % 1000;
+    for (int j = 0; j < WAVE_SIZE; j++) {
+      hPtr[j] = rand() % 1000;
     }
 
 
@@ -439,8 +439,8 @@ static void test_shfl_broadcast() {
     srcLaneCpu = hPtr[srcLane % group_size];
 
     int* cpuResultsArr = (int*)malloc(sizeof(int) * group_size);
-    for (int i = 0; i < group_size; i++) {
-      cpuResultsArr[i] = srcLaneCpu;
+    for (int j = 0; j < group_size; j++) {
+      cpuResultsArr[j] = srcLaneCpu;
     }
     printf("Array passed to GPU for computation\n");
     printResultsSimpleCoalescedGroups(hPtr, WAVE_SIZE);
