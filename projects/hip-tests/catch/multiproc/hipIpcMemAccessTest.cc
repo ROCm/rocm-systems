@@ -213,6 +213,7 @@ TEST_CASE("Unit_hipIpcMemAccess_Semaphores") {
 TEST_CASE("Unit_hipIpcMemAccess_ParameterValidation") {
   hipIpcMemHandle_t MemHandle;
   hipIpcMemHandle_t MemHandleUninit;
+  std::memset(&MemHandleUninit, 0xAB, sizeof(MemHandleUninit)); // Fill with a known invalid pattern
   void *Ad{}, *Ad2{};
   hipError_t ret;
 
