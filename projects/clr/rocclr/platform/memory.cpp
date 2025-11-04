@@ -270,6 +270,19 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
   return true;
 }
 
+size_t Memory::findOffset(const void* addr) const {
+  uintptr_t target = reinterpret_cast<uintptr_t>(addr);
+
+  for (uint i = 0; i < numDevices_; ++i) {
+    uint64_t base = deviceMemories_[i].value_->virtualAddress();
+    if (target >= base && target < base + size_) {
+      return static_cast<size_t>(target - base);
+    }
+  }
+
+  return SIZE_MAX;  // Not found
+}
+
 // ================================================================================================
 bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool forceAlloc) {
   static const bool forceAllocHostMem = false;

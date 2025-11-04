@@ -332,6 +332,10 @@ class Memory : public amd::RuntimeObject {
                        bool forceCopy = false  //!< Force system memory allocation
   );
 
+  //! Find offset from the base address
+  size_t findOffset(const void* addr           //!< Device memory address
+  ) const;
+
   // Accessors
   Memory* parent() const { return parent_; }
   void SetParent(amd::Memory* parent) {
