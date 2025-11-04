@@ -81,11 +81,6 @@ class Elf {
   } ElfTargets;
 
   typedef enum {
-    LC_PLATFORM = 0,
-    LAST_PLATFORM = 1
-  } ElfPlatform;
-
-  typedef enum {
     LLVMIR = 0,
     SOURCE,
     ILTEXT,

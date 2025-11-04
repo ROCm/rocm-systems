@@ -78,7 +78,7 @@ class Kernel : public device::Kernel {
     return reinterpret_cast<const Device&>(dev_);
   }
 
-  //! Returns the program associated with this kernel
+  //! Returns HSA program associated with this kernel
   const pal::Program& prog() const;
 
   //! Returns LDS size used in this kernel

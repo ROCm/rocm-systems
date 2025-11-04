@@ -431,7 +431,7 @@ static uint32_t GetHSAILImageFormatType(const cl_image_format& format) {
 }
 
 // ================================================================================================
-static uint32_t GetHSAILImageOrderType(const cl_image_format& format) {
+static uint32_t GetHSAImageOrderType(const cl_image_format& format) {
   static const uint32_t OrderType[] = {HSA_EXT_IMAGE_CHANNEL_ORDER_R,
                                        HSA_EXT_IMAGE_CHANNEL_ORDER_A,
                                        HSA_EXT_IMAGE_CHANNEL_ORDER_RG,
@@ -570,7 +570,7 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
 
     dev().iDev()->CreateTypedBufferViewSrds(1, &viewInfo, hwState_);
     hwState_[8] = GetHSAILImageFormatType(desc().format_);
-    hwState_[9] = GetHSAILImageOrderType(desc().format_);
+    hwState_[9] = GetHSAImageOrderType(desc().format_);
     hwState_[10] = static_cast<uint32_t>(desc().width_);
     hwState_[11] = 0;  // one extra reserved field in the argument
     return true;
@@ -742,7 +742,7 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   dev().iDev()->CreateImageViewSrds(1, &viewInfo, hwState_);
 
   hwState_[8] = GetHSAILImageFormatType(desc().format_);
-  hwState_[9] = GetHSAILImageOrderType(desc().format_);
+  hwState_[9] = GetHSAImageOrderType(desc().format_);
   hwState_[10] = static_cast<uint32_t>(desc().width_);
   hwState_[11] = 0;  // one extra reserved field in the argument
 
@@ -962,7 +962,7 @@ bool Resource::CreateInterop(CreateParams* params) {
       dev().iDev()->CreateImageViewSrds(1, &viewInfo, hwState_);
 
       hwState_[8] = GetHSAILImageFormatType(desc().format_);
-      hwState_[9] = GetHSAILImageOrderType(desc().format_);
+      hwState_[9] = GetHSAImageOrderType(desc().format_);
       hwState_[10] = static_cast<uint32_t>(desc().width_);
       hwState_[11] = 0;  // one extra reserved field in the argument
     }
@@ -984,7 +984,7 @@ bool Resource::CreateInterop(CreateParams* params) {
 
     dev().iDev()->CreateTypedBufferViewSrds(1, &viewInfo, hwState_);
     hwState_[8] = GetHSAILImageFormatType(desc().format_);
-    hwState_[9] = GetHSAILImageOrderType(desc().format_);
+    hwState_[9] = GetHSAImageOrderType(desc().format_);
     hwState_[10] = static_cast<uint32_t>(desc().width_);
     hwState_[11] = 0;  // one extra reserved field in the argument
   } else {
@@ -1048,7 +1048,7 @@ bool Resource::CreateInterop(CreateParams* params) {
       hwState_[1] = (hwState_[1] & ~0x1ff00000) | 0x08d00000;
     }
     hwState_[8] = GetHSAILImageFormatType(desc().format_);
-    hwState_[9] = GetHSAILImageOrderType(desc().format_);
+    hwState_[9] = GetHSAImageOrderType(desc().format_);
     hwState_[10] = static_cast<uint32_t>(desc().width_);
     hwState_[11] = 0;  // one extra reserved field in the argument
   }
