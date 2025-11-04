@@ -437,7 +437,7 @@ void aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
 /**
  * @brief Fn to create query and swap packets in case of double buffering.
  * The caller must pool information by sending a query_status packet, followed by a call
- * to aqlprofile_att_get_buffer_status(). If aqlprofile_att_buffer_status_v0_t.is_full, then
+ * to aqlprofile_att_get_buffer_status(). If aqlprofile_att_buffer_status_t.is_full, then
  * a buffer_swap packet must be inserted into the queue.
  * 
  * @param[out] header If not zero, must be inserted as first 8 bytes.
@@ -458,9 +458,9 @@ hsa_status_t aqlprofile_att_get_buffer_packets(uint64_t* header,
                                                int shader_engine_id,
                                                int flags);
 
-struct aqlprofile_att_buffer_status_v0_t
+struct aqlprofile_att_buffer_status_t
 {
-  uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_v0_t)
+  uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_t)
   void*    data;        // Read data from, if is full
   uint64_t read_size;   // Number of bytes to read, if is full
   uint64_t num_swaps;   // For verification purposes. Number of swaps previously executed.
@@ -479,7 +479,7 @@ struct aqlprofile_att_buffer_status_v0_t
  * @retval HSA_STATUS_SUCCESS if all packets created succesfully
  * @retval HSA_STATUS_ERROR otherwise
  */
-hsa_status_t aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_v0_t* out,
+hsa_status_t aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
                                                  aqlprofile_handle_t handle,
                                                  int shader_engine_id,
                                                  int flags);

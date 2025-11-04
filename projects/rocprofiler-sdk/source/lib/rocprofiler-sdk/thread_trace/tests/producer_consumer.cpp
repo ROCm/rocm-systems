@@ -40,12 +40,6 @@
 #include <algorithm>
 #include <unordered_set>
 
-#define ROCPROFILER_CALL(ARG, MSG)                                                                 \
-    {                                                                                              \
-        auto _status = (ARG);                                                                      \
-        EXPECT_EQ(_status, ROCPROFILER_STATUS_SUCCESS) << MSG << " :: " << #ARG;                   \
-    }
-
 namespace rocprofiler
 {
 namespace thread_trace
@@ -512,14 +506,14 @@ TEST(thread_trace, restart_after_overflow)
     threads.producer.join();
 
     // Verify that we saw both overflow and recovery
-    ASSERT_TRUE(state->seen_overflow.load()) << "Should have seen at least one overflow event";
-    ASSERT_TRUE(state->seen_normal_after_overflow.load())
+    EXPECT_TRUE(state->seen_overflow.load()) << "Should have seen at least one overflow event";
+    EXPECT_TRUE(state->seen_normal_after_overflow.load())
         << "Should have seen normal callbacks after overflow, indicating restart";
-    ASSERT_GT(state->overflow_count.load(), 0)
+    EXPECT_GT(state->overflow_count.load(), 0)
         << "Should have received callbacks with overflow flags";
-    ASSERT_GT(state->normal_count.load(), 0)
+    EXPECT_GT(state->normal_count.load(), 0)
         << "Should have received normal callbacks after overflow";
-    ASSERT_GT(state->total_callbacks.load(), state->overflow_count.load())
+    EXPECT_GT(state->total_callbacks.load(), state->overflow_count.load())
         << "Should have more total callbacks than just overflow events";
 }
 

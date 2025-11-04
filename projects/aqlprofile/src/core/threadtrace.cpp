@@ -354,7 +354,7 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
 extern "C" {
 
 PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
-  aqlprofile_att_buffer_status_v0_t* out,
+  aqlprofile_att_buffer_status_t* out,
   aqlprofile_handle_t handle,
   int shader_engine_id,
   int flags
@@ -368,7 +368,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
   volatile auto& control = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id];
   uint32_t status        = control.status_double_buffer;
 
-  out->_size       = sizeof(aqlprofile_att_buffer_status_v0_t);
+  out->_size       = sizeof(aqlprofile_att_buffer_status_t);
   out->is_too_late = false;
   out->needs_swap  = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetBufferFullMask()) != 0;
 
