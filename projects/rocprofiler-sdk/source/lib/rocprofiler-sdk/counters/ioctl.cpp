@@ -120,13 +120,11 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
 //     return ROCPROFILER_STATUS_SUCCESS;
 // }
 
-// For MI308, PTL needs to be disabled to collect some counters.
+// For some GPUs, PTL needs to be disabled to collect some counters.
 namespace ptl
 {
-
 namespace
 {
-
 namespace pc_sampling = rocprofiler::pc_sampling;
 
 template <typename T>
@@ -182,8 +180,8 @@ create_pc_sampling_session(int gpu_id, int ptl_state, int format1, int format2)
     args.op              = KFD_IOCTL_PCS_OP_CREATE;
     args.gpu_id          = gpu_id;
     args.num_sample_info = 1;
-    args.sample_info_ptr = (uint64_t) (&info);
-    args.trace_id        = 0;
+    args.sample_info_ptr = (uint64_t)(&info);
+    args.trace_id        = -1;
 
     const auto [ret, err] =
         check_ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
@@ -221,14 +219,16 @@ destroy_pc_sampling_session(int gpu_id, int trace_id)
         err,
         std::strerror(err));
 
-    ROCP_TRACE << fmt::format("PTL: Destroyed PC Sampling session with trace ID: %d",
-                              args.trace_id);
+    ROCP_INFO << fmt::format("PTL: Destroyed PC Sampling session with trace ID: %d", args.trace_id);
 }
 
 int
 enable_ptl(int gpu_id, int format1, int format2)
 {
     const auto trace_id = create_pc_sampling_session(gpu_id, 0, format1, format2);
+
+    // could not create a session
+    if(trace_id == -1) return -1;
 
     kfd_pc_sample_info info{};
     info.ptl_state    = 1;
@@ -240,9 +240,10 @@ enable_ptl(int gpu_id, int format1, int format2)
     args.gpu_id          = gpu_id;
     args.trace_id        = trace_id;
     args.num_sample_info = 1;
-    args.sample_info_ptr = (uint64_t) (&info);
+    args.sample_info_ptr = (uint64_t)(&info);
 
-    auto [ret, err] = check_ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
+    const auto [ret, err] =
+        check_ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
     if(err != 0)
     {
         ROCP_WARNING << fmt::format("PTL: Could not enable PTL for GPU %d: errno=%d (%s)\n",
@@ -260,13 +261,17 @@ enable_ptl(int gpu_id, int format1, int format2)
 
     destroy_pc_sampling_session(gpu_id, trace_id);
 
-    return 0;
+    return err;
 }
 
 int
 disable_ptl(int gpu_id)
 {
+    // Maybe KFD issue. Need to set this to 1 and then disable, create with 0 does not seem to work
     const auto trace_id = create_pc_sampling_session(gpu_id, 1, 0, 0);
+
+    // could not create a session
+    if(trace_id == -1) return -1;
 
     kfd_ioctl_pc_sample_args args{};
     args.op              = KFD_IOCTL_PCS_OP_STOP_PTL;
@@ -275,28 +280,26 @@ disable_ptl(int gpu_id)
     args.num_sample_info = 0;
     args.sample_info_ptr = 0;
 
+    const auto [ret, err] =
+        check_ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
+    if(err != 0)
     {
-        auto [ret, err] =
-            check_ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
-        if(err != 0)
-        {
-            ROCP_WARNING << fmt::format("PTL: Disable PTL failed on GPU %d. Counter collection may "
-                                        "be unavailable: errno=%d (%s): %s\n",
-                                        gpu_id,
-                                        err,
-                                        std::strerror(err));
-        };
-    }
+        ROCP_WARNING << fmt::format("PTL: Disable PTL failed on GPU %d. Counter collection may "
+                                    "be unavailable: errno=%d (%s): %s\n",
+                                    gpu_id,
+                                    err,
+                                    std::strerror(err));
+    };
 
     destroy_pc_sampling_session(gpu_id, trace_id);
 
-    return 0;
+    return err;
 }
 
 }  // namespace
 
 bool
-get_ptl_state(const rocprofiler_agent_t* agent)
+ptl_enabled(const rocprofiler_agent_t* agent)
 {
     const auto gpu_id           = agent->gpu_id;
     const auto num_sample_infos = get_num_sample_infos(gpu_id);
@@ -314,9 +317,10 @@ get_ptl_state(const rocprofiler_agent_t* agent)
     args.op              = KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES;
     args.gpu_id          = gpu_id;
     args.num_sample_info = num_sample_infos;
-    args.sample_info_ptr = (uint64_t) (samples.data());
+    args.sample_info_ptr = (uint64_t)(samples.data());
 
-    auto [ret, err] = check_ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
+    const auto [ret, err] =
+        check_ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
     if(ret != 0)
     {
         ROCP_WARNING << fmt::format("PTL: Failed to query PTL state for GPU %d: errno=%d (%s)",
@@ -334,7 +338,7 @@ get_ptl_state(const rocprofiler_agent_t* agent)
 
         if(samples[i].ptl_state != samples[0].ptl_state)
         {
-            ROCP_WARNING << fmt::format(
+            ROCP_ERROR << fmt::format(
                 "PTL: ptl_state is not the same in all reported samples from KFD");
         }
     }
@@ -342,31 +346,33 @@ get_ptl_state(const rocprofiler_agent_t* agent)
     return samples[0].ptl_state == 1;
 }
 
-static constexpr uint32_t MI308_PCIE_DID = 0x74a2;
+static constexpr uint32_t GPU_PCIE_DID = 0x74a2;
 
-void
+bool
 enable_ptl(const rocprofiler_agent_t* agent)
 {
-    if(agent->device_id == MI308_PCIE_DID && get_ptl_state(agent))
+    if(agent->device_id == GPU_PCIE_DID && ptl_enabled(agent))
     {
-        enable_ptl(agent->gpu_id, 1, 2);  // TODO: Formats
+        return enable_ptl(agent->gpu_id, 1, 2) == 0;  // TODO: Formats
     }
     else
     {
-        ROCP_INFO << "PTL: Ignoring PTL enable request for non-MI308 GPU";
+        ROCP_INFO << "PTL: Ignoring PTL enable request for unsupported device";
+        return false;
     }
 }
 
-void
+bool
 disable_ptl(const rocprofiler_agent_t* agent)
 {
-    if(agent->device_id == MI308_PCIE_DID && get_ptl_state(agent))
+    if(agent->device_id == GPU_PCIE_DID && ptl_enabled(agent))
     {
-        disable_ptl(agent->gpu_id);  // TODO: Formats
+        return disable_ptl(agent->gpu_id) == 0;
     }
     else
     {
-        ROCP_INFO << "PTL: Ignoring PTL disable request for non-MI308 GPU";
+        ROCP_INFO << "PTL: Ignoring PTL disable request for unsupported device";
+        return false;
     }
 }
 

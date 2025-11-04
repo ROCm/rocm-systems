@@ -36,12 +36,14 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
 
 namespace ptl
 {
+bool
+ptl_enabled(const rocprofiler_agent_t* agent);
 
 bool
-get_ptl_state(const rocprofiler_agent_t* agent);
-
-void
 enable_ptl(const rocprofiler_agent_t* agent);
+
+bool
+disable_ptl(const rocprofiler_agent_t* agent);
 
 }  // namespace ptl
 
