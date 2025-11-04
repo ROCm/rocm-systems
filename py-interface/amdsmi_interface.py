@@ -3186,8 +3186,6 @@ def amdsmi_get_gpu_xcd_counter(processor_handle: processor_handle_t) -> int:
     return xcd_counter.value
 
 def amdsmi_get_processor_handle_from_bdf(bdf):
-    if not isinstance(bdf, Any):
-        raise AmdSmiParameterException(bdf, Any)
     parsed_bdf = _parse_bdf(bdf)
     if parsed_bdf is None:
         raise AmdSmiParameterException(bdf, Any, 
