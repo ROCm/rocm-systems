@@ -218,11 +218,8 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
 , shader_engine_id(_shader_engine_id)
 {
     auto aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
-    if(!aqlprofile_dl || !aqlprofile_dl->valid())
-    {
-        ROCP_FATAL << "AQLProfile dynamic library not loaded or missing required symbols. "
-                   << "Cannot create SQTT buffering packets.";
-    }
+    ROCP_FATAL_IF(!aqlprofile_dl || !aqlprofile_dl->valid())
+        << "AQLProfile missing required symbols for triple buffer.";
 
     // We sometimes need 2x the number of packets as there are buffers.
     uint64_t num_packets{6};
@@ -248,7 +245,7 @@ SQTTBufferingPackets::query_buffer_status()
 {
     auto aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
     ROCP_FATAL_IF(!aqlprofile_dl || !aqlprofile_dl->valid())
-        << "AQLProfile dynamic library not valid. Cannot query buffer status.";
+        << "AQLProfile missing required symbols for triple buffer.";
 
     auto ret = aqlprofile_att_buffer_status_t{};
 
