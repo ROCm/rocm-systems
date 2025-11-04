@@ -790,6 +790,8 @@ hipError_t hipTexRefGetBorderColor(float* pBorderColor, const textureReference* 
 hipError_t hipTexRefGetArray(hipArray_t* pArray, const textureReference* texRef);
 hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                              hipDriverProcAddressQueryResult* symbolStatus = NULL);
+hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                                 hipDriverProcAddressQueryResult* symbolStatus = NULL);
 hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         const hipGraphNode_t* dependencies,
                                         const hipGraphEdgeData* dependencyData,
@@ -1377,6 +1379,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipTexRefGetBorderColor_fn = hip::hipTexRefGetBorderColor;
   ptrDispatchTable->hipTexRefGetArray_fn = hip::hipTexRefGetArray;
   ptrDispatchTable->hipGetProcAddress_fn = hip::hipGetProcAddress;
+  ptrDispatchTable->hipGetProcAddress_spt_fn = hip::hipGetProcAddress_spt;
   ptrDispatchTable->hipStreamBeginCaptureToGraph_fn = hip::hipStreamBeginCaptureToGraph;
   ptrDispatchTable->hipGetFuncBySymbol_fn = hip::hipGetFuncBySymbol;
   ptrDispatchTable->hipSetValidDevices_fn = hip::hipSetValidDevices;
@@ -2104,13 +2107,14 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetLibrary_fn, 503);
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetName_fn, 504);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
 HIP_ENFORCE_ABI(HipDispatchTable, hipOccupancyAvailableDynamicSMemPerBlock_fn, 505);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGetProcAddress_spt_fn, 506);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 506)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 507)
 
 static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 18,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
