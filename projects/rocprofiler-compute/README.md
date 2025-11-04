@@ -20,7 +20,7 @@ contribution process.
 
 ## Development
 
-ROCm Compute Profiler is now included in the rocm-systems super-repo. The latest sources are in the `develop` branch. You can find particular releases in the `release/rocm-rel-X.Y` branch for the particular release you're looking for.
+ROCm Compute Profiler is now included in the rocm-systems super-repo. The latest sources are in the `develop` branch. You can find particular releases in the `release/rocm-rel-X.Y` branch for the paricular release you're looking for.
 
 ### Pulling the source using sparse-checkout
 

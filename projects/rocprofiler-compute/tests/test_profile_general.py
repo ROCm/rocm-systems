@@ -156,7 +156,6 @@ ALL_CSVS_MI350 = sorted([
 
 ROOF_ONLY_FILES = sorted([
     "empirRoof_gpu-0_FP32.pdf",
-    "kernelName_legend.pdf",
     "pmc_perf.csv",
     "pmc_perf_0.csv",
     "pmc_perf_1.csv",
@@ -946,7 +945,6 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
         return
 
     # Test `--kernel` filtering outputs are present and labelled correctly
-    filter_kernelName = "kernelName_legend_" + config["kernel_name_1"]
     filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
 
     plot_configurations = [
@@ -967,7 +965,7 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
                 "--kernel",
                 config["kernel_name_1"],
             ],
-            "expected_files": [filter_kernelName, filter_empirRoof],
+            "expected_files": [filter_empirRoof],
         },
     ]
 
@@ -1387,10 +1385,7 @@ def test_roof_sort_dispatches(binary_handler_profile_rocprof_compute):
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    expected_files = ROOF_ONLY_FILES.copy()
-    expected_files.remove("kernelName_legend.pdf")
-    expected_files = sorted(expected_files)
-    assert sorted(list(file_dict.keys())) == expected_files
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1420,10 +1415,7 @@ def test_roof_sort_kernels(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    expected_files = ROOF_ONLY_FILES.copy()
-    expected_files.remove("kernelName_legend.pdf")
-    expected_files = sorted(expected_files)
-    assert sorted(list(file_dict.keys())) == expected_files
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1453,10 +1445,7 @@ def test_roof_mem_levels_vL1D(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    expected_files = ROOF_ONLY_FILES.copy()
-    expected_files.remove("kernelName_legend.pdf")
-    expected_files = sorted(expected_files)
-    assert sorted(list(file_dict.keys())) == expected_files
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
@@ -1486,10 +1475,7 @@ def test_roof_mem_levels_LDS(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    expected_files = ROOF_ONLY_FILES.copy()
-    expected_files.remove("kernelName_legend.pdf")
-    expected_files = sorted(expected_files)
-    assert sorted(list(file_dict.keys())) == expected_files
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     validate(
         inspect.stack()[0][3],
