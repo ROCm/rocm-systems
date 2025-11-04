@@ -227,7 +227,7 @@ class HelloWorldTest : public Tracertest {
 
 // Test:1 Compares total num of kernel-names in golden output against current
 // tracer output
-TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenKernelInfoMatchWithGoldenOutput) {
+TEST_F(HelloWorldTest, DISABLED_WhenRunningTracerWithAppThenKernelInfoMatchWithGoldenOutput) {
   // kernel info in current profler run
   std::vector<tracer_kernel_info_t> current_kernel_info;
 

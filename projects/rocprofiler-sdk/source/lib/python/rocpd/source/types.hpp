@@ -196,7 +196,8 @@ struct region
 {
     struct decoded_extdata
     {
-        std::string message = {};
+        std::optional<std::string> message   = {};
+        std::optional<std::string> operation = {};
     };
 
     uint64_t                id              = 0;
@@ -222,7 +223,8 @@ struct sample
 {
     struct decoded_extdata
     {
-        std::string message = {};
+        std::optional<std::string> message   = {};
+        std::optional<std::string> operation = {};
     };
 
     uint64_t                id              = 0;
@@ -636,6 +638,7 @@ void
 load(ArchiveT& ar, rocpd::types::region::decoded_extdata& data)
 {
     LOAD_DATA_FIELD(message);
+    LOAD_DATA_FIELD(operation);
 }
 
 template <typename ArchiveT>
@@ -662,6 +665,7 @@ void
 load(ArchiveT& ar, rocpd::types::sample::decoded_extdata& data)
 {
     LOAD_DATA_FIELD(message);
+    LOAD_DATA_FIELD(operation);
 }
 
 template <typename ArchiveT>
