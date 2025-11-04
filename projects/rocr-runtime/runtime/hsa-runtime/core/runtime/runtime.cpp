@@ -140,12 +140,21 @@ hsa_status_t Runtime::Release() {
 
   if (runtime_singleton_ == nullptr) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
-  if (runtime_singleton_->ref_count_ == 1) {
+  if (runtime_singleton_->ref_count_-- == 1) {
+    auto system_event_handlers = runtime_singleton_->GetSystemEventHandlers();
+
+    if (!system_event_handlers.empty()) {
+      hsa_amd_event_t system_shutdown_event = {} ;
+      system_shutdown_event.event_type = HSA_AMD_SYSTEM_SHUTDOWN_EVENT;
+      /* Remaining fields hsa_amd_event_t are empty */
+
+      for (auto& callback : system_event_handlers) {
+        callback.first(&system_shutdown_event, callback.second);
+      }
+    }
     // Release all registered memory, then unload backends
     runtime_singleton_->Unload();
   }
-
-  runtime_singleton_->ref_count_--;
 
   if (runtime_singleton_->ref_count_ == 0) {
     delete runtime_singleton_;
@@ -358,6 +367,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     //track the exporter BO to clear meta data via set_metadata
     //clear the set metadata here if possible if theres an existing ldrm_bo
     if (it->second.ldrm_bo) {
+#if defined(__linux__)
       struct amdgpu_bo_info info = {0};
       auto err = amdgpu_bo_query_info(it->second.ldrm_bo, &info);
 
@@ -365,6 +375,9 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
       amdgpu_bo_metadata zero_metadata = {0};
       memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
       amdgpu_bo_set_metadata(it->second.ldrm_bo, &zero_metadata);
+#else
+      assert(!"Unimplemented!");
+#endif
     }
 
     allocation_map_.erase(it);
@@ -533,7 +546,7 @@ hsa_status_t Runtime::CopyMemory(void* dst, const void* src, size_t size) {
   const auto& locked_copy = [&](void*& ptr, core::Agent* locking_agent) {
     void* tmp;
     hsa_agent_t agent = locking_agent->public_handle();
-    hsa_status_t err = system_region->Lock(1, &agent, ptr, 0, size, &tmp);
+    hsa_status_t err = system_region->Lock(1, &agent, ptr, size, 0, &tmp);
     if (err != HSA_STATUS_SUCCESS) throw AMD::hsa_exception(err, "Lock failed in hsa_memory_copy.");
     gpuPtr = ptr;
     ptr = tmp;
@@ -1373,6 +1386,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   if (err != HSA_STATUS_SUCCESS) return err;
 
   if (agent->device_type() == Agent::kAmdGpuDevice) {
+#if defined(__linux__)
     AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);    
     amdgpu_bo_import_result res;
 
@@ -1397,6 +1411,9 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       amdgpu_bo_set_metadata(res.buf_handle, &buf_info);
       allocation_map_[ptr].ldrm_bo = res.buf_handle;
     }
+#else
+    assert(!"Unimplemented!");
+#endif
   }
 
   close(dmabuf_fd);
@@ -1553,6 +1570,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
       if (ret) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (ipc_dmabuf_supported_ && !isSysMem) {
+#if defined(__linux__)
         // use the bo from the allocation map
         // Only check metadata for GPU memory
         struct amdgpu_bo_info info = {0};
@@ -1563,6 +1581,9 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
             fprintf(stderr, "IPC Attach: Invalid IPC handle! %u and %u\n", importHandle.handle[7], info.metadata.umd_metadata[0]);
             return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
+#else
+        assert(!"Unimplemented!");
+#endif
       }
       return HSA_STATUS_SUCCESS;
     };
@@ -3717,6 +3738,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
+#if defined(__linux__)
       if (munmap(va, size) != 0) return HSA_STATUS_ERROR;
 
       /* We need to keep the CPU mapping. So change it to PROT_NONE */
@@ -3727,6 +3749,10 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
         return HSA_STATUS_ERROR;
 
       permissions = HSA_ACCESS_PERMISSION_NONE;
+#else
+      assert(!"Unimplemented!");
+#endif
+
     }
   } else {
     return targetAgent->driver().Unmap(

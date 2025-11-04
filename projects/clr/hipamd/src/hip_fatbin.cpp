@@ -119,7 +119,6 @@ FatBinaryInfo::~FatBinaryInfo() {
     }
   }
   for (auto itemData : toDelete) {
-    LogPrintfInfo("~FatBinaryInfo(%p) will delete binary_image_ %p", this, itemData);
     delete[] reinterpret_cast<const char*>(itemData);
   }
   ReleaseImageAndFile();
@@ -383,8 +382,6 @@ static bool UncompressAndPopulateCodeObject(
 
         std::string bundle_entry = remove_file_extension(
             std::string(item_bundle_id.c_str() + sizeof(symbols::kOffloadHipV4FatBinName_) - 1));
-        LogPrintfInfo("Inserting bundle entry of %s : size: %d, data: %p", bundle_entry.c_str(),
-                      item_size, item_data);
         code_obj_map[bundle_entry] = std::make_pair(item_data, item_size);
       }
     }
@@ -510,8 +507,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     std::string device_name = device->devices()[0]->isa().isaName();
     unique_isa_names.insert(device_name);
     auto generic_name = TargetToGeneric(device_name);
-    LogPrintfInfo("Looking up generic name of : %s - %s", device_name.c_str(),
-                  generic_name.c_str());
     if (!generic_name.empty()) {
       unique_isa_names.insert(generic_name);
     }
@@ -537,13 +532,10 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       auto generic_target_name = TargetToGeneric(device_name);   // Generic Code Object
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
-      LogPrintfInfo("Device name: %s Generic name: %s", device_name.c_str(),
-                    generic_target_name.c_str());
+
 
       // If the size is not 0, that means we found the native isa code object
       if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using Native code object: %s", device->devices()[0]->isa().targetId());
-
         // We need to do this because there is existing mechanism which deletes code object in
         // destructor. Ideally next set of refactor should sort it.
         char* co = new char[native_co->second.second];
@@ -554,8 +546,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using Generic code object: %s : %s", device->devices()[0]->isa().targetId(),
-                      generic_target_name.c_str());
         char* co = new char[generic_co->second.second];
         std::memcpy(co, reinterpret_cast<const char*>(generic_co->second.first),
                     generic_co->second.second);
@@ -566,7 +556,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       } else if (spirv_isa_found) {
         std::string target_id = device->devices()[0]->isa().targetId();
         std::string isa = "amdgcn-amd-amdhsa--" + target_id;
-        LogPrintfInfo("Creating ISA for: %s from spirv", target_id.c_str());
 
         comgr_helper::ComgrDataSetUniqueHandle spirv_data_set;
         comgr_helper::ComgrDataSetUniqueHandle reloc_data;

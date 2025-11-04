@@ -517,3 +517,8 @@ hipLibraryUnload
 hipLibraryGetKernel
 hipLibraryGetKernelCount
 hipStreamCopyAttributes
+hipLibraryEnumerateKernels
+hipKernelGetLibrary
+hipKernelGetName
+hipOccupancyAvailableDynamicSMemPerBlock
+hipGetProcAddress_spt
