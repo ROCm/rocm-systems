@@ -505,7 +505,7 @@ def parse_args(args=None):
 
     index = 0
     input_args = []
-    ctest_args = ["--verbose"]
+    ctest_args = []
     cmake_args = []
     data = [input_args, cmake_args, ctest_args]
     cmd = os.path.basename(sys.argv[0])
