@@ -177,6 +177,7 @@ Metadata JSON Sample
             ]
             },
             "environment": [
+<<<<<<< HEAD
             {
                "key": "GOTCHA_DEBUG",
                "value": "0"
@@ -189,6 +190,8 @@ Metadata JSON Sample
                "key": "HOME",
                "value": "/home/rocm-dev"
             },
+=======
+>>>>>>> 6356c179ff ([ROCm Systems Profiler] 7.1.0 Formatting updated for understanding rocpd output docs" (#1663))
             {
                "key": "LD_LIBRARY_PATH",
                "value": "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib:/opt/rocm/lib"
