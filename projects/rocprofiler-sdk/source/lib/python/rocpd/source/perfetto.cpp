@@ -518,21 +518,27 @@ write_perfetto(
         {
             auto gen = kernel_dispatch_gen.get(ditr);
 
-            // Temporary fix until timestamp issues are resolved: Set timestamps to be
-            // halfway between ending timestamp and starting timestamp of overlapping
-            // kernel dispatches. Perfetto displays slices incorrectly if overlapping
-            // slices on the same track are not completely enveloped.
+            // Temporary fix until timestamp issues are resolved:
+            // Kernel dispatches executing on the same agent/queue/stream may have overlapping
+            // timestamps due to firmware reporting inaccuracies. Perfetto requires non-overlapping
+            // time slices on the same track for proper visualization.
+            // In the initial fix, the timestamps were set halfway between the ending timestamp and
+            // starting timestamp of overlapping kernel dispatches. In cases when one slice was
+            // completely overlapped by another one, this halfway point could fall before the
+            // beginning of the first slice or after the ending of the second one, making the duration
+            // of the slice negative.
+            // In the new fix, the halfway point is placed between the midpoints of the two overlapping slices.
             {
                 struct kernel_dispatch_group_index
                 {
-                    uint64_t agent_abs_index;
+                    uint64_t agent_absolute_index = 0;
                     uint64_t stream_id = 0;
                     uint64_t queue_id  = 0;
 
                     bool operator<(const kernel_dispatch_group_index& other) const
                     {
-                        if(agent_abs_index != other.agent_abs_index)
-                            return agent_abs_index < other.agent_abs_index;
+                        if(agent_absolute_index != other.agent_absolute_index)
+                            return agent_absolute_index < other.agent_absolute_index;
 
                         if(queue_id != other.queue_id) return queue_id < other.queue_id;
 
@@ -549,21 +555,25 @@ write_perfetto(
                 std::map<kernel_dispatch_group_index, std::vector<kernel_dispatch_data>>
                     kernel_groups;
 
+                // The visualization problem only happens for overlapping dispatches on the same agent/queue/stream.
+                // Separate all dispatches into groups based on their execution context.
                 for(auto it = begin(gen); it != end(gen); ++it)
                 {
                     kernel_dispatch_group_index group_index;
-                    group_index.agent_abs_index = it->agent_abs_index;
+                    group_index.agent_absolute_index = it->agent_abs_index;
                     if(ocfg.group_by_queue)
                         group_index.queue_id = it->queue_id;
                     else
                         group_index.stream_id = it->stream_id;
 
+                    // Define each dispatch by the middle timestap to keep their relative order correct.
                     kernel_groups[group_index].push_back({it, it->start / 2 + it->end / 2});
                 }
 
                 for(auto group_it = begin(kernel_groups); group_it != end(kernel_groups);
                     ++group_it)
                 {
+                    // Sort dispatches within the group by timestamp to ensure proper temporal ordering.
                     auto& group_data = group_it->second;
                     std::sort(begin(group_data),
                               end(group_data),
@@ -571,6 +581,7 @@ write_perfetto(
                                   return a.timestamp < b.timestamp;
                               });
 
+                    // Adjust end and start timestamps of consecutive dispatches to remove overlaps.
                     for(auto sample_it = group_data.begin(); sample_it != group_data.end() - 1;
                         ++sample_it)
                     {
@@ -579,23 +590,26 @@ write_perfetto(
                         auto current_it = sample_it->sample;
                         auto next_it    = next_sample_it->sample;
 
+                        // Skip overlap handling if there is no overlap
                         if(next_it->start >= current_it->end) continue;
 
-                        auto current_time = sample_it->timestamp;
-                        auto next_time    = next_sample_it->timestamp;
+                        auto current_midpoint = sample_it->timestamp;
+                        auto next_midpoint    = next_sample_it->timestamp;
 
-                        auto   current_half_span = current_it->end - current_time;
-                        auto   next_half_span    = next_time - next_it->start;
-                        auto   total_span        = current_half_span + next_half_span;
-                        auto   max_span          = next_time - current_time;
+                        auto current_mid_to_end_duration = current_it->end - current_midpoint;
+                        auto next_start_to_mid_duration  = next_midpoint - next_it->start;
+                        auto total_span        = current_mid_to_end_duration + next_start_to_mid_duration; // Total duration to redistribute
+                        auto max_span          = next_midpoint - current_midpoint; // Available space between midpoints
+
+                        // Preserve the proportions of each dispatch within the overlapped region to minimize the timing error.
                         double scale_factor =
                             (total_span > 0) ? static_cast<double>(max_span) / total_span : 0.0;
 
-                        auto new_current_end = current_time + static_cast<rocprofiler_timestamp_t>(
-                                                                  current_half_span * scale_factor);
+                        auto new_current_end = current_midpoint + static_cast<rocprofiler_timestamp_t>(
+                                                                  current_mid_to_end_duration * scale_factor);
 
-                        auto new_next_start = next_time - static_cast<rocprofiler_timestamp_t>(
-                                                              next_half_span * scale_factor);
+                        auto new_next_start = next_midpoint - static_cast<rocprofiler_timestamp_t>(
+                                                              next_start_to_mid_duration * scale_factor);
 
                         // Report changed timestamps to ROCP INFO
                         ROCP_INFO << fmt::format(
