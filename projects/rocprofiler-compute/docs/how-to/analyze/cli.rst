@@ -15,8 +15,6 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 * :ref:`Metric customization <cli-analysis-options>`: Isolate a subset of built-in metrics or build your own profiling configuration.
 
 * :ref:`Filtering <cli-analysis-options>`: Hone in on a particular kernel, GPU ID, or dispatch ID via post-process filtering.
-  
-* :ref:`Per-kernel roofline analysis <per-kernel-roofline>`: Detailed arithmetic intensity and performance analysis for individual kernels.
 
 Run ``rocprof-compute analyze -h`` for more details.
 
