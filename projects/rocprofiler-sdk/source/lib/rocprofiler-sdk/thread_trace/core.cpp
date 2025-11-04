@@ -319,7 +319,7 @@ ThreadTracerAgent::stop_thread_trace()
     }
     else
     {
-        auto control_packet = get_control(true);
+        auto control_packet = get_control(false);
         control_packet->clear();
         // Join helpers and emit the final set of packets so the GPU drains.
         control_packet->populate_after();
