@@ -52,37 +52,6 @@
 
 namespace amd::pal {
 
-AqlPacketMgmt::AqlPacketMgmt(const Device& dev) {
-  memset(aql_vgpus_, 0, sizeof(aql_vgpus_));
-
-  static_assert(sizeof(decltype(amd_queue_)::read_dispatch_id) == sizeof(uint64_t));
-  static_assert(sizeof(decltype(amd_queue_)::write_dispatch_id) == sizeof(uint64_t));
-
-  // Initialize the amd_queue_
-  amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_MULTI;
-  amd_queue_.hsa_queue.features = HSA_QUEUE_FEATURE_KERNEL_DISPATCH;
-  amd_queue_.hsa_queue.base_address = &aql_packets_[0];
-  amd_queue_.hsa_queue.size = sizeof(aql_packets_) / sizeof(aql_packets_[0]);
-  amd_queue_.hsa_queue.id = []() {
-    static std::atomic<uint64_t> queue_counter;
-    return queue_counter++;
-  }();
-  amd_queue_.read_dispatch_id_field_base_byte_offset =
-      offsetof(decltype(amd_queue_), read_dispatch_id) - offsetof(decltype(amd_queue_), hsa_queue);
-
-  amd_queue_.max_cu_id = dev.properties().gfxipProperties.shaderCore.numAvailableCus - 1;
-  amd_queue_.max_wave_id = dev.properties().gfxipProperties.shaderCore.numSimdsPerCu *
-          dev.properties().gfxipProperties.shaderCore.numWavefrontsPerSimd -
-      1;
-
-  amd_queue_.private_segment_aperture_base_hi = static_cast<uint32_t>(
-      dev.properties().gpuMemoryProperties.privateApertureBase >> LP64_SWITCH(0, 32));
-  amd_queue_.group_segment_aperture_base_hi = static_cast<uint32_t>(
-      dev.properties().gpuMemoryProperties.sharedApertureBase >> LP64_SWITCH(0, 32));
-
-  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64, LP64_SWITCH(0, 1));
-}
-
 uint32_t VirtualGPU::Queue::AllocedQueues(const VirtualGPU& gpu, Pal::EngineType type) {
   uint32_t allocedQueues = 0;
   for (const auto& queue : gpu.dev().QueuePool()) {
@@ -182,13 +151,13 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       uint32_t index = AllocedQueues(gpu, qCreateInfo.engineType);
       // Create PAL queue object
       if (index < GPU_MAX_HW_QUEUES) {
-        Device::QueueRecycleInfo* info = new (qSize) Device::QueueRecycleInfo(gpu.dev());
+        Device::QueueRecycleInfo* info = new (qSize) Device::QueueRecycleInfo();
         if (info == nullptr) {
           LogError("Could not create QueueRecycleInfo!");
           return nullptr;
         }
         addrQ = reinterpret_cast<address>(&info[1]);
-        qCreateInfo.aqlPacketList = info->DebuggerData();
+        qCreateInfo.aqlPacketList = info->AqlPacketList();
         result = palDev->CreateQueue(qCreateInfo, addrQ, &queue->iQueue_);
         if (result == Pal::Result::Success) {
           const_cast<Device&>(gpu.dev()).QueuePool().insert({queue->iQueue_, info});
@@ -224,7 +193,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       queue->lock_ = &info->queue_lock_;
       addrQ = reinterpret_cast<address>(&queue[1]);
     } else {
-      Device::QueueRecycleInfo* info = new Device::QueueRecycleInfo(gpu.dev());
+      Device::QueueRecycleInfo* info = new Device::QueueRecycleInfo();
       if (info == nullptr) {
         LogError("Could not create QueueRecycleInfo!");
         return nullptr;
@@ -233,7 +202,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       queue->aql_mgmt_ = &info->aql_packet_mgmt_;
       // Exclusive compute path
       addrQ = reinterpret_cast<address>(&queue[1]);
-      qCreateInfo.aqlPacketList = info->DebuggerData();
+      qCreateInfo.aqlPacketList = info->AqlPacketList();
       result = palDev->CreateQueue(qCreateInfo, addrQ, &queue->iQueue_);
     }
     if (result != Pal::Result::Success) {
@@ -1103,7 +1072,7 @@ VirtualGPU::~VirtualGPU() {
   if (queues_[MainEngine] != nullptr) {
     // Clear all timestamps, associated with this virtual GPU
     auto& mgmt = *queues_[MainEngine]->aql_mgmt_;
-    for (uint32_t i = 0; i < mgmt.amd_queue_.hsa_queue.size; ++i) {
+    for (uint32_t i = 0; i < AqlPacketMgmt::kAqlPacketsListSize; ++i) {
       if (mgmt.aql_vgpus_[i] == this) {
         mgmt.aql_vgpus_[i] = nullptr;
         mgmt.aql_events_[i].invalidate();
@@ -2719,14 +2688,12 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   GpuEvent gpuEvent(queues_[MainEngine]->cmdBufId());
   uint32_t id = gpuEvent.id_;
   uint64_t vmParentWrap = 0;
+  uint32_t aql_index = 0;
   // Program the kernel arguments for the GPU execution
-  auto&& [aqlPkt, aql_packet_id] =
+  hsa_kernel_dispatch_packet_t* aqlPkt =
       hsaKernel.loadArguments(*this, kernel, sizes, parameters, ldsSize + sharedMemBytes,
-                              vmDefQueue, &vmParentWrap);
+                              vmDefQueue, &vmParentWrap, &aql_index);
   assert((nullptr != aqlPkt) && "Couldn't load kernel arguments");
-
-  auto& amd_queue = queues_[MainEngine]->aql_mgmt_->amd_queue_;
-  uint32_t aql_index = aql_packet_id % amd_queue.hsa_queue.size;
 
   // Dynamic call stack size is considered to calculate private segment size and scratch regs
   // in pal::Kernel::postLoad(). As it is not called during hipModuleLaunchKernel unlike
@@ -2762,46 +2729,9 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   dispatchParam.useAtc = dev().settings().svmFineGrainSystem_ ? true : false;
   dispatchParam.kernargSegmentSize = hsaKernel.argsBufferSize();
   dispatchParam.aqlPacketIndex = aql_index;
-
-  // Update the mqd's information about scratch memory.
-  amd_queue.scratch_backing_memory_location = static_cast<uint64_t>(dispatchParam.scratchAddr);
-  amd_queue.scratch_backing_memory_byte_size = static_cast<uint64_t>(dispatchParam.scratchSize);
-
-  // FIXME: Conservatively, the read_dispatch_id cannot be smaller than the current aql_packet_id -
-  // hsa_queue.size for the debugger to work correctly. The read_dispatch_id really should be
-  // updated when the CmdBuf is marked as complete.
-  uint64_t new_read_dispatch_id = (aql_packet_id >= amd_queue.hsa_queue.size)
-      ? (aql_packet_id - amd_queue.hsa_queue.size + 1)
-      : 0;
-
-  // Do an atomic max of &amd_queue.read_dispatch_id and new_read_dispatch_id
-  uint64_t old_read_dispatch_id = amd_queue.read_dispatch_id;
-  while (new_read_dispatch_id > old_read_dispatch_id) {
-#if defined(__GNUC__)
-    if (__atomic_compare_exchange_n(&amd_queue.read_dispatch_id, &old_read_dispatch_id,
-                                    new_read_dispatch_id, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
-      break;
-#elif defined(_MSC_VER)
-    uint64_t initial_value = InterlockedCompareExchange64(
-        reinterpret_cast<LONG64 volatile*>(&amd_queue.read_dispatch_id), new_read_dispatch_id,
-        old_read_dispatch_id);
-    if (initial_value == old_read_dispatch_id) break;
-    old_read_dispatch_id = initial_value;
-#else  // !defined (_MSV_VER) && !defined(__GNUC__)
-#error Not implemented
-#endif  // !defined (_MSV_VER) && !defined(__GNUC__)
-  }
-
   // Run AQL dispatch in HW
   eventBegin(MainEngine);
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 954
   iCmd()->CmdDispatchAql(dispatchParam);
-#else  // PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 954
-  Pal::DispatchAqlFeedback feedback{};
-  iCmd()->CmdDispatchAql(dispatchParam, &feedback);
-  amd_queue.compute_tmpring_size = feedback.tmpRingSize;
-#endif  // PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 954
 
   if (id != gpuEvent.id_) {
     LogError("Something is wrong. ID mismatch!\n");

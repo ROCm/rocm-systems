@@ -86,7 +86,6 @@
         "Unit_hipLaunchCooperativeKernel_Negative_Parameters",
         "Unit_hipLaunchKernel_Negative_Parameters",
         "Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters",
-        "Unit_Device_modf_modff_Negative_RTC",
         "SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it",
         "=== Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===",
         "Unit_Assert_Positive_Basic_KernelFail",

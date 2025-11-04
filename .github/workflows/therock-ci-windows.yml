@@ -52,6 +52,7 @@ jobs:
 
       - name: Patch rocm-systems
         run: |
+          rm ./TheRock/patches/amd-mainline/rocm-systems/0010-clr-ClPrint-std-string-to-c-string-fix.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Install requirements
