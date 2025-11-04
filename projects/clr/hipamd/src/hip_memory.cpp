@@ -113,9 +113,7 @@ hipError_t ihipFree(void* ptr) {
 
       // External mem is not svm.
       if (memory_object->isInterop()) {
-        const void* base_ptr =
-            static_cast<const void*>(reinterpret_cast<const char*>(ptr) - offset);
-        amd::MemObjMap::RemoveMemObj(base_ptr);
+        amd::MemObjMap::RemoveMemObj(ptr);
         memory_object->release();
       } else {
         amd::SvmBuffer::free(memory_object->getContext(), ptr);
@@ -180,10 +178,9 @@ hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t e
   if (devMem == nullptr || ((bufferDesc->offset + bufferDesc->size) > devMem->size())) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(devMem->virtualAddress()), buf);
-  buf->retain();
-
   *devPtr = reinterpret_cast<void*>(devMem->virtualAddress() + bufferDesc->offset);
+  amd::MemObjMap::AddMemObj(*devPtr, buf);
+  buf->retain();
   HIP_RETURN(hipSuccess);
 }
 
