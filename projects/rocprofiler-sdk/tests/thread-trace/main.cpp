@@ -33,7 +33,7 @@
 #include <iostream>
 #include "hip/hip_runtime.h"
 
-// Eight waves per SIMD on MI300
+// 304 CUs * 64 threads * 4 simds * 8 slots on MI300
 #define DATA_SIZE          (304 * 256 * 8)
 #define HIP_API_CALL(CALL) assert((CALL) == hipSuccess)
 
@@ -76,10 +76,10 @@ main(int /*argc*/, char** /*argv*/)
     HIP_API_CALL(hipDeviceSynchronize());
     roctxProfilerResume(0);
 
-    bool is_double_buffer = std::getenv("TRIPLEBUFFER") ? atoi(std::getenv("TRIPLEBUFFER")) : false;
+    bool is_triple_buffer = std::getenv("TRIPLEBUFFER") ? atoi(std::getenv("TRIPLEBUFFER")) : false;
 
     int loopcount = LOOPCOUNT;
-    if(is_double_buffer) loopcount = 30000;
+    if(is_triple_buffer) loopcount = 30000;
 
     for(int i = 0; i < loopcount; i++)
     {
@@ -87,7 +87,7 @@ main(int /*argc*/, char** /*argv*/)
             branching_kernel, dim3(DATA_SIZE / 64), dim3(64), 0, 0, dst.ptr, src1.ptr, src2.ptr);
         HIP_API_CALL(hipGetLastError());
 
-        uint32_t tracedata = is_double_buffer ? i : 0xDEADBEEF;
+        uint32_t tracedata = is_triple_buffer ? i : 0xDEADBEEF;
         hipLaunchKernelGGL(looping_lds_kernel,
                            dim3(DATA_SIZE / 64),
                            dim3(64),
