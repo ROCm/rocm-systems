@@ -50,8 +50,7 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
 
   size_t granularity = 0;
 
-  hipMemAllocationProp memAllocationProp;
-  std::memset(&memAllocationProp, 0, sizeof(hipMemAllocationProp));
+  hipMemAllocationProp memAllocationProp{};
   memAllocationProp.type = hipMemAllocationTypePinned;
   memAllocationProp.location.id = 0;
   memAllocationProp.location.type = hipMemLocationTypeDevice;
@@ -111,8 +110,7 @@ TEST_CASE("Unit_hipMemVmm_Uncached") {
 
   size_t granularity = 0;
 
-  hipMemAllocationProp memAllocationProp;
-  std::memset(&memAllocationProp, 0, sizeof(hipMemAllocationProp));
+  hipMemAllocationProp memAllocationProp{};
   memAllocationProp.type = hipMemAllocationTypeUncached;
   memAllocationProp.location.id = 0;
   memAllocationProp.location.type = hipMemLocationTypeDevice;
