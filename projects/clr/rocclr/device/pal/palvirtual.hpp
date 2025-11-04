@@ -36,11 +36,6 @@
 #include "palQueue.h"
 #include "palFence.h"
 #include "palLinearAllocator.h"
-#include "amd_hsa_queue.h"
-
-#ifdef _WIN32
-#include <winnt.h>
-#endif  // _WIN32
 
 /*! \addtogroup PAL PAL Resource Implementation
  *  @{
@@ -60,13 +55,12 @@ class Kernel;
 
 struct AqlPacketMgmt : public amd::EmbeddedObject {
   static constexpr uint32_t kAqlPacketsListSize = 4 * Ki;
-  AqlPacketMgmt(const Device& dev);
+  AqlPacketMgmt() : packet_index_(0) { memset(aql_vgpus_, 0, sizeof(aql_vgpus_)); }
 
-  amd_queue_t amd_queue_{};
-  alignas(sizeof(hsa_kernel_dispatch_packet_t))
-      hsa_kernel_dispatch_packet_t aql_packets_[kAqlPacketsListSize];  //!< The list of AQL packets
+  hsa_kernel_dispatch_packet_t aql_packets_[kAqlPacketsListSize];  //!< The list of AQL packets
   GpuEvent aql_events_[kAqlPacketsListSize];    //!< The list of gpu for each AQL packet
   VirtualGPU* aql_vgpus_[kAqlPacketsListSize];  //!< The list of vgpus which had submissions
+  std::atomic<uint64_t> packet_index_;          //!< The active packet slot index
 };
 
 enum class BarrierType : uint8_t {
@@ -602,26 +596,15 @@ class VirtualGPU : public device::VirtualDevice {
   }
 
   //! Returns the current active slot for AQL packet
-  std::pair<hsa_kernel_dispatch_packet_t* /* packet address */, uint64_t /* packet id */>
-  GetAqlPacketSlot() const {
+  hsa_kernel_dispatch_packet_t* GetAqlPacketSlot(uint32_t* index) {
     auto& mgmt = *queues_[MainEngine]->aql_mgmt_;
     // Atomic increment global AQL index and wrap around max AQL list size
-    uint64_t packet_id =
-#if defined(__GNUC__)
-        __atomic_fetch_add(&mgmt.amd_queue_.write_dispatch_id, 1, __ATOMIC_RELAXED);
-#elif defined(_MSC_VER)
-        InterlockedExchangeAdd64(
-            reinterpret_cast<LONG64 volatile*>(&mgmt.amd_queue_.write_dispatch_id), 1);
-#else  // !defined (_MSV_VER) && !defined(__GNUC__)
-#error Not implemented
-#endif  // !defined (_MSV_VER) && !defined(__GNUC__)
-
-    uint32_t index = packet_id % mgmt.amd_queue_.hsa_queue.size;
-    if (mgmt.aql_events_[index].isValid()) {
+    *index = ++mgmt.packet_index_ % AqlPacketMgmt::kAqlPacketsListSize;
+    if (mgmt.aql_events_[*index].isValid()) {
       // Make sure GPU doesn't process this slot
-      mgmt.aql_vgpus_[index]->waitForEvent(&mgmt.aql_events_[index]);
+      mgmt.aql_vgpus_[*index]->waitForEvent(&mgmt.aql_events_[*index]);
     }
-    return {&mgmt.aql_packets_[index], packet_id};
+    return &mgmt.aql_packets_[*index];
   }
 
  protected:

@@ -20,15 +20,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-set(CMAKE_BUILD_TYPE "Release")
-find_package(Threads REQUIRED)
+# -------------------------------------------------------------------------------------- #
+#
+# thread-limit tests
+#
+# -------------------------------------------------------------------------------------- #
 
-add_library(tests-compile-options INTERFACE)
-target_compile_options(tests-compile-options INTERFACE -g)
-
-add_executable(thread-limit thread-limit.cpp)
-target_compile_definitions(thread-limit PRIVATE MAX_THREADS=${ROCPROFSYS_MAX_THREADS})
-target_link_libraries(thread-limit PRIVATE Threads::Threads tests-compile-options)
+if(NOT TARGET thread-limit)
+    return()
+endif()
 
 set(_thread_limit_environment
     "${_base_environment}"
@@ -40,6 +40,7 @@ set(_thread_limit_environment
     "ROCPROFSYS_VERBOSE=2"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,peak_rss,page_rss"
 )
+
 # Maximum allowed threads
 set(ALLOWED_MAX_THREADS 4096)
 
