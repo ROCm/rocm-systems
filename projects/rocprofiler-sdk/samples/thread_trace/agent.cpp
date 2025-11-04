@@ -120,17 +120,14 @@ gen_output_stream()
     std::vector<Element> sorted(latencies->begin(), latencies->end());
     std::stable_sort(sorted.begin(), sorted.end(), [](const Element& a, const Element& b) {
         return a.second.latency > b.second.latency;
-        // return a.first.address < b.first.address;
     });
 
-    output << "Top 20 hotspots for trace (cycles):\n";
-    for(size_t i = 0; i < sorted.size() && i < 20; i++)
+    output << "Top 50 hotspots for trace (cycles):\n";
+    for(size_t i = 0; i < sorted.size() && i < 50; i++)
     {
         auto& addr    = sorted.at(i).first;
         auto& latency = sorted.at(i).second;
-
-        if(addr.code_object_id == 0) continue;
-        auto inst = table->get(addr.code_object_id, addr.address);
+        auto  inst    = table->get(addr.code_object_id, addr.address);
 
         auto   comment = inst->comment;
         size_t pos     = comment.rfind('/');
@@ -160,41 +157,46 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                               rocprofiler_user_data_t* /* user_data */,
                               void* /* userdata */)
 {
-    if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
-    if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
-    if(record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD) return;
-
-    CHECK_NOTNULL(Results::table);
-    auto* data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
-
-    if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+       record.operation == ROCPROFILER_CODE_OBJECT_LOAD &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
     {
+        CHECK_NOTNULL(Results::table);
+        auto* data =
+            static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
+
+        if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+        {
+            Results::table->addDecoder(
+                data->uri, data->code_object_id, data->load_delta, data->load_size);
+            return;
+        }
+
+        auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
+        CHECK_NOTNULL(memorybase);
+
+        DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(decoder,
+                                                                   data->code_object_id,
+                                                                   data->load_delta,
+                                                                   data->load_size,
+                                                                   memorybase,
+                                                                   data->memory_size));
+
         Results::table->addDecoder(
-            data->uri, data->code_object_id, data->load_delta, data->load_size);
-        return;
+            memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
     }
-
-    auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
-    CHECK_NOTNULL(memorybase);
-
-    DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(decoder,
-                                                               data->code_object_id,
-                                                               data->load_delta,
-                                                               data->load_size,
-                                                               memorybase,
-                                                               data->memory_size));
-
-    Results::table->addDecoder(
-        memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
 }
 
-std::vector<char>   output_buffer(1ul << 30);
-std::atomic<size_t> output_size{0};
-size_t              total_insts{0};
-
 void
-parse_output()
+shader_data_callback(rocprofiler_agent_id_t /* agent */,
+                     int64_t /* se_id */,
+                     void*  se_data,
+                     size_t data_size,
+                     rocprofiler_thread_trace_shader_data_flags_t /* flags */,
+                     rocprofiler_user_data_t /* userdata */)
 {
+    CHECK_NOTNULL(Results::latencies);
+
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          events,
                     uint64_t                                       num_events,
@@ -217,13 +219,6 @@ parse_output()
                 }
             }
         }
-        else if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO)
-        {
-            auto* infos = (rocprofiler_thread_trace_decoder_info_t*) events;
-            for(size_t i = 0; i < num_events; i++)
-                std::cerr << rocprofiler_thread_trace_decoder_info_string(decoder, infos[i])
-                          << std::endl;
-        }
 
         if(record_type_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
 
@@ -237,52 +232,10 @@ parse_output()
                 latency.latency += inst.duration;
                 latency.hitcount += 1;
             }
-            total_insts += wave->instructions_size;
         }
     };
 
-    std::cout << "Total size: " << output_size / 1024 / 1024 << " MB" << std::endl;
-    DECODER_CALL(rocprofiler_trace_decode(decoder,
-                                          parse,
-                                          output_buffer.data(),
-                                          std::min(output_size.load(), output_buffer.size()),
-                                          nullptr));
-    output_size = 0;
-    std::cout << "Total instructions: " << total_insts / 1000000 << " M" << std::endl;
-};
-
-void
-shader_data_callback(rocprofiler_agent_id_t /* agent */,
-                     int64_t /* se_id */,
-                     void*  se_data,
-                     size_t data_size,
-                     rocprofiler_thread_trace_shader_data_flags_t /* flags */,
-                     rocprofiler_user_data_t /* userdata */)
-{
-    CHECK_NOTNULL(Results::latencies);
-
-    size_t location = output_size.fetch_add(data_size);
-    void*  output   = output_buffer.data();
-
-    // Discard
-    if(location >= output_buffer.size()) return;
-
-    data_size = std::min(data_size, output_buffer.size() - location);
-
-    auto is_ptr_mod8 = [](void* data) { return (reinterpret_cast<std::uintptr_t>(data) % 8) == 0; };
-    auto is_int_mod8 = [](size_t data) { return (data % 8) == 0; };
-
-    if(is_int_mod8(location) && is_int_mod8(data_size) && is_ptr_mod8(se_data) &&
-       is_ptr_mod8(output))
-    {
-        for(size_t j = 0; j < data_size / 8; j++)
-            static_cast<uint64_t*>(output)[j + location / 8] = static_cast<uint64_t*>(se_data)[j];
-    }
-    else
-    {
-        for(size_t j = 0; j < data_size; j++)
-            static_cast<char*>(output)[j + location] = static_cast<char*>(se_data)[j];
-    }
+    DECODER_CALL(rocprofiler_trace_decode(decoder, parse, se_data, data_size, nullptr));
 }
 
 }  // namespace Decoder
@@ -308,12 +261,10 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, 1});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1ul << 25});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 1});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, 0xF});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
-                              ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {TARGET_CU}});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {BUFFER_SIZE}});
+        parameters.push_back(
+            {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {SHADER_MASK}});
 
         ROCPROFILER_CALL(
             rocprofiler_configure_device_thread_trace_service(agent_ctx,
@@ -323,7 +274,6 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
                                                               Decoder::shader_data_callback,
                                                               user),
             "thread trace service configure");
-        break;
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -339,7 +289,6 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
        record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause)
     {
         ROCPROFILER_CALL(rocprofiler_stop_context(agent_ctx), "stopping context");
-        Decoder::parse_output();
     }
     else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
             record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume)

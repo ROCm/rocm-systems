@@ -237,7 +237,7 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
 std::optional<sqtt_buffer_status_t>
 SQTTBufferingPackets::query_buffer_status()
 {
-    aqlprofile_att_buffer_status_v0_t ret{};
+    auto ret = aqlprofile_att_buffer_status_t{};
 
     auto status = aqlprofile_att_update_buffer_status(&ret, handle, shader_engine_id, 0);
     CHECK_HSA(status, "failed to query ATT status");

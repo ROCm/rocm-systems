@@ -85,6 +85,8 @@ copy_data_sync(void*       dst,
     signal.WaitOn();
 }
 
+// Consumer loop: Waits for consumer notification, then forwards to tool/user
+// read_index is incremented so the consumer is aware they can try to lock the buffer mutex
 void
 consumer_loop(triple_buffer_consumer_data_t parameters)
 {
