@@ -71,17 +71,15 @@ class EventTimer : public Timer {
   }
 
   ~EventTimer() {
-    hipError_t error;  // to avoid compiler warnings
-
-    error = hipEventRecord(stop_, GetStream());
-    error = hipEventSynchronize(stop_);
+    HIP_CHECK(hipEventRecord(stop_, GetStream()));
+    HIP_CHECK(hipEventSynchronize(stop_));
 
     float ms;
-    error = hipEventElapsedTime(&ms, start_, stop_);
+    HIP_CHECK(hipEventElapsedTime(&ms, start_, stop_));
     Record(ms);
 
-    error = hipEventDestroy(start_);
-    error = hipEventDestroy(stop_);
+    HIP_CHECK(hipEventDestroy(start_));
+    HIP_CHECK(hipEventDestroy(stop_));
   }
 
  private:
@@ -96,8 +94,7 @@ class CpuTimer : public Timer {
   }
 
   ~CpuTimer() {
-    hipError_t error;  // to avoid compiler warnings
-    error = hipStreamSynchronize(GetStream());
+    HIP_CHECK(hipStreamSynchronize(GetStream()));
 
     stop_ = std::chrono::steady_clock::now();
 
