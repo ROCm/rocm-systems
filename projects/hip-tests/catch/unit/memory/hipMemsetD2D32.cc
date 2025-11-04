@@ -123,7 +123,7 @@ TEST_CASE("Unit_hipMemsetD2D32_NegTsts") {
   constexpr int memsetval = static_cast<int>(0x26);
   HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, width, numH, sizeof(int)));
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D32(NULL, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D32(0, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
   SECTION("OutOfBound destination") {
     void* outOfBoundsDst{reinterpret_cast<int*>(A_d) + devPitch * numH + 1};

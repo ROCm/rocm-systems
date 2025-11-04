@@ -131,7 +131,7 @@ TEST_CASE("Unit_hipMemsetD2D32Async_NegTsts") {
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, width, numH, sizeof(int)));
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D32Async(NULL, devPitch, memsetval, numW, numH, stream),
+    HIP_CHECK_ERROR(hipMemsetD2D32Async(0, devPitch, memsetval, numW, numH, stream),
                     hipErrorInvalidValue);
   }
   SECTION("OutOfBound destination") {

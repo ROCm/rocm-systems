@@ -125,7 +125,7 @@ TEST_CASE("Unit_hipMemsetD2D8_NegTsts") {
   HIP_CHECK(
       hipMemAllocPitch(&A_d, &devPitch, width, numH, 4 * sizeof(char)));
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D8(NULL, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D8(0, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
   SECTION("OutOfBound destination") {
     void* outOfBoundsDst{reinterpret_cast<char*>(A_d) + devPitch * numH + 1};

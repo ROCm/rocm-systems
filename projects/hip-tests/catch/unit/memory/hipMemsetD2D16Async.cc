@@ -135,7 +135,7 @@ TEST_CASE("Unit_hipMemsetD2D16Async_NegTsts") {
   HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, width, numH,
                              2 * sizeof(uint16_t)));
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D16Async(NULL, devPitch, memsetval, numW, numH, stream),
+    HIP_CHECK_ERROR(hipMemsetD2D16Async(0, devPitch, memsetval, numW, numH, stream),
                     hipErrorInvalidValue);
   }
   SECTION("OutOfBound destination") {
