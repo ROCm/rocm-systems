@@ -15,8 +15,8 @@ Executables
 
 This section lists the ROCm Systems Profiler executables.
 
-rocprof-sys-avail: `source/bin/rocprof-sys-avail <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/bin/rocprof-sys-avail>`_
------------------------------------------------------------------------------------------------------------------------------------------------
+rocprof-sys-avail: `source/bin/rocprof-sys-avail <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocprof-sys-avail>`_
+------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 The ``main`` routine of ``rocprof-sys-avail`` has three important sections:
 
@@ -24,16 +24,16 @@ The ``main`` routine of ``rocprof-sys-avail`` has three important sections:
 * Printing options
 * Printing hardware counters
 
-rocprof-sys-sample: `source/bin/rocprof-sys-sample <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/bin/rocprof-sys-sample>`_
---------------------------------------------------------------------------------------------------------------------------------------------------
+rocprof-sys-sample: `source/bin/rocprof-sys-sample <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocprof-sys-sample>`_
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 * Requires a command-line format of ``rocprof-sys-sample <options> -- <command> <command-args>``
 * Translates command-line options into environment variables
 * Adds ``librocprof-sys-dl.so`` to ``LD_PRELOAD``
 * Is launched by using ``execvpe`` with ``<command> <command-args>`` and a modified environment
 
-rocprof-sys-causal: `source/bin/rocprof-sys-causal <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/bin/rocprof-sys-causal>`_
----------------------------------------------------------------------------------------------------------------------------------------------------
+rocprof-sys-causal: `source/bin/rocprof-sys-causal <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocprof-sys-causal>`_
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 When there is exactly one causal profiling configuration variant (which enables debugging),
 ``rocprof-sys-casual`` has a nearly identical design to ``rocprof-sys-sample``
@@ -45,8 +45,8 @@ the following actions take place for each variant:
 * the child process launches ``<command> <command-args>`` using ``execvpe``, which modifies the environment for the variant
 * the parent process waits for the child process to finish
 
-rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/bin/rocprof-sys-instrument>`_
---------------------------------------------------------------------------------------------------------------------------------------------------------------
+rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocprof-sys-instrument>`_
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 * Requires a command-line format of ``rocprof-sys-instrument <options> -- <command> <command-args>``
 * Allows the user to provide options specifying whether to perform runtime instrumentation, use binary rewrite, or
@@ -70,32 +70,32 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
 Libraries
 ========================================
 
-Common library: `source/lib/common <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/common>`_
---------------------------------------------------------------------------------------------------------------------------------
+Common library: `source/lib/common <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/common>`_
+------------------------------------------------------------------------------------------------------------------------------------------
 
 * General header-only functionality used in multiple executables and/or libraries.
 * Not installed or exported outside of the build tree.
 
-Core library: `source/lib/core <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/core>`_
---------------------------------------------------------------------------------------------------------------------------------
+Core library: `source/lib/core <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/core>`_
+-----------------------------------------------------------------------------------------------------------------------------------------
 
 * Static PIC library with functionality that does not depend on any components.
 * Not installed or exported outside of the build tree.
 
-Binary library: `source/lib/binary <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/binary>`_
---------------------------------------------------------------------------------------------------------------------------------
+Binary library: `source/lib/binary <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/binary>`_
+--------------------------------------------------------------------------------------------------------------------------------------------
 
 * Static PIC library with functionality for reading/analyzing binary info.
 * Mostly used by the causal profiling sections of ``librocprof-sys``.
 * Not installed or exported outside of the build tree.
 
-librocprof-sys: `source/lib/rocprof-sys <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/rocprof-sys>`_
---------------------------------------------------------------------------------------------------------------------------------
+librocprof-sys: `source/lib/rocprof-sys <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/rocprof-sys>`_
+-----------------------------------------------------------------------------------------------------------------------------------------------------
 
 This is the main library encapsulating all the capabilities.
 
-librocprof-sys-dl: `source/lib/rocprof-sys-dl <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/rocprof-sys-dl>`_
------------------------------------------------------------------------------------------------------------------------------------------
+librocprof-sys-dl: `source/lib/rocprof-sys-dl <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/rocprof-sys-dl>`_
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 This is a lightweight, front-end library for ``librocprof-sys`` which serves three primary purposes:
 
@@ -105,8 +105,8 @@ This is a lightweight, front-end library for ``librocprof-sys`` which serves thr
 * Prevents re-entry if ``librocprof-sys`` calls an instrumented function internally
 * Coordinates communication between ``librocprof-sys-user`` and ``librocprof-sys``
 
-librocprof-sys-user: `source/lib/rocprof-sys-user <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/rocprof-sys-user>`_
------------------------------------------------------------------------------------------------------------------------------------------------
+librocprof-sys-user: `source/lib/rocprof-sys-user <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/rocprof-sys-user>`_
+------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 * Provides a set of functions and types for the users to add to their code, for example,
   disabling data collection globally or on a specific thread or
