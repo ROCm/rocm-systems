@@ -49,6 +49,16 @@ TEST_CASE("Unit_hipFreeHost_InvalidMemory") {
     HIP_CHECK(hipHostRegister(ptr, sizeof(char), flag));
     HIP_CHECK_ERROR(hipFreeHost(ptr), hipErrorInvalidValue);
   }
+
+#if (HT_AMD == 1) && (HT_LINUX == 1)
+  SECTION("Host registered memory AMD Linux") {
+    char* ptr = new char;
+    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped, 
+                         hipHostRegisterIoMemory);
+    HIP_CHECK(hipHostRegister(ptr, sizeof(char), flag));
+    HIP_CHECK_ERROR(hipFreeHost(ptr), hipErrorInvalidValue);
+  }
+#endif
 }
 
 /**
@@ -86,7 +96,7 @@ TEST_CASE("Unit_hipFreeHost_Multithreading") {
   std::vector<unsigned long*> ptrs(10);
   size_t ptr_size = 1024;
 
-  for (auto ptr : ptrs) {
+  for (auto& ptr : ptrs) {
     HIP_CHECK(hipHostMalloc(&ptr, ptr_size));
   }
 

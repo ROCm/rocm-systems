@@ -45,7 +45,7 @@ from sqlalchemy.sql import Select
 from utils.logger import console_debug, console_error
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 
 
 Base = declarative_base()
@@ -61,10 +61,8 @@ class Workload(Base):
     roofline_bench_extdata = Column(JSON)
     profiling_config_extdata = Column(JSON)
 
-    # Workload can have multiple dispatches
-    dispatches = relationship("Dispatch", back_populates="workload")
-    # Workload can have multiple metrics
-    metrics = relationship("Metric", back_populates="workload")
+    # Workload can have multiple kernels
+    kernels = relationship("Kernel", back_populates="workload")
     # Workload can have multiple roofline data points
     roofline_data_points = relationship("RooflineData", back_populates="workload")
     # Workload can have multiple pc_sampling values
@@ -75,8 +73,8 @@ class Metric(Base):
     __tablename__ = f"{PREFIX}metric"
 
     metric_uuid = Column(Integer, primary_key=True)
-    workload_id = Column(
-        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
     name = Column(String)  # e.g. Wavefronts Num
     metric_id = Column(String)  # e.g. 4.1.3
@@ -85,8 +83,8 @@ class Metric(Base):
     sub_table_name = Column(String)  # e.g. Wavefront stats
     unit = Column(String)  # e.g. Gbps
 
-    # Metric can have one workload
-    workload = relationship("Workload", back_populates="metrics")
+    # Metric can have one kernel
+    kernel = relationship("Kernel", back_populates="metrics")
     # Metric can have multiple values
     values = relationship("Value", back_populates="metric")
 
@@ -112,16 +110,33 @@ class Dispatch(Base):
     __tablename__ = f"{PREFIX}dispatch"
 
     dispatch_uuid = Column(Integer, primary_key=True)
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
+    )
+    dispatch_id = Column(Integer)
+    gpu_id = Column(Integer)
+    start_timestamp = Column(Integer)
+    end_timestamp = Column(Integer)
+
+    # Dispatch can have one kernel
+    kernel = relationship("Kernel", back_populates="dispatches")
+
+
+class Kernel(Base):
+    __tablename__ = f"{PREFIX}kernel"
+
+    kernel_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
         Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
-    dispatch_id = Column(Integer)
     kernel_name = Column(String)
-    gpu_id = Column(Integer)
-    duration = Column(Integer)
 
-    # Dispatch can have one workload
-    workload = relationship("Workload", back_populates="dispatches")
+    # Kernel can have one workload
+    workload = relationship("Workload", back_populates="kernels")
+    # Kernel can have multiple dispatches
+    dispatches = relationship("Dispatch", back_populates="kernel")
+    # Kernel can have multiple metrics
+    metrics = relationship("Metric", back_populates="kernel")
 
 
 class PCsampling(Base):
@@ -199,16 +214,59 @@ class Database:
 
 
 def get_views() -> list[TextClause]:
+    # Calculate median by finding middle value(s)
+    median_subquery = (
+        select(
+            Kernel.kernel_name,
+            (Dispatch.end_timestamp - Dispatch.start_timestamp).label("duration"),
+            func.row_number()
+            .over(
+                partition_by=Kernel.kernel_name,
+                order_by=Dispatch.end_timestamp - Dispatch.start_timestamp,
+            )
+            .label("row_num"),
+            func.count().over(partition_by=Kernel.kernel_name).label("total_count"),
+        )
+        .select_from(Dispatch)
+        .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
+    )
+
+    median_calc = (
+        select(
+            median_subquery.c.kernel_name,
+            func.avg(median_subquery.c.duration).label("duration_ns_median"),
+        )
+        .where(
+            # For odd counts: get the middle row
+            # For even counts: get the two middle rows and average them
+            median_subquery.c.row_num.in_([
+                func.cast((median_subquery.c.total_count + 1) / 2, Integer),
+                func.cast((median_subquery.c.total_count + 2) / 2, Integer),
+            ])
+        )
+        .group_by(median_subquery.c.kernel_name)
+    )
+
     views: dict[str, Select[Any]] = {
         "kernel_view": select(
-            Dispatch.kernel_name,
+            Kernel.kernel_name,
             func.count(Dispatch.dispatch_id).label("dispatch_count"),
-            func.sum(Dispatch.duration).label("duration_sum"),
-            func.avg(Dispatch.duration).label("duration_mean"),
-        ).group_by(Dispatch.kernel_name),
+            func.sum(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                "duration_ns_sum"
+            ),
+            median_calc.c.duration_ns_median,
+            func.avg(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                "duration_ns_mean"
+            ),
+        )
+        .select_from(Dispatch)
+        .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
+        .join(median_calc.subquery(), Kernel.kernel_name == median_calc.c.kernel_name)
+        .group_by(Kernel.kernel_name),
         "metric_view": select(
-            Metric.workload_id,
-            Metric.name,
+            Workload.name.label("workload_name"),
+            Kernel.kernel_name,
+            Metric.name.label("metric_name"),
             Metric.metric_id,
             Metric.description,
             Metric.table_name,
@@ -216,7 +274,11 @@ def get_views() -> list[TextClause]:
             Metric.unit,
             Value.value_name,
             Value.value,
-        ).join(Value, Metric.metric_uuid == Value.metric_uuid),
+        )
+        .select_from(Metric)
+        .join(Kernel, Metric.kernel_uuid == Kernel.kernel_uuid)
+        .join(Value, Metric.metric_uuid == Value.metric_uuid)
+        .join(Workload, Kernel.workload_id == Workload.workload_id),
     }
 
     return [

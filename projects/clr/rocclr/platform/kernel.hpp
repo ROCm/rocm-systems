@@ -169,6 +169,7 @@ class KernelParameters : protected HeapObject {
     samplerObjects_ = reinterpret_cast<amd::Sampler**>(values_ + samplerObjOffset_);
     queueObjOffset_ = samplerObjOffset_ + signature_.numSamplers() * sizeof(amd::Sampler*);
     queueObjects_ = reinterpret_cast<amd::DeviceQueue**>(values_ + queueObjOffset_);
+    execInfoOffset_ = totalSize_;
     address limit = reinterpret_cast<address>(&queueObjects_[signature_.numQueues()]);
     ::memset(values_, '\0', limit - values_);
   }
@@ -339,7 +340,6 @@ class Kernel : public RuntimeObject {
 
   virtual ObjectType objectType() const { return ObjectTypeKernel; }
 
-#if defined(USE_COMGR_LIBRARY)
   // Templated find function to retrieve the right value based on string
   template <typename V, typename T, size_t N>
   static V FindValue(const T (&structure)[N], const std::string& name);
@@ -416,8 +416,7 @@ class Kernel : public RuntimeObject {
   static const KernelFieldMapV3Type kKernelFieldMapV3[];
   static const ArgValueKindV3Type kArgValueKindV3[];
   static const ArgFieldMapV3Type kArgFieldMapV3[];
-#endif
-};  // defined(USE_COMGR_LIBRARY)
+};
 
 
 /*! @}

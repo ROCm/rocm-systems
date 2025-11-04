@@ -401,18 +401,6 @@ add_test(
 )
 
 # ---------------------------
-# DB Connector tests
-# ---------------------------
-
-add_test(
-    NAME test_db_connector
-    COMMAND
-        ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_db_connector.xml
-        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_db_connector.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-)
-
-# ---------------------------
 # Utils tests
 # ---------------------------
 
@@ -457,7 +445,6 @@ if(${ENABLE_COVERAGE})
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
-        test_db_connector
         test_utils
         test_autogen_config
     )
@@ -547,11 +534,12 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
-# grafana assets
+# tools/config_management
 install(
-    DIRECTORY grafana
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
+    DIRECTORY tools/config_management
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
 )
 # samples
 install(
@@ -586,10 +574,10 @@ install(
 add_custom_target(
     license
     COMMAND
-        ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}/src
         --license ${PROJECT_SOURCE_DIR}/LICENSE.md --extension '.py'
     COMMAND
-        ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}
         --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
 )

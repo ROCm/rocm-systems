@@ -310,6 +310,31 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Negative_Parameters") {
   }
 }
 
+TEST_CASE("Unit_hipMemcpyPeerAsync_Capture") {
+  const int device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    return;
+  }
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  HIP_CHECK(hipSetDevice(0));
+  LinearAllocGuard<int> src_device_alloc(LinearAllocs::hipMalloc, kPageSize);
+  HIP_CHECK(hipSetDevice(1));
+  LinearAllocGuard<int> dst_device_alloc(LinearAllocs::hipMalloc, kPageSize);
+
+  HIP_CHECK(hipSetDevice(0));
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(
+      hipMemcpyPeerAsync(src_device_alloc.ptr(), 0, dst_device_alloc.ptr(), 1, kPageSize, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
 /**
  * End doxygen group PeerToPeerTest.
  * @}

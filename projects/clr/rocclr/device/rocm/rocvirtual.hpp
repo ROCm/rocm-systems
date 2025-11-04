@@ -621,7 +621,7 @@ class VirtualGPU : public device::VirtualDevice {
                                        //!< but ROC profiler expects D2H or H2D detection
   int fence_state_;                    //!< Fence scope
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
-  bool fence_dirty_;                   //!< Fence modified flag
+  std::atomic<bool> fence_dirty_;      //!< Fence modified flag
 
   std::atomic<uint> lastUsedSdmaEngineMask_;  //!< Last Used SDMA Engine mask
   uint64_t last_write_index_ = 0;             //!< The last HW queue write index for any packet
