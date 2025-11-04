@@ -465,23 +465,4 @@ rocprofiler_configure_attach(uint32_t /*version*/,
     return &cfg;
 }
 
-// Additional exported functions for runtime control
-void
-rocprofiler_get_attachment_statistics()
-{
-    attachment_tool::get_statistics();
-}
-
-void
-rocprofiler_set_kernel_tracing(bool enable)
-{
-    attachment_tool::set_kernel_tracing(enable);
-}
-
-void
-rocprofiler_set_hip_api_tracing(bool enable)
-{
-    attachment_tool::set_hip_api_tracing(enable);
-}
-
 }  // extern "C"

@@ -50,11 +50,14 @@ set_target_properties(process-attachment-tool PROPERTIES
 
 # 2. Process Attachment Client
 # This is the utility that performs the attachment to running processes
+find_package(Threads REQUIRED)
+
 add_executable(process-attachment-client)
 target_sources(process-attachment-client PRIVATE client.cpp)
 target_link_libraries(
     process-attachment-client
-    PRIVATE 
+    PRIVATE
+        Threads::Threads
         ${CMAKE_DL_LIBS}
         rocprofiler-sdk::samples-build-flags
 )
@@ -62,8 +65,6 @@ target_link_libraries(
 # 3. Target Application
 # This is a sample long-running application that can be attached to
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
-
-find_package(Threads REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 
 add_executable(process-attachment-target)
