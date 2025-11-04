@@ -77,8 +77,8 @@ jobs:
     container:
       image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:
-        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
-        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+        username: "${{ secrets.ROCPROFILER_AZURE_CI_USER }}"
+        password: "${{ secrets.ROCPROFILER_AZURE_CI_PASS }}"
       env:
         DEBIAN_FRONTEND: noninteractive
       options: --privileged
