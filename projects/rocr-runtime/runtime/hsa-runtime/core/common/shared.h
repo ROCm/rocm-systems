@@ -142,9 +142,6 @@ class Shared final : private BaseShared {
   }
 
   ~Shared() {
-    assert(allocate_() != nullptr && free_() != nullptr &&
-                                        "Shared object allocator is not set");
-
     if (pool_)
       pool_->free(shared_object_);
     else
