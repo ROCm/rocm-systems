@@ -57,7 +57,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Dynamic packet copying based on defined maximum threshold or power-of-2 staggered copy pattern,
     - If timestamps are not collected for a signal for reuse, creates a new signal. This can potentially increase signal footprint if the handler doesn't run fast enough.
 
-#### Known issues
+### Known issues
 
 * SPIR-V-enabled applications may encounter an issue of segmentation fault. The problem disappears when SPIR-V is disabled. The issue will be fixed in the next ROCm release.
 
