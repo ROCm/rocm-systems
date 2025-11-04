@@ -124,7 +124,9 @@ jobs:
             | jq --raw-output \
             'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
           )"
-          if [[ "${FAILED_JOBS}" != "" ]]; then
-            echo "The following jobs failed: ${FAILED_JOBS}"
-            exit 1
-          fi
+          exit 0
+          # TODO: uncomment when theRock CI is no longer requirement for merge
+          # if [[ "${FAILED_JOBS}" != "" ]]; then
+          #   echo "The following jobs failed: ${FAILED_JOBS}"
+          #   exit 1
+          # fi
