@@ -7,16 +7,16 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
-    - `hipLibraryEnumerateKernels` Return Kernel handles within a library
-    - `hipKernelGetLibrary` Return Library handle for a hipKernel_t handle
-    - `hipKernelGetName` Return function name for a hipKernel_t handle
+    - `hipLibraryEnumerateKernels` returns Kernel handles within a library
+    - `hipKernelGetLibrary` returns Library handle for a hipKernel_t handle
+    - `hipKernelGetName` returns function name for a hipKernel_t handle
     - `hipLibraryLoadData`      creates library object from code
     - `hipLibraryLoadFromFile`  creates library object from file
     - `hipLibraryUnload`        unloads library
     - `hipLibraryGetKernel`     gets a kernel from library
     - `hipLibraryGetKernelCount` gets kernel count in library
     - `hipStreamCopyAttributes` copies attributes from source stream to destination stream
-    - `hipOccupancyAvailableDynamicSMemPerBlock` Returns dynamic shared memory available per block when launching numBlocks blocks on CU.
+    - `hipOccupancyAvailableDynamicSMemPerBlock` returns dynamic shared memory available per block when launching numBlocks blocks on CU.
 
 ## HIP 7.1.1 for ROCm 7.1.1
 
