@@ -24,9 +24,8 @@ TEST_CASE("Unit_hiprtc_includepath") {
   {
     fstream f("saxpy.h", std::ios::in);
     if (f.is_open()) {
-      size_t sizeFile;
       f.seekg(0, fstream::end);
-      size_t size = sizeFile = (size_t)f.tellg();
+      size_t size = (size_t)f.tellg();
       f.seekg(0, fstream::beg);
       saxpy.resize(size, ' ');
       f.read(&saxpy[0], size);
