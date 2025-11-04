@@ -1,0 +1,351 @@
+/*
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+#include <dlfcn.h>
+#include <hip_test_common.hh>
+#include <hip_test_defgroups.hh>
+
+/**
+ * @addtogroup hipGetProcAddress hipGetProcAddress_spt
+ * @{
+ * @ingroup DynamicLoading
+ * `hipError_t hipGetProcAddress (const char * 	symbol, void ** pfn, int
+                                  hipVersion, uint64_t flags,
+                                  hipDriverProcAddressQueryResult *
+ symbolStatus)` -
+ * Gets the pointer of requested HIP driver function.
+ * `hipError_t hipGetProcAddress_spt (const char * 	symbol, void ** pfn, int
+                                  hipVersion, uint64_t flags,
+                                  hipDriverProcAddressQueryResult *
+ symbolStatus)` -
+ * Gets the pointer of requested HIP driver function.
+*/
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This will perfrom the basic funtionality of hipGetProcAddress api
+ * Test source
+ * ------------------------
+ *  - unit/dynamicLoading/hipGetProcAddress.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGetProcAddress_Positive") {
+  void *funcPtr = nullptr;
+  hipDriverProcAddressQueryResult status;
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  SECTION("Get driver symbol for default mode") {
+    HIP_CHECK(hipGetProcAddress("hipGetDeviceCount", &funcPtr,
+                                currentHipVersion, HIP_GET_PROC_ADDRESS_DEFAULT,
+                                &status));
+  }
+
+  SECTION("Search for Legacy versions of driver symbol") {
+    HIP_CHECK(hipGetProcAddress("hipGetDeviceCount", &funcPtr,
+                                currentHipVersion,
+                                HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
+  }
+
+  SECTION("Search for Per-Thread versions of driver symbol") {
+    HIP_CHECK(hipGetProcAddress(
+        "hipGetDeviceCount", &funcPtr, currentHipVersion,
+        HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM, &status));
+  }
+
+  REQUIRE(status == HIP_GET_PROC_ADDRESS_SUCCESS);
+
+  hipError_t (*hipGetDeviceCount_ptr)(int *) = (hipError_t(*)(int *))funcPtr;
+  int countFuncPtr;
+  HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr));
+
+  int count;
+  HIP_CHECK(hipGetDeviceCount(&count));
+
+  REQUIRE(count > 0);
+  REQUIRE(countFuncPtr > 0);
+  REQUIRE(countFuncPtr == count);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This will verify behavior of hipGetProcAddress api with negative
+ * parameters
+ *  - 1) Empty symbol
+ *  - 2) Invalid flag
+ * Test source
+ * ------------------------
+ *  - unit/dynamicLoading/hipGetProcAddress.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGetProcAddress_Negative") {
+  void *funcPtr = nullptr;
+  hipDriverProcAddressQueryResult status;
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  SECTION("Empty symbol") {
+    HIP_CHECK_ERROR(hipGetProcAddress("", &funcPtr, currentHipVersion,
+                                      HIP_GET_PROC_ADDRESS_DEFAULT, &status),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("Invalid flag") {
+    HIP_CHECK_ERROR(hipGetProcAddress("hipGetDeviceCount", &funcPtr,
+                                      currentHipVersion, -1, &status),
+                    hipErrorInvalidValue);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This will perfrom the basic funtionality of hipGetProcAddress_spt api
+ * Test source
+ * ------------------------
+ *  - unit/dynamicLoading/hipGetProcAddress.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGetProcAddress_spt_Positive") {
+  void *funcPtr = nullptr;
+  hipDriverProcAddressQueryResult status;
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  SECTION("Get driver symbol for default mode") {
+    HIP_CHECK(hipGetProcAddress_spt("hipGetDeviceCount", &funcPtr,
+                                    currentHipVersion,
+                                    HIP_GET_PROC_ADDRESS_DEFAULT, &status));
+  }
+
+  SECTION("Search for Legacy versions of driver symbol") {
+    HIP_CHECK(
+        hipGetProcAddress_spt("hipGetDeviceCount", &funcPtr, currentHipVersion,
+                              HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
+  }
+
+  SECTION("Search for Per-Thread versions of driver symbol") {
+    HIP_CHECK(hipGetProcAddress_spt(
+        "hipGetDeviceCount", &funcPtr, currentHipVersion,
+        HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM, &status));
+  }
+
+  REQUIRE(status == HIP_GET_PROC_ADDRESS_SUCCESS);
+
+  hipError_t (*hipGetDeviceCount_ptr)(int *) = (hipError_t(*)(int *))funcPtr;
+  int countFuncPtr;
+  HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr));
+
+  int count;
+  HIP_CHECK(hipGetDeviceCount(&count));
+
+  REQUIRE(count > 0);
+  REQUIRE(countFuncPtr > 0);
+  REQUIRE(countFuncPtr == count);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This will verify behavior of hipGetProcAddress_spt api with negative
+ * parameters
+ *  - 1) Empty symbol
+ *  - 2) Invalid flag
+ * Test source
+ * ------------------------
+ *  - unit/dynamicLoading/hipGetProcAddress.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGetProcAddress_spt_Negative") {
+  void *funcPtr = nullptr;
+  hipDriverProcAddressQueryResult status;
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  SECTION("Empty symbol") {
+    HIP_CHECK_ERROR(hipGetProcAddress_spt("", &funcPtr, currentHipVersion,
+                                          HIP_GET_PROC_ADDRESS_DEFAULT,
+                                          &status),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("Invalid flag") {
+    HIP_CHECK_ERROR(hipGetProcAddress_spt("hipGetDeviceCount", &funcPtr,
+                                          currentHipVersion, -1, &status),
+                    hipErrorInvalidValue);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - This will verify behavior of hipGetProcAddress and hipGetProcAddress_spt
+ * - and check with original API address
+ * - 1) With hipMemcpy (it has spt version hipMemcpy_spt)
+ * - 2) With hipMalloc (it doesn't has spt version)
+ * - 3) with spt API hipMemcpy_spt
+ * Test source
+ * ------------------------
+ *  - unit/dynamicLoading/hipGetProcAddress.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress") {
+  hipDriverProcAddressQueryResult status;
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  void *funcPtr_default = nullptr;
+  void *funcPtr_legacy = nullptr;
+  void *funcPtr_spt = nullptr;
+
+  void *handle = dlopen("libamdhip64.so", RTLD_LAZY);
+  REQUIRE(handle != NULL);
+
+  void *sym_hipMemcpy = dlsym(handle, "hipMemcpy");
+  void *sym_hipMemcpy_spt = dlsym(handle, "hipMemcpy_spt");
+  void *sym_hipMalloc = dlsym(handle, "hipMalloc");
+
+  SECTION(
+      "hipGetProcAddress - With hipMemcpy (it has spt version hipMemcpy_spt)") {
+    HIP_CHECK(hipGetProcAddress("hipMemcpy", &funcPtr_default,
+                                currentHipVersion, HIP_GET_PROC_ADDRESS_DEFAULT,
+                                &status));
+
+    HIP_CHECK(hipGetProcAddress("hipMemcpy", &funcPtr_legacy, currentHipVersion,
+                                HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
+
+    HIP_CHECK(hipGetProcAddress("hipMemcpy", &funcPtr_spt, currentHipVersion,
+                                HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM,
+                                &status));
+
+    REQUIRE(funcPtr_default == sym_hipMemcpy);
+    REQUIRE(funcPtr_legacy == sym_hipMemcpy);
+    REQUIRE(funcPtr_spt == sym_hipMemcpy_spt);
+  }
+
+  SECTION("hipGetProcAddress - With hipMalloc (it doesn't has spt version)") {
+    HIP_CHECK(hipGetProcAddress("hipMalloc", &funcPtr_default,
+                                currentHipVersion, HIP_GET_PROC_ADDRESS_DEFAULT,
+                                &status));
+
+    HIP_CHECK(hipGetProcAddress("hipMalloc", &funcPtr_legacy, currentHipVersion,
+                                HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
+
+    HIP_CHECK(hipGetProcAddress("hipMalloc", &funcPtr_spt, currentHipVersion,
+                                HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM,
+                                &status));
+
+    REQUIRE(funcPtr_default == sym_hipMalloc);
+    REQUIRE(funcPtr_legacy == sym_hipMalloc);
+    REQUIRE(funcPtr_spt == sym_hipMalloc);
+  }
+
+  SECTION("hipGetProcAddress - with spt API hipMemcpy_spt") {
+    HIP_CHECK(hipGetProcAddress("hipMemcpy_spt", &funcPtr_default,
+                                currentHipVersion, HIP_GET_PROC_ADDRESS_DEFAULT,
+                                &status));
+
+    HIP_CHECK(hipGetProcAddress("hipMemcpy_spt", &funcPtr_legacy,
+                                currentHipVersion,
+                                HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
+
+    HIP_CHECK(hipGetProcAddress(
+        "hipMemcpy_spt", &funcPtr_spt, currentHipVersion,
+        HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM, &status));
+
+    REQUIRE(funcPtr_default == sym_hipMemcpy_spt);
+    REQUIRE(funcPtr_legacy == sym_hipMemcpy_spt);
+    REQUIRE(funcPtr_spt == sym_hipMemcpy_spt);
+  }
+
+  SECTION("hipGetProcAddress_spt - With hipMemcpy (it has spt version "
+          "hipMemcpy_spt)") {
+    HIP_CHECK(hipGetProcAddress_spt("hipMemcpy", &funcPtr_default,
+                                    currentHipVersion,
+                                    HIP_GET_PROC_ADDRESS_DEFAULT, &status));
+
+    HIP_CHECK(
+        hipGetProcAddress_spt("hipMemcpy", &funcPtr_legacy, currentHipVersion,
+                              HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
+
+    HIP_CHECK(hipGetProcAddress_spt(
+        "hipMemcpy", &funcPtr_spt, currentHipVersion,
+        HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM, &status));
+
+    REQUIRE(funcPtr_default == sym_hipMemcpy_spt);
+    REQUIRE(funcPtr_legacy == sym_hipMemcpy);
+    REQUIRE(funcPtr_spt == sym_hipMemcpy_spt);
+  }
+
+  SECTION(
+      "hipGetProcAddress_spt - With hipMalloc (it doesn't has spt version)") {
+    HIP_CHECK(hipGetProcAddress_spt("hipMalloc", &funcPtr_default,
+                                    currentHipVersion,
+                                    HIP_GET_PROC_ADDRESS_DEFAULT, &status));
+
+    HIP_CHECK(
+        hipGetProcAddress_spt("hipMalloc", &funcPtr_legacy, currentHipVersion,
+                              HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
+
+    HIP_CHECK(hipGetProcAddress_spt(
+        "hipMalloc", &funcPtr_spt, currentHipVersion,
+        HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM, &status));
+
+    REQUIRE(funcPtr_default == sym_hipMalloc);
+    REQUIRE(funcPtr_legacy == sym_hipMalloc);
+    REQUIRE(funcPtr_spt == sym_hipMalloc);
+  }
+
+  SECTION("hipGetProcAddress_spt - with spt API hipMemcpy_spt") {
+    HIP_CHECK(hipGetProcAddress_spt("hipMemcpy_spt", &funcPtr_default,
+                                    currentHipVersion,
+                                    HIP_GET_PROC_ADDRESS_DEFAULT, &status));
+
+    HIP_CHECK(hipGetProcAddress_spt(
+        "hipMemcpy_spt", &funcPtr_legacy, currentHipVersion,
+        HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
+
+    HIP_CHECK(hipGetProcAddress_spt(
+        "hipMemcpy_spt", &funcPtr_spt, currentHipVersion,
+        HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM, &status));
+
+    REQUIRE(funcPtr_default == sym_hipMemcpy_spt);
+    REQUIRE(funcPtr_legacy == sym_hipMemcpy_spt);
+    REQUIRE(funcPtr_spt == sym_hipMemcpy_spt);
+  }
+
+  REQUIRE(dlclose(handle) == 0);
+}
+
+/**
+ * End doxygen group DeviceTest.
+ * @}
+ */

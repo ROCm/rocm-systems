@@ -21,7 +21,10 @@ if(UNIX AND BUILD_SHARED_LIBS)
   set(TEST_SRC ${TEST_SRC}
       complex_loading_behavior.cc)
   set(AMD_TEST_SRC
-      hipApiDynamicLoad.cc)
+      hipApiDynamicLoad.cc
+      hipGetProcAddress.cc
+      hipGetProcAddressCompilerOption.cc
+      )
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
@@ -45,6 +48,10 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so
   ${CMAKE_CURRENT_BINARY_DIR}/bit_extract_kernel.code
 )
+
+if(HIP_PLATFORM MATCHES "amd")
+  set_source_files_properties(hipGetProcAddressCompilerOption.cc PROPERTIES COMPILE_OPTIONS "-fgpu-default-stream=per-thread")
+endif()
 
 if(HIP_PLATFORM MATCHES "amd")
 hip_add_exe_to_target(NAME Dynamic
