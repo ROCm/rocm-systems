@@ -35,7 +35,7 @@
 #include "hip/hip_runtime.h"
 
 // Two waves per SIMD on MI300
-#define DATA_SIZE (256 * 256 * 8 * 4)
+#define DATA_SIZE (304 * 64 * 4 * 2)
 #define HIP_API_CALL(CALL)                                                                         \
     if((CALL) != hipSuccess)                                                                       \
     {                                                                                              \
@@ -142,21 +142,12 @@ public:
 };
 
 #define Launch(kernel, stream, arglast)                                                            \
-    hipLaunchKernelGGL(kernel,                                                                     \
-                       DATA_SIZE / 512,                                                            \
-                       512,                                                                        \
-                       0,                                                                          \
-                       0,                                                                          \
-                       stream.dst.ptr,                                                             \
-                       stream.src1.ptr,                                                            \
-                       stream.src2.ptr,                                                            \
-                       arglast);
+    hipLaunchKernelGGL(                                                                            \
+        kernel, DATA_SIZE / 512, 512, 0, 0, stream.dst.ptr, stream.src1.ptr, stream.src2.ptr, 6);
 
 int
 main(int /*argc*/, char** /*argv*/)
 {
-    hipSetDevice(0);
-
     std::array<HipStream, 3>              streams{};
     std::vector<decltype(divide_kernel)*> kernels{};
 
@@ -164,19 +155,23 @@ main(int /*argc*/, char** /*argv*/)
     kernels.push_back(looping_lds_kernel);
     kernels.push_back(fifo_kernel);
 
-    roctxProfilerResume(0);
-
-    for(size_t i = 0; i < streams.size() * kernels.size() * 200; i++)  // 3000 = 1GB on mi300x
+    for(size_t i = 0; i < streams.size() * kernels.size(); i++)
     {
+        // Warmup then start
+        if(i == streams.size())
+        {
+            HIP_API_CALL(hipDeviceSynchronize());
+            roctxProfilerResume(0);
+        }
+
         auto& stream = streams.at(i % streams.size());
         auto& kernel = kernels.at(i % kernels.size());
 
-        HIP_API_CALL(hipStreamSynchronize(stream.stream));
         Launch(kernel, stream, 3);
         HIP_API_CALL(hipGetLastError());
     }
-    HIP_API_CALL(hipDeviceSynchronize());
 
+    HIP_API_CALL(hipDeviceSynchronize());
     roctxProfilerPause(0);
 
     return 0;
