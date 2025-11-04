@@ -74,6 +74,7 @@ __global__ void mykernel(int* archProp_d) { getArchValuesFromDevice(archProp_d);
 /*
  * Internal Functions
  */
+#if HT_AMD
 static void validateDeviceMacro(int* archProp_h, hipDeviceProp_t* prop) {
   CHECK_FALSE(prop->arch.hasGlobalInt32Atomics !=
               archProp_h[HIP_ARCH_HAS_GLOBAL_INT32_ATOMICS_IDX]);
@@ -115,6 +116,8 @@ static void validateDeviceMacro(int* archProp_h, hipDeviceProp_t* prop) {
 
   CHECK_FALSE(prop->arch.hasDynamicParallelism != archProp_h[HIP_ARCH_HAS_DYNAMIC_PARALLEL_IDX]);
 }
+#endif
+
 /*
  * Validates value of __HIP_ARCH_*  with deviceProp.arch.has* as follows
  * __HIP_ARCH_HAS_GLOBAL_INT32_ATOMICS__ == hasGlobalInt32Atomics

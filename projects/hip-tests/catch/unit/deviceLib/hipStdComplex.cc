@@ -23,8 +23,6 @@ THE SOFTWARE.
 #include <complex>
 
 #pragma clang diagnostic ignored "-Wunused-variable"
-// Tolerance for error
-const double tolerance = 1e-6;
 
 #define LEN 64
 
@@ -86,6 +84,8 @@ template <typename FloatT> __global__ void kernel(std::complex<FloatT>* A, std::
 }
 
 template <typename FloatT> void test() {
+  // Tolerance for error
+  const double tolerance = 1e-6;
   typedef std::complex<FloatT> ComplexT;
 
   ComplexT *A, *Ad, *B, *Bd, *C, *Cd, *D;

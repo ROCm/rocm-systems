@@ -55,6 +55,7 @@ __global__ void SquareKrnl(int* ptr) {
   *ptr = (*ptr) * (*ptr);
 }
 
+#if HT_AMD
 // The function tests the coherency of allocated memory
 // Return false on failure, true on success.
 bool static TstCoherency(int* Ptr, bool HmmMem) {
@@ -96,6 +97,7 @@ bool static TstCoherency(int* Ptr, bool HmmMem) {
   fprintf(stderr, "TstCoherency: *Ptr=%u\b", *Ptr);
   return false;
 }
+#endif
 
 /* Test case description: The following test validates if fine grain
    behavior is observed or not with memory allocated using malloc()*/

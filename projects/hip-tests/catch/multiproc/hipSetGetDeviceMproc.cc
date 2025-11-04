@@ -248,7 +248,7 @@ static void testValidDevices(int numDevices, bool useRocrEnv, int* deviceList,
   REQUIRE(testResult == true);
 }
 
-
+#ifdef __HIP_PLATFORM_AMD__
 static void Initialize(int* deviceList, int numDevices, int count,
                        std::string& min_visibleDeviceString, std::string& max_visibleDeviceString) {
   int* deviceListPtr = deviceList;
@@ -393,6 +393,7 @@ static void testMinRvdMaxHvd(int numDevices, int* deviceList, int count) {
 
   REQUIRE(testResult == true);
 }
+#endif
 
 /**
  * Scenario sets Invalid visible device list and checks behavior.

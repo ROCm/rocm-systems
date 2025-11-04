@@ -25,11 +25,6 @@ THE SOFTWARE.
 
 #include <stdlib.h>
 
-constexpr size_t buffer_size = (1024 * 1024);
-constexpr int test_iteration_hstvismem = 5;
-constexpr int test_iteration_noncohmem = 10;
-constexpr int block_size = 512;
-
 /**
  * @addtogroup hipEventCreateWithFlags hipEventCreateWithFlags
  * @{
@@ -74,6 +69,11 @@ Since flags hipEventReleaseToSystem, hipEventDisableSystemFence and hipEventRele
 are AMD specific flags, hence the following tests enabled only for AMD.
 */
 #if HT_AMD
+constexpr int test_iteration_hstvismem = 5;
+constexpr size_t buffer_size = (1024 * 1024);
+constexpr int test_iteration_noncohmem = 10;
+constexpr int block_size = 512;
+
 enum class eSyncToTest {
   eStreamSynchronize,
   eDeviceSynchronize,

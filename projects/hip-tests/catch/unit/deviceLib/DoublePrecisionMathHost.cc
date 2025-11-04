@@ -25,7 +25,7 @@ THE SOFTWARE.
 
 __host__ static void double_precision_math_functions() {
   int iX;
-  double fX, fY;
+  double fX;
 
   acos(1.0);
   acosh(1.0);
@@ -93,6 +93,7 @@ __host__ static void double_precision_math_functions() {
   std::signbit(1.0);
   sin(0.0);
 #ifdef _unix__
+  double fY;
   sincos(0.0, &fX, &fY);
 #endif
   sinh(0.0);

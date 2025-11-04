@@ -22,7 +22,6 @@
 #include <limits>
 
 static bool thread_results[NUMBER_OF_THREADS];
-static constexpr int streamPerAsic = 2;
 static hipMemPool_t mem_pool_common;
 
 /**
@@ -358,6 +357,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_ReleaseThreshold_Mgpu", "[multigpu]") {
 /**
  * Local Thread Functions
  */
+#if HT_AMD
 static void threadQAsyncCommands(streamMemAllocTest* testObj, hipStream_t strm, int idx) {
   HIP_CHECK(hipSetDevice(idx));
   // Create host buffer with test data.
@@ -371,7 +371,7 @@ static void threadQAsyncCommands(streamMemAllocTest* testObj, hipStream_t strm, 
   // Free Buffer Asynchronously on stream.
   testObj->freeDevBuf(strm);
 }
-
+#endif
 static void thread_Test1(hipStream_t stream, int N, enum eTestValue testtype, int threadNum) {
   thread_results[threadNum] = checkMaximumAndDefaultThreshold(stream, N, testtype, 0);
 }
@@ -575,6 +575,8 @@ static bool checkReuseAllowOtherFlags(int N, hipMemPoolAttr attr, enum eTestValu
  *    - HIP_VERSION >= 6.2
  */
 #if HT_AMD
+static constexpr int streamPerAsic = 2;
+
 TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_Concurrent", "[multigpu]") {
   auto testType = GENERATE(testdefault, testMaximum);
   constexpr int N = 1 << 20;

@@ -57,6 +57,7 @@ static __global__ void kernel_cg_grid_group_type(int* size_dev, int* thd_rank_de
   group_dim_dev[gIdx] = gg.group_dim();
 }
 
+#if HT_AMD
 static __global__ void kernel_cg_grid_group_type_via_base_type(int* size_dev, int* thd_rank_dev,
                                                                int* is_valid_dev, int* sync_dev) {
   cg::thread_group tg = cg::this_grid();
@@ -84,6 +85,7 @@ static __global__ void kernel_cg_grid_group_type_via_base_type(int* size_dev, in
   tg.sync();
   sync_dev[gIdx] = gm[1] * gm[0];
 }
+#endif
 
 static __global__ void kernel_cg_grid_group_type_via_public_api(int* size_dev, int* thd_rank_dev,
                                                                 int* is_valid_dev, int* sync_dev,

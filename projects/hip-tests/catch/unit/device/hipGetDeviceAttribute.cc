@@ -51,6 +51,7 @@ static hipError_t test_hipDeviceGetAttribute(int deviceId, hipDeviceAttribute_t 
   return hipSuccess;
 }
 
+#if HT_AMD
 static hipError_t test_hipDeviceGetHdpAddress(int deviceId, hipDeviceAttribute_t attr,
                                               uint32_t* expectedValue) {
   uint32_t* value = 0;
@@ -66,6 +67,7 @@ static hipError_t test_hipDeviceGetHdpAddress(int deviceId, hipDeviceAttribute_t
   }
   return hipSuccess;
 }
+#endif
 
 /**
  * Test Description
