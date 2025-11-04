@@ -784,7 +784,7 @@ tool_tracing_callback_stop(
                 if(config::get_perfetto_annotations())
                 {
                     tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ts);
-                    tracing::add_perfetto_annotation(ctx, "corr_id",
+                    tracing::add_perfetto_annotation(ctx, "stack_id",
                                                      record.correlation_id.internal);
                     if(stream_id.handle != 0)
                         tracing::add_perfetto_annotation(ctx, "stream_id",
@@ -1124,7 +1124,7 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
                 if(config::get_perfetto_annotations())
                 {
                     tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ts);
-                    tracing::add_perfetto_annotation(ctx, "corr_id",
+                    tracing::add_perfetto_annotation(ctx, "stack_id",
                                                      record.correlation_id.internal);
                     if(stream_id.handle != 0)
                         tracing::add_perfetto_annotation(ctx, "stream_id",
@@ -1599,7 +1599,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     get_kernel_symbol_info(record->dispatch_info.kernel_id);
 
                 auto        _name     = tim::demangle(_kern_sym_data->kernel_name);
-                auto        _corr_id  = record->correlation_id.internal;
+                auto        _stack_id = record->correlation_id.internal;
                 auto        _beg_ns   = record->start_timestamp;
                 auto        _end_ns   = record->end_timestamp;
                 auto        _agent_id = record->dispatch_info.agent_id;
@@ -1646,7 +1646,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         {
                             tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
                             tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
-                            tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
+                            tracing::add_perfetto_annotation(ctx, "stack_id", _stack_id);
                             tracing::add_perfetto_annotation(ctx, "stream_id",
                                                              _stream_id);
 
@@ -1692,7 +1692,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                         tracing::push_perfetto(category::rocm_kernel_dispatch{},
                                                _name.c_str(), _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_corr_id),
+                                               ::perfetto::Flow::ProcessScoped(_stack_id),
                                                add_perfetto_annotations);
 
                         tracing::pop_perfetto(category::rocm_kernel_dispatch{},
@@ -1705,7 +1705,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                         tracing::push_perfetto(category::rocm_hip_stream{}, _name.c_str(),
                                                _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_corr_id),
+                                               ::perfetto::Flow::ProcessScoped(_stack_id),
                                                add_perfetto_annotations);
 
                         tracing::pop_perfetto(category::rocm_hip_stream{}, _name.c_str(),
@@ -1719,7 +1719,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(
                         header->payload);
 
-                auto        _corr_id      = record->correlation_id.internal;
+                auto        _stack_id     = record->correlation_id.internal;
                 auto        _beg_ns       = record->start_timestamp;
                 auto        _end_ns       = record->end_timestamp;
                 auto        _dst_agent_id = record->dst_agent_id;
@@ -1772,7 +1772,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         {
                             tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
                             tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
-                            tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
+                            tracing::add_perfetto_annotation(ctx, "stack_id", _stack_id);
                             tracing::add_perfetto_annotation(ctx, "stream_id",
                                                              _stream_id);
                             tracing::add_perfetto_annotation(ctx, "dst_agent",
@@ -1797,7 +1797,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                         tracing::push_perfetto(category::rocm_memory_copy{}, _name.data(),
                                                _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_corr_id),
+                                               ::perfetto::Flow::ProcessScoped(_stack_id),
                                                add_perfetto_annotations);
 
                         tracing::pop_perfetto(category::rocm_memory_copy{}, "", _track,
@@ -1810,7 +1810,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                         tracing::push_perfetto(category::rocm_hip_stream{}, _name.data(),
                                                _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_corr_id),
+                                               ::perfetto::Flow::ProcessScoped(_stack_id),
                                                add_perfetto_annotations);
 
                         tracing::pop_perfetto(category::rocm_hip_stream{}, "", _track,
