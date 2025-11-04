@@ -91,6 +91,12 @@ set(PKG_VERSION_GIT_TAG_PREFIX "rocminfo_pkg_ver")
 
 find_program (GIT NAMES git)
 
+# Set Lintian Support Flags
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+# No Library for rocminfo, So no ASAN specific package, no asan comp type
+set( COMP_TYPE "dev" )
+
 get_package_version_number("1.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 # VERSION_* variables should be set by get_version_from_tag
 message("Package version: ${PKG_VERSION_STR}")
@@ -195,7 +201,9 @@ set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 set(CPACK_PACKAGE_VERSION_MAJOR "${PKG_VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${PKG_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${PKG_VERSION_PATCH}")
-set(CPACK_PACKAGE_CONTACT "AMD Rocminfo Support <rocminfo.support@amd.com>")
+set(PKG_MAINTAINER_NM     "AMD Rocminfo Support")
+set(PKG_MAINTAINER_EMAIL  "rocminfo.support@amd.com")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/License.txt")
 set( CPACK_RPM_PACKAGE_LICENSE "NCSA" )
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Radeon Open Compute (ROCm) Runtime rocminfo tool")
@@ -268,4 +276,8 @@ if(NOT BUILD_SHARED_LIBS)
   string(REPLACE "hsa-rocr" "hsa-rocr-static-dev" CPACK_DEBIAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
   string(REPLACE "hsa-rocr" "hsa-rocr-static-devel" CPACK_RPM_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 endif()
+
+# Configure Lintian Specific Package Data
+configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+
 include ( CPack )
