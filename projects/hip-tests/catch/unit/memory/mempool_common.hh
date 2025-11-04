@@ -599,11 +599,13 @@ public:
     iov[0].iov_len = sizeof(dummy_data);
     msg.msg_iov = iov;
     msg.msg_iovlen = 1;
-
-    if ((n = recvmsg(handle->socket, &msg, 0)) <= 0) {
+    
+    n = recvmsg(handle->socket, &msg, 0);
+    if (n <= 0) {
       perror("Socket failure: Receiving data over socket failed");
       return -1;
     }
+    (void)n; // suppress unused variable warning
 
     if (((cmptr = CMSG_FIRSTHDR(&msg)) != NULL) &&
        (cmptr->cmsg_len == CMSG_LEN(sizeof(int)))) {
