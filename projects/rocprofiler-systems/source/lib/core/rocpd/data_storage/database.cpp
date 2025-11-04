@@ -98,8 +98,8 @@ std::string
 get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
 {
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
-    rocpd_sql_schema_jinja_variables_t info{ 2 * upid.size(), upid.c_str(),
-                                             upid.c_str() };
+    const auto                         jinja_size = 2 * upid.size();
+    rocpd_sql_schema_jinja_variables_t info{ jinja_size, upid.c_str(), upid.c_str() };
 
     std::string query;
     rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind, ROCPD_SQL_OPTIONS_NONE,
