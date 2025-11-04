@@ -30,6 +30,7 @@ THE SOFTWARE.
 
 #include <driver_types.h>
 #include <stdio.h>
+#include <string.h>
 
 #define CUDA_9000 9000
 #define CUDA_10000 10000

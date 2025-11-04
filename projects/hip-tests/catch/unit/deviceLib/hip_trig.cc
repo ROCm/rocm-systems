@@ -17,7 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
-#include <hip/device_functions.h>
+
 #define LEN 512
 #define SIZE (LEN << 2)
 __global__ static void kernel_trig(float* In, float* sin_d, float* cos_d, float* tan_d,

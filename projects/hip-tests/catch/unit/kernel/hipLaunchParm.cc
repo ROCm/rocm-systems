@@ -796,7 +796,6 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_h20.name = 'A';
     hipLaunchKernelStruct_h20.rank = 2;
     hipLaunchKernelStruct_h20.age = 42;
-    bool *result_d20, *result_h20;
 #if ENABLE_OUT_OF_ORDER_INITIALIZATION
     hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc20), dim3(BLOCK_DIM_SIZE), dim3(1),
                        0, 0, hipLaunchKernelStruct_h20, result_d);
@@ -809,7 +808,6 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_t21 hipLaunchKernelStruct_h21 =
         // out of order initalization
         {2, 0};
-    bool *result_d21, *result_h21;
     hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc21), dim3(BLOCK_DIM_SIZE), dim3(1),
                        0, 0, hipLaunchKernelStruct_h21, result_d);
 #if ENABLE_BIT_FIELDS

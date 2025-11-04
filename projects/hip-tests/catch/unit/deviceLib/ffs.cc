@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip/device_functions.h>
 
 #include <assert.h>
 #include <stdio.h>
