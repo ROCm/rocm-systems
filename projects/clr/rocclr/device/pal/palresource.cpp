@@ -1565,7 +1565,11 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
     copyRegion.gpuMemoryDepthPitch =
         (srcOrigin[2]) ? srcOrigin[2]
                        : copyRegion.gpuMemoryRowPitch * copyRegion.imageExtent.height;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 955
     gpu.iCmd()->CmdCopyMemoryToImage(*iMem(), *dstResource.image_, imgLayout, 1, &copyRegion);
+#else
+    gpu.iCmd()->CmdCopyMemoryToImage(*iMem(), *dstResource.image_, imgLayout, 1, &copyRegion, 0);
+#endif
   } else if (!desc().buffer_ && dstResource.desc().buffer_) {
     Pal::MemoryImageCopyRegion copyRegion = {};
     uint32_t arraySliceIdx = img2Darray ? srcOrigin[2] : img1Darray ? srcOrigin[1] : 0;
