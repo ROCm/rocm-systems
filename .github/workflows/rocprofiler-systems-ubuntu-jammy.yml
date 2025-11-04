@@ -84,7 +84,7 @@ jobs:
           cd projects/rocprofiler-systems/
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y libomp-dev libopenmpi-dev ${{ matrix.compiler }}
+          apt-get install -y libomp-dev libopenmpi-dev ${{ matrix.compiler }} &&
           apt-get autoclean
 
     - name: Test Environment Modules
