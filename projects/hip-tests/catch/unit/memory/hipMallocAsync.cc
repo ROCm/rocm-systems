@@ -25,7 +25,6 @@
 
 static bool thread_results[NUMBER_OF_THREADS];
 static constexpr auto NUM_ELM{1024 * 1024};
-static constexpr int streamPerAsic = 2;
 
 /**
  * @addtogroup hipMallocAsync hipMallocAsync
@@ -316,6 +315,8 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice") {
  *    - HIP_VERSION >= 6.2
  */
 #if HT_AMD
+static constexpr int streamPerAsic = 2;
+
 static void threadQAsyncCommands(streamMemAllocTest* testObj, hipStream_t strm, int idx) {
   HIP_CHECK(hipSetDevice(idx));
   // Create host buffer with test data.

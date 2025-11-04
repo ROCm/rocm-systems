@@ -29,6 +29,8 @@ THE SOFTWARE.
 
 using namespace mem_utils;
 
+#if HT_AMD
+
 // value used for memset operations
 constexpr int testValue = 0x11;
 
@@ -175,7 +177,7 @@ static void runMemcpyTests(hipStream_t stream, bool async, allocType type, memTy
   }
 }
 
-#if HT_AMD /* Disabled because frequency based wait is timing out on nvidia platforms */
+/* Disabled because frequency based wait is timing out on nvidia platforms */
 
 TEST_CASE("Unit_hipMemcpySync") {
 #if HT_AMD  // To be removed when EXSWCPHIPT-127 is fixed
