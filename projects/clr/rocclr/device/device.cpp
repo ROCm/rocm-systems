@@ -115,8 +115,8 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       // --------------|-------------|--------|------------|-----------------------               
       //   Target ID   |   ROC PAL   | Major  |  SRAMECC   | SIMD/CU
       //               |             |  Minor |   XNACK    |  SIMD Width
-      //               |             |   Step |            |   Instr Wdith
-      //               |             |        |            |    Bank Wdith
+      //               |             |   Step |            |   Instr Width
+      //               |             |        |            |    Bank Width
       //               |             |        |            |     LDS Size
       //               |             |        |            |      Mem Banks
       //               |             |        |            |       LDS Alignment
