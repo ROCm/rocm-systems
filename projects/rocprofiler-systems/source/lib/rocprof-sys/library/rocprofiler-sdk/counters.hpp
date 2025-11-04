@@ -109,7 +109,7 @@ struct counter_storage
     void operator()(const counter_event& _event, timing_interval _timing,
                     scope::config _scope = scope::get_default()) const;
 
-    static void write(counter_storage_type* storage, std::string metric_name,
+    static void write(counter_storage_type* storage, const std::string& metric_name,
                       std::string metric_description);
 };
 }  // namespace rocprofiler_sdk

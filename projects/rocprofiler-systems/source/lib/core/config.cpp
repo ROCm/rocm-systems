@@ -315,6 +315,10 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_CACHING_PERFETTO",
+                              "Enable perfetto with trace cache", false, "backend",
+                              "perfetto_caching");
+
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
                               "Enable ROCm API and kernel tracing", true, "backend",
                               "rocm");
@@ -2395,6 +2399,13 @@ bool&
 get_use_rocpd()
 {
     static auto _v = get_config()->at("ROCPROFSYS_USE_ROCPD");
+    return static_cast<tim::tsettings<bool>&>(*_v).get();
+}
+
+bool&
+get_caching_perfetto()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_CACHING_PERFETTO");
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 

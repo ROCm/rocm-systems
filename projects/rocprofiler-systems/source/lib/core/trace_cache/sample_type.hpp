@@ -161,6 +161,7 @@ struct region_sample : storage_parsed_type_base
 
 struct in_time_sample : storage_parsed_type_base
 {
+    size_t      category_enum_id;
     std::string track_name;
     size_t      timestamp_ns;
     std::string event_metadata;

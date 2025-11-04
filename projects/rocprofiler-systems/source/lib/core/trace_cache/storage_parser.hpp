@@ -48,7 +48,7 @@ public:
     void register_type_callback(const entry_type&              type,
                                 const postprocessing_callback& callback);
 
-    void consume_storage();
+    void consume_storage(bool cleanup = false);
     void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback);
 
 private:

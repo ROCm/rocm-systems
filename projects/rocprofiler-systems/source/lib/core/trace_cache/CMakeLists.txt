@@ -26,6 +26,7 @@ set(trace_cache_sources
     ${CMAKE_CURRENT_LIST_DIR}/buffer_storage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rocpd_post_processing.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto_post_processing.cpp
 )
 
 set(trace_cache_headers
@@ -35,6 +36,7 @@ set(trace_cache_headers
     ${CMAKE_CURRENT_LIST_DIR}/cache_utility.hpp
     ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocpd_post_processing.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto_post_processing.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sample_type.hpp
 )
 
