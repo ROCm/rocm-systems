@@ -21,10 +21,12 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
+
 #include <fmt/core.h>
 #include <cstdlib>
 #include <iostream>
-#include "lib/common/logging.hpp"
 
 #define CHECK_HSA(fn, message)                                                                     \
     if((fn) != HSA_STATUS_SUCCESS)                                                                 \
@@ -215,6 +217,13 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
 : handle(_handle)
 , shader_engine_id(_shader_engine_id)
 {
+    auto aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
+    if(!aqlprofile_dl || !aqlprofile_dl->valid())
+    {
+        ROCP_FATAL << "AQLProfile dynamic library not loaded or missing required symbols. "
+                   << "Cannot create SQTT buffering packets.";
+    }
+
     // We sometimes need 2x the number of packets as there are buffers.
     uint64_t num_packets{6};
     buffer_swap.resize(num_packets);
@@ -223,7 +232,7 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
     for(auto& buffer : buffer_swap)
         buffer_ptr.emplace_back(&buffer);
 
-    auto status = aqlprofile_att_get_buffer_packets(
+    auto status = aqlprofile_dl->get_buffer_packets_fn(
         &header, &query_status, buffer_ptr.data(), &num_packets, handle, shader_engine_id, 0);
     CHECK_HSA(status, "failed to create ATT double buffer packet");
 
@@ -237,9 +246,13 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
 std::optional<sqtt_buffer_status_t>
 SQTTBufferingPackets::query_buffer_status()
 {
+    auto aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
+    ROCP_FATAL_IF(!aqlprofile_dl || !aqlprofile_dl->valid())
+        << "AQLProfile dynamic library not valid. Cannot query buffer status.";
+
     auto ret = aqlprofile_att_buffer_status_t{};
 
-    auto status = aqlprofile_att_update_buffer_status(&ret, handle, shader_engine_id, 0);
+    auto status = aqlprofile_dl->update_buffer_status_fn(&ret, handle, shader_engine_id, 0);
     CHECK_HSA(status, "failed to query ATT status");
 
     if(!ret.needs_swap) return {};
