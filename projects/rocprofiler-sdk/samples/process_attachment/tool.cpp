@@ -402,16 +402,6 @@ tool_detach(void* /*tool_data*/)
 
 }  // namespace attachment_tool
 
-// Forward declarations for attach functions
-namespace attachment_tool
-{
-int tool_attach(rocprofiler_client_detach_t detach_func,
-               rocprofiler_context_id_t*   context_ids,
-               uint64_t                    context_ids_length,
-               void*                       tool_data);
-
-void tool_detach(void* tool_data);
-}  // namespace attachment_tool
 
 extern "C" {
 
