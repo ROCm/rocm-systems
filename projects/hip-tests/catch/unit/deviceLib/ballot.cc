@@ -21,8 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip/device_functions.h>
-
 
 __global__ void gpu_ballot(unsigned int* device_ballot, unsigned Num_Warps_per_Block,
                            unsigned pshift) {
