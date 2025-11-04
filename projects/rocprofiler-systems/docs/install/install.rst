@@ -24,18 +24,9 @@ To review and install either the current ROCm Systems Profiler release or earlie
 Operating system support
 ========================================
 
-ROCm Systems Profiler is only supported on Linux. The following distributions are tested in the ROCm Systems Profiler GitHub workflows:
-
-* Ubuntu 20.04
-* Ubuntu 22.04
-* OpenSUSE 15.5
-* OpenSUSE 15.6
-* Red Hat 8.8
-* Red Hat 8.9
-* Red Hat 8.10
-* Red Hat 9.2
-* Red Hat 9.3
-* Red Hat 9.4
+ROCm Systems Profiler is only supported on Linux. See
+`Supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_
+for ROCm supported operating systems.
 
 Other OS distributions might function but are not supported or tested.
 

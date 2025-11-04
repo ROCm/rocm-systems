@@ -18,9 +18,8 @@ version and ``Y`` is the ROCm minor version, for example, ``--rocm 6.3``.
    wget https://github.com/ROCm/rocprofiler-systems/releases/latest/download/rocprofiler-systems-install.py
    python3 ./rocprofiler-systems-install.py --prefix /opt/rocprofiler-systems --rocm 6.3
 
-This script supports installation on Ubuntu, OpenSUSE, Red Hat, Debian, CentOS, and Fedora.
-If the target OS is compatible with one of the operating system versions listed in
-the comprehensive :doc:`Installation guidelines <./install>`,
+This script supports installation on Ubuntu, Red Hat, Debian, and SUSE.
+If the target OS is compatible with one of the operating system versions listed in `Supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_,
 specify ``-d <DISTRO> -v <VERSION>``. For example, if the OS is compatible with Ubuntu 22.04, pass
 ``-d ubuntu -v 22.04`` to the script.
 
