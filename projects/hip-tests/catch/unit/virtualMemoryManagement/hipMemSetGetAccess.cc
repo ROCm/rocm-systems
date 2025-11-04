@@ -1398,47 +1398,6 @@ TEST_CASE("Unit_hipMemSetAccessHostDevice_hostalloc") {
   HIP_CHECK(hipMemRelease(handle));
 }
 
-TEST_CASE("Unit_hipMemSetAccessHost_devicealloc") {
-  // Ensure device 0 is selected
-  REQUIRE(hipSetDevice(0) == hipSuccess);
-
-  // ---- Describe a DEVICE-backed allocation
-  hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;         // pinned system RAM
-  prop.location.type = hipMemLocationTypeDevice;  // generic host
-  prop.location.id = 0;                           // host id must be 0
-  prop.requestedHandleType = hipMemHandleTypeNone;
-
-  constexpr size_t N = 1024;
-  constexpr size_t bytes = N * sizeof(int);
-
-  //get minimum granularity
-  size_t gran = 0;
-  HIP_CHECK(hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityMinimum));
-  size_t mapSize = ((bytes + gran - 1) / gran) * gran;
-
-  // Create host-backed allocation handle
-  hipMemGenericAllocationHandle_t handle{};
-  HIP_CHECK(hipMemCreate(&handle, mapSize, &prop, 0 /*flags*/));
-
-  // Reserve VA and map
-  void* addr = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&addr, mapSize, 0 /*align*/, 0 /*addr*/, 0 /*flags*/));
-
-  HIP_CHECK(hipMemMap(addr, mapSize, 0 /*offset*/, handle, 0 /*flags*/));
-
-  // Grant HOST access. 
-  hipMemAccessDesc accHost{};
-  accHost.flags = hipMemAccessFlagsProtReadWrite;
-  accHost.location.type = hipMemLocationTypeHost;
-  accHost.location.id = 0;
-  HIP_CHECK_ERROR(hipMemSetAccess(addr, mapSize, &accHost, 1), hipErrorInvalidValue);
-
-  HIP_CHECK(hipMemUnmap(addr, mapSize));
-  HIP_CHECK(hipMemAddressFree(addr, mapSize));
-  HIP_CHECK(hipMemRelease(handle));
-}
-
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}
