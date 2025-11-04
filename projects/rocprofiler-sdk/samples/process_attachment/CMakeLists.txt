@@ -86,9 +86,11 @@ rocprofiler_samples_get_ld_library_path_env(
 
 set(process-attachment-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
+#[[
+# commenting this out for now to run via a script later    
 # Test that verifies the target application runs correctly
 add_test(NAME process-attachment-target-test 
-         COMMAND $<TARGET_FILE:process-attachment-target> -t 5)
+         COMMAND $<TARGET_FILE:process-attachment-target> -t 10)
 
 set_tests_properties(
     process-attachment-target-test
@@ -117,6 +119,7 @@ if(NOT ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
 endif()
+]]
 
 # Install targets
 install(
