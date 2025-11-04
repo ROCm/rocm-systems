@@ -565,6 +565,9 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
     ret = new core::InterruptSignal(initial_value);
   }
 
+  if (ret == nullptr)
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
   *hsa_signal = core::Signal::Convert(ret);
   return HSA_STATUS_SUCCESS;
   CATCH;
@@ -758,7 +761,7 @@ hsa_status_t hsa_amd_memory_lock(void* host_ptr, size_t size,
   const AMD::MemoryRegion* system_region = static_cast<const AMD::MemoryRegion*>(
       core::Runtime::runtime_singleton_->system_regions_coarse()[0]);
 
-  return system_region->Lock(num_agent, agents, host_ptr, size, agent_ptr);
+  return system_region->Lock(num_agent, agents, host_ptr, size, 0, agent_ptr);
   CATCH;
 }
 
@@ -768,7 +771,7 @@ hsa_status_t hsa_amd_memory_lock_to_pool(void* host_ptr, size_t size, hsa_agent_
   TRY;
   IS_OPEN();
 
-  if (size == 0 || host_ptr == nullptr || agent_ptr == nullptr || flags != 0) {
+  if (size == 0 || host_ptr == nullptr || agent_ptr == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -786,7 +789,7 @@ hsa_status_t hsa_amd_memory_lock_to_pool(void* host_ptr, size_t size, hsa_agent_
   if (mem_region->owner()->device_type() != core::Agent::kAmdCpuDevice)
     return (hsa_status_t)HSA_STATUS_ERROR_INVALID_MEMORY_POOL;
 
-  return mem_region->Lock(num_agent, agents, host_ptr, size, agent_ptr);
+  return mem_region->Lock(num_agent, agents, host_ptr, size, flags, agent_ptr);
   CATCH;
 }
 
@@ -835,14 +838,12 @@ hsa_status_t hsa_amd_agent_iterate_memory_pools(
         reinterpret_cast<hsa_status_t (*)(hsa_region_t memory_pool,
                                           void *data)>(callback),
         data);
-#if defined(__linux__)
   case core::Agent::kAmdAieDevice:
     return reinterpret_cast<const AMD::AieAgent *>(agent)->VisitRegion(
         false,
         reinterpret_cast<hsa_status_t (*)(hsa_region_t memory_pool,
                                           void *data)>(callback),
         data);
-#endif
   case core::Agent::kAmdGpuDevice:
     return reinterpret_cast<const AMD::GpuAgentInt *>(agent)->VisitRegion(
         false,

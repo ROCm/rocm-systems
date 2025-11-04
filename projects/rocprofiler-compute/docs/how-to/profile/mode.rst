@@ -27,7 +27,7 @@ Profiling with ROCm Compute Profiler yields the following benefits.
 * :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profile can adjust the
   output format of underlying rocprof tool which changes the output format of raw performance
   counter data in the workload folder created during profiling. Supported output formats are
-  ``json``, ``csv``, and ``rocpd``. The default output format is ``csv``.
+  ``csv`` and ``rocpd``. The default output format is ``csv``.
 
 .. note::
 
@@ -47,7 +47,7 @@ Run ``rocprof-compute profile -h`` for more details. See
 Profiling example
 -----------------
 
-The `<https://github.com/ROCm/rocprofiler-compute/blob/amd-mainline/sample/vcopy.cpp>`__ repository
+The `<https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/sample/vcopy.cpp>`__ repository
 includes source code for a sample GPU compute workload, ``vcopy.cpp``. A copy of
 this file is available in the ``share/sample`` subdirectory after a normal
 ROCm Compute Profiler installation, or via the ``$ROCPROFCOMPUTE_SHARE/sample`` directory when
@@ -237,11 +237,6 @@ of the underlying ``rocprof`` tool. The following formats are supported:
 * ``csv`` format:
    * Ask underlying rocprof tool to dump raw performance counter data in csv format.
    * The generated csv files across multiple runs of rocprof are processed and dumped into the workload directory as csv files.
-   * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
-
-* ``json`` format:
-   * Ask underlying rocprof tool to dump raw performance counter data in json format.
-   * The generated json files across multiple runs of rocprof are processed and dumped into the workload directory as csv files.
    * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
 
 * ``rocpd`` format:
