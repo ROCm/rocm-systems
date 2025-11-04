@@ -96,7 +96,7 @@ counter_callback_info::setup_counter_config(std::shared_ptr<counter_config>& pro
 
         try
         {
-            config.asts.back().set_dimensions();
+            config.asts.back().set_dimensions(config.agent->id);
         } catch(std::runtime_error& e)
         {
             ROCP_ERROR << metric.name() << " has improper dimensions"

@@ -1036,4 +1036,34 @@ function(rocprofiler_install_env_setup_files)
         COMPONENT ${RIEF_COMPONENT})
 endfunction()
 
+# ----------------------------------------------------------------------------
+# gets the user local python bin directory from `python3 -m pip install --user ...`
+#
+function(_rocprofiler_get_python_user_bin _OUT)
+    find_package(Python3 QUIET)
+    # default to empty
+    set(_VAL)
+    if(Python3_FOUND)
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -m site --user-base
+            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            OUTPUT_VARIABLE _PYTHON_USER_BASE
+            RESULT_VARIABLE _PYTHON_USER_BASE_RET
+            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+
+        # if successful, check the bin dir
+        if(_PYTHON_USER_BASE_RET EQUAL 0)
+            set(_PYTHON_USER_BIN "${_PYTHON_USER_BASE}/bin")
+            if(EXISTS "${_PYTHON_USER_BIN}")
+                set(_VAL "${_PYTHON_USER_BIN}")
+            endif()
+        endif()
+    endif()
+
+    # return value
+    set(${_OUT}
+        "${_VAL}"
+        PARENT_SCOPE)
+endfunction()
+
 cmake_policy(POP)

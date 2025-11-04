@@ -28,6 +28,7 @@ THE SOFTWARE.
 struct CmdOptions {
   int iterations = 10;
   int warmups = 100;
+  int cg_extended_run = 5;
   int cg_iterations = 2;
   bool no_display = false;
   bool progress = false;

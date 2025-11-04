@@ -638,6 +638,12 @@ global:
     hipLibraryUnload;
     hipLibraryGetKernel;
     hipLibraryGetKernelCount;
+    hipStreamCopyAttributes;
+    hipLibraryEnumerateKernels;
+    hipKernelGetLibrary;
+    hipKernelGetName;
+    hipOccupancyAvailableDynamicSMemPerBlock;
+    hipGetProcAddress_spt;
 local:
     *;
 } hip_7.1;

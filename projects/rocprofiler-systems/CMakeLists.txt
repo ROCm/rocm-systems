@@ -217,6 +217,9 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from subm
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
                                "Build libunwind from submodule" ON
 )
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_NLOHMANN_JSON
+                               "Build nlohmann/json from submodule" ON
+)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CODECOV "Build for code coverage" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
                                "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF
