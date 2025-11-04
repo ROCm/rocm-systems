@@ -8,8 +8,6 @@ CLI analysis
 
 This section provides an overview of ROCm Compute Profiler's CLI analysis features.
 
-This section provides an overview of ROCm Compute Profiler's CLI analysis features.
-
 * :ref:`Derived metrics <cli-list-metrics>`: All of ROCm Compute Profiler's built-in metrics.
 
 * :ref:`Baseline comparison <analysis-baseline-comparison>`: Compare multiple runs in a side-by-side manner.
