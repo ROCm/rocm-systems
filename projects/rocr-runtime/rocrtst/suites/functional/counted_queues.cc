@@ -53,15 +53,6 @@ void CountedQueuesTest::DisplayResults() const {
 
 void CountedQueuesTest::DisplayTestInfo() { TestBase::DisplayTestInfo(); }
 
-/* Test Description:
-
-Positive test:
-- Set MAX_CP_LIMIT to 4 within the environment
-- Create CP queues upto the limit of all different priorities
-- Create one more CP queues and check if it is an existing one or a new one
-- Check internal ref count, data etc
-*/
-
 void CountedQueuesTest::CountedQueueBasicApiTest() {
   hsa_status_t status;
 
@@ -183,6 +174,9 @@ void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
             HSA_STATUS_SUCCESS);
   EXPECT_EQ(new_hw_id, 1);
   EXPECT_EQ(refCount, 1);
+
+  // Release this queue
+  EXPECT_EQ(hsa_amd_counted_queue_release(new_queue), HSA_STATUS_SUCCESS);
 }
 
 void CountedQueuesTest::InvalidArgsTest() {
@@ -304,7 +298,7 @@ void CountedQueuesTest::CountedQueuesAllPrioritiesLimitTest() {
 
   // Verify use counts of first two HW queues
   uint32_t low_use1 = 0, low_use2 = 0, low_use3;
-  uint32_t norm_use1 = 0, norm_use2 = 0, norm_use3 =  0;
+  uint32_t norm_use1 = 0, norm_use2 = 0, norm_use3 = 0;
   uint32_t high_use1 = 0, high_use2 = 0, high_use3 = 0;
 
   EXPECT_EQ(hsa_amd_counted_queue_get_info(low1, HSA_QUEUE_INFO_USE_COUNT, &low_use1), HSA_STATUS_SUCCESS);
@@ -321,7 +315,7 @@ void CountedQueuesTest::CountedQueuesAllPrioritiesLimitTest() {
 
   EXPECT_EQ(low_use1, 2);
   EXPECT_EQ(low_use2, 1);
-  EXPECT_TRUE(low_use1 == low_use3); // same HW queues, hence same ref count
+  EXPECT_TRUE(low_use1 == low_use3); // same HW queues, same ref count
 
   EXPECT_EQ(norm_use1, 2);
   EXPECT_EQ(norm_use2, 1);
@@ -343,4 +337,51 @@ void CountedQueuesTest::CountedQueuesAllPrioritiesLimitTest() {
   EXPECT_EQ(hsa_amd_counted_queue_release(high1), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_counted_queue_release(high2), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_counted_queue_release(high3), HSA_STATUS_SUCCESS);
+}
+
+void CountedQueuesTest::CountedQueuesSetPriorityNackTest() {
+  hsa_status_t status;
+
+  // Find all gpu agents
+  std::vector<hsa_agent_t> gpus;
+  status = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
+  ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+  // Create a counted queue
+  hsa_queue_t* queue = nullptr;
+  EXPECT_EQ(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
+                                          nullptr, nullptr, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  EXPECT_NE(queue, nullptr);
+
+  // Try to set priority on this queue; should fail
+  status = hsa_amd_queue_set_priority(queue, HSA_AMD_QUEUE_PRIORITY_HIGH);
+  EXPECT_TRUE(status != HSA_STATUS_SUCCESS);
+
+  // release queue
+  EXPECT_EQ(hsa_amd_counted_queue_release(queue), HSA_STATUS_SUCCESS);
+}
+
+void CountedQueuesTest::CountedQueuesSetCUMaskNackTest() {
+  hsa_status_t status;
+
+  // Find all gpu agents
+  std::vector<hsa_agent_t> gpus;
+  status = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
+  ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+  // Create a counted queue
+  hsa_queue_t* queue = nullptr;
+  EXPECT_EQ(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
+                                          nullptr, nullptr, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  EXPECT_NE(queue, nullptr);
+
+  // Attempt to set CU mask on counted queue; should fail
+  uint32_t cu_mask[32] = {0};  // dummy mask
+  status = hsa_amd_queue_cu_set_mask(queue, 1, cu_mask);
+  EXPECT_TRUE(status != HSA_STATUS_SUCCESS);
+
+  // release queue
+  EXPECT_EQ(hsa_amd_counted_queue_release(queue), HSA_STATUS_SUCCESS);
 }

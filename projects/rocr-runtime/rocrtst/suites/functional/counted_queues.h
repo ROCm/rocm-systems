@@ -36,6 +36,8 @@ class CountedQueuesTest : public TestBase {
   void CountedQueues_SamePriority_MaxLimitTest();
   void InvalidArgsTest();
   void CountedQueuesAllPrioritiesLimitTest();
+  void CountedQueuesSetPriorityNackTest();
+  void CountedQueuesSetCUMaskNackTest();
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_COUNTED_QUEUES_H

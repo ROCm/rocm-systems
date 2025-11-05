@@ -501,32 +501,34 @@ TEST(rocrtstFunc, Filter_Devices_Test) {
   );
 }
 
+/* The following Counted Queue tests must be executed in separate child processes
+   because they rely on a Singleton instance that persists for the lifetime of the
+   process in which it is created. When run individually, these tests pass even
+   without process isolation; however, when executed sequentially within the same
+   process, they can fail with HSA_STATUS_ERROR_NOT_INITIALIZED. */
+
 TEST(rocrtstFunc, Counted_Queue_Basic_Test) {
-  CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
-  cq.CountedQueueBasicApiTest();
-  RunCustomTestEpilog(&cq);
+  RUN_COUNTED_QUEUE_TEST_IN_CHILD(CountedQueueBasicApiTest);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Same_Priority_Max_Limit_Test) {
-  CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
-  cq.CountedQueues_SamePriority_MaxLimitTest();
-  RunCustomTestEpilog(&cq);
+  RUN_COUNTED_QUEUE_TEST_IN_CHILD(CountedQueues_SamePriority_MaxLimitTest);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Invalid_Args_Test) {
-  CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
-  cq.InvalidArgsTest();
-  RunCustomTestEpilog(&cq);
+  RUN_COUNTED_QUEUE_TEST_IN_CHILD(InvalidArgsTest);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Multiple_Priorities_Limit_Test) {
-  CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
-  cq.CountedQueuesAllPrioritiesLimitTest();
-  RunCustomTestEpilog(&cq);
+  RUN_COUNTED_QUEUE_TEST_IN_CHILD(CountedQueuesAllPrioritiesLimitTest);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Set_Priority_Nack_Test) {
+  RUN_COUNTED_QUEUE_TEST_IN_CHILD(CountedQueuesSetPriorityNackTest);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Set_CUMask_Nack_Test) {
+  RUN_COUNTED_QUEUE_TEST_IN_CHILD(CountedQueuesSetCUMaskNackTest);
 }
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {
