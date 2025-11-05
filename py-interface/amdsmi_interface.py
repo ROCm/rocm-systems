@@ -740,6 +740,9 @@ def _check_res(ret_code) -> None:
     Returns:
         `None`.
     """
+    if ret_code == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
+        raise AmdSmiRetryException()
+
     if ret_code == amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT:
         raise AmdSmiTimeoutException()
 
@@ -3186,23 +3189,14 @@ def amdsmi_get_gpu_xcd_counter(processor_handle: processor_handle_t) -> int:
     return xcd_counter.value
 
 def amdsmi_get_processor_handle_from_bdf(bdf):
-    parsed_bdf = _parse_bdf(bdf)
-    if parsed_bdf is None:
-        raise AmdSmiParameterException(bdf, Any, 
-            msg="Wrong BDF format: {}. \n"
-            + "BDF string should be: <domain>:<bus>:<device>.<function>\n"
-            + " or <bus>:<device>.<function> in hexcode format.\n"
-            + "Where:\n\t<domain> is 4 hex digits long from 0000-FFFF interval\n"
-            + "\t<bus> is 2 hex digits long from 00-FF interval\n"
-            + "\t<device> is 2 hex digits long from 00-1F interval\n"
-            + "\t<function> is 1 hex digit long from 0-7 interval"
-        ).format(bdf)
-    amdsmi_bdf = _make_amdsmi_bdf_from_list(parsed_bdf)
+    bdf = _parse_bdf(bdf)
+    if bdf is None:
+        raise AmdSmiBdfFormatException(bdf)
+    amdsmi_bdf = _make_amdsmi_bdf_from_list(bdf)
     processor_handle = amdsmi_wrapper.amdsmi_processor_handle()
     _check_res(amdsmi_wrapper.amdsmi_get_processor_handle_from_bdf(
         amdsmi_bdf, ctypes.byref(processor_handle)))
     return processor_handle
-
 
 def amdsmi_get_gpu_vendor_name(
     processor_handle: processor_handle_t,
@@ -3494,7 +3488,7 @@ def amdsmi_is_P2P_accessible(
 
     return accessible.value
 
-def amdsmi_get_gpu_compute_partition(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
+def amdsmi_get_gpu_compute_partition(processor_handle: processor_handle_t):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
@@ -5792,4 +5786,3 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     gpu_busy_percent = ctypes.c_uint32(0)
     _check_res(amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent)))
     return gpu_busy_percent.value
-
