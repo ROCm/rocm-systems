@@ -643,7 +643,6 @@ global:
     hipKernelGetLibrary;
     hipKernelGetName;
     hipOccupancyAvailableDynamicSMemPerBlock;
-    hipGetProcAddress_spt;
 local:
     *;
 } hip_7.1;
