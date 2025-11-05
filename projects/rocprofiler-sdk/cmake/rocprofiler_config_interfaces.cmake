@@ -198,8 +198,8 @@ target_link_libraries(rocprofiler-sdk-ptl INTERFACE PTL::ptl-static)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(libelf REQUIRED)
-target_link_libraries(rocprofiler-sdk-elf INTERFACE libelf::libelf)
+find_package(LibElf REQUIRED)
+target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
 
 # ----------------------------------------------------------------------------------------#
 #
