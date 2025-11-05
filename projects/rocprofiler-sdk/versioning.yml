@@ -43,7 +43,8 @@ versioning:
         - source/include/rocprofiler-sdk/*.h
     abi-check:
       include:
-        - lib/librocprofiler-sdk.so*
+        - lib/librocprofiler-sdk.so
+        - lib/librocprofiler-sdk.so.?
 
   # values relative to this file's path in the install tree
   install-tree:
@@ -56,4 +57,5 @@ versioning:
         - include/rocprofiler-sdk/cxx/**/*.hpp
     abi-check:
       include:
-        - lib/librocprofiler-sdk.so*
+        - lib/librocprofiler-sdk.so
+        - lib/librocprofiler-sdk.so.?
