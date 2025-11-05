@@ -147,7 +147,9 @@ public:
     Pal::Result UnregisterElfBinary(const ElfBinaryInfo& elfBinaryInfo);
 
     // ==== Base Class Overrides =================================================================================== //
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < COMPRESSION_ARG_VERSION
     virtual void OnConfigUpdated(DevDriver::StructuredValue* pJsonConfig) override { }
+#endif
 
     virtual Pal::uint64 QueryGpuWorkMask() const override { return 0; }
 
