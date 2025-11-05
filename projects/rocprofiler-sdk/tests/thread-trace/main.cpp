@@ -102,7 +102,10 @@ main(int /*argc*/, char** /*argv*/)
         HIP_API_CALL(hipGetLastError());
         HIP_API_CALL(hipDeviceSynchronize());
     }
-    roctxProfilerPause(0);
+
+    // We use EXECUTE_PAUSE to test for running double buffering after global destructor
+    const char* do_pause = std::getenv("EXECUTE_PAUSE");
+    if(do_pause == nullptr || atoi(do_pause) == 1) roctxProfilerPause(0);
 
     return 0;
 }

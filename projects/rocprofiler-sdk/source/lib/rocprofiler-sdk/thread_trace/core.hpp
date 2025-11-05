@@ -104,9 +104,11 @@ public:
     void unload_codeobj(code_object_id_t id);
 
     /// Acquire a copy of the control packet bundle for a dispatch boundary.
-    std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
+    std::unique_ptr<hsa::TraceControlAQLPacket> get_start_packet();
     /// Relay data buffers produced by the ATT to the user-mode callback.
     void iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data);
+    /// Same as above but for device mode, using the internal data structures
+    void iterate_data();
 
     thread_trace_parameter_pack  params;
     const rocprofiler_agent_id_t agent_id;
@@ -119,6 +121,9 @@ public:
     std::unique_ptr<Signal> stop_thread_trace();
 
 private:
+    /// Acquire a copy of the control packet, with optional increment to active_traces
+    std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
+
     std::shared_ptr<HsaATTQueue> queue{};
 
     std::atomic<int> active_traces{0};
@@ -127,8 +132,9 @@ private:
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
-    std::thread consumer{};
-    std::thread producer{};
+    std::thread                        consumer{};
+    std::thread                        producer{};
+    std::shared_ptr<std::atomic<bool>> worker_flag{nullptr};
 };
 
 class DispatchThreadTracer
