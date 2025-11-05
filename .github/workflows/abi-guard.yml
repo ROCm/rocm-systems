@@ -100,6 +100,8 @@ jobs:
     defaults:
       run:
         working-directory: ${{ github.workspace }}
+    outputs:
+      tag: ${{ steps.hash.outputs.hash }}
     env:
       BUILD_DIR: build
       INSTALL_DIR: install
@@ -127,13 +129,24 @@ jobs:
           echo -n "Commit: "
           git rev-parse HEAD
 
-    #   - name: Cache CMake build (HEAD)
-    #     uses: actions/cache@v4
-    #     with:
-    #       path: ${{ env.BUILD_DIR }}
-    #       key: cmake-${{ runner.os }}-head-${{ hashFiles('CMakeLists.txt', '**/*.cmake', inputs.version_file) }}
-    #       restore-keys: |
-    #         cmake-${{ runner.os }}-head-
+      - name: Compute hash
+        id: hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          HASH=$(python3 scripts/abi-guard.py hash -i "${{ inputs.versioning_spec }}")
+          if [[ -z "${HASH}" ]]; then
+            echo "No hash found for versioning spec: ${{ inputs.versioning_spec }}"
+            exit 1
+          fi
+          echo "Hash: ${HASH}"
+          echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CMake build (HEAD)
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.source_directory }}/${{ env.BUILD_DIR }}
+          key: cmake-${{ runner.os }}-head-${{ steps.hash.outputs.hash }}
 
       - name: Configure
         run: cmake -S ${{ inputs.source_directory }} -B ${{ inputs.source_directory }}/${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
@@ -174,12 +187,11 @@ jobs:
     defaults:
       run:
         working-directory: ${{ github.workspace }}
-    # outputs:
-    #   tag: ${{ steps.tag.outputs.tag }}
+    outputs:
+      tag: ${{ steps.hash.outputs.hash }}
     env:
       BUILD_DIR: build
       INSTALL_DIR: install
-      OLD_SRC: baseline-src
     steps:
       - name: Install toolchain
         run: |
@@ -191,24 +203,6 @@ jobs:
           path: ${{ github.workspace }}
           ref: ${{ github.base_ref || github.event.repository.default_branch }}
           submodules: ${{ inputs.checkout_submodules }}
-
-    #   - name: Determine baseline tag
-    #     id: tag
-    #     shell: bash
-    #     run: |
-    #       set -euo pipefail
-    #       git fetch --tags --force
-    #       BASE_BRANCH="${{ github.base_ref || github.event.repository.default_branch }}"
-    #       MB=$(git merge-base HEAD "origin/${BASE_BRANCH}")
-    #       TAG=$(git tag --merged "$MB" --list '${{ inputs.tag_pattern }}' --sort=-version:refname | head -n1)
-    #       if [[ -z "$TAG" ]]; then
-    #         echo "No baseline tag found matching pattern: ${{ inputs.tag_pattern }}"
-    #         exit 1
-    #       fi
-    #       echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-    #   - name: Prepare worktree
-    #     run: git worktree add "$OLD_SRC" "${{ steps.tag.outputs.tag }}"
 
       - name: Show git branch
         shell: bash
@@ -223,13 +217,24 @@ jobs:
           echo -n "Commit: "
           git rev-parse HEAD
 
-    #   - name: Cache CMake build (baseline)
-    #     uses: actions/cache@v4
-    #     with:
-    #       path: ${{ env.BUILD_DIR }}
-    #       key: cmake-${{ runner.os }}-baseline-${{ steps.tag.outputs.tag }}-${{ hashFiles(format('{0}/CMakeLists.txt', env.OLD_SRC), format('{0}/**/*.cmake', env.OLD_SRC)) }}
-    #       restore-keys: |
-    #         cmake-${{ runner.os }}-baseline-
+      - name: Compute hash
+        id: hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          HASH=$(python3 scripts/abi-guard.py hash -i "${{ inputs.versioning_spec }}")
+          if [[ -z "${HASH}" ]]; then
+            echo "No hash found for versioning spec: ${{ inputs.versioning_spec }}"
+            exit 1
+          fi
+          echo "Hash: ${HASH}"
+          echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CMake build (baseline)
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.source_directory }}/${{ env.BUILD_DIR }}
+          key: cmake-${{ runner.os }}-baseline-${{ steps.hash.outputs.hash }}
 
       - name: Configure
         run: cmake -S ${{ inputs.source_directory }} -B ${{ inputs.source_directory }}/${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
