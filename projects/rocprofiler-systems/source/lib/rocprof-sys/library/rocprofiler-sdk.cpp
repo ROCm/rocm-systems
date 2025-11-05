@@ -185,6 +185,7 @@ get_stream_id(Tp* _record)
         auto _region_id                        = _ecid_data->region_id;
         _record->correlation_id.external.value = _region_id;
         delete _ecid_data;
+        _record->correlation_id.external.ptr = nullptr;
     }
     return _stream_id;
 }
