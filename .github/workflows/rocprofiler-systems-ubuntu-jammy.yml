@@ -59,6 +59,16 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@v1.3.0
+      with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-systems/
@@ -74,7 +84,8 @@ jobs:
           cd projects/rocprofiler-systems/
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y libomp-dev libopenmpi-dev openmpi-bin ${{ matrix.compiler }}
+          apt-get install -y libomp-dev libopenmpi-dev ${{ matrix.compiler }} &&
+          apt-get autoclean
 
     - name: Test Environment Modules
       timeout-minutes: 15
@@ -214,6 +225,16 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@v1.3.0
+      with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-systems/
@@ -229,7 +250,8 @@ jobs:
           cd projects/rocprofiler-systems/
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y libomp-dev libopenmpi-dev openmpi-bin ${{ matrix.compiler }}
+          apt-get install -y libomp-dev libopenmpi-dev ${{ matrix.compiler }} &&
+          apt-get autoclean
 
     - name: Install ROCm Packages
       timeout-minutes: 25
@@ -250,6 +272,7 @@ jobs:
           apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
+          apt-get autoclean
           echo "/opt/rocm/bin" >> $GITHUB_PATH
           echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
@@ -394,6 +417,16 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@v1.3.0
+      with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-systems/
@@ -409,7 +442,8 @@ jobs:
           cd projects/rocprofiler-systems/
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y libomp-dev libmpich-dev mpich
+          apt-get install -y libomp-dev libmpich-dev mpich &&
+          apt-get autoclean
 
     - name: Configure Env
       run:
