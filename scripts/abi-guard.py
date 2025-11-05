@@ -32,6 +32,7 @@ import shlex
 import hashlib
 import logging
 import argparse
+import tempfile
 import subprocess
 from pathlib import Path
 from typing import Iterable, Dict, List, Tuple
@@ -99,7 +100,9 @@ class Version(object):
 
     def value(self):
         _factor = 10000
-        for key, itr in zip(["major", "minor", "patch"], [self.major, self.minor, self.patch]):
+        for key, itr in zip(
+            ["major", "minor", "patch"], [self.major, self.minor, self.patch]
+        ):
             if itr >= _factor:
                 raise ValueError(
                     f"Version component {key} exceeds maximum value ({_factor - 1}): {itr}"
@@ -247,9 +250,6 @@ class VersioningSpec(object):
 
     def __init__(self, head_spec, args, **kwargs) -> None:
 
-        def has_attr(obj, name):
-            return hasattr(obj, name) and getattr(obj, name) is not None
-
         def _get_file_set(inp, working_dir, section):
 
             logging.debug(
@@ -389,6 +389,39 @@ class VersioningSpec(object):
                 ),
             )
 
+            # create a temporary file if the working directory has git submodules
+            if itr == "source-tree":
+                run_cmd(
+                    ["git", "submodule", "update", "--init", working_directory],
+                )
+
+                submod_rc, submod_out, submod_err = run_cmd(
+                    ["git", "submodule", "status", working_directory],
+                )
+
+                if submod_rc == 0 and submod_out.strip():
+                    submod_out = "\n".join(
+                        [
+                            "  {}".format(itr.strip())
+                            for itr in submod_out.strip().split("\n")
+                        ]
+                    )
+                    logging.info(
+                        f"Source tree '{working_directory}' has git submodule(s):\n{submod_out}"
+                    )
+                    tmpf = tempfile.NamedTemporaryFile(
+                        prefix=f"rocm-abi-guard-{self.name}-submodules.", delete=False
+                    )
+                    with open(tmpf.name, "w") as f:
+                        f.write(f"{submod_out}\n")
+                    setattr(self, "submodule_file", tmpf.name)
+                    setattr(
+                        self,
+                        f"{attrib}_sources",
+                        getattr(self, f"{attrib}_sources")
+                        + FileSet([tmpf.name], [], [], []),
+                    )
+
         setattr(self, "headers", FileSet([], [], [], []))
         setattr(self, "sources", FileSet([], [], [], []))
         setattr(self, "abi_check", FileSet([], [], [], []))
@@ -403,10 +436,24 @@ class VersioningSpec(object):
                         getattr(self, f"{aitr}") + getattr(self, f"{titr}_{aitr}"),
                     )
 
+    def __del__(self):
+        if hasattr(self, "submodule_file"):
+            try:
+                logging.info(f"Removing temporary submodule file '{self.submodule_file}'")
+                os.remove(self.submodule_file)
+            except Exception as e:
+                logging.error(
+                    f"Failed to remove temporary submodule file '{self.submodule_file}': {e}"
+                )
+
     def get(self, name, default=None):
         if not hasattr(self, name) and hasattr(self, name.replace("-", "_")):
             name = name.replace("-", "_")
         return getattr(self, name, default)
+
+
+def has_attr(obj, name):
+    return hasattr(obj, name) and getattr(obj, name) is not None
 
 
 def strtobool(val):
@@ -454,6 +501,14 @@ def compute_hash(data) -> str:
     else:
         _data = f"{data}" if not isinstance(data, str) else data
         return hashlib.md5(_data.encode()).hexdigest()
+
+
+def _flush_streams():
+    """
+    Flush stdout and stderr streams.
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
 
 
 def _language_for_path(path: Path) -> str:
@@ -1097,6 +1152,9 @@ def main() -> None:
         deleted_any = False
 
         for name in common_libs:
+            logging.warning(f"Processing library: {name}")
+            _flush_streams()
+
             base_so = base_by_name[name]
             head_so = head_by_name[name]
             old_xml = abi_base / f"{name}.abi"
@@ -1185,17 +1243,19 @@ def main() -> None:
             if deleted_funcs + deleted_vars > 0:
                 deleted_any = True
 
+            _flush_streams()
+
         # Enforce semver policy
         fail_reason = ""
         if incompatible:
             if not (head_version.major > base_version.major):
                 fail_reason = (
-                    f"ABI break detected, but VERSION major not incremented "
+                    f"ABI break detected, but major VERSION not incremented "
                     f"(prev={base_version}, "
                     f"curr={head_version})."
                 )
         else:
-            if added_any or changed_any or deleted_any:
+            if added_any or changed_any or deleted_any or added_libs or removed_libs:
                 if not (
                     head_version.major > base_version.major
                     or (
@@ -1204,7 +1264,7 @@ def main() -> None:
                     )
                 ):
                     fail_reason = (
-                        f"Public API additions/compatible changes detected, but VERSION minor not incremented "
+                        f"Public API additions/compatible changes detected, but minor VERSION not incremented "
                         f"(prev={base_version}, "
                         f"curr={head_version})."
                     )
@@ -1215,6 +1275,19 @@ def main() -> None:
                         f"(prev={base_version}, "
                         f"curr={head_version})."
                     )
+                elif head_version == base_version:
+                    base_digest = compute_hash(base_spec.sources + base_spec.headers)
+                    head_digest = compute_hash(head_spec.sources + head_spec.headers)
+
+                    if (
+                        base_digest != head_digest
+                        and head_version.patch == base_version.patch
+                    ):
+                        fail_reason = (
+                            f"Source/header files changed, but patch VERSION not incremented "
+                            f"(prev={base_version}, "
+                            f"curr={head_version})."
+                        )
 
         if fail_reason:
             logging.critical(f"::error title=ABI / Version policy::{fail_reason}")
