@@ -485,6 +485,12 @@ def show_all(
         if not csv_dir.exists():
             csv_dir.mkdir()
 
+    if profiling_config.get("iteration_multiplexing_mode") is not None:
+        console_log(
+            "Note: The profiling data was collected using iteration multiplexing. "
+            "Some metrics may represent aggregated values across multiple iterations."
+        )
+
     for panel_id, panel in arch_configs.panel_configs.items():
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:

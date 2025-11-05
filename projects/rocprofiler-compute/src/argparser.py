@@ -271,17 +271,18 @@ Examples:
         required=False,
         nargs="?",
         choices=[
-            "simple",
+            # "simple",
             "kernel",
-            "launch",
+            "kernel_launch_params",
         ],
-        const="launch",
+        const="kernel_launch_params",
         help=(
-            "\t\t\tChoose the iteration multiplexing method: (DEFAULT: launch).\n"
-            "\t\t\t   simple (i.e. Round robin over all kernel dispatches\n"
+            "\t\t\tChoose the iteration multiplexing policy: "
+            "(DEFAULT: kernel_launch_params).\n"
+            # "\t\t\t   simple (i.e. Round robin over all kernel dispatches\n"
             "\t\t\t   kernel (i.e. Round robin over unique kernel dispatches)\n"
-            "\t\t\t   launch (i.e. Round robin over unique kernel+launch config"
-            "dispatches)"
+            "\t\t\t   kernel_launch_params (i.e. Round robin over "
+            "dispatches with unique kernel and launch parameters)"
         ),
     )
 
