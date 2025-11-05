@@ -183,8 +183,8 @@ rocprofiler_configure_device_thread_trace_service(
             return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
         // Triple buffering requires specific AQLProfile symbols that may not be available
-        auto aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
-        if(!aqlprofile_dl || !aqlprofile_dl->valid()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+        const auto& aqlprofile = rocprofiler::thread_trace::get_aqlprofile_dl();
+        if(!aqlprofile.valid()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     }
 
     ctx->device_thread_trace->add_agent(agent_id, pack);

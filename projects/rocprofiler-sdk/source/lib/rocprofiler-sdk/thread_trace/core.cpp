@@ -132,16 +132,12 @@ ThreadTracerAgent::~ThreadTracerAgent()
     // We expect the trace to be stopped before destruction. Emit a warning
     // and flush the outstanding after packets if this invariant is violated.
     ROCP_TRACE << "Destroying ATT Queue...";
-    std::unique_lock<std::mutex> lk(trace_resources_mut);
     if(active_traces.load() < 1) return;
 
     ROCP_CI_LOG(WARNING) << "Thread tracer being destroyed with thread trace active";
 
-    control_packet->clear();
-    control_packet->populate_after();
-
-    for(auto& after_packet : control_packet->after_krn_pkt)
-        queue->Submit(&after_packet, true);
+    if(worker_flag) worker_flag->store(false);
+    stop_thread_trace();
 }
 
 /**
@@ -151,8 +147,6 @@ ThreadTracerAgent::~ThreadTracerAgent()
 std::unique_ptr<hsa::TraceControlAQLPacket>
 ThreadTracerAgent::get_control(bool bStart)
 {
-    std::unique_lock<std::mutex> lk(trace_resources_mut);
-
     auto active_resources = std::make_unique<hsa::TraceControlAQLPacket>(*control_packet);
     // Clone the control packet so callers can safely mutate state without
     // racing with concurrent dispatches.
@@ -161,6 +155,13 @@ ThreadTracerAgent::get_control(bool bStart)
     if(bStart) active_traces.fetch_add(1);
 
     return active_resources;
+}
+
+std::unique_ptr<hsa::TraceControlAQLPacket>
+ThreadTracerAgent::get_start_packet()
+{
+    auto lock = std::unique_lock{trace_resources_mut};
+    return get_control(true);
 }
 
 hsa_status_t
@@ -182,9 +183,6 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 void
 ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data)
 {
-    // Already executed by producer thread, skip
-    if(params.triple_buffering) return;
-
     cbdata_t cb_dt{};
 
     cb_dt.agent = agent_id;
@@ -200,6 +198,16 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
         ROCP_CI_LOG(ERROR) << "Failed to iterate ATT data: " << status;
 
     active_traces.fetch_sub(1);
+}
+
+void
+ThreadTracerAgent::iterate_data()
+{
+    // Already executed by producer thread, skip
+    if(params.triple_buffering) return;
+
+    auto lock = std::unique_lock{trace_resources_mut};
+    iterate_data(control_packet->GetHandle(), params.callback_userdata);
 }
 
 void
@@ -235,6 +243,8 @@ std::shared_ptr<Signal>
 ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
+    auto lock   = std::unique_lock{trace_resources_mut};
+    worker_flag = flag;
 
     auto control_packet = get_control(true);
     control_packet->clear();
@@ -274,7 +284,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
             worker_data->buffers.at(i).memory = buffer_memory.at(i);
 
         auto producer_data             = triple_buffer_producer_data_t{};
-        producer_data.producer_running = std::move(flag);
+        producer_data.producer_running = worker_flag;
         producer_data.start_pkt_signal = shared_signal;
         producer_data.control_packet   = std::move(control_packet);
         producer_data.copy_data_fn     = copy_data_sync;
@@ -298,12 +308,15 @@ std::unique_ptr<Signal>
 ThreadTracerAgent::stop_thread_trace()
 {
     ROCP_TRACE << "Stopping Thread trace for agent " << agent_id.handle;
+    auto lock = std::unique_lock{trace_resources_mut};
 
     if(params.triple_buffering)
     {
-        producer.join();
-        consumer.join();
+        if(worker_flag) worker_flag->store(false);
+        if(producer.joinable()) producer.join();
+        if(consumer.joinable()) consumer.join();
         active_traces.fetch_sub(1);
+        worker_flag = nullptr;
         return nullptr;
     }
     else
@@ -387,7 +400,7 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     if(control_flags == ROCPROFILER_THREAD_TRACE_CONTROL_NONE)
         return {nullptr, parameters.bSerialize};
 
-    auto packet = agent.get_control(true);
+    auto packet = agent.get_start_packet();
     post_move_data.fetch_add(1);
     packet->populate_before();
     packet->populate_after();
@@ -521,13 +534,9 @@ DeviceThreadTracer::start_context()
 void
 DeviceThreadTracer::stop_context()
 {
-    std::unique_lock<std::mutex> lk(agent_mut);
+    auto lock = std::unique_lock{agent_mut};
 
-    if(agents.empty())
-    {
-        ROCP_WARNING << "Thread trace context not present for agent!";
-        return;
-    }
+    if(agents.empty()) return;
 
     ROCP_INFO << "Stopping device thread trace context";
 
@@ -541,7 +550,7 @@ DeviceThreadTracer::stop_context()
     wait_list.clear();
 
     for(auto& [_, tracer] : agents)
-        tracer->iterate_data(tracer->get_control()->GetHandle(), tracer->params.callback_userdata);
+        tracer->iterate_data();
 }
 
 void

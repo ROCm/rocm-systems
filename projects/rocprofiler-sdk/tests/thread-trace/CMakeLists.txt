@@ -159,6 +159,7 @@ target_link_libraries(thread-trace-api-triple-buffer-test
 add_test(NAME thread-trace-api-triple-buffer-consistency-test
          COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>)
 
+# Checks for data integrity
 set_tests_properties(
     thread-trace-api-triple-buffer-consistency-test
     PROPERTIES
@@ -174,6 +175,7 @@ set_tests_properties(
 add_test(NAME thread-trace-api-triple-buffer-hammer-test
          COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>)
 
+# Collects a lot of data
 set_tests_properties(
     thread-trace-api-triple-buffer-hammer-test
     PROPERTIES
@@ -189,6 +191,7 @@ set_tests_properties(
 add_test(NAME thread-trace-api-triple-buffer-slow-test
          COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>)
 
+# Tests for proper handling of when the tool is very slow
 set_tests_properties(
     thread-trace-api-triple-buffer-slow-test
     PROPERTIES
@@ -200,3 +203,13 @@ set_tests_properties(
         "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Tests for thread trace not paused during application run (global destructor)
+add_test(NAME thread-trace-api-triple-buffer-no-pause-test
+         COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>)
+
+set_tests_properties(
+    thread-trace-api-triple-buffer-no-pause-test
+    PROPERTIES TIMEOUT 120 LABELS "integration-tests" ENVIRONMENT
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};TRIPLEBUFFER=1;EXECUTE_PAUSE=0"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
