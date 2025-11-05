@@ -280,7 +280,7 @@ TEST(thread_trace, multiple_calls)
     threads.consumer.join();
     threads.producer.join();
 
-    ASSERT_EQ(data_received.load(), status_called.load() * BUFFER_SIZE);
+    EXPECT_EQ(data_received.load(), status_called.load() * BUFFER_SIZE);
 }
 
 TEST(thread_trace, data_integrity)
@@ -335,7 +335,7 @@ TEST(thread_trace, data_integrity)
     threads.consumer.join();
     threads.producer.join();
 
-    ASSERT_EQ(output_buffer.size() * sizeof(size_t), status_called.load() * BUFFER_SIZE);
+    EXPECT_EQ(output_buffer.size() * sizeof(size_t), status_called.load() * BUFFER_SIZE);
 
     for(size_t i = 0; i < output_buffer.size(); i++)
     {
@@ -386,7 +386,7 @@ TEST(thread_trace, slow_cpu)
     threads.consumer.join();
     threads.producer.join();
 
-    ASSERT_EQ(interrupt_received.load(), true);
+    EXPECT_EQ(interrupt_received.load(), true);
 }
 
 TEST(thread_trace, slow_gpu)
@@ -432,7 +432,7 @@ TEST(thread_trace, slow_gpu)
     threads.consumer.join();
     threads.producer.join();
 
-    ASSERT_EQ(interrupt_received.load(), true);
+    EXPECT_EQ(interrupt_received.load(), true);
 }
 
 TEST(thread_trace, restart_after_overflow)
@@ -577,9 +577,9 @@ TEST(thread_trace, buffer_alternation)
     threads.producer.join();
 
     // Verify we received callbacks
-    ASSERT_GT(callback_state.callback_count.load(), 10);
+    EXPECT_EQ(callback_state.callback_count.load(), 10);
     // The triple_buffer implementation uses write_index % buffer.size() where buffer.size() == 3.
     // This means we should only ever see 3 distinct buffer addresses.
-    ASSERT_EQ(callback_state.buffer_addresses.size(), 3)
+    EXPECT_EQ(callback_state.buffer_addresses.size(), 3)
         << "Expected exactly 3 unique buffer addresses for triple-buffering";
 }
