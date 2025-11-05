@@ -60,7 +60,7 @@ class HsaATTQueue
 
 public:
     HsaATTQueue(const hsa::AgentCache& agent, size_t triple_buffer_size);
-    ~HsaATTQueue();
+    virtual ~HsaATTQueue();
     HsaATTQueue(HsaATTQueue& other) = delete;
     HsaATTQueue& operator=(HsaATTQueue& other) = delete;
 

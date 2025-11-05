@@ -232,7 +232,6 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
         for(auto& output_buffer : *agent_buffers)
         {
-            std::cout << "Trace size " << (output_buffer.output_size.load() >> 20) << std::endl;
             uint32_t current_sdata = 0;
             auto&    buffer        = output_buffer.output_buffer;
             size_t   output_size   = std::min(output_buffer.output_size.exchange(0), buffer.size());

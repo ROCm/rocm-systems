@@ -85,7 +85,7 @@ AQLProfileDL::~AQLProfileDL()
     if(handle) dlclose(handle);
 }
 
-AQLProfileDL::AQLProfileDL(AQLProfileDL&& other)
+AQLProfileDL::AQLProfileDL(AQLProfileDL&& other) noexcept
 {
     this->update_buffer_status_fn = other.update_buffer_status_fn;
     this->get_buffer_packets_fn   = other.get_buffer_packets_fn;

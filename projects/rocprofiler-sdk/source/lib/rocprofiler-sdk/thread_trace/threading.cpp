@@ -36,7 +36,7 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-constexpr double SQTT_BANDWIDTH = 17E9f * 4;  // 17GB/s, times 4 for wiggle room
+constexpr double SQTT_BANDWIDTH = 70E9;  // 70GB/s, for wiggle room
 
 namespace
 {
@@ -88,7 +88,8 @@ copy_data_sync(void*       dst,
 // Consumer loop: Waits for consumer notification, then forwards to tool/user
 // read_index is incremented so the consumer is aware they can try to lock the buffer mutex
 void
-consumer_loop(triple_buffer_consumer_data_t parameters)
+consumer_loop(
+    triple_buffer_consumer_data_t parameters)  // NOLINT(performance-unnecessary-value-param)
 {
     auto& buffers     = parameters.shared->buffers;
     auto& running     = parameters.shared->consumer_running;
@@ -126,7 +127,8 @@ consumer_loop(triple_buffer_consumer_data_t parameters)
 // The loop uses adaptive polling with backoff based on estimated bandwidth to minimize
 // CPU overhead while ensuring timely buffer flips before GPU overflow.
 void
-producer_loop(triple_buffer_producer_data_t parameters)
+producer_loop(
+    triple_buffer_producer_data_t parameters)  // NOLINT(performance-unnecessary-value-param)
 {
     CHECK_NOTNULL(parameters.copy_data_fn);
 
@@ -161,7 +163,7 @@ producer_loop(triple_buffer_producer_data_t parameters)
         parameters.copy_data_fn(
             buffer.memory, src, queue.near_cpu, queue.hsa_agent, size, &submit_signal);
         auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
-        ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << size / float(copy_time);
+        ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << size / copy_time;
 
         // PHASE 3: Wake up consumer thread
         // Increment write_index to signal a new buffer is available, then notify
@@ -231,7 +233,7 @@ producer_loop(triple_buffer_producer_data_t parameters)
                     ROCP_INFO << "Restarting the trace!";
 
                     // We need to resend the header is applicable
-                    if(buffer_packet.header)
+                    if(buffer_packet.header != 0)
                         send_to_consumer(&buffer_packet.header,
                                          sizeof(buffer_packet.header),
                                          ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE);
