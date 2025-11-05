@@ -90,7 +90,7 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeElementType", "", char, uns
 
   for (auto i = 0u; i < out_alloc_h.size(); ++i) {
     const auto ref_val = tex_h[i];
-    if (out_alloc_h[i] != ref_val) {
+    if (!(out_alloc_h[i] == ref_val)) {
       INFO("Index: " << i);
       REQUIRE(false);
     }
@@ -154,7 +154,7 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat", "", char,
 
   for (auto i = 0u; i < out_alloc_h.size(); ++i) {
     const auto ref_val = Vec4Map(tex_h[i]);
-    if (out_alloc_h[i] != ref_val) {
+    if (!(out_alloc_h[i] == ref_val)) {
       INFO("Index: " << i);
       REQUIRE(false);
     }
