@@ -68,7 +68,9 @@ public:
 
     void addwave(const Fspath& file, Coord coord, size_t start, size_t end);
 
-    void add_other_simd(int se, const rocprofiler_thread_trace_decoder_other_simd_t& rec);
+    void add_other_simd_data(
+        int                                                                    se,
+        const std::vector<rocprofiler_thread_trace_decoder_inst_other_simd_t>& records);
 
     Fspath                    dir{};
     Fspath                    filename{};

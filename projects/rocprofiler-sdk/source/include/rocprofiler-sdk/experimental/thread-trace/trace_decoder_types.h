@@ -212,14 +212,14 @@ typedef struct rocprofiler_thread_trace_decoder_shaderdata_t
     uint32_t reserved;
 } rocprofiler_thread_trace_decoder_shaderdata_t;
 
-typedef struct rocprofiler_thread_trace_decoder_other_simd_t
+typedef struct rocprofiler_thread_trace_decoder_inst_other_simd_t
 {
-    uint8_t cu;    ///< CU id (gfx9) or wgp id (gfx10+). This is always the target_cu.
-    uint8_t simd;  ///< SIMD ID [0,3].
-
-    uint64_t                                 instructions_size;   ///< instructions_array size
-    rocprofiler_thread_trace_decoder_inst_t* instructions_array;  ///< Instructions executed
-} rocprofiler_thread_trace_decoder_other_simd_t;
+    uint64_t size;      ///< Size of this struct.
+    int64_t  time;      ///< Issue time.
+    uint16_t cycles;    ///< Execution duration, not including stall.
+    uint8_t  wgp;       ///< WGP ID. This is always the target cu.
+    uint8_t  category;  ///< One of rocprofiler_thread_trace_decoder_inst_category_t
+} rocprofiler_thread_trace_decoder_inst_other_simd_t;
 
 /**
  * @brief Defines the type of payload received by rocprofiler_thread_trace_decoder_callback_t
@@ -235,7 +235,7 @@ typedef enum rocprofiler_thread_trace_decoder_record_type_t
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA,  ///< rocprofiler_thread_trace_decoder_shaderdata_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME,  ///< rocprofiler_thread_trace_decoder_realtime_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY,
-    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OTHER_SIMD,
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD,
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST
 
     /// @var ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY

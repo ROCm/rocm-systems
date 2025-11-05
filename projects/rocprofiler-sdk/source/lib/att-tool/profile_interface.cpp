@@ -80,15 +80,16 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
             tool.config.realtime->add(
                 tool.config.shader_engine, static_cast<realtime_t*>(trace_events), trace_size);
     }
-    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OTHER_SIMD)
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD)
     {
-        if(trace_size > 0)
-        {
-            const auto& rec =
-                *static_cast<const rocprofiler_thread_trace_decoder_other_simd_t*>(trace_events);
+        using inst_t    = rocprofiler_thread_trace_decoder_inst_other_simd_t;
+        const auto* ptr = static_cast<const inst_t*>(trace_events);
 
-            const int se = tool.config.shader_engine;
-            tool.config.filemgr->add_other_simd(se, rec);
+        if(trace_size > 0 && ptr != nullptr)
+        {
+            std::vector<inst_t> recs(ptr, ptr + trace_size);
+            const int           se = tool.config.shader_engine;
+            tool.config.filemgr->add_other_simd_data(se, recs);
         }
     }
 

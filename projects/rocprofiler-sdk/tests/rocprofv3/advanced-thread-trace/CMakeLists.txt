@@ -284,3 +284,38 @@ set_tests_properties(
                True
                FAIL_REGULAR_EXPRESSION
                "Invalid GPU Device Index")
+
+# Other SIMD file tests
+set(IS_DISABLED_OTHER_SIMD ON)
+list(GET rocprofiler-sdk-tests-gfx-info 0 openmp-tools-gpu-0-gfx-info)
+if("${openmp-tools-gpu-0-gfx-info}" MATCHES "^(gfx(11|12)[0-9][0-9])$")
+    set(IS_DISABLED_OTHER_SIMD OFF)
+endif()
+
+add_test(
+    NAME rocprofv3-test-att-other-smid-execute
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
+            ${CMAKE_CURRENT_BINARY_DIR}/att-other-simd --att -- $<TARGET_FILE:vector-ops>)
+
+set_tests_properties(
+    rocprofv3-test-att-other-smid-execute
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               ${IS_DISABLED})
+
+add_test(NAME rocprofv3-test-att-other-smid-validate
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
+                 --att-other-simd-out-dir ${CMAKE_CURRENT_BINARY_DIR}/att-other-simd)
+
+set_tests_properties(
+    rocprofv3-test-att-other-smid-validate
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+               rocprofv3-test-att-other-smid-execute FAIL_REGULAR_EXPRESSION
+               "AssertionError")

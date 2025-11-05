@@ -40,36 +40,13 @@ FilenameMgr::addwave(const Fspath& name, Coord coord, size_t begint, size_t endt
 }
 
 void
-FilenameMgr::add_other_simd(int se, const rocprofiler_thread_trace_decoder_other_simd_t& rec)
+FilenameMgr::add_other_simd_data(
+    int                                                                    se,
+    const std::vector<rocprofiler_thread_trace_decoder_inst_other_simd_t>& records)
 {
     // Compute begin/end from instructions
-    int64_t begin = 0;
-    int64_t end   = 0;
-
-    if(rec.instructions_array && rec.instructions_size > 0)
-    {
-        int64_t min_t = std::numeric_limits<int64_t>::max();
-        int64_t max_t = std::numeric_limits<int64_t>::min();
-
-        for(uint64_t i = 0; i < rec.instructions_size; ++i)
-        {
-            const auto& inst = rec.instructions_array[i];
-
-            if(inst.pc.code_object_id == 0 && inst.pc.address == 0) continue;
-
-            const int64_t inst_start = static_cast<int64_t>(inst.time);
-            const int64_t inst_end   = inst_start + static_cast<int64_t>(inst.duration);
-
-            min_t = std::min(min_t, inst_start);
-            max_t = std::max(max_t, inst_end);
-        }
-
-        if(min_t != std::numeric_limits<int64_t>::max())
-        {
-            begin = min_t;
-            end   = max_t;
-        }
-    }
+    int64_t begin = records.front().time;
+    int64_t end   = records.back().time + records.back().cycles;
 
     auto&        vec = other_simd_files[se];
     const size_t idx = vec.size();
@@ -79,7 +56,7 @@ FilenameMgr::add_other_simd(int se, const rocprofiler_thread_trace_decoder_other
     vec.emplace_back(
         OtherSIMDName{file.filename(), static_cast<size_t>(begin), static_cast<size_t>(end)});
 
-    write_other_simd_json(rec, file, begin, end);
+    write_other_simd_json(records, file, begin, end);
 }
 
 FilenameMgr::~FilenameMgr()
