@@ -66,6 +66,7 @@ template <typename T> __global__ void surf1DKernelRW(hipSurfaceObject_t surfaceO
 }
 
 template <typename T> static void runTestR(const int width) {
+  (void) hipGetLastError();  // Prevent negative tests affecting this
   unsigned int size = width * sizeof(T);
   T* hData = (T*)malloc(size);
   memset(hData, 0, size);
