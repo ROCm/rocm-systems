@@ -20,13 +20,22 @@ contribution process.
 
 ## Development
 
-ROCm Compute Profiler follows a
-[main-dev](https://nvie.com/posts/a-successful-git-branching-model/)
-branching model. As a result, our latest stable release is shipped
-from the `amd-mainline` branch, while new features are developed in our
-`develop` branch.
+ROCm Compute Profiler is now included in the rocm-systems super-repo. The latest sources are in the `develop` branch. You can find particular releases in the `release/rocm-rel-X.Y` branch for the paricular release you're looking for.
 
-Users may checkout `amd-staging` to preview upcoming features.
+### Pulling the source using sparse-checkout
+
+Being in the super-repo, if you only want to pull the source for a particular project, do a sparse checkout:
+
+```bash
+git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+cd rocm-systems
+git sparse-checkout init --cone
+git sparse-checkout set projects/rocprofiler-compute
+git checkout develop
+
+cd rocprofiler-compute
+python3 -m pip install -r requirements.txt
+```
 
 ## Testing
 
