@@ -7,7 +7,7 @@ Configuring runtime options
 ****************************************************
 
 The ``rocprof-sys.cfg`` file maintains a list of the
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ runtime
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ runtime
 options. To create this configuration
 file and view the current runtime options, use the ``rocprof-sys-avail`` executable.
 
@@ -269,9 +269,11 @@ Use the following command to view the available domains:
 
 .. note::
 
-Some  settings can enable tracing for multiple domains, such as ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
-And ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, ``hsa_finalize_ext_api``.
-The setting ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
+   Some settings can enable tracing for multiple domains, such as: 
+   
+   * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
+   * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
+   * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
 
 For example, the following is a valid configuration:
 

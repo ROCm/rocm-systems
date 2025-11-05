@@ -6,7 +6,7 @@
 VCN and JPEG activity sampling and tracing
 ********************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ supports
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports
 sampling of VCN and JPEG engines activities. It allows you to gather key performance metrics for
 VCN utilization and understand engine usage through visualization. This information can be used
 to optimize media and video workloads. Additionally, it supports tracing of `rocDecode
@@ -47,7 +47,7 @@ Alternatively, you can use the following to collect all available GPU metrics:
 API tracing support
 =====================
 
-Tracing of rocDecode and rocJPEG APIs is supported by leveraging `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ 
+Tracing of rocDecode and rocJPEG APIs is supported by leveraging `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_
 which provides runtime-independent APIs for tracing the runtime calls and asynchronous activities associated with decoder activities and workload in VCN and JPEG engines.
 
 To enable tracing for the rocDecode and rocJPEG APIs, update the ``ROCPROFSYS_ROCM_DOMAINS`` variable. The default value is:

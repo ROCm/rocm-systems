@@ -111,7 +111,7 @@ Install from source
 -------------------
 
 #. A typical install begins by downloading the latest release tarball available
-   from `<https://github.com/ROCm/rocprofiler-compute/releases>`__. From there, untar and
+   from `<https://github.com/ROCm/rocm-systems/releases>`__. From there, untar and
    navigate into the top-level directory.
 
    ..
