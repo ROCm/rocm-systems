@@ -868,10 +868,9 @@ inline __HOST_DEVICE__ __half2 __hmul2_sat(__half2 x, __half2 y) {
   return __half2{__clamp_01(__half_raw{r.data.x}), __clamp_01(__half_raw{r.data.y})};
 }
 inline __device__ __half2 __hfma2(__half2 x, __half2 y, __half2 z) {
-  return __half2 {
-    __builtin_elementwise_fma(static_cast<__half2_raw>(x).data, static_cast<__half2_raw>(y).data,
-                              static_cast<__half2_raw>(z).data)
-  };
+  return __half2{__builtin_elementwise_fma(static_cast<__half2_raw>(x).data,
+                                           static_cast<__half2_raw>(y).data,
+                                           static_cast<__half2_raw>(z).data)};
 }
 inline __device__ __half2 __hfma2_sat(__half2 x, __half2 y, __half2 z) {
   auto r = static_cast<__half2_raw>(__hfma2(x, y, z));
