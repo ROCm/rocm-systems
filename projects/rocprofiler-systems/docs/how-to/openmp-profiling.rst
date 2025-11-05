@@ -92,13 +92,13 @@ Understanding the ``.proto`` output
 To view the generated ``.proto`` file in a browser, open the `Perfetto UI page <https://ui.perfetto.dev/>`_. Then, click on ``Open trace file`` and select the ``.proto`` file.
 The output should match:
 
-.. image:: ..data/openmp-profiling/perfetto-jacobi-initial-view.png
+.. image:: ../data/openmp-profiling/perfetto-jacobi-initial-view.png
     :alt: Initial view of the perfetto trace file
     :width: 800
 
 To view all the traces, click on the drop-down arrow in the ``./jacobi`` track. You will then be able to see the full trace, which should resemble:
 
-.. image:: ..data/openmp-profiling/perfetto-jacobi-tracks-view.png
+.. image:: ../data/openmp-profiling/perfetto-jacobi-tracks-view.png
     :alt: Initial view of the perfetto trace file
     :width: 800
 
@@ -122,7 +122,7 @@ For this example, the important tracks are ``./jacobi`` (1), ``GPU Kernel dispat
 
   Certain traces have extra information attached to them which can be viewed by selecting the trace and looking at its details and argument fields:
 
-.. image:: ..data/openmp-profiling/perfetto-jacobi-trace-details.png
+.. image:: ../data/openmp-profiling/perfetto-jacobi-trace-details.png
     :alt: Zoomed in view of the jacobi track showing details for the first ``omp_target_emi`` track
     :width: 800
 
@@ -145,7 +145,7 @@ The ``laplacian`` subroutine in ``laplacian.f90`` contains the following block o
 
 The image below shows the group of traces that correspond to the execution of the block above:
 
-.. image:: ..data/openmp-profiling/perfetto-jacobi-laplacian-traces-view.png
+.. image:: ../data/openmp-profiling/perfetto-jacobi-laplacian-traces-view.png
     :alt: Traces corresponding to the Laplacian OpenMP pragma
     :width: 800
 
@@ -164,11 +164,11 @@ In general, if a trace directly relates to another trace, an arrow will be gener
 For the sake of showing all relations at once, black arrows were inserted in the image above.
 The images below show how flow events are displayed in perfetto.
 
-.. image:: ..data/openmp-profiling/perfetto-memory-flow-event-view.png
+.. image:: ../data/openmp-profiling/perfetto-memory-flow-event-view.png
     :alt: An ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_to_device`` pointing to its corresponding ``MEMORY_COPY_DEVICE_TO_DEVICE``
     :width: 800
 
-.. image:: ..data/openmp-profiling/perfetto-kernel-flow-event-view.png
+.. image:: ../data/openmp-profiling/perfetto-kernel-flow-event-view.png
     :alt: An ``omp_target_submit_emi`` trace pointing to its corresponding ``__omp_offload`` trace
     :width: 800
 
