@@ -476,8 +476,7 @@ class ROCMHealthCheck:
 
         # AMD GPUs PCI class codes: 03xx (Display controllers ), 12xx (Processing accelerators)
         # use class codes also to identify AMD GPUs
-        stdout, _, ret_code = run_command( "lspci -d 1002: -nn | grep -Ei \
-                                           'Display controller|Processing accelerators|\[03[[:xdigit:]]{2}\]|\[12[[:xdigit:]]{2}\]' ",\
+        stdout, _, ret_code = run_command( r"lspci -d 1002: -nn | grep -Ei 'Display controller|Processing accelerators|\[03[[:xdigit:]]{2}\]|\[12[[:xdigit:]]{2}\]' ",\
                                             shell=True)
         gpu_hw = stdout.strip()
         if ret_code == 0 and gpu_hw:
@@ -1254,7 +1253,7 @@ class ROCMHealthCheck:
         # 2. Check if network cards (NICs) are present in hardware list
         self.logger.info("----Checking for network interface cards...")
         nic_brand = None
-        nic_cards, stderr, ret_code = run_command("lspci -nn | grep -i 'ethernet\|network\|infiniband'", shell=True)
+        nic_cards, stderr, ret_code = run_command("lspci -nn | grep -Ei 'ethernet|network|infiniband'", shell=True)
         if ret_code != 0 or not nic_cards.strip():
             errors += 1
             cluster_readiness_issues.append("No network cards found in hardware")
@@ -1347,6 +1346,96 @@ class ROCMHealthCheck:
             success_msg = f"Found {len(nic_cards)} NICs and required drivers are loaded."
             self.logger.info(f" {success_msg}")
             return TestStatus.PASS.value, success_msg
+
+    def test_check_atomic_operations(self):
+        """Test if atomic operations are enabled for GPU devices"""
+        self.logger.info("--Checking atomic operations support for GPU devices...")
+
+        # Find AMD GPU devices using lspci
+        stdout, stderr, ret_code = run_command("lspci -d 1002: -nn | grep -Ei 'Display controller|Processing accelerators|VGA compatible controller'", shell=True)
+
+        if ret_code != 0 or not stdout.strip():
+            self.logger.error("!!! No AMD GPU devices found")
+            return TestStatus.FAIL.value, "No AMD GPU devices found to check atomic operations."
+
+        gpu_devices = stdout.strip().split('\n')
+        self.logger.info(f"----Found {len(gpu_devices)} AMD GPU device(s)")
+
+        atomic_ops_status = []
+        devices_with_atomics = 0
+        devices_without_atomics = 0
+        check_failed_devices = 0
+
+        for gpu_line in gpu_devices:
+            # Extract PCI address (e.g., "01:00.0")
+            pci_address = gpu_line.split()[0]
+
+            # Get atomic operations info using grep to filter relevant lines
+            stdout_detail, stderr_detail, ret_detail = run_command(
+                f"lspci -vvv -s {pci_address} | grep -i atomic",
+                shell=True
+            )
+
+            if ret_detail != 0 or not stdout_detail.strip():
+                self.logger.warning(f"!!! Failed to get atomic operations info for device {pci_address}")
+                self.logger.warning(f"!!! Try running the test with 'sudo -E' ")
+                check_failed_devices += 1
+                atomic_ops_status.append(f"{pci_address}: Check failed")
+                continue
+
+            # Parse AtomicOpsCap and AtomicOpsCtl
+            atomic_cap_found = False
+            atomic_enabled = False
+            cap_details = ""
+            ctl_details = ""
+
+            for line in stdout_detail.strip().split('\n'):
+                line = line.strip()
+
+                if "AtomicOpsCap:" in line:
+                    atomic_cap_found = True
+                    cap_details = line
+                    self.logger.debug(f"------Device {pci_address}: {line}")
+
+                if "AtomicOpsCtl:" in line:
+                    ctl_details = line
+                    # Check if ReqEn+ (Request Enable is set)
+                    if "ReqEn+" in line:
+                        atomic_enabled = True
+                    self.logger.debug(f"------Device {pci_address}: {line}")
+
+            # Determine device status
+            if atomic_cap_found and atomic_enabled:
+                devices_with_atomics += 1
+                status_msg = f"{pci_address}: Supported and Enabled"
+                atomic_ops_status.append(status_msg)
+                self.logger.info(f"------{status_msg}")
+            elif atomic_cap_found and not atomic_enabled:
+                devices_without_atomics += 1
+                status_msg = f"{pci_address}: Supported but NOT Enabled (ReqEn-)"
+                atomic_ops_status.append(status_msg)
+                self.logger.warning(f"!!! {status_msg}")
+            else:
+                check_failed_devices += 1
+                status_msg = f"{pci_address}: Capability not found or unclear"
+                atomic_ops_status.append(status_msg)
+                self.logger.warning(f"!!! {status_msg}")
+
+        # Log summary
+        self.logger.info(f"----Atomic operations summary:")
+        self.logger.info(f"------Devices with atomic ops enabled: {devices_with_atomics}")
+        self.logger.info(f"------Devices with atomic ops disabled: {devices_without_atomics}")
+        if check_failed_devices > 0:
+            self.logger.info(f"------Devices with check failed/unclear: {check_failed_devices}")
+
+        # Determine overall status
+        if devices_without_atomics > 0:
+            return TestStatus.FAIL.value, f"Atomic operations not enabled for {devices_without_atomics} device(s). Details: {'; '.join(atomic_ops_status)}"
+        elif check_failed_devices > 0:
+            return TestStatus.PASS.value, f"Atomic operations check completed with {check_failed_devices} warning(s). Details: {'; '.join(atomic_ops_status)}"
+        else:
+            return TestStatus.PASS.value, f"Atomic operations supported and enabled on all {devices_with_atomics} GPU device(s)."
+
 
     # Example component specific tests (these should be customized for each component)
     def test_check_hipcc(self):
@@ -1566,54 +1655,70 @@ class ROCMHealthCheck:
         # TODO
         return TestStatus.PASS.value, f"{component} is installed but no specific test available."
 
+    def _print_test_start(self, test_name):
+        """Print a separator line and test start message
+
+        Args:
+            test_name (str): Name of the test being run
+        """
+        separator = "=" * 80
+        print(f"\n{separator}")
+        self.logger.info(f"Running test: {test_name}...")
+
     def run_default_tests(self):
         """Run the default set of tests"""
         results = {}
 
         # Test 1: GPU Presence
-        self.logger.info("Running test: GPU Presence...")
+        self._print_test_start("GPU Presence")
         status, reason = self.test_GPUPresence()
         results["gpu_presence"] = {"status": status, "reason": reason}
 
         # Test 2: AMDGPU Driver
-        self.logger.info("Running test: AMDGPU Driver...")
+        self._print_test_start("AMDGPU Driver")
         status, reason = self.test_amdgpu_driver()
         results["amdgpu_driver"] = {"status": status, "reason": reason}
 
         # Test 3: Kernel Parameters
-        self.logger.info("Running test: Kernel Parameters...")
+        self._print_test_start("Kernel Parameters")
         status, reason = self.test_check_kernel_parameters()
         results["kernel_parameters"] = {"status": status, "reason": reason}
 
         # Test 4: rocminfo
-        self.logger.info("Running test: rocminfo...")
+        self._print_test_start("rocminfo")
         status, reason = self.test_rocminfo()
         results["rocminfo"] = {"status": status, "reason": reason}
 
         # Test 5: rocm_agent_enumerator
-        self.logger.info("Running test: rocm_agent_enumerator...")
+        self._print_test_start("rocm_agent_enumerator")
         status, reason = self.test_rocm_agent_enumerator()
         results["rocm_agent_enumerator"] = {"status": status, "reason": reason}
 
         # Test 6: amd-smi
-        self.logger.info("Running test: amd-smi...")
+        self._print_test_start("amd-smi")
         status, reason = self.test_amd_smi()
         results["amd_smi"] = {"status": status, "reason": reason}
 
         # Test 7: Library Dependencies
-        self.logger.info("Running test: Library Dependencies...")
+        self._print_test_start("Library Dependencies")
         status, reason = self.test_check_lib_dependencies()
         results["lib_dependencies"] = {"status": status, "reason": reason}
 
         # Test 8: Environment Variables
-        self.logger.info("Running test: ENV variables...")
+        self._print_test_start("ENV variables")
         status, reason = self.test_check_env_variables()
         results["env_variables"] = {"status": status, "reason": reason}
 
         # Test 9: Multinode cluster readiness
-        self.logger.info("Running test: Multinode cluster readiness...")
+        self._print_test_start("Multinode cluster readiness")
         status, reason = self.test_check_multinode_cluster_readiness()
         results["Multinode_Readiness"] = {"status": status, "reason": reason}
+
+        # Test 10: Atomic Operations
+        self._print_test_start("Is Atomic Operations Enabled")
+        status, reason = self.test_check_atomic_operations()
+        results["atomic_operations"] = {"status": status, "reason": reason}
+
         return results
 
     def run_component_tests(self):
@@ -1622,7 +1727,7 @@ class ROCMHealthCheck:
 
         for component in self.installed_components:
             if component not in self.exclude_list:
-                self.logger.info(f"Running component test: {component}...")
+                self._print_test_start(f"Component - {component}")
                 status, reason = self.test_component(component)
                 results[component] = {"status": status, "reason": reason}
 
@@ -1638,7 +1743,7 @@ class ROCMHealthCheck:
 
         # Run tests for each application target
         for target in self.rocm_examples_targets.get("applications", []):
-            self.logger.info(f"Running application test: [ {target} ]...")
+            self._print_test_start(f"Application - {target}")
             status, reason = self._build_target_and_run(target, target)
             results[target] = {"status": status, "reason": reason}
 
