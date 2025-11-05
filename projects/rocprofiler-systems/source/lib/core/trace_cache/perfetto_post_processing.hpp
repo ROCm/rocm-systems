@@ -22,6 +22,7 @@
 
 #pragma once
 #include "agent_manager.hpp"
+#include "config.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/storage_parser.hpp"
@@ -68,6 +69,7 @@ private:
     uint64_t                                    m_process_id;
     agent_manager&                              m_agent_manager;
     ::perfetto::TraceConfig                     m_session_config;
+    std::shared_ptr<tmp_file>                   m_tmp_file{ nullptr };
     std::unique_ptr<::perfetto::TracingSession> m_tracing_session{ nullptr };
 };
 }  // namespace trace_cache

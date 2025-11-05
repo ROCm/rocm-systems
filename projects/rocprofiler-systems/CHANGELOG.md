@@ -10,6 +10,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Profiling and metric collection capabilities for XGMI and PCIe data.
 - How-to document for XGMI and PCIe sampling and monitoring.
+- Added a `perfeto_post_processing` module responsible for storing the cached data into perfetto tracks.
+- Added a `ROCPROFSYS_CACHING_PERFETTO` configuration setting to enable the perfetto output for cached data.
 - Added a `ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS` configuration setting to set the flush period for Perfetto traces. The default value is 10000 ms (10 seconds).
 - Added fetching of the `rocpd` schema from rocprofiler-sdk-rocpd
 

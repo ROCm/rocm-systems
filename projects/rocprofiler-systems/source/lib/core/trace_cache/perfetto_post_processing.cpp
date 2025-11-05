@@ -22,7 +22,6 @@
 
 #include "core/trace_cache/perfetto_post_processing.hpp"
 #include "common.hpp"
-#include "config.hpp"
 #include "core/agent_manager.hpp"
 #include "library/tracing.hpp"
 #include "perfetto.hpp"
@@ -54,26 +53,6 @@ get_perfetto_initialized()
 {
     static bool _initialized = false;
     return _initialized;
-}
-
-auto&
-get_perfetto_tmp_file()
-{
-    static std::shared_ptr<tmp_file> _tmp_file = nullptr;
-    return _tmp_file;
-}
-
-int
-get_perffeto_temp_fd(const std::string& _pid)
-{
-    auto& _tmp_file = get_perfetto_tmp_file();
-    if(config::get_use_tmp_files())
-    {
-        auto _base = JOIN("-", "cached-perfetto-trace", _pid);
-        _tmp_file  = config::get_tmp_file(_base, "proto");
-        _tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, 0600);
-    }
-    return ((_tmp_file) ? _tmp_file->fd : -1);
 }
 
 void
@@ -185,7 +164,7 @@ write_track_data(const struct backtrace_region_sample& _sample)
 
     auto _track = get_track(Category{}, _track_name, _thread_id);
 
-    auto add_annotations = [&](::perfetto::EventContext ctx) {
+    auto add_annotations = [&](::perfetto::EventContext& ctx) {
         std::vector<annotation_entry> annotations = {
             { "begin_ns", _sample.start_timestamp }, { "end_ns", _sample.end_timestamp }
         };
@@ -223,6 +202,7 @@ perfetto_post_processing::perfetto_post_processing(metadata_registry& metadata,
 : m_metadata(metadata)
 , m_process_id(pid)
 , m_agent_manager(agent_mngr)
+, m_tmp_file(nullptr)
 , m_tracing_session(nullptr)
 {
     if(get_caching_perfetto())
@@ -285,8 +265,14 @@ perfetto_post_processing::start_session()
     ROCPROFSYS_VERBOSE(2,
                        "Starting perfetto post-processing session with cached data...\n");
 
-    auto temp_fd = get_perffeto_temp_fd(std::to_string(m_process_id));
-
+    int temp_fd = -1;
+    if(config::get_use_tmp_files())
+    {
+        auto _base = JOIN("-", "cached-perfetto-trace", std::to_string(m_process_id));
+        m_tmp_file = config::get_tmp_file(_base, "proto");
+        m_tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, 0600);
+        temp_fd = m_tmp_file->fd;
+    }
     m_tracing_session->Setup(m_session_config, temp_fd);
     m_tracing_session->StartBlocking();
 }
@@ -312,18 +298,17 @@ perfetto_post_processing::post_process(bool& _perfetto_output_error)
     stop_session();
 
     auto _get_session_data = [this]() {
-        auto _data     = char_vec_t{};
-        auto _tmp_file = get_perfetto_tmp_file();
-        if(_tmp_file && *_tmp_file)
+        auto _data = char_vec_t{};
+        if(m_tmp_file && *m_tmp_file)
         {
-            _tmp_file->close();
-            FILE* _fdata = ::fopen(_tmp_file->filename.c_str(), "rb");
+            m_tmp_file->close();
+            FILE* _fdata = ::fopen(m_tmp_file->filename.c_str(), "rb");
 
             if(!_fdata)
             {
                 ROCPROFSYS_VERBOSE(
                     -1, "Error! perfetto temp trace file '%s' could not be read",
-                    _tmp_file->filename.c_str());
+                    m_tmp_file->filename.c_str());
                 return char_vec_t{ m_tracing_session->ReadTraceBlocking() };
             }
 
@@ -338,7 +323,7 @@ perfetto_post_processing::post_process(bool& _perfetto_output_error)
             ROCPROFSYS_CI_THROW(
                 _fnum_read != _fnum_elem,
                 "Error! read %zu elements from perfetto trace file '%s'. Expected %zu\n",
-                _fnum_read, _tmp_file->filename.c_str(), _fnum_elem);
+                _fnum_read, m_tmp_file->filename.c_str(), _fnum_elem);
         }
         else
         {
@@ -392,12 +377,11 @@ perfetto_post_processing::post_process(bool& _perfetto_output_error)
             _filename.c_str());
     }
 
-    auto& _tmp_file = get_perfetto_tmp_file();
-    if(_tmp_file)
+    if(m_tmp_file)
     {
-        _tmp_file->close();
-        _tmp_file->remove();
-        _tmp_file.reset();
+        m_tmp_file->close();
+        m_tmp_file->remove();
+        m_tmp_file.reset();
     }
 
     m_tracing_session.reset();
@@ -440,14 +424,12 @@ perfetto_post_processing::get_kernel_dispatch_callback() const
                 ctx, { { "begin_ns", _beg_ts },
                        { "end_ns", _end_ts },
                        { "corr_id", _corr_id },
-                       { "stream_id", static_cast<uint64_t>(_stream_handle) },
-                       { "queue", static_cast<uint64_t>(_queue_id_handle) },
-                       { "dispatch_id", static_cast<uint64_t>(_kds.dispatch_id) },
-                       { "kernel_id", static_cast<uint64_t>(_kds.kernel_id) },
-                       { "private_segment_size",
-                         static_cast<uint64_t>(_kds.private_segment_size) },
-                       { "group_segment_size",
-                         static_cast<uint64_t>(_kds.group_segment_size) },
+                       { "stream_id", _stream_handle },
+                       { "queue", _queue_id_handle },
+                       { "dispatch_id", _kds.dispatch_id },
+                       { "kernel_id", _kds.kernel_id },
+                       { "private_segment_size", _kds.private_segment_size },
+                       { "group_segment_size", _kds.group_segment_size },
                        { "workgroup_size",
                          JOIN("", "(",
                               JOIN(',', _kds.workgroup_size_x, _kds.workgroup_size_y,
@@ -500,18 +482,16 @@ perfetto_post_processing::get_memory_copy_callback() const
             category::rocm_memory_copy{}, _track_desc, _dst_agent_log_node_id, _thrd_id);
 
         auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
-            annotate_perfetto(
-                ctx,
-                { { "begin_ns", _beg_ts },
-                  { "end_ns", _end_ts },
-                  { "corr_id", _corr_id },
-                  { "stream_id", static_cast<uint64_t>(_stream_id) },
-                  { "bytes", static_cast<uint64_t>(_mcs.bytes) },
-                  { "src_agent_id", static_cast<uint64_t>(_mcs.src_agent_id_handle) },
-                  { "dst_agent_id", static_cast<uint64_t>(_mcs.dst_agent_id_handle) },
-                  { "operation", _name },
-                  { "src_address", static_cast<uint64_t>(_mcs.src_address_value) },
-                  { "dst_address", static_cast<uint64_t>(_mcs.dst_address_value) } });
+            annotate_perfetto(ctx, { { "begin_ns", _beg_ts },
+                                     { "end_ns", _end_ts },
+                                     { "corr_id", _corr_id },
+                                     { "stream_id", _stream_id },
+                                     { "bytes", _mcs.bytes },
+                                     { "src_agent_id", _src_agent_log_node_id },
+                                     { "dst_agent_id", _dst_agent_log_node_id },
+                                     { "operation", _name },
+                                     { "src_address", _mcs.src_address_value },
+                                     { "dst_address", _mcs.dst_address_value } });
         };
 
         tracing::push_perfetto(category::rocm_memory_copy{}, _name.c_str(), _track,
@@ -572,14 +552,13 @@ perfetto_post_processing::get_memory_allocate_callback() const
                                             _agent_logical_node_id, _thrd_id);
 
             auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
-                annotate_perfetto(
-                    ctx, { { "begin_ns", _beg_ts },
-                           { "end_ns", _end_ts },
-                           { "corr_id", _corr_id },
-                           { "stream_id", static_cast<uint64_t>(_stream_id) },
-                           { "bytes", static_cast<uint64_t>(_mas.allocation_size) },
-                           { "agent_id", static_cast<uint64_t>(_mas.agent_id_handle) },
-                           { "address", static_cast<uint64_t>(_mas.address_value) } });
+                annotate_perfetto(ctx, { { "begin_ns", _beg_ts },
+                                         { "end_ns", _end_ts },
+                                         { "corr_id", _corr_id },
+                                         { "stream_id", _stream_id },
+                                         { "bytes", _alloc_size },
+                                         { "agent_id", _agent_logical_node_id },
+                                         { "address", _addr_val } });
             };
 
             tracing::push_perfetto(category::rocm_memory_allocate{}, operation, _track,
