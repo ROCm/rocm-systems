@@ -67,7 +67,6 @@ submitPackets(hsa_queue_t* queue, const void** packets, size_t num_packets)
             "Cannot submit {} packets to queue with size {}. num_packets must be <= queue->size",
             num_packets,
             queue->size);
-        return 0;
     }
 
     const uint32_t pkt_size = 0x40;
