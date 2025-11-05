@@ -21,14 +21,17 @@
 // SOFTWARE.
 
 #include "cache_manager.hpp"
-#include "agent_manager.hpp"
+
+#include "core/trace_cache/metadata_registry.hpp"
+#include "core/trace_cache/rocpd_processor.hpp"
+#include "core/trace_cache/sample_processor.hpp"
+
+#include "core/agent_manager.hpp"
 #include "core/config.hpp"
-#include "core/trace_cache/storage_parser.hpp"
-#include "debug.hpp"
+#include "core/debug.hpp"
+
 #include "library/runtime.hpp"
-#include "trace_cache/cache_utility.hpp"
-#include "trace_cache/metadata_registry.hpp"
-#include "trace_cache/rocpd_post_processing.hpp"
+
 #include <algorithm>
 #include <memory>
 #include <vector>
@@ -164,15 +167,23 @@ cache_manager::post_process_bulk()
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
             rocpd_threads.emplace_back([this]() {
-                auto                  pid  = getpid();
-                auto                  ppid = get_root_process_id();
-                rocpd_post_processing _post_processing(
+                auto            pid  = getpid();
+                auto            ppid = get_root_process_id();
+                rocpd_processor _rocpd_post_processing(
                     m_metadata, get_agent_manager_instance(), pid, ppid);
-                storage_parser _parser(
-                    get_buffered_storage_filename(get_root_process_id(), getpid()));
-                _post_processing.register_parser_callback(_parser);
-                _post_processing.post_process_metadata();
-                _parser.consume_storage();
+
+                auto _type_processing = std::make_unique<sample_processor_t>();
+                _type_processing->add_handler(_rocpd_post_processing);
+
+                storage_parser_t _parser(utility::get_buffered_storage_filename(
+                    get_root_process_id(), getpid()));
+
+                _parser.register_on_finished_callback(
+                    std::make_unique<std::function<void()>>(
+                        [&]() { _rocpd_post_processing.get_data_processor()->flush(); }));
+
+                _rocpd_post_processing.post_process_metadata();
+                _parser.load(std::move(_type_processing));
             });
 
             for(const auto& [pid, files] : _cache_files)
@@ -197,14 +208,22 @@ cache_manager::post_process_bulk()
                             return;
                         }
 
-                        agent_manager         _agent_manager{ _agents };
-                        auto                  ppid = get_root_process_id();
-                        rocpd_post_processing _post_processing(_metadata, _agent_manager,
-                                                               pid, ppid);
-                        storage_parser        _parser(files.buff_storage);
-                        _post_processing.register_parser_callback(_parser);
-                        _post_processing.post_process_metadata();
-                        _parser.consume_storage();
+                        agent_manager   _agent_manager{ _agents };
+                        auto            ppid = get_root_process_id();
+                        rocpd_processor _rocpd_processing(_metadata, _agent_manager, pid,
+                                                          ppid);
+
+                        auto _type_processing = std::make_unique<sample_processor_t>();
+                        _type_processing->add_handler(_rocpd_processing);
+
+                        storage_parser_t _parser(files.buff_storage);
+                        _parser.register_on_finished_callback(
+                            std::make_unique<std::function<void()>>([&]() {
+                                _rocpd_processing.get_data_processor()->flush();
+                            }));
+
+                        _rocpd_processing.post_process_metadata();
+                        _parser.load(std::move(_type_processing));
                     });
                 }
             }
@@ -212,6 +231,13 @@ cache_manager::post_process_bulk()
             for(auto& thread : rocpd_threads)
             {
                 thread.join();
+            }
+
+            ROCPROFSYS_PRINT("Removing cached files from file system..\n");
+            for(const auto& [pid, files] : _cache_files)
+            {
+                std::remove(files.buff_storage.c_str());
+                std::remove(files.metadata.c_str());
             }
         }
 
