@@ -10,17 +10,13 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 
 * :ref:`Derived metrics <cli-list-metrics>`: All of ROCm Compute Profiler's built-in metrics.
 
-* :ref:`Baseline comparison <analysis-baseline-comparison>`: Compare multiple
-  runs in a side-by-side manner.
+* :ref:`Baseline comparison <analysis-baseline-comparison>`: Compare multiple runs in a side-by-side manner.
 
-* :ref:`Metric customization <cli-analysis-options>`: Isolate a subset of
-  built-in metrics or build your own profiling configuration.
+* :ref:`Metric customization <cli-analysis-options>`: Isolate a subset of built-in metrics or build your own profiling configuration.
 
-* :ref:`Filtering <cli-analysis-options>`: Hone in on a particular kernel,
-  GPU ID, or dispatch ID via post-process filtering.
-
-* :ref:`Per-kernel roofline analysis <per-kernel-roofline>`: Detailed arithmetic 
-   intensity and performance analysis for individual kernels.
+* :ref:`Filtering <cli-analysis-options>`: Hone in on a particular kernel, GPU ID, or dispatch ID via post-process filtering.
+  
+* :ref:`Per-kernel roofline analysis <per-kernel-roofline>`: Detailed arithmetic intensity and performance analysis for individual kernels.
 
 Run ``rocprof-compute analyze -h`` for more details.
 
@@ -128,7 +124,7 @@ There are three high-level GPU analysis views:
 
 3. Choose your own customized subset of metrics with the ``-b`` (or ``--block``)
    option. Or, build your own configuration following
-   `config_template <https://github.com/ROCm/rocprofiler-compute/blob/amd-mainline/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
+   `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
    The following snippet shows how to generate a report containing only metric 2
    (:doc:`System Speed-of-Light </conceptual/system-speed-of-light>`).
 
