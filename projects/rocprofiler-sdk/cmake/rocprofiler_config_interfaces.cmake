@@ -199,11 +199,11 @@ target_link_libraries(rocprofiler-sdk-ptl INTERFACE PTL::ptl-static)
 # ----------------------------------------------------------------------------------------#
 
 find_package(LibElf)
-if (LibElf_FOUND)
-  target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
-else ()
-  find_package(libelf REQUIRED)
-  target_link_libraries(rocprofiler-sdk-elf INTERFACE libelf::libelf)
+if(LibElf_FOUND)
+    target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
+else()
+    find_package(libelf REQUIRED)
+    target_link_libraries(rocprofiler-sdk-elf INTERFACE libelf::libelf)
 endif()
 
 # ----------------------------------------------------------------------------------------#
