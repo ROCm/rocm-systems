@@ -33,6 +33,12 @@ on:
         required: true
         type: string
 
+      checkout_submodules:
+        description: "Whether to checkout git submodules."
+        required: false
+        type: boolean
+        default: false
+
       cmake_generator:
         description: "CMake generator."
         required: false
@@ -107,7 +113,7 @@ jobs:
         with:
           path: ${{ github.workspace }}
           ref: ${{ github.base_ref || github.event.repository.default_branch }}
-          submodules: true
+          submodules: ${{ inputs.checkout_submodules }}
 
       - name: Show git branch
         shell: bash
@@ -185,7 +191,7 @@ jobs:
         with:
           path: ${{ github.workspace }}
           ref: ${{ github.base_ref || github.event.repository.default_branch }}
-          submodules: true
+          submodules: ${{ inputs.checkout_submodules }}
 
     #   - name: Determine baseline tag
     #     id: tag
@@ -287,6 +293,12 @@ jobs:
           pwd
           ls -la ${PWD}
           python3 -m pip install -r scripts/requirements.txt
+          ls -la build-head/
+          ls -la build-baseline/
+          ls -la build-head/${{ inputs.source_directory }}
+          ls -la build-baseline/${{ inputs.source_directory }}
+          ls -la build-head/$(dirname ${{ inputs.versioning_spec }})
+          ls -la build-baseline/$(dirname ${{ inputs.versioning_spec }})
           python3 scripts/abi-guard.py check \
             -i "build-head/${{ inputs.versioning_spec }}" \
             -b "build-baseline/${{ inputs.versioning_spec }}" \
@@ -337,6 +349,8 @@ jobs:
           python3 -m pip install -r scripts/requirements.txt
           ls -la build-head/
           ls -la build-baseline/
+          ls -la build-head/${{ inputs.source_directory }}
+          ls -la build-baseline/${{ inputs.source_directory }}
           ls -la build-head/$(dirname ${{ inputs.versioning_spec }})
           ls -la build-baseline/$(dirname ${{ inputs.versioning_spec }})
           python3 scripts/abi-guard.py check \
