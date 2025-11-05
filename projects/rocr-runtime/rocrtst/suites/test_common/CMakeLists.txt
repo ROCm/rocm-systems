@@ -240,9 +240,6 @@ if(${BUILD_TYPE} STREQUAL "Debug")
 add_definitions(-DDEBUG)
 endif()
 
-if(${EMULATOR_BUILD})
-add_definitions(-DROCRTST_EMULATOR_BUILD=1)
-endif()
 
 
 #add_definitions(-D__linux__)
