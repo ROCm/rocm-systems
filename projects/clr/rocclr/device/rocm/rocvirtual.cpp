@@ -240,6 +240,7 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
   }
 
   // Return false, so the callback will not be called again for this signal
+  gpu->release();
   return false;
 }
 
@@ -545,6 +546,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
           }
         }
         gpu_.QueuedAsyncHandlers()++;
+        ts->gpu()->retain();
         hsa_status_t result = Hsa::signal_async_handler(
             prof_signal->signal_, HSA_SIGNAL_CONDITION_LT, init_value, &HsaAmdSignalHandler, ts);
         if (HSA_STATUS_SUCCESS != result) {
