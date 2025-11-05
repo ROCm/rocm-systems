@@ -313,6 +313,9 @@ class VersioningSpec(object):
             if self.tree == "source-tree" and itr == "install-tree":
                 # if the spec is from the source tree, ignore the install-tree
                 continue
+            elif self.tree == "build-tree" and itr == "install-tree":
+                # if the spec is from the source tree, ignore the install-tree
+                continue
             elif self.tree == "install-tree" and itr in ["source-tree", "build-tree"]:
                 # if the spec is from the install tree, ignore the source and build trees
                 continue
@@ -410,7 +413,7 @@ class VersioningSpec(object):
                         f"Source tree '{working_directory}' has git submodule(s):\n{submod_out}"
                     )
                     tmpf = tempfile.NamedTemporaryFile(
-                        prefix=f"rocm-abi-guard-{self.name}-submodules.", delete=False
+                        prefix=f"rocm-abi-guard-submodules-{self.name}.", delete=False
                     )
                     with open(tmpf.name, "w") as f:
                         f.write(f"{submod_out}\n")
@@ -486,7 +489,7 @@ def compute_hash(data) -> str:
     """
     if isinstance(data, FileSet):
         combined = {}
-        for path in data.get_paths():
+        for path in data.get_paths(absolute=False):
             lang = _language_for_path(path)
             text = path.read_text(encoding="utf-8", errors="ignore")
             pattern = COMMENT_PATTERNS.get(lang)
@@ -494,7 +497,10 @@ def compute_hash(data) -> str:
                 text = re.sub(pattern, "", text)
             # Remove all whitespace
             text = re.sub(r"\s+", "", text)
-            combined[f"{path}"] = text
+            if "rocm-abi-guard-submodules-" in str(path):
+                combined["rocm-abi-guard-submodules.tmp"] = text
+            else:
+                combined[f"{path}"] = text
 
         # Compute MD5
         return compute_hash(f"{combined}") if combined else "0"
