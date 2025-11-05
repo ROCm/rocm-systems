@@ -287,7 +287,7 @@ jobs:
           pwd
           ls -la ${PWD}
           python3 -m pip install -r scripts/requirements.txt
-          python3 scripts/abi_guard.py check \
+          python3 scripts/abi-guard.py check \
             -i "build-head/${{ inputs.versioning_spec }}" \
             -b "build-baseline/${{ inputs.versioning_spec }}" \
             --abidw-args "${{ inputs.abidw_args }}" \
@@ -335,7 +335,7 @@ jobs:
           pwd
           ls -la ${PWD}
           python3 -m pip install -r scripts/requirements.txt
-          python3 scripts/abi_guard.py check \
+          python3 scripts/abi-guard.py check \
             -i "build-head/${{ inputs.versioning_spec }}" \
             -b "build-baseline/${{ inputs.versioning_spec }}" \
             --abidw-args "${{ inputs.abidw_args }}" \
