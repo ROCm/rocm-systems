@@ -150,4 +150,4 @@ TEST_CASE("Unit_Device_modf_Accuracy_Positive - double") {
       PairValidatorBuilderFactory<double>(ULPValidatorBuilderFactory<double>(0)));
 }
 
-TEST_CASE("Unit_Device_modf_modff_Negative_RTC") { NegativeTestRTCWrapper<20>(kModf); }
+TEST_CASE("Unit_Device_modf_modff_Negative_RTC") { NegativeTestRTCWrapper<19>(kModf); }

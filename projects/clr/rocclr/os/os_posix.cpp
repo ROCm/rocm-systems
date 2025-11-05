@@ -1002,8 +1002,7 @@ bool NumaNode::GetAffinity() {
       "/cpumap";
   std::ifstream file(path);
   if (!file) {
-    std::cerr << "Failed to open " << path << "\n";
-    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "%s cannot be opened", path);
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "%s cannot be opened", path.c_str());
     return false;
   }
   std::string line;

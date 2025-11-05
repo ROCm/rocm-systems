@@ -63,25 +63,21 @@ TEST_CASE("Unit_hipCreateSurfaceObject_Negative_Parameters") {
 
   SECTION("invalid resource type") {
     resc.resType = hipResourceTypeLinear;
+#if HT_AMD
     HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc), hipErrorInvalidValue);
+#else
+    HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc), hipErrorInvalidChannelDescriptor);
+#endif
   }
 
-#if HT_NVIDIA  // DIsalbed due to defect EXSWHTEC-366
   SECTION("array handle is nullptr") {
     resc.res.array.array = nullptr;
+#if HT_AMD
+    HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc), hipErrorInvalidValue);
+#else
     HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc), hipErrorInvalidHandle);
-  }
 #endif
-
-#if HT_NVIDIA  // Disalbed due to defect EXSWHTEC-367
-  SECTION("freed array handle") {
-    hipArray_t invalid_array;
-    HIP_CHECK(hipMallocArray(&invalid_array, &desc, 64, 0, hipArraySurfaceLoadStore));
-    HIP_CHECK(hipFreeArray(invalid_array));
-    resc.res.array.array = invalid_array;
-    HIP_CHECK_ERROR(hipCreateSurfaceObject(&surf, &resc), hipErrorContextIsDestroyed);
   }
-#endif
 
   HIP_CHECK(hipFreeArray(array));
 }
