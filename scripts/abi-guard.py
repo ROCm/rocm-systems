@@ -97,6 +97,15 @@ class Version(object):
             _contents = textwrap.dedent(_contents).strip("\n").strip()
             ofs.write(f"{_contents}\n")
 
+    def value(self):
+        _factor = 10000
+        for key, itr in zip(["major", "minor", "patch"], [self.major, self.minor, self.patch]):
+            if itr >= _factor:
+                raise ValueError(
+                    f"Version component {key} exceeds maximum value ({_factor - 1}): {itr}"
+                )
+        return (self.major * _factor * _factor) + (self.minor * _factor) + self.patch
+
     def __str__(self) -> str:
         _data = f"{self.major}.{self.minor}.{self.patch}"
         if self.build:
@@ -141,6 +150,21 @@ class Version(object):
         if not hasattr(self, name) and hasattr(self, name.replace("-", "_")):
             name = name.replace("-", "_")
         return getattr(self, name, default)
+
+    def __eq__(self, other):
+        return self.value() == other.value()
+
+    def __lt__(self, other):
+        return self.value() < other.value()
+
+    def __le__(self, other):
+        return self.value() <= other.value()
+
+    def __gt__(self, other):
+        return self.value() > other.value()
+
+    def __ge__(self, other):
+        return self.value() >= other.value()
 
 
 class FileSet(object):
@@ -1180,12 +1204,12 @@ def main() -> None:
                     )
                 ):
                     fail_reason = (
-                        f"Public API additions/compatible changes detected, but VERSION minor/major not incremented "
+                        f"Public API additions/compatible changes detected, but VERSION minor not incremented "
                         f"(prev={base_version}, "
                         f"curr={head_version})."
                     )
             else:
-                if not (head_version == base_version):
+                if head_version != base_version:
                     fail_reason = (
                         f"No public ABI change, but major/minor changed "
                         f"(prev={base_version}, "
