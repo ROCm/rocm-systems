@@ -40,7 +40,9 @@ THE SOFTWARE.
 /**
  * Test Description
  * ------------------------
- *  - This will perfrom the basic funtionality of hipGetProcAddress api
+ *  - This will perform the basic operation on hipGetProcAddress API.
+ *  - Get the driver symbol with all three flags and validates the basic
+ *  - functionlity of hipGetDeviceCount using the function pointer.
  * Test source
  * ------------------------
  *  - unit/dynamicLoading/hipGetProcAddress.cc
@@ -54,19 +56,19 @@ TEST_CASE("Unit_hipGetProcAddress_Positive") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  SECTION("Get driver symbol for default mode") {
+  SECTION("Get driver symbol for default flag") {
     HIP_CHECK(hipGetProcAddress("hipGetDeviceCount", &funcPtr,
                                 currentHipVersion, HIP_GET_PROC_ADDRESS_DEFAULT,
                                 &status));
   }
 
-  SECTION("Search for Legacy versions of driver symbol") {
+  SECTION("Get driver symbol for legacy stream flag") {
     HIP_CHECK(hipGetProcAddress("hipGetDeviceCount", &funcPtr,
                                 currentHipVersion,
                                 HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
   }
 
-  SECTION("Search for Per-Thread versions of driver symbol") {
+  SECTION("Get driver symbol for Per thread stream flag") {
     HIP_CHECK(hipGetProcAddress(
         "hipGetDeviceCount", &funcPtr, currentHipVersion,
         HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM, &status));
@@ -89,7 +91,7 @@ TEST_CASE("Unit_hipGetProcAddress_Positive") {
 /**
  * Test Description
  * ------------------------
- *  - This will verify behavior of hipGetProcAddress api with negative
+ *  - This will verify behavior of hipGetProcAddress API with negative
  * parameters
  *  - 1) Empty symbol
  *  - 2) Invalid flag
@@ -122,7 +124,9 @@ TEST_CASE("Unit_hipGetProcAddress_Negative") {
 /**
  * Test Description
  * ------------------------
- *  - This will perfrom the basic funtionality of hipGetProcAddress_spt api
+ *  - This will perform the basic operation on hipGetProcAddress_spt API.
+ *  - Get the driver symbol with all three flags and validates the basic
+ *  - functionlity of hipGetDeviceCount using the function pointer.
  * Test source
  * ------------------------
  *  - unit/dynamicLoading/hipGetProcAddress.cc
@@ -136,19 +140,19 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Positive") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  SECTION("Get driver symbol for default mode") {
+  SECTION("Get driver symbol for default flag") {
     HIP_CHECK(hipGetProcAddress_spt("hipGetDeviceCount", &funcPtr,
                                     currentHipVersion,
                                     HIP_GET_PROC_ADDRESS_DEFAULT, &status));
   }
 
-  SECTION("Search for Legacy versions of driver symbol") {
+  SECTION("Get driver symbol for legacy stream flag") {
     HIP_CHECK(
         hipGetProcAddress_spt("hipGetDeviceCount", &funcPtr, currentHipVersion,
                               HIP_GET_PROC_ADDRESS_LEGACY_STREAM, &status));
   }
 
-  SECTION("Search for Per-Thread versions of driver symbol") {
+  SECTION("Get driver symbol for per thread stream flag") {
     HIP_CHECK(hipGetProcAddress_spt(
         "hipGetDeviceCount", &funcPtr, currentHipVersion,
         HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM, &status));
@@ -171,7 +175,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Positive") {
 /**
  * Test Description
  * ------------------------
- *  - This will verify behavior of hipGetProcAddress_spt api with negative
+ *  - This will verify behavior of hipGetProcAddress_spt API with negative
  * parameters
  *  - 1) Empty symbol
  *  - 2) Invalid flag
@@ -233,8 +237,7 @@ TEST_CASE("Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress") {
   void *sym_hipMemcpy_spt = dlsym(handle, "hipMemcpy_spt");
   void *sym_hipMalloc = dlsym(handle, "hipMalloc");
 
-  SECTION(
-      "hipGetProcAddress - With hipMemcpy (it has spt version hipMemcpy_spt)") {
+  SECTION("hipGetProcAddress - For hipMemcpy") {
     HIP_CHECK(hipGetProcAddress("hipMemcpy", &funcPtr_default,
                                 currentHipVersion, HIP_GET_PROC_ADDRESS_DEFAULT,
                                 &status));
@@ -251,7 +254,7 @@ TEST_CASE("Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress") {
     REQUIRE(funcPtr_spt == sym_hipMemcpy_spt);
   }
 
-  SECTION("hipGetProcAddress - With hipMalloc (it doesn't has spt version)") {
+  SECTION("hipGetProcAddress - For hipMalloc") {
     HIP_CHECK(hipGetProcAddress("hipMalloc", &funcPtr_default,
                                 currentHipVersion, HIP_GET_PROC_ADDRESS_DEFAULT,
                                 &status));
@@ -268,7 +271,7 @@ TEST_CASE("Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress") {
     REQUIRE(funcPtr_spt == sym_hipMalloc);
   }
 
-  SECTION("hipGetProcAddress - with spt API hipMemcpy_spt") {
+  SECTION("hipGetProcAddress - For hipMemcpy_spt") {
     HIP_CHECK(hipGetProcAddress("hipMemcpy_spt", &funcPtr_default,
                                 currentHipVersion, HIP_GET_PROC_ADDRESS_DEFAULT,
                                 &status));
@@ -286,8 +289,7 @@ TEST_CASE("Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress") {
     REQUIRE(funcPtr_spt == sym_hipMemcpy_spt);
   }
 
-  SECTION("hipGetProcAddress_spt - With hipMemcpy (it has spt version "
-          "hipMemcpy_spt)") {
+  SECTION("hipGetProcAddress_spt - For hipMemcpy") {
     HIP_CHECK(hipGetProcAddress_spt("hipMemcpy", &funcPtr_default,
                                     currentHipVersion,
                                     HIP_GET_PROC_ADDRESS_DEFAULT, &status));
@@ -305,8 +307,7 @@ TEST_CASE("Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress") {
     REQUIRE(funcPtr_spt == sym_hipMemcpy_spt);
   }
 
-  SECTION(
-      "hipGetProcAddress_spt - With hipMalloc (it doesn't has spt version)") {
+  SECTION("hipGetProcAddress_spt - For hipMalloc") {
     HIP_CHECK(hipGetProcAddress_spt("hipMalloc", &funcPtr_default,
                                     currentHipVersion,
                                     HIP_GET_PROC_ADDRESS_DEFAULT, &status));
@@ -324,7 +325,7 @@ TEST_CASE("Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress") {
     REQUIRE(funcPtr_spt == sym_hipMalloc);
   }
 
-  SECTION("hipGetProcAddress_spt - with spt API hipMemcpy_spt") {
+  SECTION("hipGetProcAddress_spt - For hipMemcpy_spt") {
     HIP_CHECK(hipGetProcAddress_spt("hipMemcpy_spt", &funcPtr_default,
                                     currentHipVersion,
                                     HIP_GET_PROC_ADDRESS_DEFAULT, &status));
