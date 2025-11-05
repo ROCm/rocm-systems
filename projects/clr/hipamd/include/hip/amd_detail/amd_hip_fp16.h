@@ -980,7 +980,7 @@ inline __device__ __half hrsqrt(__half x) {
   return __half_raw{__ocml_rsqrt_f16(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hsqrt(__half x) {
-  return __half_raw{__ocml_sqrt_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_elementwise_sqrt(static_cast<__half_raw>(x).data)};
 }
 inline __HOST_DEVICE__ bool __hisinf(__half x) {
   __half_raw hr = x;
@@ -1015,7 +1015,9 @@ inline __device__ __half2 h2rcp(__half2 x) {
   return _Float16_2{_Float16_2{static_cast<_Float16>(1.0f), static_cast<_Float16>(1.0f)} / x.data};
 }
 inline __device__ __half2 h2rsqrt(__half2 x) { return __ocml_rsqrt_2f16(x); }
-inline __device__ __half2 h2sqrt(__half2 x) { return __ocml_sqrt_2f16(x); }
+inline __device__ __half2 h2sqrt(__half2 x) {
+  return __half2{__builtin_elementwise_sqrt(static_cast<__half2_raw>(x).data)};
+}
 inline __device__ __half2 __hisinf2(__half2 x) {
   auto r = __ocml_isinf_2f16(x);
   return __half2{_Float16_2{static_cast<_Float16>(r.x), static_cast<_Float16>(r.y)}};
