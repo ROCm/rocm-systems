@@ -20,10 +20,10 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 #include <gtest/gtest.h>
 
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <limits>

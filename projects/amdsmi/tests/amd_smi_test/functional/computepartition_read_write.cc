@@ -24,13 +24,14 @@
 #include <unistd.h>
 
 #include <iostream>
+#include <iomanip>
 #include <chrono>   // NOLINT [build]
 #include <map>
 #include <string>
 #include <vector>
 #include <limits>
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 #include "../test_base.h"
 #include "amd_smi/amdsmi.h"
 #include "rocm_smi/rocm_smi_utils.h"
