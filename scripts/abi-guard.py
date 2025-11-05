@@ -1071,11 +1071,11 @@ def main() -> None:
 
         digest_files = head_spec.sources + head_spec.headers
         digest = compute_hash(digest_files)
-        print(f"  {args.package} {args.tree} hash: {digest}")
+        print(f"{digest}")
         files = "\n".join(
             sorted([f"    - {itr}" for itr in digest_files.get_paths(absolute=False)])
         )
-        logging.info(f"  {args.package} {args.tree} files:\n{files}")
+        logging.info(f"  files:\n{files}")
 
     elif args.command == "check":
         head_version = head_spec.version
