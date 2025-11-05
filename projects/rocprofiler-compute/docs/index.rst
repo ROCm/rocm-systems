@@ -42,7 +42,11 @@ in practice.
 
       * :doc:`how-to/use`
 
+      * :doc:`how-to/pc_sampling`
+
       * :doc:`how-to/profile/mode`
+  
+      * :doc:`how-to/live_attach_detach`
 
       * :doc:`how-to/analyze/mode`
 
