@@ -1226,8 +1226,8 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
         // Capture new packets for this node
         std::vector<uint8_t*> newPackets;
         std::vector<std::string> newKernelNames;
-        hipError_t status =
-            node->CaptureAndFormPacket(kernArgManager_, &newPackets, &newKernelNames);
+        hipError_t status = node->CaptureAndFormPacket(kernArgManager_, &newPackets,
+                                                                        &newKernelNames);
         if (status != hipSuccess) {
           return status;
         }
@@ -1934,7 +1934,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     if (DEBUG_HIP_GRAPH_DOT_PRINT && !graph_dumped_) {
       graph_dumped_ = true;
       std::string filename =
-        "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_1";
+        "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_";
       hipError_t status = ihipGraphDebugDotPrint(this, filename.c_str(), 0);
       if (status == hipSuccess) {
       LogPrintfInfo("[hipGraph] graph dump:%s", filename.c_str());

@@ -894,6 +894,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     for (auto streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
+          stream->finish();
           constexpr bool kForceDestroy = true;
           hip::Stream::Destroy(stream, kForceDestroy);
         }
@@ -966,6 +967,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
   void FindStreamsReqPerDevForSegments();
+  //! Get the parallel streams map for synchronization before destruction
+  const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
+    return parallel_streams_;
+  }
 
  protected:
   //! Topological order of the graph doesn't include nodes embedded as part of the child graph
