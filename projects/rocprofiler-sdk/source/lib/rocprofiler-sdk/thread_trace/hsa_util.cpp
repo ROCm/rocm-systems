@@ -93,7 +93,7 @@ HsaATTQueue::HsaATTQueue(const hsa::AgentCache& agent, size_t triple_buffer_size
 
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create thread trace async queue";
 
-    if(triple_buffer_size)
+    if(triple_buffer_size != 0)
     {
         for(auto& memory : triple_buffer_memory)
         {
@@ -115,7 +115,7 @@ HsaATTQueue::~HsaATTQueue()
     ROCP_TRACE << "Destroying Async Queue...";
     hsa::get_core_table()->hsa_queue_destroy_fn(this->queue);
 
-    for(auto memory : triple_buffer_memory)
+    for(auto* memory : triple_buffer_memory)
         hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(memory);
 }
 

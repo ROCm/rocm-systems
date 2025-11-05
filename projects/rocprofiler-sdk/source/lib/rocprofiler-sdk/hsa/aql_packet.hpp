@@ -245,10 +245,12 @@ struct sqtt_buffer_status_t
     bool                         gpu_full{};
 };
 
+// Virtual members for mocking in tests
 class SQTTBufferingPackets
 {
 public:
     SQTTBufferingPackets(aqlprofile_handle_t handle, int shader_engine_id);
+    virtual ~SQTTBufferingPackets() = default;
 
     hsa_ext_amd_aql_pm4_packet_t                query_status{};
     virtual std::optional<sqtt_buffer_status_t> query_buffer_status();

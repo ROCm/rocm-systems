@@ -149,7 +149,7 @@ set_tests_properties(
                DISABLED
                ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
 
-# Triple buffer tests
+# Triple buffer tests. Marked unstable because CI is not picking up aqlprofile.
 add_executable(thread-trace-api-triple-buffer-test)
 target_sources(thread-trace-api-triple-buffer-test
                PRIVATE triple_buffer.cpp main.cpp kernel_branch.cpp kernel_lds.cpp)
@@ -170,7 +170,9 @@ set_tests_properties(
         ENVIRONMENT
         "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
         FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        DISABLED
+        ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
 
 add_test(NAME thread-trace-api-triple-buffer-hammer-test
          COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>)
@@ -186,7 +188,9 @@ set_tests_properties(
         ENVIRONMENT
         "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};TRIPLEBUFFER=1;ATT_NODETAIL=0;ATT_SLOW_CALLBACK=0"
         FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        DISABLED
+        ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
 
 add_test(NAME thread-trace-api-triple-buffer-slow-test
          COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>)
@@ -202,7 +206,9 @@ set_tests_properties(
         ENVIRONMENT
         "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
         FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        DISABLED
+        ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
 
 # Tests for thread trace not paused during application run (global destructor)
 add_test(NAME thread-trace-api-triple-buffer-no-pause-test
@@ -210,6 +216,13 @@ add_test(NAME thread-trace-api-triple-buffer-no-pause-test
 
 set_tests_properties(
     thread-trace-api-triple-buffer-no-pause-test
-    PROPERTIES TIMEOUT 120 LABELS "integration-tests" ENVIRONMENT
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};TRIPLEBUFFER=1;EXECUTE_PAUSE=0"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})

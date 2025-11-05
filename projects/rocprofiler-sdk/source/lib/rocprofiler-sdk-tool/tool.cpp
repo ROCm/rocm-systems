@@ -1392,7 +1392,7 @@ att_shader_data_callback(rocprofiler_agent_id_t                       agent,
                          rocprofiler_thread_trace_shader_data_flags_t flags,
                          rocprofiler_user_data_t                      userdata)
 {
-    if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL)
+    if((flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0)
         ROCP_CI_LOG(WARNING) << "Thread trace buffer full!";
     std::lock_guard<std::mutex> lock(att_shader_data);
     std::stringstream           filename;

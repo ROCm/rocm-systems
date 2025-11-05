@@ -47,7 +47,9 @@ gtest_add_tests(
     TEST_LIST thread-trace-producer-consumer-test_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
+# Tests disabled because CI is not picking up aqlprofile
 set_tests_properties(
     ${thread-trace-producer-consumer-test_TESTS}
     PROPERTIES TIMEOUT 60 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}" DISABLED
+               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})

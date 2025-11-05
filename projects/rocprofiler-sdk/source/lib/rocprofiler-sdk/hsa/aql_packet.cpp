@@ -224,7 +224,7 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
     uint64_t num_packets{6};
     buffer_swap.resize(num_packets);
 
-    std::vector<hsa_ext_amd_aql_pm4_packet_t*> buffer_ptr{};
+    auto buffer_ptr = std::vector<hsa_ext_amd_aql_pm4_packet_t*>{};
     for(auto& buffer : buffer_swap)
         buffer_ptr.emplace_back(&buffer);
 

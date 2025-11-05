@@ -109,7 +109,7 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
     auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
 
-    auto* agent =
+    const auto* agent =
         CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
 
     size_t triple_buffer_size = params.triple_buffering ? params.buffer_size : 0ul;
@@ -240,18 +240,18 @@ ThreadTracerAgent::unload_codeobj(code_object_id_t id)
 }
 
 std::shared_ptr<Signal>
-ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
+ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> _flag)
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
     auto lock   = std::unique_lock{trace_resources_mut};
-    worker_flag = flag;
+    worker_flag = std::move(_flag);
 
-    auto control_packet = get_control(true);
-    control_packet->clear();
-    control_packet->populate_before();
-    control_packet->populate_after();
+    auto control_packet_copy = get_control(true);
+    control_packet_copy->clear();
+    control_packet_copy->populate_before();
+    control_packet_copy->populate_after();
 
-    auto unique_signal = queue->SubmitAndSignalLast(control_packet->before_krn_pkt);
+    auto unique_signal = queue->SubmitAndSignalLast(control_packet_copy->before_krn_pkt);
     auto shared_signal = std::shared_ptr<Signal>(std::move(unique_signal));
 
     if(params.triple_buffering)
@@ -262,10 +262,10 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
             if((params.shader_engine_mask >> i) % 2 == 1) shader_engine_id = i;
 
         auto buffer_packet = std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(
-            control_packet->GetHandle(), shader_engine_id);
+            control_packet_copy->GetHandle(), shader_engine_id);
         // Emit the optional buffer header first so consumers can prime state
         // before the main payload arrives.
-        if(buffer_packet->header)
+        if(buffer_packet->header != 0)
         {
             params.shader_cb_fn(agent_id,
                                 0,
@@ -286,7 +286,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> flag)
         auto producer_data             = triple_buffer_producer_data_t{};
         producer_data.producer_running = worker_flag;
         producer_data.start_pkt_signal = shared_signal;
-        producer_data.control_packet   = std::move(control_packet);
+        producer_data.control_packet   = std::move(control_packet_copy);
         producer_data.copy_data_fn     = copy_data_sync;
         producer_data.shared           = worker_data;
         producer_data.buffer_packet    = std::move(buffer_packet);
@@ -321,11 +321,11 @@ ThreadTracerAgent::stop_thread_trace()
     }
     else
     {
-        auto control_packet = get_control(false);
-        control_packet->clear();
+        auto control_packet_copy = get_control(false);
+        control_packet_copy->clear();
         // Join helpers and emit the final set of packets so the GPU drains.
-        control_packet->populate_after();
-        return queue->SubmitAndSignalLast(control_packet->after_krn_pkt);
+        control_packet_copy->populate_after();
+        return queue->SubmitAndSignalLast(control_packet_copy->after_krn_pkt);
     }
 }
 
