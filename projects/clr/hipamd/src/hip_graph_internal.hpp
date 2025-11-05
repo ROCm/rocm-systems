@@ -447,6 +447,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     out << GetLabel(flag);
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
       out << "\nStreamId:" << stream_id_;
+      out << "\nSegmentId:" << segment_id_;
       out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       out << "\nDeviceId:" << dev_id_;
     }
@@ -470,6 +471,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t inDegree_;         //!< count of in coming edges (@todo: remove, it's dependencies_.size())
   size_t outDegree_;        //!< count of outgoing edges (@todo: remove, it's edges_.size())
   int32_t stream_id_ = -1;  //! Stream ID on which this node will be executed
+  int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
   int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
   static int nextID;
   Graph* parentGraph_;
@@ -881,6 +883,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   static std::unordered_set<GraphExec*> graphExecSet_;
   static amd::Monitor graphExecSetLock_;
   static amd::Monitor graphExecStreamCreateLock_;
+  bool graph_dumped_ = false;
   GraphExec(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
     amd::ScopedLock lock(graphExecSetLock_);
@@ -1165,6 +1168,7 @@ class GraphKernelNode : public GraphNode {
     out << GetLabel(flag);
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
       out << "StreamId:" << stream_id_;
+      out << "\nSegmentId:" << segment_id_;
       out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       out << "\nDeviceId:" << dev_id_;
     }

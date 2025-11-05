@@ -1517,6 +1517,13 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
   }
   graph->clone(*pGraphExec, true);
 
+  hipError_t scheduleStatus = (*pGraphExec)->ScheduleNodes();
+  if (scheduleStatus != hipSuccess) {
+    delete *pGraphExec;
+    *pGraphExec = nullptr;
+    return scheduleStatus;
+  }
+
   if (DEBUG_HIP_GRAPH_DOT_PRINT) {
     static int i = 1;
     std::string filename =
@@ -1525,13 +1532,6 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
     if (status == hipSuccess) {
       LogPrintfInfo("[hipGraph] graph dump:%s", filename.c_str());
     }
-  }
-
-  hipError_t scheduleStatus = (*pGraphExec)->ScheduleNodes();
-  if (scheduleStatus != hipSuccess) {
-    delete *pGraphExec;
-    *pGraphExec = nullptr;
-    return scheduleStatus;
   }
 
   graph->SetGraphInstantiated(true);

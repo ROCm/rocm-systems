@@ -627,6 +627,7 @@ void Graph::CreateSegmentsFromPaths(const hip::Graph::GraphExecutionPaths& exec_
     // Map each node in this segment to the segment ID (local to this graph)
     for (const auto& node : segment.nodes) {
       node_to_segment_id_[node] = segment_id;
+      node->segment_id_ = segment_id;
     }
 
     segment_id++;
@@ -1609,7 +1610,9 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
   // Process all nodes in this segment
   for (size_t i = 0; i < segment.nodes.size(); ++i) {
     auto& node = segment.nodes[i];
-
+    if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+      node->stream_id_ = stream->GetStreamId();
+    }
     if (!node->GraphCaptureEnabled()) {
       // Node doesn't support capture - execute individually
       node->SetStream(stream);
@@ -1645,7 +1648,11 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
             return status;
           }
         }
-
+        if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+            for(int j = i; j < i + packetBatch.nodeRanges.size(); j++) {
+              segment.nodes[j]->stream_id_ = stream->GetStreamId();
+            }
+        }
         // Skip all consecutive captured nodes that belong to this batch
         i += packetBatch.nodeRanges.size() - 1;  // -1 because loop will increment
         ++batchIndex;
@@ -1857,6 +1864,8 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
   return true;
 }
 
+hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned int flags);
+
 // ================================================================================================
 hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   hipError_t status = hipSuccess;
@@ -1921,6 +1930,15 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     // Release the last command as we don't need to track it for top-level graph execution
     if (last_cmd != nullptr) {
       last_cmd->release();
+    }
+    if (DEBUG_HIP_GRAPH_DOT_PRINT && !graph_dumped_) {
+      graph_dumped_ = true;
+      std::string filename =
+        "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_1";
+      hipError_t status = ihipGraphDebugDotPrint(this, filename.c_str(), 0);
+      if (status == hipSuccess) {
+      LogPrintfInfo("[hipGraph] graph dump:%s", filename.c_str());
+      }
     }
   } else if (max_streams_ == 1 && instantiateDeviceId_ != launch_stream->DeviceId()) {
     for (int i = 0; i < topoOrder_.size(); i++) {
