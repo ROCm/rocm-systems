@@ -2,6 +2,7 @@
 #define CUID_UTIL_H
 
 #include "cuid.h"
+#include "hmac.h"
 #include <vector>
 #include <memory>
 #include <string>
@@ -39,7 +40,7 @@ private:
 namespace AmdCuidUtilities {
     std::string read_sysfs_file(const std::string &path);
     std::string readlink_bdf(const std::string &device_path);
-    amdcuid_status_t generate_secondary_cuid(const amdcuid* primary_id, amdcuid* secondary_id);
+    amdcuid_status_t generate_secondary_cuid(const amdcuid* primary_id, amdcuid* secondary_id, AMDCUID_HMAC* hmac);
     amdcuid_status_t generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                  uint8_t revision_id, uint16_t device_id, uint16_t vendor_id,
                                  uint8_t component_type, amdcuid* id);

@@ -12,6 +12,7 @@ set(CUID_SOURCES
     cuid_device_manager.cc
     cuid_cpu.cc
     cuid_gpu.cc
+    hmac.cc
 )
 
 set(CUID_HEADERS
@@ -23,6 +24,7 @@ set(CUID_HEADERS
     cuid_gpu.h
     cuid_nic.h
     cuid_platform.h
+    hmac.h
 )
 
 add_library(cuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})

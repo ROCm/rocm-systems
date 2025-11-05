@@ -8,8 +8,6 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
-#include <openssl/hmac.h>
-#include <openssl/evp.h>
 
 
 const char* Logger::LogLevelName(LogLevel level) const {
@@ -62,76 +60,21 @@ std::string AmdCuidUtilities::readlink_bdf(const std::string &device_path) {
 }
 
 
-amdcuid_status_t AmdCuidUtilities::generate_secondary_cuid(const amdcuid* primary_id, amdcuid* secondary_id) {
-    if (!primary_id) {
+amdcuid_status_t AmdCuidUtilities::generate_secondary_cuid(const amdcuid* primary_id, amdcuid* secondary_id, AMDCUID_HMAC* hmac) {
+    if (!primary_id || !hmac) {
         // Return invalid on null input
         amdcuid empty = {};
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
 
-    // read key from protected file
-    char key[32] = {0};
-    std::ifstream key_file("/path/to/protected/key/file");
-    if (key_file.is_open()) {
-        key_file.read(key, sizeof(key));
-        key_file.close();
-    }
-    else{
-        std::cerr << "Error opening key file" << std::endl;
-        return AMDCUID_STATUS_KEY_ERROR;
-    }
-
     uint8_t hash[EVP_MAX_MD_SIZE];
     size_t hash_len = 0;
 
-    // set MAC as HMAC
-    EVP_MAC* mac = EVP_MAC_fetch(NULL, "HMAC", NULL);
-    if (!mac) {
-        std::cerr << "Error creating EVP_MAC" << std::endl;
-        return AMDCUID_STATUS_HMAC_ERROR;
+    amdcuid_status_t status = hmac->generate_hmac_sha256(reinterpret_cast<const uint8_t*>(primary_id->bytes), sizeof(primary_id->bytes), hash, &hash_len);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+        std::cerr << "Error generating HMAC" << std::endl;
+        return status;
     }
-
-    // create MAC context
-    EVP_MAC_CTX* ctx = EVP_MAC_CTX_new(mac);
-    if (!ctx) {
-        EVP_MAC_free(mac);
-        std::cerr << "Error creating EVP_MAC_CTX" << std::endl;
-        return AMDCUID_STATUS_HMAC_ERROR;
-    }
-
-    // set hash algorithm as SHA256
-    OSSL_PARAM params[2];
-    const char* sha256 = EVP_MD_get0_name(EVP_sha256());
-    params[0] = OSSL_PARAM_construct_utf8_string("digest", const_cast<char*>(sha256), 0);
-    params[1] = OSSL_PARAM_construct_end();
-
-    // initialize MAC context with key
-    if (!EVP_MAC_init(ctx, reinterpret_cast<const unsigned char*>(key), sizeof(key), params)) {
-        EVP_MAC_CTX_free(ctx);
-        EVP_MAC_free(mac);
-        std::cerr << "Error initializing MAC context" << std::endl;
-        return AMDCUID_STATUS_HMAC_ERROR;
-    }
-
-    // update MAC with primary CUID as the message
-    if (!EVP_MAC_update(ctx, reinterpret_cast<const unsigned char*>(primary_id->bytes), sizeof(primary_id->bytes))) {
-        EVP_MAC_CTX_free(ctx);
-        EVP_MAC_free(mac);
-        std::cerr << "Error updating MAC context" << std::endl;
-        return AMDCUID_STATUS_HMAC_ERROR;
-    }
-
-    // compute HMAC-SHA256 hash
-    if (!EVP_MAC_final(ctx, reinterpret_cast<unsigned char*>(hash), &hash_len, EVP_MAX_MD_SIZE)) {
-        EVP_MAC_CTX_free(ctx);
-        EVP_MAC_free(mac);
-        std::cerr << "Error finalizing MAC" << std::endl;
-        return AMDCUID_STATUS_HMAC_ERROR;
-    }
-
-    // clean up MAC context
-    EVP_MAC_CTX_free(ctx);
-    EVP_MAC_free(mac);
 
     // Map the 256-bit hash to 122-bit CUID format
     uint8_t id_bits[16] = {0}; // 128 bits total (122 bits + 6 bits padding)

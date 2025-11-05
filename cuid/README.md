@@ -95,7 +95,10 @@ Both static and shared libraries are built.
 * Parse the sysfs /sys/firmware/dmi/tables/DMI to extract out the system UUID.
 * Run time load the library: https://github.com/ROCm/amdsmi/blob/amd-staging/src/amd_smi/amd_smi_lib_loader.cc
 * NIC devices, platform, and other devices ... ...
+* Implement HMAC library code
 ### CLI
+* Implement all those CLI options
+### Daemon/cron job
 * Detect the device plug and unplug events using udev
 #### Example: Detecting PCI Device Events with libudev
 
@@ -171,4 +174,3 @@ int main() {
 ```
 
 This code sets up a monitor for PCI device events and prints details when devices are added or removed. You can extend the periodic logic section as needed for your application.
-* Implement all those CLI options
