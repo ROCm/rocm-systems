@@ -57,9 +57,9 @@ UberTraceCaptureMgr* UberTraceCaptureMgr::Create(Pal::IPlatform* platform, const
   return mgr;
 }
 
-static void PAL_STDCALL UberTraceStateChangeCallback(const GpuUtil::TraceSession& pTraceSession,
-                                                     GpuUtil::TraceSessionState newState,
-                                                     void* pPrivateData)
+static void UberTraceStateChangeCallback(const GpuUtil::TraceSession& pTraceSession,
+                                         GpuUtil::TraceSessionState newState,
+                                         void* pPrivateData)
 {
     UberTraceCaptureMgr* mgr = static_cast<UberTraceCaptureMgr*>(pPrivateData);
 
