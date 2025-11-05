@@ -24,7 +24,6 @@
 #include "agent_manager.hpp"
 #include "config.hpp"
 #include "debug.hpp"
-#include "gpu.hpp"
 #include "library/thread_info.hpp"
 #include "node_info.hpp"
 #include "rocpd/data_processor.hpp"
@@ -405,17 +404,25 @@ rocpd_post_processing::get_pmc_event_with_sample_callback() const
 postprocessing_callback
 rocpd_post_processing::get_amd_smi_sample_callback() const
 {
-#if ROCPROFSYS_USE_ROCM > 0
     struct gpu_metrics_t
     {
-        std::vector<uint16_t> vcn_busy;
-        std::vector<uint16_t> jpeg_busy;
+        // VCN metrics
+        std::vector<uint16_t> vcn_activity;  // Device-level VCN (when supported)
+        std::vector<std::vector<uint16_t>>
+            vcn_busy;  // XCP-level VCN (per-XCP organization)
 
+        // JPEG metrics
+        std::vector<uint16_t> jpeg_activity;  // Device-level JPEG (when supported)
+        std::vector<std::vector<uint16_t>>
+            jpeg_busy;  // XCP-level JPEG (per-XCP organization)
+
+        // XGMI metrics
         uint16_t              xgmi_link_width = 0;
         uint16_t              xgmi_link_speed = 0;
         std::vector<uint64_t> xgmi_read_data_acc;
         std::vector<uint64_t> xgmi_write_data_acc;
 
+        // PCIe metrics
         uint16_t pcie_link_width     = 0;
         uint16_t pcie_link_speed     = 0;
         uint64_t pcie_bandwidth_acc  = 0;
@@ -425,7 +432,9 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
     auto deserialize_gpu_metrics = [](const std::vector<uint8_t>& serialized_data,
                                       gpu_metrics_t& result, bool is_vcn_enabled,
                                       bool is_jpeg_enabled, bool is_xgmi_enabled,
-                                      bool is_pcie_enabled) {
+                                      bool is_pcie_enabled, bool& _is_vcn_supported,
+                                      bool& _is_jpeg_supported) {
+        // - Flags (1 byte): bit 0: is_vcn_supported, bit 1: is_jpeg_supported
         // - counts (4 bytes): vcn_count, jpeg_count, xgmi_read_count, xgmi_write_count
         // - conditional data based on settings (passed as parameters)
         if(serialized_data.empty())
@@ -478,19 +487,74 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
             return values;
         };
 
+        // Deserialize capability flags
+        uint8_t _flags     = deserialize_uint8(serialized_data, offset);
+        _is_vcn_supported  = (_flags & 0x01) != 0;
+        _is_jpeg_supported = (_flags & 0x02) != 0;
+
         // Deserialize counts
         uint8_t vcn_count        = deserialize_uint8(serialized_data, offset);
         uint8_t jpeg_count       = deserialize_uint8(serialized_data, offset);
+        uint8_t vcn_xcp_count    = deserialize_uint8(serialized_data, offset);
+        uint8_t jpeg_xcp_count   = deserialize_uint8(serialized_data, offset);
         uint8_t xgmi_read_count  = deserialize_uint8(serialized_data, offset);
         uint8_t xgmi_write_count = deserialize_uint8(serialized_data, offset);
 
-        // Conditionally deserialize data based on settings
+        // Deserialize per-XCP sizes
+        std::vector<uint8_t> vcn_xcp_sizes;
+        std::vector<uint8_t> jpeg_xcp_sizes;
+        for(uint8_t i = 0; i < vcn_xcp_count; ++i)
+            vcn_xcp_sizes.push_back(deserialize_uint8(serialized_data, offset));
+        for(uint8_t i = 0; i < jpeg_xcp_count; ++i)
+            jpeg_xcp_sizes.push_back(deserialize_uint8(serialized_data, offset));
+
+        // Deserialize VCN data and reconstruct structure
         if(is_vcn_enabled && vcn_count > 0)
-            result.vcn_busy =
+        {
+            auto flat_data =
                 deserialize_uint16_vector(serialized_data, offset, vcn_count);
+            if(_is_vcn_supported)
+            {
+                result.vcn_activity = flat_data;
+            }
+            else
+            {
+                // Per-XCP: split flat data according to XCP sizes into vcn_busy
+                size_t flat_offset = 0;
+                for(uint8_t xcp_size : vcn_xcp_sizes)
+                {
+                    std::vector<uint16_t> xcp_data(flat_data.begin() + flat_offset,
+                                                   flat_data.begin() + flat_offset +
+                                                       xcp_size);
+                    result.vcn_busy.push_back(xcp_data);
+                    flat_offset += xcp_size;
+                }
+            }
+        }
+
+        // Deserialize JPEG data and reconstruct structure
         if(is_jpeg_enabled && jpeg_count > 0)
-            result.jpeg_busy =
+        {
+            auto flat_data =
                 deserialize_uint16_vector(serialized_data, offset, jpeg_count);
+            if(_is_jpeg_supported)
+            {
+                result.jpeg_activity = flat_data;
+            }
+            else
+            {
+                // Per-XCP: split flat data according to XCP sizes into jpeg_busy
+                size_t flat_offset = 0;
+                for(uint8_t xcp_size : jpeg_xcp_sizes)
+                {
+                    std::vector<uint16_t> xcp_data(flat_data.begin() + flat_offset,
+                                                   flat_data.begin() + flat_offset +
+                                                       xcp_size);
+                    result.jpeg_busy.push_back(xcp_data);
+                    flat_offset += xcp_size;
+                }
+            }
+        }
         if(is_xgmi_enabled)
         {
             result.xgmi_link_width = deserialize_uint16(serialized_data, offset);
@@ -578,11 +642,14 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
             return;
 
         gpu_metrics_t gpu_metrics;
+        bool          is_vcn_activity_supported  = false;
+        bool          is_jpeg_activity_supported = false;
         deserialize_gpu_metrics(_amd_smi.gpu_activity, gpu_metrics, is_vcn_enabled,
-                                is_jpeg_enabled, is_xgmi_enabled, is_pcie_enabled);
+                                is_jpeg_enabled, is_xgmi_enabled, is_pcie_enabled,
+                                is_vcn_activity_supported, is_jpeg_activity_supported);
 
-        // Lambda to insert uint16_t vector-based metrics (VCN, JPEG)
-        auto insert_uint16_vector_metrics = [&](auto category, bool _is_enabled,
+        // Insert VCN and JPEG activity metrics
+        auto insert_decode_vector_metrics = [&](auto category, bool _is_enabled,
                                                 const std::vector<uint16_t>& data,
                                                 std::optional<size_t>        _idx =
                                                     std::nullopt) {
@@ -604,11 +671,10 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
             }
         };
 
-        // Lambda to insert uint64_t vector-based metrics (XGMI read/write)
-        auto insert_uint64_vector_metrics = [&](auto category, bool _is_enabled,
-                                                const std::vector<uint64_t>& data,
-                                                std::optional<size_t>        _idx =
-                                                    std::nullopt) {
+        // Insert XGMI read/write data metrics
+        auto insert_xgmi_vector_metrics = [&](auto category, bool _is_enabled,
+                                              const std::vector<uint64_t>& data,
+                                              std::optional<size_t> _idx = std::nullopt) {
             if(!_is_enabled) return;
 
             using Category = std::decay_t<decltype(category)>;
@@ -627,35 +693,40 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
             }
         };
 
-        // Process uint16_t vector-based metrics
-        // Check if VCN activity is supported and insert accordingly
-        if(gpu::is_vcn_activity_supported(_amd_smi.device_id))
+        // Insert VCN activity metrics
+        if(is_vcn_activity_supported)
         {
-            insert_uint16_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
-                                         gpu_metrics.vcn_busy, std::nullopt);
+            // Device-level: use vcn_activity vector
+            insert_decode_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
+                                         gpu_metrics.vcn_activity, std::nullopt);
         }
         else
         {
-            for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+            // Per-XCP: iterate through actual XCPs in vcn_busy
+            for(size_t xcp = 0; xcp < gpu_metrics.vcn_busy.size(); ++xcp)
             {
-                insert_uint16_vector_metrics(category::amd_smi_vcn_activity{},
-                                             is_vcn_enabled, gpu_metrics.vcn_busy, xcp);
+                insert_decode_vector_metrics(category::amd_smi_vcn_activity{},
+                                             is_vcn_enabled, gpu_metrics.vcn_busy[xcp],
+                                             xcp);
             }
         }
 
-        // Check if JPEG activity is supported and insert accordingly
-        if(gpu::is_jpeg_activity_supported(_amd_smi.device_id))
+        // Insert JPEG activity metrics
+        if(is_jpeg_activity_supported)
         {
-            insert_uint16_vector_metrics(category::amd_smi_jpeg_activity{},
-                                         is_jpeg_enabled, gpu_metrics.jpeg_busy,
+            // Device-level: use jpeg_activity vector
+            insert_decode_vector_metrics(category::amd_smi_jpeg_activity{},
+                                         is_jpeg_enabled, gpu_metrics.jpeg_activity,
                                          std::nullopt);
         }
         else
         {
-            for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+            // Per-XCP: iterate through actual XCPs in jpeg_busy
+            for(size_t xcp = 0; xcp < gpu_metrics.jpeg_busy.size(); ++xcp)
             {
-                insert_uint16_vector_metrics(category::amd_smi_jpeg_activity{},
-                                             is_jpeg_enabled, gpu_metrics.jpeg_busy, xcp);
+                insert_decode_vector_metrics(category::amd_smi_jpeg_activity{},
+                                             is_jpeg_enabled, gpu_metrics.jpeg_busy[xcp],
+                                             xcp);
             }
         }
 
@@ -674,11 +745,11 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
                 .c_str(),
             gpu_metrics.xgmi_link_speed);
 
-        insert_uint64_vector_metrics(category::amd_smi_xgmi_read_data{}, is_xgmi_enabled,
-                                     gpu_metrics.xgmi_read_data_acc, std::nullopt);
+        insert_xgmi_vector_metrics(category::amd_smi_xgmi_read_data{}, is_xgmi_enabled,
+                                   gpu_metrics.xgmi_read_data_acc, std::nullopt);
 
-        insert_uint64_vector_metrics(category::amd_smi_xgmi_write_data{}, is_xgmi_enabled,
-                                     gpu_metrics.xgmi_write_data_acc, std::nullopt);
+        insert_xgmi_vector_metrics(category::amd_smi_xgmi_write_data{}, is_xgmi_enabled,
+                                   gpu_metrics.xgmi_write_data_acc, std::nullopt);
 
         insert_event_and_sample(
             is_pcie_enabled, trait::name<category::amd_smi_pcie_link_width>::value,
@@ -708,9 +779,6 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
                 .c_str(),
             static_cast<double>(gpu_metrics.pcie_bandwidth_inst));
     };
-#else
-    return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {};
-#endif
 }
 
 postprocessing_callback

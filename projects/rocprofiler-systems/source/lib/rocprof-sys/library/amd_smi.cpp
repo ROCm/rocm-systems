@@ -447,29 +447,87 @@ get_state()
 }
 
 std::vector<uint8_t>
-serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics)
+serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
+                      bool is_vcn_activity_supported, bool is_jpeg_activity_supported)
 {
     // Serialization format:
-    // Counts (4 bytes total):
-    //   - vcn_count (1 byte)
-    //   - jpeg_count (1 byte)
-    //   - xgmi_read_count (1 byte)
-    //   - xgmi_write_count (1 byte)
-    // Data (conditionally serialized based on settings from serialize_settings):
-    //   - VCN data (if vcn_activity setting enabled)
-    //   - JPEG data (if jpeg_activity setting enabled)
-    //   - XGMI data (if xgmi setting enabled):
-    //       link_width, link_speed
-    //       xgmi_read_data
-    //       xgmi_write_data
-    //   - PCIe data (if pcie setting enabled):
-    //       link_width, link_speed, bandwidth_acc/inst
+    // 1. Support flags byte (1 byte):
+    //      - bit 0: is_vcn_activity_supported (device-level vs per-XCP)
+    //      - bit 1: is_jpeg_activity_supported (device-level vs per-XCP)
+    //      - bits 2-7: reserved
+    // 2. Data element counts (4 bytes):
+    //      - vcn_count (1 byte): total VCN values (flattened across all XCPs)
+    //      - jpeg_count (1 byte): total JPEG values (flattened across all XCPs)
+    //      - xgmi_read_count (1 byte): number of XGMI read data values
+    //      - xgmi_write_count (1 byte): number of XGMI write data values
+    // 3. XCP structure metadata (2 bytes):
+    //      - vcn_xcp_count (1 byte): number of XCPs with VCN data
+    //      - jpeg_xcp_count (1 byte): number of XCPs with JPEG data
+    // 4. Per-XCP size arrays (variable):
+    //      - vcn_xcp_sizes[0..vcn_xcp_count-1]: size of each XCP's VCN data (1 byte each)
+    //      - jpeg_xcp_sizes[0..jpeg_xcp_count-1]: size of each XCP's JPEG data (1 byte
+    //      each)
+    //        Note: Sizes vary due to filtering of UINT16_MAX (unsupported features in
+    //        AMD-SMI)
+    // 5. Flattened data arrays (conditionally serialized based on settings from
+    // serialize_settings):
+    //      - VCN data (if vcn_activity setting enabled): flattened uint16 values
+    //      - JPEG data (if jpeg_activity setting enabled): flattened uint16 values
+    //      - XGMI data (if xgmi setting enabled):
+    //          link_width (uint16), link_speed (uint16)
+    //          xgmi_read_data array (uint64[xgmi_read_count])
+    //          xgmi_write_data array (uint64[xgmi_write_count])
+    //      - PCIe data (if pcie setting enabled):
+    //          link_width (uint16), link_speed (uint16)
+    //          bandwidth_acc (uint64), bandwidth_inst (uint64)
 
     auto settings = get_settings(device_id);
 
-    // Pre-calculate counts
-    uint8_t vcn_count        = static_cast<uint8_t>(metrics.vcn_busy.size());
-    uint8_t jpeg_count       = static_cast<uint8_t>(metrics.jpeg_busy.size());
+    // Flatten XCP data if needed and pre-calculate counts
+    // Example::
+    // XCP 0: [10, 20, 30]        (3 values)
+    // XCP 1: [15, 25]            (2 values)
+    // XCP 2: [5, 10, 15, 20]     (4 values)
+    // vcn_xcp_count: 3
+    // vcn_xcp_sizes: [3, 2, 4]
+    // vcn_data_flat: [10, 20, 30, 15, 25, 5, 10, 15, 20]
+    std::vector<uint16_t> vcn_data_flat;
+    std::vector<uint16_t> jpeg_data_flat;
+    std::vector<uint8_t>  vcn_xcp_sizes;   // Size of each XCP's VCN data
+    std::vector<uint8_t>  jpeg_xcp_sizes;  // Size of each XCP's JPEG data
+
+    if(is_vcn_activity_supported)
+    {
+        vcn_data_flat = metrics.vcn_activity;
+    }
+    else
+    {
+        // Flatten per-XCP VCN data and record sizes
+        for(const auto& xcp_data : metrics.vcn_busy)
+        {
+            vcn_xcp_sizes.push_back(static_cast<uint8_t>(xcp_data.size()));
+            vcn_data_flat.insert(vcn_data_flat.end(), xcp_data.begin(), xcp_data.end());
+        }
+    }
+
+    if(is_jpeg_activity_supported)
+    {
+        jpeg_data_flat = metrics.jpeg_activity;
+    }
+    else
+    {
+        // Flatten per-XCP JPEG data and record sizes
+        for(const auto& xcp_data : metrics.jpeg_busy)
+        {
+            jpeg_xcp_sizes.push_back(static_cast<uint8_t>(xcp_data.size()));
+            jpeg_data_flat.insert(jpeg_data_flat.end(), xcp_data.begin(), xcp_data.end());
+        }
+    }
+
+    uint8_t vcn_count        = static_cast<uint8_t>(vcn_data_flat.size());
+    uint8_t jpeg_count       = static_cast<uint8_t>(jpeg_data_flat.size());
+    uint8_t vcn_xcp_count    = static_cast<uint8_t>(vcn_xcp_sizes.size());
+    uint8_t jpeg_xcp_count   = static_cast<uint8_t>(jpeg_xcp_sizes.size());
     uint8_t xgmi_read_count  = static_cast<uint8_t>(metrics.xgmi_read_data_acc.size());
     uint8_t xgmi_write_count = static_cast<uint8_t>(metrics.xgmi_write_data_acc.size());
 
@@ -508,17 +566,31 @@ serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics)
 
     std::vector<uint8_t> result;
 
+    uint8_t _flags = 0;
+    if(is_vcn_activity_supported) _flags |= (1 << 0);  // Set bit for VCN activity support
+    if(is_jpeg_activity_supported)
+        _flags |= (1 << 1);  // Set bit for JPEG activity support
+    serialize_uint8(result, _flags);
+
     // Serialize counts
     serialize_uint8(result, vcn_count);
     serialize_uint8(result, jpeg_count);
+    serialize_uint8(result, vcn_xcp_count);
+    serialize_uint8(result, jpeg_xcp_count);
     serialize_uint8(result, xgmi_read_count);
     serialize_uint8(result, xgmi_write_count);
 
-    // Conditionally serialize data based on settings (which are serialized separately)
+    for(uint8_t size : vcn_xcp_sizes)
+        serialize_uint8(result, size);
+
+    for(uint8_t size : jpeg_xcp_sizes)
+        serialize_uint8(result, size);
+
+    // Serialize the flattened data
     if(settings.vcn_activity && vcn_count > 0)
-        serialize_uint16_vector(result, metrics.vcn_busy, vcn_count);
+        serialize_uint16_vector(result, vcn_data_flat, vcn_count);
     if(settings.jpeg_activity && jpeg_count > 0)
-        serialize_uint16_vector(result, metrics.jpeg_busy, jpeg_count);
+        serialize_uint16_vector(result, jpeg_data_flat, jpeg_count);
     if(settings.xgmi)
     {
         serialize_uint16(result, metrics.xgmi_link_width);
@@ -642,7 +714,9 @@ data::sample(uint32_t _device_id)
     if(_gpu_metrics_needed)
     {
         gpu_metrics_t metrics;
-        bool          has_data = false;
+        bool          has_data           = false;
+        bool _is_vcn_activity_supported  = gpu::is_vcn_activity_supported(m_dev_id);
+        bool _is_jpeg_activity_supported = gpu::is_jpeg_activity_supported(m_dev_id);
 
         // Helper lambda to filter max uint values (unsupported) - returns 0 if max,
         // otherwise the value
@@ -661,39 +735,47 @@ data::sample(uint32_t _device_id)
 
         if(get_settings(m_dev_id).vcn_activity)
         {
-            if(gpu::is_vcn_activity_supported(m_dev_id))
+            if(_is_vcn_activity_supported)
             {
-                fill_gpu_metrics(metrics.vcn_busy, _gpu_metrics.vcn_activity, UINT16_MAX);
-                if(!metrics.vcn_busy.empty()) has_data = true;
+                fill_gpu_metrics(metrics.vcn_activity, _gpu_metrics.vcn_activity,
+                                 UINT16_MAX);
+                if(!metrics.vcn_activity.empty()) has_data = true;
             }
             else
             {
-                // Use XCP stats for VCN - collect from all XCPs into one metrics instance
                 for(const auto& xcp : _gpu_metrics.xcp_stats)
                 {
-                    fill_gpu_metrics(metrics.vcn_busy, xcp.vcn_busy, UINT16_MAX);
+                    std::vector<uint16_t> xcp_vcn_data;
+                    fill_gpu_metrics(xcp_vcn_data, xcp.vcn_busy, UINT16_MAX);
+                    if(!xcp_vcn_data.empty())
+                    {
+                        metrics.vcn_busy.push_back(std::move(xcp_vcn_data));
+                        has_data = true;
+                    }
                 }
-                if(!metrics.vcn_busy.empty()) has_data = true;
             }
         }
 
         if(get_settings(m_dev_id).jpeg_activity)
         {
-            if(gpu::is_jpeg_activity_supported(m_dev_id))
+            if(_is_jpeg_activity_supported)
             {
-                fill_gpu_metrics(metrics.jpeg_busy, _gpu_metrics.jpeg_activity,
+                fill_gpu_metrics(metrics.jpeg_activity, _gpu_metrics.jpeg_activity,
                                  UINT16_MAX);
-                if(!metrics.jpeg_busy.empty()) has_data = true;
+                if(!metrics.jpeg_activity.empty()) has_data = true;
             }
             else
             {
-                // Use XCP stats for JPEG - collect from all XCPs into one metrics
-                // instance
                 for(const auto& xcp : _gpu_metrics.xcp_stats)
                 {
-                    fill_gpu_metrics(metrics.jpeg_busy, xcp.jpeg_busy, UINT16_MAX);
+                    std::vector<uint16_t> xcp_jpeg_data;
+                    fill_gpu_metrics(xcp_jpeg_data, xcp.jpeg_busy, UINT16_MAX);
+                    if(!xcp_jpeg_data.empty())
+                    {
+                        metrics.jpeg_busy.push_back(std::move(xcp_jpeg_data));
+                        has_data = true;
+                    }
                 }
-                if(!metrics.jpeg_busy.empty()) has_data = true;
             }
         }
 
@@ -744,7 +826,8 @@ data::sample(uint32_t _device_id)
                 _device_id, _timestamp, m_busy_perc.gfx_activity,
                 m_busy_perc.umc_activity, m_busy_perc.mm_activity,
                 m_power.current_socket_power, m_temp, m_mem_usage,
-                serialize_gpu_metrics(m_dev_id, metrics));
+                serialize_gpu_metrics(m_dev_id, metrics, _is_vcn_activity_supported,
+                                      _is_jpeg_activity_supported));
 
             m_gpu_metrics.push_back(metrics);
         }
@@ -949,18 +1032,21 @@ data::post_process(uint32_t _dev_id)
                 }
                 else if(gpu::is_vcn_activity_supported(_dev_id))
                 {
-                    // For VCN activity, use simple indexing
-                    for(std::size_t i = 0; i < std::size(itr.m_gpu_metrics[0].vcn_busy);
-                        ++i)
+                    // For VCN activity supported: use vcn_activity vector
+                    for(std::size_t i = 0;
+                        i < std::size(itr.m_gpu_metrics[0].vcn_activity); ++i)
                         counter_track::emplace(_dev_id, addendum_blk(i, "VCN Activity"),
                                                "%");
                 }
                 else
                 {
-                    for(std::size_t xcp = 0; xcp < std::size(itr.m_gpu_metrics); ++xcp)
+                    // For VCN activity NOT supported: use vcn_busy vector with per-XCP
+                    // organization
+                    for(size_t xcp = 0; xcp < itr.m_gpu_metrics[0].vcn_busy.size(); ++xcp)
                     {
-                        for(std::size_t i = 0;
-                            i < std::size(itr.m_gpu_metrics[xcp].vcn_busy); ++i)
+                        // Loop through each XCP's VCN busy values
+                        for(size_t i = 0; i < itr.m_gpu_metrics[0].vcn_busy[xcp].size();
+                            ++i)
                         {
                             counter_track::emplace(
                                 _dev_id, addendum_blk(i, "VCN Activity", xcp), "%");
@@ -977,19 +1063,26 @@ data::post_process(uint32_t _dev_id)
                 }
                 else if(gpu::is_jpeg_activity_supported(_dev_id))
                 {
-                    for(std::size_t i = 0; i < std::size(itr.m_gpu_metrics[0].jpeg_busy);
-                        ++i)
+                    // For JPEG activity supported: use jpeg_activity vector
+                    for(std::size_t i = 0;
+                        i < std::size(itr.m_gpu_metrics[0].jpeg_activity); ++i)
                         counter_track::emplace(_dev_id, addendum_blk(i, "JPEG Activity"),
                                                "%");
                 }
                 else
                 {
-                    for(std::size_t xcp = 0; xcp < std::size(itr.m_gpu_metrics); ++xcp)
+                    // For JPEG activity NOT supported: use jpeg_busy vector with per-XCP
+                    // organization
+                    for(size_t xcp = 0; xcp < itr.m_gpu_metrics[0].jpeg_busy.size();
+                        ++xcp)
                     {
-                        for(std::size_t i = 0;
-                            i < std::size(itr.m_gpu_metrics[xcp].jpeg_busy); ++i)
+                        // Loop through each XCP's JPEG busy values
+                        for(size_t i = 0; i < itr.m_gpu_metrics[0].jpeg_busy[xcp].size();
+                            ++i)
+                        {
                             counter_track::emplace(
                                 _dev_id, addendum_blk(i, "JPEG Activity", xcp), "%");
+                        }
                     }
                 }
             }
@@ -1062,28 +1155,54 @@ data::post_process(uint32_t _dev_id)
 
             if(_settings.vcn_activity && !itr.m_gpu_metrics.empty())
             {
-                // Iterate over all XCPs and their VCN busy/activity values
-                for(const auto& metrics : itr.m_gpu_metrics)
+                if(gpu::is_vcn_activity_supported(_dev_id))
                 {
-                    for(const auto& vcn_val : metrics.vcn_busy)
+                    // Device-level VCN activity
+                    for(const auto& vcn_val : itr.m_gpu_metrics[0].vcn_activity)
                     {
                         TRACE_COUNTER("device_vcn_activity",
                                       counter_track::at(_dev_id, track_index++), _ts,
                                       vcn_val);
                     }
                 }
+                else
+                {
+                    // XCP-level VCN busy (per-XCP organization)
+                    for(const auto& xcp_data : itr.m_gpu_metrics[0].vcn_busy)
+                    {
+                        for(const auto& vcn_val : xcp_data)
+                        {
+                            TRACE_COUNTER("device_vcn_activity",
+                                          counter_track::at(_dev_id, track_index++), _ts,
+                                          vcn_val);
+                        }
+                    }
+                }
             }
 
             if(_settings.jpeg_activity && !itr.m_gpu_metrics.empty())
             {
-                // Iterate over all XCPs and their JPEG busy/activity values
-                for(const auto& metrics : itr.m_gpu_metrics)
+                if(gpu::is_jpeg_activity_supported(_dev_id))
                 {
-                    for(const auto& jpeg_val : metrics.jpeg_busy)
+                    // Device-level JPEG activity
+                    for(const auto& jpeg_val : itr.m_gpu_metrics[0].jpeg_activity)
                     {
                         TRACE_COUNTER("device_jpeg_activity",
                                       counter_track::at(_dev_id, track_index++), _ts,
                                       jpeg_val);
+                    }
+                }
+                else
+                {
+                    // XCP-level JPEG busy (per-XCP organization)
+                    for(const auto& xcp_data : itr.m_gpu_metrics[0].jpeg_busy)
+                    {
+                        for(const auto& jpeg_val : xcp_data)
+                        {
+                            TRACE_COUNTER("device_jpeg_activity",
+                                          counter_track::at(_dev_id, track_index++), _ts,
+                                          jpeg_val);
+                        }
                     }
                 }
             }

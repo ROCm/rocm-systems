@@ -97,8 +97,15 @@ struct data
 
     struct gpu_metrics_t
     {
-        std::vector<uint16_t> vcn_busy;
-        std::vector<uint16_t> jpeg_busy;
+        // VCN metrics
+        std::vector<uint16_t> vcn_activity;  // Device-level VCN (when supported)
+        std::vector<std::vector<uint16_t>>
+            vcn_busy;  // XCP-level VCN (per-XCP organization)
+
+        // JPEG metrics
+        std::vector<uint16_t> jpeg_activity;  // Device-level JPEG (when supported)
+        std::vector<std::vector<uint16_t>>
+            jpeg_busy;  // XCP-level JPEG (per-XCP organization)
 
         // XGMI metrics
         uint16_t              xgmi_link_width = 0;
