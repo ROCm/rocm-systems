@@ -133,17 +133,20 @@ endif()
 # Required Defines first:
 find_package(hsa-runtime64 REQUIRED)
 find_package(amd_smi REQUIRED)
+find_package(Clang REQUIRED)
+
+# target_include_directories(${PROJECT_NAME}
+#   PRIVATE
+#     ${LLVM_INCLUDE_DIRS}
+#     ${CLANG_INCLUDE_DIRS}
+#     ${LLD_INCLUDE_DIRS})
 
 set (ONLY64STR "64")
 
-if (DEFINED LLVM_DIR)
-  set(CLANG ${LLVM_DIR}/clang)
-  if (NOT EXISTS ${CLANG})
-    message("ERROR: path to clang (${CLANG}) is not valid. Is define LLVM_DIR correct?")
-    return()
-  endif()
-else()
-    message("WARNING: LLVM_DIR define is not set. Kernels will not be built.")
+set(CLANG "${LLVM_TOOLS_BINARY_DIR}/clang")
+if (NOT EXISTS ${CLANG})
+  message(SEND_ERROR "ERROR: path to clang (${CLANG}) is not valid. find_package did not locate clang correctly")
+  return()
 endif()
 
 if (DEFINED OPENCL_DIR)
@@ -195,7 +198,7 @@ find_path(BITCODE_DIR NAMES "opencl.bc" "opencl.amdgcn.bc"
     "${ROCM_DIR}/lib/x86_64/bitcode"
     "${OPENCL_DIR}/amdgcn/bitcode"
     "${OPENCL_DIR}/lib/x86_64/bitcode"
-    "${LLVM_DIR}/../lib/bitcode"
+    "${LLVM_INCLUDE_DIRS}/../lib/bitcode"
     "${CMAKE_PREFIX_PATH}/amdgcn/bitcode"
     "${CMAKE_PREFIX_PATH}/lib/bitcode"
     "${CMAKE_PREFIX_PATH}/lib/x86_64/bitcode")
@@ -236,6 +239,11 @@ set(CMAKE_BUILD_TYPE ${BUILD_TYPE})
 if(${BUILD_TYPE} STREQUAL "Debug")
 add_definitions(-DDEBUG)
 endif()
+
+if(${EMULATOR_BUILD})
+add_definitions(-DROCRTST_EMULATOR_BUILD=1)
+endif()
+
 
 #add_definitions(-D__linux__)
 add_definitions(-DLITTLEENDIAN_CPU=1)
