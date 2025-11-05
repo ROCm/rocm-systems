@@ -64,9 +64,8 @@ public:
     AQLProfileDL();
     ~AQLProfileDL();
     AQLProfileDL(const AQLProfileDL&) = delete;
-    AQLProfileDL(AQLProfileDL&&)      = delete;
-    AQLProfileDL& operator=(const AQLProfileDL&) = delete;
-    AQLProfileDL& operator=(AQLProfileDL&&) = delete;
+    AQLProfileDL& operator=(AQLProfileDL&) = delete;
+    AQLProfileDL(AQLProfileDL&&);
 
     bool valid() const
     {
@@ -79,7 +78,7 @@ public:
     void*                 handle                  = nullptr;
 };
 
-std::shared_ptr<AQLProfileDL>
+const AQLProfileDL&
 get_aqlprofile_dl();
 
 }  // namespace thread_trace

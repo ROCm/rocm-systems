@@ -85,12 +85,19 @@ AQLProfileDL::~AQLProfileDL()
     if(handle) dlclose(handle);
 }
 
-std::shared_ptr<AQLProfileDL>
+AQLProfileDL::AQLProfileDL(AQLProfileDL&& other)
+{
+    this->update_buffer_status_fn = other.update_buffer_status_fn;
+    this->get_buffer_packets_fn   = other.get_buffer_packets_fn;
+    this->handle                  = other.handle;
+    other.handle                  = nullptr;
+}
+
+const AQLProfileDL&
 get_aqlprofile_dl()
 {
-    static auto& instance = common::static_object<std::shared_ptr<AQLProfileDL>>::construct(
-        std::make_shared<AQLProfileDL>());
-    return *instance;
+    static auto*& instance = common::static_object<AQLProfileDL>::construct(AQLProfileDL());
+    return *CHECK_NOTNULL(instance);
 }
 
 }  // namespace thread_trace
