@@ -54,15 +54,31 @@ hsa_inited()
 uint64_t
 submitPackets(hsa_queue_t* queue, const void** packets, size_t num_packets)
 {
+    // Handle edge case: no packets to submit
+    if(num_packets == 0)
+    {
+        return hsa::get_core_table()->hsa_queue_load_write_index_relaxed_fn(queue);
+    }
+
+    // Validate num_packets doesn't exceed queue capacity
+    if(num_packets > queue->size)
+    {
+        ROCP_FATAL << fmt::format(
+            "Cannot submit {} packets to queue with size {}. num_packets must be <= queue->size",
+            num_packets,
+            queue->size);
+        return 0;
+    }
+
     const uint32_t pkt_size = 0x40;
 
     // Advance command queue by num_packets
     const uint64_t write_idx =
         hsa::get_core_table()->hsa_queue_add_write_index_scacq_screl_fn(queue, num_packets);
 
-    // Wait for queue space to be available
-    while((write_idx - hsa::get_core_table()->hsa_queue_load_read_index_relaxed_fn(queue)) >=
-          queue->size)
+    // Wait for queue space to be available for all num_packets
+    while((write_idx + num_packets - 1 -
+           hsa::get_core_table()->hsa_queue_load_read_index_relaxed_fn(queue)) >= queue->size)
     {
         sched_yield();
     }
