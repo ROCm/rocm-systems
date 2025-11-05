@@ -2,35 +2,44 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 7.1.1 for ROCm 7.1.1
+
+### Added
+
+* Support for the flag `hipHostRegisterIoMemory` in `hipHostRegister`, used to register I/O memory with HIP runtime so it can be accessed by the GPU.
+
+### Resolved issues
+
+* Incorrect Compute Unit (CU) mask in logging. HIP runtime now correctly sets the field width for the output print operation. When logging is enabled via the environment variable `AMD_LOG_LEVEL`, the runtime logs the accurate CU mask.
+* A segmentation fault occurred when dynamic queue management mechanism was enabled. HIP runtime now ensures GPU queues aren't NULL during marker submission, preventing crashes and improving robustness.
+* An error encountered on hip tear-down after device reset in certain applications due to accessing stale memory objects. HIP runtime now properly releases memory associated with host calls, ensuring reliable device resets.
+* A race condition occurred in certain graph-related applications when pending asynchronous signal handlers referenced device memory that had already been released, leading to memory corruption. HIP runtime now uses a reference counting strategy to manage access to device objects in asynchronous event handlers, ensuring safe and reliable memory usage.
+
 ## HIP 7.1 for ROCm 7.1
 
 ### Added
 
 * New HIP APIs
     - `hipModuleGetFunctionCount` returns the number of functions within a module
-    - `hipMemsetD2D8` used for setting 2D memory range with specified 8-bit values
-    - `hipMemsetD2D8Async` used for setting 2D memory range with specified 8-bit values asynchronously
-    - `hipMemsetD2D16` used for setting 2D memory range with specified 16-bit values
-    - `hipMemsetD2D16Async` used for setting 2D memory range with specified 16-bit values asynchronously
-    - `hipMemsetD2D32` used for setting 2D memory range with specified 32-bit values
-    - `hipMemsetD2D32Async` used for setting 2D memory range with specified 32-bit values asynchronously
+    - `hipMemsetD2D8` sets 2D memory range with specified 8-bit values
+    - `hipMemsetD2D8Async` asynchronously sets 2D memory range with specified 8-bit values
+    - `hipMemsetD2D16` sets 2D memory range with specified 16-bit values
+    - `hipMemsetD2D16Async` asynchronously sets 2D memory range with specified 16-bit values
+    - `hipMemsetD2D32` sets 2D memory range with specified 32-bit values
+    - `hipMemsetD2D32Async` asynchronously sets 2D memory range with specified 32-bit values
     - `hipStreamSetAttribute` sets attributes such as synchronization policy for a given stream
     - `hipStreamGetAttribute` returns attributes such as priority for a given stream
     - `hipModuleLoadFatBinary`  loads fatbin binary to a module
-    - `hipMemcpyBatchAsync` performs a batch of 1D or 2D memory copied asynchronously
-    - `hipMemcpy3DBatchAsync` performs a batch of 3D memory copied asynchronously
+    - `hipMemcpyBatchAsync` asynchronously performs a batch copy of 1D or 2D memory
+    - `hipMemcpy3DBatchAsync` asynchronously performs a batch copy of 3D memory
     - `hipMemcpy3DPeer` copies memory between devices
-    - `hipMemcpy3DPeerAsync`copied memory between devices asynchronously
-    - `hipMemsetD2D32Async` used for setting 2D memory range with specified 32-bit values
-      asynchronously
+    - `hipMemcpy3DPeerAsync` asynchronously copies memory between devices
+    - `hipMemsetD2D32Async` asynchronously sets 2D memory range with specified 32-bit values
     - `hipMemPrefetchAsync_v2`  prefetches memory to the specified location
-    - `hipMemAdvise_v2`         advise about the usage of a given memory range
+    - `hipMemAdvise_v2`         advises about the usage of a given memory range
     - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
     - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
     - `hipStreamGetId`          queries the id of a stream
-* New HIP flags
-    - `hipMemLocationTypeHost` enables handling virtual memory management in host memory location, in addition to device memory.
-    - `hipHostRegisterIoMemory` is supported in `hipHostRegister`, used to register I/O memory with HIP runtime so it can be accessed by the GPU.
 * Support for nested tile partitioning within cooperative groups, matching NVIDIA CUDA functionality.
 
 ### Resolved issues
@@ -43,10 +52,14 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * Improved hip module loading latency.
 * Optimized kernel metadata retrieval during module post load.
-* Optimized doorbell ring in HIP runtime, advantages the following for performance improvement,
+* Optimized doorbell ring in HIP runtime for the following performance improvements:
     - Makes efficient packet batching for HIP graph launch,
     - Dynamic packet copying based on defined maximum threshold or power-of-2 staggered copy pattern,
     - If timestamps are not collected for a signal for reuse, creates a new signal. This can potentially increase signal footprint if the handler doesn't run fast enough.
+
+### Known issues
+
+* SPIR-V-enabled applications may encounter an issue of segmentation fault. The problem disappears when SPIR-V is disabled. The issue will be fixed in the next ROCm release.
 
 ## HIP 7.0.2 for ROCm 7.0.2
 

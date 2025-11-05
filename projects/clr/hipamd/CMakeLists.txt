@@ -43,7 +43,7 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 # Options
 #############################
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
-option(HIP_OFFICIAL_BUILD "Enable/Disable for mainline/staging builds" OFF)
+option(HIP_OFFICIAL_BUILD "Enable/Disable for mainline/staging builds" ON)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 if(MSVC)

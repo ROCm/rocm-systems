@@ -42,9 +42,10 @@ import tempfile
 import threading
 import time
 import uuid
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Generator, Optional, Union, cast
+from typing import Any, Optional, Union, cast
 
 import pandas as pd
 import yaml
@@ -767,7 +768,7 @@ def run_prof(
         if is_mode_live_attach:
 
             @contextmanager
-            def temporary_env(env_vars: Dict[str, str]) -> Generator[None, None, None]:
+            def temporary_env(env_vars: dict[str, str]) -> Generator[None, None, None]:
                 """
                 Temporarily change the environment variable of this application.
                 """
@@ -974,6 +975,7 @@ def pc_sampling_prof(
             "ROCPROF_PC_SAMPLING_UNIT": unit,
             "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
             "ROCPROF_PC_SAMPLING_METHOD": method,
+            "ROCPROF_KERNEL_TRACE": "1",
         }
         new_env = os.environ.copy()
         for key, value in options.items():
@@ -985,6 +987,7 @@ def pc_sampling_prof(
         )
     else:
         options = [
+            "--kernel-trace",
             "--pc-sampling-beta-enabled",
             "--pc-sampling-method",
             method,
