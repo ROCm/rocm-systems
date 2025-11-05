@@ -28,6 +28,7 @@
 #include <config.hpp>
 #include <fstream>
 #include <regex>
+#include <string>
 #include <timemory/environment/types.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <unistd.h>
@@ -50,17 +51,11 @@ namespace rocpd
 {
 namespace data_storage
 {
-database&
-database::get_instance()
+database::database(int pid, int ppid)
 {
-    static database _instance;
-    return _instance;
-}
-
-database::database()
-{
-    auto db_name     = std::string_view{ "rocpd.db" };
-    auto abs_db_path = rocprofsys::get_database_absolute_path(db_name);
+    auto _tag        = std::to_string(pid);
+    auto db_name     = std::string{ "rocpd" };
+    auto abs_db_path = rocprofsys::get_database_absolute_path(db_name, _tag);
     create_directory_for_database_file(abs_db_path);
     ROCPROFSYS_VERBOSE(0, "Database: %s\r\n", abs_db_path.c_str());
 
@@ -68,6 +63,7 @@ database::database()
                             "database open failed!");
     validate_sqlite3_result(sqlite3_open(abs_db_path.c_str(), &_sqlite3_db), "",
                             "database open failed!");
+    m_upid = generate_upid(pid, ppid);
 }
 
 database::~database()
@@ -120,8 +116,10 @@ database::initialize_schema()
         std::regex guid_pattern("\\{\\{guid\\}\\}");
         std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
 
-        query = std::regex_replace(query, upid_pattern, "_" + get_upid());
-        query = std::regex_replace(query, guid_pattern, get_upid());
+        auto upid = get_upid();
+
+        query = std::regex_replace(query, upid_pattern, "_" + upid);
+        query = std::regex_replace(query, guid_pattern, upid);
         query = std::regex_replace(query, view_upid_pattern, "");
 
         validate_sqlite3_result(
@@ -141,12 +139,15 @@ database::execute_query(const std::string& query)
 std::string
 database::get_upid()
 {
-    static std::string _upid = []() {
-        auto n_info = node_info::get_instance();
-        auto guid   = common::md5sum{ n_info.id, getpid(), getppid() };
-        return guid.hexdigest();
-    }();
-    return _upid;
+    return m_upid;
+}
+
+std::string
+database::generate_upid(const int pid, const int ppid)
+{
+    auto n_info = node_info::get_instance();
+    auto guid   = common::md5sum{ n_info.id, pid, ppid };
+    return guid.hexdigest();
 }
 
 size_t

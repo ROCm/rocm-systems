@@ -26,6 +26,7 @@
 import inspect
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -168,6 +169,7 @@ PC_SAMPLING_HOST_TRAP_FILES = sorted([
     "pmc_perf_0.csv",
     "pmc_perf.csv",
     "ps_file_agent_info.csv",
+    "ps_file_kernel_trace.csv",
     "ps_file_pc_sampling_host_trap.csv",
     "ps_file_results.json",
     "sysinfo.csv",
@@ -177,6 +179,7 @@ PC_SAMPLING_STOCHASTIC_FILES = sorted([
     "pmc_perf_0.csv",
     "pmc_perf.csv",
     "ps_file_agent_info.csv",
+    "ps_file_kernel_trace.csv",
     "ps_file_pc_sampling_stochastic.csv",
     "ps_file_results.json",
     "sysinfo.csv",
@@ -312,14 +315,6 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
         differences["gpu-id"] = [gpu_id]
         errors_pd = pd.concat([errors_pd, pd.DataFrame.from_dict(differences)])
     return errors_pd
-
-
-def run(cmd):
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if cmd[0] == "amd-smi" and p.returncode == 8:
-        print("ERROR: No GPU detected. Unable to load amd-smi")
-        assert 0
-    return p.stdout.decode("ascii")
 
 
 def gpu_soc():
@@ -758,7 +753,42 @@ def test_analyze_rocpd(
     assert code == 0
     assert os.path.isfile(f"{db_name}.db")
 
-    # Remove test.db
+    # Open the sqlite database and assert the schema
+    # Import Kernel from analysis_orm.py
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+    from utils.analysis_orm import (
+        Dispatch,
+        Kernel,
+        Metadata,
+        Metric,
+        RooflineData,
+        Value,
+        Workload,
+    )
+
+    table_name_map = {
+        "compute_workload": Workload,
+        "compute_metric": Metric,
+        "compute_roofline_data": RooflineData,
+        "compute_dispatch": Dispatch,
+        "compute_kernel": Kernel,
+        "compute_value": Value,
+        "compute_metadata": Metadata,
+    }
+
+    def check_cols(table_name, orm_obj):
+        conn = sqlite3.connect(f"{db_name}.db")
+        cursor = conn.cursor()
+        cursor.execute(f"PRAGMA table_info('{table_name}');")
+        columns = cursor.fetchall()
+        column_names = [column[1] for column in columns]
+        expected_columns = [col.name for col in orm_obj.__table__.columns]
+        assert column_names == expected_columns
+        conn.close()
+
+    for table_name, orm_obj in table_name_map.items():
+        check_cols(table_name, orm_obj)
+
     os.remove(f"{db_name}.db")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
