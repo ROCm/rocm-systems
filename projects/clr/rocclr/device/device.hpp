@@ -1826,7 +1826,8 @@ class Device : public RuntimeObject {
       uint32_t pseudo_fine_grain_ : 1; //!< True if pseudo fine grain memory is required
       uint32_t contiguous_ : 1;        //!< True if contiguous memory allocation is required
       uint32_t executable_ : 1;        //!< True if executable memory is required
-      uint32_t reserved_ : 28;         //!< Reserved for future use
+      uint32_t uncached_ : 1;          //!< True if uncached memory is required
+      uint32_t reserved_ : 27;         //!< Reserved for future use
     };
     uint32_t data_;
   } AllocationFlags;
