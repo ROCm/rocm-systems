@@ -52,11 +52,6 @@
 #include <climits>
 #include <cmath>
 
-#if (defined(WIN32) || defined(_WIN32))
-#define NOMINMAX
-__inline long int lrintf(float f) { return _mm_cvtss_si32(_mm_load_ss(&f)); }
-#endif
-
 namespace rocr {
 namespace image {
 

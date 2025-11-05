@@ -1111,8 +1111,6 @@ typedef hipError_t (*t_hipLibraryEnumerateKernels)(hipKernel_t* kernels, unsigne
                                                    hipLibrary_t library);
 typedef hipError_t (*t_hipKernelGetLibrary)(hipLibrary_t* library, hipKernel_t kernel);
 typedef hipError_t (*t_hipKernelGetName)(const char** name, hipKernel_t kernel);
-typedef hipError_t (*t_hipGetProcAddress_spt)(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
-                                              hipDriverProcAddressQueryResult* symbolStatus);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1698,7 +1696,6 @@ struct HipDispatchTable {
   
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
   t_hipOccupancyAvailableDynamicSMemPerBlock hipOccupancyAvailableDynamicSMemPerBlock_fn;
-  t_hipGetProcAddress_spt hipGetProcAddress_spt_fn;
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 19
