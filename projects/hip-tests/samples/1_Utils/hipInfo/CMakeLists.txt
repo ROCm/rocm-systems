@@ -18,14 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-# hipcc.bat fails to qualify as a valid compiler for CMAKE_CXX_COMPILER_ID = ROCMClang
-# so  the simple compiler test is skipped and forced to use hipcc.bat as compiler
-set(CMAKE_C_COMPILER_WORKS 1)
-set(CMAKE_CXX_COMPILER_WORKS 1)
-
-project(hipInfo)
-
 cmake_minimum_required(VERSION 3.10)
+
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})
@@ -38,6 +32,11 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
+
+project(hipInfo LANGUAGES CXX)
+
 # flag is set to ON in compute build for windows
 option(HIPINFO_INTERNAL_BUILD "Enable building hipInfo from compute" OFF)
 
@@ -48,11 +47,8 @@ if (WIN32 AND HIPINFO_INTERNAL_BUILD)
 endif()
 
 # Find hip
-find_package(hip)
+find_package(hip REQUIRED)
 
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
 set(CMAKE_BUILD_TYPE Release)
 
 # Create the excutable

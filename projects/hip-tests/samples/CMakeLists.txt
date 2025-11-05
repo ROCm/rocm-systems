@@ -19,14 +19,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 cmake_minimum_required(VERSION 3.16.8)
-project(hip-samples)
 
-option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
-option(BUILD_SHARED_LIBS "Use this option to link with shared hip runtime libraries" ON)
-
-if(NOT WIN32)
-    set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip-samples to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
-endif()
 # Read -DROCM_Path and env{ROCM_PATH}
 if(NOT DEFINED ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})
@@ -60,6 +53,48 @@ elseif(DEFINED ROCM_PATH AND NOT DEFINED HIP_PATH)
 endif()
 message(STATUS "HIP_PATH: ${HIP_PATH}")
 message(STATUS "ROCM_PATH: ${ROCM_PATH}")
+
+# Dynamic compiler detection - set before project()
+# Only applies if ROCM_PATH is defined and compiler not already set
+if(NOT CMAKE_CXX_COMPILER AND DEFINED ROCM_PATH)
+  if(WIN32)
+    # Windows: Search recursively for amdclang++.exe (TheRock variants)
+    file(GLOB_RECURSE HIP_CLANG_COMPILER
+         "${ROCM_PATH}/../*/bin/amdclang++.exe"
+         "${HIP_PATH}/../*/bin/amdclang++.exe")
+    if(HIP_CLANG_COMPILER)
+      list(GET HIP_CLANG_COMPILER 0 HIP_CLANG_COMPILER)
+      message(STATUS "Found amdclang++: ${HIP_CLANG_COMPILER}")
+    endif()
+  else()
+    # Linux: Try multiple standard paths
+    find_program(HIP_CLANG_COMPILER
+      NAMES amdclang++ clang++
+      PATHS
+        ${ROCM_PATH}/llvm/bin
+        ${ROCM_PATH}/bin
+        ${HIP_PATH}/llvm/bin
+        ${HIP_PATH}/bin
+      NO_DEFAULT_PATH
+    )
+    if(HIP_CLANG_COMPILER)
+      message(STATUS "Found amdclang++: ${HIP_CLANG_COMPILER}")
+    endif()
+  endif()
+
+  if(HIP_CLANG_COMPILER)
+    set(CMAKE_CXX_COMPILER ${HIP_CLANG_COMPILER} CACHE FILEPATH "C++ compiler" FORCE)
+  endif()
+endif()
+
+project(hip-samples LANGUAGES CXX)
+
+option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
+option(BUILD_SHARED_LIBS "Use this option to link with shared hip runtime libraries" ON)
+
+if(NOT WIN32)
+    set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip-samples to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
+endif()
 
 execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version
                 OUTPUT_VARIABLE HIP_VERSION

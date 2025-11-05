@@ -18,11 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(dynamic_shared)
-
 cmake_minimum_required(VERSION 3.10)
-
-include_directories(../../common)
 
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
@@ -36,12 +32,15 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-# Find hip
-find_package(hip)
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
 
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+project(dynamic_shared LANGUAGES CXX)
+
+include_directories(../../common)
+
+# Find hip
+find_package(hip REQUIRED)
 
 # Create the excutable
 if(TARGET build_cookbook)
@@ -54,7 +53,7 @@ add_executable(dynamic_shared ${EXCLUDE_OPTION} dynamic_shared.cpp)
 target_include_directories(dynamic_shared PRIVATE ../../common)
 
 # Link with HIP
-target_link_libraries(dynamic_shared hip::host)
+target_link_libraries(dynamic_shared hip::device)
 
 if(TARGET build_cookbook)
 add_dependencies(build_cookbook dynamic_shared)

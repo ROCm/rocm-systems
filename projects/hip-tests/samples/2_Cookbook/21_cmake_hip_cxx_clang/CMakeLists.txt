@@ -20,10 +20,6 @@
 
 cmake_minimum_required(VERSION 3.21.3)
 
-project(cmake_cxx_amdclang++_test
-        DESCRIPTION "Verifies CXX Language Support with amdclang++"
-        LANGUAGES CXX)
-
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})
@@ -36,7 +32,12 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-set(CMAKE_CXX_COMPILER "${ROCM_PATH}/llvm/bin/clang++")
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
+
+project(cmake_cxx_amdclang++_test
+        DESCRIPTION "Verifies CXX Language Support with amdclang++"
+        LANGUAGES CXX)
 
 # Find HIP
 find_package(hip REQUIRED)

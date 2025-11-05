@@ -18,8 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(module_api_global)
-
 cmake_minimum_required(VERSION 3.10)
 
 if(UNIX)
@@ -34,13 +32,13 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
+
+project(module_api_global LANGUAGES CXX)
+
 # Find hip
-find_package(hip)
-
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+find_package(hip REQUIRED)
 
 # Create the excutable
 if(TARGET build_intro)
@@ -53,7 +51,7 @@ add_executable(runKernel1.hip.out ${EXCLUDE_OPTION} runKernel.cpp)
 # Generate code object
 add_custom_target(
   codeobj1
-  COMMAND  ${HIP_HIPCC_EXECUTABLE} --genco  ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o vcpy_kernel.code
+  COMMAND  ${CMAKE_CXX_COMPILER} --cuda-device-only ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o vcpy_kernel.code
   COMMENT "codeobj1 generated"
 )
 
@@ -62,7 +60,7 @@ add_dependencies(runKernel1.hip.out codeobj1)
 target_include_directories(runKernel1.hip.out PRIVATE ../../common)
 
 # Link with HIP
-target_link_libraries(runKernel1.hip.out hip::host)
+target_link_libraries(runKernel1.hip.out hip::device)
 
 if(TARGET build_intro)
 add_dependencies(build_intro runKernel1.hip.out)

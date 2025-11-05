@@ -20,8 +20,6 @@
 
 #Follow "README.md" to generate square.cpp if it's missing
 
-project(square)
-
 cmake_minimum_required(VERSION 3.10)
 
 if(UNIX)
@@ -36,16 +34,17 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
+
+project(square LANGUAGES CXX)
+
 # create square.cpp
 execute_process(COMMAND sh -c "${ROCM_PATH}/bin/hipify-perl \
          ${CMAKE_CURRENT_SOURCE_DIR}/square.cu > ${CMAKE_CURRENT_BINARY_DIR}/square.cpp")
 
 # Find hip
-find_package(hip)
-
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+find_package(hip REQUIRED)
 
 # Create the excutable
 if(TARGET build_intro)
@@ -56,7 +55,7 @@ endif()
 add_executable(square ${EXCLUDE_OPTION} ${CMAKE_CURRENT_BINARY_DIR}/square.cpp)
 
 # Link with HIP
-target_link_libraries(square hip::host)
+target_link_libraries(square hip::device)
 
 if(TARGET build_intro)
 add_dependencies(build_intro square)

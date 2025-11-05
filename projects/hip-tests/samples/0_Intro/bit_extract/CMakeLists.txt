@@ -18,17 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(bit_extract)
-
 cmake_minimum_required(VERSION 3.10)
-
-if(NOT WIN32 AND NOT DEFINED __HIP_ENABLE_PCH)
-  set(__HIP_ENABLE_PCH ON CACHE BOOL "enable/disable pre-compiled hip headers")
-endif()
-
-if(${__HIP_ENABLE_PCH})
-  add_definitions(-D__HIP_ENABLE_PCH)
-endif()
 
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
@@ -41,13 +31,22 @@ if(UNIX)
   # Search for rocm in common locations
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
+
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
+
+project(bit_extract LANGUAGES CXX)
+
+if(NOT WIN32 AND NOT DEFINED __HIP_ENABLE_PCH)
+  set(__HIP_ENABLE_PCH ON CACHE BOOL "enable/disable pre-compiled hip headers")
+endif()
+
+if(${__HIP_ENABLE_PCH})
+  add_definitions(-D__HIP_ENABLE_PCH)
+endif()
+
 # Find hip
-find_package(hip)
-
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+find_package(hip REQUIRED)
 
 # Create the excutable
 if(TARGET build_intro)
@@ -60,7 +59,7 @@ add_executable(bit_extract ${EXCLUDE_OPTION} bit_extract.cpp)
 target_include_directories(bit_extract PRIVATE ../../common)
 
 # Link with HIP
-target_link_libraries(bit_extract hip::host)
+target_link_libraries(bit_extract hip::device)
 
 if(TARGET build_intro)
   add_dependencies(build_intro bit_extract)

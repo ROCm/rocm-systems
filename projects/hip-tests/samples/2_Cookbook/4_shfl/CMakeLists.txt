@@ -18,8 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(shfl)
-
 cmake_minimum_required(VERSION 3.10)
 
 if(UNIX)
@@ -34,12 +32,13 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-# Find hip
-find_package(hip)
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
 
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+project(shfl LANGUAGES CXX)
+
+# Find hip
+find_package(hip REQUIRED)
 set(CMAKE_BUILD_TYPE Release)
 
 # Create the excutable
@@ -53,7 +52,7 @@ add_executable(shfl ${EXCLUDE_OPTION} shfl.cpp)
 target_include_directories(shfl PRIVATE ../../common)
 
 # Link with HIP
-target_link_libraries(shfl hip::host)
+target_link_libraries(shfl hip::device)
 
 if(TARGET build_cookbook)
 add_dependencies(build_cookbook shfl)

@@ -18,11 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(cmake_hip_device_test)
-
 cmake_minimum_required(VERSION 3.10.2)
-
-include_directories(../../common)
 
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
@@ -36,7 +32,12 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-set(CMAKE_CXX_COMPILER "${ROCM_PATH}/llvm/bin/clang++")
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
+
+project(cmake_hip_device_test LANGUAGES CXX)
+
+include_directories(../../common)
 
 # Find hip
 find_package(hip REQUIRED)

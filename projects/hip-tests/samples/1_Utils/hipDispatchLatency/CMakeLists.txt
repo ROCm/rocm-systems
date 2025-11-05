@@ -18,11 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(hipDispatchLatency)
-
 cmake_minimum_required(VERSION 3.10)
-
-include_directories(../../common)
 
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
@@ -36,12 +32,16 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-# Find hip
-find_package(hip)
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
 
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+project(hipDispatchLatency LANGUAGES CXX)
+
+include_directories(../../common)
+
+# Find hip
+find_package(hip REQUIRED)
+
 set(CMAKE_BUILD_TYPE Release)
 
 # Create the excutable
@@ -56,7 +56,7 @@ add_executable(hipDispatchEnqueueRateMT ${EXCLUDE_OPTION} hipDispatchEnqueueRate
 # Generate code object
 add_custom_target(
   codeobj2
-  COMMAND  ${HIP_HIPCC_EXECUTABLE} --genco  ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.cpp -o test_kernel.code
+  COMMAND  ${CMAKE_CXX_COMPILER} --cuda-device-only ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.cpp -o test_kernel.code
   COMMENT "codeobj2 generated"
 )
 
@@ -64,8 +64,8 @@ add_dependencies(hipDispatchLatency codeobj2)
 add_dependencies(hipDispatchEnqueueRateMT codeobj2)
 
 # Link with HIP
-target_link_libraries(hipDispatchLatency hip::host)
-target_link_libraries(hipDispatchEnqueueRateMT hip::host)
+target_link_libraries(hipDispatchLatency hip::device)
+target_link_libraries(hipDispatchEnqueueRateMT hip::device)
 if(UNIX)
   target_link_libraries(hipDispatchEnqueueRateMT pthread)
 endif()

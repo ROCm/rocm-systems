@@ -18,8 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(peer2peer)
-
 cmake_minimum_required(VERSION 3.10)
 
 if(UNIX)
@@ -33,12 +31,14 @@ if(UNIX)
   # Search for rocm in common locations
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
-# Find hip
-find_package(hip)
 
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
+
+project(peer2peer LANGUAGES CXX)
+
+# Find hip
+find_package(hip REQUIRED)
 
 # Create the excutable
 if(TARGET build_cookbook)
@@ -49,7 +49,7 @@ endif()
 add_executable(peer2peer ${EXCLUDE_OPTION} peer2peer.cpp)
 
 # Link with HIP
-target_link_libraries(peer2peer hip::host)
+target_link_libraries(peer2peer hip::device)
 
 if(TARGET build_cookbook)
 add_dependencies(build_cookbook peer2peer)

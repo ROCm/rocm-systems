@@ -1,5 +1,3 @@
-project(static_lib)
-
 cmake_minimum_required(VERSION 3.10)
 
 if(UNIX)
@@ -14,6 +12,11 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
+# Dynamic compiler detection - use shared module
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/DetectCompiler.cmake)
+
+project(static_lib LANGUAGES CXX)
+
 # Find hip
 find_package(hip REQUIRED)
 
@@ -22,10 +25,6 @@ if (WIN32)
   find_program(libpath NAMES lib.exe)
   set (CMAKE_AR ${libpath})
 endif()
-
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
 set(CMAKE_BUILD_TYPE Release)
 
 # Turn static library generation ON
@@ -48,7 +47,7 @@ endif()
 add_library(HipDevice ${EXCLUDE_OPTION} STATIC ${CPP_SOURCES})
 
 target_compile_options(HipDevice PRIVATE -fgpu-rdc)
-target_link_libraries(HipDevice PRIVATE -fgpu-rdc)
+target_link_libraries(HipDevice PRIVATE -fgpu-rdc hip::device)
 target_include_directories(HipDevice PRIVATE ${CMAKE_PREFIX_PATH}/hsa/include)
 
 # Create test executable that uses libHipDevice.a
@@ -65,7 +64,7 @@ else()
   target_link_libraries(test_device_static PRIVATE HipDevice)
 endif()
 
-target_link_libraries(test_device_static PRIVATE -fgpu-rdc hip::amdhip64 amd_comgr)
+target_link_libraries(test_device_static PRIVATE -fgpu-rdc hip::device amd_comgr)
 
 if(TARGET build_cookbook)
 add_dependencies(build_cookbook HipDevice test_device_static)

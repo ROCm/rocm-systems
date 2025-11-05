@@ -1,11 +1,11 @@
 # The test must be with CMake 3.18 or above which supports LINK_LANGUAGE that is necessary for
 # Fortran build.
 cmake_minimum_required(VERSION 3.18.0)
+
 if(ENABLE_ADDRESS_SANITIZER)
   message(STATUS "This fortran sample is temporarily disabled due to SWDEV-462616.")
   return()
 endif()
-project(cmake_lang_test CXX Fortran)
 
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
@@ -19,7 +19,10 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-set(CMAKE_CXX_COMPILER "${ROCM_PATH}/llvm/bin/clang++")
+# Dynamic compiler detection - use shared module (CXX only, Fortran uses default)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/DetectCompiler.cmake)
+
+project(cmake_lang_test CXX Fortran)
 
 find_package(hip REQUIRED)
 
