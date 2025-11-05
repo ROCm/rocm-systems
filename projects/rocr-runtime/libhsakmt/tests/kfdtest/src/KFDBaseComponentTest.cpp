@@ -138,7 +138,7 @@ void KFDBaseComponentTest::SetUp() {
     if (g_TestGPUsNum == 1) {
         syslog(LOG_INFO, "[Test on Node#%03d] "
                     "STARTED ========== %s.%s ==========",
-                    g_SelectedNodes.empty() ? 
+                    g_TestNodeId > 0 ? 
                             m_NodeInfo.HsaDefaultGPUNode() : g_SelectedNodes[0],
                     curr_test_info->test_case_name(), curr_test_info->name());
     } else {    
@@ -185,7 +185,7 @@ void KFDBaseComponentTest::TearDown() {
         if (g_TestGPUsNum == 1)
             syslog(LOG_INFO, "[Test on Node#%03d] PASSED"
                              "  ========== %s.%s ==========",
-                g_SelectedNodes.empty() ? 
+                g_TestNodeId > 0 ? 
                             m_NodeInfo.HsaDefaultGPUNode() : g_SelectedNodes[0],
                 curr_test_info->test_case_name(), curr_test_info->name());
         else
