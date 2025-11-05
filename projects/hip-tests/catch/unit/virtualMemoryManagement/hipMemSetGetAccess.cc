@@ -1353,7 +1353,7 @@ TEST_CASE("Unit_hipMemSetGetAccess_Capture") {
   hipMemGenericAllocationHandle_t mem_handle;
   HIP_CHECK(hipMemCreate(&mem_handle, vmm_bytes, &alloc_prop, 0));
 
-  hipDeviceptr_t vmm_ptr = nullptr;
+  void* vmm_ptr = nullptr;
   HIP_CHECK(hipMemAddressReserve(&vmm_ptr, vmm_bytes, 0, 0, 0));
   HIP_CHECK(hipMemMap(vmm_ptr, vmm_bytes, 0, mem_handle, 0));
   HIP_CHECK(hipMemRelease(mem_handle));
