@@ -52,6 +52,7 @@ amdcuid_status_t AmdCuidGpu::discover(std::vector<DevicePtr> &gpus) {
     return AMDCUID_STATUS_SUCCESS;
 }
 
+// need to figure out how to require privilege for this function
 amdcuid_status_t AmdCuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const {
     // Try to read the unique_id from the device sysfs
     std::string unique_id_path = m_info.render_node + "/device/unique_id";
@@ -77,6 +78,7 @@ amdcuid_status_t AmdCuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) con
     return AMDCUID_STATUS_SUCCESS;
 }
 
+// need to figure out how to require privilege for this function
 amdcuid_status_t AmdCuidGpu::get_primary_cuid(amdcuid& id) const {
     uint64_t fingerprint = 0;
     amdcuid_status_t status = get_hardware_fingerprint(fingerprint);

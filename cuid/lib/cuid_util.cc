@@ -70,7 +70,7 @@ amdcuid_status_t AmdCuidUtilities::generate_secondary_cuid(const amdcuid* primar
     uint8_t hash[EVP_MAX_MD_SIZE];
     size_t hash_len = 0;
 
-    amdcuid_status_t status = hmac->generate_hmac_sha256(reinterpret_cast<const uint8_t*>(primary_id->bytes), sizeof(primary_id->bytes), hash, &hash_len);
+    amdcuid_status_t status = static_cast<amdcuid_status_t>(hmac->generate_hmac_sha256(reinterpret_cast<const uint8_t*>(primary_id->bytes), sizeof(primary_id->bytes), hash, &hash_len));
     if (status != AMDCUID_STATUS_SUCCESS) {
         std::cerr << "Error generating HMAC" << std::endl;
         return status;
