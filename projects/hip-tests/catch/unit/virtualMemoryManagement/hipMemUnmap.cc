@@ -108,7 +108,7 @@ TEST_CASE("Unit_hipMemUnmap_Capture") {
   size_t mem_size = ((granularity + kBufferSize - 1) / granularity) * granularity;
 
   hipMemGenericAllocationHandle_t allocation_handle;
-  hipDeviceptr_t device_ptr;
+  void* device_ptr = nullptr;
   HIP_CHECK(hipMemCreate(&allocation_handle, mem_size, &allocation_prop, 0));
   HIP_CHECK(hipMemAddressReserve(&device_ptr, mem_size, 0, nullptr, 0));
   HIP_CHECK(hipMemMap(device_ptr, mem_size, 0, allocation_handle, 0));
