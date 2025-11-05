@@ -65,7 +65,7 @@ public:
     ~AQLProfileDL();
     AQLProfileDL(const AQLProfileDL&) = delete;
     AQLProfileDL& operator=(AQLProfileDL&) = delete;
-    AQLProfileDL(AQLProfileDL&&);
+    AQLProfileDL(AQLProfileDL&&) noexcept;
 
     bool valid() const
     {
