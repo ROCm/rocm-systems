@@ -821,8 +821,9 @@ inline __HOST_DEVICE__ __half __hadd_sat(__half x, __half y) { return __clamp_01
 inline __HOST_DEVICE__ __half __hsub_sat(__half x, __half y) { return __clamp_01(__hsub(x, y)); }
 inline __HOST_DEVICE__ __half __hmul_sat(__half x, __half y) { return __clamp_01(__hmul(x, y)); }
 inline __device__ __half __hfma(__half x, __half y, __half z) {
-  return __half_raw{__ocml_fma_f16(static_cast<__half_raw>(x).data, static_cast<__half_raw>(y).data,
-                                   static_cast<__half_raw>(z).data)};
+  return __half_raw{__builtin_elementwise_fma(static_cast<__half_raw>(x).data,
+                                              static_cast<__half_raw>(y).data,
+                                              static_cast<__half_raw>(z).data)};
 }
 inline __device__ __half __hfma_sat(__half x, __half y, __half z) {
   return __clamp_01(__hfma(x, y, z));
@@ -867,7 +868,10 @@ inline __HOST_DEVICE__ __half2 __hmul2_sat(__half2 x, __half2 y) {
   return __half2{__clamp_01(__half_raw{r.data.x}), __clamp_01(__half_raw{r.data.y})};
 }
 inline __device__ __half2 __hfma2(__half2 x, __half2 y, __half2 z) {
-  return __half2{__ocml_fma_2f16(x, y, z)};
+  return __half2 {
+    __builtin_elementwise_fma(static_cast<__half2_raw>(x).data, static_cast<__half2_raw>(y).data,
+                              static_cast<__half2_raw>(z).data)
+  }
 }
 inline __device__ __half2 __hfma2_sat(__half2 x, __half2 y, __half2 z) {
   auto r = static_cast<__half2_raw>(__hfma2(x, y, z));
