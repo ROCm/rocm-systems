@@ -137,16 +137,16 @@ jobs:
     #         cmake-${{ runner.os }}-head-
 
       - name: Configure
-        run: cmake -S ${{ inputs.source_directory }} -B ${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
+        run: cmake -S ${{ inputs.source_directory }} -B ${{ inputs.source_directory }}/${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
 
       - name: Build
-        run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target all --parallel 8
+        run: cmake --build ${{ inputs.source_directory }}/${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target all --parallel 8
 
       - name: Install
-        run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target install --parallel 8
+        run: cmake --build ${{ inputs.source_directory }}/${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target install --parallel 8
 
       - name: Cleanup build object and static library files
-        run: find ${BUILD_DIR} -type f \( -name '*.o' -o -name '*.a' \) -delete
+        run: find ${{ inputs.source_directory }}/${BUILD_DIR} -type f \( -name '*.o' -o -name '*.a' \) -delete
 
       - name: List Files
         shell: bash
@@ -233,16 +233,16 @@ jobs:
     #         cmake-${{ runner.os }}-baseline-
 
       - name: Configure
-        run: cmake -S ${{ inputs.source_directory }} -B ${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
+        run: cmake -S ${{ inputs.source_directory }} -B ${{ inputs.source_directory }}/${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
 
       - name: Build
-        run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target all --parallel 8
+        run: cmake --build ${{ inputs.source_directory }}/${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target all --parallel 8
 
       - name: Install
-        run: cmake --build ${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target install --parallel 8
+        run: cmake --build ${{ inputs.source_directory }}/${BUILD_DIR} --config ${{ inputs.cmake_build_type }} --target install --parallel 8
 
       - name: Cleanup build object and static library files
-        run: find ${BUILD_DIR} -type f \( -name '*.o' -o -name '*.a' \) -delete
+        run: find ${{ inputs.source_directory }}/${BUILD_DIR} -type f \( -name '*.o' -o -name '*.a' \) -delete
 
       - name: List Files
         shell: bash
@@ -302,6 +302,7 @@ jobs:
           python3 scripts/abi-guard.py check \
             -i "build-head/${{ inputs.versioning_spec }}" \
             -b "build-baseline/${{ inputs.versioning_spec }}" \
+            --build-directory "build" \
             --abidw-args "${{ inputs.abidw_args }}" \
             --abidiff-args "${{ inputs.abidiff_args }}" \
             --report-dir "abi-guard/diff-reports" \
@@ -356,6 +357,7 @@ jobs:
           python3 scripts/abi-guard.py check \
             -i "build-head/${{ inputs.versioning_spec }}" \
             -b "build-baseline/${{ inputs.versioning_spec }}" \
+            --build-directory "build" \
             --abidw-args "${{ inputs.abidw_args }}" \
             --abidiff-args "${{ inputs.abidiff_args }}" \
             --report-dir "abi-guard/diff-reports" \
