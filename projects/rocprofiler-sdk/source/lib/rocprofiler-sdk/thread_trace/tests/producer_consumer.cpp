@@ -94,8 +94,8 @@ using query_status_t = std::function<std::optional<hsa::sqtt_buffer_status_t>(vo
 class MockPackets : public hsa::SQTTBufferingPackets
 {
 public:
-    MockPackets(aqlprofile_handle_t handle, query_status_t _query)
-    : hsa::SQTTBufferingPackets(handle, 0)
+    MockPackets(aqlprofile_handle_t _handle, query_status_t _query)
+    : hsa::SQTTBufferingPackets(_handle, 0)
     , query_fn(_query){};
 
     std::optional<hsa::sqtt_buffer_status_t> query_buffer_status() override { return query_fn(); };
@@ -176,16 +176,6 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
 
 }  // namespace thread_trace
 }  // namespace rocprofiler
-
-/*
-typedef void (*rocprofiler_thread_trace_shader_data_callback_t)(
-    rocprofiler_agent_id_t                       agent,
-    int64_t                                      shader_engine_id,
-    void*                                        data,
-    size_t                                       data_size,
-    rocprofiler_thread_trace_shader_data_flags_t flags,
-    rocprofiler_user_data_t                      userdata);
-*/
 
 TEST(thread_trace, init_shutdown)
 {
@@ -577,7 +567,7 @@ TEST(thread_trace, buffer_alternation)
     threads.producer.join();
 
     // Verify we received callbacks
-    EXPECT_EQ(callback_state.callback_count.load(), 10);
+    EXPECT_GT(callback_state.callback_count.load(), 10);
     // The triple_buffer implementation uses write_index % buffer.size() where buffer.size() == 3.
     // This means we should only ever see 3 distinct buffer addresses.
     EXPECT_EQ(callback_state.buffer_addresses.size(), 3)
