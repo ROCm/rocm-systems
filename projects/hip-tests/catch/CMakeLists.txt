@@ -57,7 +57,6 @@ elseif(HIP_PLATFORM STREQUAL "nvidia")
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
-  find_package(hip-lang PATHS "${HIP_PATH}" REQUIRED CONFIG)
   project(hiptests LANGUAGES CXX HIP)
 elseif(HIP_PLATFORM STREQUAL "nvidia")
   project(hiptests LANGUAGES CXX CUDA)
