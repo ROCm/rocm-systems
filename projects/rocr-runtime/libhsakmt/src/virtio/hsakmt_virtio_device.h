@@ -27,6 +27,7 @@
 
 #include "hsakmt_virtio_proto.h"
 #include "rbtree.h"
+#include "hsakmt_interval_tree.h"
 #include "virtio_gpu.h"
 #include <stdatomic.h>
 
@@ -98,6 +99,7 @@ struct vhsakmt_device {
   int refcount;
   pthread_mutex_t bo_handles_mutex;
   rbtree_t bo_rbt;
+  interval_tree_t userptr_tree;
 
   struct vhsakmt_bo* shmem_bo;
 
@@ -110,10 +112,13 @@ struct vhsakmt_device {
   pthread_mutex_t vhsakmt_mutex;
   struct vhsakmt_node* vhsakmt_nodes;
   HsaSystemProperties* sys_props;
+
+  bool use_svm;
 };
 
 struct vhsakmt_bo {
   rbtree_node_t rbtn;
+  interval_tree_node_t itn;
   struct vhsakmt_device* dev;
 
   int refcount;

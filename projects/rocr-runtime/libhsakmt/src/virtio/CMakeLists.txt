@@ -53,7 +53,8 @@ set ( HSAKMT_VIRTIO_SRC "virtio_gpu.c"
                         "hsakmt_virtio_queues.c"
                         "hsakmt_virtio_topology.c"
                         "hsakmt_virtio_openclose.c"
-                        "../rbtree.c" )
+                        "../rbtree.c"
+                        "hsakmt_interval_tree.c" )
 
 add_library ( ${HSAKMT_VIRTIO_TARGET} STATIC ${HSAKMT_VIRTIO_SRC} )
 
