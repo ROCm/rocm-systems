@@ -1289,11 +1289,7 @@ def main() -> None:
                         base_digest != head_digest
                         and head_version.patch == base_version.patch
                     ):
-                        fail_reason = (
-                            f"Source/header files changed, but patch VERSION not incremented "
-                            f"(prev={base_version}, "
-                            f"curr={head_version})."
-                        )
+                        fail_reason = f"Source/header files changed (prev={base_digest}, curr={head_digest}), but patch VERSION not incremented (prev={base_version}, curr={head_version})."
 
         if fail_reason:
             logging.critical(f"::error title=ABI / Version policy::{fail_reason}")
