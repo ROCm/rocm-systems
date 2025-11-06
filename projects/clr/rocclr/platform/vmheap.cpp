@@ -62,8 +62,9 @@ bool VmHeap::CommitMemory(void* addr, size_t size) {
     return false;
   }
 
+  size_t offset = 0;  // this is ignored
   // Find physical memory in the map of all objects
-  Memory* phys_mem_obj = MemObjMap::FindMemObj(ptr);
+  Memory* phys_mem_obj = MemObjMap::FindMemObj(ptr, &offset);
 
   // Map the physical memory to a virtual address
   Command* cmd = new VirtualMapCommand(GetVmQueue(), Command::EventWaitList{}, addr, padded_size,
