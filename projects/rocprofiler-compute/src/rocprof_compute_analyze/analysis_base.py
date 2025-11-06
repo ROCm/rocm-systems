@@ -429,3 +429,12 @@ class OmniAnalyze_Base:
     def run_analysis(self) -> None:
         """Run analysis."""
         console_debug("analysis", "generating analysis")
+        if self._profiling_config["iteration_multiplexing"] is not None:
+            console_log(
+                "analysis",
+                (
+                    "Profiling data was collected using iteration multiplexing. "
+                    "Some metrics may represent aggregated values "
+                    "across multiple iterations."
+                ),
+            )
