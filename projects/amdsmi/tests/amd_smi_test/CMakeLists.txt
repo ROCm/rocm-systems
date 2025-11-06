@@ -1,10 +1,26 @@
+option(INSTALL_GTEST "Install GTest" OFF)
+
 # Help tests find libraries at runtime
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags")
 set(CMAKE_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
     CACHE STRING "RUNPATH for tests. Helps find libgtest.so and libamd_smi.so")
 
-# Use system-installed GTest
-find_package(GTest REQUIRED)
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+
+# Use system GTest if available, otherwise fetch and build
+find_package(GTest)
+if(NOT GTest_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        # Originally mirrored from: https://github.com/google/googletest/releases/download/v1.16.0/googletest-1.16.0.tar.gz
+        URL https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/googletest-1.16.0.tar.gz
+        URL_HASH SHA256=78c676fc63881529bf97bf9d45948d905a66833fbfa5318ea2cd7478cb98f399
+    )
+    FetchContent_MakeAvailable(googletest)
+endif()
 
 enable_testing()
 

@@ -22,7 +22,9 @@
 
 #include <cinttypes>
 #include <cstdint>
+#include <cstdio>
 
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -431,7 +433,7 @@ void TestHWTopologyRead::Run(void) {
   }
   std::cout << std::endl;
 
-  char *topology_link_type_str[] = {
+  std::string topology_link_type_str[] = {
       "AMDSMI_LINK_TYPE_INTERNAL",
       "AMDSMI_LINK_TYPE_XGMI",
       "AMDSMI_LINK_TYPE_PCIE",
