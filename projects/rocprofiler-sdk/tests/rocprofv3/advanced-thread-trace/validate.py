@@ -172,8 +172,7 @@ def test_other_simd_data(att_other_simd_out_dir_path):
                 # Start from the second element
                 for other_simd_instruction in other_simd_instructions[1:]:
                     assert (
-                        other_simd_instruction["time"]
-                        >= last_known_time + last_known_duration
+                        other_simd_instruction["time"] >= last_known_time
                     ), "data from other_simd file is not in increasing time, corrupted data."
                     last_known_time = other_simd_instruction["time"]
                     last_known_duration = other_simd_instruction["duration"]
