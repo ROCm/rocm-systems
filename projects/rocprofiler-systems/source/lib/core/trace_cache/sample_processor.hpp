@@ -23,7 +23,6 @@
 #pragma once
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include <functional>
 #include <vector>
 
 namespace rocprofsys
@@ -32,7 +31,7 @@ namespace trace_cache
 {
 
 template <typename T>
-struct post_processor_t
+struct processor_t
 {
     void handle(const kernel_dispatch_sample& sample)
     {
@@ -68,122 +67,153 @@ struct post_processor_t
     }
 
 protected:
-    ~post_processor_t() = default;
+    ~processor_t() = default;
 };
 
-struct post_processor_view_t
+struct processor_view_t
 {
+    using kernel_dispatch_fn_t  = void (*)(void*, const kernel_dispatch_sample&) noexcept;
+    using memory_copy_fn_t      = void (*)(void*, const memory_copy_sample&) noexcept;
+    using memory_allocate_fn_t  = void (*)(void*, const memory_allocate_sample&) noexcept;
+    using region_fn_t           = void (*)(void*, const region_sample&) noexcept;
+    using in_time_sample_fn_t   = void (*)(void*, const in_time_sample&) noexcept;
+    using pmc_event_fn_t        = void (*)(void*, const pmc_event_with_sample&) noexcept;
+    using amd_smi_sample_fn_t   = void (*)(void*, const amd_smi_sample&) noexcept;
+    using cpu_freq_sample_fn_t  = void (*)(void*, const cpu_freq_sample&) noexcept;
+    using backtrace_region_fn_t = void (*)(void*,
+                                           const backtrace_region_sample&) noexcept;
+
+    struct vtable_t
+    {
+        kernel_dispatch_fn_t  handle_kernel_dispatch;
+        memory_copy_fn_t      handle_memory_copy;
+        memory_allocate_fn_t  handle_memory_allocate;
+        region_fn_t           handle_region;
+        in_time_sample_fn_t   handle_in_time_sample;
+        pmc_event_fn_t        handle_pmc_event;
+        amd_smi_sample_fn_t   handle_amd_smi_sample;
+        cpu_freq_sample_fn_t  handle_cpu_freq_sample;
+        backtrace_region_fn_t handle_backtrace_region;
+    };
+
     template <typename T>
-    explicit post_processor_view_t(T& t)
-    : object{ &t }
-    , handle_kernel_dispatch_impl{ [](void* obj, const kernel_dispatch_sample& sample) {
-        static_cast<T*>(obj)->handle(sample);
-    } }
-    , handle_memory_copy_impl{ [](void* obj, const memory_copy_sample& sample) {
-        static_cast<T*>(obj)->handle(sample);
-    } }
-    , handle_memory_allocate_impl{ [](void* obj, const memory_allocate_sample& sample) {
-        static_cast<T*>(obj)->handle(sample);
-    } }
-    , handle_region_impl{ [](void* obj, const region_sample& sample) {
-        static_cast<T*>(obj)->handle(sample);
-    } }
-    , handle_in_time_sample_impl{ [](void* obj, const in_time_sample& sample) {
-        static_cast<T*>(obj)->handle(sample);
-    } }
-    , handle_pmc_event_with_sample_impl{ [](void*                        obj,
-                                            const pmc_event_with_sample& sample) {
-        static_cast<T*>(obj)->handle(sample);
-    } }
-    , handle_amd_smi_sample_impl{ [](void* obj, const amd_smi_sample& sample) {
-        static_cast<T*>(obj)->handle(sample);
-    } }
-    , handle_cpu_freq_sample_impl{ [](void* obj, const cpu_freq_sample& sample) {
-        static_cast<T*>(obj)->handle(sample);
-    } }
-    , handle_backtrace_region_sample_impl{ [](void*                          obj,
-                                              const backtrace_region_sample& sample) {
-        static_cast<T*>(obj)->handle(sample);
-    } }
-    {}
-
-    void handle(const kernel_dispatch_sample& sample) const
+    explicit processor_view_t(T& t) noexcept
+    : m_object{ std::addressof(t) }
+    , m_vtable{ std::addressof(get_vtable_for_type<T>()) }
     {
-        handle_kernel_dispatch_impl(object, sample);
+        static_assert(std::is_base_of<processor_t<T>, T>::value,
+                      "Type must be derived from processor_t<T>");
     }
 
-    void handle(const memory_copy_sample& sample) const
+    processor_view_t(const processor_view_t&) noexcept            = default;
+    processor_view_t(processor_view_t&&) noexcept                 = default;
+    processor_view_t& operator=(const processor_view_t&) noexcept = default;
+    processor_view_t& operator=(processor_view_t&&) noexcept      = default;
+
+    ROCPROFSYS_INLINE void handle(const kernel_dispatch_sample& sample) const noexcept
     {
-        handle_memory_copy_impl(object, sample);
+        m_vtable->handle_kernel_dispatch(m_object, sample);
     }
 
-    void handle(const memory_allocate_sample& sample) const
+    ROCPROFSYS_INLINE void handle(const memory_copy_sample& sample) const noexcept
     {
-        handle_memory_allocate_impl(object, sample);
+        m_vtable->handle_memory_copy(m_object, sample);
     }
 
-    void handle(const region_sample& sample) const { handle_region_impl(object, sample); }
-
-    void handle(const in_time_sample& sample) const
+    ROCPROFSYS_INLINE void handle(const memory_allocate_sample& sample) const noexcept
     {
-        handle_in_time_sample_impl(object, sample);
+        m_vtable->handle_memory_allocate(m_object, sample);
     }
 
-    void handle(const pmc_event_with_sample& sample) const
+    ROCPROFSYS_INLINE void handle(const region_sample& sample) const noexcept
     {
-        handle_pmc_event_with_sample_impl(object, sample);
+        m_vtable->handle_region(m_object, sample);
     }
 
-    void handle(const amd_smi_sample& sample) const
+    ROCPROFSYS_INLINE void handle(const in_time_sample& sample) const noexcept
     {
-        handle_amd_smi_sample_impl(object, sample);
+        m_vtable->handle_in_time_sample(m_object, sample);
     }
 
-    void handle(const cpu_freq_sample& sample) const
+    ROCPROFSYS_INLINE void handle(const pmc_event_with_sample& sample) const noexcept
     {
-        handle_cpu_freq_sample_impl(object, sample);
+        m_vtable->handle_pmc_event(m_object, sample);
     }
 
-    void handle(const backtrace_region_sample& sample) const
+    ROCPROFSYS_INLINE void handle(const amd_smi_sample& sample) const noexcept
     {
-        handle_backtrace_region_sample_impl(object, sample);
+        m_vtable->handle_amd_smi_sample(m_object, sample);
+    }
+
+    ROCPROFSYS_INLINE void handle(const cpu_freq_sample& sample) const noexcept
+    {
+        m_vtable->handle_cpu_freq_sample(m_object, sample);
+    }
+
+    ROCPROFSYS_INLINE void handle(const backtrace_region_sample& sample) const noexcept
+    {
+        m_vtable->handle_backtrace_region(m_object, sample);
     }
 
 private:
-    void* object;
+    template <typename T>
+    static inline const vtable_t& get_vtable_for_type() noexcept
+    {
+        static const vtable_t vtable{
+            +[](void* obj, const kernel_dispatch_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const memory_copy_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const memory_allocate_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const region_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const in_time_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const pmc_event_with_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const amd_smi_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const cpu_freq_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const backtrace_region_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            }
+        };
+        return vtable;
+    }
 
-    std::function<void(void*, const kernel_dispatch_sample&)> handle_kernel_dispatch_impl;
-    std::function<void(void*, const memory_copy_sample&)>     handle_memory_copy_impl;
-    std::function<void(void*, const memory_allocate_sample&)> handle_memory_allocate_impl;
-    std::function<void(void*, const region_sample&)>          handle_region_impl;
-    std::function<void(void*, const in_time_sample&)>         handle_in_time_sample_impl;
-    std::function<void(void*, const pmc_event_with_sample&)>
-                                                       handle_pmc_event_with_sample_impl;
-    std::function<void(void*, const amd_smi_sample&)>  handle_amd_smi_sample_impl;
-    std::function<void(void*, const cpu_freq_sample&)> handle_cpu_freq_sample_impl;
-    std::function<void(void*, const backtrace_region_sample&)>
-        handle_backtrace_region_sample_impl;
+    void*           m_object;
+    const vtable_t* m_vtable;
 };
 
 struct sample_processor_t
 {
-    void clear_handlers() { m_post_processor_view_list.clear(); }
+    void clear_handlers() { m_processor_view_list.clear(); }
 
     template <typename T>
     void add_handler(T& handler)
     {
-        m_post_processor_view_list.emplace_back(handler);
+        m_processor_view_list.emplace_back(handler);
     }
 
     template <typename SampleType>
-    void handle_sample(const SampleType& sample) const
+    ROCPROFSYS_INLINE void handle_sample(const SampleType& sample) const
     {
-        for(const auto& view : m_post_processor_view_list)
+        for(const auto& view : m_processor_view_list)
             view.handle(sample);
     }
 
-    void execute_sample_processing(type_identifier_t               type_identifier,
-                                   const trace_cache::cacheable_t& sample) const
+    ROCPROFSYS_INLINE void execute_sample_processing(
+        type_identifier_t type_identifier, const trace_cache::cacheable_t& sample) const
     {
         switch(type_identifier)
         {
@@ -221,7 +251,7 @@ struct sample_processor_t
     }
 
 private:
-    std::vector<post_processor_view_t> m_post_processor_view_list;
+    std::vector<processor_view_t> m_processor_view_list;
 };
 
 }  // namespace trace_cache

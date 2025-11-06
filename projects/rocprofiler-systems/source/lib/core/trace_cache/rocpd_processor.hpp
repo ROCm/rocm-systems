@@ -34,7 +34,7 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-class rocpd_processor : public post_processor_t<rocpd_processor>
+class rocpd_processor : public processor_t<rocpd_processor>
 {
 public:
     rocpd_processor(metadata_registry& metadata, agent_manager& agent_mngr, int pid,

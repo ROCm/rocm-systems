@@ -67,6 +67,11 @@ public:
             "TypeProcessing must have member function "
             "execute_sample_processing(TypeIdentifierEnum, const cacheable_t&)");
 
+        if(_type_processing == nullptr)
+        {
+            throw std::runtime_error("TypeProcessing is nullptr");
+        }
+
         ROCPROFSYS_DEBUG("Consuming buffered storage with filename: %s\n",
                          m_filename.c_str());
 

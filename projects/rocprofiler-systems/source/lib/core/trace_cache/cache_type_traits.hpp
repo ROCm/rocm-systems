@@ -147,11 +147,11 @@ template <typename T, typename TypeIdentifierEnum>
 __attribute__((always_inline)) inline constexpr void
 check_type()
 {
-    static_assert(has_serialize<T>::value, "Type don't have `serialize` function.");
-    static_assert(has_deserialize<T>::value, "Type don't have `deserialize` function.");
-    static_assert(has_get_size<T>::value, "Type don't have `get_size` function.");
+    static_assert(has_serialize<T>::value, "Type doesn't have `serialize` function.");
+    static_assert(has_deserialize<T>::value, "Type doesn't have `deserialize` function.");
+    static_assert(has_get_size<T>::value, "Type doesn't have `get_size` function.");
     static_assert(has_type_identifier<T, TypeIdentifierEnum>::value,
-                  "Type don't have `type_identifier` member with correct type.");
+                  "Type doesn't have `type_identifier` member with correct type.");
 }
 
 template <typename T, typename TypeIdentifierEnum, typename CacheableType,

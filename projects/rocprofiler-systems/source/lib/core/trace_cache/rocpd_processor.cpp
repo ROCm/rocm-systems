@@ -611,7 +611,7 @@ rocpd_processor::handle(const cpu_freq_sample& _cpu_freq_sample)
 
 rocpd_processor::rocpd_processor(metadata_registry& md, agent_manager& agent_mngr,
                                  int pid, int ppid)
-: post_processor_t<rocpd_processor>()
+: processor_t<rocpd_processor>()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
 , m_data_processor(std::make_shared<rocpd::data_processor>(
