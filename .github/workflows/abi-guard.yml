@@ -135,12 +135,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install -r scripts/requirements.txt
+          mkdir -p "${{ inputs.source_directory }}/${{ env.BUILD_DIR }}"
           HASH=$(python3 scripts/abi-guard.py hash -i "${{ inputs.versioning_spec }}")
           if [[ -z "${HASH}" ]]; then
             echo "No hash found for versioning spec: ${{ inputs.versioning_spec }}"
             exit 1
           fi
           echo "Hash: ${HASH}"
+          rmdir "${{ inputs.source_directory }}/${{ env.BUILD_DIR }}"
           echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
 
       - name: Cache CMake build (HEAD)
@@ -226,12 +228,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install -r scripts/requirements.txt
+          mkdir -p "${{ inputs.source_directory }}/${{ env.BUILD_DIR }}"
           HASH=$(python3 scripts/abi-guard.py hash -i "${{ inputs.versioning_spec }}")
           if [[ -z "${HASH}" ]]; then
             echo "No hash found for versioning spec: ${{ inputs.versioning_spec }}"
             exit 1
           fi
           echo "Hash: ${HASH}"
+          rmdir "${{ inputs.source_directory }}/${{ env.BUILD_DIR }}"
           echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
 
       - name: Cache CMake build (baseline)
