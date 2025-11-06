@@ -127,12 +127,12 @@ cache_manager::post_process_bulk()
             shutdown();
         }
 
+        auto _cache_files = get_cache_files();
+
         if(get_use_rocpd())
         {
             ROCPROFSYS_PRINT(
                 "Generating rocpd with collected data. This may take a while..\n");
-
-            auto _cache_files = get_cache_files();
 
             std::vector<std::thread> rocpd_threads;
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -179,7 +179,6 @@ cache_manager::post_process_bulk()
                         _post_processing.register_parser_callback(_parser);
                         _post_processing.post_process_metadata();
                         _parser.consume_storage();
-                        std::remove(files.metadata.c_str());  // Remove metadata file
                     });
                 }
             }
@@ -188,6 +187,32 @@ cache_manager::post_process_bulk()
             {
                 thread.join();
             }
+        }
+
+        ROCPROFSYS_PRINT("Removing temporary files...\n");
+
+        auto remove_if_exists = [](const std::string& fname) {
+            std::ifstream file(fname);
+            if(file.is_open())
+            {
+                file.close();
+                if(std::remove(fname.c_str()) == 0)
+                {
+                    ROCPROFSYS_DEBUG("Removed file: %s\n", fname.c_str());
+                }
+                else
+                {
+                    ROCPROFSYS_WARNING(0, "Failed to remove file: %s\n", fname.c_str());
+                }
+            }
+        };
+
+        remove_if_exists(get_buffered_storage_filename(get_root_process_id(), getpid()));
+
+        for(const auto& [pid, files] : _cache_files)
+        {
+            remove_if_exists(files.metadata);
+            remove_if_exists(files.buff_storage);
         }
     }
 }
