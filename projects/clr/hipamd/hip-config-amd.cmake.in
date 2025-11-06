@@ -106,8 +106,6 @@ if(NOT GPU_TARGETS)
         " (gfx906 for dynamic build / gfx942 for static build) will be used\n"
         " for compiling device code in C++ language mode\n")
   else()
-    # rocm_agent_enumerator adds gfx000 entry
-    string(REPLACE "gfx000\n" "" AMDGPU_ARCH_OUTPUT "${AMDGPU_ARCH_OUTPUT}")
     if (NOT AMDGPU_ARCH_OUTPUT STREQUAL "")
       string(REPLACE "\n" ";" AMDGPU_ARCH_OUTPUT ${AMDGPU_ARCH_OUTPUT})
       set(GPU_TARGETS ${AMDGPU_ARCH_OUTPUT} CACHE STRING "AMD GPU targets to compile for")

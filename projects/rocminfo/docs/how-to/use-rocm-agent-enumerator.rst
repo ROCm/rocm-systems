@@ -12,11 +12,5 @@ See the following example output of the rocm_agent_enumerator command on a syste
 
 .. code-block::
 
-    gfx000
     gfx941
-
-
-.. Note:: 
-
-The gfx000 represents the CPU agent.
 

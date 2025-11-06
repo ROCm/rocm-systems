@@ -59,7 +59,7 @@ std::string TestContext::substringFound(std::vector<std::string> list, std::stri
 std::string TestContext::getCurrentArch() {
 #if HT_LINUX
   const char* cmd =
-      "/opt/rocm/bin/rocm_agent_enumerator | awk '$0 != \"gfx000\"' | xargs | sed -e 's/ /;/g' | "
+      "/opt/rocm/bin/rocm_agent_enumerator | xargs | sed -e 's/ /;/g' | "
       "tr -d '\n'";
   std::array<char, 1024> buffer;
   std::string result;
