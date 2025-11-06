@@ -135,7 +135,7 @@ hip_add_exe_to_target(NAME MemoryTest1
 
 if(UNIX)
   # link libnuma for numa_available(), numa_max_node(), move_pages(), etc.
-  find_package(NUMA)
+  find_package(NUMA QUIET)
   if(NUMA_FOUND)
     set(NUMA "${NUMA_LIBRARIES}")
   else()
