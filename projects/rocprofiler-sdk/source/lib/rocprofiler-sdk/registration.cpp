@@ -48,6 +48,7 @@
 #include "lib/rocprofiler-sdk/ompt.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include "lib/rocprofiler-sdk/ptl.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
@@ -857,6 +858,9 @@ initialize()
                                          _client_activated_ctx);
             }
         }
+
+        // disable PTL on select GPUs
+        rocprofiler::ptl::disable_ptl();
     });
 }
 
@@ -894,6 +898,8 @@ finalize()
         thread_trace::finalize();
         ompt::finalize_ompt();
         kfd::finalize();
+        // restore PTL state
+        rocprofiler::ptl::restore_ptl();
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // WARNING: this must precede `code_object::finalize()`
         pc_sampling::code_object::finalize();
