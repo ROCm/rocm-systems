@@ -1511,17 +1511,53 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
       }
     }
   }
+
   *pGraphExec = new hip::GraphExec(flags);
   if (*pGraphExec == nullptr) {
     return hipErrorOutOfMemory;
   }
+
   graph->clone(*pGraphExec, true);
-  (*pGraphExec)->ScheduleNodes();
-  if (false == (*pGraphExec)->TopologicalOrder()) {
+
+  if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
+    (*pGraphExec)->SetKernelArgManager(new hip::GraphKernelArgManager());
+  }
+
+  // Create a map to track kernel argument sizes for each device
+  std::unordered_map<int, size_t> kernArgSizeForGraph;
+  // Reserve space for all available devices and Initialize to 0
+  kernArgSizeForGraph.reserve(g_devices.size());
+  for (int devId = 0; devId < g_devices.size(); devId++) {
+    kernArgSizeForGraph[devId] = 0;
+  }
+
+  (*pGraphExec)->ScheduleNodes(kernArgSizeForGraph);
+
+  if (false == (*pGraphExec)->TopologicalOrderDuringInit()) {
     delete *pGraphExec;
     return hipErrorInvalidValue;
   }
+
+  // Allocate kernel argument pools on respective devices with extra space for updates
+  for (const auto& deviceKernArgPair : kernArgSizeForGraph) {
+    const int deviceId = deviceKernArgPair.first;
+    const size_t kernArgSize = deviceKernArgPair.second;
+    if (kernArgSize == 0) {
+      continue;
+    }
+    const size_t totalPoolSize = kernArgSize + (*pGraphExec)->kKernArgChunkSize_;
+    if (!(*pGraphExec)
+             ->GetKernelArgManager()
+             ->AllocGraphKernargPool(totalPoolSize, g_devices[deviceId]->devices()[0])) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "[hipGraph] Failed to allocate kernel argument pool of size %zu for device %d",
+              totalPoolSize, deviceId);
+      return hipErrorMemoryAllocation;
+    }
+  }
+
   graph->SetGraphInstantiated(true);
+
   if (DEBUG_HIP_GRAPH_DOT_PRINT) {
     static int i = 1;
     std::string filename =
@@ -1531,10 +1567,10 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
       LogPrintfInfo("[hipGraph] graph dump:%s", filename.c_str());
     }
   }
-  if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
-    (*pGraphExec)->SetKernelArgManager(new hip::GraphKernelArgManager());
-  }
-  return (*pGraphExec)->Init();
+
+  hipError_t result = (*pGraphExec)->Init();
+
+  return result;
 }
 
 hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,

@@ -242,6 +242,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   std::vector<uint8_t*>& GetAqlPackets() { return gpuPackets_; }
   void SetKernelName(const std::string& kernelName) { capturedKernelName_ = kernelName; }
   const std::string& GetKernelName() const { return capturedKernelName_; }
+  const std::vector<std::string>& GetKernelNames() const { return kernelNames_; }
   size_t GetKerArgSize() const { return alignedKernArgSize_; }
   size_t GetKernargSegmentByteSize() const { return kernargSegmentByteSize_; }
   size_t GetKernargSegmentAlignment() const { return kernargSegmentAlignment_; }
@@ -268,6 +269,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       command->submit(*(command->queue())->vdev());
       command->release();
     }
+    kernelNames_.resize(gpuPackets_.size(), capturedKernelName_);
 
     // Accumulate packets directly into the batch (only if batch vectors are provided)
     if (batchPackets != nullptr && batchKernelNames != nullptr) {
@@ -372,6 +374,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   }
   /// Get topological sort of the nodes embedded as part of the graphnode(e.g. ChildGraph)
   virtual bool TopologicalOrder(std::vector<Node>& TopoOrder) { return true; }
+  virtual bool TopologicalOrderDuringInit(std::vector<Node>& TopoOrder) { return true; }
+
   /// Update waitlist of the nodes embedded as part of the graphnode(e.g. ChildGraph)
   virtual void UpdateEventWaitLists(const amd::Command::EventWaitList& waitList) {
     for (auto command : commands_) {
@@ -454,7 +458,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     out << GetLabel(flag);
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
       out << "\nStreamId:" << stream_id_;
-      out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
+      out << "\nLaunchId:" << launch_id_;
       out << "\nDeviceId:" << dev_id_;
     }
     out << "\"";
@@ -487,6 +491,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   bool signal_is_required_ = false;   //!< This node requires a signal on the command
   std::vector<uint8_t*> gpuPackets_;  //!< GPU Packet to enqueue during graph launch
   std::string capturedKernelName_;
+  std::vector<std::string> kernelNames_;
   size_t alignedKernArgSize_ = 256;       //!< Aligned size required for kernel args
   size_t kernargSegmentByteSize_ = 512;   //!< Kernel arg segment byte size
   size_t kernargSegmentAlignment_ = 256;  //!< Kernel arg segment alignment
@@ -547,6 +552,9 @@ class Graph {
   std::unordered_set<void*> memAllocNodePtrs_;
   static std::unordered_set<Graph*> graphSet_;
   static amd::Monitor graphSetLock_;
+  std::unordered_map<Node, int> inDegree_;
+  std::vector<Node> root_nodes_;
+
   Graph(hip::Device* device, const Graph* original = nullptr)
       : pOriginalGraph_(original), id_(nextID++), device_(device) {
     amd::ScopedLock lock(graphSetLock_);
@@ -668,16 +676,15 @@ class Graph {
   //! Schedules one node on a vitual stream.
   //! It will also process the nodes in edges, using recursion
   void ScheduleOneNode(Node node,     //!< Node for scheduling on a virtual stream
-                       int stream_id  //!< Current active virtual stream to use for scheduling
+                       int stream_id,  //!< Current active virtual stream to use for scheduling
+                       std::unordered_map<int, size_t>& kernArgSizeForGraph
   );
 
   //! Schedules all nodes in the graph into different streams
-  void ScheduleNodes();
+  void ScheduleNodes(std::unordered_map<int, size_t>& kernArgSizeForGraph);
 
   //! Runs one node on the assigned stream
-  bool RunOneNode(Node node,  //!< Node for the execution on GPU
-                  bool wait   //!< Wait dependencies
-  );
+  bool RunOneNode(Node node, std::vector<amd::AccumulateCommand*>& accumulateCommands);
 
   //! Runs all nodes from the execution graph on the assigned streams
   bool RunNodes(
@@ -687,6 +694,7 @@ class Graph {
   );
 
   bool TopologicalOrder(std::vector<Node>& TopoOrder);
+  bool TopologicalOrderDuringInit(std::vector<Node>& TopoOrder);
 
   void clone(Graph* newGraph, bool cloneNodes = false) const;
   Graph* clone() const;
@@ -779,7 +787,8 @@ class Graph {
   //!< Used to track which devices are accessed by each parallel stream
   //!< during multi-device graph execution scheduling.
   std::unordered_map<int, std::set<int>> streams_dev_ids_;
-
+  //! Topological order of the graph doesn't include nodes embedded as part of the child graph
+  std::vector<Node> topoOrder_;
  private:
   friend class GraphExec;
   std::vector<Node> vertices_;
@@ -812,9 +821,12 @@ class Graph {
 
 class GraphExec : public amd::ReferenceCountedObject, public Graph {
  public:
+ //! Chunk size to add to kern arg pool
+  static constexpr uint32_t kKernArgChunkSize_ = 128 * 1024; // 128 KiB
   static std::unordered_set<GraphExec*> graphExecSet_;
   static amd::Monitor graphExecSetLock_;
   static amd::Monitor graphExecStreamCreateLock_;
+  bool graph_dumped_ = false;
   GraphExec(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
     amd::ScopedLock lock(graphExecSetLock_);
@@ -885,6 +897,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   //! Enqueue a multi-device linear graph for execution
   hipError_t EnqueueMultiDeviceLinearGraph(hip::Stream* hip_stream);
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
+  bool TopologicalOrderDuringInit() { return Graph::TopologicalOrderDuringInit(topoOrder_); }
+
   //! Update streams for the graph execution with launch stream from application
   void UpdateStreams(hip::Stream* launch_stream);
   //! Find the number of streams required per device for multi-device graph execution
@@ -893,8 +907,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   void FindStreamsReqPerDev();
 
  protected:
-  //! Topological order of the graph doesn't include nodes embedded as part of the child graph
-  std::vector<Node> topoOrder_;
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   uint64_t flags_ = 0;
@@ -955,6 +967,10 @@ class ChildGraphNode : public GraphNode, public GraphExec {
 
   bool TopologicalOrder(std::vector<Node>& TopoOrder) override {
     return Graph::TopologicalOrder(TopoOrder);
+  }
+
+  bool TopologicalOrderDuringInit(std::vector<Node>& TopoOrder) override {
+    return Graph::TopologicalOrderDuringInit(TopoOrder);
   }
 
   void EnqueueCommands(hip::Stream* stream) override {
@@ -1053,7 +1069,7 @@ class GraphKernelNode : public GraphNode {
     out << GetLabel(flag);
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
       out << "StreamId:" << stream_id_;
-      out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
+      out << "\nLaunchId:" << launch_id_;
       out << "\nDeviceId:" << dev_id_;
     }
     out << "\"";
