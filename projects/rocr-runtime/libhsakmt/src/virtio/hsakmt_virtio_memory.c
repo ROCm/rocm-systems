@@ -22,6 +22,8 @@
 
 #include "hsakmt/hsakmt_virtio.h"
 #include "hsakmt_virtio_device.h"
+#include <unistd.h>
+#include <xf86drm.h>
 
 #define VHSA_GL_METADATA_MAX_SIZE (0x50)
 
@@ -90,6 +92,51 @@ vhsakmt_bo_handle vhsakmt_find_bo_by_addr(vhsakmt_device_handle dev, void* addr)
   }
 
   return NULL;
+}
+
+static void vhsakmt_insert_userptr(vhsakmt_device_handle dev, vhsakmt_bo_handle userptr) {
+  if (!(userptr->bo_type & VHSA_BO_USERPTR)) return;
+
+  interval_tree_node_init(&userptr->itn, (unsigned long)userptr->cpu_addr,
+                          (unsigned long)userptr->cpu_addr + userptr->size - 1UL);
+
+  pthread_mutex_lock(&dev->bo_handles_mutex);
+  hsakmt_interval_tree_insert(&dev->userptr_tree, &userptr->itn);
+  pthread_mutex_unlock(&dev->bo_handles_mutex);
+}
+
+static vhsakmt_bo_handle vhsakmt_find_userptr(vhsakmt_device_handle dev, unsigned long addr,
+                                              unsigned long last) {
+  interval_tree_node_t* n;
+
+  pthread_mutex_lock(&dev->bo_handles_mutex);
+
+  n = hsakmt_interval_tree_iter_first(&dev->userptr_tree, addr, last);
+
+  while (n) {
+    vhsakmt_bo_handle bo = (vhsakmt_bo_handle)((char*)n - offsetof(struct vhsakmt_bo, itn));
+    if ((unsigned long)bo->cpu_addr <= addr &&
+        ((unsigned long)bo->cpu_addr + bo->size - 1UL) >= last) {
+      pthread_mutex_unlock(&dev->bo_handles_mutex);
+      return bo;
+    }
+    n = hsakmt_interval_tree_iter_next(&dev->userptr_tree, n, addr, last);
+  }
+
+  pthread_mutex_unlock(&dev->bo_handles_mutex);
+
+  return NULL;
+}
+
+static void vhsakmt_destroy_userptr(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
+  hsakmt_interval_tree_remove(&dev->userptr_tree, &bo->itn);
+  pthread_mutex_destroy(&bo->map_mutex);
+
+  struct drm_gem_close drm_req = {
+      .handle = bo->real.handle,
+  };
+  drmIoctl(dev->vgdev->fd, DRM_IOCTL_GEM_CLOSE, &drm_req);
+  free(bo);
 }
 
 void* vhsakmt_gpu_va(vhsakmt_device_handle dev, void* va) {
@@ -378,8 +425,18 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint6
   if (bo) {
     req->map_to_GPU_nodes_args.MemoryAddress = (uint64_t)bo->host_addr;
     if (bo->bo_type & VHSA_BO_USERPTR) vhsakmt_remove_userptr_bo(dev, bo);
-  } else
-    req->map_to_GPU_nodes_args.MemoryAddress = (uint64_t)MemoryAddress;
+  } else if (!dev->use_svm) {
+    bo = vhsakmt_find_userptr(dev, (uint64_t)MemoryAddress,
+                              (uint64_t)MemoryAddress + MemorySizeInBytes - 1UL);
+    if (bo)
+      req->map_to_GPU_nodes_args.MemoryAddress =
+          (uint64_t)bo->host_addr + ((char*)MemoryAddress - (char*)bo->cpu_addr);
+  }
+
+  if (!bo) {
+    free(req);
+    return HSAKMT_STATUS_INVALID_HANDLE;
+  }
 
   memcpy(req->payload, NodeArray, NumberOfNodes * sizeof(*NodeArray));
 
@@ -509,7 +566,17 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPU(void* MemoryAddress, HSAuint64 Mem
           },
   };
 
-  if (bo && (bo->bo_type & VHSA_BO_USERPTR)) vhsakmt_remove_userptr_bo(dev, bo);
+  if (bo && (bo->bo_type & VHSA_BO_USERPTR)) {
+    vhsakmt_remove_userptr_bo(dev, bo);
+  } else if (!bo) {
+    bo = vhsakmt_find_userptr(dev, (uint64_t)MemoryAddress,
+                              (uint64_t)MemoryAddress + MemorySizeInBytes - 1UL);
+    if (bo)
+      req.map_to_GPU_args.MemoryAddress =
+          (uint64_t)bo->host_addr + ((char*)MemoryAddress - (char*)bo->cpu_addr);
+  }
+
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
 
   rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
   if (!rsp) return -ENOMEM;
@@ -542,31 +609,46 @@ static int vhsakmt_map_userptr(vhsakmt_device_handle dev, void* addr, size_t siz
   return rsp->ret;
 }
 
-static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size) {
+static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size, bool use_svm) {
   vhsakmt_device_handle dev = vhsakmt_dev();
-  size_t offset = (uint64_t)addr % getpagesize();
-  size_t map_size = (VHSA_ALIGN_UP(size + offset, getpagesize()) / getpagesize()) * getpagesize();
-  uint64_t userptr_offset, userptr_handle = 0;
+  size_t page_size = getpagesize();
+  size_t addr_offset = (uint64_t)addr % page_size;
+  void* blob_addr;
+  size_t blob_size;
+  uint64_t userptr_offset = 0, userptr_handle = 0;
   vhsakmt_bo_handle userptr;
   int r;
 
-  vhsa_debug("%s: addr: %p, size: 0x%lx, size + offset: 0x%lx, map_size: 0x%lx\n", __FUNCTION__,
-             addr, size, size + offset, map_size);
+  if (use_svm) {
+    blob_addr = addr;
+    blob_size = size;
+  } else {
+    blob_addr = (void*)((uint64_t)addr - addr_offset);
+    blob_size = VHSA_ALIGN_UP(size + addr_offset, page_size);
+  }
 
-  r = vhsakmt_init_userptr_blob(dev, addr, size, &userptr, &userptr_offset);
+  vhsa_debug("%s: addr: %p, size: 0x%lx, offset: 0x%lx, blob_addr: %p, blob_size: 0x%lx, svm: %d\n",
+             __FUNCTION__, addr, size, addr_offset, blob_addr, blob_size, use_svm);
+
+  r = vhsakmt_init_userptr_blob(dev, blob_addr, blob_size, &userptr, &userptr_offset);
   if (r < 0) {
     vhsa_debug("%s: userptr create failed at address: %p, ret = %d\n", __FUNCTION__, addr, r);
     return NULL;
   }
 
-  vhsakmt_map_userptr(dev, addr, size, userptr->real.res_id, &userptr_handle);
+  r = vhsakmt_map_userptr(dev, addr, size, userptr->real.res_id, &userptr_handle);
   if (!userptr_handle) {
     vhsa_debug("%s: map userptr failed at address: %p, ret = %d\n", __FUNCTION__, addr, r);
     vhsakmt_destroy_handle(dev, userptr);
     vhsakmt_remove_userptr_bo(dev, userptr);
     return NULL;
   }
-  userptr->host_addr = VHSA_UINT64_TO_VPTR(VHSA_VPTR_TO_UINT64(userptr_handle) + offset);
+
+  if (use_svm) {
+    userptr->host_addr = VHSA_UINT64_TO_VPTR(VHSA_VPTR_TO_UINT64(userptr_handle) + addr_offset);
+  } else {
+    userptr->host_addr = VHSA_UINT64_TO_VPTR(userptr_handle);
+  }
 
   if (r > 0) {
     vhsa_debug("%s: userptr: %p already registered, offset: %lx\n", __FUNCTION__, addr,
@@ -574,11 +656,16 @@ static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size) {
     userptr->host_addr =
         VHSA_UINT64_TO_VPTR(VHSA_VPTR_TO_UINT64(userptr->host_addr) + userptr_offset);
   }
-  vhsakmt_insert_bo(dev, userptr, userptr->cpu_addr, userptr->size);
 
-  vhsa_debug("%s: real gva: %p, gva: %p, hva: %p, size: %lx, offset: %" PRIu64
-             ", map_size: 0x%lx\n",
-             __FUNCTION__, addr, userptr->cpu_addr, userptr->host_addr, size, offset, map_size);
+  if (use_svm) {
+    vhsakmt_insert_bo(dev, userptr, userptr->cpu_addr, userptr->size);
+  } else {
+    vhsakmt_insert_userptr(dev, userptr);
+  }
+
+  vhsa_debug("%s: gva: %p, cpu_addr: %p, hva: %p, size: %lx, offset: %lx, blob_size: 0x%lx\n",
+             __FUNCTION__, addr, userptr->cpu_addr, userptr->host_addr, size, addr_offset,
+             blob_size);
   return userptr;
 }
 
@@ -603,10 +690,25 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
   /* no need to register memory from lihsakmt / not a userptr */
   if (!vhsakmt_is_userptr(dev, MemoryAddress)) return HSAKMT_STATUS_SUCCESS;
 
-  userptr = vhsakmt_map_to_gpu(MemoryAddress, MemorySizeInBytes);
+  if (!dev->use_svm) {
+    vhsakmt_bo_handle bo = vhsakmt_find_userptr(dev, (uint64_t)MemoryAddress,
+                                                (uint64_t)MemoryAddress + MemorySizeInBytes - 1UL);
+    if (bo) {
+      vhsa_debug(
+          "%s: memory already registered, MemoryAddress:%p, bo address: %p, size: %x, "
+          "res_id: %d, count: %d\n",
+          __FUNCTION__, MemoryAddress, bo->cpu_addr, bo->size, bo->real.res_id, bo->refcount);
+      (void)vhsakmt_atomic_inc_return(&bo->refcount);
+      return HSAKMT_STATUS_SUCCESS;
+    }
+  }
+
+  userptr = vhsakmt_map_to_gpu(MemoryAddress, MemorySizeInBytes, dev->use_svm);
+
   if (!userptr) {
-    vhsa_debug("%s: register memory failed, gva: %p, size: %lx\n", __FUNCTION__, MemoryAddress,
-               MemorySizeInBytes);
+    vhsa_debug(
+        "%s: register memory failed at address: %p, size: %lx (vhsakmt_map_to_gpu returned %p)\n",
+        __FUNCTION__, MemoryAddress, MemorySizeInBytes, userptr);
     return HSAKMT_STATUS_ERROR;
   }
 
@@ -641,21 +743,62 @@ static int vhsakmt_remove_clgl_bo(vhsakmt_device_handle dev, vhsakmt_bo_handle b
   return rsp->ret;
 }
 
+static int vhsakmt_deregister_userptr_non_svm(vhsakmt_device_handle dev, void* MemoryAddress) {
+  size_t page_size = getpagesize();
+  unsigned long aligned_addr = ((uint64_t)MemoryAddress / page_size) * page_size;
+  interval_tree_node_t* n;
+
+  pthread_mutex_lock(&dev->bo_handles_mutex);
+
+  /* First pass: Decrement refcounts and check if all can be freed */
+  bool can_free_all = true;
+  n = hsakmt_interval_tree_iter_first(&dev->userptr_tree, aligned_addr, aligned_addr);
+  while (n) {
+    vhsakmt_bo_handle bo = (vhsakmt_bo_handle)((char*)n - offsetof(struct vhsakmt_bo, itn));
+    if (bo->cpu_addr == (void*)aligned_addr) {
+      vhsa_debug("%s: found userptr: %p, size: %x, res_id: %d, count: %d\n", __FUNCTION__,
+                 bo->cpu_addr, bo->size, bo->real.res_id, bo->refcount);
+
+      if (vhsakmt_atomic_dec_return(&bo->refcount) > 0) {
+        can_free_all = false;
+      }
+    }
+    n = hsakmt_interval_tree_iter_next(&dev->userptr_tree, n, aligned_addr, aligned_addr);
+  }
+
+  /* Second pass: Free all userptrs if all refcounts are <= 0 */
+  if (can_free_all) {
+    n = hsakmt_interval_tree_iter_first(&dev->userptr_tree, aligned_addr, aligned_addr);
+    while (n) {
+      vhsakmt_bo_handle bo = (vhsakmt_bo_handle)((char*)n - offsetof(struct vhsakmt_bo, itn));
+      interval_tree_node_t* next =
+          hsakmt_interval_tree_iter_next(&dev->userptr_tree, n, aligned_addr, aligned_addr);
+
+      if (bo->cpu_addr == (void*)aligned_addr) {
+        vhsa_debug("%s: destroying userptr: %p, size: %x, res_id: %d\n", __FUNCTION__, bo->cpu_addr,
+                   bo->size, bo->real.res_id);
+
+        vhsakmt_destroy_userptr(dev, bo);
+      }
+
+      n = next;
+    }
+  }
+
+  pthread_mutex_unlock(&dev->bo_handles_mutex);
+  return 0;
+}
+
 HSAKMT_STATUS HSAKMTAPI vhsaKmtDeregisterMemory(void* MemoryAddress) {
   CHECK_VIRTIO_KFD_OPEN();
 
   vhsakmt_device_handle dev = vhsakmt_dev();
   vhsakmt_bo_handle bo = vhsakmt_find_bo_by_addr(dev, MemoryAddress);
-  if (!bo) return HSAKMT_STATUS_SUCCESS;
 
-  vhsa_debug("%s: remove userptr %p size: 0x%lx, res id: %d\n", __FUNCTION__, MemoryAddress,
-             (size_t)bo->size, bo->real.res_id);
+  if (bo && (bo->bo_type & VHSA_BO_CLGL)) return vhsakmt_remove_clgl_bo(dev, bo);
 
-  if (bo->bo_type & VHSA_BO_CLGL)
-    return vhsakmt_remove_clgl_bo(dev, bo);
-  else {
-    vhsakmt_remove_bo(dev, bo);
-    free(bo);
+  if (!dev->use_svm) {
+    return vhsakmt_deregister_userptr_non_svm(dev, MemoryAddress);
   }
 
   return 0;
