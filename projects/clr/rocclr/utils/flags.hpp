@@ -271,8 +271,10 @@ release(bool, DEBUG_CLR_KERNARG_HDP_FLUSH_WA, false,                          \
         "Toggle kernel arg copy workaround")                                  \
 release(bool, DEBUG_CLR_SKIP_RELEASE_SCOPE, false,                            \
         "Forces release scope to SCOPE_NONE for aql packets")                 \
-release(bool, DEBUG_HIP_DYNAMIC_QUEUES, false,                                \
-        "Forces dynamic queue management")                                    \
+release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 0,                                    \
+        "Dynamic queue management: 0=off, 1=Round-Robin, 2=Queue depth")      \
+release(bool, DEBUG_HIP_EXCLUSIVE_NULL_STREAM, false,                         \
+        "Give null streams dedicated queues, excluded from pool management")  \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \

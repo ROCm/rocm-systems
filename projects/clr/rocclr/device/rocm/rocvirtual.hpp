@@ -334,7 +334,8 @@ class VirtualGPU : public device::VirtualDevice {
 
   VirtualGPU(Device& device, bool profiling = false, bool cooperative = false,
              const std::vector<uint32_t>& cuMask = {},
-             amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal);
+             amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
+             bool is_null_stream = false);
   ~VirtualGPU();
 
   bool create();
@@ -546,16 +547,35 @@ class VirtualGPU : public device::VirtualDevice {
   //! Returns true if the queue is considered as idle. That means all submitted packets are complete.
   //! Note: it doesn't track the state of caches
   bool IsQueueIdle() const {
-    bool result = false;
-    // Make sure the last packet contained a completion signal
-    if (last_barrier_index_ == last_write_index_) {
-      if ((last_write_index_ == 0) && (last_completion_signal_.handle == 0)) {
-        result = true;
-      } else {
-        result = (hsa_signal_load_relaxed(last_completion_signal_) == 0);
-      }
+    if (gpu_queue_ == nullptr) {
+      return true;
     }
-    return result;
+
+    // Use wptr/rptr to accurately determine if queue has pending work
+    uint64_t wptr = Hsa::queue_load_write_index_relaxed(gpu_queue_);
+    uint64_t rptr = Hsa::queue_load_read_index_relaxed(gpu_queue_);
+
+    // Queue is idle if read pointer has caught up to write pointer
+    if (wptr == rptr) {
+      return true;
+    }
+
+    // Fallback: check completion signal if available (for backwards compatibility)
+    if (last_barrier_index_ == last_write_index_ && last_completion_signal_.handle != 0) {
+      return (Hsa::signal_load_relaxed(last_completion_signal_) == 0);
+    }
+
+    return false;
+  }
+
+  //! Get the current queue depth (number of pending packets)
+  uint64_t GetQueueDepth() const {
+    if (gpu_queue_ == nullptr) {
+      return 0;
+    }
+    uint64_t wptr = Hsa::queue_load_write_index_relaxed(gpu_queue_);
+    uint64_t rptr = Hsa::queue_load_read_index_relaxed(gpu_queue_);
+    return wptr - rptr;
   }
 
   std::vector<amd::Memory*> pinnedMems_;   //!< Pinned memory list
@@ -614,7 +634,8 @@ class VirtualGPU : public device::VirtualDevice {
 
   //!< bit-vector representing the CU mask. Each active bit represents using one CU
   const std::vector<uint32_t> cuMask_;
-  amd::CommandQueue::Priority priority_; //!< The priority for the hsa queue
+  amd::CommandQueue::Priority priority_;  //!< The priority for the hsa queue
+  bool is_null_stream_;                   //!< TRUE if this VirtualGPU is for a HIP null stream
 
   cl_command_type copy_command_type_;   //!< Type of the copy command, used for ROC profiler
                                         //!< OCL doesn't distinguish diffrent copy types,

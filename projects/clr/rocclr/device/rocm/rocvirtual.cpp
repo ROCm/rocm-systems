@@ -916,8 +916,10 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 
 // ================================================================================================
 uint64_t VirtualGPU::getQueueID() {
-  amd::ScopedLock lock(execution());
-  if (gpu_queue_ == nullptr) {
+
+  // Null streams keep their dedicated queue, never acquire from pool
+  if (!is_null_stream_ && gpu_queue_ == nullptr) {
+    amd::ScopedLock lock(execution());
     gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
   }
   return gpu_queue_->id;
@@ -1409,8 +1411,8 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
 
 // ================================================================================================
 VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
-                       const std::vector<uint32_t>& cuMask,
-                       amd::CommandQueue::Priority priority)
+                       const std::vector<uint32_t>& cuMask, amd::CommandQueue::Priority priority,
+                       bool is_null_stream)
     : device::VirtualDevice(device),
       state_(0),
       gpu_queue_(nullptr),
@@ -1430,8 +1432,8 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       copy_command_type_(0),
       fence_state_(Device::CacheState::kCacheStateInvalid),
       fence_dirty_(false),
-      lastUsedSdmaEngineMask_(0)
-{
+      lastUsedSdmaEngineMask_(0),
+      is_null_stream_(is_null_stream) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
   printfdbg_ = nullptr;
@@ -1479,7 +1481,8 @@ VirtualGPU::~VirtualGPU() {
 
   if (tracking_created_) {
     amd::ScopedLock l(execution());
-    if (gpu_queue_ == nullptr) {
+    // Null streams keep their dedicated queue, never acquire from pool
+    if (!is_null_stream_ && gpu_queue_ == nullptr) {
       gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
     }
     // Release the resources of signal
@@ -1522,7 +1525,17 @@ VirtualGPU::~VirtualGPU() {
   }
 
   if (gpu_queue_ != nullptr) {
-    roc_device_.releaseQueue(gpu_queue_, cuMask_, cooperative_);
+    // For null streams, just mark it for cleanup but DON'T destroy it here
+    // The Device destructor will handle destroying the null stream queue
+    if (is_null_stream_) {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+              "Releasing null stream queue %p (will be destroyed by Device destructor)",
+              gpu_queue_->base_address);
+      // Don't destroy the queue here, just clear our reference
+      gpu_queue_ = nullptr;
+    } else {
+      roc_device_.releaseQueue(gpu_queue_, cuMask_, cooperative_);
+    }
   }
 }
 
@@ -1530,7 +1543,8 @@ VirtualGPU::~VirtualGPU() {
 bool VirtualGPU::create() {
   // Pick a reasonable queue size
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
-  gpu_queue_ = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_);
+  gpu_queue_ = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
+                                         is_null_stream_);
   if (!gpu_queue_) return false;
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
@@ -1693,17 +1707,23 @@ address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
 // ================================================================================================
 void VirtualGPU::ReleaseAllHwQueues() {
   if (roc_device_.settings().dynamic_queues_ &&
-      (roc_device_.NumNormalQueues() > GPU_MAX_HW_QUEUES)) {
+      (roc_device_.NumNormalQueues() > roc_device_.settings().max_hw_queues_)) {
     // Lock the device to make the following thread safe
-    amd::ScopedLock lock(roc_device_.vgpusAccess());
-    for (uint idx = 0; idx < roc_device_.vgpus().size(); ++idx) {
-      roc_device_.vgpus()[idx]->ReleaseHwQueue();
-    }
+    // amd::ScopedLock lock(roc_device_.vgpusAccess());
+    // for (uint idx = 0; idx < roc_device_.vgpus().size(); ++idx) {
+    //   roc_device_.vgpus()[idx]->ReleaseHwQueue();
+    // }
+    ReleaseHwQueue();
   }
 }
 
 // ================================================================================================
 void VirtualGPU::ReleaseHwQueue() {
+  // Null streams keep their dedicated queue, never release to pool
+  if (is_null_stream_) {
+    return;
+  }
+
   // Try to release normal queue to the pool of active queues
   if (roc_device_.settings().dynamic_queues_ &&
       (priority_ == amd::CommandQueue::Priority::Normal) &&
@@ -1725,7 +1745,8 @@ void VirtualGPU::ReleaseHwQueue() {
 * and then calls start() to get the current host timestamp.
 */
 void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
-  if (gpu_queue_ == nullptr) {
+  // Null streams keep their dedicated queue, never acquire from pool
+  if (!is_null_stream_ && gpu_queue_ == nullptr) {
     gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
   }
   // Track the current command
