@@ -301,10 +301,6 @@ if(rocprofiler-sdk-rocpd_FOUND)
             set(_INCLUDE_PATH "${_ROCPD_PREFIX}/${_SUFFIX}")
             if(EXISTS "${_INCLUDE_PATH}/sql.h")
                 set(ROCPROFSYS_ROCPD_HAS_SQL_H TRUE)
-                message(
-                    STATUS
-                    "Found rocprofiler-sdk-rocpd with sql.h support in: ${_INCLUDE_PATH}"
-                )
                 break()
             endif()
         endforeach()
@@ -322,12 +318,21 @@ if(rocprofiler-sdk-rocpd_FOUND)
             INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
         )
 
-        message(STATUS "rocprofiler-sdk-rocpd found - using latest schema files")
+        message(
+            STATUS
+            "rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
+        )
+    else()
+        message(
+            STATUS
+            "rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
+        )
     endif()
+else()
+    message(STATUS "rocprofiler-sdk-rocpd not found - using local schema files")
 endif()
 
 if(NOT ROCPROFSYS_USE_ROCPD_LIBRARY)
-    message(STATUS "rocprofiler-sdk-rocpd not found - using local schema files")
     rocprofsys_configure_rocpd_schema_files()
 endif()
 
