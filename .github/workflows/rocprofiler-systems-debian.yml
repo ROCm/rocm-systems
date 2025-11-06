@@ -55,16 +55,6 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@v1.3.0
-      with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: true
-
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-systems/
