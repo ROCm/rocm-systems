@@ -31,79 +31,79 @@ import json
 from pathlib import Path
 
 
-# def test_json_data(json_data):
-#     data = json_data["rocprofiler-sdk-tool"]
-#     strings = data["strings"]
-#     assert "att_filenames" in strings.keys()
-#     att_files = data["strings"]["att_filenames"]
-#     assert len(att_files) > 0
+def test_json_data(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+    strings = data["strings"]
+    assert "att_filenames" in strings.keys()
+    att_files = data["strings"]["att_filenames"]
+    assert len(att_files) > 0
 
 
-# def test_code_object_memory(code_object_file_path, json_data, output_path):
+def test_code_object_memory(code_object_file_path, json_data, output_path):
 
-#     data = json_data["rocprofiler-sdk-tool"]
-#     tool_memory_load = data["strings"]["code_object_snapshot_filenames"]
-#     gfx_pattern = "gfx[a-z0-9]+"
-#     match = re.search(gfx_pattern, tool_memory_load[1])
-#     assert match != None
-#     gpu_name = match.group(0)
+    data = json_data["rocprofiler-sdk-tool"]
+    tool_memory_load = data["strings"]["code_object_snapshot_filenames"]
+    gfx_pattern = "gfx[a-z0-9]+"
+    match = re.search(gfx_pattern, tool_memory_load[1])
+    assert match != None
+    gpu_name = match.group(0)
 
-#     read_bytes = lambda filename: open(os.path.join(output_path, filename), "rb").read()
-#     # Loads all saved code objects
-#     tool_memory = [read_bytes(saved) for saved in tool_memory_load[1:]]
+    read_bytes = lambda filename: open(os.path.join(output_path, filename), "rb").read()
+    # Loads all saved code objects
+    tool_memory = [read_bytes(saved) for saved in tool_memory_load[1:]]
 
-#     found = False
-#     for hsa_file in code_object_file_path["hsa_memory_load"]:
+    found = False
+    for hsa_file in code_object_file_path["hsa_memory_load"]:
 
-#         m = re.search(gfx_pattern, hsa_file)
-#         assert m != None
-#         gpu = m.group(0)
+        m = re.search(gfx_pattern, hsa_file)
+        assert m != None
+        gpu = m.group(0)
 
-#         if gpu == gpu_name:
-#             found = True
-#             hsa_memory_bytes = open(hsa_file, "rb").read()
-#             # Checks if hsa_file is one of the saved code objects
-#             assert any([hsa_memory_bytes == fs for fs in tool_memory])
-#             break
-#     assert found == True
+        if gpu == gpu_name:
+            found = True
+            hsa_memory_bytes = open(hsa_file, "rb").read()
+            # Checks if hsa_file is one of the saved code objects
+            assert any([hsa_memory_bytes == fs for fs in tool_memory])
+            break
+    assert found == True
 
 
-# def test_realtime_clock(output_path):
+def test_realtime_clock(output_path):
 
-#     def verify_sorted(timestamps):
+    def verify_sorted(timestamps):
 
-#         # Sort by shader_clock (index 0)
-#         timestamps_sorted = sorted(timestamps, key=lambda ts: ts[0])
-#         # Ensure realtime clock is non descreasing
-#         assert all(
-#             curr[1] >= prev[1]
-#             for prev, curr in zip(timestamps_sorted, timestamps_sorted[1:])
-#         )
+        # Sort by shader_clock (index 0)
+        timestamps_sorted = sorted(timestamps, key=lambda ts: ts[0])
+        # Ensure realtime clock is non descreasing
+        assert all(
+            curr[1] >= prev[1]
+            for prev, curr in zip(timestamps_sorted, timestamps_sorted[1:])
+        )
 
-#     def verify_gfxclock(timestamps, rt_frequency):
+    def verify_gfxclock(timestamps, rt_frequency):
 
-#         delta_shader_clock = timestamps[-1][0] - timestamps[0][0]
-#         delta_realtime_ts = timestamps[-1][1] - timestamps[0][1]
-#         gfxclock = rt_frequency * delta_shader_clock / delta_realtime_ts
+        delta_shader_clock = timestamps[-1][0] - timestamps[0][0]
+        delta_realtime_ts = timestamps[-1][1] - timestamps[0][1]
+        gfxclock = rt_frequency * delta_shader_clock / delta_realtime_ts
 
-#         # gfxclock must be positive
-#         assert gfxclock > 0
-#         # gfxclock must be <10GHz
-#         assert gfxclock < 1e10
+        # gfxclock must be positive
+        assert gfxclock > 0
+        # gfxclock must be <10GHz
+        assert gfxclock < 1e10
 
-#     pattern = os.path.join(output_path, "ui_output_*", "realtime.json")
-#     for rt_file in glob.glob(pattern):
-#         with open(rt_file, "r", encoding="utf-8") as f:
-#             json_file = json.load(f)
+    pattern = os.path.join(output_path, "ui_output_*", "realtime.json")
+    for rt_file in glob.glob(pattern):
+        with open(rt_file, "r", encoding="utf-8") as f:
+            json_file = json.load(f)
 
-#         frequency = json_file["metadata"]["frequency"]
-#         # frequency = 0 means aqlprofile is not instrumented
-#         if frequency > 0:
-#             for key, value in json_file.items():
-#                 # Exclude metadata and single-clock timestamps
-#                 if "metadata" not in key and len(value) >= 2:
-#                     verify_sorted(value)
-#                     verify_gfxclock(value, frequency)
+        frequency = json_file["metadata"]["frequency"]
+        # frequency = 0 means aqlprofile is not instrumented
+        if frequency > 0:
+            for key, value in json_file.items():
+                # Exclude metadata and single-clock timestamps
+                if "metadata" not in key and len(value) >= 2:
+                    verify_sorted(value)
+                    verify_gfxclock(value, frequency)
 
 
 def test_other_simd_data(att_other_simd_out_dir_path):
@@ -129,9 +129,9 @@ def test_other_simd_data(att_other_simd_out_dir_path):
 
     for ui_dispatch_dir in att_ui_dispatch_dirs:
         with open(ui_dispatch_dir / "filenames.json", "r") as inp:
-            filennames_json = json.load(inp)
+            filenames_json = json.load(inp)
 
-        listed_file_names = filennames_json["other_simd_filenames"]
+        listed_file_names = filenames_json["other_simd_filenames"]
         assert len(listed_file_names) > 0, "other_simd_filenames is empty."
 
         other_simd_files_found = find_other_simd_files(ui_dispatch_dir)
@@ -147,11 +147,11 @@ def test_other_simd_data(att_other_simd_out_dir_path):
 
                 assert (
                     file[1] == other_simd_file_data["begin_time"]
-                ), "begin time mistach filenames.json and other_simd_se*_*.json"
+                ), "begin time mismatch filenames.json and other_simd_se*_*.json"
 
                 assert (
                     file[2] == other_simd_file_data["end_time"]
-                ), "end time mistach filenames.json and other_simd_se*_*.json"
+                ), "end time mismatch filenames.json and other_simd_se*_*.json"
 
                 assert (
                     other_simd_file_data["instructions_count"] > 0

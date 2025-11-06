@@ -287,18 +287,18 @@ set_tests_properties(
 
 # Other SIMD file tests
 set(IS_DISABLED_OTHER_SIMD ON)
-list(GET rocprofiler-sdk-tests-gfx-info 0 openmp-tools-gpu-0-gfx-info)
-if("${openmp-tools-gpu-0-gfx-info}" MATCHES "^(gfx(11|12)[0-9][0-9])$")
+list(GET rocprofiler-sdk-tests-gfx-info 0 att-gpu-0-gfx-info)
+if("${att-gpu-0-gfx-info}" MATCHES "^(gfx(11|12)[0-9][0-9])$")
     set(IS_DISABLED_OTHER_SIMD OFF)
 endif()
 
 add_test(
-    NAME rocprofv3-test-att-other-smid-execute
+    NAME rocprofv3-test-att-other-simd-execute
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
             ${CMAKE_CURRENT_BINARY_DIR}/att-other-simd --att -- $<TARGET_FILE:vector-ops>)
 
 set_tests_properties(
-    rocprofv3-test-att-other-smid-execute
+    rocprofv3-test-att-other-simd-execute
     PROPERTIES TIMEOUT
                45
                LABELS
@@ -308,14 +308,24 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               ${IS_DISABLED})
+               ${IS_DISABLED_OTHER_SIMD})
 
-add_test(NAME rocprofv3-test-att-other-smid-validate
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                 --att-other-simd-out-dir ${CMAKE_CURRENT_BINARY_DIR}/att-other-simd)
+add_test(
+    NAME rocprofv3-test-att-other-simd-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py -k
+        test_other_simd_data --att-other-simd-out-dir
+        ${CMAKE_CURRENT_BINARY_DIR}/att-other-simd)
 
 set_tests_properties(
-    rocprofv3-test-att-other-smid-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               rocprofv3-test-att-other-smid-execute FAIL_REGULAR_EXPRESSION
-               "AssertionError")
+    rocprofv3-test-att-other-simd-validate
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               rocprofv3-test-att-other-simd-execute
+               FAIL_REGULAR_EXPRESSION
+               "AssertionError"
+               DISABLED
+               ${IS_DISABLED_OTHER_SIMD})
