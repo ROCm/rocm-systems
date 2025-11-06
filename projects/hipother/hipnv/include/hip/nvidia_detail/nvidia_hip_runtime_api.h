@@ -43,6 +43,7 @@ THE SOFTWARE.
 #define CUDA_12000 12000
 #define CUDA_12020 12020
 #define CUDA_12030 12030
+#define CUDA_13000 13000
 
 #ifdef __cplusplus
 extern "C" {
@@ -1727,6 +1728,13 @@ inline static enum cudaChannelFormatKind hipChannelFormatKindToCudaChannelFormat
   }
 }
 
+inline static CUmemLocation hipMemLocationToCUmemLocation(const hipMemLocation* loc) {
+  CUmemLocation cuLoc;
+  cuLoc.id = loc->id;
+  cuLoc.type = (CUmemLocationType)loc->type;
+  return cuLoc;
+}
+
 typedef enum cudaExternalMemoryHandleType hipExternalMemoryHandleType;
 #define hipExternalMemoryHandleTypeOpaqueFd cudaExternalMemoryHandleTypeOpaqueFd
 #define hipExternalMemoryHandleTypeOpaqueWin32 cudaExternalMemoryHandleTypeOpaqueWin32
@@ -2086,6 +2094,24 @@ inline static hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t coun
   return hipCUDAErrorTohipError(cudaMemPrefetchAsync_v2(dev_ptr, count, location, flags, stream));
 #endif
 }
+
+#if CUDA_VERSION >= CUDA_13000
+inline static hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                                  hipMemLocation* locations,
+                                                  size_t* location_indices, size_t num_locations,
+                                                  unsigned long long flags, hipStream_t stream) {
+  if (locations == nullptr) {
+    return hipCUResultTohipError(cuMemPrefetchBatchAsync(
+      reinterpret_cast<CUdeviceptr*>(dev_ptrs), sizes, count, nullptr, location_indices, num_locations, flags, stream));
+  }
+  CUmemLocation cu_locations[num_locations];
+  for (size_t i = 0; i < num_locations; i++) {
+    cu_locations[i] = hipMemLocationToCUmemLocation(reinterpret_cast<const hipMemLocation*>(&locations[i]));
+  }
+  return hipCUResultTohipError(cuMemPrefetchBatchAsync(
+      reinterpret_cast<CUdeviceptr*>(dev_ptrs), sizes, count, cu_locations, location_indices, num_locations, flags, stream));
+}
+#endif
 
 inline static hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                                          hipMemLocation location) {
@@ -3087,12 +3113,6 @@ inline static hipMemAllocationProp CUmemAllocationPropToHipMemAllocationProp(
   hipProp.allocFlags.reserved[2] = prop->allocFlags.reserved[2];
   hipProp.allocFlags.reserved[3] = prop->allocFlags.reserved[3];
   return hipProp;
-}
-inline static CUmemLocation hipMemLocationToCUmemLocation(const hipMemLocation* loc) {
-  CUmemLocation cuLoc;
-  cuLoc.id = loc->id;
-  cuLoc.type = (CUmemLocationType)loc->type;
-  return cuLoc;
 }
 inline static CUmemAccessDesc* hipMemAccessDescToCUmemAccessDesc(const hipMemAccessDesc* desc,
                                                                  size_t count) {

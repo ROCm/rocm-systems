@@ -17,6 +17,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipLibraryGetKernelCount` gets kernel count in library
     - `hipStreamCopyAttributes` copies attributes from source stream to destination stream
     - `hipOccupancyAvailableDynamicSMemPerBlock` Returns dynamic shared memory available per block when launching numBlocks blocks on CU.
+    - `hipMemPrefetchBatchAsync` Prefetches a batch of memory ranges to the specified locations
 
 ## HIP 7.1 for ROCm 7.1
 

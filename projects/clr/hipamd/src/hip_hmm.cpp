@@ -31,6 +31,10 @@ namespace hip {
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocation location,
                                 hipStream_t stream);
+hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                     hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                     size_t num_prefetch_locs, unsigned long long flags,
+                                     hipStream_t stream);
 hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                          hipMemLocation location);
 
@@ -117,6 +121,19 @@ hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocat
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(ihipMemPrefetchAsync(dev_ptr, count, location, stream));
+}
+
+// ================================================================================================
+hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                    size_t num_prefetch_locs, unsigned long long flags,
+                                    hipStream_t stream) {
+  HIP_INIT_API(hipMemPrefetchBatchAsync, dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs,
+               num_prefetch_locs, flags, stream);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  HIP_RETURN(ihipMemPrefetchBatchAsync(dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs,
+                                       num_prefetch_locs, flags, stream));
 }
 
 // ================================================================================================
@@ -349,6 +366,123 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   }
   command->enqueue();
   command->release();
+  return hipSuccess;
+}
+// ================================================================================================
+hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                     hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                     size_t num_prefetch_locs, unsigned long long flags,
+                                     hipStream_t stream) {
+  if ((dev_ptrs == nullptr) || (sizes == nullptr) || (prefetch_locs == nullptr) ||
+      (prefetch_loc_idxs == nullptr)) {
+    return hipErrorInvalidValue;
+  }
+
+  if ((count == 0) || (num_prefetch_locs == 0) || (num_prefetch_locs > count)) {
+    return hipErrorInvalidValue;
+  }
+
+  if ((flags != 0) || (stream == nullptr)) {
+    return hipErrorInvalidValue;
+  }
+
+  if (prefetch_loc_idxs[0] != 0) {
+    return hipErrorInvalidValue;
+  }
+
+  for (size_t i = 0; i < num_prefetch_locs; i++) {
+    if (prefetch_loc_idxs[i] >= count) {
+      return hipErrorInvalidValue;
+    }
+    if (i > 0 && prefetch_loc_idxs[i] < prefetch_loc_idxs[i - 1]) {
+      return hipErrorInvalidValue;
+    }
+  }
+
+  getStreamPerThread(stream);
+
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  // Create a mapping from each operation index to its corresponding location index.
+  std::vector<size_t> op_to_loc_mapping(count);
+  size_t current_loc = 0;
+  for (size_t op = 0; op < count; op++) {
+    if (current_loc + 1 < num_prefetch_locs && op >= prefetch_loc_idxs[current_loc + 1]) {
+      current_loc++;
+    }
+    op_to_loc_mapping[op] = current_loc;
+  }
+
+  amd::SvmPrefetchBatchAsyncCommand* command = nullptr;
+  {
+    std::vector<const void*> dev_ptrs_vec(count);
+    std::vector<size_t> sizes_vec(count);
+    std::vector<uint8_t> cpu_access_vec(count);
+    std::vector<int> target_devices_vec(count);
+    std::vector<amd::Device*> devices_vec(count);
+
+    // Validate and prepare each operation
+    for (size_t op_idx = 0; op_idx < count; op_idx++) {
+      const void* dev_ptr = dev_ptrs[op_idx];
+      size_t size = sizes[op_idx];
+
+      if (size == 0) {
+        return hipErrorInvalidValue;
+      }
+
+      if (dev_ptr == nullptr) {
+        return hipErrorInvalidValue;
+      }
+
+      size_t loc_idx = op_to_loc_mapping[op_idx];
+      hipMemLocation location = prefetch_locs[loc_idx];
+
+      size_t offset = 0;
+      amd::Memory* mem_obj = getMemoryObject(dev_ptr, offset);
+      if ((mem_obj != nullptr) && (size > (mem_obj->getSize() - offset))) {
+        return hipErrorInvalidValue;
+      }
+
+      const bool is_device = (location.type == hipMemLocationTypeDevice);
+      int target_device = is_device ? location.id : hipCpuDeviceId;
+
+      amd::Device* dev = nullptr;
+      if (is_device) {
+        if (static_cast<size_t>(target_device) >= g_devices.size()) {
+          return hipErrorInvalidDevice;
+        }
+        dev = g_devices[target_device]->devices()[0];
+        // For non-managed memory prefetching to device, device must support pageable memory access
+        // Managed memory is identified by CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR flags
+        const bool is_managed_memory =
+            (mem_obj != nullptr) &&
+            (mem_obj->getMemFlags() & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR));
+        if (!is_managed_memory && !dev->info().hmmCpuMemoryAccessible_) {
+          return hipErrorInvalidValue;
+        }
+      }
+
+      dev_ptrs_vec[op_idx] = dev_ptr;
+      sizes_vec[op_idx] = size;
+      cpu_access_vec[op_idx] = !is_device ? 1 : 0;
+      target_devices_vec[op_idx] = target_device;
+      devices_vec[op_idx] = dev;
+    }
+
+    amd::Command::EventWaitList wait_list;
+    command = new amd::SvmPrefetchBatchAsyncCommand(
+        *hip_stream, wait_list, std::move(dev_ptrs_vec), std::move(sizes_vec),
+        std::move(cpu_access_vec), std::move(target_devices_vec), std::move(devices_vec));
+  }
+  if (command == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+  command->enqueue();
+  command->release();
+
   return hipSuccess;
 }
 // ================================================================================================

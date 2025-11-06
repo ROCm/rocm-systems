@@ -380,6 +380,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd);
   void submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& cmd);
   void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd);
+  void submitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd);
 
   virtual void submitSignal(amd::SignalCommand& cmd) {}
   virtual void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) {}

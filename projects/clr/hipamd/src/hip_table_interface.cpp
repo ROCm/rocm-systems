@@ -1036,6 +1036,13 @@ hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocat
   return hip::GetHipDispatchTable()->hipMemPrefetchAsync_v2_fn(dev_ptr, count, location, flags,
                                                                stream);
 }
+hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                    size_t num_prefetch_locs, unsigned long long flags,
+                                    hipStream_t stream) {
+  return hip::GetHipDispatchTable()->hipMemPrefetchBatchAsync_fn(
+      dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs, num_prefetch_locs, flags, stream);
+}
 hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
   return hip::GetHipDispatchTable()->hipMemPtrGetInfo_fn(ptr, size);
 }

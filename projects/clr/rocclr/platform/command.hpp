@@ -1880,6 +1880,47 @@ class SvmPrefetchAsyncCommand : public Command {
   int numa_id() const { return numa_id_; }
 };
 
+/*! \brief      Batch prefetch command for SVM memory
+ *
+ *  \details    Prefetches multiple SVM memory ranges into their destination devices or CPU
+ */
+class SvmPrefetchBatchAsyncCommand : public Command {
+  std::vector<const void*> dev_ptrs_;  //!< Array of device pointers to memory for prefetch
+  std::vector<size_t> sizes_;          //!< Array of sizes for prefetch
+  std::vector<uint8_t> cpu_access_;  //!< Array indicating CPU access for each operation (as uint8_t
+                                     //!< for contiguous storage)
+  std::vector<int> target_devices_;  //!< Array of target device IDs (one per operation)
+  std::vector<amd::Device*> devices_;  //!< Array of device pointers (one per operation)
+  size_t count_;                       //!< Number of operations
+
+ public:
+  SvmPrefetchBatchAsyncCommand(HostQueue& queue, const EventWaitList& eventWaitList,
+                               std::vector<const void*>&& dev_ptrs, std::vector<size_t>&& sizes,
+                               std::vector<uint8_t>&& cpu_access, std::vector<int>&& target_devices,
+                               std::vector<amd::Device*>&& devices)
+      : Command(queue, 1, eventWaitList),
+        dev_ptrs_(std::move(dev_ptrs)),
+        sizes_(std::move(sizes)),
+        cpu_access_(std::move(cpu_access)),
+        target_devices_(std::move(target_devices)),
+        devices_(std::move(devices)),
+        count_(dev_ptrs_.size()) {
+    assert(sizes_.size() == count_ && "sizes vector must match dev_ptrs size");
+    assert(cpu_access_.size() == count_ && "cpu_access vector must match dev_ptrs size");
+    assert(target_devices_.size() == count_ && "target_devices vector must match dev_ptrs size");
+    assert(devices_.size() == count_ && "devices vector must match dev_ptrs size");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.submitSvmPrefetchBatchAsync(*this); }
+
+  const void** dev_ptrs() const { return const_cast<const void**>(dev_ptrs_.data()); }
+  const size_t* sizes() const { return sizes_.data(); }
+  size_t count() const { return count_; }
+  const uint8_t* cpu_access() const { return cpu_access_.data(); }
+  const int* target_devices() const { return target_devices_.data(); }
+  amd::Device* const* devices() const { return devices_.data(); }
+};
+
 /*! \brief  A virtual map memory command.
  *
  */
@@ -1948,6 +1989,7 @@ union ComputeCommand {
   SvmPrefetchAsyncCommand cmd26;
   VirtualMapCommand cmd27;
   BatchMemoryOperationCommand cmd28;
+  SvmPrefetchBatchAsyncCommand cmd29;
   ComputeCommand() {}
   ~ComputeCommand() {}
 };

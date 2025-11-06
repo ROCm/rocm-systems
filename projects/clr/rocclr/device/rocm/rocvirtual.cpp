@@ -2327,6 +2327,51 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::submitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) {
+  amd::ScopedLock lock(execution());
+  profilingBegin(cmd);
+
+  if (dev().info().hmmSupported_) {
+    auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
+    hsa_signal_t active = Barriers().ActiveSignal(cmd.count(), timestamp_);
+
+    for (size_t i = 0; i < cmd.count(); i++) {
+      const void* dev_ptr = cmd.dev_ptrs()[i];
+      size_t count = cmd.sizes()[i];
+      bool cpu_access = cmd.cpu_access()[i];
+      int target_device = cmd.target_devices()[i];
+      amd::Device* target_dev = cmd.devices()[i];
+
+      hsa_agent_t agent =
+          (cpu_access || (dev().settings().hmmFlags_ & Settings::Hmm::EnableSystemMemory))
+              ? dev().getCpuAgent(target_device)
+              : (static_cast<const roc::Device*>(target_dev))->getBackendDevice();
+
+      hsa_status_t status = Hsa::svm_prefetch_async(const_cast<void*>(dev_ptr), count, agent,
+                                                    wait_events.size(), wait_events.data(), active);
+      ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+              "HSA prefetch batch async[%zu] dev_ptr=0x%zx, count=%zu, wait_event=0x%zx, "
+              "completion_signal=0x%zx",
+              i, const_cast<void*>(dev_ptr), count,
+              (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
+
+      if ((status != HSA_STATUS_SUCCESS)) {
+        Barriers().ResetCurrentSignal();
+        LogError("hsa_amd_svm_prefetch_async failed in batch operation");
+        cmd.setStatus(CL_INVALID_OPERATION);
+        profilingEnd();
+        return;
+      }
+    }
+
+    addSystemScope();
+  } else {
+    LogWarning("hsa_amd_svm_prefetch_async is ignored, because no HMM support");
+  }
+  profilingEnd();
+}
+
+// ================================================================================================
 bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memory& dstMem,
                             bool entire, const amd::Coord3D& srcOrigin,
                             const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
