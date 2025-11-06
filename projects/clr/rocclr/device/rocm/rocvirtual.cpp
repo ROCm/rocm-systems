@@ -226,9 +226,6 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
   auto gpu = ts->gpu();
   gpu->QueuedAsyncHandlers()--;
 
-  // Reset last used SDMA engine mask
-  gpu->setLastUsedSdmaEngine(0);
-
   bool isBlocking = ts->GetBlocking();
 
   // Update the batch, since signal is complete
