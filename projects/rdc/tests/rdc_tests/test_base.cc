@@ -62,12 +62,6 @@ void TestBase::SetUp(void) {
   return;
 }
 
-void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
-  IF_VERB(STANDARD) { std::cout << "\t**Device index: " << dv_ind << std::endl; }
-
-  std::cout << std::setbase(10);
-}
-
 rdc_status_t TestBase::AllocateRDCChannel(void) {
   IF_VERB(STANDARD) { std::cout << "\t**Initializing RDC" << std::endl; }
   rdc_status_t result = rdc_init(0);

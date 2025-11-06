@@ -72,7 +72,6 @@ class TestBase {
   rdc_handle_t rdc_handle;
 
  protected:
-  void PrintDeviceHeader(uint32_t dv_ind);
   rdc_status_t AllocateRDCChannel(void);
   bool standalone_;
 
