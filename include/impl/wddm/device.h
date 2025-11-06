@@ -71,6 +71,18 @@ class WDDMQueue;
 #define IS_OVERLAPPING(start1, size1, start2, size2) \
   ((start1 < (start2 + size2)) && (start2 < (start1 + size1)))
 
+struct SegmentInfo {
+  uint32_t segment_id;
+  uint32_t segment_type;    // 0=aperture, 1=gpu memory, 2=system memory
+  bool aperture;
+  bool system_memory;
+  uint64_t commit_limit;
+
+  SegmentInfo()
+      : segment_id(0), segment_type(0), aperture(false),
+        system_memory(false), commit_limit(0) {}
+};
+
 class WDDMDevice {
 public:
   static constexpr size_t GpuMemoryChunkSize = 2 * (1ULL << 30);   // 2 GB
@@ -203,6 +215,9 @@ private:
   void SetPowerOptimization(bool restore);
   void InitCmdbufInfo(void);
 
+  bool QuerySegmentInfo();
+  bool GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type, uint32_t &segment_id);
+
   D3DKMT_HANDLE adapter_;
   LUID adapter_luid_;
   D3DKMT_HANDLE device_;
@@ -218,7 +233,7 @@ private:
   uint32_t node_id_;
   // device info
   thunk_proxy::DeviceInfo device_info_;
-
+  std::vector<struct SegmentInfo> segment_infos_;
   //CmdUtil cmd_util;
 };
 

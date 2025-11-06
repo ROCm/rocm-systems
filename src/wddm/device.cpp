@@ -68,6 +68,7 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   SetPowerOptimization(false);
   CreatePagingQueue();
   InitCmdbufInfo();
+  QuerySegmentInfo();
 }
 
 WDDMDevice::~WDDMDevice() {
@@ -89,6 +90,66 @@ static NTSTATUS WDDMQueryAdapter(D3DKMT_HANDLE adapter, KMTQUERYADAPTERINFOTYPE 
   args.PrivateDriverDataSize = size;
 
   return DXCORE_CALL(D3DKMTQueryAdapterInfo(&args));
+}
+
+bool WDDMDevice::QuerySegmentInfo()
+{
+  uint32_t segmentCount = 0;
+  segment_infos_.clear();
+
+  // Get the number of segments
+  D3DKMT_QUERYSTATISTICS adapterQuery = {};
+  adapterQuery.Type = D3DKMT_QUERYSTATISTICS_ADAPTER;
+  adapterQuery.AdapterLuid = adapter_luid_;
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTQueryStatistics(&adapterQuery));
+  if (ret == STATUS_SUCCESS) {
+    segmentCount = adapterQuery.QueryResult.AdapterInformation.NbSegments;
+    pr_debug("Total Segments: %u\n", segmentCount);
+  } else {
+    pr_err("Failed to query adapter info\n");
+    return false;
+  }
+
+  for (uint32_t i = 0; i < segmentCount; i++) {
+
+    D3DKMT_QUERYSTATISTICS segQuery = {};
+    segQuery.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+    segQuery.AdapterLuid = adapter_luid_;
+    segQuery.QuerySegment.SegmentId = i;
+
+    ret = DXCORE_CALL(D3DKMTQueryStatistics(&segQuery));
+    if (ret != STATUS_SUCCESS) {
+      pr_err("Failed to query segment %u info\n", i);
+      return false;
+    }
+
+    auto& seg = segQuery.QueryResult.SegmentInformation;
+
+    SegmentInfo info;
+    info.segment_id = i;
+    info.segment_type = seg.SegmentProperties.SegmentType;
+    info.system_memory = seg.SegmentProperties.SystemMemory;
+    info.aperture = seg.Aperture;
+    info.commit_limit = seg.CommitLimit;
+
+    segment_infos_.push_back(info);
+  }
+
+  return true;
+}
+
+bool WDDMDevice::GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
+                              uint32_t &segment_id)
+{
+  for (const auto& seg_info : segment_infos_) {
+    if (seg_info.segment_type == segment_type) {
+      segment_id = seg_info.segment_id;
+      return true;
+    }
+  }
+  pr_err("Failed to get segment id for type %u\n", segment_type);
+  return false;
 }
 
 uint64_t WDDMDevice::VramAvail(void) {
