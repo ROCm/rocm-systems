@@ -226,11 +226,18 @@ TEST_CASE("Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator",
     return;
   }
   char command_op[BUFFER_LEN];
+  int j = 0;
   std::map<int, std::vector<char>> dNameMap;
   while (fgets(command_op, BUFFER_LEN, fpipe)) {
     command_op[strcspn(command_op, "\n")] = '\0';
     std::string rocmCommand_line(command_op);
     int dNameLen = strlen(rocmCommand_line.c_str());
+
+    std::vector<char> dName(dNameLen + 1, 0);
+    std::memcpy(dName.data(), &rocmCommand_line[0], dNameLen);
+    dNameMap[j] = dName;
+
+    j++;
   }
 
   auto visible_devices = parseVisibleDevices();
