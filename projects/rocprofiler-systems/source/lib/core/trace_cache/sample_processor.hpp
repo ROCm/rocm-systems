@@ -43,10 +43,12 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
+#if(ROCPROFILER_VERSION >= 600)
     void handle(const memory_allocate_sample& sample)
     {
         static_cast<T*>(this)->handle(sample);
     }
+#endif
 
     void handle(const region_sample& sample) { static_cast<T*>(this)->handle(sample); }
 
@@ -72,9 +74,11 @@ protected:
 
 struct processor_view_t
 {
-    using kernel_dispatch_fn_t  = void (*)(void*, const kernel_dispatch_sample&) noexcept;
-    using memory_copy_fn_t      = void (*)(void*, const memory_copy_sample&) noexcept;
-    using memory_allocate_fn_t  = void (*)(void*, const memory_allocate_sample&) noexcept;
+    using kernel_dispatch_fn_t = void (*)(void*, const kernel_dispatch_sample&) noexcept;
+    using memory_copy_fn_t     = void (*)(void*, const memory_copy_sample&) noexcept;
+#if(ROCPROFILER_VERSION >= 600)
+    using memory_allocate_fn_t = void (*)(void*, const memory_allocate_sample&) noexcept;
+#endif
     using region_fn_t           = void (*)(void*, const region_sample&) noexcept;
     using in_time_sample_fn_t   = void (*)(void*, const in_time_sample&) noexcept;
     using pmc_event_fn_t        = void (*)(void*, const pmc_event_with_sample&) noexcept;
@@ -85,9 +89,11 @@ struct processor_view_t
 
     struct vtable_t
     {
-        kernel_dispatch_fn_t  handle_kernel_dispatch;
-        memory_copy_fn_t      handle_memory_copy;
-        memory_allocate_fn_t  handle_memory_allocate;
+        kernel_dispatch_fn_t handle_kernel_dispatch;
+        memory_copy_fn_t     handle_memory_copy;
+#if(ROCPROFILER_VERSION >= 600)
+        memory_allocate_fn_t handle_memory_allocate;
+#endif
         region_fn_t           handle_region;
         in_time_sample_fn_t   handle_in_time_sample;
         pmc_event_fn_t        handle_pmc_event;
@@ -120,10 +126,12 @@ struct processor_view_t
         m_vtable->handle_memory_copy(m_object, sample);
     }
 
+#if(ROCPROFILER_VERSION >= 600)
     ROCPROFSYS_INLINE void handle(const memory_allocate_sample& sample) const noexcept
     {
         m_vtable->handle_memory_allocate(m_object, sample);
     }
+#endif
 
     ROCPROFSYS_INLINE void handle(const region_sample& sample) const noexcept
     {
@@ -166,9 +174,11 @@ private:
             +[](void* obj, const memory_copy_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
+#if(ROCPROFILER_VERSION >= 600)
             +[](void* obj, const memory_allocate_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
+#endif
             +[](void* obj, const region_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },

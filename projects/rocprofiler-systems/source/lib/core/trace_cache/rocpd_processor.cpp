@@ -152,6 +152,7 @@ rocpd_processor::handle(const memory_copy_sample& _mcs)
         queue_id, _mcs.stream_handle, name_primary_key, event_primary_key);
 }
 
+#if(ROCPROFILER_VERSION >= 600)
 void
 rocpd_processor::handle(const memory_allocate_sample& _mas)
 {
@@ -232,6 +233,7 @@ rocpd_processor::handle(const memory_allocate_sample& _mas)
             _mas.allocation_size, queue_id, _mas.stream_handle, event_primary_key);
     }
 }
+#endif
 
 void
 rocpd_processor::handle(const region_sample& _rs)
