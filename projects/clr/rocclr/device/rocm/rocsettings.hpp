@@ -41,17 +41,18 @@ class Settings : public device::Settings {
 
   union {
     struct {
-      uint doublePrecision_ : 1;        //!< Enables double precision support
-      uint enableLocalMemory_ : 1;      //!< Enable GPUVM memory
-      uint enableNCMode_ : 1;           //!< Enable Non Coherent mode for system memory
-      uint imageDMA_ : 1;               //!< Enable direct image DMA transfers
-      uint imageBufferWar_ : 1;         //!< Image buffer workaround for Gfx10
-      uint cpu_wait_for_signal_ : 1;    //!< Wait for HSA signal on CPU
-      uint system_scope_signal_ : 1;    //!< HSA signal is visibile to the entire system
-      uint fgs_kernel_arg_ : 1;         //!< Use fine grain kernel arg segment
-      uint barrier_value_packet_ : 1;   //!< Barrier value packet functionality
-      uint dynamic_queues_ : 1;         //!< Dynamic queues management
-      uint reserved_ : 22;
+      uint doublePrecision_ : 1;       //!< Enables double precision support
+      uint enableLocalMemory_ : 1;     //!< Enable GPUVM memory
+      uint enableNCMode_ : 1;          //!< Enable Non Coherent mode for system memory
+      uint imageDMA_ : 1;              //!< Enable direct image DMA transfers
+      uint imageBufferWar_ : 1;        //!< Image buffer workaround for Gfx10
+      uint cpu_wait_for_signal_ : 1;   //!< Wait for HSA signal on CPU
+      uint system_scope_signal_ : 1;   //!< HSA signal is visibile to the entire system
+      uint fgs_kernel_arg_ : 1;        //!< Use fine grain kernel arg segment
+      uint barrier_value_packet_ : 1;  //!< Barrier value packet functionality
+      uint dynamic_queues_ : 2;        //!< Dynamic queues: 0=off, 1=RR, 2=depth, 3=weighted
+      uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
+      uint reserved_ : 20;
     };
     uint value_;
   };
@@ -73,8 +74,9 @@ class Settings : public device::Settings {
   size_t sdmaCopyThreshold_;  //!< Use SDMA to copy above this size
   size_t sdma_p2p_threshold_; //!< Use SDMA in P2P above this size
 
-  uint32_t  hmmFlags_;        //!< HMM functionality control flags
-  uint32_t  limit_blit_wg_;   //!< The number of workgroups for blit execution
+  uint32_t hmmFlags_;       //!< HMM functionality control flags
+  uint32_t limit_blit_wg_;  //!< The number of workgroups for blit execution
+  uint32_t max_hw_queues_;  //!< Effective maximum HW queues (accounts for null stream reservation)
 
   //! Default constructor
   Settings();

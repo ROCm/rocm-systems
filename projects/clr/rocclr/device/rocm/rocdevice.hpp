@@ -507,10 +507,10 @@ class Device : public NullDevice {
 
   //! Acquire HSA queue. This method can create a new HSA queue or
   //! share previously created
-  hsa_queue_t* acquireQueue(uint32_t queue_size_hint, bool coop_queue = false,
-                            const std::vector<uint32_t>& cuMask = {},
-                            amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
-                            bool managed = false);
+  hsa_queue_t* acquireQueue(
+      uint32_t queue_size_hint, bool coop_queue = false, const std::vector<uint32_t>& cuMask = {},
+      amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
+      bool managed = false, bool is_null_stream = false);
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {},
@@ -622,25 +622,51 @@ class Device : public NullDevice {
   struct QueueInfo {
     int refCount;           //! Reference counter. Shows how many time the queue was shared
     void* hostcallBuffer_;  //! Host call buffer for the HSA queue
+
+    // Constructor
+    QueueInfo() : refCount(0), hostcallBuffer_(nullptr) {}
+
+    //! Get the current hardware queue depth (wptr - rptr)
+    static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
+      uint64_t wptr = hsa_queue_load_write_index_relaxed(queue);
+      uint64_t rptr = hsa_queue_load_read_index_relaxed(queue);
+      return wptr - rptr;
+    }
+
+    //! Get a combined metric for queue selection (lower is better)
+    uint64_t GetLoadMetric(hsa_queue_t* queue) const {
+      // Metric = current_depth + (refCount * 1000)
+      // - A queue with depth=100 and 2 users gets score 102000 (100 + 2 * 1000)
+      // - A queue with depth=500 and 0 users gets score 500 (500 + 0 * 1000)
+      // - Result: pick the 2-user queue
+      return GetHwQueueDepth(queue) + static_cast<uint64_t>(refCount * 1000);
+    }
   };
 
   struct QueueCompare {
+    const Device* device_;
+
+    QueueCompare(const Device* dev = nullptr) : device_(dev) {}
+
     // Customized queue compare operator to make sure the queues are sorted in the creation order
     bool operator()(hsa_queue_t* lhs, hsa_queue_t* rhs) const {
-      if (DEBUG_HIP_DYNAMIC_QUEUES) {
-        return (lhs->id < rhs->id) ? true : false;
+      if (device_ && device_->settings().dynamic_queues_ > 0) {
+        return lhs->id < rhs->id;  // Sort by ID for dynamic queues
       } else {
-        return (lhs < rhs) ? true : false;
+        return lhs < rhs;  // Sort by pointer address for mode 0
       }
     }
   };
   //! a vector for keeping Pool of HSA queues with low, normal and high priorities for recycling
   std::vector<std::map<hsa_queue_t*, QueueInfo, QueueCompare>> queuePool_;
-  amd::Monitor active_queue_access_;                //!< Lock to serialise virtual gpu list access
-  std::atomic<uint32_t> num_normal_queues_{0};      //!< The total number of allocated normal queues
+  //! Track the single null stream queue (not pooled)
+  hsa_queue_t* nullStreamQueue_ = nullptr;
+  void* nullStreamHostcallBuffer_ = nullptr;
+  amd::Monitor active_queue_access_;            //!< Lock to serialise virtual gpu list access
+  std::atomic<uint32_t> num_normal_queues_{0};  //!< The total number of allocated normal queues
 
   //! returns a hsa queue from queuePool with least refCount and updates the refCount as well
-  hsa_queue_t* getQueueFromPool(const uint qIndex);
+  hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false);
 
   void* coopHostcallBuffer_;
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.

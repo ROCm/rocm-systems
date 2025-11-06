@@ -175,23 +175,23 @@ bool NullDevice::create(const amd::Isa &isa) {
 }
 
 Device::Device(hsa_agent_t bkendDevice)
-    : mapCacheOps_(nullptr)
-    , mapCache_(nullptr)
-    , bkendDevice_(bkendDevice)
-    , pciDeviceId_(0)
-    , gpuvm_segment_max_alloc_(0)
-    , alloc_granularity_(0)
-    , xferQueue_(nullptr)
-    , freeMem_(0)
-    , vgpusAccess_(true) /* Virtual GPU List Ops Lock */
-    , hsa_exclusive_gpu_access_(false)
-    , queuePool_(QueuePriority::Total)
-    , coopHostcallBuffer_(nullptr)
-    , queueWithCUMaskPool_(QueuePriority::Total)
-    , numOfVgpus_(0)
-    , preferred_numa_node_(0)
-    , maxSdmaReadMask_(0)
-    , maxSdmaWriteMask_(0) {
+    : mapCacheOps_(nullptr),
+      mapCache_(nullptr),
+      bkendDevice_(bkendDevice),
+      pciDeviceId_(0),
+      gpuvm_segment_max_alloc_(0),
+      alloc_granularity_(0),
+      xferQueue_(nullptr),
+      freeMem_(0),
+      vgpusAccess_(true), /* Virtual GPU List Ops Lock */
+      hsa_exclusive_gpu_access_(false),
+      queuePool_(QueuePriority::Total),
+      coopHostcallBuffer_(nullptr),
+      queueWithCUMaskPool_(QueuePriority::Total),
+      numOfVgpus_(0),
+      preferred_numa_node_(0),
+      maxSdmaReadMask_(0),
+      maxSdmaWriteMask_(0) {
   group_segment_.handle = 0;
   system_segment_.handle = 0;
   system_coarse_segment_.handle = 0;
@@ -202,6 +202,14 @@ Device::Device(hsa_agent_t bkendDevice)
   prefetch_signal_.handle = 0;
   isXgmi_ = false;
   cache_state_ = Device::CacheState::kCacheStateInvalid;
+
+  // Initialize queuePool_ and queueWithCUMaskPool_ with proper comparator that has device pointer
+  queuePool_.clear();
+  queueWithCUMaskPool_.clear();
+  for (size_t i = 0; i < QueuePriority::Total; ++i) {
+    queuePool_.emplace_back(QueueCompare(this));
+    queueWithCUMaskPool_.emplace_back(QueueCompare(this));
+  }
 }
 
 void Device::setupCpuAgent() {
@@ -273,6 +281,11 @@ Device::~Device() {
       glb_ctx_ = nullptr;
   }
 
+  // Destroy transfer queue FIRST (before destroying queues in pool)
+  // because its destructor will call releaseQueue()
+  delete xferQueue_;
+  xferQueue_ = nullptr;
+
   for (auto& it : queuePool_) {
     for (auto qIter = it.begin(); qIter != it.end(); ) {
       hsa_queue_t* queue = qIter->first;
@@ -291,8 +304,21 @@ Device::~Device() {
   }
   queuePool_.clear();
 
-  // Destroy transfer queue
-  delete xferQueue_;
+  // Clean up null stream queue and its hostcall buffer if it exists
+  if (nullStreamQueue_) {
+    if (nullStreamHostcallBuffer_) {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+              "Deleting hostcall buffer %p for null stream queue %p", nullStreamHostcallBuffer_,
+              nullStreamQueue_->base_address);
+      amd::disableHostcalls(nullStreamHostcallBuffer_);
+      context().svmFree(nullStreamHostcallBuffer_);
+      nullStreamHostcallBuffer_ = nullptr;
+    }
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+            "Destroying null stream queue %p", nullStreamQueue_->base_address);
+    hsa_queue_destroy(nullStreamQueue_);
+    nullStreamQueue_ = nullptr;
+  }
 
   delete blitProgram_;
 
@@ -1788,6 +1814,7 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
 
   bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
   bool cooperative = false;
+  bool is_null_stream = (queue != nullptr) && queue->isNullStream();
 
   // If amd command queue is null, then it's an internal device queue
   if (queue == nullptr) {
@@ -1799,10 +1826,10 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
   // queue creation time.
   const std::vector<uint32_t> defaultCuMask = {};
   bool q = (queue != nullptr);
-  VirtualGPU* virtualDevice = new VirtualGPU(*this, profiling, cooperative,
-                                            q ? queue->cuMask() : defaultCuMask,
-                                            q ? queue->priority()
-                                              : amd::CommandQueue::Priority::Normal);
+  VirtualGPU* virtualDevice =
+      new VirtualGPU(*this, profiling, cooperative, q ? queue->cuMask() : defaultCuMask,
+                     q ? queue->priority() : amd::CommandQueue::Priority::Normal,
+                     is_null_stream);
 
   if (!virtualDevice->create()) {
     delete virtualDevice;
@@ -2917,30 +2944,46 @@ void Device::getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* 
 }
 
 // ================================================================================================
-hsa_queue_t* Device::getQueueFromPool(const uint qIndex) {
-  // Check if queue with refCount 0 is available to use
-  if (queuePool_[qIndex].size() < GPU_MAX_HW_QUEUES) {
-    for (auto& it : queuePool_[qIndex]) {
-      if (it.second.refCount == 0) {
-        it.second.refCount++;
-        ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Selected queue refCount: %p (%d)",
-                it.first->base_address, it.second.refCount);
-        return it.first;
-      }
+hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse) {
+  // Only reuse queues when we've reached the maximum limit, unless forced
+  // Below the limit, return nullptr to allow creating new queues
+  if (!force_reuse && queuePool_[qIndex].size() < settings().max_hw_queues_) {
+    return nullptr;
+  }
+
+  // We've hit the limit, must reuse - find the queue with lowest load metric
+  if (qIndex < QueuePriority::Total && queuePool_[qIndex].size() > 0) {
+    typedef decltype(queuePool_)::value_type::const_reference PoolRef;
+
+    // Select queue based on dynamic_queues_ mode
+    decltype(queuePool_[qIndex].begin()) lowest;
+    uint32_t mode = settings().dynamic_queues_;
+
+    if (mode == 2) {
+      // Mode 2: Queue depth
+      lowest = std::min_element(queuePool_[qIndex].begin(), queuePool_[qIndex].end(),
+                                [](PoolRef A, PoolRef B) {
+                                  return A.second.GetLoadMetric(A.first) <
+                                         B.second.GetLoadMetric(B.first);
+                                });
+    } else {
+      // Mode 0: Map ordered by hsa_queue_t*
+      // Mode 1: Round-Robin(uses queue->id sort)
+      lowest = std::min_element(
+        queuePool_[qIndex].begin(), queuePool_[qIndex].end(),
+                               [](PoolRef A, PoolRef B) {
+                                   return A.second.refCount < B.second.refCount;
+                                });
     }
-  } else {
-    if (qIndex < QueuePriority::Total && queuePool_[qIndex].size() > 0) {
-      // Search through all available queues for the lowest counter.
-      // Note: the map is sorted in the allocation order for possible round-robin selection
-      typedef decltype(queuePool_)::value_type::const_reference PoolRef;
-      auto lowest = std::min_element(
-          queuePool_[qIndex].begin(), queuePool_[qIndex].end(),
-          [](PoolRef A, PoolRef B) { return A.second.refCount < B.second.refCount; });
-      lowest->second.refCount++;
-      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Selected queue refCount: %p (%d)",
-              lowest->first->base_address, lowest->second.refCount);
-      return lowest->first;
-    }
+
+    lowest->second.refCount++;
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+            "Selected queue (mode=%u): %p refCount: %d, depth: %lu, metric: %lu%s",
+            mode, lowest->first->base_address, lowest->second.refCount,
+            QueueInfo::GetHwQueueDepth(lowest->first),
+            lowest->second.GetLoadMetric(lowest->first),
+            force_reuse ? " (forced)" : "");
+    return lowest->first;
   }
   return nullptr;
 }
@@ -2956,20 +2999,8 @@ hsa_queue_t* Device::AcquireActiveNormalQueue() {
 // ================================================================================================
 hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   const std::vector<uint32_t>& cuMask,
-                                  amd::CommandQueue::Priority priority,
-                                  bool managed) {
-  amd::ScopedLock l(active_queue_access_);
-
-  assert(queuePool_[QueuePriority::Low].size() <= GPU_MAX_HW_QUEUES ||
-         queuePool_[QueuePriority::Normal].size() <= GPU_MAX_HW_QUEUES ||
-         queuePool_[QueuePriority::High].size() <= GPU_MAX_HW_QUEUES);
-
-  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Number of allocated hardware queues with low priority: %d,"
-      " with normal priority: %d, with high priority: %d, maximum per priority is: %d",
-      queuePool_[QueuePriority::Low].size(),
-      queuePool_[QueuePriority::Normal].size(),
-      queuePool_[QueuePriority::High].size(), GPU_MAX_HW_QUEUES);
-
+                                  amd::CommandQueue::Priority priority, bool managed,
+                                  bool is_null_stream) {
   hsa_amd_queue_priority_t queue_priority;
   uint qIndex;
   switch (priority) {
@@ -2989,22 +3020,42 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
       break;
   }
 
-  // If we have reached the max number of queues, reuse an existing queue with the matching queue priority,
-  // choosing the one with the least number of users.
-  // Note: Don't attempt to reuse the cooperative queue, since it's single per device
-  if (!coop_queue && (cuMask.size() == 0) &&
-      ((queuePool_[qIndex].size() == GPU_MAX_HW_QUEUES) || queuePool_[qIndex].size() > 0)) {
-    hsa_queue_t* queue = getQueueFromPool(qIndex);
-    if (queue != nullptr) {
-      if (!managed && (qIndex  == QueuePriority::Normal)) {
-        num_normal_queues_++;
-      }
-      return queue;
-    }
+  // Honor DEBUG_HIP_IGNORE_STREAM_PRIORITY flag - force all streams to normal priority
+  if (DEBUG_HIP_IGNORE_STREAM_PRIORITY) {
+    queue_priority = HSA_AMD_QUEUE_PRIORITY_NORMAL;
+    qIndex = QueuePriority::Normal;
   }
 
-  // Else create a new queue. This also includes the initial state where there
-  // is no queue.
+  { // Lock
+    amd::ScopedLock l(active_queue_access_);
+
+    assert(queuePool_[QueuePriority::Low].size() <= settings().max_hw_queues_ ||
+           queuePool_[QueuePriority::Normal].size() <= settings().max_hw_queues_ ||
+           queuePool_[QueuePriority::High].size() <= settings().max_hw_queues_);
+
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+            "Number of allocated hardware queues with low priority: %d,"
+            " with normal priority: %d, with high priority: %d, maximum per priority is: %d",
+            queuePool_[QueuePriority::Low].size(), queuePool_[QueuePriority::Normal].size(),
+            queuePool_[QueuePriority::High].size(), settings().max_hw_queues_);
+
+    // If we have reached the max number of queues, reuse an existing queue with the matching queue
+    // priority, choosing the one with the least number of users. Note: Don't attempt to reuse the
+    // cooperative queue, since it's single per device. Also, null streams ALWAYS get a dedicated
+    // queue, never from the pool.
+    if (!coop_queue && !is_null_stream && (cuMask.size() == 0) &&
+        (queuePool_[qIndex].size() >= settings().max_hw_queues_)) {
+      hsa_queue_t* queue = getQueueFromPool(qIndex);
+      if (queue != nullptr) {
+        if (!managed && (qIndex == QueuePriority::Normal)) {
+          num_normal_queues_++;
+        }
+        return queue;
+      }
+    }
+  } // Lock release
+
+  // Create a new queue.
   uint32_t queue_max_packets = 0;
   if (HSA_STATUS_SUCCESS !=
       hsa_agent_get_info(bkendDevice_, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max_packets)) {
@@ -3026,11 +3077,15 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                           &queue) != HSA_STATUS_SUCCESS) {
     queue_size >>= 1;
     if (queue_size < 64) {
-      // if a queue with the same requested priority available from the pool, returns it here
-      if (!coop_queue && (cuMask.size() == 0) && (queuePool_[qIndex].size() > 0)) {
-        return getQueueFromPool(qIndex);
+      LogError("Device::acquireQueue: hsa_queue_create failed!");
+      // If we can't create even a small queue, try to reuse any existing queue
+      if (!coop_queue && (cuMask.size() == 0)) {
+        amd::ScopedLock l(active_queue_access_);
+        if (queuePool_[qIndex].size() > 0) {
+          bool kForceReuse = true;
+          return getQueueFromPool(qIndex, kForceReuse);
+        }
       }
-      DevLogError("Device::acquireQueue: hsa_queue_create failed!");
       return nullptr;
     }
   }
@@ -3118,6 +3173,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
       return nullptr;
     }
     if (cuMask.size() != 0) {
+      amd::ScopedLock l(active_queue_access_);
       // add queues with custom CU mask into their special pool to keep track
       // of mapping of these queues to their associated queueInfo (i.e., hostcall buffers)
       auto result = queueWithCUMaskPool_[qIndex].emplace(std::make_pair(queue, QueueInfo()));
@@ -3134,14 +3190,26 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     // per device.
     return queue;
   }
-  auto result = queuePool_[qIndex].emplace(std::make_pair(queue, QueueInfo()));
-  assert(result.second && "QueueInfo already exists");
-  auto &qInfo = result.first->second;
-  qInfo.refCount = 1;
-  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d)",
-          result.first->first->base_address, result.first->second.refCount);
-  if (!managed && (cuMask.size() == 0) && (qIndex = QueuePriority::Normal)) {
-    num_normal_queues_++;
+
+  // Skip adding null streams to the queue pool - they get their own dedicated queue
+  if (!is_null_stream) {
+    amd::ScopedLock l(active_queue_access_);
+    auto result = queuePool_[qIndex].emplace(std::make_pair(queue, QueueInfo()));
+    assert(result.second && "QueueInfo already exists");
+    auto& qInfo = result.first->second;
+    qInfo.refCount = 1;
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d)",
+            result.first->first->base_address, result.first->second.refCount);
+    if (!managed && (cuMask.size() == 0) && (qIndex == QueuePriority::Normal)) {
+      num_normal_queues_++;
+    }
+  } else {
+    // Track the single null stream queue (not pooled, but need hostcall buffer tracking)
+    amd::ScopedLock l(active_queue_access_);
+    assert(nullStreamQueue_ == nullptr && "Only one null stream queue should exist per device");
+    nullStreamQueue_ = queue;
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+            "Acquired dedicated queue for null stream: %p (not pooled)", queue->base_address);
   }
   return queue;
 }
@@ -3149,7 +3217,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 // ================================================================================================
 bool Device::ReleaseActiveNormalQueue(hsa_queue_t* queue) {
   // Release a queue if the total number of allocated queues exceeds the max possible
-  if (num_normal_queues_.load() > GPU_MAX_HW_QUEUES) {
+  if (num_normal_queues_.load() > settings().max_hw_queues_) {
     releaseQueue(queue, std::vector<uint32_t>{}, false, true);
     return true;
   } else {
@@ -3158,42 +3226,56 @@ bool Device::ReleaseActiveNormalQueue(hsa_queue_t* queue) {
 }
 
 // ================================================================================================
-void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMask,
-    bool coop_queue, bool managed) {
-  amd::ScopedLock l(active_queue_access_);
-  for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
-    auto qIter = it.find(queue);
-    if (qIter != it.end()) {
-      if (!managed && (cuMask.size() == 0) && (&it == &queuePool_[QueuePriority::Normal])) {
-        num_normal_queues_--;
-      }
-      auto &qInfo = qIter->second;
-      assert(qInfo.refCount > 0);
-      qInfo.refCount--;
-      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "releaseQueue refCount:%p (%d)",
-              qIter->first->base_address, qIter->second.refCount);
-      // hsa queues with cumask set are not being reused. Hence, if the app uses multiple
-      // such queues it can cause memory leak and those must be destroyed here once the
-      // refcount reaches 0.
-      if ((!cuMask.empty()) && (qInfo.refCount == 0)) {
-        if (qInfo.hostcallBuffer_) {
-          ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-                  "Deleting hostcall buffer %p for hardware queue %p",
-                  qInfo.hostcallBuffer_, qIter->first->base_address);
-          amd::disableHostcalls(qInfo.hostcallBuffer_);
-          context().svmFree(qInfo.hostcallBuffer_);
+void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMask, bool coop_queue,
+                          bool managed) {
+  // Defer cleanup operations outside the lock
+  void* hostcallBufferToFree = nullptr;
+  bool shouldDestroyQueue = false;
+
+  { // Lock
+    amd::ScopedLock l(active_queue_access_);
+    for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
+      auto qIter = it.find(queue);
+      if (qIter != it.end()) {
+        if (!managed && (cuMask.size() == 0) && (&it == &queuePool_[QueuePriority::Normal])) {
+          num_normal_queues_--;
         }
-        ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
-                queue->base_address);
-        qIter = it.erase(qIter);
-        hsa_queue_destroy(queue);
+        auto& qInfo = qIter->second;
+        assert(qInfo.refCount > 0);
+        qInfo.refCount--;
+        ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "releaseQueue refCount:%p (%d)",
+                qIter->first->base_address, qIter->second.refCount);
+        // hsa queues with cumask set are not being reused. Hence, if the app uses multiple
+        // such queues it can cause memory leak and those must be destroyed here once the
+        // refcount reaches 0.
+        if ((!cuMask.empty()) && (qInfo.refCount == 0)) {
+          hostcallBufferToFree = qInfo.hostcallBuffer_;
+          shouldDestroyQueue = true;
+          ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+                  queue->base_address);
+          it.erase(qIter);
+        }
+        break;  // Found and processed the queue
       }
     }
+  } // Lock release
+
+  // Perform expensive cleanup operations outside the lock
+  if (shouldDestroyQueue) {
+    if (hostcallBufferToFree) {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+              "Deleting hostcall buffer %p for hardware queue %p", hostcallBufferToFree,
+              queue->base_address);
+      amd::disableHostcalls(hostcallBufferToFree);
+      context().svmFree(hostcallBufferToFree);
+    }
+    hsa_queue_destroy(queue);
   }
-  if (coop_queue) { // cooperative queue
-      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
-               queue->base_address);
-      hsa_queue_destroy(queue);
+
+  if (coop_queue) {  // cooperative queue
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
+            queue->base_address);
+    hsa_queue_destroy(queue);
   }
 
 }
@@ -3201,22 +3283,34 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
 void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
                                         const std::vector<uint32_t>& cuMask) {
   decltype(queuePool_)::value_type::iterator qIter;
+  bool found = false;
+  bool is_null_stream_queue = false;
 
   if (!coop_queue) {
-    for (auto &it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
-      qIter = it.find(queue);
-      if (qIter != it.end()) {
-        break;
+    // Check if this is the null stream queue first
+    {
+      amd::ScopedLock l(active_queue_access_);
+      if (queue == nullStreamQueue_) {
+        is_null_stream_queue = true;
+        if (nullStreamHostcallBuffer_) {
+          return nullStreamHostcallBuffer_;
+        }
       }
     }
-    if (cuMask.size() == 0) {
-      assert(qIter != queuePool_[QueuePriority::High].end());
-    } else {
-      assert(qIter != queueWithCUMaskPool_[QueuePriority::High].end());
-    }
 
-    if (qIter->second.hostcallBuffer_) {
-      return qIter->second.hostcallBuffer_;
+    if (!is_null_stream_queue) {
+      for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
+        qIter = it.find(queue);
+        if (qIter != it.end()) {
+          found = true;
+          break;
+        }
+      }
+      assert(found && "Couldn't find queue");
+
+      if (qIter->second.hostcallBuffer_) {
+        return qIter->second.hostcallBuffer_;
+      }
     }
   } else {
     if (coopHostcallBuffer_) {
@@ -3241,7 +3335,12 @@ void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Created hostcall buffer %p for hardware queue %p", buffer,
           queue->base_address);
   if (!coop_queue) {
-    qIter->second.hostcallBuffer_ = buffer;
+    if (is_null_stream_queue) {
+      amd::ScopedLock l(active_queue_access_);
+      nullStreamHostcallBuffer_ = buffer;
+    } else {
+      qIter->second.hostcallBuffer_ = buffer;
+    }
   } else {
     coopHostcallBuffer_ = buffer;
   }
