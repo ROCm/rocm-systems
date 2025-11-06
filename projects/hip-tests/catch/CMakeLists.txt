@@ -7,7 +7,6 @@ option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
 option(BUILD_UNIT_TESTS "Build unit tests" ON)
 option(BUILD_PERF_TESTS "Build perf tests" OFF)
 option(BUILD_STRESS_TESTS "Build stress tests" OFF)
-option(THEROCK_BUILD_MODE "Option to let hip-tests know if TheRock is being used to build" OFF)
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 option(GENERATE_COVERATE "Generate coverage" OFF)
 
@@ -93,7 +92,8 @@ else()
    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
 endif()
 
-if(NOT THEROCK_BUILD_MODE)
+find_package(Catch2 3.8.1 QUIET)
+if(NOT Catch2_FOUND)
     # Setup catch2 manually
     include(FetchContent)
     FetchContent_Declare(
@@ -103,9 +103,6 @@ if(NOT THEROCK_BUILD_MODE)
         URL_HASH SHA256=18b3f70ac80fccc340d8c6ff0f339b2ae64944782f8d2fca2bd705cf47cadb79
     )
     FetchContent_MakeAvailable(Catch2)
-else()
-    # TheRock has already setup Catch2 for us
-    find_package(Catch2 REQUIRED)
 endif()
 
 include(cmake/hip-tests.cmake)
@@ -262,7 +259,7 @@ set(_subdirs ${_autogen} "subdirs(..)\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
 
 set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
-set(CATCH_ADD_TESTS_SCRIPT ${Catch2_DIR}/CatchAddTests.cmake)
+set(CATCH_ADD_TESTS_SCRIPT ${Catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
      DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 file(COPY ${CATCH_ADD_TESTS_SCRIPT}
@@ -352,8 +349,3 @@ else()
 endif()
 
 
-# get_cmake_property(_variableNames VARIABLES)
-# list (SORT _variableNames)
-# foreach (_variableName ${_variableNames})
-#   message(STATUS "${_variableName}=${${_variableName}}")
-# endforeach()
