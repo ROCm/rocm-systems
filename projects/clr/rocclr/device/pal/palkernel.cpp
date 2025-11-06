@@ -173,9 +173,9 @@ const pal::Program& Kernel::prog() const {
 }
 
 std::pair<hsa_kernel_dispatch_packet_t* /* packet address */, uint64_t /* packet id */>
-HSAILKernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
-                           const amd::NDRangeContainer& sizes, const_address params,
-			   size_t ldsAddress, uint64_t vmDefQueue, uint64_t* vmParentWrap) const {
+Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
+                      const amd::NDRangeContainer& sizes, const_address params,
+                      size_t ldsAddress, uint64_t vmDefQueue, uint64_t* vmParentWrap) const {
   // Provide private and local heap addresses
   static constexpr uint AddressShift = LP64_SWITCH(0, 32);
   const_address parameters = params;
