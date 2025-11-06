@@ -352,15 +352,15 @@ Memory* Device::p2p_stage_ = nullptr;
 cl_int Device::gpu_error_ = CL_SUCCESS;
 
 std::shared_mutex MemObjMap::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
-std::map<uintptr_t, amd::Memory*> MemObjMap::MemObjMap_ ROCCLR_INIT_PRIORITY(101);
+std::map<uintptr_t, MemObjMapEntry> MemObjMap::MemObjMap_ ROCCLR_INIT_PRIORITY(101);
 std::map<uintptr_t, amd::Memory*> MemObjMap::VirtualMemObjMap_ ROCCLR_INIT_PRIORITY(101);
 std::map<MemObjMap::IpcMemHandle, amd::Memory*> MemObjMap::IpcHandleMemObjMap_ ROCCLR_INIT_PRIORITY(
     101);
 
 
-void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
+void MemObjMap::AddMemObj(const void* k, amd::Memory* v, size_t offset) {
   std::unique_lock lock(AllocatedLock_);
-  auto rval = MemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
+  auto rval = MemObjMap_.insert({reinterpret_cast<uintptr_t>(k), MemObjMapEntry{v, offset}});
   if (!rval.second) {
     DevLogPrintfError("Memobj map already has an entry for ptr: 0x%x",
                       reinterpret_cast<uintptr_t>(k));
@@ -382,12 +382,13 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset) {
   }
 
   --it;
-  amd::Memory* mem = it->second;
+  amd::Memory* mem = it->second.memObj;
+  uintptr_t base_address = it->first - it->second.offset;
   size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? sizeof(mem->getUserData().hsa_handle)
                                                              : mem->getSize();
-  if (key >= it->first && key < (it->first + mem_size)) {
+  if (key >= base_address && key < (base_address + mem_size)) {
     if (offset != nullptr) {
-      *offset = key - it->first;
+      *offset = key - base_address;
     }
     // the k is in the range
     return mem;
@@ -404,9 +405,9 @@ void MemObjMap::UpdateAccess(amd::Device* peerDev) {
   // hsa_amd_agents_allow_access was not called because there was no peer
   std::shared_lock lock(AllocatedLock_);
   for (auto it : MemObjMap_) {
-    const std::vector<Device*>& devices = it.second->getContext().devices();
+    const std::vector<Device*>& devices = it.second.memObj->getContext().devices();
     if (devices.size() == 1 && devices[0] == peerDev) {
-      device::Memory* devMem = it.second->getDeviceMemory(*devices[0]);
+      device::Memory* devMem = it.second.memObj->getDeviceMemory(*devices[0]);
       if (!devMem->getAllowedPeerAccess()) {
         peerDev->deviceAllowAccess(reinterpret_cast<void*>(it.first));
         devMem->setAllowedPeerAccess(true);
@@ -419,7 +420,7 @@ void MemObjMap::Purge(amd::Device* dev) {
   assert(dev != nullptr);
   std::unique_lock lock(AllocatedLock_);
   for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
-    amd::Memory* memObj = it->second;
+    amd::Memory* memObj = it->second.memObj;
     unsigned int flags = memObj->getMemFlags();
     const std::vector<Device*>& devices = memObj->getContext().devices();
     if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {

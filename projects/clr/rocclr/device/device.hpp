@@ -1359,6 +1359,11 @@ namespace amd {
 
 typedef enum SyncPolicy { Auto = 1, Spin = 2, Yield = 3, Blocking = 4 } SyncPolicy;
 
+struct MemObjMapEntry {
+  amd::Memory* memObj;
+  size_t offset;
+};
+
 //! MemoryObject map lookup  class
 class MemObjMap : public AllStatic {
  public:
@@ -1378,7 +1383,7 @@ class MemObjMap : public AllStatic {
     }
   };
   //!< add the host mem pointer and buffer in the container
-  static void AddMemObj(const void* k, amd::Memory* v);
+  static void AddMemObj(const void* k, amd::Memory* v, size_t offset = 0);
 
   //!< Remove an entry of mem object from the container
   static void RemoveMemObj(const void* k);
@@ -1405,7 +1410,7 @@ class MemObjMap : public AllStatic {
 
  private:
   //!< the mem object<->hostptr information container
-  static std::map<uintptr_t, amd::Memory*> MemObjMap_;
+  static std::map<uintptr_t, MemObjMapEntry> MemObjMap_;
   //!< the virtual mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> VirtualMemObjMap_;
   //!< Shared read/write lock
