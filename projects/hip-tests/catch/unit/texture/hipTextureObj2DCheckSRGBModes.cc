@@ -154,11 +154,6 @@ line1:
 
 TEST_CASE("Unit_hipTextureObj2DCheckRGBAModes") {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
   (void) hipGetLastError();  // Prevent negative tests affecting this
 
   SECTION("RGBA 2D hipAddressModeClamp, hipFilterModePoint, regularCoords") {
@@ -205,11 +200,6 @@ TEST_CASE("Unit_hipTextureObj2DCheckRGBAModes") {
 
 TEST_CASE("Unit_hipTextureObj2DCheckSRGBAModes") {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   SECTION("SRGBA 2D hipAddressModeClamp, hipFilterModePoint, regularCoords") {
     runTest<hipAddressModeClamp, hipFilterModePoint, false, true>(256, 256, -3.9, 6.1);
