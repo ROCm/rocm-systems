@@ -130,11 +130,12 @@ def create_df_kernel_top_stats(
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
 
     # First, create a dispatches file used to populate global vars
-    dispatch_columns = (
-        ["Node", "Dispatch_ID", "Kernel_Name", "GPU_ID"]
-        if "Node" in df.columns
-        else ["Dispatch_ID", "Kernel_Name", "GPU_ID"]
-    )
+    dispatch_columns = ["Kernel_Name", "GPU_ID"]
+    if "Dispatch_ID" in df.columns:
+        dispatch_columns.insert(0, "Dispatch_ID")
+    if "Node" in df.columns:
+        dispatch_columns.insert(0, "Node")
+
     dispatch_info = df[dispatch_columns]
     dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
     dispatch_info.to_csv(dispatch_output_path, index=False)

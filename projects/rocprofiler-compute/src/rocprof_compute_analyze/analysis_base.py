@@ -49,6 +49,7 @@ from utils.utils import (
     get_panel_alias,
     get_uuid,
     is_workload_empty,
+    merge_counters_iteration_multiplex,
     merge_counters_spatial_multiplex,
 )
 
@@ -101,6 +102,12 @@ class OmniAnalyze_Base:
     @demarcate
     def spatial_multiplex_merge_counters(self, df: pd.DataFrame) -> pd.DataFrame:
         return merge_counters_spatial_multiplex(df)
+
+    @demarcate
+    def iteration_multiplex_merge_counters(
+        self, df: pd.DataFrame, policy: str
+    ) -> pd.DataFrame:
+        return merge_counters_iteration_multiplex(df, policy)
 
     @demarcate
     def generate_configs(

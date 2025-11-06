@@ -1474,6 +1474,109 @@ def reverse_multi_index_df_pmc(
     return dfs, coll_levels
 
 
+def merge_counters_iteration_multiplex(
+    df_multi_index: pd.DataFrame,
+    policy: str,
+) -> pd.DataFrame:
+    """
+    For iteration multiplexing, this merges counter values for the same kernel that
+    runs on different devices. For time stamp, start time stamp will use median
+    while for end time stamp, it will be equal to the summation between median
+    start stamp and median delta time.
+    """
+    non_counter_column_index = [
+        "Dispatch_ID",
+        "GPU_ID",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+        "Scratch_Per_Workitem",
+        "Arch_VGPR",
+        "Accum_VGPR",
+        "SGPR",
+        "Kernel_Name",
+        "Start_Timestamp",
+        "End_Timestamp",
+        "Kernel_ID",
+    ]
+
+    expired_column_index = [
+        "Dispatch_ID",
+    ]
+
+    result_dfs: list[pd.DataFrame] = []
+
+    # TODO: will need to optimize to avoid this conversion to single index format
+    # and do merge directly on multi-index dataframe
+    dfs, coll_levels = reverse_multi_index_df_pmc(df_multi_index)
+
+    for df in dfs:
+        kernel_name_column_name = "Kernel_Name"
+        if "Kernel_Name" not in df and "Name" in df:
+            kernel_name_column_name = "Name"
+
+        # Find the values in Kernel_Name that occur more than once
+        unique_occurences = (
+            df.groupby(kernel_name_column_name)
+            if policy == "kernel"
+            else df.groupby([
+                kernel_name_column_name,
+                "Grid_Size",
+                "Workgroup_Size",
+                "LDS_Per_Workgroup",
+            ])
+        )
+
+        # Define a list to store the merged rows
+        result_data: list[dict[str, Any]] = []
+
+        for _, group in unique_occurences:
+            # Create a dictionary to store the merged row for the current group
+            merged_row: dict[str, Any] = {}
+
+            # Process non-counter columns
+            for col in [
+                col
+                for col in non_counter_column_index
+                if col not in expired_column_index
+            ]:
+                if col == "End_Timestamp":
+                    # For End_Timestamp, calculate the median delta time
+                    delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
+                    median_delta_time = delta_time.median()
+                    merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
+                elif pd.api.types.is_numeric_dtype(group[col]):
+                    # For other non-counter numeric columns, take the median value
+                    merged_row[col] = group[col].median()
+                else:
+                    # For other non-counter columns, take the first occurrence (0th row)
+                    merged_row[col] = group.iloc[0][col]
+
+            # Process counter columns (assumed to be all columns not in
+            # non_counter_column_index)
+            counter_columns = [
+                col for col in group.columns if col not in non_counter_column_index
+            ]
+            for counter_col in counter_columns:
+                # for counter columns, take the first non-none (or non-nan) value
+                current_valid_counter_group = group[group[counter_col].notna()]
+                first_valid_value = (
+                    current_valid_counter_group.iloc[0][counter_col]
+                    if len(current_valid_counter_group) > 0
+                    else None
+                )
+                merged_row[counter_col] = first_valid_value
+
+            # Append the merged row to the result list
+            result_data.append(merged_row)
+
+        # Create a new DataFrame from the merged rows
+        result_dfs.append(pd.DataFrame(result_data))
+
+    final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
+    return final_df
+
+
 def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFrame:
     """
     For spatial multiplexing, this merges counter values for the same kernel that

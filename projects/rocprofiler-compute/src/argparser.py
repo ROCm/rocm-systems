@@ -280,9 +280,9 @@ Examples:
             "\t\t\tChoose the iteration multiplexing policy: "
             "(DEFAULT: kernel_launch_params).\n"
             # "\t\t\t   simple (i.e. Round robin over all kernel dispatches\n"
-            "\t\t\t   kernel (i.e. Round robin over unique kernel dispatches)\n"
+            "\t\t\t   kernel (i.e. Round robin over unique kernel invokations.)\n"
             "\t\t\t   kernel_launch_params (i.e. Round robin over "
-            "dispatches with unique kernel and launch parameters)"
+            "kernel invokations with unique kernel and launch parameters)"
         ),
     )
 
