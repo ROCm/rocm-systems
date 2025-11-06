@@ -151,12 +151,9 @@ jobs:
           path: |
             ${{ inputs.source_directory }}/${{ env.BUILD_DIR }}
             ${{ inputs.source_directory }}/${{ env.BUILD_DIR }}/**/.*
-          key: abi-guard-build-cache-${{ runner.os }}-head-${{ steps.hash.outputs.hash }}
+          key: abi-guard-build-cache-${{ runner.os }}-head-${{ steps.hash.outputs.hash }}-${{ hashFiles('.github/workflows/abi-guard.yml') }}
           restore-keys: |
             abi-guard-build-cache-${{ runner.os }}-head-
-
-      - name: Clean
-        run: rm -rf ${{ inputs.source_directory }}/${BUILD_DIR}
 
       - name: Configure
         run: cmake -S ${{ inputs.source_directory }} -B ${{ inputs.source_directory }}/${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
@@ -249,12 +246,9 @@ jobs:
           path: |
             ${{ inputs.source_directory }}/${{ env.BUILD_DIR }}
             ${{ inputs.source_directory }}/${{ env.BUILD_DIR }}/**/.*
-          key: abi-guard-build-cache-${{ runner.os }}-baseline-${{ steps.hash.outputs.hash }}
+          key: abi-guard-build-cache-${{ runner.os }}-baseline-${{ steps.hash.outputs.hash }}-${{ hashFiles('.github/workflows/abi-guard.yml') }}
           restore-keys: |
             abi-guard-build-cache-${{ runner.os }}-baseline-
-
-      - name: Clean
-        run: rm -rf ${{ inputs.source_directory }}/${BUILD_DIR}
 
       - name: Configure
         run: cmake -S ${{ inputs.source_directory }} -B ${{ inputs.source_directory }}/${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
