@@ -37,7 +37,7 @@ env:
   ROCM_VERSION: "7.0.0"
   PYTHON_VENV_PATH: "rocprofiler-sdk"
   PYTHON_VENV_ACTIVATE: "rocprofiler-sdk/bin/activate"
-  GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
+  GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
 
   ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
@@ -62,7 +62,8 @@ env:
   navi4_EXCLUDE_LABEL_REGEX: ""
 
   GLOBAL_CMAKE_OPTIONS: ""
-  DISABLE_ROCR_BUILD: "false"
+  ENABLE_ROCR_BUILD: "true"
+  ENABLE_HIP_CLR_BUILD: "true"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
@@ -227,7 +228,7 @@ jobs:
           echo "✅ ROCProfiler-Register Installation complete!"
 
       - name: Build and Install ROCR-Runtime
-        if: ${{ !contains(env.DISABLE_ROCR_BUILD, 'true') }}
+        if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
@@ -244,7 +245,7 @@ jobs:
           echo "✅ ROCR-Runtime Installation complete!"
 
       - name: Build and Install HIP
-        if: ${{ !contains(env.DISABLE_HIP_BUILD, 'true') }}
+        if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
         shell: bash
         working-directory: projects
         run: |
@@ -525,7 +526,7 @@ jobs:
           echo "✅ ROCProfiler-Register Installation complete!"
 
       - name: Build and Install ROCR-Runtime
-        if: ${{ !contains(env.DISABLE_ROCR_BUILD, 'true') }}
+        if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
@@ -545,7 +546,7 @@ jobs:
           echo "✅ ROCR-Runtime Installation complete!"
 
       - name: Build and Install HIP
-        if: ${{ !contains(env.DISABLE_HIP_BUILD, 'true') }}
+        if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
         shell: bash
         working-directory: projects
         run: |
@@ -615,27 +616,27 @@ jobs:
         timeout-minutes: 30
         shell: bash
         working-directory: projects/rocprofiler-sdk
-        run:
+        run: |
           source ${{ env.PYTHON_VENV_ACTIVATE }}
-          PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
-          python3 ./source/scripts/run-ci.py -B build
-            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
-            --mode ${CI_MODE}
-            --build-jobs 16
-            --site ${{ matrix.system.runner }}
-            --gpu-targets ${{ env.GPU_TARGETS }}
-            --run-attempt ${{ github.run_attempt }}
-            ${{ matrix.system.ci-flags }}
-            --
-            -DROCPROFILER_DEP_ROCMCORE=ON
-            -DROCPROFILER_BUILD_DOCS=OFF
-            -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
-            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
-            -DPython3_EXECUTABLE=$(which python3)
-            ${{ env.GLOBAL_CMAKE_OPTIONS }}
-            --
-            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
-            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+          export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          python3 ./source/scripts/run-ci.py -B build \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
+            --mode ${CI_MODE} \
+            --build-jobs 16 \
+            --site ${{ matrix.system.runner }} \
+            --gpu-targets ${{ env.GPU_TARGETS }} \
+            --run-attempt ${{ github.run_attempt }} \
+            ${{ matrix.system.ci-flags }} \
+            -- \
+            -DROCPROFILER_DEP_ROCMCORE=ON \
+            -DROCPROFILER_BUILD_DOCS=OFF \
+            -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
+            -DPython3_EXECUTABLE=$(which python3) \
+            ${{ env.GLOBAL_CMAKE_OPTIONS }} \
+            -- \
+            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
+            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" \
 
   sanitizers:
     name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
@@ -768,7 +769,7 @@ jobs:
         echo "✅ ROCProfiler-Register Installation complete!"
 
     - name: Build and Install ROCR-Runtime
-      if: ${{ !contains(env.DISABLE_ROCR_BUILD, 'true') }}
+      if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
       shell: bash
       working-directory: projects/rocr-runtime
       run: |
@@ -785,7 +786,7 @@ jobs:
         echo "✅ ROCR-Runtime Installation complete!"
 
     - name: Build and Install HIP
-      if: ${{ !contains(env.DISABLE_HIP_BUILD, 'true') }}
+      if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
       shell: bash
       working-directory: projects
       run: |

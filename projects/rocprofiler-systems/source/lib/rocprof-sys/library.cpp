@@ -45,6 +45,8 @@
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cache_utility.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/experiment.hpp"
@@ -116,6 +118,22 @@ namespace
 {
 auto _timemory_manager  = tim::manager::instance();
 auto _timemory_settings = tim::settings::shared_instance();
+
+void
+set_metadata_process_start_timestamp(int64_t _ts)
+{
+    auto process_info  = trace_cache::get_metadata_registry().get_process_info();
+    process_info.start = _ts;
+    trace_cache::get_metadata_registry().set_process(process_info);
+}
+
+void
+set_metadata_process_end_timestamp(int64_t _ts)
+{
+    auto process_info = trace_cache::get_metadata_registry().get_process_info();
+    process_info.end  = _ts;
+    trace_cache::get_metadata_registry().set_process(process_info);
+}
 
 bool
 ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
@@ -559,6 +577,8 @@ rocprofsys_init_tooling_hidden(void)
         get_main_bundle()->start();
         ROCPROFSYS_DEBUG_F("State: %s -> State::Active\n",
                            std::to_string(get_state()).c_str());
+
+        trace_cache::get_buffer_storage().start_flushing_thread(getpid());
         set_state(State::Active);  // set to active as very last operation
     } };
 
@@ -701,6 +721,8 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         if(get_state() == State::Active) rocprofsys_finalize_hidden();
     });
 
+    set_metadata_process_start_timestamp(comp::wall_clock::record());
+
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(
         get_debug_env() || get_verbose_env() > 2,
         "mode: %s | is binary rewrite: %s | command: %s\n", _mode,
@@ -757,8 +779,13 @@ rocprofsys_finalize_hidden(void)
                                  std::to_string(get_state()).c_str());
         return;
     }
-    else if(_is_child)
+
+    set_metadata_process_end_timestamp(comp::wall_clock::record());
+
+    if(_is_child)
     {
+        set_state(State::Finalized);
+
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
         // Flush buffered traces in case of child process
         if(get_use_rocm())
@@ -767,17 +794,13 @@ rocprofsys_finalize_hidden(void)
             rocprofiler_sdk::shutdown();
         }
 #endif
-        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
-        _manager.post_process();
+        const auto metadata_filepath =
+            trace_cache::get_metadata_filepath(get_root_process_id(), getpid());
+        _manager.get_metadata_registry().save_to_file(metadata_filepath, _agents);
 
-#if ROCPROFSYS_USE_ROCM > 0
-        if(get_use_rocpd())
-        {
-            rocpd::data_processor::get_instance().flush();
-        }
-#endif
-        set_state(State::Finalized);
         std::quick_exit(EXIT_SUCCESS);
         return;
     }
@@ -870,12 +893,6 @@ rocprofsys_finalize_hidden(void)
         rocprofiler_sdk::shutdown();
     }
 #endif
-
-    {
-        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
-        _manager.shutdown();
-        _manager.post_process();
-    }
 
     ROCPROFSYS_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
@@ -1013,6 +1030,12 @@ rocprofsys_finalize_hidden(void)
                                            _perfetto_output_error);
     }
 
+    {
+        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        _manager.shutdown();
+        _manager.post_process_bulk();
+    }
+
     if(_timemory_manager && _timemory_manager != nullptr)
     {
         _timemory_manager->add_metadata([](auto& ar) {
@@ -1067,12 +1090,6 @@ rocprofsys_finalize_hidden(void)
         [](int) {});
 
     common::destroy_static_objects();
-#if ROCPROFSYS_USE_ROCM > 0
-    if(get_use_rocpd())
-    {
-        rocpd::data_processor::get_instance().flush();
-    }
-#endif
 }
 
 //======================================================================================//

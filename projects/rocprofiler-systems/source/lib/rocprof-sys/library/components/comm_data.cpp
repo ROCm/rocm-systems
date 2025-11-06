@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "library/components/comm_data.hpp"
-#include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
@@ -135,9 +134,6 @@ template <typename Track>
 void
 cache_comm_data_events(const uint32_t device_id, int bytes)
 {
-    auto& agents = agent_manager::get_instance();
-    auto  agent  = agents.get_agent_by_type_index(device_id, agent_type::CPU);
-
     static std::mutex _mutex{};
     static uint64_t   value = 0;
     uint64_t          _now  = 0;
@@ -154,12 +150,13 @@ cache_comm_data_events(const uint32_t device_id, int bytes)
     const size_t      correlation_id  = 0;
     const std::string call_stack      = "{}";
     const std::string line_info       = "{}";
-    const size_t      agent_handle    = agent.handle;
 
     trace_cache::get_buffer_storage().store(
         trace_cache::entry_type::pmc_event_with_sample, track_name.c_str(), timestamp_ns,
         event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
-        call_stack.c_str(), line_info.c_str(), agent_handle, track_name.c_str(), value);
+        call_stack.c_str(), line_info.c_str(), device_id,
+        static_cast<uint8_t>(agent_type::CPU), track_name.c_str(),
+        static_cast<double>(value));
 }
 
 }  // namespace

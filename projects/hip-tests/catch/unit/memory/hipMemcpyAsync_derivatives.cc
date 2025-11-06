@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <memcpy1d_tests_common.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include <numeric>
 
 TEST_CASE("Unit_hipMemcpyDtoHAsync_Positive_Basic") {
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
@@ -163,38 +164,34 @@ TEST_CASE("Unit_hipMemcpyDtoDAsync_Negative_Parameters") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipMemcpyDtoHAsync_capturehipMemcpyDtoHAsync") {
-  hipGraph_t graph{nullptr};
-  hipGraphExec_t graphExec{nullptr};
-  hipStream_t stream;
+TEST_CASE("Unit_hipMemcpyDtoHAsync_Capture") {
+  hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
-  int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
-  int* A_d;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), sizeof(int) * kPageSize));
-  for (int i = 0; i < kPageSize; i++) {
-    B_h[i] = i;
-  }
-  HIP_CHECK(hipMemcpyHtoD((hipDeviceptr_t)A_d, B_h, sizeof(int) * kPageSize));
-  // Start Capturing
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpyDtoHAsync(A_h, (hipDeviceptr_t)A_d, sizeof(int) * kPageSize, stream));
-  // End Capture
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
-  // Create and Launch Executable Graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
+  auto host_dst = std::make_unique<int[]>(kPageSize);
+  auto host_src = std::make_unique<int[]>(kPageSize);
+  int* device_src = nullptr;
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_src), sizeof(int) * kPageSize));
+
+  std::iota(host_src.get(), host_src.get() + kPageSize, 0);
+
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(device_src), host_src.get(),
+                          sizeof(int) * kPageSize));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpyDtoHAsync(host_dst.get(), reinterpret_cast<hipDeviceptr_t>(device_src),
+                               sizeof(int) * kPageSize, stream));
+  END_CAPTURE(stream);
+
   HIP_CHECK(hipStreamSynchronize(stream));
-  for (int i = 0; i < kPageSize; i++) {
-    REQUIRE(A_h[i] == B_h[i]);
+
+  for (int i = 0; i < kPageSize; ++i) {
+    REQUIRE(host_dst[i] == host_src[i]);
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec))
-  HIP_CHECK(hipGraphDestroy(graph));
+
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(A_d));
-  free(A_h);
-  free(B_h);
+  HIP_CHECK(hipFree(device_src));
 }
 
 /**
@@ -204,41 +201,32 @@ TEST_CASE("Unit_hipMemcpyDtoHAsync_capturehipMemcpyDtoHAsync") {
  *  to improve code coverage.
  * Test source
  * ------------------------
- *  - unit/memory/hipMemcpyAsync_derivatives.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipMemcpyHtoDAsync_capturehipMemcpyHtoDAsync") {
-  hipGraph_t graph{nullptr};
-  hipGraphExec_t graphExec{nullptr};
-  hipStream_t stream;
+TEST_CASE("Unit_hipMemcpyHtoDAsync_Capture") {
+  hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
-  int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
-  int* A_d;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), sizeof(int) * kPageSize));
-  for (int i = 0; i < kPageSize; i++) {
-    B_h[i] = i;
-  }
-  // Start Capturing
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpyHtoDAsync((hipDeviceptr_t)A_d, B_h, sizeof(int) * kPageSize, stream));
-  // End Capture
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
-  // Create and Launch Executable Graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
+  auto host_src = std::make_unique<int[]>(kPageSize);
+  auto host_dst = std::make_unique<int[]>(kPageSize);
+  int* device_ptr = nullptr;
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_ptr), sizeof(int) * kPageSize));
+
+  std::iota(host_src.get(), host_src.get() + kPageSize, 0);
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(device_ptr), host_src.get(),
+                               sizeof(int) * kPageSize, stream));
+  END_CAPTURE(stream);
+
   HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpyDtoH(A_h, (hipDeviceptr_t)A_d, sizeof(int) * kPageSize));
-  for (int i = 0; i < kPageSize; i++) {
-    REQUIRE(A_h[i] == B_h[i]);
+
+  HIP_CHECK(hipMemcpyDtoH(host_dst.get(), reinterpret_cast<hipDeviceptr_t>(device_ptr),
+                          sizeof(int) * kPageSize));
+  for (int i = 0; i < kPageSize; ++i) {
+    REQUIRE(host_dst[i] == host_src[i]);
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec))
-  HIP_CHECK(hipGraphDestroy(graph));
+
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(A_d));
-  free(A_h);
-  free(B_h);
+  HIP_CHECK(hipFree(device_ptr));
 }

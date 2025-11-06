@@ -61,11 +61,6 @@ TEST_CASE("Unit_hipBindTexture_Positive") {
 TEST_CASE("Unit_hipBindTexture_1DfetchVerification") {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   float* tex_buf;
   float val[N], output[N];
   size_t offset = 0;
@@ -135,16 +130,10 @@ TEST_CASE("Unit_hipBindTexture_Negative") {
   }
 
   SECTION("Invalid hipChannelFormatDesc") {
-    hipChannelFormatDesc invalid_channel_desc;
-#if HT_AMD
-    HIP_CHECK_ERROR(hipBindTexture(&offset, tex_ref, reinterpret_cast<void*>(tex_buf),
-                                   invalid_channel_desc, N * sizeof(float)),
-                    hipErrorInvalidValue);
-#else
+    hipChannelFormatDesc invalid_channel_desc{-1, -1, -1, -1, hipChannelFormatKindSigned};
     HIP_CHECK_ERROR(hipBindTexture(&offset, tex_ref, reinterpret_cast<void*>(tex_buf),
                                    invalid_channel_desc, N * sizeof(float)),
                     hipErrorInvalidChannelDescriptor);
-#endif
   }
 
   if (tex_buf) {

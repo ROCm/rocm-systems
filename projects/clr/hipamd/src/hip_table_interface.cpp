@@ -1337,6 +1337,12 @@ extern "C" hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
 hipError_t hipModuleUnload(hipModule_t module) {
   return hip::GetHipDispatchTable()->hipModuleUnload_fn(module);
 }
+extern "C" hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
+                                                               int numBlocks, int blockSize) {
+  return hip::GetHipDispatchTable()->hipOccupancyAvailableDynamicSMemPerBlock_fn(dynamicSmemSize,
+                                                                                 f, numBlocks,
+                                                                                 blockSize);
+}
 extern "C" hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f,
                                                                    int blockSize,
                                                                    size_t dynSharedMemPerBlk) {
@@ -1395,6 +1401,9 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
 }
 hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode) {
   return hip::GetHipDispatchTable()->hipStreamBeginCapture_fn(stream, mode);
+}
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
+  return hip::GetHipDispatchTable()->hipStreamCopyAttributes_fn(dst, src);
 }
 hipError_t hipStreamCreate(hipStream_t* stream) {
   return hip::GetHipDispatchTable()->hipStreamCreate_fn(stream);
@@ -2037,4 +2046,14 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
   return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count,
                                                                  library);
+}
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library) {
+  return hip::GetHipDispatchTable()->hipLibraryEnumerateKernels_fn(kernels, numKernels, library);
+}
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
+  return hip::GetHipDispatchTable()->hipKernelGetLibrary_fn(library, kernel);
+}
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
+  return hip::GetHipDispatchTable()->hipKernelGetName_fn(name, kernel);
 }

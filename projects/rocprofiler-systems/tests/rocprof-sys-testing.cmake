@@ -25,6 +25,13 @@
 #
 include_guard(DIRECTORY)
 
+set(ROCPROFSYS_ABORT_FAIL_REGEX
+    "### ERROR ###|unknown-hash=|address of faulting memory reference|exiting with non-zero exit code|terminate called after throwing an instance|calling abort.. in |Exit code: [1-9]"
+    CACHE INTERNAL
+    "Regex to catch abnormal exits when a PASS_REGULAR_EXPRESSION is set"
+    FORCE
+)
+
 if(EXISTS /etc/os-release AND NOT IS_DIRECTORY /etc/os-release)
     file(READ /etc/os-release _OS_RELEASE_RAW)
 
@@ -67,6 +74,20 @@ math(EXPR MAX_CAUSAL_ITERATIONS "(${ROCPROFSYS_MAX_THREADS} - 1) / 2")
 if(MAX_CAUSAL_ITERATIONS GREATER 100)
     set(MAX_CAUSAL_ITERATIONS 100)
 endif()
+
+if(
+    DEFINED ROCmVersion_FULL_VERSION
+    AND ROCmVersion_FULL_VERSION VERSION_GREATER_EQUAL "7.0"
+)
+    set(ENABLE_ROCPD_TEST YES)
+else()
+    set(ENABLE_ROCPD_TEST NO)
+endif()
+
+rocprofiler_systems_message(
+    STATUS
+    "ROCm ${ROCmVersion_FULL_VERSION} - Including ROCPD Test: ${ENABLE_ROCPD_TEST}"
+)
 
 if(DEFINED ROCM_PATH)
     set(ROCM_LLVM_LIB_PATH "${ROCM_PATH}/lib/llvm/lib")
@@ -119,16 +140,6 @@ set(_lock_environment
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_TIMELINE_PROFILE=OFF"
     "ROCPROFSYS_VERBOSE=2"
-    "${_test_library_path}"
-)
-
-set(_ompt_environment
-    "ROCPROFSYS_TRACE=ON"
-    "ROCPROFSYS_PROFILE=ON"
-    "ROCPROFSYS_TIME_OUTPUT=OFF"
-    "ROCPROFSYS_USE_OMPT=ON"
-    "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
-    "${_test_openmp_env}"
     "${_test_library_path}"
 )
 
@@ -1020,7 +1031,14 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
         set(_TEST_FILE
             ${PROJECT_BINARY_DIR}/python/tests/${TEST_PYTHON_VERSION}/${_TEST_FILE}
         )
+
+        if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+            list(APPEND TEST_LABELS "rocpd")
+            list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_USE_ROCPD=ON")
+        endif()
+
         configure_file(${TEST_FILE} ${_TEST_FILE} @ONLY)
+
         if(TEST_STANDALONE)
             add_test(
                 NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}
@@ -1178,7 +1196,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
     cmake_parse_arguments(
         TEST
         ""
-        "NAME;TIMEOUT;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_METRIC;PERFETTO_FILE"
+        "NAME;TIMEOUT;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_METRIC;PERFETTO_FILE;ROCPD_FILE"
         "ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;EXIST_FILES;ARGS"
         ${ARGN}
     )
@@ -1211,7 +1229,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
 
     if(NOT TEST_PASS_REGEX)
         set(TEST_PASS_REGEX
-            "rocprof-sys-tests-output/${TEST_NAME}/(${TEST_TIMEMORY_FILE}|${TEST_PERFETTO_FILE}) validated"
+            "rocprof-sys-tests-output/${TEST_NAME}/(${TEST_TIMEMORY_FILE}|${TEST_PERFETTO_FILE}|${TEST_ROCPD_FILE}) validated"
         )
     endif()
 
@@ -1250,10 +1268,43 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         )
     endif()
 
+    if(TEST_ROCPD_FILE)
+        add_test(
+            NAME validate-${TEST_NAME}-rocpd
+            COMMAND
+                ${ROCPROFSYS_VALIDATION_PYTHON}
+                ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py -db
+                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_ROCPD_FILE}
+                ${TEST_ARGS}
+            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        )
+    endif()
+
     list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_CI_TIMEOUT=${TEST_TIMEOUT}")
 
-    foreach(_TEST validate-${TEST_NAME}-timemory validate-${TEST_NAME}-perfetto)
+    foreach(
+        _TEST
+        validate-${TEST_NAME}-timemory
+        validate-${TEST_NAME}-perfetto
+        validate-${TEST_NAME}-rocpd
+    )
+        # Skip tests that don't exist
         if(NOT TEST "${_TEST}")
+            continue()
+        endif()
+
+        # Skip timemory validation if no timemory file is specified
+        if("${_TEST}" MATCHES "-timemory" AND NOT TEST_TIMEMORY_FILE)
+            continue()
+        endif()
+
+        # Skip perfetto validation if no perfetto file is specified
+        if("${_TEST}" MATCHES "-perfetto" AND NOT TEST_PERFETTO_FILE)
+            continue()
+        endif()
+
+        # Skip rocpd validation if no rocpd file is specified
+        if("${_TEST}" MATCHES "-rocpd" AND NOT TEST_ROCPD_FILE)
             continue()
         endif()
 
@@ -1274,4 +1325,117 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 ${TEST_PROPERTIES}
         )
     endforeach()
+endfunction()
+
+# -------------------------------------------------------------------------------------- #
+#
+# Adds a ctest for executables
+#
+# -------------------------------------------------------------------------------------- #
+
+function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
+    cmake_parse_arguments(
+        TEST
+        "" # options
+        "NAME;TARGET;TIMEOUT;WORKING_DIRECTORY" # single value args
+        "ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND" # multiple
+        # value args
+        ${ARGN}
+    )
+
+    if(NOT TEST_WORKING_DIRECTORY)
+        set(TEST_WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+    endif()
+
+    if(NOT TEST_ENVIRONMENT)
+        set(TEST_ENVIRONMENT
+            "ROCPROFSYS_TRACE=ON"
+            "ROCPROFSYS_PROFILE=ON"
+            "ROCPROFSYS_USE_SAMPLING=ON"
+            "ROCPROFSYS_TIME_OUTPUT=OFF"
+            "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
+        )
+    endif()
+
+    # common
+    list(
+        APPEND
+        TEST_ENVIRONMENT
+        "ROCPROFSYS_CI=ON"
+        "ROCPROFSYS_CI_TIMEOUT=${TEST_TIMEOUT}"
+        "ROCPROFSYS_CONFIG_FILE="
+        "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+        "TWD=${TEST_WORKING_DIRECTORY}"
+    )
+    # copy for inverse
+    set(TEST_ENVIRONMENT_INV "${TEST_ENVIRONMENT}")
+
+    # different for regular test and inverse test
+    list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_OUTPUT_PREFIX=${TEST_NAME}/")
+    list(APPEND TEST_ENVIRONMENT_INV "ROCPROFSYS_OUTPUT_PREFIX=${TEST_NAME}-inverse/")
+
+    if(
+        NOT "${TEST_PASS_REGEX}" STREQUAL ""
+        AND NOT "${TEST_FAIL_REGEX}" STREQUAL ""
+        AND NOT "${TEST_FAIL_REGEX}" MATCHES "\\|ROCPROFSYS_ABORT_FAIL_REGEX"
+    )
+        rocprofiler_systems_message(
+            FATAL_ERROR
+            "${TEST_NAME} has set pass and fail regexes but fail regex does not include '|ROCPROFSYS_ABORT_FAIL_REGEX'"
+        )
+    endif()
+
+    if("${TEST_FAIL_REGEX}" STREQUAL "")
+        set(TEST_FAIL_REGEX "(${ROCPROFSYS_ABORT_FAIL_REGEX})")
+    else()
+        string(
+            REPLACE
+            "|ROCPROFSYS_ABORT_FAIL_REGEX"
+            "|${ROCPROFSYS_ABORT_FAIL_REGEX}"
+            TEST_FAIL_REGEX
+            "${TEST_FAIL_REGEX}"
+        )
+    endif()
+
+    if(TEST_COMMAND)
+        add_test(
+            NAME ${TEST_NAME}
+            COMMAND ${TEST_COMMAND} ${TEST_ARGS}
+            WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY}
+        )
+
+        set_tests_properties(
+            ${TEST_NAME}
+            PROPERTIES
+                ENVIRONMENT "${TEST_ENVIRONMENT}"
+                TIMEOUT ${TEST_TIMEOUT}
+                DEPENDS "${TEST_DEPENDS}"
+                LABELS "rocprofiler-systems-bin;${TEST_LABELS}"
+                PASS_REGULAR_EXPRESSION "${TEST_PASS_REGEX}"
+                FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
+                SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
+                ${TEST_PROPERTIES}
+        )
+    elseif(TARGET ${TEST_TARGET})
+        add_test(
+            NAME ${TEST_NAME}
+            COMMAND $<TARGET_FILE:${TEST_TARGET}> ${TEST_ARGS}
+            WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY}
+        )
+
+        set_tests_properties(
+            ${TEST_NAME}
+            PROPERTIES
+                ENVIRONMENT "${TEST_ENVIRONMENT}"
+                TIMEOUT ${TEST_TIMEOUT}
+                DEPENDS "${TEST_DEPENDS}"
+                LABELS "rocprofiler-systems-bin;${TEST_LABELS}"
+                PASS_REGULAR_EXPRESSION "${TEST_PASS_REGEX}"
+                FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
+                SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
+                ${TEST_PROPERTIES}
+        )
+    elseif(ROCPROFSYS_BUILD_TESTING)
+        message(FATAL_ERROR "Error! ${TEST_TARGET} does not exist")
+    endif()
 endfunction()

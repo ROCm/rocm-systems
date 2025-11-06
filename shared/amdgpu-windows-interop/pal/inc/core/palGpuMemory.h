@@ -133,8 +133,12 @@ union GpuMemoryCreateFlags
                                                   ///  indicating the driver must manage both
                                                   ///  CPU caches and GPU caches that are not flushed on
                                                   ///  command buffer boundaries.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
         uint64 xdmaBuffer                   :  1; ///< GPU memory will be used for an XDMA cache buffer for
                                                   ///  transferring data
+#else
+        uint64 reserved1                    :  1; ///< Delete this bit when the MAJOR_VERSION backcompat is removed.
+#endif
                                                   ///  between GPUs in a multi-GPU configuration.
         uint64 turboSyncSurface             :  1; ///< The memory will be used for TurboSync private swapchain primary.
         uint64 typedBuffer                  :  1; ///< GPU memory will be permanently considered a single
@@ -203,7 +207,9 @@ union GpuMemoryCreateFlags
 #endif
         uint64 directCaptureSource          :  1; ///< Memory will be mapped to DirectCapture resource's KMD-managed
                                                   ///  private VA.
-        uint64 reserved                     : 28; ///< Reserved for future use.
+        uint64 videoEncoder                 :  1; ///< Video encoder output butffer stream.
+        uint64 videoDecoder                 :  1; ///< Video decoder input butffer stream.
+        uint64 reserved                     : 26; ///< Reserved for future use.
     };
     uint64     u64All;                            ///< Flags packed as 64-bit uint.
 };

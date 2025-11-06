@@ -39,7 +39,8 @@ project(
     LANGUAGES C
     DESCRIPTION
         "A kernel-level profiling tool for machine learning/HPC workloads running on AMD MI GPUs"
-    HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-compute"
+    HOMEPAGE_URL
+        "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute"
 )
 
 set(PACKAGE_NAME "rocprofiler-compute")
@@ -72,7 +73,7 @@ option(CHECK_PYTHON_DEPS "Verify necessary python dependencies" ON)
 if(CHECK_PYTHON_DEPS)
     # Python 3 is required
     message(STATUS "Detecting Python interpreter...")
-    find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
+    find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
     # Allow user-provided python search path
     if(DEFINED PYTHON_DEPS)
@@ -94,11 +95,6 @@ if(CHECK_PYTHON_DEPS)
         set(PACKAGE ${ARGV0})
         if(${ARGV0} STREQUAL "pyyaml")
             set(PACKAGE "yaml")
-        endif()
-        # Skip check for textual_fspicker
-        if(${package} STREQUAL "textual_fspicker")
-            message(STATUS "Skipping check for textual_fspicker")
-            return()
         endif()
         execute_process(
             COMMAND ${Python3_EXECUTABLE} -c "import ${PACKAGE}"
@@ -405,18 +401,6 @@ add_test(
 )
 
 # ---------------------------
-# DB Connector tests
-# ---------------------------
-
-add_test(
-    NAME test_db_connector
-    COMMAND
-        ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_db_connector.xml
-        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_db_connector.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-)
-
-# ---------------------------
 # Utils tests
 # ---------------------------
 
@@ -461,7 +445,6 @@ if(${ENABLE_COVERAGE})
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
-        test_db_connector
         test_utils
         test_autogen_config
     )
@@ -551,11 +534,12 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
-# grafana assets
+# tools/config_management
 install(
-    DIRECTORY grafana
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
+    DIRECTORY tools/config_management
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
 )
 # samples
 install(
@@ -590,10 +574,10 @@ install(
 add_custom_target(
     license
     COMMAND
-        ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}/src
         --license ${PROJECT_SOURCE_DIR}/LICENSE.md --extension '.py'
     COMMAND
-        ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}
         --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
 )
@@ -671,7 +655,9 @@ message(STATUS "Install tests: ${INSTALL_TESTS}")
 message(STATUS "Packaging config...")
 set(CPACK_GENERATOR "DEB" "RPM" CACHE STRING "")
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
-set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/rocprofiler-compute")
+set(CPACK_PACKAGE_CONTACT
+    "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute"
+)
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "ROCm Compute Profiler: tool for GPU performance profiling"
 )

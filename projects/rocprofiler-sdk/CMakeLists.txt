@@ -39,7 +39,8 @@ endif()
 
 find_package(Git)
 
-if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+if(Git_FOUND AND (EXISTS "${PROJECT_SOURCE_DIR}/../../.git"
+                  OR EXISTS "${PROJECT_SOURCE_DIR}/.git"))
     execute_process(
         COMMAND ${GIT_EXECUTABLE} describe --tags
         OUTPUT_VARIABLE ROCPROFILER_SDK_GIT_DESCRIBE

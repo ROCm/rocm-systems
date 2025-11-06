@@ -298,7 +298,7 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
   ASSERT_NE(cpy_ag, nullptr);
 
   for (int i = 0; i < kNumGranularity; i++) {
-    if (Size[i] > size) {
+    if (Granularities[i].Size > size) {
       break;
     }
 
@@ -317,7 +317,7 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
 
       copy_timer.StartTimer(index);
       err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag,
-                                                 Size[i], 0, NULL, t->signal);
+                                                 Granularities[i].Size, 0, NULL, t->signal);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
       while (hsa_signal_wait_scacquire(t->signal, HSA_SIGNAL_CONDITION_LT, 1,
@@ -343,7 +343,7 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
           {}
       }
 
-      if (memcmp(host_ptr_src, host_ptr_dst, Size[i])) {
+      if (memcmp(host_ptr_src, host_ptr_dst, Granularities[i].Size)) {
         verified_ = false;
       }
       // Push the result back to vector time

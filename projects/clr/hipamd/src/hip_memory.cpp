@@ -1287,7 +1287,7 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
 hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
   if (hostPtr == nullptr || sizeBytes == 0 ||
       flags & ~(hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterCoarseGrained |
-                hipExtHostRegisterUncached)) {
+                hipExtHostRegisterUncached | hipHostRegisterIoMemory)) {
     return hipErrorInvalidValue;
   } else {
     unsigned int memFlags = CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS;
@@ -1296,6 +1296,11 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
         return hipErrorInvalidValue;
       }
       memFlags |= ROCCLR_MEM_HSA_UNCACHED;
+    } else if (flags & hipHostRegisterIoMemory) {
+      if (IS_WINDOWS) {
+        return hipErrorInvalidValue;
+      }
+      memFlags |= ROCCLR_MEM_IO_MEMORY;
     }
 
     amd::Memory* mem =
@@ -3529,6 +3534,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
                                     hipDeviceptr_t ptr) {
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(ptr, offset);
+  amd::Memory* vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr);
   constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
 
   hipError_t status = hipSuccess;
@@ -3654,8 +3660,27 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE: {
-      // TODO: Unclear what to be done for this attribute
-      status = hipErrorNotSupported;
+      if (memObj) {
+        if (getMemoryType(memObj) == hipMemoryTypeHost) {
+	      // host pointer, pinned or registered memory
+          *reinterpret_cast<int*>(data) = 0;
+        } else if ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) {
+          // managed allocation
+          *reinterpret_cast<int*>(data) = 0;
+        } else if (vaddr_mem_obj) {
+          // virtual memory allocation, mapped to a physical memory
+          if (vaddr_mem_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD) {
+            *reinterpret_cast<int*>(data) = 0;
+          }
+        } else {
+          // device pointer, allocated using cudaMalloc
+          *reinterpret_cast<int*>(data) = 1;
+        }
+      } else {
+        // must be a normal host pointer or virtual memory not backed to a physical memory
+        *reinterpret_cast<int*>(data) = 0;
+        status = hipErrorInvalidValue;
+      }
       break;
     }
     case HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR: {

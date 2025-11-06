@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 15
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 18
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -685,6 +685,8 @@ typedef hipError_t (*t_hipModuleOccupancyMaxPotentialBlockSizeWithFlags)(
     int* gridSize, int* blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit,
     unsigned int flags);
 typedef hipError_t (*t_hipModuleUnload)(hipModule_t module);
+typedef hipError_t (*t_hipOccupancyAvailableDynamicSMemPerBlock)(size_t* dynamicSmemSize, const void* f,
+                                                                 int numBlocks, int blockSize);
 typedef hipError_t (*t_hipOccupancyMaxActiveBlocksPerMultiprocessor)(int* numBlocks, const void* f,
                                                                      int blockSize,
                                                                      size_t dynSharedMemPerBlk);
@@ -713,6 +715,7 @@ typedef hipError_t (*t_hipStreamAddCallback)(hipStream_t stream, hipStreamCallba
 typedef hipError_t (*t_hipStreamAttachMemAsync)(hipStream_t stream, void* dev_ptr, size_t length,
                                                 unsigned int flags);
 typedef hipError_t (*t_hipStreamBeginCapture)(hipStream_t stream, hipStreamCaptureMode mode);
+typedef hipError_t (*t_hipStreamCopyAttributes)(hipStream_t dst, hipStream_t src);
 typedef hipError_t (*t_hipStreamCreate)(hipStream_t* stream);
 typedef hipError_t (*t_hipStreamCreateWithFlags)(hipStream_t* stream, unsigned int flags);
 typedef hipError_t (*t_hipStreamCreateWithPriority)(hipStream_t* stream, unsigned int flags,
@@ -1104,6 +1107,10 @@ typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t l
                                             const char* name);
 typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int *count,
                                                  hipLibrary_t library);
+typedef hipError_t (*t_hipLibraryEnumerateKernels)(hipKernel_t* kernels, unsigned int numKernels,
+                                                   hipLibrary_t library);
+typedef hipError_t (*t_hipKernelGetLibrary)(hipLibrary_t* library, hipKernel_t kernel);
+typedef hipError_t (*t_hipKernelGetName)(const char** name, hipKernel_t kernel);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1679,8 +1686,19 @@ struct HipDispatchTable {
   t_hipLibraryGetKernel hipLibraryGetKernel_fn;
   t_hipLibraryGetKernelCount hipLibraryGetKernelCount_fn;
 
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 16
+  t_hipStreamCopyAttributes hipStreamCopyAttributes_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 17
+  t_hipLibraryEnumerateKernels hipLibraryEnumerateKernels_fn;
+  t_hipKernelGetLibrary hipKernelGetLibrary_fn;
+  t_hipKernelGetName hipKernelGetName_fn;
+  
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
+  t_hipOccupancyAvailableDynamicSMemPerBlock hipOccupancyAvailableDynamicSMemPerBlock_fn;
+
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 19
 
   // ******************************************************************************************* //
   //
