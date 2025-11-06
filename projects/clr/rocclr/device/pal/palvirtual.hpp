@@ -36,6 +36,9 @@
 #include "palQueue.h"
 #include "palFence.h"
 #include "palLinearAllocator.h"
+#include "amd_hsa_queue.h"
+
+#include <atomic>
 
 /*! \addtogroup PAL PAL Resource Implementation
  *  @{
@@ -55,12 +58,13 @@ class Kernel;
 
 struct AqlPacketMgmt : public amd::EmbeddedObject {
   static constexpr uint32_t kAqlPacketsListSize = 4 * Ki;
-  AqlPacketMgmt() : packet_index_(0) { memset(aql_vgpus_, 0, sizeof(aql_vgpus_)); }
+  AqlPacketMgmt(const Device& dev);
 
-  hsa_kernel_dispatch_packet_t aql_packets_[kAqlPacketsListSize];  //!< The list of AQL packets
+  amd_queue_t amd_queue_{};
+  alignas(sizeof(hsa_kernel_dispatch_packet_t))
+      hsa_kernel_dispatch_packet_t aql_packets_[kAqlPacketsListSize];  //!< The list of AQL packets
   GpuEvent aql_events_[kAqlPacketsListSize];    //!< The list of gpu for each AQL packet
   VirtualGPU* aql_vgpus_[kAqlPacketsListSize];  //!< The list of vgpus which had submissions
-  std::atomic<uint64_t> packet_index_;          //!< The active packet slot index
 };
 
 enum class BarrierType : uint8_t {
@@ -596,15 +600,19 @@ class VirtualGPU : public device::VirtualDevice {
   }
 
   //! Returns the current active slot for AQL packet
-  hsa_kernel_dispatch_packet_t* GetAqlPacketSlot(uint32_t* index) {
+  std::pair<hsa_kernel_dispatch_packet_t* /* packet address */, uint64_t /* packet id */>
+  GetAqlPacketSlot() const {
     auto& mgmt = *queues_[MainEngine]->aql_mgmt_;
-    // Atomic increment global AQL index and wrap around max AQL list size
-    *index = ++mgmt.packet_index_ % AqlPacketMgmt::kAqlPacketsListSize;
-    if (mgmt.aql_events_[*index].isValid()) {
+
+    std::atomic_ref write_ptr(*const_cast<uint64_t *>(&mgmt.amd_queue_.write_dispatch_id));
+    uint64_t packet_id = write_ptr.fetch_add (1, std::memory_order::relaxed);
+
+    uint32_t index = packet_id % mgmt.amd_queue_.hsa_queue.size;
+    if (mgmt.aql_events_[index].isValid()) {
       // Make sure GPU doesn't process this slot
-      mgmt.aql_vgpus_[*index]->waitForEvent(&mgmt.aql_events_[*index]);
+      mgmt.aql_vgpus_[index]->waitForEvent(&mgmt.aql_events_[index]);
     }
-    return &mgmt.aql_packets_[*index];
+    return {&mgmt.aql_packets_[index], packet_id};
   }
 
  protected:
