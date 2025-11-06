@@ -1578,7 +1578,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
         return JOIN("", "HIP Activity Stream ", _stream_id);
     };
 
-    bool _group_by_queue = get_group_by_queue();
+    const bool _default_group_by_queue = get_group_by_queue();
 
     static auto _mtx = std::mutex{};
     auto        _lk  = std::unique_lock<std::mutex>{ _mtx };
@@ -1594,6 +1594,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_kernel_dispatch_record_t*>(
                         header->payload);
+
+                bool _group_by_queue = _default_group_by_queue;
 
                 const auto* _kern_sym_data =
                     get_kernel_symbol_info(record->dispatch_info.kernel_id);
@@ -1718,6 +1720,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(
                         header->payload);
+
+                bool _group_by_queue = _default_group_by_queue;
 
                 auto        _stack_id     = record->correlation_id.internal;
                 auto        _beg_ns       = record->start_timestamp;
