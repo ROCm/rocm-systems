@@ -542,7 +542,7 @@ static int vhsakmt_map_userptr(vhsakmt_device_handle dev, void* addr, size_t siz
   return rsp->ret;
 }
 
-static void* vhsakmt_map_to_gpu(void* addr, size_t size) {
+static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size) {
   vhsakmt_device_handle dev = vhsakmt_dev();
   size_t offset = (uint64_t)addr % getpagesize();
   size_t map_size = (VHSA_ALIGN_UP(size + offset, getpagesize()) / getpagesize()) * getpagesize();
@@ -579,7 +579,7 @@ static void* vhsakmt_map_to_gpu(void* addr, size_t size) {
   vhsa_debug("%s: real gva: %p, gva: %p, hva: %p, size: %lx, offset: %" PRIu64
              ", map_size: 0x%lx\n",
              __FUNCTION__, addr, userptr->cpu_addr, userptr->host_addr, size, offset, map_size);
-  return userptr->host_addr;
+  return userptr;
 }
 
 HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
@@ -589,7 +589,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
 
   vhsakmt_device_handle dev = vhsakmt_dev();
   struct vhsakmt_ccmd_memory_rsp* rsp;
-  void* addr;
+  vhsakmt_bo_handle userptr;
   struct vhsakmt_ccmd_memory_req req = {
       .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
       .type = VHSAKMT_CCMD_MEMORY_REG_MEM_WITH_FLAG,
@@ -603,14 +603,15 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
   /* no need to register memory from lihsakmt / not a userptr */
   if (!vhsakmt_is_userptr(dev, MemoryAddress)) return HSAKMT_STATUS_SUCCESS;
 
-  addr = vhsakmt_map_to_gpu(MemoryAddress, MemorySizeInBytes);
-  if (!addr) {
+  userptr = vhsakmt_map_to_gpu(MemoryAddress, MemorySizeInBytes);
+  if (!userptr) {
     vhsa_debug("%s: register memory failed, gva: %p, size: %lx\n", __FUNCTION__, MemoryAddress,
                MemorySizeInBytes);
     return HSAKMT_STATUS_ERROR;
   }
 
-  req.reg_mem_with_flag.MemoryAddress = (uint64_t)addr;
+  req.reg_mem_with_flag.MemoryAddress = (uint64_t)userptr->host_addr;
+  req.res_id = userptr->real.res_id;
 
   rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
   if (!rsp) return -ENOMEM;
