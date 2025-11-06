@@ -104,15 +104,14 @@ class Kernel : public device::Kernel {
 
   //! Returns AQL packet in CPU memory
   //! if the kernel arguments were successfully loaded, otherwise NULL
-  hsa_kernel_dispatch_packet_t* loadArguments(
-      VirtualGPU& gpu,                     //!< Running GPU context
-      const amd::Kernel& kernel,           //!< AMD kernel object
-      const amd::NDRangeContainer& sizes,  //!< NDrange container
-      const_address params,                //!< Application arguments for the kernel
-      size_t ldsAddress,                   //!< LDS address that includes all arguments.
-      uint64_t vmDefQueue,                 //!< GPU VM default queue pointer
-      uint64_t* vmParentWrap,              //!< GPU VM parent aql wrap object
-      uint32_t* aql_index                  //!< AQL packet index in the packets array for debugger
+  std::pair<hsa_kernel_dispatch_packet_t* /* packet address */, uint64_t /* packet id */>
+  loadArguments(VirtualGPU& gpu,                     //!< Running GPU context
+                const amd::Kernel& kernel,           //!< AMD kernel object
+                const amd::NDRangeContainer& sizes,  //!< NDrange container
+                const_address params,                //!< Application arguments for the kernel
+                size_t ldsAddress,                   //!< LDS address that includes all arguments.
+                uint64_t vmDefQueue,                 //!< GPU VM default queue pointer
+                uint64_t* vmParentWrap               //!< GPU VM parent aql wrap object
   ) const;
 
   //! Returns the kernel index in the program

@@ -3534,6 +3534,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
                                     hipDeviceptr_t ptr) {
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(ptr, offset);
+  amd::Memory* vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr);
   constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
 
   hipError_t status = hipSuccess;
@@ -3659,8 +3660,27 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE: {
-      // TODO: Unclear what to be done for this attribute
-      status = hipErrorNotSupported;
+      if (memObj) {
+        if (getMemoryType(memObj) == hipMemoryTypeHost) {
+	      // host pointer, pinned or registered memory
+          *reinterpret_cast<int*>(data) = 0;
+        } else if ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) {
+          // managed allocation
+          *reinterpret_cast<int*>(data) = 0;
+        } else if (vaddr_mem_obj) {
+          // virtual memory allocation, mapped to a physical memory
+          if (vaddr_mem_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD) {
+            *reinterpret_cast<int*>(data) = 0;
+          }
+        } else {
+          // device pointer, allocated using cudaMalloc
+          *reinterpret_cast<int*>(data) = 1;
+        }
+      } else {
+        // must be a normal host pointer or virtual memory not backed to a physical memory
+        *reinterpret_cast<int*>(data) = 0;
+        status = hipErrorInvalidValue;
+      }
       break;
     }
     case HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR: {
