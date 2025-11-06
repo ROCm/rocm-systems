@@ -287,16 +287,24 @@ find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
 if(rocprofiler-sdk-rocpd_FOUND)
     set(ROCPROFSYS_ROCPD_HAS_SQL_H FALSE)
 
-    get_target_property(
-        ROCPD_INCLUDE_DIRS
-        rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-        INTERFACE_INCLUDE_DIRECTORIES
-    )
+    if(rocprofiler-sdk-rocpd_DIR)
+        get_filename_component(_ROCPD_PREFIX "${rocprofiler-sdk-rocpd_DIR}" DIRECTORY)
+        get_filename_component(_ROCPD_PREFIX "${_ROCPD_PREFIX}" DIRECTORY)
+        get_filename_component(_ROCPD_PREFIX "${_ROCPD_PREFIX}" DIRECTORY)
 
-    if(ROCPD_INCLUDE_DIRS)
-        foreach(INCLUDE_DIR ${ROCPD_INCLUDE_DIRS})
-            if(EXISTS "${INCLUDE_DIR}/sql.h")
+        foreach(
+            _SUFFIX
+            "include"
+            "include/rocprofiler-sdk-rocpd"
+            "include/rocprofiler-sdk"
+        )
+            set(_INCLUDE_PATH "${_ROCPD_PREFIX}/${_SUFFIX}")
+            if(EXISTS "${_INCLUDE_PATH}/sql.h")
                 set(ROCPROFSYS_ROCPD_HAS_SQL_H TRUE)
+                message(
+                    STATUS
+                    "Found rocprofiler-sdk-rocpd with sql.h support in: ${_INCLUDE_PATH}"
+                )
                 break()
             endif()
         endforeach()

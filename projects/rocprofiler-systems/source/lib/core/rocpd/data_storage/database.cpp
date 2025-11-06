@@ -34,6 +34,7 @@
 
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
 #    include <rocprofiler-sdk-rocpd/rocpd.h>
+#    include <rocprofiler-sdk-rocpd/types.h>
 #else
 #    include "core/rocpd/data_storage/schema/data_views.hpp"
 #    include "core/rocpd/data_storage/schema/marker_views.hpp"
@@ -102,24 +103,38 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
     rocpd_sql_schema_jinja_variables_t info{ jinja_size, upid.c_str(), upid.c_str() };
 
     std::string query;
-    rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind, ROCPD_SQL_OPTIONS_NONE,
-                          &info, load_schema_cb, nullptr, 0, &query);
+    auto        status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind,
+                                               ROCPD_SQL_OPTIONS_NONE, &info, load_schema_cb,
+                                               nullptr, 0, &query);
+    if(status != ROCPD_STATUS_SUCCESS)
+    {
+        ROCPROFSYS_WARNING(0, "Unable to load rocpd schema. Error code: %d", status);
+    }
     return query;
 #else
-    static const std::map<rocpd_sql_schema_kind_t, std::string_view> schema_data = {
-        { ROCPD_SQL_SCHEMA_ROCPD_TABLES,
-          rocprofsys::rocpd::data_storage::schema::ROCPD_TABLES_SQL },
-        { ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
-          rocprofsys::rocpd::data_storage::schema::ROCPD_VIEWS_SQL },
-        { ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-          rocprofsys::rocpd::data_storage::schema::DATA_VIEWS_SQL },
-        { ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
-          rocprofsys::rocpd::data_storage::schema::MARKER_VIEWS_SQL },
-        { ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
-          rocprofsys::rocpd::data_storage::schema::SUMMARY_VIEWS_SQL }
-    };
+    std::string_view schema_content;
 
-    return process_schema_template(schema_data.at(schema_kind), upid);
+    switch(schema_kind)
+    {
+        case ROCPD_SQL_SCHEMA_ROCPD_TABLES:
+            schema_content = rocprofsys::rocpd::data_storage::schema::ROCPD_TABLES_SQL;
+            break;
+        case ROCPD_SQL_SCHEMA_ROCPD_VIEWS:
+            schema_content = rocprofsys::rocpd::data_storage::schema::ROCPD_VIEWS_SQL;
+            break;
+        case ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS:
+            schema_content = rocprofsys::rocpd::data_storage::schema::DATA_VIEWS_SQL;
+            break;
+        case ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS:
+            schema_content = rocprofsys::rocpd::data_storage::schema::MARKER_VIEWS_SQL;
+            break;
+        case ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS:
+            schema_content = rocprofsys::rocpd::data_storage::schema::SUMMARY_VIEWS_SQL;
+            break;
+        default: ROCPROFSYS_WARNING(0, "Unknown schema kind: %d", schema_kind); return "";
+    }
+
+    return process_schema_template(schema_content, upid);
 #endif
 }
 
