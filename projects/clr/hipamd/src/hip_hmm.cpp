@@ -25,7 +25,25 @@
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
 
+#if defined(__linux__)
+#include <sched.h>
+#include <stdio.h>
+#endif
+
 namespace hip {
+
+// Get the CPU ID of the current thread
+static int getCurrentCpuId() {
+#if defined(__linux__)
+  int cpu = sched_getcpu();
+  if (cpu >= 0) {
+    return cpu;
+  }
+#endif
+  // Default to default if we can't determine the CPU
+  return hipCpuDeviceId;
+}
+
 
 // Forward declaraiton of a function
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
@@ -310,9 +328,17 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   const bool cpuAccess = isHost || isHostNuma || isHostCurrent;
 
   // Determine the target device index:
-  //  - for host-prefetch and host-current, always use device 0
+  //  - for host-prefetch, use default CPU agent
+  //  - for host-current, query the current thread's CPU ID
   //  - for host-NUMA or device-prefetch, use the provided id
-  int targetDevice = (isHost || isHostCurrent) ? hipCpuDeviceId : location.id;
+  int targetDevice;
+  if (isHost) {
+    targetDevice = hipCpuDeviceId;
+  } else if (isHostCurrent) {
+    targetDevice = getCurrentCpuId();
+  } else {
+    targetDevice = location.id;
+  }
 
   amd::Device* dev = nullptr;
   if (cpuAccess == false) {
@@ -378,8 +404,11 @@ hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advi
       use_cpu = true;
       break;
     case hipMemLocationTypeHost:
-    case hipMemLocationTypeHostNumaCurrent:
       targetDevice = hipCpuDeviceId;
+      use_cpu = true;
+      break;
+    case hipMemLocationTypeHostNumaCurrent:
+      targetDevice = getCurrentCpuId();  // Query current thread's CPU ID
       use_cpu = true;
       break;
     default:
