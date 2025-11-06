@@ -79,6 +79,7 @@
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
+#include "suites/functional/gpu_coredump.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 
@@ -308,6 +309,51 @@ TEST(rocrtstFunc, Memory_Available) {
     RunCustomTestProlog(&mt);
     mt.MemAvailableTest();
     RunCustomTestEpilog(&mt);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestDefaultPattern();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_CustomPattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestCustomPattern();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_DisableFlag) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestDisableFlag();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_PatternSubstitution) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestPatternSubstitution();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_InvalidPath) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestInvalidPath();
+    RunCustomTestEpilog(&gcd);
   );
 }
 
