@@ -22,6 +22,7 @@ set(ROCPROFILER_LIB_SOURCES
     internal_threading.cpp
     ompt.cpp
     pc_sampling.cpp
+    ptl.cpp
     registration.cpp
     rocprofiler.cpp
     runtime_initialization.cpp)
