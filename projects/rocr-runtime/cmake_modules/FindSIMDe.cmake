@@ -36,16 +36,8 @@ else()
             NAMES simde/simde-common.h
             PATHS
                 "C:/simde"
-            ENV INCLUDE
-        )
+            ENV INCLUDE)
     elseif(UNIX)
-        # Debug: Check if expected directories exist
-        if(EXISTS "/usr/include/simde/simde-common.h")
-            message(STATUS "DEBUG: /usr/include/simde/simde-common.h exists")
-        else()
-            message(STATUS "DEBUG: /usr/include/simde/simde-common.h does NOT exist")
-        endif()
-        
         # Try with restricted paths first
         find_path(SIMDE_INCLUDE_DIR
             NAMES simde/simde-common.h
