@@ -30,7 +30,7 @@
 
 #include "virtio_gpu.h"
 
-#define SHMEM_SZ (25 * 0x1000)
+#define SHMEM_SZ (80 * 0x1000)
 
 static int set_context(int fd) {
   struct drm_virtgpu_context_set_param params[] = {
