@@ -40,11 +40,6 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-namespace
-{
-constexpr auto NUM_OF_THREADS = 1;
-}  // namespace
-
 flush_worker_t::flush_worker_t(worker_function_t            worker_function,
                                worker_synchronization_ptr_t worker_synchronization_ptr,
                                std::string                  filepath)
@@ -58,8 +53,6 @@ void
 flush_worker_t::start(const pid_t& current_pid)
 {
     m_ofs = std::ofstream{ m_filepath, std::ios::binary | std::ios::out };
-
-    // TODO: Thread
 
     if(!m_ofs.good())
     {
@@ -115,11 +108,11 @@ flush_worker_t::stop(const pid_t& current_pid)
         std::mutex       _exit_mutex;
         std::unique_lock _exit_lock{ _exit_mutex };
         m_worker_synchronization->exit_finished_condition.wait(
-            _exit_lock, [&]() { return m_worker_synchronization->exit_finished; });
+            _exit_lock, [&]() { return m_worker_synchronization->exit_finished.load(); });
 
         if(m_flushing_thread->joinable())
         {
-            m_flushing_thread->detach();
+            m_flushing_thread->join();
             m_flushing_thread.reset();
         }
     }

@@ -70,8 +70,12 @@ remove_if_exists(const std::string& fname)
 std::vector<std::string>
 list_dir_files(const std::string& path)
 {
-    DIR* dir = opendir(path.c_str());
-    if(dir == nullptr)
+    auto dir_deleter = [](DIR* d) {
+        if(d) closedir(d);
+    };
+    std::unique_ptr<DIR, decltype(dir_deleter)> dir(opendir(path.c_str()), dir_deleter);
+
+    if(!dir)
     {
         ROCPROFSYS_THROW("Error opening directory: %s", path.c_str());
     }
@@ -79,7 +83,7 @@ list_dir_files(const std::string& path)
     std::vector<std::string> result{};
     dirent*                  entry;
 
-    while((entry = readdir(dir)) != nullptr)
+    while((entry = readdir(dir.get())) != nullptr)
     {
         if(std::string(entry->d_name) != "." && std::string(entry->d_name) != "..")
         {
@@ -87,7 +91,6 @@ list_dir_files(const std::string& path)
         }
     }
 
-    closedir(dir);
     return result;
 }
 
@@ -101,7 +104,7 @@ std::map<pid_t, cache_files>
 get_cache_files()
 {
     const auto root_pid  = get_root_process_id();
-    const auto tmp_files = list_dir_files("/tmp/");
+    const auto tmp_files = list_dir_files(trace_cache::tmp_directory);
 
     std::map<int, cache_files> cache_map{};
 
@@ -116,7 +119,7 @@ get_cache_files()
             int pid        = std::stoi(match[2]);
             if(parent_pid == root_pid)
             {
-                cache_map[pid].buff_storage = "/tmp/" + filename;
+                cache_map[pid].buff_storage = trace_cache::tmp_directory + filename;
             }
         }
         else if(std::regex_match(filename, match, meta_regex))
@@ -125,7 +128,7 @@ get_cache_files()
             int pid        = std::stoi(match[2]);
             if(parent_pid == root_pid)
             {
-                cache_map[pid].metadata = "/tmp/" + filename;
+                cache_map[pid].metadata = trace_cache::tmp_directory + filename;
             }
         }
     };

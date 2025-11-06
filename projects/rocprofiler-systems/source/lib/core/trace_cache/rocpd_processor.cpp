@@ -93,7 +93,6 @@ rocpd_processor::handle(const kernel_dispatch_sample& _kds)
     if(!kernel_symbol.has_value())
     {
         throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
-        return;
     }
 
     auto region_name_primary_key =

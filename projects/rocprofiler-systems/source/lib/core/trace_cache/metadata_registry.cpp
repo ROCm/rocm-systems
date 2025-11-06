@@ -38,6 +38,23 @@ namespace trace_cache
 namespace
 {
 
+class thread_local_string_pool
+{
+public:
+    const char* store(std::string_view str)
+    {
+        auto [it, inserted] = m_strings.emplace(str);
+        return it->c_str();
+    }
+
+    void clear() { m_strings.clear(); }
+
+private:
+    std::set<std::string> m_strings;
+};
+
+thread_local thread_local_string_pool g_string_pool;
+
 template <typename ReturnType, typename DataType, typename Filter>
 std::optional<ReturnType>
 get_type_info(const DataType& data, const Filter& filter)
@@ -215,12 +232,11 @@ from_json_code_object(const nlohmann::json& _json)
     rocprofiler_callback_tracing_code_object_load_data_t co = {};
     co.code_object_id = _json["code_object_id"].get<long long>();
     auto uri_str      = _json["uri"].get<std::string>();
-    co.uri            = new char[uri_str.size() + 1];
-    strncpy(const_cast<char*>(co.uri), uri_str.c_str(), uri_str.size() + 1);
-    co.load_base    = _json["load_base"].get<long long>();
-    co.load_size    = _json["load_size"].get<long long>();
-    co.load_delta   = _json["load_delta"].get<long long>();
-    co.storage_type = static_cast<rocprofiler_code_object_storage_type_t>(
+    co.uri            = g_string_pool.store(uri_str);
+    co.load_base      = _json["load_base"].get<long long>();
+    co.load_size      = _json["load_size"].get<long long>();
+    co.load_delta     = _json["load_delta"].get<long long>();
+    co.storage_type   = static_cast<rocprofiler_code_object_storage_type_t>(
         _json["storage_type"].get<int>());
     auto handle = _json["agent_id_handle"].get<long long>();
 #    if(ROCPROFILER_VERSION >= 600)
@@ -255,12 +271,10 @@ rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t
 from_json_kernel_symbol(const nlohmann::json& _json)
 {
     rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t ks = {};
-    ks.kernel_id         = _json["kernel_id"].get<long long>();
-    ks.code_object_id    = _json["code_object_id"].get<long long>();
-    auto kernel_name_str = _json["kernel_name"].get<std::string>();
-    ks.kernel_name       = new char[kernel_name_str.size() + 1];
-    strncpy(const_cast<char*>(ks.kernel_name), kernel_name_str.c_str(),
-            sizeof(ks.kernel_name) + 1);
+    ks.kernel_id                 = _json["kernel_id"].get<long long>();
+    ks.code_object_id            = _json["code_object_id"].get<long long>();
+    auto kernel_name_str         = _json["kernel_name"].get<std::string>();
+    ks.kernel_name               = g_string_pool.store(kernel_name_str);
     ks.kernel_object             = _json["kernel_object"].get<long long>();
     ks.kernarg_segment_size      = _json["kernarg_segment_size"].get<int>();
     ks.kernarg_segment_alignment = _json["kernarg_segment_alignment"].get<int>();
@@ -843,6 +857,7 @@ metadata_registry::save_to_file(const std::string&                         filep
         std::ofstream file(filepath);
         if(!file.is_open())
         {
+            ROCPROFSYS_WARNING(1, "Error opening file for writing: %s", filepath.c_str());
             return false;
         }
 
@@ -851,6 +866,7 @@ metadata_registry::save_to_file(const std::string&                         filep
         return true;
     } catch(const std::exception& e)
     {
+        ROCPROFSYS_WARNING(1, "Error saving metadata to file: %s", e.what());
         return false;
     }
 }
@@ -864,6 +880,7 @@ metadata_registry::load_from_file(const std::string&                   filepath,
         std::ifstream file(filepath);
         if(!file.is_open())
         {
+            ROCPROFSYS_WARNING(1, "Error opening file for reading: %s", filepath.c_str());
             return false;
         }
 
@@ -875,6 +892,7 @@ metadata_registry::load_from_file(const std::string&                   filepath,
         return true;
     } catch(const std::exception& e)
     {
+        ROCPROFSYS_WARNING(1, "Error loading metadata from file: %s", e.what());
         return false;
     }
 }

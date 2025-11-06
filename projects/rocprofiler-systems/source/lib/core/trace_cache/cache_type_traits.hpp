@@ -33,18 +33,27 @@ namespace rocprofsys
 namespace trace_cache
 {
 
+namespace type_traits
+{
+
+template <typename T>
+struct always_false : std::false_type
+{};
+
+}  // namespace type_traits
+
 template <typename T>
 void
 serialize(uint8_t*, const T&)
 {
-    static_assert(std::false_type::value, "serialize<T> not specialized");
+    static_assert(type_traits::always_false<T>::value, "serialize<T> not specialized");
 }
 
 template <typename T>
 T
 deserialize(uint8_t*&)
 {
-    static_assert(std::false_type::value, "deserialize<T> not specialized");
+    static_assert(type_traits::always_false<T>::value, "deserialize<T> not specialized");
     return T{};
 }
 
@@ -52,16 +61,12 @@ template <typename T>
 size_t
 get_size(const T&)
 {
-    static_assert(std::false_type::value, "get_size(T) not specialized");
+    static_assert(type_traits::always_false<T>::value, "get_size(T) not specialized");
     return 0;
 }
 
 namespace type_traits
 {
-
-template <typename T>
-struct always_false : std::false_type
-{};
 
 template <typename T>
 struct tuple_to_variant;

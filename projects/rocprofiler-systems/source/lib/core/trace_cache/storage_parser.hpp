@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "core/debug.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
 
@@ -109,9 +110,10 @@ public:
 
             if(ifs.fail())
             {
-                ROCPROFSYS_DEBUG("Bad read while consuming buffered storage. Filename: "
-                                 "%s Bytes read: %d\n",
-                                 m_filename.c_str(), static_cast<int>(ifs.tellg()));
+                ROCPROFSYS_WARNING(1,
+                                   "Bad read while consuming buffered storage. Filename: "
+                                   "%s Bytes read: %d\n",
+                                   m_filename.c_str(), static_cast<int>(ifs.tellg()));
                 continue;
             }
 

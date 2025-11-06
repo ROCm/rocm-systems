@@ -40,7 +40,9 @@ set(trace_cache_headers
     ${CMAKE_CURRENT_LIST_DIR}/sample_type.hpp
 )
 
-target_sources(
+target_sources(rocprofiler-systems-core-library PRIVATE ${trace_cache_sources})
+
+target_include_directories(
     rocprofiler-systems-core-library
-    PRIVATE ${trace_cache_sources} ${trace_cache_headers}
+    PUBLIC ${CMAKE_CURRENT_LIST_DIR}
 )

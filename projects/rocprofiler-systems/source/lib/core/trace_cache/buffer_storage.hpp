@@ -49,10 +49,10 @@ using worker_function_t = std::function<void(ofs_t& ofs, bool force)>;
 struct worker_synchronization_t
 {
     std::condition_variable is_running_condition;
-    bool                    is_running{ false };
+    std::atomic_bool        is_running{ false };
 
     std::condition_variable exit_finished_condition;
-    bool                    exit_finished{ false };
+    std::atomic_bool        exit_finished{ false };
 
     pid_t origin_pid;
 };
@@ -147,7 +147,6 @@ public:
         {
             throw std::runtime_error(
                 "Trying to use buffered storage while it is not running");
-            return;
         }
 
         type_traits::check_type<Type, TypeIdentifierEnum>();
@@ -206,12 +205,17 @@ private:
                       buffer_size - _tail);
             ofs.write(reinterpret_cast<const char*>(m_buffer->data()), _head);
         }
+        if(ofs.fail())
+        {
+            ROCPROFSYS_WARNING(1, "Error flushing buffered storage to file for pid: %d",
+                               m_worker_synchronization->origin_pid);
+        }
     }
 
     void fragment_memory()
     {
         auto* _data = m_buffer->data();
-        memset(_data + m_head, 0xFFFF, buffer_size - m_head);
+        memset(_data + m_head, std::numeric_limits<uint8_t>::max(), buffer_size - m_head);
         *reinterpret_cast<TypeIdentifierEnum*>(_data + m_head) =
             TypeIdentifierEnum::fragmented_space;
 
