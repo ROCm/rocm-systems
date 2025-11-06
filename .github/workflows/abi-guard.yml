@@ -146,7 +146,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ inputs.source_directory }}/${{ env.BUILD_DIR }}
-          key: cmake-${{ runner.os }}-head-${{ steps.hash.outputs.hash }}
+          key: abi-guard-build-cache-${{ runner.os }}-head-${{ steps.hash.outputs.hash }}
+          restore-keys: |
+            abi-guard-build-cache-${{ runner.os }}-head-
 
       - name: Configure
         run: cmake -S ${{ inputs.source_directory }} -B ${{ inputs.source_directory }}/${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
@@ -234,7 +236,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ inputs.source_directory }}/${{ env.BUILD_DIR }}
-          key: cmake-${{ runner.os }}-baseline-${{ steps.hash.outputs.hash }}
+          key: abi-guard-build-cache-${{ runner.os }}-baseline-${{ steps.hash.outputs.hash }}
+          restore-keys: |
+            abi-guard-build-cache-${{ runner.os }}-baseline-
 
       - name: Configure
         run: cmake -S ${{ inputs.source_directory }} -B ${{ inputs.source_directory }}/${BUILD_DIR} -G "${{ inputs.cmake_generator }}" -DCMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }} ${{ inputs.cmake_config_args }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }}
