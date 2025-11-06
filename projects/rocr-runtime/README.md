@@ -48,6 +48,7 @@ Ensure you have the following installed:
 - `libelf-dev`
 - `g++`
 - `libdrm-amdgpu-dev` or `libdrm-dev`
+- `libsimde-dev`
 - `pkg-config`
 - `rocm-core`
 - `rocm-llvm-dev`
@@ -62,7 +63,7 @@ Ensure you have the following installed:
     ```sh
     cmake -DCMAKE_INSTALL_PREFIX=<rocm install dir> ..
     ```
-    e.g: 
+    e.g:
     ```
     cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
     ```

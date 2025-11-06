@@ -336,15 +336,14 @@ if(${IMAGE_SUPPORT})
 endif()
 
 if (UNIX)
-  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
+  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt ${SIMDE_TARGET} )
 else()
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE Ws2_32 )
   target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
   target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE dxcore)
 endif()
 
-target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE PkgConfig::simde)
-target_link_libraries (${SIMDE_TARGET})
+target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE SIMDE)
 
 # For static package rocprofiler-register dependency is not required
 # Link to hsakmt target for shared library builds

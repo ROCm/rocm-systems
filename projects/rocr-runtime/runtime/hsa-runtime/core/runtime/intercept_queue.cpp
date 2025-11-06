@@ -381,6 +381,20 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
       invalid_header_i = i;
       break;
     }
+
+    // Process callbacks.
+    Cursor.interceptor_index = interceptors.size() - 1;
+    Cursor.pkt_index = i;
+    auto& handler = interceptors[Cursor.interceptor_index];
+    handler.first(&ring[i & mask], 1, i, handler.second, PacketWriter);
+    // Ensure the packet body is written as header may get reordered when
+    // writing over PCIE by doing absolutely nothing since the atomic::Store
+    // helper already takes care of inserting the SFENCE when ORDER_WC is
+    // defined.
+    // Invalidate consumed packet.
+    atomic::Store(&ring[i & mask].packet.header, kInvalidHeader, std::memory_order_release);
+
+    // Packet has now been processed so advance the read index.
     ++i;
 
     // Only allow the rewrite of one packet to be on the overflow queue. When
