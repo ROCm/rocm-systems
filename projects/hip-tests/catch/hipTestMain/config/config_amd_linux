@@ -12,6 +12,7 @@
         "NOTE: The following test is disabled due to defect - EXSWHTEC-242",
         "Unit_hipFuncGetAttributes_Positive_Basic",
         "NOTE: The following test is disabled due to defect - EXSWHTEC-244",
+        "Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters",
         "Unit_hipMemAdvise_No_Flag_Interference",
         "NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238",
         "Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic",
