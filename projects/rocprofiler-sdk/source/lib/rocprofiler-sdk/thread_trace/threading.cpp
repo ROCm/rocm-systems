@@ -252,7 +252,7 @@ producer_loop(
     write_cv.notify_all();
 
     auto end_t0 = std::chrono::system_clock::now();
-    ROCP_INFO << "Total trace size: " << (end_t0 - start_t0).count() * 1E-9f << " s.";
+    ROCP_INFO << "Total trace time: " << (end_t0 - start_t0).count() * 1E-9f << " s.";
 }
 }  // namespace thread_trace
 }  // namespace rocprofiler
