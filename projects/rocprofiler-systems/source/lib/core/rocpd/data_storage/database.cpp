@@ -46,11 +46,14 @@ namespace
 {
 enum rocpd_sql_schema_kind_t
 {
+    ROCPD_SQL_SCHEMA_NONE = 0,
     ROCPD_SQL_SCHEMA_ROCPD_TABLES,
+    ROCPD_SQL_SCHEMA_ROCPD_INDEXES,
     ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
+    ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
+    ROCPD_SQL_SCHEMA_LAST,
 };
 }  // namespace
 
@@ -90,8 +93,18 @@ load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
                const rocpd_sql_schema_jinja_variables_t*, const char*,
                const char* schema_content, void* user_data)
 {
+    if(user_data == nullptr || schema_content == nullptr)
+    {
+        ROCPROFSYS_WARNING(1, "Invalid user data or schema content pointer");
+        return;
+    }
     auto* query = static_cast<std::string*>(user_data);
-    *query      = schema_content;
+    if(query == nullptr)
+    {
+        ROCPROFSYS_WARNING(1, "Invalid query pointer");
+        return;
+    }
+    *query = std::string(schema_content);
 }
 #endif
 
@@ -181,6 +194,13 @@ database::initialize_schema()
     for(const auto& schema_kind : schema_kinds)
     {
         const std::string query = get_schema_query(schema_kind, upid);
+
+        if(query.empty())
+        {
+            ROCPROFSYS_WARNING(0, "Failed to get schema query for schema kind: %d",
+                               schema_kind);
+            continue;
+        }
 
         validate_sqlite3_result(sqlite3_exec(_sqlite3_db_temp, query.c_str(), 0, 0, 0),
                                 query.c_str(),
