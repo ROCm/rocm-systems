@@ -51,6 +51,7 @@
 #include "stdarg.h"
 #if defined(__linux__)
 #include "unistd.h"
+#include <simde/x86/sse2.h>
 #endif
 
 #include <simde/x86/sse2.h>

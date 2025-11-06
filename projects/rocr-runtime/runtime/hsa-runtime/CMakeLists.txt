@@ -95,6 +95,8 @@ endif()
 pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
 find_package(SIMDe REQUIRED)
 
+find_package(SIMDe REQUIRED)
+
 ## Create the rocr target.
 add_library( ${CORE_RUNTIME_TARGET} "" )
 
@@ -336,7 +338,7 @@ if(${IMAGE_SUPPORT})
 endif()
 
 if (UNIX)
-  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
+  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt ${SIMDE_TARGET} )
 else()
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE Ws2_32 )
   target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
