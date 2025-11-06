@@ -29,9 +29,11 @@ vhsakmt_bo_handle vhsakmt_entry_to_bo_handle(bo_entry e) { return (vhsakmt_bo_ha
 bo_entry vhsakmt_bo_handle_to_entry(vhsakmt_bo_handle bo) { return &bo->rbtn; }
 static inline bool vhsakmt_is_mem_bo(vhsakmt_bo_handle bo) { return (!bo->queue_id && !bo->event); }
 
-static bool vhsakmt_mappable(HsaMemFlags flags) { return (!flags.ui32.Scratch); }
+static bool vhsakmt_mappable(HsaMemFlags flags) {
+  if (flags.ui32.Scratch || flags.ui32.NoAddress) return false;
 
-static bool vhsakmt_bo_mappable(vhsakmt_bo_handle bo) { return vhsakmt_mappable(bo->flags); }
+  return flags.ui32.HostAccess;
+}
 
 void vhsakmt_insert_bo(vhsakmt_device_handle dev, vhsakmt_bo_handle bo, void* addr, uint64_t size) {
   bo->rbtn.key.addr = (unsigned long)addr;
@@ -103,8 +105,6 @@ void* vhsakmt_gpu_va(vhsakmt_device_handle dev, void* va) {
 int vhsakmt_bo_cpu_map(vhsakmt_bo_handle bo, void** cpu, void* fixed_cpu) {
   int r;
 
-  if (!vhsakmt_bo_mappable(bo)) return 0;
-
   pthread_mutex_lock(&bo->map_mutex);
 
   if (!bo->cpu_addr) {
@@ -123,8 +123,6 @@ int vhsakmt_bo_cpu_map(vhsakmt_bo_handle bo, void** cpu, void* fixed_cpu) {
 
 int vhsakmt_bo_cpu_unmap(vhsakmt_bo_handle bo) {
   int r = 0;
-
-  if (!vhsakmt_bo_mappable(bo)) return 0;
 
   pthread_mutex_lock(&bo->map_mutex);
 
@@ -280,6 +278,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 Si
                              vhsakmt_mappable(MemFlags) ? VIRTGPU_BLOB_FLAG_USE_MAPPABLE : 0,
                              req.blob_id, VHSA_BO_KFD_MEM, (void*)rsp->memory_handle, &bo);
   if (r) return r;
+  bo->flags = MemFlags;
 
   if (!vhsakmt_mappable(MemFlags)) {
     bo->cpu_addr = bo->host_addr;
@@ -477,6 +476,7 @@ static int vhsakmt_create_scratch_map_memory(vhsakmt_device_handle dev, void* Me
 
   // TODO: insert scratch bo into rbtree, or insert it in dev nodes.
 
+  out->flags.ui32.Scratch = 1;
   out->cpu_addr = MemoryAddress;
   out->host_addr = (void*)rsp->memory_handle;
   *AlternateVAGPU = rsp->alternate_vagpu;
