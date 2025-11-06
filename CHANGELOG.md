@@ -3602,6 +3602,3 @@ Now the information is displayed as a table by each GPU's BDF, which closer rese
 
 - **Fix for driver not initialized**.  
 If driver module is not loaded, user retrieve error reponse indicating amdgpu module is not loaded.
-
-
-
