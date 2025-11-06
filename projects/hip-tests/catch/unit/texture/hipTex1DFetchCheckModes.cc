@@ -110,6 +110,7 @@ TEST_CASE("Unit_tex1Dfetch_CheckModes") {
   HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
   return;
 #endif
+  (void) hipGetLastError();  // Prevent negative tests affecting this
 
   SECTION("hipAddressModeClamp AND hipFilterModePoint") {
     runTest(hipAddressModeClamp, hipFilterModePoint);

@@ -95,18 +95,18 @@ TEMPLATE_TEST_CASE("Unit_tex3D_Positive_ReadModeElementType", "", char, unsigned
                       params.tex_desc.normalizedCoords);
     z = GetCoordinate(z, params.NumItersZ(), params.Depth(), params.num_subdivisions,
                       params.tex_desc.normalizedCoords);
-
-    INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
-    INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
-    INFO("Address mode X: " << AddressModeToString(params.tex_desc.addressMode[0]));
-    INFO("Address mode Y: " << AddressModeToString(params.tex_desc.addressMode[1]));
-    INFO("Address mode Z: " << AddressModeToString(params.tex_desc.addressMode[2]));
-    INFO("x: " << std::fixed << std::setprecision(16) << x);
-    INFO("y: " << std::fixed << std::setprecision(16) << y);
-    INFO("z: " << std::fixed << std::setprecision(16) << z);
-
     const auto ref_val = fixture.tex_h.Tex3D(x, y, z, params.tex_desc);
-    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
+    if (!fixture.Verify(fixture.out_alloc_h[i], ref_val)) {
+      INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
+      INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
+      INFO("Address mode X: " << AddressModeToString(params.tex_desc.addressMode[0]));
+      INFO("Address mode Y: " << AddressModeToString(params.tex_desc.addressMode[1]));
+      INFO("Address mode Z: " << AddressModeToString(params.tex_desc.addressMode[2]));
+      INFO("x: " << std::fixed << std::setprecision(16) << x);
+      INFO("y: " << std::fixed << std::setprecision(16) << y);
+      INFO("z: " << std::fixed << std::setprecision(16) << z);
+      REQUIRE(false);
+    }
   }
 }
 
@@ -172,18 +172,18 @@ TEMPLATE_TEST_CASE("Unit_tex3D_Positive_ReadModeNormalizedFloat", "", char, unsi
                       params.tex_desc.normalizedCoords);
     z = GetCoordinate(z, params.NumItersZ(), params.Depth(), params.num_subdivisions,
                       params.tex_desc.normalizedCoords);
-
-    INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
-    INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
-    INFO("Address mode X: " << AddressModeToString(params.tex_desc.addressMode[0]));
-    INFO("Address mode Y: " << AddressModeToString(params.tex_desc.addressMode[1]));
-    INFO("Address mode Z: " << AddressModeToString(params.tex_desc.addressMode[2]));
-    INFO("x: " << std::fixed << std::setprecision(16) << x);
-    INFO("y: " << std::fixed << std::setprecision(16) << y);
-    INFO("z: " << std::fixed << std::setprecision(16) << z);
-
     auto ref_val = fixture.tex_h.Tex3D(x, y, z, params.tex_desc);
-    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
+    if (!fixture.Verify(fixture.out_alloc_h[i], ref_val)) {
+      INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
+      INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
+      INFO("Address mode X: " << AddressModeToString(params.tex_desc.addressMode[0]));
+      INFO("Address mode Y: " << AddressModeToString(params.tex_desc.addressMode[1]));
+      INFO("Address mode Z: " << AddressModeToString(params.tex_desc.addressMode[2]));
+      INFO("x: " << std::fixed << std::setprecision(16) << x);
+      INFO("y: " << std::fixed << std::setprecision(16) << y);
+      INFO("z: " << std::fixed << std::setprecision(16) << z);
+      REQUIRE(false);
+    }
   }
 }
 
