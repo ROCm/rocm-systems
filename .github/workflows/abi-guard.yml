@@ -109,7 +109,7 @@ jobs:
       - name: Install toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y git pkg-config build-essential cmake ninja-build ${{ inputs.install_packages }}
+          sudo apt-get install -y git pkg-config build-essential cmake ninja-build python3 python3-pip ${{ inputs.install_packages }}
 
       - uses: actions/checkout@v4
         with:
@@ -134,6 +134,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 -m pip install -r scripts/requirements.txt
           HASH=$(python3 scripts/abi-guard.py hash -i "${{ inputs.versioning_spec }}")
           if [[ -z "${HASH}" ]]; then
             echo "No hash found for versioning spec: ${{ inputs.versioning_spec }}"
@@ -198,7 +199,7 @@ jobs:
       - name: Install toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y git pkg-config build-essential cmake ninja-build ${{ inputs.install_packages }}
+          sudo apt-get install -y git pkg-config build-essential cmake ninja-build python3 python3-pip ${{ inputs.install_packages }}
 
       - uses: actions/checkout@v4
         with:
@@ -224,6 +225,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 -m pip install -r scripts/requirements.txt
           HASH=$(python3 scripts/abi-guard.py hash -i "${{ inputs.versioning_spec }}")
           if [[ -z "${HASH}" ]]; then
             echo "No hash found for versioning spec: ${{ inputs.versioning_spec }}"
