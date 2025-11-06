@@ -525,15 +525,15 @@ write_perfetto(
             // In the initial fix, the timestamps were set halfway between the ending timestamp and
             // starting timestamp of overlapping kernel dispatches. In cases when one slice was
             // completely overlapped by another one, this halfway point could fall before the
-            // beginning of the first slice or after the ending of the second one, making the duration
-            // of the slice negative.
-            // In the new fix, the halfway point is placed between the midpoints of the two overlapping slices.
+            // beginning of the first slice or after the ending of the second one, making the
+            // duration of the slice negative. In the new fix, the halfway point is placed between
+            // the midpoints of the two overlapping slices.
             {
                 struct kernel_dispatch_group_index
                 {
                     uint64_t agent_absolute_index = 0;
-                    uint64_t stream_id = 0;
-                    uint64_t queue_id  = 0;
+                    uint64_t stream_id            = 0;
+                    uint64_t queue_id             = 0;
 
                     bool operator<(const kernel_dispatch_group_index& other) const
                     {
@@ -555,8 +555,9 @@ write_perfetto(
                 std::map<kernel_dispatch_group_index, std::vector<kernel_dispatch_data>>
                     kernel_groups;
 
-                // The visualization problem only happens for overlapping dispatches on the same agent/queue/stream.
-                // Separate all dispatches into groups based on their execution context.
+                // The visualization problem only happens for overlapping dispatches on the same
+                // agent/queue/stream. Separate all dispatches into groups based on their execution
+                // context.
                 for(auto it = begin(gen); it != end(gen); ++it)
                 {
                     kernel_dispatch_group_index group_index;
@@ -566,14 +567,16 @@ write_perfetto(
                     else
                         group_index.stream_id = it->stream_id;
 
-                    // Define each dispatch by the middle timestap to keep their relative order correct.
+                    // Define each dispatch by the middle timestap to keep their relative order
+                    // correct.
                     kernel_groups[group_index].push_back({it, it->start / 2 + it->end / 2});
                 }
 
                 for(auto group_it = begin(kernel_groups); group_it != end(kernel_groups);
                     ++group_it)
                 {
-                    // Sort dispatches within the group by timestamp to ensure proper temporal ordering.
+                    // Sort dispatches within the group by timestamp to ensure proper temporal
+                    // ordering.
                     auto& group_data = group_it->second;
                     std::sort(begin(group_data),
                               end(group_data),
@@ -598,18 +601,24 @@ write_perfetto(
 
                         auto current_mid_to_end_duration = current_it->end - current_midpoint;
                         auto next_start_to_mid_duration  = next_midpoint - next_it->start;
-                        auto total_span        = current_mid_to_end_duration + next_start_to_mid_duration; // Total duration to redistribute
-                        auto max_span          = next_midpoint - current_midpoint; // Available space between midpoints
+                        auto total_span =
+                            current_mid_to_end_duration +
+                            next_start_to_mid_duration;  // Total duration to redistribute
+                        auto max_span =
+                            next_midpoint - current_midpoint;  // Available space between midpoints
 
-                        // Preserve the proportions of each dispatch within the overlapped region to minimize the timing error.
+                        // Preserve the proportions of each dispatch within the overlapped region to
+                        // minimize the timing error.
                         double scale_factor =
                             (total_span > 0) ? static_cast<double>(max_span) / total_span : 0.0;
 
-                        auto new_current_end = current_midpoint + static_cast<rocprofiler_timestamp_t>(
-                                                                  current_mid_to_end_duration * scale_factor);
+                        auto new_current_end =
+                            current_midpoint + static_cast<rocprofiler_timestamp_t>(
+                                                   current_mid_to_end_duration * scale_factor);
 
-                        auto new_next_start = next_midpoint - static_cast<rocprofiler_timestamp_t>(
-                                                              next_start_to_mid_duration * scale_factor);
+                        auto new_next_start =
+                            next_midpoint - static_cast<rocprofiler_timestamp_t>(
+                                                next_start_to_mid_duration * scale_factor);
 
                         // Report changed timestamps to ROCP INFO
                         ROCP_INFO << fmt::format(
