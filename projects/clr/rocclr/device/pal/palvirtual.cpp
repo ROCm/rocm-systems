@@ -2776,21 +2776,12 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
   // Do an atomic max of &amd_queue.read_dispatch_id and new_read_dispatch_id
   uint64_t old_read_dispatch_id = amd_queue.read_dispatch_id;
-  while (new_read_dispatch_id > old_read_dispatch_id) {
-#if defined(__GNUC__)
-    if (__atomic_compare_exchange_n(&amd_queue.read_dispatch_id, &old_read_dispatch_id,
-                                    new_read_dispatch_id, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
-      break;
-#elif defined(_MSC_VER)
-    uint64_t initial_value = InterlockedCompareExchange64(
-        reinterpret_cast<LONG64 volatile*>(&amd_queue.read_dispatch_id), new_read_dispatch_id,
-        old_read_dispatch_id);
-    if (initial_value == old_read_dispatch_id) break;
-    old_read_dispatch_id = initial_value;
-#else  // !defined (_MSV_VER) && !defined(__GNUC__)
-#error Not implemented
-#endif  // !defined (_MSV_VER) && !defined(__GNUC__)
-  }
+  std::atomic_ref read_dispatch_id(*const_cast<uint64_t *>(&amd_queue.read_dispatch_id));
+  while (!read_dispatch_id.compare_exchange_weak(old_read_dispatch_id,
+                                                 new_read_dispatch_id,
+                                                 std::memory_order::relaxed,
+                                                 std::memory_order::relaxed))
+    ;
 
   // Run AQL dispatch in HW
   eventBegin(MainEngine);
