@@ -1058,7 +1058,7 @@ function(rocprofiler_add_unit_test)
         "PASS_REGULAR_EXPRESSION"
         "FAIL_REGULAR_EXPRESSION"
         "SKIP_REGULAR_EXPRESSION")
-    set(_MULTI_OPTS "SOURCES" "ENVIRONMENT")
+    set(_MULTI_OPTS "SOURCES" "ENVIRONMENT" "DISABLE_TESTS")
 
     cmake_parse_arguments(RAUT "${_FLAG_OPTS}" "${_SINGLE_OPTS}" "${_MULTI_OPTS}" ${ARGN})
 
@@ -1085,6 +1085,13 @@ function(rocprofiler_add_unit_test)
     set_arg_if_empty(RAUT_DISABLED "OFF")
     set_arg_if_empty(RAUT_TEST_PREFIX "unit.")
 
+    set(_DISABLE_TESTS_SOURCE "")
+    if(RAUT_DISABLE_TESTS)
+        foreach(_TEST ${RAUT_DISABLE_TESTS})
+            list(APPEND _DISABLE_TESTS_SOURCE "${RAUT_TEST_PREFIX}${_TEST}")
+        endforeach()
+    endif()
+
     if(NOT "unittests" IN_LIST RAUT_LABELS)
         list(APPEND RAUT_LABELS "unittests")
     endif()
@@ -1109,7 +1116,13 @@ function(rocprofiler_add_unit_test)
                    SKIP_REGULAR_EXPRESSION
                    "${RAUT_SKIP_REGULAR_EXPRESSION}"
                    ENVIRONMENT
-                   "${RAUT_ENVIRONMENT}")
+                   "${RAUT_ENVIRONMENT}"
+                   DISABLED
+                   ${RAUT_DISABLED})
+
+    if(_DISABLE_TESTS_SOURCE)
+        set_tests_properties(${_DISABLE_TESTS_SOURCE} PROPERTIES DISABLED ON)
+    endif()
 
     install(
         TARGETS ${RAUT_TARGET}
@@ -1135,6 +1148,14 @@ function(rocprofiler_add_unit_test)
 
     string(REPLACE "-" "_" _PACKAGE_NAME_UNDERSCORED "${CMAKE_PROJECT_NAME}")
     set(RAUT_TEST_PREFIX "${_PACKAGE_NAME_UNDERSCORED}.${RAUT_TEST_PREFIX}")
+
+    set(_DISABLE_TESTS_INSTALLED "")
+    if(RAUT_DISABLE_TESTS)
+        foreach(_TEST ${RAUT_DISABLE_TESTS})
+            list(APPEND _DISABLE_TESTS_INSTALLED "${RAUT_TEST_PREFIX}${_TEST}")
+        endforeach()
+    endif()
+    set(RAUT_DISABLE_TESTS "${_DISABLE_TESTS_INSTALLED}")
 
     configure_file(
         ${CMAKE_SOURCE_DIR}/cmake/Templates/unit-test.cmake.in

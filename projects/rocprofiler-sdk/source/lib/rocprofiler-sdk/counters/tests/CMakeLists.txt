@@ -84,6 +84,8 @@ target_link_libraries(
 set(_ROCPROFILER_SHARE_DIR
     "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
 
+# unstable counter collection test: Generates HW exception leading to GPU hang or memory
+# access fault
 rocprofiler_add_unit_test(
     TARGET counter-tests
     SOURCES ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES}
@@ -92,14 +94,13 @@ rocprofiler_add_unit_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION
         "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
-    )
-
-# unstable counter collection test: Generates HW exception leading to GPU hang or memory
-# access fault
-set_tests_properties(
-    unit.device_counting_service_test.sync_counters
-    unit.device_counting_service_test.async_counters
-    PROPERTIES DISABLED "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+        DISABLE_TESTS
+        device_counting_service_test.sync_counters
+        device_counting_service_test.async_counters
+        device_counting_service_test.sync_gpu_util_verify
+        device_counting_service_test.sync_sq_waves_verify
+        device_counting_service_test.sync_sq_waves_verify_non_intercept
+        device_counting_service_test.raw_sq_waves_verify)
 
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 

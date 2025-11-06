@@ -45,3 +45,11 @@ set_tests_properties(
                "${_ENVIRONMENT}"
                DISABLED
                "${_DISABLED}")
+
+# Disable specific tests
+set(_DISABLE_TESTS "@RAUT_DISABLE_TESTS@")
+if(_DISABLE_TESTS)
+    set_tests_properties(
+        ${_DISABLE_TESTS}
+        PROPERTIES DISABLED ON)
+endif()
