@@ -4,6 +4,12 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.2.1 for ROCm 7.1.1
+
+### Resolved issues
+
+- Fixed an issue of OpenMP Tools (OMPT) events, GPU performance counters, VA-API, MPI, and host events failing to be collected in the `rocpd` output.
+
 ## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 
 ### Added
