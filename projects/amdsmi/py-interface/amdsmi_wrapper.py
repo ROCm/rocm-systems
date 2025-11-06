@@ -184,7 +184,7 @@ def find_smi_library():
     err = OSError("Could not load libamd_smi.so")
     possible_locations = []
     # 0.
-    libamd_smi_path = Path(__file__).resolve().parent.parent.parent.parent / "lib/libamd_smi.so"
+    libamd_smi_path = Path(__file__).resolve().parent.parent.parent.parent / "lib/libamd_smi.so.26"
     possible_locations.append(libamd_smi_path)
     # 1.
     rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
