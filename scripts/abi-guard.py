@@ -29,6 +29,7 @@ import sys
 import glob
 import yaml
 import shlex
+import shutil
 import hashlib
 import logging
 import argparse
@@ -50,6 +51,14 @@ COMMENT_PATTERNS = {
     "python": re.compile(r"#.*?$", re.MULTILINE),
     "cmake": re.compile(r"#.*?$", re.MULTILINE),
 }
+
+GLOBAL_ABIDW_EXTRAS = [
+    "--load-all-types",
+    "--type-id-style",
+    "hash",
+]
+
+GLOBAL_ABIDIFF_EXTRAS = []
 
 
 class BooleanArgAction(argparse.Action):
@@ -248,7 +257,7 @@ class VersioningSpec(object):
     Class to represent a versioning specification from versioning.yml.
     """
 
-    def __init__(self, head_spec, args, **kwargs) -> None:
+    def __init__(self, spec_file, args, **kwargs) -> None:
 
         def _get_file_set(inp, working_dir, section):
 
@@ -273,56 +282,39 @@ class VersioningSpec(object):
                 exclude_recursive,
             )
 
-        root_working_dir = Path(head_spec).parent
-        with open(head_spec, "r") as ifs:
+        with open(spec_file, "r") as ifs:
             self.spec = yaml.safe_load(ifs)
 
+        # root working directory for relative paths
+        root_working_dir = Path(spec_file).resolve().parent
+
         self.name = self.spec["versioning"].get("name", None)
-        self.tree = None
+        self.version = None
         self.build_directory = self.spec["versioning"].get("build-directory", "build")
-        self.install_directory = self.spec["versioning"].get(
-            "install-directory", "install"
-        )
         self.abidw_args = self.spec["versioning"].get("abidw-args", "")
         self.abidiff_args = self.spec["versioning"].get("abidiff-args", "")
 
         # command line overrides
         if has_attr(args, "build_directory"):
             self.build_directory = args.build_directory
-        if has_attr(args, "install_directory"):
-            self.install_directory = args.install_directory
         if has_attr(args, "abidw_args"):
             self.abidw_args = args.abidw_args
         if has_attr(args, "abidiff_args"):
             self.abidiff_args = args.abidiff_args
-        if has_attr(args, "tree"):
-            self.tree = args.tree
+        if has_attr(args, "mode"):
+            self.mode = args.mode
 
         self.build_directory = kwargs.get("build_directory", self.build_directory)
-        self.install_directory = kwargs.get("install_directory", self.install_directory)
         self.abidw_args = kwargs.get("abidw_args", self.abidw_args)
         self.abidiff_args = kwargs.get("abidiff_args", self.abidiff_args)
-        self.tree = kwargs.get("tree", self.tree)
+        self.mode = kwargs.get("mode", self.mode)
 
-        if self.tree is None:
-            raise argparse.ArgumentError(None, message="-t / --tree must be specified.")
+        if self.mode is None:
+            raise argparse.ArgumentError(None, message="-m / --mode must be specified.")
 
-        for itr, attrib in zip(
-            ["source-tree", "build-tree", "install-tree"], ["source", "build", "install"]
-        ):
-            if self.tree == "source-tree" and itr == "install-tree":
-                # if the spec is from the source tree, ignore the install-tree
-                continue
-            elif self.tree == "build-tree" and itr == "install-tree":
-                # if the spec is from the source tree, ignore the install-tree
-                continue
-            elif self.tree == "install-tree" and itr in ["source-tree", "build-tree"]:
-                # if the spec is from the install tree, ignore the source and build trees
-                continue
-
-            working_directory = self.spec["versioning"][itr].get(
-                "working-directory", None
-            )
+        for itr in ["source", "build", "install"]:
+            _spec = self.spec["versioning"].get(f"{itr}-tree", None)
+            working_directory = _spec.get("working-directory", None)
 
             if working_directory is not None:
                 working_directory = (
@@ -333,24 +325,54 @@ class VersioningSpec(object):
             else:
                 working_directory = root_working_dir
 
-            if self.tree != "build-tree" and itr == "build-tree":
-                # if the spec is not from the build tree, configure build tree working directory
-                working_directory = (
-                    root_working_dir / self.build_directory
-                    if not Path(self.build_directory).is_absolute()
-                    else self.build_directory
+            if self.mode == "build":
+                if itr == "source":
+                    # no need to make any modifications
+                    pass
+                elif itr == "build":
+                    # configure relative to the build directory
+                    working_directory = (
+                        root_working_dir / self.build_directory
+                        if not Path(self.build_directory).is_absolute()
+                        else self.build_directory
+                    )
+                elif itr == "install":
+                    continue
+                else:
+                    raise argparse.ArgumentError(
+                        None,
+                        message=f"Invalid build tree specified: {itr}. Must be 'source' or 'build'.",
+                    )
+            elif self.mode == "install":
+                if itr == "source" or itr == "build":
+                    continue
+                elif itr == "install":
+                    pass
+                else:
+                    raise argparse.ArgumentError(
+                        None,
+                        message=f"Invalid build tree specified: {itr}. Must be 'source' or 'build'.",
+                    )
+            else:
+                raise argparse.ArgumentError(
+                    None,
+                    message=f"Invalid mode specified: {self.mode}. Must be 'build' or 'install'.",
                 )
-            elif self.tree != "install-tree" and itr == "install-tree":
-                # if the spec is not from the install tree, configure install tree working directory
-                working_directory = (
-                    root_working_dir / self.install_directory
-                    if not Path(self.install_directory).is_absolute()
-                    else self.install_directory
+
+            _require_working_directory_exists = _spec.get(
+                "require-working-directory-exists", False
+            )
+
+            if _require_working_directory_exists and not os.path.exists(
+                working_directory
+            ):
+                raise RuntimeError(
+                    f"Working directory for {itr} does not exist: {working_directory}"
                 )
 
             # read the VERSION file from the reference tree
-            if itr == self.tree:
-                _version_file = self.spec["versioning"][itr]["version-file"]
+            if self.version is None:
+                _version_file = _spec["version-file"]
                 self.version_file = (
                     Path(working_directory) / _version_file
                     if not Path(_version_file).is_absolute()
@@ -358,42 +380,37 @@ class VersioningSpec(object):
                 )
                 self.version = parse_version_file(self.version_file)
 
-            if not os.path.exists(working_directory):
-                raise RuntimeError(
-                    f"Working directory for {itr} does not exist: {working_directory}"
-                )
-
-            setattr(self, f"{attrib}_working_directory", working_directory)
+            setattr(self, f"{itr}_working_directory", working_directory)
             setattr(
                 self,
-                f"{attrib}_sources",
+                f"{itr}_sources",
                 _get_file_set(
-                    self.spec["versioning"][itr],
+                    _spec,
                     working_directory,
                     "sources",
                 ),
             )
             setattr(
                 self,
-                f"{attrib}_headers",
+                f"{itr}_headers",
                 _get_file_set(
-                    self.spec["versioning"][itr],
+                    _spec,
                     working_directory,
                     "headers",
                 ),
             )
             setattr(
                 self,
-                f"{attrib}_abi_check",
+                f"{itr}_abi_check",
                 _get_file_set(
-                    self.spec["versioning"][itr],
+                    _spec,
                     working_directory,
                     "abi-check",
                 ),
             )
 
             # create a temporary file if the working directory has git submodules
-            if itr == "source-tree":
+            if itr == "source":
                 run_cmd(
                     ["git", "submodule", "update", "--init", working_directory],
                 )
@@ -420,8 +437,8 @@ class VersioningSpec(object):
                     setattr(self, "submodule_file", tmpf.name)
                     setattr(
                         self,
-                        f"{attrib}_sources",
-                        getattr(self, f"{attrib}_sources")
+                        f"{itr}_sources",
+                        getattr(self, f"{itr}_sources")
                         + FileSet([tmpf.name], [], [], []),
                     )
 
@@ -483,30 +500,60 @@ def strtobool(val):
         raise ValueError(f"invalid truth value {val} (type={val_type})")
 
 
-def compute_hash(data) -> str:
+def get_compute_hash_text(data):
+
+    def _get_readable_text(_text, nwidth=120, indent="\t", line_join="\n"):
+        nwidth = 120
+        return line_join.join(
+            [
+                "{}{}".format(indent, _text[i : i + nwidth])
+                for i in range(0, len(_text), nwidth)
+            ]
+        )
+
+    ret = []
+    if isinstance(data, (list, tuple, set)):
+        ret += [get_compute_hash_text(itr) for itr in data]
+    elif isinstance(data, FileSet):
+        ret += [get_compute_hash_text(itr) for itr in data.get_paths(absolute=True)]
+    elif isinstance(data, Path):
+        logging.info(f"Computing hash text for file: '{str(data)}'")
+        lang = _language_for_path(data)
+        text = data.read_text(encoding="utf-8", errors="ignore")
+        pattern = COMMENT_PATTERNS.get(lang)
+        if pattern:
+            text = re.sub(pattern, "", text)
+        # Remove all whitespace
+        text = re.sub(r"\s+", "", text)
+        logging.debug(
+            "Hash text for file '{}':\n{}".format(str(data), _get_readable_text(text))
+        )
+        ret.append(text)
+    elif isinstance(data, str):
+        ret.append(data)
+    else:
+        raise TypeError(f"Unsupported data type for hash text extraction: {type(data)}")
+
+    if not isinstance(data, Path):
+        logging.debug(
+            "Computed hash text data:\n{}".format(
+                "\n".join([_get_readable_text(itr) for itr in ret])
+            )
+        )
+
+    return ret
+
+
+def compute_hash(data, *args) -> str:
     """
     Compute a hash for the given data.
     """
-    if isinstance(data, FileSet):
-        combined = {}
-        for path in data.get_paths(absolute=False):
-            lang = _language_for_path(path)
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            pattern = COMMENT_PATTERNS.get(lang)
-            if pattern:
-                text = re.sub(pattern, "", text)
-            # Remove all whitespace
-            text = re.sub(r"\s+", "", text)
-            if "rocm-abi-guard-submodules-" in str(path):
-                combined["rocm-abi-guard-submodules.tmp"] = text
-            else:
-                combined[f"{path}"] = text
+    data = get_compute_hash_text(data)
+    if len(args) > 0:
+        data += get_compute_hash_text([*args])
 
-        # Compute MD5
-        return compute_hash(f"{combined}") if combined else "0"
-    else:
-        _data = f"{data}" if not isinstance(data, str) else data
-        return hashlib.md5(_data.encode()).hexdigest()
+    _data = "".join([str(itr) for itr in data])
+    return hashlib.md5(_data.encode()).hexdigest()
 
 
 def _flush_streams():
@@ -539,8 +586,8 @@ def run_cmd(
     Run a command in a subprocess and return its exit code, stdout, and stderr.
     """
 
-    _cmd = "\n\t  ".join([f"{itr}" for itr in cmd])
-    logging.debug(f"Running command (cwd={str(cwd)}):\n\t'{_cmd}'")
+    _cmd = " ".join([f"{itr}" for itr in cmd])
+    logging.info(f"Running command (cwd={str(cwd)}):\n\t'{_cmd}'")
 
     proc = subprocess.Popen(
         cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
@@ -555,8 +602,9 @@ def parse_version_file(path: Path) -> Version:
     """
     Parse the VERSION file and return a Version object.
     """
+    logging.info(f"Parsing VERSION file at: '{path.resolve()}'")
     if not path.is_file():
-        sys.exit(f"Missing VERSION file at {path} (expected X.Y.Z).")
+        sys.exit(f"Missing VERSION file at '{path.resolve()}'.")
     ver = path.read_text().strip()
     m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)[\.\-]*([a-zA-Z0-9]*)\n# hash: (\w+)", ver)
     if not m:
@@ -566,7 +614,7 @@ def parse_version_file(path: Path) -> Version:
     return Version(*m.groups())
 
 
-def map_by_basename(paths: List[str]) -> Dict[str, str]:
+def map_by_basename(paths: List[str]) -> Tuple[Dict[str, str], Dict[str, str]]:
     """
     Map file basenames to their full paths.
     """
@@ -580,6 +628,7 @@ def map_by_basename(paths: List[str]) -> Dict[str, str]:
 
     keys = list(out.keys())
     del_keys = []
+    dup = {}
     for i, itr in enumerate(keys):
         for j in range(i + 1, len(keys)):
             nitr = keys[j]
@@ -587,6 +636,10 @@ def map_by_basename(paths: List[str]) -> Dict[str, str]:
                 logging.info(
                     f"Duplicate basename '{itr}' found for paths in '{nitr}':\n\t- {out[itr]}\n\t- {out[nitr]}"
                 )
+                if itr not in dup:
+                    dup[itr] = []
+                if nitr not in dup:
+                    dup[itr].append(nitr)
                 if nitr not in del_keys:
                     del_keys.append(nitr)
 
@@ -594,7 +647,7 @@ def map_by_basename(paths: List[str]) -> Dict[str, str]:
         logging.debug(f"Removing path for '{d}': {out[d]}")
         del out[d]
 
-    return out
+    return (out, dup)
 
 
 def split_shell_args(argstr: str) -> List[str]:
@@ -645,13 +698,13 @@ def generate(args) -> str:
     data = {
         "name": f"{args.project_name}",
         "build_directory": "build",
-        "install_directory": "install",
         "cmake_build_type": "RelWithDebInfo",
         "cmake_generator": "Ninja",
         "cmake_config_args": "",
         "source_tree": {
             "version_file": "VERSION",
             "working_directory": ".",
+            "require_working_directory_exists": True,
             "sources": {
                 "include": [],
                 "exclude": [],
@@ -674,6 +727,7 @@ def generate(args) -> str:
         "build_tree": {
             "version_file": "VERSION",
             "working_directory": ".",
+            "require_working_directory_exists": False,
             "sources": {},
             "headers": {},
             "abi_check": {
@@ -686,6 +740,7 @@ def generate(args) -> str:
         "install_tree": {
             "version_file": f"share/{args.project_name}/VERSION",
             "working_directory": "../..",
+            "require_working_directory_exists": True,
             "sources": [],
             "headers": [
                 f"include/{args.project_name}/**/*.h",
@@ -707,7 +762,7 @@ def generate(args) -> str:
     if not args.quiet:
         print(rendered_config)
 
-    output_file = os.path.join(args.output_path, args.output_file)
+    output_file = os.path.join(args.output_directory, args.output_file)
     output_dir = os.path.dirname(output_file)
 
     logging.warning(f"Generating '{output_file}'...")
@@ -749,7 +804,7 @@ def main() -> None:
 
     parser.add_argument(
         "--log-level",
-        default="warning",
+        default=os.environ.get("ROCM_ABI_GUARD_LOG_LEVEL", "warning"),
         choices=list(logging_choices.keys()),
         type=str.lower,
         help="Set the logging level.",
@@ -774,11 +829,11 @@ def main() -> None:
         )
 
         _parser.add_argument(
-            "-t",
-            "--tree",
-            help="Select tree to operate on (source-tree, build-tree, install-tree).",
-            choices=["source-tree", "build-tree", "install-tree"],
-            default="source-tree",
+            "-m",
+            "--mode",
+            help="Select build mode to use. build means using source tree and build tree, install means using install tree.",
+            choices=["build", "install"],
+            default="build",
         )
 
         _parser.add_argument(
@@ -922,7 +977,7 @@ def main() -> None:
 
     generate_parser.add_argument(
         "-d",
-        "--output-path",
+        "--output-directory",
         help="Path to output directory.",
         default=os.getcwd(),
     )
@@ -937,6 +992,20 @@ def main() -> None:
         "--quiet",
         help="Suppress printing configuration to stdout.",
         action="store_true",
+    )
+
+    abi_dump_parser = subparsers.add_parser(
+        "abi-generate", help="ABI Guard using libabigail (abidw/abidiff)"
+    )
+
+    _add_head_spec_arg(abi_dump_parser)
+
+    abi_dump_parser.add_argument("--abidw-args", default="", help="Extra args for abidw.")
+    abi_dump_parser.add_argument(
+        "-d",
+        "--output-directory",
+        default=os.path.join(os.getcwd(), "abi-guard"),
+        help="Directory to write abidw reports.",
     )
 
     check_parser = subparsers.add_parser(
@@ -956,27 +1025,37 @@ def main() -> None:
         "--abidiff-args", default="", help="Extra args for abidiff."
     )
     check_parser.add_argument(
-        "--baseline-tag-pattern",
-        default="v[0-9]*.[0-9]*.[0-9]*",
-        help="Tag pattern to infer baseline version if VERSION missing in baseline artifact.",
+        "-d",
+        "--output-directory",
+        default=os.path.join(os.getcwd(), "abi-guard"),
+        help="Directory to write abidw/abidiff reports and logs.",
     )
     check_parser.add_argument(
-        "--report-dir",
-        default="abi-guard/diff-reports",
-        help="Directory to write abidiff reports.",
+        "--head-abi-xml",
+        help="Path to folder containing the (head) ABI XML files (if generated previously via abi-generate).",
+        required=False,
+        type=str,
+        default=None,
     )
     check_parser.add_argument(
-        "--abi-base-dir",
-        default="abi-guard/abi-base",
-        help="Output dir for baseline ABI XML.",
-    )
-    check_parser.add_argument(
-        "--abi-head-dir",
-        default="abi-guard/abi-head",
-        help="Output dir for head ABI XML.",
+        "--base-abi-xml",
+        help="Path to folder containing the (base) ABI XML files (if generated previously via abi-generate).",
+        required=False,
+        type=str,
+        default=None,
     )
 
     args = parser.parse_args()
+
+    for _attr in ["head_abi_xml", "base_abi_xml"]:
+        if has_attr(args, _attr):
+            _path = Path(getattr(args, _attr))
+            if not _path.is_dir():
+                _option = f"--{_attr.replace('_', '-')}"
+                raise argparse.ArgumentError(
+                    None,
+                    message=f"Specified {_option} option is not a directory: '{str(_path)}'",
+                )
 
     logging.basicConfig(
         level=logging_choices.get(args.log_level, logging.WARNING),
@@ -1075,7 +1154,78 @@ def main() -> None:
         files = "\n".join(
             sorted([f"    - {itr}" for itr in digest_files.get_paths(absolute=False)])
         )
-        logging.info(f"  files:\n{files}")
+        logging.info(f"hashed files:\n{files}")
+
+    elif args.command == "abi-generate":
+        head_version = head_spec.version
+
+        logging.warning(f"Current  VERSION: {head_version}")
+
+        # Collect libraries
+        head_libs = head_spec.abi_check
+
+        logging.info(f"Current ABI libs: {head_libs.get_paths(absolute=False)}")
+
+        head_by_name, dup_head_by_name = map_by_basename(
+            head_libs.get_paths(absolute=False)
+        )
+
+        abi_libs = sorted(set(head_by_name.keys()))
+        if not abi_libs:
+            sys.exit("No ABI libraries found")
+
+        logging.warning(f"ABI libraries: {abi_libs}")
+
+        # Prepare dirs
+        out_dir = Path(args.output_directory)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        for ditr in [out_dir]:
+            with open(ditr / ".gitignore", "w") as ofs:
+                ofs.write("*\n")
+
+        abidw_extras = split_shell_args(head_spec.abidw_args) + GLOBAL_ABIDW_EXTRAS
+
+        for name in abi_libs:
+            logging.warning(f"Processing library: {name}")
+            _flush_streams()
+
+            head_so = head_by_name[name]
+            head_xml = out_dir / f"{head_spec.name}.{name}.abi"
+
+            head_abidw_header_files = split_shell_args(
+                " ".join(
+                    [
+                        f"--header-file {str(p)}"
+                        for p in head_spec.headers.get_paths(absolute=True)
+                    ]
+                )
+            )
+
+            # Dump ABI XML with abidw
+            head_rc, head_out, head_err = run_cmd(
+                ["abidw", *abidw_extras, *head_abidw_header_files, head_so]
+            )
+
+            if head_rc == 0:
+                logging.warning(f"Writing ABI XML: '{str(head_xml)}'...")
+                head_xml.write_text(f"{head_out}\n")
+            else:
+                Path(out_dir / f"{head_spec.name}.{name}.abidw.stderr.txt").write_text(
+                    head_err
+                )
+                logging.warning(
+                    f"::warning title=abidw head::{name}: abidw returned {head_rc}\nstderr:\n{head_err}"
+                )
+                sys.exit(head_rc)
+
+            if name in dup_head_by_name:
+                for itr in dup_head_by_name[name]:
+                    copy_xml = out_dir / f"{head_spec.name}.{itr}.abi"
+                    logging.warning(
+                        f"Copying ABI XML: '{str(head_xml)}' to '{str(copy_xml)}'..."
+                    )
+                    shutil.copy2(str(head_xml), str(copy_xml))
 
     elif args.command == "check":
         head_version = head_spec.version
@@ -1091,8 +1241,8 @@ def main() -> None:
         logging.info(f"Baseline ABI libs: {base_libs.get_paths(absolute=False)}")
         logging.info(f"Current  ABI libs: {head_libs.get_paths(absolute=False)}")
 
-        base_by_name = map_by_basename(base_libs.get_paths(absolute=False))
-        head_by_name = map_by_basename(head_libs.get_paths(absolute=False))
+        base_by_name, _ = map_by_basename(base_libs.get_paths(absolute=False))
+        head_by_name, _ = map_by_basename(head_libs.get_paths(absolute=False))
 
         common_libs = sorted(set(base_by_name.keys()) & set(head_by_name.keys()))
         if not common_libs:
@@ -1138,19 +1288,15 @@ def main() -> None:
         logging.warning(f"Removed libraries: {removed_libs}")
 
         # Prepare dirs
-        report_dir = Path(args.report_dir)
-        report_dir.mkdir(parents=True, exist_ok=True)
-        abi_base = Path(args.abi_base_dir)
-        abi_base.mkdir(parents=True, exist_ok=True)
-        abi_head = Path(args.abi_head_dir)
-        abi_head.mkdir(parents=True, exist_ok=True)
+        out_dir = Path(args.output_directory)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-        for ditr in [report_dir, abi_base, abi_head]:
+        for ditr in [out_dir]:
             with open(ditr / ".gitignore", "w") as ofs:
                 ofs.write("*\n")
 
-        abidw_extras = split_shell_args(args.abidw_args)
-        abidiff_extras = split_shell_args(args.abidiff_args)
+        abidw_extras = split_shell_args(args.abidw_args) + GLOBAL_ABIDW_EXTRAS
+        abidiff_extras = split_shell_args(args.abidiff_args) + GLOBAL_ABIDIFF_EXTRAS
 
         incompatible = 0
         added_any = False
@@ -1163,66 +1309,67 @@ def main() -> None:
 
             base_so = base_by_name[name]
             head_so = head_by_name[name]
-            old_xml = abi_base / f"{name}.abi"
-            new_xml = abi_head / f"{name}.abi"
 
-            base_abidw_header_files = split_shell_args(
-                " ".join(
-                    [
-                        f"--header-file {str(p)}"
-                        for p in base_spec.headers.get_paths(absolute=True)
-                    ]
-                )
-            )
-            head_abidw_header_files = split_shell_args(
-                " ".join(
-                    [
-                        f"--header-file {str(p)}"
-                        for p in head_spec.headers.get_paths(absolute=True)
-                    ]
-                )
-            )
+            def _get_abi_xml(_label, _spec, _abi_xml_dir, _so):
+                if _abi_xml_dir:
+                    assert os.path.isdir(
+                        _abi_xml_dir
+                    ), f"Specified {_label} ABI XML path is not a directory: '{_abi_xml_dir}'"
+                    _abi_xml = (
+                        Path(_abi_xml_dir) / f"{_spec.name}.{name}.abi"
+                        if _abi_xml_dir
+                        else None
+                    )
+                    assert os.path.exists(
+                        _abi_xml
+                    ), f"Specified {_label} ABI XML file does not exist: '{str(_abi_xml)}'"
+                    return Path(_abi_xml)
+                else:
+                    _xml = out_dir / f"{base_spec.name}.{name}.{_label}.abi"
+                    _abidw_header_files = split_shell_args(
+                        " ".join(
+                            [
+                                f"--header-file {str(p)}"
+                                for p in _spec.headers.get_paths(absolute=True)
+                            ]
+                        )
+                    )
+                    # Dump ABI XML with abidw
+                    _rc, _out, _err = run_cmd(
+                        ["abidw", *abidw_extras, *_abidw_header_files, _so]
+                    )
+                    _xml.write_text(f"{_out}\n")
+                    if _rc != 0:
+                        Path(
+                            out_dir / f"{_spec.name}.{name}.{_label}.abidw.stderr.txt"
+                        ).write_text(_err)
+                        logging.warning(
+                            f"::warning title=abidw baseline::{name}: abidw returned {_rc}\nstderr:\n{_err}"
+                        )
+                    if _rc != 0:
+                        logging.critical(
+                            f"::error title=ABI / Version policy:: abidw ({_label}) failed."
+                        )
+                        sys.exit(1)
 
-            # Dump ABI XML with abidw
-            base_rc, base_out, base_err = run_cmd(
-                ["abidw", *abidw_extras, *base_abidw_header_files, base_so]
-            )
-            old_xml.write_text(base_out)
-            if base_rc != 0:
-                Path(report_dir / f"{name}.baseline_abidw.stderr.txt").write_text(
-                    base_err
-                )
-                logging.warning(
-                    f"::warning title=abidw baseline::{name}: abidw returned {base_rc}\nstderr:\n{base_err}"
-                )
+                    return Path(_xml)
 
-            head_rc, head_out, head_err = run_cmd(
-                ["abidw", *abidw_extras, *head_abidw_header_files, head_so]
-            )
-            new_xml.write_text(head_out)
-            if head_rc != 0:
-                Path(report_dir / f"{name}.head_abidw.stderr.txt").write_text(head_err)
-                logging.warning(
-                    f"::warning title=abidw head::{name}: abidw returned {head_rc}\nstderr:\n{head_err}"
-                )
-
-            if base_rc != 0 or head_rc != 0:
-                logging.critical("::error title=ABI / Version policy:: abidw failed.")
-                sys.exit(1)
+            base_xml = _get_abi_xml("baseline", base_spec, args.base_abi_xml, base_so)
+            head_xml = _get_abi_xml("head", head_spec, args.head_abi_xml, head_so)
 
             # Compare with abidiff
-            def run_abidiff(option):
+            def _run_abidiff(option):
                 global incompatible
 
                 cmd = [
                     "abidiff",
                     *abidiff_extras,
                     f"--{option}",
-                    str(old_xml),
-                    str(new_xml),
+                    str(base_xml),
+                    str(head_xml),
                 ]
                 rc, out, err = run_cmd(cmd)
-                report_path = report_dir / f"{name}.{option}.txt"
+                report_path = out_dir / f"{name}.{option}.txt"
                 report_path.write_text(
                     f"ExitCode={rc}\n\nstderr:\n{err}\n\nstdout:\n{out}\n"
                 )
@@ -1235,12 +1382,12 @@ def main() -> None:
 
                 return 1 if rc != 0 else 0
 
-            added_funcs = run_abidiff("added-fns")
-            added_vars = run_abidiff("added-vars")
-            changed_funcs = run_abidiff("changed-fns")
-            changed_vars = run_abidiff("changed-vars")
-            deleted_funcs = run_abidiff("deleted-fns")
-            deleted_vars = run_abidiff("deleted-vars")
+            added_funcs = _run_abidiff("added-fns")
+            added_vars = _run_abidiff("added-vars")
+            changed_funcs = _run_abidiff("changed-fns")
+            changed_vars = _run_abidiff("changed-vars")
+            deleted_funcs = _run_abidiff("deleted-fns")
+            deleted_vars = _run_abidiff("deleted-vars")
 
             if added_funcs + added_vars > 0:
                 added_any = True
