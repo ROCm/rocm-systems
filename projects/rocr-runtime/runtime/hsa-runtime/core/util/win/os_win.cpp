@@ -459,6 +459,11 @@ uint64_t HostTotalPhysicalMemory() {
   return totalPhys;
 }
 
+bool ProtectMemory(void* addr, size_t size, MemProt prot) {
+  DWORD OldProtect;
+  return VirtualProtect(addr, size, memProtToOsProt(prot), &OldProtect) != 0;
+}
+
 int Ffs(int i) {
   int res = 0;
   unsigned long index;
