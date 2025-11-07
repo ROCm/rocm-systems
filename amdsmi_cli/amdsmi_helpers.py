@@ -32,6 +32,8 @@ import time
 import glob
 import errno
 import pwd
+import stat
+from typing import Tuple, Optional, Union
 
 from enum import Enum
 from pathlib import Path
@@ -1168,13 +1170,45 @@ class AMDSMIHelpers():
         except Exception as e:
             return {"error": str(e)}
 
-    def _try_open(self, path: str):
+    def _has_read_access(self, path: str) -> Tuple[bool, Optional[int], Optional[str]]:
+        """
+        Check whether the current (real/effective) user can read the given path
+        without opening it. Returns (ok:bool, errno_or_None, message_or_None)
+        """
         try:
-            fd = os.open(path, os.O_RDONLY) # Only read access is needed for permission check
-            os.close(fd)
-            return True, None, None
+            st = os.stat(path)
         except OSError as e:
             return False, e.errno, e.strerror
+
+        # root can always read
+        if os.geteuid() == 0:
+            return True, None, None
+
+        mode = st.st_mode
+        uid = st.st_uid
+        gid = st.st_gid
+
+        euid = os.geteuid()
+        egid = os.getegid()
+        groups = os.getgroups()
+
+        # owner
+        if euid == uid:
+            if mode & stat.S_IRUSR:
+                return True, None, None
+            return False, errno.EACCES, "Permission denied (owner)"
+
+        # group
+        if gid == egid or gid in groups:
+            if mode & stat.S_IRGRP:
+                return True, None, None
+            return False, errno.EACCES, "Permission denied (group)"
+
+        # other
+        if mode & stat.S_IROTH:
+            return True, None, None
+
+        return False, errno.EACCES, "Permission denied (other)"
 
     def check_required_groups(self, check_render=True, check_video=True):
         """
@@ -1210,7 +1244,23 @@ class AMDSMIHelpers():
         denied = []
 
         for path in paths_to_check:
-            ok, err, msg = self._try_open(path)
+            # Do not try to open all paths, may cause driver issues.
+            # Read access is sufficient to check permissions.
+            #
+            # Reason: GPUs which support partitioning (memory/compute), 
+            # logical devices will not be valid until configured.
+            # See `sudo amd-smi set -h` or applicable APIs
+            # to configure on supported hardware.
+            #
+            # Example error dmesg output:
+            # [965358.883112] amdgpu 0000:15:00.0: amdgpu: renderD153 partition 1 not valid!
+            # [965358.883283] amdgpu 0000:15:00.0: amdgpu: renderD154 partition 2 not valid!
+            # [965358.883438] amdgpu 0000:15:00.0: amdgpu: renderD155 partition 3 not valid!
+            # [965358.883594] amdgpu 0000:15:00.0: amdgpu: renderD156 partition 4 not valid!
+            # [965358.883749] amdgpu 0000:15:00.0: amdgpu: renderD157 partition 5 not valid!
+            # [965358.883904] amdgpu 0000:15:00.0: amdgpu: renderD158 partition 6 not valid!
+            # [965358.884060] amdgpu 0000:15:00.0: amdgpu: renderD159 partition 7 not valid!
+            ok, err, msg = self._has_read_access(path)
             if ok:
                 continue
             # if permission denied or operation not permitted
