@@ -1,50 +1,10 @@
 /*
- * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
- * The University of Illinois/NCSA
- * Open Source License (NCSA)
- *
- * Copyright (c) 2025, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD ROC Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal with the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- *  - Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimers.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimers in
- *    the documentation and/or other materials provided with the distribution.
- *  - Neither the names of <Name of Development Group, Name of Institution>,
- *    nor the names of its contributors may be used to endorse or promote
- *    products derived from this Software without specific prior written
- *    permission.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS WITH THE SOFTWARE.
- *
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ * 
+ * SPDX-License-Identifier: NCSA
  */
 
 #include <fcntl.h>
-#include <sys/wait.h>
 #include <sys/resource.h>
 #include <unistd.h>
 #include <elf.h>
@@ -53,7 +13,6 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
-#include <memory>
 #include <cstring>
 #include <cstdlib>
 
@@ -64,39 +23,44 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
-// Simple kernel that causes a memory fault
-static const char* kFaultKernel = 
-  ".amdgcn_target \"amdgcn-amd-amdhsa--gfx900\"\n"
-  ".text\n"
-  ".globl fault_kernel\n"
-  ".p2align 8\n"
-  ".type fault_kernel,@function\n"
-  "fault_kernel:\n"
-  "  .amd_kernel_code_t\n"
-  "    enable_sgpr_kernarg_segment_ptr = 1\n"
-  "    is_ptr64 = 1\n"
-  "    compute_pgm_rsrc1_vgprs = 0\n"
-  "    compute_pgm_rsrc1_sgprs = 0\n"
-  "    compute_pgm_rsrc2_user_sgpr = 2\n"
-  "    kernarg_segment_byte_size = 8\n"
-  "  .end_amd_kernel_code_t\n"
-  "  s_load_dwordx2 s[0:1], s[0:1], 0x0\n"
-  "  s_waitcnt lgkmcnt(0)\n"
-  "  v_mov_b32 v0, 0xDEADBEEF\n"  // Invalid address
-  "  v_mov_b32 v1, 0xDEADBEEF\n"
-  "  flat_store_dword v[0:1], v0\n"  // This will cause a memory fault
-  "  s_endpgm\n"
-  ".Lfunc_end0:\n"
-  "  .size fault_kernel, .Lfunc_end0-fault_kernel\n";
+#define VECTOR_SIZE 256
+
+#define RET_IF_HSA_ERR(err) { \
+  if ((err) != HSA_STATUS_SUCCESS) { \
+    const char* msg = 0; \
+    hsa_status_string(err, &msg); \
+    std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << \
+                          __FILE__ << ". Call returned " << err << std::endl; \
+    std::cout << msg << std::endl; \
+    return (err); \
+  } \
+}
+
+namespace {
+  void set_core_limit() {
+    // Set ulimit -c to 100MB (sufficient for GPU core dumps)
+    struct rlimit rlim;
+    rlim.rlim_cur = 100 * 1024 * 1024;  // 100MB
+    rlim.rlim_max = 100 * 1024 * 1024;
+    setrlimit(RLIMIT_CORE, &rlim);
+  }
+}
 
 GpuCoreDumpTest::GpuCoreDumpTest(void) : TestBase() {
   set_num_iteration(1);
   set_title("GPU Core Dump Configuration Tests");
   set_description("Tests for configurable GPU core dump functionality including "
                   "custom patterns, format specifiers, and disable flag.");
+  set_kernel_file_name("vector_add_memory_fault_kernels.hsaco");
+  set_kernel_name("vector_add_memory_fault");
+  
+  // Save original ulimit
+  getrlimit(RLIMIT_CORE, &original_rlimit_);
 }
 
 GpuCoreDumpTest::~GpuCoreDumpTest(void) {
+  // Restore original ulimit
+  setrlimit(RLIMIT_CORE, &original_rlimit_);
 }
 
 void GpuCoreDumpTest::SetUp(void) {
@@ -107,10 +71,91 @@ void GpuCoreDumpTest::SetUp(void) {
   err = rocrtst::SetDefaultAgents(this);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
+  hsa_agent_t* gpu_dev = gpu_device1();
+
+  err = rocrtst::SetPoolsTypical(this);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // Create a queue
+  hsa_queue_t* q = nullptr;
+  rocrtst::CreateQueue(*gpu_dev, &q);
+  ASSERT_NE(q, nullptr);
+  set_main_queue(q);
+
+  err = rocrtst::LoadKernelFromObjFile(this, gpu_dev);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  err = rocrtst::InitializeAQLPacket(this, &aql());
+  ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+
+  hsa_agent_t ag_list[2] = {*gpu_device1(), *cpu_device()};
+
+  // Allocate buffers for the kernel
+  err = hsa_amd_memory_pool_allocate(cpu_pool(),
+                                   VECTOR_SIZE*sizeof(int),
+                                   0, reinterpret_cast<void**>(&a_buffer_));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_agents_allow_access(2, ag_list, nullptr, a_buffer_);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  err = hsa_amd_memory_pool_allocate(cpu_pool(),
+                                   VECTOR_SIZE*sizeof(int),
+                                   0, reinterpret_cast<void**>(&b_buffer_));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_agents_allow_access(2, ag_list, nullptr, b_buffer_);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  err = hsa_amd_memory_pool_allocate(cpu_pool(),
+                                   VECTOR_SIZE*sizeof(int),
+                                   0, reinterpret_cast<void**>(&c_buffer_));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_agents_allow_access(2, ag_list, nullptr, c_buffer_);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  err = hsa_amd_memory_pool_allocate(cpu_pool(),
+                                   VECTOR_SIZE*sizeof(int),
+                                   0, reinterpret_cast<void**>(&d_buffer_));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_agents_allow_access(2, ag_list, nullptr, d_buffer_);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  err = hsa_amd_memory_pool_allocate(cpu_pool(),
+                                   VECTOR_SIZE*sizeof(int),
+                                   0, reinterpret_cast<void**>(&e_buffer_));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  err = hsa_amd_agents_allow_access(2, ag_list, nullptr, e_buffer_);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // Initialize buffers
+  for (int i = 0; i < VECTOR_SIZE; i++) {
+    reinterpret_cast<int*>(a_buffer_)[i] = i;
+    reinterpret_cast<int*>(b_buffer_)[i] = i * 2;
+    reinterpret_cast<int*>(c_buffer_)[i] = 0;
+    reinterpret_cast<int*>(d_buffer_)[i] = 0;
+    reinterpret_cast<int*>(e_buffer_)[i] = 0;
+  }
+
+  // Set up kernel arguments
+  struct __attribute__((aligned(16))) kernel_args_t {
+    const int *a;
+    const int *b;
+    const int *c;
+    int *d;
+    int *e;
+  } kernel_args;
+
+  kernel_args.a = reinterpret_cast<int*>(a_buffer_);
+  kernel_args.b = reinterpret_cast<int*>(b_buffer_);
+  kernel_args.c = reinterpret_cast<int*>(c_buffer_);
+  kernel_args.d = reinterpret_cast<int*>(d_buffer_);
+  kernel_args.e = reinterpret_cast<int*>(e_buffer_);
+
+  err = rocrtst::AllocAndSetKernArgs(this, &kernel_args, sizeof(kernel_args));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
   // Create temporary directory for test dumps
   test_dir_ = "/tmp/rocr_coredump_test_" + std::to_string(getpid());
-  std::string mkdir_cmd = "mkdir -p " + test_dir_;
-  ASSERT_EQ(0, system(mkdir_cmd.c_str()));
+  mkdir(test_dir_.c_str(), 0755);
 }
 
 void GpuCoreDumpTest::Run(void) {
@@ -133,96 +178,36 @@ void GpuCoreDumpTest::DisplayResults(void) const {
 }
 
 void GpuCoreDumpTest::Close() {
-  // Clean up test directory
+  hsa_status_t err;
+
+  if (a_buffer_) {
+    err = hsa_amd_memory_pool_free(a_buffer_);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+  }
+  if (b_buffer_) {
+    err = hsa_amd_memory_pool_free(b_buffer_);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+  }
+  if (c_buffer_) {
+    err = hsa_amd_memory_pool_free(c_buffer_);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+  }
+  if (d_buffer_) {
+    err = hsa_amd_memory_pool_free(d_buffer_);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+  }
+  if (e_buffer_) {
+    err = hsa_amd_memory_pool_free(e_buffer_);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+  }
+
+  // Clean up test directory and its contents
   if (!test_dir_.empty()) {
-    std::string rm_cmd = "rm -rf " + test_dir_;
-    system(rm_cmd.c_str());
+    CleanupCoreDumps(test_dir_ + "/*");
+    rmdir(test_dir_.c_str());
   }
   
   TestBase::Close();
-}
-
-void GpuCoreDumpTest::TriggerGPUFault() {
-  // This function runs in the child process and should cause a GPU fault
-  // We'll trigger a memory access violation by accessing invalid GPU memory
-  
-  hsa_status_t err;
-  
-  // Initialize HSA
-  err = hsa_init();
-  if (err != HSA_STATUS_SUCCESS) {
-    _exit(1);
-  }
-  
-  // Get GPU agent
-  hsa_agent_t gpu_agent = {0};
-  auto find_gpu = [](hsa_agent_t agent, void* data) -> hsa_status_t {
-    hsa_device_type_t device_type;
-    hsa_status_t status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
-    if (status == HSA_STATUS_SUCCESS && device_type == HSA_DEVICE_TYPE_GPU) {
-      *((hsa_agent_t*)data) = agent;
-      return HSA_STATUS_INFO_BREAK;
-    }
-    return HSA_STATUS_SUCCESS;
-  };
-  
-  err = hsa_iterate_agents(find_gpu, &gpu_agent);
-  if (gpu_agent.handle == 0) {
-    hsa_shut_down();
-    _exit(1);
-  }
-  
-  // Allocate some GPU memory and intentionally access invalid memory
-  // to trigger a fault
-  hsa_region_t global_region = {0};
-  auto find_global = [](hsa_region_t region, void* data) -> hsa_status_t {
-    hsa_region_segment_t segment;
-    hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment);
-    if (segment == HSA_REGION_SEGMENT_GLOBAL) {
-      hsa_region_global_flag_t flags;
-      hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags);
-      if (flags & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) {
-        *((hsa_region_t*)data) = region;
-        return HSA_STATUS_INFO_BREAK;
-      }
-    }
-    return HSA_STATUS_SUCCESS;
-  };
-  
-  err = hsa_agent_iterate_regions(gpu_agent, find_global, &global_region);
-  if (global_region.handle == 0) {
-    hsa_shut_down();
-    _exit(1);
-  }
-  
-  // Allocate memory
-  void* ptr = nullptr;
-  err = hsa_memory_allocate(global_region, 1024, &ptr);
-  if (err != HSA_STATUS_SUCCESS) {
-    hsa_shut_down();
-    _exit(1);
-  }
-  
-  // Create a queue
-  hsa_queue_t* queue = nullptr;
-  err = hsa_queue_create(gpu_agent, 4, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 
-                         UINT32_MAX, UINT32_MAX, &queue);
-  if (err != HSA_STATUS_SUCCESS) {
-    hsa_memory_free(ptr);
-    hsa_shut_down();
-    _exit(1);
-  }
-  
-  // Trigger fault by accessing invalid memory address
-  // We'll write to an invalid GPU address which should cause a memory fault
-  volatile uint64_t* bad_addr = (volatile uint64_t*)0xDEADBEEF00000000UL;
-  *bad_addr = 0x42;  // This should trigger a GPU memory fault
-  
-  // Should not reach here
-  hsa_queue_destroy(queue);
-  hsa_memory_free(ptr);
-  hsa_shut_down();
-  _exit(0);
 }
 
 bool GpuCoreDumpTest::VerifyCoreDumpFile(const std::string& filename) {
@@ -300,72 +285,6 @@ bool GpuCoreDumpTest::IsValidGPUCoreDump(const std::string& filename) {
   return true;
 }
 
-bool GpuCoreDumpTest::RunFaultTest(const char* env_var, const char* env_value,
-                                   const std::string& expected_pattern) {
-  // Set ulimit -c unlimited for this process
-  struct rlimit rlim;
-  rlim.rlim_cur = RLIM_INFINITY;
-  rlim.rlim_max = RLIM_INFINITY;
-  if (setrlimit(RLIMIT_CORE, &rlim) != 0) {
-    if (verbosity() > 0) {
-      std::cout << "    Failed to set ulimit -c unlimited" << std::endl;
-    }
-    return false;
-  }
-  
-  pid_t pid = fork();
-  if (pid < 0) {
-    if (verbosity() > 0) {
-      std::cout << "    Fork failed" << std::endl;
-    }
-    return false;
-  }
-  
-  if (pid == 0) {
-    // Child process - set environment and trigger fault
-    if (env_var && env_value) {
-      setenv(env_var, env_value, 1);
-    }
-    
-    // Trigger the GPU fault
-    TriggerGPUFault();
-    
-    // Should not reach here
-    _exit(0);
-  } else {
-    // Parent process - wait for child to crash
-    int status;
-    pid_t result = waitpid(pid, &status, 0);
-    
-    if (result != pid) {
-      if (verbosity() > 0) {
-        std::cout << "    waitpid failed" << std::endl;
-      }
-      return false;
-    }
-    
-    // Give the runtime a moment to finish writing the core dump
-    usleep(500000);  // 500ms
-    
-    // Check if child was signaled (crashed)
-    if (!WIFSIGNALED(status)) {
-      if (verbosity() > 0) {
-        std::cout << "    Child process did not crash as expected" << std::endl;
-      }
-      return false;
-    }
-    
-    // Verify the core dump file
-    std::string pattern_with_pid = expected_pattern;
-    size_t pos = pattern_with_pid.find("%p");
-    if (pos != std::string::npos) {
-      pattern_with_pid.replace(pos, 2, std::to_string(pid));
-    }
-    
-    return VerifyCoreDumpFile(pattern_with_pid);
-  }
-}
-
 void GpuCoreDumpTest::CleanupCoreDumps(const std::string& pattern) {
   glob_t glob_result;
   memset(&glob_result, 0, sizeof(glob_result));
@@ -377,6 +296,33 @@ void GpuCoreDumpTest::CleanupCoreDumps(const std::string& pattern) {
     }
   }
   globfree(&glob_result);
+}
+
+void GpuCoreDumpTest::DispatchFaultingKernel() {
+  // Override grid/workgroup sizes for our kernel
+  aql().workgroup_size_x = 64;
+  aql().workgroup_size_y = 1;
+  aql().workgroup_size_z = 1;
+  aql().grid_size_x = VECTOR_SIZE;
+  aql().grid_size_y = 1;
+  aql().grid_size_z = 1;
+
+  uint64_t index;
+  hsa_kernel_dispatch_packet_t *queue_aql_packet = rocrtst::WriteAQLToQueue(this, &index);
+  
+  uint32_t aql_header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  aql_header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+  aql_header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+  
+  rocrtst::AtomicSetPacketHeader(aql_header, aql().setup, queue_aql_packet);
+  hsa_signal_store_screlease(main_queue()->doorbell_signal, index);
+  
+  // Wait for completion (or fault) - ROCr will catch the GPU fault
+  hsa_signal_wait_scacquire(aql().completion_signal, HSA_SIGNAL_CONDITION_LT, 1,
+                            UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  
+  // Reset signal for next dispatch
+  hsa_signal_store_screlease(aql().completion_signal, 1);
 }
 
 void GpuCoreDumpTest::TestDefaultPattern(void) {
@@ -402,14 +348,25 @@ void GpuCoreDumpTest::TestDefaultPattern(void) {
   unsetenv("HSA_COREDUMP_FILE");
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
   
+  set_core_limit(); 
+
+  // Dispatch the faulting kernel
+  DispatchFaultingKernel();
+  
   // Expected pattern is kernel pattern + .gpu
   std::string expected = kernel_pattern + ".gpu";
+  size_t pos = expected.find("%p");
+  if (pos != std::string::npos) {
+    expected.replace(pos, 2, std::to_string(getpid()));
+  }
   
-  bool success = RunFaultTest(nullptr, nullptr, expected);
+  bool success = VerifyCoreDumpFile(expected);
   EXPECT_TRUE(success);
   
   // Cleanup
-  CleanupCoreDumps(expected);
+  if (success) {
+    unlink(expected.c_str());
+  }
 }
 
 void GpuCoreDumpTest::TestCustomPattern(void) {
@@ -417,13 +374,24 @@ void GpuCoreDumpTest::TestCustomPattern(void) {
     std::cout << "  Testing custom pattern (HSA_COREDUMP_FILE)..." << std::endl;
   }
   
-  std::string custom_pattern = test_dir_ + "/custom_gpu_core.%p";
+  std::string custom_pattern = test_dir_ + "/custom_gpu_core." + std::to_string(getpid());
+  setenv("HSA_COREDUMP_FILE", custom_pattern.c_str(), 1);
+  unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
+
+  set_core_limit(); 
+
+  // Dispatch the faulting kernel
+  DispatchFaultingKernel();
   
-  bool success = RunFaultTest("HSA_COREDUMP_FILE", custom_pattern.c_str(), custom_pattern);
+  bool success = VerifyCoreDumpFile(custom_pattern);
   EXPECT_TRUE(success);
   
   // Cleanup
-  CleanupCoreDumps(test_dir_ + "/custom_gpu_core.*");
+  if (success) {
+    unlink(custom_pattern.c_str());
+  }
+  
+  unsetenv("HSA_COREDUMP_FILE");
 }
 
 void GpuCoreDumpTest::TestDisableFlag(void) {
@@ -431,42 +399,32 @@ void GpuCoreDumpTest::TestDisableFlag(void) {
     std::cout << "  Testing disable flag (HSA_DISABLE_COREDUMP_ON_EXCEPTION=1)..." << std::endl;
   }
   
-  pid_t pid = fork();
-  if (pid < 0) {
-    FAIL() << "Fork failed";
-    return;
+  std::string test_file = test_dir_ + "/should_not_exist." + std::to_string(getpid());
+  setenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION", "1", 1);
+  setenv("HSA_COREDUMP_FILE", test_file.c_str(), 1);
+
+  set_core_limit(); 
+
+  // Dispatch the faulting kernel
+  DispatchFaultingKernel();
+  
+  // Verify NO core dump was created
+  bool file_exists = (access(test_file.c_str(), F_OK) == 0);
+  EXPECT_FALSE(file_exists) << "Core dump should not have been created when disabled";
+  
+  if (verbosity() > 0) {
+    if (!file_exists) {
+      std::cout << "    Correctly prevented core dump creation" << std::endl;
+    }
   }
   
-  if (pid == 0) {
-    // Child process
-    setenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION", "1", 1);
-    setenv("HSA_COREDUMP_FILE", (test_dir_ + "/should_not_exist.%p").c_str(), 1);
-    
-    TriggerGPUFault();
-    _exit(0);
-  } else {
-    // Parent process
-    int status;
-    waitpid(pid, &status, 0);
-    usleep(500000);  // Give time for any dump to be written
-    
-    // Verify NO core dump was created
-    std::string expected_file = test_dir_ + "/should_not_exist." + std::to_string(pid);
-    bool file_exists = (access(expected_file.c_str(), F_OK) == 0);
-    
-    EXPECT_FALSE(file_exists) << "Core dump should not have been created when disabled";
-    
-    if (verbosity() > 0) {
-      if (!file_exists) {
-        std::cout << "    Correctly prevented core dump creation" << std::endl;
-      }
-    }
-    
-    // Cleanup just in case
-    if (file_exists) {
-      unlink(expected_file.c_str());
-    }
+  // Cleanup just in case
+  if (file_exists) {
+    unlink(test_file.c_str());
   }
+  
+  unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
+  unsetenv("HSA_COREDUMP_FILE");
 }
 
 void GpuCoreDumpTest::TestPatternSubstitution(void) {
@@ -474,14 +432,27 @@ void GpuCoreDumpTest::TestPatternSubstitution(void) {
     std::cout << "  Testing pattern substitution (%p, %e, %t)..." << std::endl;
   }
   
-  // Test pattern with multiple specifiers
-  std::string pattern = test_dir_ + "/core.%e.%p.dump";
+  // Test pattern with PID specifier
+  std::string pattern = test_dir_ + "/core.%p.dump";
+  setenv("HSA_COREDUMP_FILE", pattern.c_str(), 1);
+  unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
+
+  set_core_limit(); 
+
+  // Dispatch the faulting kernel
+  DispatchFaultingKernel();
   
-  bool success = RunFaultTest("HSA_COREDUMP_FILE", pattern.c_str(), pattern);
+  // Verify with substituted PID
+  std::string expected = test_dir_ + "/core." + std::to_string(getpid()) + ".dump";
+  bool success = VerifyCoreDumpFile(expected);
   EXPECT_TRUE(success);
   
   // Cleanup
-  CleanupCoreDumps(test_dir_ + "/core.*.dump");
+  if (success) {
+    unlink(expected.c_str());
+  }
+  
+  unsetenv("HSA_COREDUMP_FILE");
 }
 
 void GpuCoreDumpTest::TestInvalidPath(void) {
@@ -489,44 +460,27 @@ void GpuCoreDumpTest::TestInvalidPath(void) {
     std::cout << "  Testing invalid path handling..." << std::endl;
   }
   
-  // Use a path that doesn't exist and can't be created
-  std::string invalid_pattern = "/nonexistent_dir_12345/core.%p";
+  // Use a path that doesn't exist
+  std::string invalid_pattern = "/nonexistent_dir_12345/core." + std::to_string(getpid());
+  setenv("HSA_COREDUMP_FILE", invalid_pattern.c_str(), 1);
+  unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
+
+  set_core_limit(); 
+
+  // Dispatch the faulting kernel
+  DispatchFaultingKernel();
   
-  pid_t pid = fork();
-  if (pid < 0) {
-    FAIL() << "Fork failed";
-    return;
-  }
+  // Verify NO core dump was created (path is invalid)
+  bool file_exists = (access(invalid_pattern.c_str(), F_OK) == 0);
+  EXPECT_FALSE(file_exists) << "Core dump should not be created with invalid path";
   
-  if (pid == 0) {
-    // Child process
-    setenv("HSA_COREDUMP_FILE", invalid_pattern.c_str(), 1);
-    
-    // Redirect stderr to /dev/null to suppress expected error messages
-    int null_fd = open("/dev/null", O_WRONLY);
-    if (null_fd >= 0) {
-      dup2(null_fd, STDERR_FILENO);
-      close(null_fd);
-    }
-    
-    TriggerGPUFault();
-    _exit(0);
-  } else {
-    // Parent process
-    int status;
-    waitpid(pid, &status, 0);
-    usleep(500000);
-    
-    // Verify NO core dump was created (path is invalid)
-    std::string expected_file = "/nonexistent_dir_12345/core." + std::to_string(pid);
-    bool file_exists = (access(expected_file.c_str(), F_OK) == 0);
-    
-    EXPECT_FALSE(file_exists) << "Core dump should not be created with invalid path";
-    
-    if (verbosity() > 0) {
-      if (!file_exists) {
-        std::cout << "    Correctly handled invalid path" << std::endl;
-      }
+  if (verbosity() > 0) {
+    if (!file_exists) {
+      std::cout << "    Correctly handled invalid path" << std::endl;
     }
   }
+  
+  unsetenv("HSA_COREDUMP_FILE");
 }
+
+#undef RET_IF_HSA_ERR
