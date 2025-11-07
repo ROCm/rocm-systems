@@ -19,9 +19,9 @@ Only a subset of OMPT callbacks are processed. The list of supported callbacks c
 
 .. note::
 
-  ``omp_callback_functions`` is an internal callback used by ROCprofiler-SDK and should not be disabled.
-  ``omp_parallel_begin`` and ``omp_parallel_end`` have been combined into a single track named ``omp_parallel``.
-  ``omp_thread_end`` events are not supported.
+  * ``omp_callback_functions`` is an internal callback used by ROCprofiler-SDK and should not be disabled.
+  * ``omp_parallel_begin`` and ``omp_parallel_end`` have been combined into a single track named ``omp_parallel``.
+  * ``omp_thread_end`` events are not supported.
 
 .. important::
   If your system does not have a device to offload to, OMPT traces will not be generated.
@@ -53,7 +53,7 @@ Profiling a Fortran program that uses GPU offloading
 For this example, we will be using the `Fortran Jacobi example <https://github.com/amd/HPCTrainingExamples/tree/main/Pragma_Examples/OpenMP/Fortran/8_jacobi/2_jacobi_targetdata>`_.
 This program uses OpenMP to offload compute to the GPU.
 
-Clone and build the application
+Cloning and building the application
 ---------------------------------------------
 
 Clone the repository and navigate to the folder containing the program:
@@ -96,7 +96,7 @@ The output should match:
     :alt: Initial view of the perfetto trace file
     :width: 800
 
-To view all the traces, click on the drop-down arrow in the ``./jacobi`` track. You will then be able to see the full trace, which should resemble:
+To view the collected traces, click on the drop-down arrow in the ``./jacobi`` track. You will then be able to see the full trace, which should resemble:
 
 .. image:: ../data/openmp-profiling/perfetto-jacobi-tracks-view.png
     :alt: Initial view of the perfetto trace file
@@ -147,7 +147,7 @@ The image below shows the group of traces that correspond to the execution of th
 
 .. image:: ../data/openmp-profiling/perfetto-jacobi-laplacian-traces-view.png
     :alt: Traces corresponding to the Laplacian OpenMP pragma
-    :width: 800
+    :width: 1400
 
 The general sequence of events for this code block is as follows:
     1. An ``omp_target_emi`` callback is generated and spans the entire duration of the OpenMP ``target teams`` construct.
@@ -162,7 +162,8 @@ The general sequence of events for this code block is as follows:
 
 In general, if a trace directly relates to another trace, an arrow will be generated between the two. These arrows are called "flow events". A flow event is visible only when the track is selected.
 For the sake of showing all relations at once, black arrows were inserted in the image above.
-The images below show how flow events are displayed in perfetto.
+
+The images below show the standard way that flow events are displayed in perfetto.
 
 .. image:: ../data/openmp-profiling/perfetto-memory-flow-event-view.png
     :alt: An ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_to_device`` pointing to its corresponding ``MEMORY_COPY_DEVICE_TO_DEVICE``
@@ -175,8 +176,10 @@ The images below show how flow events are displayed in perfetto.
 Instrumenting the application with rocprof-sys-instrument
 -------------------------------------------------------------
 
-The application can be instrumented using ``rocprof-sys-instrument`` to gather more data that would be obtained from tracing using ``rocprof-sys-run`` alone.
+The application can be instrumented using ``rocprof-sys-instrument`` to gather more data than would be obtained from tracing using ``rocprof-sys-run`` alone.
 More details on ``rocprof-sys-instrument`` and the data it gathers can be found `here <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/conceptual/data-collection-modes.rst>`_.
+
+To instrument the program, run the following command:
 
 .. code-block:: shell
 
