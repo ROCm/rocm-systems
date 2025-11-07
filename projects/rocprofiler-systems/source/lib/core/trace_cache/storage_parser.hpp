@@ -52,14 +52,8 @@ public:
     : m_filename(std::move(_filename))
     {}
 
-    void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback)
-
-    {
-        m_on_finished_callback = std::move(callback);
-    }
-
     template <typename TypeProcessing>
-    void load(std::unique_ptr<TypeProcessing> _type_processing)
+    void load(std::shared_ptr<TypeProcessing> _type_processing)
     {
         static_assert(
             type_traits::has_execute_processing<TypeProcessing, TypeIdentifierEnum,
@@ -150,16 +144,10 @@ public:
         ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system.\n",
                          m_filename.c_str());
         std::remove(m_filename.c_str());
-
-        if(m_on_finished_callback != nullptr)
-        {
-            (*m_on_finished_callback)();
-        }
     }
 
 private:
-    std::string                            m_filename;
-    std::unique_ptr<std::function<void()>> m_on_finished_callback{ nullptr };
+    std::string                                          m_filename;
     type_registry<TypeIdentifierEnum, SupportedTypes...> m_registry;
 };
 

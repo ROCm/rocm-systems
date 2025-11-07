@@ -68,6 +68,10 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
+    void prepare_for_processing() { static_cast<T*>(this)->prepare_for_processing(); }
+
+    void finalize_processing() { static_cast<T*>(this)->finalize_processing(); }
+
 protected:
     ~processor_t() = default;
 };
@@ -86,6 +90,8 @@ struct processor_view_t
     using cpu_freq_sample_fn_t  = void (*)(void*, const cpu_freq_sample&) noexcept;
     using backtrace_region_fn_t = void (*)(void*,
                                            const backtrace_region_sample&) noexcept;
+    using prepare_for_processing_fn_t = void (*)(void*) noexcept;
+    using finalize_processing_fn_t    = void (*)(void*) noexcept;
 
     struct vtable_t
     {
@@ -94,12 +100,14 @@ struct processor_view_t
 #if(ROCPROFILER_VERSION >= 600)
         memory_allocate_fn_t handle_memory_allocate;
 #endif
-        region_fn_t           handle_region;
-        in_time_sample_fn_t   handle_in_time_sample;
-        pmc_event_fn_t        handle_pmc_event;
-        amd_smi_sample_fn_t   handle_amd_smi_sample;
-        cpu_freq_sample_fn_t  handle_cpu_freq_sample;
-        backtrace_region_fn_t handle_backtrace_region;
+        region_fn_t                 handle_region;
+        in_time_sample_fn_t         handle_in_time_sample;
+        pmc_event_fn_t              handle_pmc_event;
+        amd_smi_sample_fn_t         handle_amd_smi_sample;
+        cpu_freq_sample_fn_t        handle_cpu_freq_sample;
+        backtrace_region_fn_t       handle_backtrace_region;
+        prepare_for_processing_fn_t prepare_for_processing;
+        finalize_processing_fn_t    finalize_processing;
     };
 
     template <typename T>
@@ -163,6 +171,16 @@ struct processor_view_t
         m_vtable->handle_backtrace_region(m_object, sample);
     }
 
+    ROCPROFSYS_INLINE void prepare_for_processing() const noexcept
+    {
+        m_vtable->prepare_for_processing(m_object);
+    }
+
+    ROCPROFSYS_INLINE void finalize_processing() const noexcept
+    {
+        m_vtable->finalize_processing(m_object);
+    }
+
 private:
     template <typename T>
     static inline const vtable_t& get_vtable_for_type() noexcept
@@ -196,7 +214,9 @@ private:
             },
             +[](void* obj, const backtrace_region_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
-            }
+            },
+            +[](void* obj) noexcept { static_cast<T*>(obj)->prepare_for_processing(); },
+            +[](void* obj) noexcept { static_cast<T*>(obj)->finalize_processing(); }
         };
         return vtable;
     }
@@ -220,6 +240,23 @@ struct sample_processor_t
     {
         for(const auto& view : m_processor_view_list)
             view.handle(sample);
+    }
+
+    ROCPROFSYS_INLINE void prepare_for_processing() const noexcept
+    {
+        for(const auto& view : m_processor_view_list)
+            view.prepare_for_processing();
+    }
+
+    ROCPROFSYS_INLINE void finalize_processing() const noexcept
+    {
+        for(const auto& view : m_processor_view_list)
+            view.finalize_processing();
+    }
+
+    ROCPROFSYS_INLINE bool is_empty() const noexcept
+    {
+        return m_processor_view_list.empty();
     }
 
     ROCPROFSYS_INLINE void execute_sample_processing(

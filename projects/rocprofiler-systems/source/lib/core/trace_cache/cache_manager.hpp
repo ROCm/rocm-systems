@@ -26,6 +26,7 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "core/trace_cache/storage_parser.hpp"
+#include <memory>
 
 namespace rocprofsys
 {
@@ -52,17 +53,19 @@ class cache_manager
 public:
     static cache_manager& get_instance();
     buffer_storage_t&     get_buffer_storage() { return m_storage; }
-    metadata_registry&    get_metadata_registry() { return m_metadata; }
+    metadata_registry&    get_metadata_registry() { return *m_metadata; }
     void                  shutdown();
     void                  post_process_bulk();
 
 private:
-    void post_process_metadata();
     cache_manager() = default;
 
-    buffer_storage_t  m_storage{ utility::get_buffered_storage_filename(
+    buffer_storage_t m_storage{ utility::get_buffered_storage_filename(
         get_root_process_id(), getpid()) };
-    metadata_registry m_metadata;
+
+    std::shared_ptr<metadata_registry> m_metadata{
+        std::make_shared<metadata_registry>()
+    };
 };
 
 inline metadata_registry&
