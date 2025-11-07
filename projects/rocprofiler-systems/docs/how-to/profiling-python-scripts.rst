@@ -51,7 +51,7 @@ environment variable.
 
 .. note::
 
-   PyTorch and other Python applications might fail to profile device activities when it is unable to find the libraries in the default linker path. As a workaround, you need to explicitly add the library path to ``LD_LIBRARY_PATH``. For PyTorch use:
+   Profiling PyTorch and other AI workloads might fail because it is unable to find the libraries in the default linker path. As a workaround, you need to explicitly add the library path to ``LD_LIBRARY_PATH``. For example, when using PyTorch with Python 3.10, add the following to the environment:
 
    .. code-block:: shell
 
