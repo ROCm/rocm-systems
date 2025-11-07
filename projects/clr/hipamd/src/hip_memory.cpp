@@ -111,8 +111,8 @@ hipError_t ihipFree(void* ptr) {
       // Wait on the device, associated with the current memory object during allocation
       g_devices[device_id]->SyncAllStreams();
 
-      // External mem is not svm.
-      if (memory_object->isInterop()) {
+      // Non SVM memory free, such as external memory
+      if (memory_object->getSvmPtr() == nullptr) {
         amd::MemObjMap::RemoveMemObj(ptr);
         memory_object->release();
       } else {
@@ -172,15 +172,35 @@ hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t e
   if (devPtr == nullptr || extMem == nullptr || bufferDesc == nullptr || bufferDesc->flags != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  auto buf = reinterpret_cast<amd::ExternalBuffer*>(extMem);
-  const device::Memory* devMem = buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
 
-  if (devMem == nullptr || ((bufferDesc->offset + bufferDesc->size) > devMem->size())) {
+  auto buf = reinterpret_cast<amd::ExternalBuffer*>(extMem);
+
+  // Validate bounds
+  if (bufferDesc->size > buf->getSize() ||
+      bufferDesc->offset > buf->getSize() - bufferDesc->size) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  *devPtr = reinterpret_cast<void*>(devMem->virtualAddress() + bufferDesc->offset);
-  amd::MemObjMap::AddMemObj(*devPtr, buf);
-  buf->retain();
+
+  // Create a buffer view
+  auto view = new (buf->getContext())
+      amd::Buffer(*buf, buf->getMemFlags(), bufferDesc->offset, bufferDesc->size);
+  if (view == nullptr || !view->create()) {
+    if (view) view->release();
+    HIP_RETURN(hipErrorOutOfMemory);
+  }
+
+  // Create device memory for the current device
+  const device::Memory* devMem = view->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
+  if (devMem == nullptr) {
+    view->release();
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Map the device memory to the user pointer
+  *devPtr = reinterpret_cast<void*>(devMem->virtualAddress());
+  amd::MemObjMap::AddMemObj(*devPtr, view);
+  view->retain();
+
   HIP_RETURN(hipSuccess);
 }
 
