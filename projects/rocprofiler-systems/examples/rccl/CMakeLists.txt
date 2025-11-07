@@ -37,15 +37,15 @@ if(ROCPROFSYS_DISABLE_EXAMPLES)
 endif()
 
 # Find HIP
-find_package(hip HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
+find_package(hip HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
 if(NOT hip_FOUND)
     message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing HIP...")
     return()
 endif()
 
 # Find RCCL
-find_package(RCCL HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
-if(NOT RCCL_FOUND)
+find_package(rccl HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
+if(NOT rccl_FOUND)
     message(AUTHOR_WARNING "rccl-tests skipped. Missing RCCL...")
     return()
 else()
@@ -55,7 +55,7 @@ else()
 endif()
 
 # Build rccl-tests
-if(hip_FOUND AND RCCL_FOUND)
+if(hip_FOUND AND rccl_FOUND)
     # Setup source and build directories
     set(rccl-tests_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rccl-tests")
     set(rccl-tests_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/rccl-tests")
@@ -68,19 +68,20 @@ if(hip_FOUND AND RCCL_FOUND)
         return()
     endif()
 
-    # Copy source to build directory at configuration time (this is fine - it's fast)
+    # Copy source to build directory
     file(COPY ${rccl-tests_SOURCE_DIR}/ DESTINATION ${rccl-tests_BUILD_DIR})
 
     # Get RCCL root directory
-    get_filename_component(rccl_ROOT_DIR "${RCCL_INCLUDE_DIRS}" DIRECTORY)
+    get_filename_component(rccl_ROOT_DIR "${rccl_INCLUDE_DIRS}" DIRECTORY)
 
     # Create a custom target that builds rccl-tests at build-time
     add_custom_target(
         build-rccl-tests
         ALL
-        COMMAND make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR}
+        COMMAND make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} -j
         WORKING_DIRECTORY ${rccl-tests_BUILD_DIR}
-        COMMENT "Building rccl-tests..."
+        COMMENT
+            "Building rccl-tests with HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} ..."
         BYPRODUCTS
             ${rccl-tests_BUILD_DIR}/build/all_gather_perf
             ${rccl-tests_BUILD_DIR}/build/all_reduce_perf
