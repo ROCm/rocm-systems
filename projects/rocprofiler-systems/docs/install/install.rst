@@ -350,8 +350,8 @@ Issues with RHEL and SELinux
 
 RHEL (Red Hat Enterprise Linux) and related distributions of Linux automatically enable a security feature
 named SELinux (Security-Enhanced Linux) that prevents ROCm Systems Profiler from running.
-This issue applies to any Linux distribution with SELinux installed, including RHEL,
-CentOS, Fedora, and Rocky Linux. The problem can happen with any GPU, or even without a GPU.
+This issue applies to any Linux distribution with SELinux installed, including RHEL and Rocky Linux.
+The problem can happen with any GPU, or even without a GPU.
 
 The problem occurs after you instrument a program and try to
 run ``rocprof-sys-run`` with the instrumented program.

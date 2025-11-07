@@ -78,8 +78,8 @@ TEST_CASE("Unit_hipGraphInstantiateWithParams_Negative") {
     hipGraph_t graph;
     HIP_CHECK(hipGraphCreate(&graph, 0));
     hipGraphExec_t graphExec;
-    hipGraphInstantiateParams params;
-    params.flags = 10;
+    hipGraphInstantiateParams params{};
+    params.flags = 100;
     REQUIRE(hipGraphInstantiateWithParams(&graphExec, graph, &params) == hipErrorInvalidValue);
     REQUIRE(params.result_out == hipGraphInstantiateError);
     HIP_CHECK(hipGraphDestroy(graph));
