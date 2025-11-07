@@ -2,9 +2,9 @@
     :description: ROCm Systems Profiler OpenMP performance profiling, including Fortran offloading support
     :keywords: rocprof-sys, rocprofiler-systems, ROCm, tips, how to, profiler, tracking, OpenMP, OMPT, AMD, Offload, Fortran
 
-********************************************************
-OpenMP performance profiling for C/C++/Fortran programs
-********************************************************
+**************************************************************************
+OpenMP performance profiling for C/C++/Fortran host and offload programs
+**************************************************************************
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports profiling of OpenMP programs on ROCm 6.4.0 or higher.
 
@@ -69,10 +69,10 @@ Compile the program:
 
   make FC=amdflang
 
-Collecting a trace with ``rocprof-sys-run``
+Collecting a trace with rocprof-sys-run
 ------------------------------------------------
 
-Callback APIs, such as OMPT, can be traced using `rocprof-sys-run`. To collect a trace for the Jacobi example, run the following command:
+Callback APIs, such as OMPT, can be traced using ``rocprof-sys-run``. To collect a trace for the Jacobi example, run the following command:
 
 .. code-block:: shell
 
@@ -86,7 +86,7 @@ Once the command completes, a ``.proto`` file will be generated in the output di
 
 By default, this file contains all captured traces from the profiling session.
 
-Understanding the ``.proto`` output
+Understanding the proto file output
 -----------------------------------------------
 
 To view the generated ``.proto`` file in a browser, open the `Perfetto UI page <https://ui.perfetto.dev/>`_. Then, click on ``Open trace file`` and select the ``.proto`` file.
@@ -99,7 +99,7 @@ The output should match:
 To view the collected traces, click on the drop-down arrow in the ``./jacobi`` track. You will then be able to see the full trace, which should resemble:
 
 .. image:: ../data/openmp-profiling/perfetto-jacobi-tracks-view.png
-    :alt: Initial view of the perfetto trace file
+    :alt: Expanded view of the proto file showing tracks and the collected traces
     :width: 800
 
 .. tip::
@@ -132,6 +132,7 @@ Visualizing data transfer and kernel execution on the GPU
 The ``laplacian`` subroutine in ``laplacian.f90`` contains the following block of code that offloads compute to the GPU:
 
 .. code-block:: fortran
+
   !$omp target teams distribute parallel do collapse(2)
   do j = 2,mesh%n_y-1
       do i = 2,mesh%n_x-1
@@ -141,50 +142,46 @@ The ``laplacian`` subroutine in ``laplacian.f90`` contains the following block o
   end do
 
 .. note::
-    This specific kernel code is executed many times. To find it in your trace, look for the corresponding ``__omp_offloading`` trace in the ``GPU Kernel Dispatch`` that has the name ``laplacian`` in it.
+    This specific kernel code is executed many times. To find it in your trace, look for the corresponding ``__omp_offloading`` trace in the ``GPU Kernel Dispatch`` track that contains ``laplacian``
+    in its name (for example: ``__omp_offloading_10302_8e8155f__QMlaplacian_modPlaplacian_l21.kd``)
 
-The image below shows the group of traces that correspond to the execution of the block above:
+The image below shows a group of traces that correspond to the execution of the block above:
 
 .. image:: ../data/openmp-profiling/perfetto-jacobi-laplacian-traces-view.png
     :alt: Traces corresponding to the Laplacian OpenMP pragma
     :width: 1400
 
 The general sequence of events for this code block is as follows:
-    1. An ``omp_target_emi`` callback is generated and spans the entire duration of the OpenMP ``target teams`` construct.
-    2. Memory is allocated on the GPU for variables. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_alloc``.
-    3. The variables are then transferred to the GPU. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_to_device``.
-    4. A corresponding ``MEMORY_COPY_DEVICE_TO_DEVICE`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (3).
-    5. Once the necessary data transfers are complete, the code can be executed on the kernel. An ``omp_target_submit_emi`` trace is generated and points to the kernel being executed on the GPU.
-    6. A corresponding ``__omp_offloading`` kernel is generated on the ``GPU Kernel Dispatch`` track for each occurrence of (5), representing the GPU code being executed.
-    7. Once complete, the data is transferred back to the host. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_from_device``.
-    8. A corresponding ``MEMORY_COPY_DEVICE_TO_DEVICE`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (7).
-    9. The previously allocated memory is deallocated from the GPU. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_delete``.
+  1. An ``omp_target_emi`` callback is generated and spans the entire duration of the OpenMP ``target teams`` construct.
+  2. Memory is allocated on the GPU for variables. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_alloc``.
+  3. The variables are then transferred to the GPU. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_to_device``.
+  4. A corresponding ``MEMORY_COPY_HOST_TO_DEVICE`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (3).
+  5. Once the necessary data transfers are complete, the code can be executed on the kernel. An ``omp_target_submit_emi`` trace is generated and points to the kernel being executed on the GPU.
+  6. A corresponding ``__omp_offloading`` kernel is generated on the ``GPU Kernel Dispatch`` track for each occurrence of (5), representing the GPU code being executed.
+  7. Once complete, the data is transferred back to the host. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_from_device``.
+  8. A corresponding ``MEMORY_COPY_DEVICE_TO_HOST`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (7).
+  9. The previously allocated memory is deallocated from the GPU. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_delete``.
 
-In general, if a trace directly relates to another trace, an arrow will be generated between the two. These arrows are called "flow events". A flow event is visible only when the track is selected.
+In general, if a trace directly relates to another trace, an arrow will be generated between the two. These arrows are called "flow events". A flow event is visible only when a trace is selected.
 For the sake of showing all relations at once, black arrows were inserted in the image above.
 
-The images below show the standard way that flow events are displayed in perfetto.
+The image below show the standard way that flow events are displayed in perfetto.
 
 .. image:: ../data/openmp-profiling/perfetto-memory-flow-event-view.png
-    :alt: An ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_to_device`` pointing to its corresponding ``MEMORY_COPY_DEVICE_TO_DEVICE``
-    :width: 800
-
-.. image:: ../data/openmp-profiling/perfetto-kernel-flow-event-view.png
-    :alt: An ``omp_target_submit_emi`` trace pointing to its corresponding ``__omp_offload`` trace
+    :alt: An ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_to_device`` pointing to its corresponding ``MEMORY_COPY_HOST_TO_DEVICE``
     :width: 800
 
 Instrumenting the application with rocprof-sys-instrument
 -------------------------------------------------------------
 
 The application can be instrumented using ``rocprof-sys-instrument`` to gather more data than would be obtained from tracing using ``rocprof-sys-run`` alone.
-More details on ``rocprof-sys-instrument`` and the data it gathers can be found `here <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/conceptual/data-collection-modes.rst>`_.
+More details on ``rocprof-sys-instrument`` and the data it gathers can be found in the `data collection modes document <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/conceptual/data-collection-modes.rst>`_.
 
 To instrument the program, run the following command:
 
 .. code-block:: shell
 
-  rocprof-sys-instrument -o jacobi.inst \
-                         -- ./jacobi
+  rocprof-sys-instrument -o jacobi.inst -- ./jacobi
 
 This command generates an instrumented binary, ``jacobi.inst``. To profile this binary, run the following command:
 
@@ -198,4 +195,4 @@ When profiling finishes, a ``.proto`` file will be generated in the output direc
 
   rocprofsys-jacobi.inst-output/<timestamp>/
 
-This ``.proto`` file can be viewed in the same manner that was described in the previous section.
+This ``.proto`` file can be viewed using the same method described in the previous section.
