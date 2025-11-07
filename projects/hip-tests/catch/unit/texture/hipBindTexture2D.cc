@@ -52,11 +52,6 @@ TEST_CASE("Unit_hipBindTexture2D_Positive") {
 
 TEST_CASE("Unit_hipBindTexture2D_Pitch") {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
   (void) hipGetLastError();  // Prevent negative tests affecting this
 
   float* b;
