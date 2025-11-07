@@ -322,9 +322,7 @@ jobs:
             -b "build-baseline/${{ inputs.versioning_spec }}" \
             --abidw-args "${{ inputs.abidw_args }}" \
             --abidiff-args "${{ inputs.abidiff_args }}" \
-            --report-dir "abi-guard/diff-reports" \
-            --abi-base-dir "abi-guard/abi-base" \
-            --abi-head-dir "abi-guard/abi-head"
+            --output-directory "abi-guard/diff-reports"
       - name: Upload abidiff reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -376,9 +374,7 @@ jobs:
             -b "build-baseline/${{ inputs.versioning_spec }}" \
             --abidw-args "${{ inputs.abidw_args }}" \
             --abidiff-args "${{ inputs.abidiff_args }}" \
-            --report-dir "abi-guard/diff-reports" \
-            --abi-base-dir "abi-guard/abi-base" \
-            --abi-head-dir "abi-guard/abi-head"
+            --output-directory "abi-guard/diff-reports"
       - name: Upload abidiff reports
         if: always()
         uses: actions/upload-artifact@v4
