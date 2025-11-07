@@ -6,8 +6,8 @@ import re
 if len(sys.argv) > 1:
     build_folder = sys.argv[1]
     install_folder = sys.argv[2]  
-    # print(f"In relative_paths.py [1]: build folder: {build_folder}")
-    # print(f"In relative_paths.py [2]: install folder: {install_folder}")
+    #print(f"In relative_paths.py [1]: build folder: {build_folder}")
+    #print(f"In relative_paths.py [2]: install folder: {install_folder}")
 else:
     print(f"Args not provided. Please provide arg1-build folder-catch_tests, arg2-install folder")
     exit(1)
@@ -39,7 +39,7 @@ def make_test_files_portable(filenames):
             # Read the entire content of the file
             with open(filename, 'r') as file:
                 file_content = file.read()
-            # print(f"**Done reading now parsing", filename)
+            #print(f"**Done reading now parsing", filename)
             # 1 replace abs path with filename. Make relative
             old_text=os.path.dirname(os.path.abspath(filename))
             abs_dir_path = os.path.join(old_text, '')
@@ -77,7 +77,7 @@ def make_test_files_portable(filenames):
             # Write the modified content back to the file
             with open(install_path, 'w') as file:
                 file.write(modified_content)
-            # print(f"**Done parsing now writing into", install_path)
+            #print(f"**Done parsing now writing into", install_path)
         except IOError as e:
             print(f"Error: '{e}'")
         except Exception as e:
