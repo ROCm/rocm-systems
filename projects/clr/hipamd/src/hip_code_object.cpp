@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "hip_code_object.hpp"
+#include "hip_platform.hpp"
 #include "amd_hsa_elf.hpp"
 
 #include <cstring>
@@ -265,6 +266,48 @@ hipError_t StatCO::digestFatBinary(const void* data, FatBinaryInfo*& programs) {
     return hipSuccess;
   }
 
+  // HACK: Check if this is a kpack binary by calling back to PlatformState
+  char* kpack_buffer = nullptr;
+  size_t kpack_size = 0;
+  if (hip::PlatformState::instance().getKpackDeviceCode(data, kpack_buffer, kpack_size)) {
+    // Now runtime should be initialized
+    if (g_devices.size() == 0) {
+      return hipErrorNoDevice;
+    }
+
+    // Create FatBinaryInfo with nullptr image
+    FatBinaryInfo* fb_info = new FatBinaryInfo(nullptr, nullptr);
+
+    // Add device program for each device
+    for (size_t dev_idx = 0; dev_idx < g_devices.size(); dev_idx++) {
+      hipError_t status = fb_info->AddDevProgram(
+          g_devices[dev_idx],
+          kpack_buffer,
+          kpack_size,
+          0
+      );
+
+      if (status != hipSuccess) {
+        delete fb_info;
+        return status;
+      }
+    }
+
+    // Build the program for each device
+    for (size_t dev_idx = 0; dev_idx < g_devices.size(); dev_idx++) {
+      hipError_t status = fb_info->BuildProgram(dev_idx);
+
+      if (status != hipSuccess) {
+        delete fb_info;
+        return status;
+      }
+    }
+
+    programs = fb_info;
+    return hipSuccess;
+  }
+
+  // Normal fat binary path
   // Create a new fat binary object and extract the fat binary for all devices.
   FatBinaryInfo* fatBinaryInfo = new FatBinaryInfo(nullptr, data);
   hipError_t err = fatBinaryInfo->ExtractFatBinaryUsingCOMGR(g_devices);

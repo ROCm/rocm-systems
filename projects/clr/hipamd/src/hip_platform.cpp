@@ -31,6 +31,7 @@
 
 namespace hip {
 constexpr unsigned __hipFatMAGIC2 = 0x48495046;  // "HIPF"
+constexpr unsigned __hipFatMAGIC_KPACK = 0x4B504948;  // "HIPK" - kpack'd binary
 
 PlatformState* PlatformState::platform_;  // Initiaized as nullptr by default
 
@@ -43,6 +44,116 @@ struct __CudaFatBinaryWrapper {
   void* binary;
   void* dummy1;
 };
+
+// Kpack metadata structure
+struct KpackMetadata {
+  std::vector<std::string> kpack_search_paths;
+  std::string kernel_name;
+};
+
+// Helper to parse a MessagePack string (fixstr, str8, str16, str32)
+static bool parseMsgpackString(const uint8_t*& ptr, const uint8_t* end, std::string& out) {
+  if (ptr >= end) return false;
+
+  uint32_t str_len = 0;
+  uint8_t format = *ptr;
+
+  if ((format & 0xe0) == 0xa0) {
+    // fixstr: 101xxxxx
+    str_len = format & 0x1f;
+    ptr++;
+  } else if (format == 0xd9) {
+    // str8: length in next 1 byte
+    ptr++;
+    if (ptr >= end) return false;
+    str_len = *ptr;
+    ptr++;
+  } else if (format == 0xda) {
+    // str16: length in next 2 bytes (big-endian)
+    ptr++;
+    if (ptr + 2 > end) return false;
+    str_len = (static_cast<uint32_t>(ptr[0]) << 8) | ptr[1];
+    ptr += 2;
+  } else if (format == 0xdb) {
+    // str32: length in next 4 bytes (big-endian)
+    ptr++;
+    if (ptr + 4 > end) return false;
+    str_len = (static_cast<uint32_t>(ptr[0]) << 24) |
+              (static_cast<uint32_t>(ptr[1]) << 16) |
+              (static_cast<uint32_t>(ptr[2]) << 8) |
+              ptr[3];
+    ptr += 4;
+  } else {
+    fprintf(stderr, "[HIP] Kpack metadata: expected string, got 0x%02x\n", format);
+    return false;
+  }
+
+  if (ptr + str_len > end) return false;
+  out = std::string(reinterpret_cast<const char*>(ptr), str_len);
+  ptr += str_len;
+  return true;
+}
+
+// Simple MessagePack parser for kpack metadata
+// Only handles the specific format we use: map with string keys and string/array values
+static bool parseKpackMetadata(const void* data, size_t max_size, KpackMetadata& metadata) {
+  const uint8_t* ptr = static_cast<const uint8_t*>(data);
+  const uint8_t* end = ptr + max_size;
+
+  if (ptr >= end) return false;
+
+  // Expect fixmap with 2 entries (0x82)
+  if (*ptr != 0x82) {
+    fprintf(stderr, "[HIP] Kpack metadata: expected fixmap, got 0x%02x\n", *ptr);
+    return false;
+  }
+  ptr++;
+
+  // Parse 2 key-value pairs
+  for (int i = 0; i < 2; i++) {
+    if (ptr >= end) return false;
+
+    // Read key (string)
+    std::string key;
+    if (!parseMsgpackString(ptr, end, key)) {
+      fprintf(stderr, "[HIP] Kpack metadata: failed to parse key\n");
+      return false;
+    }
+
+    if (ptr >= end) return false;
+
+    if (key == "kpack_search_paths") {
+      // Expect fixarray
+      if ((*ptr & 0xf0) != 0x90) {
+        fprintf(stderr, "[HIP] Kpack metadata: expected fixarray for kpack_search_paths, got 0x%02x\n", *ptr);
+        return false;
+      }
+      uint8_t arr_len = *ptr & 0x0f;
+      ptr++;
+
+      // Parse array elements (all strings)
+      for (uint8_t j = 0; j < arr_len; j++) {
+        std::string path;
+        if (!parseMsgpackString(ptr, end, path)) {
+          fprintf(stderr, "[HIP] Kpack metadata: failed to parse search path\n");
+          return false;
+        }
+        metadata.kpack_search_paths.push_back(path);
+      }
+    } else if (key == "kernel_name") {
+      // Parse kernel name string
+      if (!parseMsgpackString(ptr, end, metadata.kernel_name)) {
+        fprintf(stderr, "[HIP] Kpack metadata: failed to parse kernel_name\n");
+        return false;
+      }
+    } else {
+      fprintf(stderr, "[HIP] Kpack metadata: unknown key '%s'\n", key.c_str());
+      return false;
+    }
+  }
+
+  return true;
+}
 
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name);
@@ -73,12 +184,75 @@ static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const c
 
 void** __hipRegisterFatBinary(const void* data) {
   const __CudaFatBinaryWrapper* fbwrapper = reinterpret_cast<const __CudaFatBinaryWrapper*>(data);
+
+  // Check for kpack'd binary by magic value (BEFORE dereferencing binary pointer!)
+  if (fbwrapper->magic == __hipFatMAGIC_KPACK && fbwrapper->version == 1) {
+    // Parse the MessagePack metadata
+    KpackMetadata metadata;
+    constexpr size_t MAX_METADATA_SIZE = 4096; // Reasonable upper bound
+
+    if (!parseKpackMetadata(fbwrapper->binary, MAX_METADATA_SIZE, metadata)) {
+      return nullptr;
+    }
+
+    // HACK: Check for env var pointing to extracted device code
+    const char* device_code_path = getenv("HIP_KPACK_DEVICE_CODE");
+    if (device_code_path == nullptr) {
+      return nullptr;
+    }
+
+    // Load the .hsaco file from disk
+    FILE* fp = fopen(device_code_path, "rb");
+    if (!fp) {
+      return nullptr;
+    }
+
+    // Get file size
+    fseek(fp, 0, SEEK_END);
+    size_t file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    // Allocate buffer and read file
+    // NOTE: Using new[] to match FatBinaryInfo memory management
+    char* hsaco_buffer = new char[file_size];
+    size_t bytes_read = fread(hsaco_buffer, 1, file_size, fp);
+    fclose(fp);
+
+    if (bytes_read != file_size) {
+      delete[] hsaco_buffer;
+      return nullptr;
+    }
+
+    // Store the hsaco buffer in a static map for lazy loading
+    // HACK: Using a static map to store kpack device code until runtime is initialized
+    PlatformState::instance().registerKpackDeviceCode(fbwrapper, hsaco_buffer, file_size);
+
+    // Call addFatBinary with initialized=false to defer loading
+    // This creates an entry in modules_[fbwrapper] and returns a pointer to it
+    bool success = false;
+    auto fat_binary_info = PlatformState::instance().addFatBinary(fbwrapper, success);
+
+    if (!success) {
+      delete[] hsaco_buffer;
+      return nullptr;
+    }
+
+    // Set to nullptr for lazy loading - digestFatBinary will be called later
+    // when runtime is initialized and kernel is first used
+    *fat_binary_info = nullptr;
+
+    // Return the FatBinaryInfo** as expected
+    return reinterpret_cast<void**>(fat_binary_info);
+  }
+
+  // Check for normal fat binary
   if (fbwrapper->magic != __hipFatMAGIC2 || fbwrapper->version != 1) {
     LogPrintfError("Cannot Register fat binary. FatMagic: %u version: %u ", fbwrapper->magic,
                    fbwrapper->version);
     return nullptr;
   }
 
+  // Normal fat binary path - safe to dereference binary pointer
   bool success{};
   auto fat_binary_info = PlatformState::instance().addFatBinary(fbwrapper->binary, success);
   return success ? reinterpret_cast<void**>(fat_binary_info) : nullptr;
@@ -87,6 +261,14 @@ void** __hipRegisterFatBinary(const void* data) {
 void __hipRegisterFunction(hip::FatBinaryInfo** modules, const void* hostFunction,
                            char* deviceFunction, const char* deviceName, unsigned int threadLimit,
                            uint3* tid, uint3* bid, dim3* blockDim, dim3* gridDim, int* wSize) {
+  // Check if modules pointer itself is nullptr (shouldn't happen)
+  if (modules == nullptr) {
+    return;
+  }
+
+  // For kpack binaries, *modules will be nullptr but we still need to register the function
+  // The device code will be loaded lazily when first accessed
+
   static int enable_deferred_loading{[]() {
     char* var = getenv("HIP_ENABLE_DEFERRED_LOADING");
     return var ? atoi(var) : 1;
@@ -980,7 +1162,64 @@ hipError_t PlatformState::getDynTexRef(const char* hostVar, hipModule_t hmod,
   return hipSuccess;
 }
 
+void PlatformState::registerKpackDeviceCode(const void* key, char* buffer, size_t size) {
+  kpack_device_code_map_[key] = std::make_pair(buffer, size);
+}
+
+bool PlatformState::getKpackDeviceCode(const void* key, char*& buffer, size_t& size) {
+  auto it = kpack_device_code_map_.find(key);
+  if (it != kpack_device_code_map_.end()) {
+    buffer = it->second.first;
+    size = it->second.second;
+    return true;
+  }
+  return false;
+}
+
 hipError_t PlatformState::digestFatBinary(const void* data, hip::FatBinaryInfo*& programs) {
+  // HACK: Check if this is a kpack binary
+  char* kpack_buffer = nullptr;
+  size_t kpack_size = 0;
+  if (getKpackDeviceCode(data, kpack_buffer, kpack_size)) {
+    // Now runtime should be initialized
+    if (g_devices.size() == 0) {
+      return hipErrorNoDevice;
+    }
+
+    // Create FatBinaryInfo with nullptr image (don't pass the .hsaco, it's not a fat binary!)
+    hip::FatBinaryInfo* fb_info = new hip::FatBinaryInfo(nullptr, nullptr);
+
+    // Add device program for each device
+    // The kpack_buffer contains a single-arch .hsaco file (ELF), not a fat binary
+    for (size_t dev_idx = 0; dev_idx < g_devices.size(); dev_idx++) {
+      hipError_t status = fb_info->AddDevProgram(
+          g_devices[dev_idx],
+          kpack_buffer,
+          kpack_size,
+          0
+      );
+
+      if (status != hipSuccess) {
+        delete fb_info;
+        return status;
+      }
+    }
+
+    // Build the program for each device
+    for (size_t dev_idx = 0; dev_idx < g_devices.size(); dev_idx++) {
+      hipError_t status = fb_info->BuildProgram(dev_idx);
+
+      if (status != hipSuccess) {
+        delete fb_info;
+        return status;
+      }
+    }
+
+    programs = fb_info;
+    return hipSuccess;
+  }
+
+  // Normal fat binary path
   return statCO_.digestFatBinary(data, programs);
 }
 

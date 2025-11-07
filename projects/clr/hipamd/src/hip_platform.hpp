@@ -87,6 +87,10 @@ class PlatformState {
   hipError_t removeFatBinary(hip::FatBinaryInfo** module);
   hipError_t digestFatBinary(const void* data, hip::FatBinaryInfo*& programs);
 
+  // HACK: Kpack device code management
+  void registerKpackDeviceCode(const void* key, char* buffer, size_t size);
+  bool getKpackDeviceCode(const void* key, char*& buffer, size_t& size);
+
   hipError_t registerStatFunction(const void* hostFunction, hip::Function* func);
   hipError_t registerStatGlobalVar(const void* hostVar, hip::Var* var);
   hipError_t registerStatManagedVar(hip::Var* var);
@@ -150,5 +154,8 @@ class PlatformState {
 
   void* dynamicLibraryHandle_{nullptr};
   std::unordered_map<hipKernel_t, hipLibrary_t> library_functions_;
+
+  // HACK: Kpack device code storage for lazy loading
+  std::map<const void*, std::pair<char*, size_t>> kpack_device_code_map_;
 };
 }  // namespace hip
