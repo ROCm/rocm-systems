@@ -18,8 +18,8 @@ To build and install, clone the RDC source code from GitHub and use CMake.
 
 .. code-block:: shell
 
-    $ git clone <GitHub for RDC>
-    $ cd rdc
+    $ git clone 'https://github.com/ROCm/rocm-systems' --recursive
+    $ cd rocm-systems/projects/rdc
     $ mkdir -p build; cd build
     $ cmake -DROCM_DIR=/opt/rocm -DGRPC_ROOT="$GRPC_PROTOC_ROOT"..
     $ make
@@ -44,7 +44,7 @@ Build Unit Tests for RDC Tool
 
 .. code-block:: shell
 
-    $ cd rdc/tests/rdc_tests
+    $ cd rocm-systems/projects/rdc/tests/rdc_tests
     $ mkdir -p build; cd build
     $ cmake -DROCM_DIR=/opt/rocm -DGRPC_ROOT="$GRPC_PROTOC_ROOT"..
     $ make
