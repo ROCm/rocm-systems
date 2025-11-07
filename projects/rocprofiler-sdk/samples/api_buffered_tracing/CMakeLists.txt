@@ -57,7 +57,9 @@ endif()
 
 add_test(NAME buffered-api-tracing COMMAND $<TARGET_FILE:buffered-api-tracing>)
 
-PROPERTIES TIMEOUT
+set_tests_properties(
+    buffered-api-tracing
+    PROPERTIES TIMEOUT
                45
                LABELS
                "samples"
