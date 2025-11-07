@@ -97,7 +97,9 @@ def convert_time_columns(df: pd.DataFrame, time_unit: str) -> pd.DataFrame:
 
     # Avoid modifying the original
     df_copy = df.copy()
-    time_rows = df_copy["Unit"].str.lower().str.contains("ns", na=False)
+    time_rows = (
+        df_copy["Unit"].str.lower().str.contains(r"\bns\b", na=False, regex=True)
+    )
     time_value_columns = ["Avg", "Min", "Max"]
 
     for col in time_value_columns:
@@ -127,7 +129,9 @@ def has_time_data(df: pd.DataFrame) -> bool:
     if "Unit" not in df.columns:
         return False
     # NOTE: "ns" / "NS" / "nS" / "Ns" are reserved for Nanosec time unit
-    return bool(df["Unit"].str.lower().str.contains("ns", na=False).any())
+    return bool(
+        df["Unit"].str.lower().str.contains(r"\bns\b", na=False, regex=True).any()
+    )
 
 
 def is_roofline_shown(
