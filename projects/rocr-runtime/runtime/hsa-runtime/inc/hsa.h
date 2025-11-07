@@ -5683,6 +5683,15 @@ typedef enum {
 } hsa_code_symbol_info_t;
 
 /**
+ * @brief System dependent handle type.
+ */
+#if defined(_WIN32)
+typedef void* hsa_handle_t;
+#else
+typedef int hsa_handle_t;
+#endif
+
+/**
  * @deprecated
  *
  * @brief Get the current value of an attribute for a given code symbol.
