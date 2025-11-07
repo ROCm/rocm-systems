@@ -2,12 +2,13 @@ versioning:
   schema-version: 0.1
   name: rocprofiler-sdk
   build-directory: build
-  install-directory: install
   cmake-build-type: RelWithDebInfo
   cmake-generator: Ninja
-  cmake-config-args: "-DROCPROFILER_BUILD_DEBUG=ON -DROCPROFILER_BUILD_CI=ON"
+  cmake-config-args: "-DROCPROFILER_BUILD_DEBUG=ON"
   source-tree:
     version-file: VERSION
+    working-directory: "."
+    require-working-directory-exists: True
     sources:
       # files to use/not use for determining a version ID. This is mostly
       # used for restoring cached data in continuous integration.
@@ -25,7 +26,7 @@ versioning:
         - source/docs/**
         - source/**/tests/**
     headers:
-      # files to use for abidw --header-file
+      # same as source except these files are used with abidw via the --header-file option
       recursive-include:
         - source/include/rocprofiler-sdk/**/*.h
         - source/include/rocprofiler-sdk/cxx/**/*.hpp
@@ -33,14 +34,11 @@ versioning:
   # values relative to this file's path in the build tree
   build-tree:
     version-file: VERSION
-    sources:
-      # files to use/not use for determining a version ID. This is mostly
-      # used for restoring cached data in continuous integration.
-      include:
-        - source/include/rocprofiler-sdk/version.h
-        - source/include/rocprofiler-sdk/ext_version.h
-      exclude:
-        - source/include/rocprofiler-sdk/*.h
+    # root directory is {{ build-directory }}
+    working-directory: "."
+    # allow hash to be computed even if build directory does not exist
+    require-working-directory-exists: False
+    # files to check for ABI-compatibility
     abi-check:
       include:
         - lib/librocprofiler-sdk.so
@@ -51,6 +49,8 @@ versioning:
     working-directory: "../.."
     # relative to dirname(versioning.yml)/ {working-directory}
     version-file: share/rocprofiler-sdk/VERSION
+    require-working-directory-exists: True
+    #
     headers:
       recursive-include:
         - include/rocprofiler-sdk/**/*.h

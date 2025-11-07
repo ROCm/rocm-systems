@@ -22,8 +22,9 @@ endforeach()
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../../cmake ${CMAKE_MODULE_PATH})
 include(rocm_versioning)
 
-rocm_versioning_read_version_file(rocprofiler-sdk ROCPROFILER_SDK
-                                  ${CMAKE_CURRENT_LIST_DIR}/VERSION)
+rocm_versioning_read_version_file(
+    rocprofiler-sdk ROCPROFILER_SDK ${CMAKE_CURRENT_LIST_DIR}/VERSION
+    ${CMAKE_CURRENT_LIST_DIR}/versioning.yml)
 
 project(
     rocprofiler-sdk
@@ -75,7 +76,8 @@ set(FULL_VERSION_STRING "${ROCPROFILER_SDK_FULL_VERSION_STRING}")
 set(ROCPROFILER_SDK_SOVERSION "${ROCPROFILER_SDK_VERSION_MAJOR}")
 
 # make sure that cmake re-runs when version file changes
-configure_file(${PROJECT_SOURCE_DIR}/VERSION ${PROJECT_BINARY_DIR}/VERSION COPYONLY)
+rocm_versioning_configure_version_files(FILES ${PROJECT_SOURCE_DIR}/VERSION
+                                        ${PROJECT_SOURCE_DIR}/versioning.yml)
 
 message(
     STATUS

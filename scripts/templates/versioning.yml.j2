@@ -7,9 +7,6 @@ versioning:
   # default build directory
   build-directory: {{ build_directory }}
 
-  # default install directory
-  install-directory: {{ install_directory }}
-
   # default CMAKE_BUILD_TYPE
   cmake-build-type: {{ cmake_build_type }}
 
@@ -26,6 +23,9 @@ versioning:
 
     # relative to working-directory
     version-file: {{ source_tree.version_file }}
+
+    # fail if the working directory does not exist
+    require-working-directory-exists: {{ source_tree.require_working_directory_exists }}
 
     # files to use/not use for determining a version ID. This is mostly used for
     # generating git conflicts and saving/restoring cached data in workflows.
@@ -73,6 +73,9 @@ versioning:
 
     # relative to working-directory
     version-file: {{ build_tree.version_file }}
+
+    # fail if the working directory does not exist
+    require-working-directory-exists: {{ build_tree.require_working_directory_exists }}
 
     # files to use/not use for determining a version ID. This is mostly used for
     # generating git conflicts and saving/restoring cached data in workflows.
@@ -140,6 +143,9 @@ versioning:
 
     # relative to working-directory
     version-file: {{ install_tree.version_file }}
+
+    # fail if the working directory does not exist
+    require-working-directory-exists: {{ install_tree.require_working_directory_exists }}
 
     # files to use/not use for determining a version ID. This is mostly used for
     # generating git conflicts and saving/restoring cached data in workflows.
