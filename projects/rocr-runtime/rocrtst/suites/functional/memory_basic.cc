@@ -233,15 +233,14 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   err = TestAllocate(pool, pool_sz*gran_sz + gran_sz);
   EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ALLOCATION, err);
 
-  pool_sz = (ag_type == HSA_DEVICE_TYPE_CPU)?
-              std::min(pool_sz, info.totalram / gran_sz) :
-              pool_sz;
+  const bool is_system_ram = (ag_type == HSA_DEVICE_TYPE_CPU) || (ag_type == HSA_DEVICE_TYPE_AIE);
+  pool_sz = is_system_ram ? std::min(pool_sz, info.totalram / gran_sz) : pool_sz;
 
   // Reduce upper_bound by 30% or 10% for system-RAM, depending on pool size limit. Otherwise
   // Linux OOM-Killer app can be triggered if system has allocated all available physical
   // memory and swap space, and so killing this process.
   float pool_size_limit_ratio = 1.0;
-  if (ag_type == HSA_DEVICE_TYPE_CPU) {
+  if (is_system_ram) {
     pool_size_limit_ratio = rocrtst::pool_size_limit ? 0.9 : 0.7;
   }
 
@@ -419,8 +418,8 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
 
   if (verbosity() > 0) {
     std::cout << "  Available memory before: " << ag_avail_memory_before << std::endl;
-    std::cout << "         Memory allocated: " << allocate_sz1 
-                  << " + " << allocate_sz2 << std::endl;
+    std::cout << "         Memory allocated: " << allocate_sz1 << " + " << allocate_sz2
+              << std::endl;
     std::cout << "   Available memory after: " << ag_avail_memory_after << std::endl;
   }
 

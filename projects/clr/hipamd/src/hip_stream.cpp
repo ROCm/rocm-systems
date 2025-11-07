@@ -547,7 +547,7 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   if (stream != nullptr) {
     // If still capturing return error
     if (hip::Stream::StreamCaptureOngoing(stream) == true) {
-      HIP_RETURN(hipErrorStreamCaptureUnsupported);
+      return hipErrorStreamCaptureUnsupported;
     }
   }
   bool wait = (stream == nullptr) ? true : false;
@@ -935,6 +935,10 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
 hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
   HIP_INIT_API(hipStreamCopyAttributes, dst, src);
+
+  if (!hip::isValid(src) || !hip::isValid(dst)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
 
   getStreamPerThread(src);
   getStreamPerThread(dst);

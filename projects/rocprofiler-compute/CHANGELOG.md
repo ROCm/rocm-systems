@@ -10,6 +10,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added `config_delta/gfx950_diff.yaml` to analysis config yamls to track the revision between a gfx9 architecture against the latest supported architecture gfx950
 
+* Analysis db features
+  * Add support for per kernel metrics analysis.
+  * Add support for dispatch timeline analysis.
+  * Show duration as median in addition to mean in kernel view.
+
 ### Changed
 
 * `-b/--block` accepts block alias(es) (See block aliases using command-line option `--list-blocks <arch>`).
@@ -20,6 +25,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 
 ### Removed
+* Removed `database` mode from `rocprofiler-compute`. This is to move our focus from grafana
+  and mongodb integration to other visualization methods such as:
+  * Analysis DB based Visualizer (upcoming)
+  * Plotly server based standalone GUI
+  * Commandline based Textual User Interface
 
 ### Optimized
 
@@ -209,6 +219,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * MI300A/X L2-Fabric 64B read counter may display negative values - The rocprof-compute metric 17.6.1 (Read 64B) can report negative values due to incorrect calculation when TCC_BUBBLE_sum + TCC_EA0_RDREQ_32B_sum exceeds TCC_EA0_RDREQ_sum.
   * A workaround has been implemented using max(0, calculated_value) to prevent negative display values while the root cause is under investigation.
+
+* The profile mode crashes when `--format-rocprof-output json` is selected.
+  * As a workaround, this option should either not be provided or should be set to `csv` instead of `json`. This issue does not affect the profiling results since both `csv` and `json` output formats lead to the same profiling data.  
 
 ### Upcoming changes
 

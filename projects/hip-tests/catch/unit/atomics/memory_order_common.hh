@@ -259,6 +259,9 @@ template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() 
       });
       ConsumerKernel<operation, memory_order, __HIP_MEMORY_SCOPE_SYSTEM>
           <<<1, 1>>>(flag.ptr(), data.ptr(), ret.ptr());
+
+      HIP_CHECK(hipDeviceSynchronize());
+      host_thread.join();
     }
 
     SECTION("Device producer - Host consumer") {
@@ -268,11 +271,11 @@ template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() 
       });
       ProducerKernel<operation, memory_order, __HIP_MEMORY_SCOPE_SYSTEM>
           <<<1, 1>>>(flag.ptr(), data.ptr());
+
+      HIP_CHECK(hipDeviceSynchronize());
+      host_thread.join();
     }
   }
-
-  HIP_CHECK(hipDeviceSynchronize());
-  host_thread.join();
 
   REQUIRE(ret.ptr()[0] == kTestValue);
 }

@@ -206,12 +206,7 @@ hsa_status_t Memory::interopMapBuffer(amd::Os::FileDesc fdn) {
   size_t size;
   size_t metadata_size = 0;
   void* metadata;
-#if IS_WINDOWS
-  int fd = 0;
-  assert(!"Unimplemented");
-#else
   auto fd = fdn;
-#endif
   hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, 0, &size, &interop_deviceMemory_,
                                                 &metadata_size, (const void**)&metadata);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
