@@ -8,5 +8,14 @@ else()
     set(CPACK_PKG_DIRS
       @CMAKE_BINARY_DIR@/_CPack_Packages/${CPACK_GENERATOR}/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME})
 endif()
-
-execute_process(COMMAND @Python3_EXECUTABLE@ @CMAKE_SOURCE_DIR@/cmake/relative_paths.py @CATCH_BUILD_DIR@ ${CPACK_PKG_DIRS})
+execute_process(COMMAND @Python_EXECUTABLE@
+                        @CMAKE_SOURCE_DIR@/cmake/relative_paths.py @CATCH_BUILD_DIR@ ${CPACK_PKG_DIRS}
+                        OUTPUT_VARIABLE workaround_out
+                        RESULT_VARIABLE workaround_res)
+if(NOT ${workaround_res} EQUAL 0)
+  message(FATAL_ERROR
+    "Error performing workaround using relative_paths.py :\n"
+    "  Result: ${workaround_res}\n"
+    "  Output: ${workaround_out}\n"
+  )
+endif()

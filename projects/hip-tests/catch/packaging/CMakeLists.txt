@@ -26,6 +26,7 @@ cmake_minimum_required(VERSION 3.16.8)
 set(CMAKE_C_COMPILER_WORKS 1)
 set(CMAKE_CXX_COMPILER_WORKS 1)
 include(GNUInstallDirs)
+set(CPACK_CMAKE_GENERATOR "Ninja")
 
 #############################
 # Packaging steps
