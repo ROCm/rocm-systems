@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.20)
 
 project(hiptests LANGUAGES C CXX HIP)                                         
 
@@ -22,8 +22,8 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 find_package(hip REQUIRED)
 find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
-
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
+
 if(UNIX)
     find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
     find_program(GCC_EXEC gcc)
@@ -294,9 +294,8 @@ if(BUILD_UNIT_TESTS)
     add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
     add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
     add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
-    # TODO test finds 0 tests, causing test failures
     if(UNIX)
-        add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
+      add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
     endif()
 endif()
 if(BUILD_PERF_TESTS)
@@ -317,20 +316,23 @@ if(GENERATE_COVERATE)
 endif()
 
 # packaging the tests
-# make package_test to generate packages for test
 add_subdirectory(packaging)
 if(UNIX)
-    add_custom_target(package_test ALL
+    add_custom_command(
+        TARGET build_tests
+        POST_BUILD
         COMMAND rm -rf *.deb *.rpm *.tar.gz
         COMMAND cpack
+        COMMENT "Generating hip-catch test packages"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 else()
-    add_custom_target(package_test ALL
+    add_custom_command(
+        TARGET build_tests
+        POST_BUILD
         COMMAND cpack
+        COMMENT "Generating hip-catch test packages"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
-# Make sure build_tests happpens before package_test
-add_dependencies(package_test build_tests)
 
 # Doxygen documentation
 # check if doxygen is installed
