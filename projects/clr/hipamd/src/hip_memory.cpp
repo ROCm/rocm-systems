@@ -179,7 +179,7 @@ hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t e
     HIP_RETURN(hipErrorInvalidValue);
   }
   *devPtr = reinterpret_cast<void*>(devMem->virtualAddress() + bufferDesc->offset);
-  amd::MemObjMap::AddMemObj(*devPtr, buf, bufferDesc->offset);
+  amd::MemObjMap::AddMemObj(*devPtr, buf);
   buf->retain();
   HIP_RETURN(hipSuccess);
 }
