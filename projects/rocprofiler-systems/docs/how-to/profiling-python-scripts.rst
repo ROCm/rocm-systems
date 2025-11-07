@@ -49,6 +49,14 @@ Both the ``share/rocprofiler-systems/setup-env.sh`` script and the module file i
 ``share/modulefiles/rocprofiler-systems`` automatically handle the prefixing of the ``PYTHONPATH``
 environment variable.
 
+.. note::
+
+   PyTorch and other Python applications might fail to profile device activities when it is unable to find the libraries in the default linker path. As a workaround, you need to explicitly add the library path to ``LD_LIBRARY_PATH``. For PyTorch use:
+
+   .. code-block:: shell
+
+      export LD_LIBRARY_PATH=:/opt/venv/lib/python3.10/site-packages/torch/lib:$LD_LIBRARY_PATH
+   
 Running ROCm Systems Profiler on a Python script
 ================================================
 
