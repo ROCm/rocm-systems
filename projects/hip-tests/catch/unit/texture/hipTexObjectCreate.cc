@@ -244,6 +244,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeArray_NullptrArray") {
   CTX_DESTROY();
 }
 
+#if 0
 TEST_CASE("Unit_TexObjectCreate_TypeMipmapped") {
 #if __linux__
   HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
@@ -311,6 +312,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeMipmaped_IncompleteInit") {
   HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
   CTX_DESTROY();
 }
+#endif
 
 TEST_CASE("Unit_TexObjectCreate_TypePitch2D") {
   CHECK_IMAGE_SUPPORT

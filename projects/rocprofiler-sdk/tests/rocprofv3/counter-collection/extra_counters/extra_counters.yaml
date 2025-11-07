@@ -18,6 +18,8 @@ rocprofiler-sdk:
           - gfx906
           - gfx1100
           - gfx1101
+          - gfx1150
+          - gfx1151
           - gfx908
           - gfx90a
           - gfx9
