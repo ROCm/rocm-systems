@@ -140,9 +140,9 @@ struct RocpdImportData
     RocpdImportData()  = default;
     ~RocpdImportData() = default;
 
-    RocpdImportData(const RocpdImportData&)     = default;
-    RocpdImportData(RocpdImportData&&) noexcept = default;
-    RocpdImportData& operator=(const RocpdImportData&) = default;
+    RocpdImportData(const RocpdImportData&)                = default;
+    RocpdImportData(RocpdImportData&&) noexcept            = default;
+    RocpdImportData& operator=(const RocpdImportData&)     = default;
     RocpdImportData& operator=(RocpdImportData&&) noexcept = default;
 
     RocpdImportData(const py::object& _obj, const std::vector<std::string>& _dbs)
@@ -535,6 +535,110 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
             for(auto obj : {data.connection})
             {
+                const std::string create_samples_view = R"(
+                            CREATE TEMP VIEW
+                                `samples_schema_3_0` AS
+                            SELECT
+                                R.id,
+                                R.guid,
+                                PMC_I.name,
+                                PMC_I.symbol,
+                                T.nid,
+                                P.pid,
+                                T.tid,
+                                R.timestamp,
+                                CASE PMC_I.units
+                                    WHEN 'W' THEN 'watts'
+                                    WHEN '°C' THEN 'deg C'
+                                    ELSE PMC_I.units
+                                END AS units,
+                                PMC_I.description,
+                                CASE PMC_I.symbol
+                                    WHEN 'Context Switches' THEN 'CPU Context Switches'
+                                    WHEN 'GFX Busy' THEN 'GPU GFX Busy'
+                                    WHEN 'Kernel Time' THEN 'CPU Kernel Time'
+                                    WHEN 'MM Busy' THEN 'GPU MM Busy'
+                                    WHEN 'MemUsg' THEN 'GPU Memory Usage'
+                                    WHEN 'Memory Usage' THEN 'CPU Page Faults'
+                                    WHEN 'Peak Memory' THEN 'CPU Peak Memory'
+                                    WHEN 'Pow' THEN 'GPU Current Power'
+                                    WHEN 'Temp' THEN 'GPU Temperature'
+                                    WHEN 'UMC Busy' THEN 'GPU UMC Busy'
+                                    WHEN 'User Time' THEN 'CPU User Time'
+                                    WHEN 'Virtual Memory Usage' THEN 'CPU Virtual Memory Usage'
+                                    WHEN 'thread_context_switch' THEN 'Thread Context Switches'
+                                    WHEN 'thread_cpu_time' THEN 'Thread CPU Time'
+                                    WHEN 'thread_page_fault' THEN 'Thread Page Faults'
+                                    WHEN 'thread_peak_memory' THEN 'Thread Peak Memory Usage'
+                                    ELSE PMC_I.description
+                                END AS short_description,
+                                A.absolute_index AS agent_abs_index,
+                                R.event_id,
+                                E.stack_id AS stack_id,
+                                E.parent_stack_id AS parent_stack_id,
+                                E.correlation_id AS corr_id,
+                                E.extdata AS extdata,
+                                E.call_stack AS call_stack,
+                                E.line_info AS line_info
+                            FROM
+                                `rocpd_sample` R
+                                INNER JOIN `rocpd_track` T ON T.id = R.track_id
+                                AND T.guid = R.guid
+                                INNER JOIN `rocpd_event` E ON E.id = R.event_id
+                                AND E.guid = R.guid
+                                INNER JOIN `rocpd_info_process` P ON P.id = T.pid
+                                AND P.guid = T.guid
+                                INNER JOIN `rocpd_string` SN ON SN.id = T.name_id
+                                AND SN.guid = T.guid
+                                INNER JOIN `rocpd_string` CN ON CN.id = E.category_id
+                                AND CN.guid = T.guid
+                                INNER JOIN `rocpd_info_pmc` PMC_I ON SN.string =
+                                CASE CN.string
+                                    WHEN 'amd_smi' THEN PMC_I.name || ' [' ||
+                                    (SELECT type_index
+                                        FROM `rocpd_info_agent` A
+                                        WHERE A.id = PMC_I.agent_id) || ']'
+                                    ELSE  PMC_I.name
+                                END
+                                AND PMC_I.guid = T.guid
+                                INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id
+                                AND A.guid = T.guid
+                                LEFT OUTER JOIN `rocpd_info_thread` TH ON TH.id = T.tid
+                                AND TH.guid = T.guid;
+                        )";
+
+                execute_raw_sql_statements(conn, create_samples_view);
+
+                const std::string create_pmc_event_view = R"(
+                            CREATE TEMP VIEW
+                                `pmc_events_schema_3_0` AS
+                            SELECT
+                                PMC_E.id,
+                                PMC_E.guid,
+                                PMC_I.nid,
+                                PMC_I.pid,
+                                PMC_E.pmc_id,
+                                PMC_E.event_id,
+                                PMC_I.name,
+                                PMC_I.symbol,
+                                CASE PMC_I.units
+                                    WHEN 'MB' THEN
+                                    CASE symbol
+                                        WHEN 'thread_peak_memory' THEN PMC_E.value
+                                        ELSE PMC_E.value / (1000 * 1000)
+                                    END
+                                    WHEN 'sec' THEN PMC_E.value / (1000 * 1000 * 1000)
+                                    ELSE PMC_E.value
+                                END AS value,
+                                PMC_E.extdata AS extdata
+                            FROM
+                                `rocpd_pmc_event` PMC_E
+                                INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
+                                AND PMC_I.guid = PMC_E.guid;
+                        )";
+
+                execute_raw_sql_statements(conn, create_pmc_event_view);
+                
                 auto nodes = rocpd::read<rocpd::types::node>(conn);
 
                 for(const auto& nitr : nodes)
@@ -604,79 +708,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto regions = rocpd::sql_generator<rocpd::types::region>{
                             conn, select_guid_nid_pid("regions"), region_order_by};
 
-                        const std::string create_samples_view = R"(
-                            CREATE TEMP VIEW
-                                `samples_schema_3_0` AS
-                            SELECT
-                                R.id,
-                                R.guid,
-                                PMC_I.name,
-                                PMC_I.symbol,
-                                T.nid,
-                                P.pid,
-                                T.tid,
-                                R.timestamp,
-                                CASE PMC_I.units
-                                    WHEN 'W' THEN 'watts'
-                                    WHEN '°C' THEN 'deg C'
-                                    ELSE PMC_I.units
-                                END AS units,
-                                PMC_I.description,
-                                CASE PMC_I.symbol
-                                    WHEN 'Context Switches' THEN 'CPU Context Switches'
-                                    WHEN 'GFX Busy' THEN 'GPU GFX Busy'
-                                    WHEN 'Kernel Time' THEN 'CPU Kernel Time'
-                                    WHEN 'MM Busy' THEN 'GPU MM Busy'
-                                    WHEN 'MemUsg' THEN 'GPU Memory Usage'
-                                    WHEN 'Memory Usage' THEN 'CPU Page Faults'
-                                    WHEN 'Peak Memory' THEN 'CPU Peak Memory'
-                                    WHEN 'Pow' THEN 'GPU Current Power'
-                                    WHEN 'Temp' THEN 'GPU Temperature'
-                                    WHEN 'UMC Busy' THEN 'GPU UMC Busy'
-                                    WHEN 'User Time' THEN 'CPU User Time'
-                                    WHEN 'Virtual Memory Usage' THEN 'CPU Virtual Memory Usage'
-                                    WHEN 'thread_context_switch' THEN 'Thread Context Switches'
-                                    WHEN 'thread_cpu_time' THEN 'Thread CPU Time'
-                                    WHEN 'thread_page_fault' THEN 'Thread Page Faults'
-                                    WHEN 'thread_peak_memory' THEN 'Thread Peak Memory Usage'
-                                    ELSE PMC_I.description
-                                END AS short_description,
-                                A.absolute_index AS agent_abs_index,
-                                R.event_id,
-                                E.stack_id AS stack_id,
-                                E.parent_stack_id AS parent_stack_id,
-                                E.correlation_id AS corr_id,
-                                E.extdata AS extdata,
-                                E.call_stack AS call_stack,
-                                E.line_info AS line_info
-                            FROM
-                                `rocpd_sample` R
-                                INNER JOIN `rocpd_track` T ON T.id = R.track_id
-                                AND T.guid = R.guid
-                                INNER JOIN `rocpd_event` E ON E.id = R.event_id
-                                AND E.guid = R.guid
-                                INNER JOIN `rocpd_info_process` P ON P.id = T.pid
-                                AND P.guid = T.guid
-                                INNER JOIN `rocpd_string` SN ON SN.id = T.name_id
-                                AND SN.guid = T.guid
-                                INNER JOIN `rocpd_string` CN ON CN.id = E.category_id
-                                AND CN.guid = T.guid
-                                INNER JOIN `rocpd_info_pmc` PMC_I ON SN.string =
-                                CASE CN.string
-                                    WHEN 'amd_smi' THEN PMC_I.name || ' [' ||
-                                       (SELECT type_index
-                                        FROM `rocpd_info_agent` A
-                                        WHERE A.id = PMC_I.agent_id) || ']'
-                                    ELSE  PMC_I.name
-                                END
-                                AND PMC_I.guid = T.guid
-                                INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id
-                                AND A.guid = T.guid
-                                LEFT OUTER JOIN `rocpd_info_thread` TH ON TH.id = T.tid
-                                AND TH.guid = T.guid;
-                        )";
-
-                        execute_raw_sql_statements(conn, create_samples_view);
 
                         auto samples = rocpd::sql_generator<rocpd::types::sample>{
                             conn,
@@ -688,36 +719,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
                         auto pmc_info = rocpd::sql_generator<rocpd::types::pmc_info>{
                             conn, select_guid_nid_pid("pmc_info")};
-
-                        const std::string create_pmc_event_view = R"(
-                            CREATE TEMP VIEW
-                                `pmc_events_schema_3_0` AS
-                            SELECT
-                                PMC_E.id,
-                                PMC_E.guid,
-                                PMC_I.nid,
-                                PMC_I.pid,
-                                PMC_E.pmc_id,
-                                PMC_E.event_id,
-                                PMC_I.name,
-                                PMC_I.symbol,
-                                CASE PMC_I.units
-                                    WHEN 'MB' THEN
-                                    CASE symbol
-                                        WHEN 'thread_peak_memory' THEN PMC_E.value
-                                        ELSE PMC_E.value / (1000 * 1000)
-                                    END
-                                    WHEN 'sec' THEN PMC_E.value / (1000 * 1000 * 1000)
-                                    ELSE PMC_E.value
-                                END AS value,
-                                PMC_E.extdata AS extdata
-                            FROM
-                                `rocpd_pmc_event` PMC_E
-                                INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
-                                AND PMC_I.guid = PMC_E.guid;
-                        )";
-
-                        execute_raw_sql_statements(conn, create_pmc_event_view);
 
                         auto pmc_events = rocpd::sql_generator<rocpd::types::pmc_event>{
                             conn, select_guid_nid_pid("pmc_events_schema_3_0")};

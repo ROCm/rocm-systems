@@ -666,7 +666,7 @@ write_perfetto(
                                   ::perfetto::StaticString{"[Graph Execution]"},
                                   track,
                                   itr.start,
-                                  ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
+                                  ::perfetto::Flow::Global(itr.stack_id ^ this_pid_track.uuid),
                                   "begin_ns",
                                   itr.start,
                                   "end_ns",
