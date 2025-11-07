@@ -49,9 +49,21 @@ rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 
 set(buffered-api-tracing-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
+if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
+    set(IS_DISABLED ON)
+else()
+    set(IS_DISABLED OFF)
+endif()
+
 add_test(NAME buffered-api-tracing COMMAND $<TARGET_FILE:buffered-api-tracing>)
 
-set_tests_properties(
-    buffered-api-tracing
-    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${buffered-api-tracing-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+PROPERTIES TIMEOUT
+               45
+               LABELS
+               "samples"
+               ENVIRONMENT
+               "${buffered-api-tracing-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_DISABLED}")

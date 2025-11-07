@@ -16,6 +16,12 @@ target_compile_definitions(codeobj-library-tests
 configure_file(smallkernel.bin smallkernel.bin COPYONLY)
 configure_file(hipcc_output.s hipcc_output.s COPYONLY)
 
+install(
+    FILES ${CMAKE_CURRENT_BINARY_DIR}/smallkernel.bin
+          ${CMAKE_CURRENT_BINARY_DIR}/hipcc_output.s
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin
+    COMPONENT tests)
+
 target_link_libraries(
     codeobj-library-tests
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library

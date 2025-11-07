@@ -100,7 +100,8 @@ rocprofiler_add_unit_test(
         device_counting_service_test.sync_gpu_util_verify
         device_counting_service_test.sync_sq_waves_verify
         device_counting_service_test.sync_sq_waves_verify_non_intercept
-        device_counting_service_test.raw_sq_waves_verify)
+        device_counting_service_test.raw_sq_waves_verify
+        device_counting_service_test.sync_grbm_verify)
 
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 
