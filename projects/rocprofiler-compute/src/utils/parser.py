@@ -346,7 +346,7 @@ class MetricEvaluator:
                 local_expr_context,
             )
 
-            if np.isnan(eval_result).any():
+            if eval_result is None or np.isnan(eval_result).any():
                 return ""
             else:
                 return eval_result
