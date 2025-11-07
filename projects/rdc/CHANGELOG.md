@@ -12,7 +12,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 ### Changed
 
 - Completed migration from legacy [ROCProfiler](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/) to [ROCprofiler-SDK](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/).
-- Reorganized the configuration files internally and improved [README/installation](https://github.com/ROCm/rdc/blob/amd-staging/README.md) instructions.
+- Reorganized the configuration files internally and improved [README/installation](https://github.com/ROCm/rocm-systems/blob/develop/projects/rdc/README.md) instructions.
 - Updated metrics and monitoring support for the latest AMD data center GPUs.
 
 ### Optimized
