@@ -20,13 +20,13 @@ Panel Config:
             + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
             + (2 * SQ_INSTS_VALU_FMA_F64)))) / (End_Timestamp - Start_Timestamp)))
           unit: GFLOP/s
-          peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          peak: (((($max_sclk * $cu_per_gpu) * 64) * 4) / 1000)
           pop: ((100 * AVG(((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16)
             + SQ_INSTS_VALU_TRANS_F16) + (2 * SQ_INSTS_VALU_FMA_F16))) + (64 * (((SQ_INSTS_VALU_ADD_F32
             + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (2 * SQ_INSTS_VALU_FMA_F32))))
             + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
             + (2 * SQ_INSTS_VALU_FMA_F64)))) / (End_Timestamp - Start_Timestamp))))
-            / (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000))
+            / (((($max_sclk * $cu_per_gpu) * 64) * 4) / 1000))
         VALU IOPs:
           value: AVG(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) / (End_Timestamp
             - Start_Timestamp)))
