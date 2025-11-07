@@ -39,6 +39,31 @@ namespace trace_cache
 {
 namespace
 {
+void
+remove_if_exists(const std::string& fname)
+{
+    if(fname.empty()) return;
+    std::ifstream file(fname);
+    if(file.is_open())
+    {
+        file.close();
+        auto result = std::remove(fname.c_str());
+        if(result == 0)
+        {
+            ROCPROFSYS_DEBUG("Removed file: %s\n", fname.c_str());
+        }
+        else if(errno == ENOENT)
+        {
+            ROCPROFSYS_DEBUG("File does not exist: %s\n", fname.c_str());
+        }
+        else
+        {
+            ROCPROFSYS_WARNING(0, "Failed to remove file: %s (errno: %d - %s)\n",
+                               fname.c_str(), errno, std::strerror(errno));
+        }
+    }
+}
+
 std::vector<std::string>
 list_dir_files(const std::string& path)
 {
@@ -190,22 +215,6 @@ cache_manager::post_process_bulk()
         }
 
         ROCPROFSYS_PRINT("Removing temporary files...\n");
-
-        auto remove_if_exists = [](const std::string& fname) {
-            std::ifstream file(fname);
-            if(file.is_open())
-            {
-                file.close();
-                if(std::remove(fname.c_str()) == 0)
-                {
-                    ROCPROFSYS_DEBUG("Removed file: %s\n", fname.c_str());
-                }
-                else
-                {
-                    ROCPROFSYS_WARNING(0, "Failed to remove file: %s\n", fname.c_str());
-                }
-            }
-        };
 
         remove_if_exists(get_buffered_storage_filename(get_root_process_id(), getpid()));
 
