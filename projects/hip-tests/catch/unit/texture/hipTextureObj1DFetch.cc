@@ -39,6 +39,7 @@ TEST_CASE("Unit_hipCreateTextureObject_tex1DfetchVerification") {
   HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
   return;
 #endif
+  (void) hipGetLastError();  // Prevent negative tests affecting this
 
   // Allocating the required buffer on gpu device
   float *texBuf, *texBufOut;
