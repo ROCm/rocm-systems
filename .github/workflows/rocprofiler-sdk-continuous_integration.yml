@@ -223,7 +223,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
-          cmake --build build-rocprofiler-register --target all --parallel 16
+          cmake --build build-rocprofiler-register --target all --parallel 8
           cmake --build build-rocprofiler-register --target install
           echo "✅ ROCProfiler-Register Installation complete!"
 
