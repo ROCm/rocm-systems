@@ -58,7 +58,7 @@ elseif(STERILE_BUILD)
 elseif(NOT ROCPROFSYS_BUILD_LIBIBERTY)
     rocprofiler_systems_message(
         FATAL_ERROR
-        "LibIberty was not found. Either configure cmake to find TBB properly or set ROCPROFSYS_BUILD_LIBIBERTY=ON to download and build"
+        "LibIberty was not found. Either configure cmake to find LibIberty properly or set ROCPROFSYS_BUILD_LIBIBERTY=ON to download and build"
     )
 else()
     rocprofiler_systems_message(STATUS "${LibIberty_ERROR_REASON}")

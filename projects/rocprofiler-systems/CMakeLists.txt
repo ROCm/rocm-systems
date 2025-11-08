@@ -217,7 +217,7 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from subm
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from submodule"
                                OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build iberty from submodule"
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
                                OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_BOOST "Build boost from submodule"

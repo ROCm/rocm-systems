@@ -225,7 +225,7 @@ if(ROCPROFSYS_USE_ROCM)
         INTERFACE rocprofiler-sdk::rocprofiler-sdk
     )
 
-    # Find DRM libraries. amd-smi requires both drm and drm_amdgpu.
+    # Find drm library. amd-smi requires both drm and drm_amdgpu.
     find_library(
         drm_LIBRARY
         NAMES drm
@@ -234,7 +234,7 @@ if(ROCPROFSYS_USE_ROCM)
         PATH_SUFFIXES lib lib64
         REQUIRED
     )
-
+    # Find drm_amdgpu library. amd-smi requires both drm and drm_amdgpu.
     find_library(
         drm_amdgpu_LIBRARY
         NAMES drm_amdgpu
@@ -258,6 +258,7 @@ if(ROCPROFSYS_USE_ROCM)
         PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
         REQUIRED
     )
+
     target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
 
     target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
