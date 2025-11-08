@@ -69,8 +69,8 @@ struct kfd_ioctl_get_version_args
 struct kfd_ioctl_create_queue_args
 {
     __u64 ring_base_address;     /* to KFD */
-    __u64 write_pointer_address; /* from KFD */
-    __u64 read_pointer_address;  /* from KFD */
+    __u64 write_pointer_address; /* to KFD */
+    __u64 read_pointer_address;  /* to KFD */
     __u64 doorbell_offset;       /* from KFD */
 
     __u32 ring_size;        /* to KFD */
@@ -629,7 +629,7 @@ enum KFD_SVM_UNMAP_TRIGGERS
     KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU      /* Unmap to free the buffer */
 };
 
-#define KFD_SMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) -1))
+#define KFD_SMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) - 1))
 #define KFD_SMI_EVENT_MSG_SIZE           96
 
 struct kfd_ioctl_smi_events_args
@@ -1775,8 +1775,6 @@ enum kfd_ioctl_pc_sample_op
     KFD_IOCTL_PCS_OP_DESTROY,
     KFD_IOCTL_PCS_OP_START,
     KFD_IOCTL_PCS_OP_STOP,
-    KFD_IOCTL_PCS_OP_START_PTL,
-    KFD_IOCTL_PCS_OP_STOP_PTL,
 };
 
 enum psp_gfx_format_type
@@ -1787,6 +1785,20 @@ enum psp_gfx_format_type
     GFX_FTYPE_F32     = 0x00000003,
     GFX_FTYPE_F64     = 0x00000004,
     GFX_FTYPE_INVALID = 0xFFFFFFFF,
+};
+
+/**
+ * kfd_ioctl_ptl_op - PTL ioctl cmd operations
+ *
+ * @KFD_IOCTL_PTL_OP_QUERY_CAPABILITIES: Query device PTL capabilities
+ * @KFD_IOCTL_PTL_OP_START:	start PTL
+ * @KFD_IOCTL_PTL_OP_STOP:	stop PTL
+ */
+enum kfd_ioctl_ptl_op
+{
+    KFD_IOCTL_PTL_OP_QUERY_CAPABILITIES,
+    KFD_IOCTL_PTL_OP_START,
+    KFD_IOCTL_PTL_OP_STOP
 };
 
 /* Values have to be a power of 2*/
@@ -1817,9 +1829,6 @@ struct kfd_pc_sample_info
     __u64 flags;        /* [OUT] indicate potential restrictions e.g FLAG_POWER_OF_2 */
     __u32 method;       /* [IN/OUT] kfd_ioctl_pc_sample_method */
     __u32 type;         /* [IN/OUT] kfd_ioctl_pc_sample_type */
-    __u32 ptl_state;    /* [IN/OUT] */
-    __u32 pref_format1; /* [IN/OUT] */
-    __u32 pref_format2; /* [IN/OUT] */
 };
 
 #define KFD_IOCTL_PCS_QUERY_TYPE_FULL (1 << 0) /* If not set, return current */
@@ -1841,6 +1850,7 @@ enum kfd_profiler_ops
     KFD_IOC_PROFILER_PMC       = 0,
     KFD_IOC_PROFILER_PC_SAMPLE = 1,
     KFD_IOC_PROFILER_VERSION   = 2,
+    KFD_IOC_PROFILER_PTL       = 3,
 };
 
 /**
@@ -1853,6 +1863,16 @@ struct kfd_ioctl_pmc_settings
     __u32 perfcount_enable; /* Force Perfcount Enable for queues on GPU */
 };
 
+struct kfd_ioctl_ptl_settings
+{
+    __u32 cmd;
+    __u32 gpu_id;
+    __u32 ptl_state;
+    __u32 pref_format1;
+    __u32 pref_format2;
+    __u32 reserved[3];
+} __attribute__((packed));
+
 struct kfd_ioctl_profiler_args
 {
     __u32 op; /* kfd_profiler_op */
@@ -1860,6 +1880,7 @@ struct kfd_ioctl_profiler_args
     {
         struct kfd_ioctl_pc_sample_args pc_sample;
         struct kfd_ioctl_pmc_settings   pmc;
+        struct kfd_ioctl_ptl_settings   ptl;
         __u32                           version; /* KFD_IOC_PROFILER_VERSION_NUM */
     };
 };
