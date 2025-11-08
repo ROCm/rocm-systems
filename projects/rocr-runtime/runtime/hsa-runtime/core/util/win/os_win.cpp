@@ -301,9 +301,21 @@ uint64_t ReadSystemClock() {
 }
 
 uint64_t SystemClockFrequency() {
-  LARGE_INTEGER frequency;
-  QueryPerformanceFrequency(&frequency);
-  return frequency.QuadPart;
+  HKEY hKey;
+  DWORD mhz = 0;
+  DWORD bufSize = sizeof(mhz);
+  auto result = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                         0, KEY_READ, &hKey);
+  if (result != ERROR_SUCCESS) {
+    return 0;
+  }
+  result =
+      RegQueryValueExW(hKey, L"~MHz", nullptr, nullptr, reinterpret_cast<LPBYTE>(&mhz), &bufSize);
+  RegCloseKey(hKey);
+  if (result != ERROR_SUCCESS) {
+    return 0;
+  }
+  return mhz * 1'000'000ULL;
 }
 
 bool ParseCpuID(cpuid_t* cpuinfo) {
