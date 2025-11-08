@@ -1521,20 +1521,23 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
     delete *pGraphExec;
     return hipErrorInvalidValue;
   }
+  if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
+    auto argManager = std::make_unique<hip::GraphKernelArgManager>();
+    (*pGraphExec)->SetKernelArgManager(argManager.release());
+  }
   graph->SetGraphInstantiated(true);
+  hipError_t status = (*pGraphExec)->Init();
+
   if (DEBUG_HIP_GRAPH_DOT_PRINT) {
     static int i = 1;
-    std::string filename =
-        "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_" + std::to_string(i++);
-    hipError_t status = ihipGraphDebugDotPrint(*pGraphExec, filename.c_str(), 0);
-    if (status == hipSuccess) {
+    std::string filename = "graph_" + std::to_string(amd::Os::getProcessId()) +
+                           "_dot_print_" + std::to_string(i++);
+    hipError_t dotStatus = ihipGraphDebugDotPrint(*pGraphExec, filename.c_str(), 0);
+    if (dotStatus == hipSuccess) {
       LogPrintfInfo("[hipGraph] graph dump:%s", filename.c_str());
     }
-  }
-  if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
-    (*pGraphExec)->SetKernelArgManager(new hip::GraphKernelArgManager());
-  }
-  return (*pGraphExec)->Init();
+  } 
+  return status;
 }
 
 hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
