@@ -361,7 +361,8 @@ class VirtualGPU : public device::VirtualDevice {
   //! Dispatches multiple AQL packets in a single batch operation
   bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
                               const std::vector<std::string>& kernelNames,
-                              amd::AccumulateCommand* vcmd = nullptr) {
+                              amd::AccumulateCommand* vcmd = nullptr,
+                              bool enableLLPF = false) {
     return false;
   }
 

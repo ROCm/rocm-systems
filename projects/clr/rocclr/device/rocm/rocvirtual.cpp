@@ -1165,7 +1165,8 @@ bool VirtualGPU::dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t he
 template <typename AqlPacket>
 bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& packets,
                                                bool blocking, bool attach_signal,
-                                               const std::vector<std::string>* kernelNames) {
+                                               const std::vector<std::string>* kernelNames,
+                                               bool enableLLPF) {
   if (packets.empty()) {
     return false;
   }
@@ -1173,15 +1174,47 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
-  const size_t numPackets = packets.size();
+  size_t numPackets = packets.size();
   size_t kMaxBatchSize = DEBUG_HIP_GRAPH_BATCH_SIZE;
   const size_t kGpuLagPackets = 16;
+
+  // LLPF optimization: buffer the last packet for fusion with barrier
+  // If only 1 packet, buffer it directly without dispatching anything
+  // If multiple packets, dispatch all but the last one and buffer it
+  // LLPF can only be used if we're not profiling and don't need to attach a signal
+  if (enableLLPF && numPackets >= 1 && timestamp_ == nullptr && !attach_signal) {
+    AqlPacket* lastPacket = packets[numPackets - 1];
+
+    // Save the last packet to LLPF buffer (only works for kernel dispatch packets)
+    if (std::is_same<AqlPacket, hsa_kernel_dispatch_packet_t>::value) {
+      llpf_buffer_.packet = *reinterpret_cast<hsa_kernel_dispatch_packet_t*>(lastPacket);
+      llpf_buffer_.header = lastPacket->header;
+      llpf_buffer_.rest = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(lastPacket)->setup;
+      llpf_buffer_.has_packet = true;
+      enable_llpf_ = true;
+
+      // Save the kernel name if available
+      if (kernelNames && (numPackets - 1) < kernelNames->size()) {
+        llpf_buffer_.kernel_name = (*kernelNames)[numPackets - 1];
+      }
+
+      // If this was the only packet, we're done - no need to dispatch anything
+      if (numPackets == 1) {
+        hasPendingDispatch_ = true;
+        return true;
+      }
+    }
+  }
+
+  // Determine how many packets to actually submit
+  bool holdLastPacket = enableLLPF && (numPackets > 1) && llpf_buffer_.has_packet;
+  size_t packetsToSubmit = holdLastPacket ? (numPackets - 1) : numPackets;
 
   // Staggered copy pattern: powers of 2 (1, 2, 4, 8.. to DEBUG_HIP_GRAPH_BATCH_SIZE
   size_t processedPackets = 0;
   size_t batchSize = 1;
 
-  while (processedPackets < numPackets) {
+  while (processedPackets < packetsToSubmit) {
     uint64_t currentReadIndex = Hsa::queue_load_read_index_scacquire(gpu_queue_);
     uint64_t currentWriteIndex = Hsa::queue_load_write_index_relaxed(gpu_queue_);
 
@@ -1191,8 +1224,8 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
     }
 
     // Process all remaining packets in one batch
-    if (processedPackets + batchSize > numPackets) {
-      batchSize = numPackets - processedPackets;
+    if (processedPackets + batchSize > packetsToSubmit) {
+      batchSize = packetsToSubmit - processedPackets;
     }
 
     // Check if we have enough space in the queue for this batch
@@ -1224,8 +1257,10 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
       AqlPacket* packet = packets[packetIndex];
       uint16_t header = packet->header;
 
-
-      bool attachSignal = timestamp_ != nullptr || attach_signal;
+      // Attach signal to the last packet in the batch only if attach_signal is true
+      // Note: when LLPF is enabled, the last packet to submit is not the actual last packet
+      bool attachSignal = timestamp_ != nullptr ||
+                          (attach_signal && packetIndex == packetsToSubmit - 1);
 
       packet->completion_signal =
           Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, attachSignal);
@@ -1242,8 +1277,8 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
         current_signal->flags_.isPacketDispatch_ = true;
       }
 
-      //Add blocking command if needed (only for the last packet)
-      if (blocking && (packetIndex == numPackets - 1)) {
+      //Add blocking command if needed (only for the last packet to be submitted)
+      if (blocking && (packetIndex == packetsToSubmit - 1)) {
         if (packet->completion_signal.handle == 0) {
           packet->completion_signal = Barriers().ActiveSignal();
         }
@@ -1362,7 +1397,8 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 // ================================================================================================
 bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
                                         const std::vector<std::string>& kernelNames,
-                                        amd::AccumulateCommand* vcmd) {
+                                        amd::AccumulateCommand* vcmd,
+                                        bool enableLLPF) {
   if (vcmd == nullptr || packets.empty() || packets.size() != kernelNames.size()) {
     return false;
   }
@@ -1378,7 +1414,7 @@ bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
   // Cast packets vector to AQL packets vector on the fly
   const auto& aqlPackets =
       reinterpret_cast<const std::vector<hsa_kernel_dispatch_packet_t*>&>(packets);
-  bool result = dispatchGenericAqlPacketBatch(aqlPackets, false, false, &kernelNames);
+  bool result = dispatchGenericAqlPacketBatch(aqlPackets, false, false, &kernelNames, enableLLPF);
 
   profilingEnd();
 
@@ -1566,6 +1602,119 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
           barrier_value_packet_.completion_signal, read, index);
   // Clear dependent signals for the next packet
   barrier_value_packet_.signal = hsa_signal_t{};
+}
+
+// ================================================================================================
+void VirtualGPU::dispatchFusedLLPFPacket() {
+  // Only fuse if we have a buffered packet
+  if (!llpf_buffer_.has_packet) {
+    // No packet buffered, fall back to regular barrier dispatch
+    const Settings& settings = dev().settings();
+    if (settings.barrier_value_packet_) {
+      dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
+    } else {
+      dispatchBarrierPacket(kNopPacketHeader, false);
+    }
+    return;
+  }
+
+  const uint32_t queueSize = gpu_queue_->size;
+  const uint32_t queueMask = queueSize - 1;
+  const Settings& settings = dev().settings();
+
+  // Determine which barrier packet header to use based on settings
+  uint16_t barrierPacketHeader = settings.barrier_value_packet_
+      ? kBarrierVendorPacketNopScopeHeader
+      : kNopPacketHeader;
+
+  // Get or create the completion signal for the fused packet
+  hsa_signal_t completion_signal = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
+
+  // Create the fused packet by copying the buffered dispatch packet
+  hsa_kernel_dispatch_packet_t fused_packet = llpf_buffer_.packet;
+
+  // Copy completion signal from barrier packet to dispatch packet
+  fused_packet.completion_signal = completion_signal;
+
+  // Extract acquire and release scopes from barrier packet header
+  uint16_t acquire_scope = extractAqlBits(barrierPacketHeader,
+                                         HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                                         HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE);
+  uint16_t release_scope = extractAqlBits(barrierPacketHeader,
+                                         HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                                         HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
+
+  // Apply barrier scopes to dispatch packet header
+  uint16_t fused_header = llpf_buffer_.header;
+
+  // Only override scopes if the barrier has system-level scopes
+  // Otherwise, keep the original dispatch packet scopes
+  if (acquire_scope == HSA_FENCE_SCOPE_SYSTEM) {
+    fused_header &= ~(HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+    fused_header |= (acquire_scope << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+  }
+
+  if (release_scope == HSA_FENCE_SCOPE_SYSTEM) {
+    fused_header &= ~(HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    fused_header |= (release_scope << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  }
+
+  // Reserve a slot in the queue
+  uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
+
+  fence_dirty_ = true;
+  auto cache_state = extractAqlBits(fused_header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                                    HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
+
+  TrackQueueProgress(fused_packet, index);
+
+  // Reset fence_dirty_ flag if we submit a packet with system scopes
+  if (cache_state == amd::Device::kCacheStateSystem) {
+    fence_dirty_ = false;
+  }
+
+  // Wait for queue slot to be available
+  while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
+
+  hsa_kernel_dispatch_packet_t* aql_loc = &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
+                                            (gpu_queue_->base_address))[index & queueMask];
+
+  // Invalidate the header first
+  aql_loc->header = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
+
+  // Copy the fused packet
+  *aql_loc = fused_packet;
+
+  // Write the valid header with release semantics
+  packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), fused_header, llpf_buffer_.rest);
+
+  // Ring the doorbell
+  Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u (LLPF fused)",
+          llpf_buffer_.kernel_name.c_str(), dev().index());
+
+  ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
+          "SWq=0x%zx, HWq=0x%zx, id=%d, Header = 0x%x "
+          "(type=%d, barrier=%d, acquire=%d, release=%d), "
+          "grid=[%u, %u, %u], workgroup=[%u, %u, %u], "
+          "kernel_obj=0x%zx, completion_signal=0x%zx, "
+          "rptr=%u, wptr=%u",
+          gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, fused_header,
+          extractAqlBits(fused_header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
+          extractAqlBits(fused_header, HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
+          extractAqlBits(fused_header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+          HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE), cache_state,
+          fused_packet.grid_size_x, fused_packet.grid_size_y, fused_packet.grid_size_z,
+          fused_packet.workgroup_size_x, fused_packet.workgroup_size_y,
+          fused_packet.workgroup_size_z, fused_packet.kernel_object,
+          fused_packet.completion_signal,
+          Hsa::queue_load_read_index_scacquire(gpu_queue_), index);
+
+  // Clear the LLPF buffer
+  llpf_buffer_.has_packet = false;
+  llpf_buffer_.kernel_name.clear();
+  enable_llpf_ = false;
 }
 
 // ================================================================================================
@@ -3948,11 +4097,18 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   amd::ScopedLock lock(execution());
   profilingBegin(vcmd);
 
-  const Settings& settings = dev().settings();
-  if (settings.barrier_value_packet_) {
-    dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
+
+  // If LLPF is enabled, fuse the buffered packet with the barrier
+  if (enable_llpf_ && llpf_buffer_.has_packet) {
+    dispatchFusedLLPFPacket();
   } else {
-    dispatchBarrierPacket(kNopPacketHeader, false);
+    const Settings& settings = dev().settings();
+    // Regular barrier dispatch
+    if (settings.barrier_value_packet_) {
+      dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
+    } else {
+      dispatchBarrierPacket(kNopPacketHeader, false);
+    }
   }
 
   profilingEnd();

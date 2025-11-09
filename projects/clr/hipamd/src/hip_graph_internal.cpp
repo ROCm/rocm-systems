@@ -1630,6 +1630,19 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
       if (segBatch && batchIndex < segBatch->packet_batches.size()) {
         auto& packetBatch = segBatch->packet_batches[batchIndex];
 
+        // LLPF can only be enabled for the last batch and only if the last node has packet capture
+        // enabled Otherwise, buffering a packet would cause out-of-order execution
+        bool enableLLPF = false;
+        if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2 &&
+            batchIndex == segBatch->packet_batches.size() - 1) {
+          // Find the last node in this batch and check if it has packet capture enabled
+          size_t lastNodeInBatch = i + packetBatch.nodeRanges.size() - 1;
+          if (lastNodeInBatch < segment.nodes.size() &&
+              segment.nodes[lastNodeInBatch]->GraphCaptureEnabled()) {
+            enableLLPF = true;
+          }
+        }
+
         // Select which vectors to dispatch based on whether nodes are disabled
         const std::vector<uint8_t*>* packetsToDispatch;
         const std::vector<std::string>* kernelNamesToDispatch;
@@ -1645,10 +1658,10 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
           kernelNamesToDispatch = &packetBatch.enabledKernelNames;
         }
 
-        // Dispatch the selected batch
+        // Dispatch the selected batch with LLPF if applicable
         if (!packetsToDispatch->empty()) {
           bool batchStatus = stream->vdev()->dispatchAqlPacketBatch(
-              *packetsToDispatch, *kernelNamesToDispatch, accumulate);
+              *packetsToDispatch, *kernelNamesToDispatch, accumulate, enableLLPF);
           if (!batchStatus) {
             status = hipErrorUnknown;
             return status;

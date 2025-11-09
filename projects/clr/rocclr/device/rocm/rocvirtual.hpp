@@ -473,14 +473,16 @@ class VirtualGPU : public device::VirtualDevice {
   //! Dispatches multiple AQL packets in a single batch operation
   bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
                               const std::vector<std::string>& kernelNames,
-                              amd::AccumulateCommand* vcmd = nullptr);
+                              amd::AccumulateCommand* vcmd = nullptr,
+                              bool enableLLPF = false);
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
                                                               bool attach_signal = false);
   //! Dispatches multiple AQL packets with a single doorbell ring
   template <typename AqlPacket> bool dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& packets,
                                                                    bool blocking, bool attach_signal = false,
-                                                                   const std::vector<std::string>* kernelNames = nullptr);
+                                                                   const std::vector<std::string>* kernelNames = nullptr,
+                                                                   bool enableLLPF = false);
 
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);
@@ -492,6 +494,8 @@ class VirtualGPU : public device::VirtualDevice {
                                   hsa_signal_condition32_t cond = HSA_SIGNAL_CONDITION_EQ,
                                   bool skipTs = false,
                                   hsa_signal_t completionSignal = hsa_signal_t{0});
+  //! Dispatch fused LLPF packet with barrier packet properties
+  void dispatchFusedLLPFPacket();
   void initializeDispatchPacket(hsa_kernel_dispatch_packet_t* packet, amd::NDRangeContainer& sizes);
 
   void resetKernArgPool() { managed_kernarg_buffer_.ResetPool(); }
@@ -628,6 +632,16 @@ class VirtualGPU : public device::VirtualDevice {
   uint64_t last_barrier_index_ = 0;           //!< The last HW queue write index for a packet
                                               //!< with a complition signal
   hsa_signal_t last_completion_signal_{};     //!< The last completion signal
+
+  //! LastLevelPacketFuser (LLPF) - Optimization for graph execution
+  struct {
+    hsa_kernel_dispatch_packet_t packet;  //!< Buffered last dispatch packet
+    uint16_t header;                      //!< Saved header of the buffered packet
+    uint16_t rest;                        //!< Saved rest/setup field
+    std::string kernel_name;              //!< Kernel name for the buffered packet
+    bool has_packet;                      //!< True if LLPF buffer contains a packet
+  } llpf_buffer_{};
+  bool enable_llpf_ = false;              //!< Enable LLPF optimization
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
