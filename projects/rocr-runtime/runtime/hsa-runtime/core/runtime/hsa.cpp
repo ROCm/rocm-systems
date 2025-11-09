@@ -428,6 +428,7 @@ hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t v
     ext_table.hsa_ext_image_data_get_info_with_layout = hsa_ext_image_data_get_info_with_layout;
     ext_table.hsa_ext_image_create_with_layout = hsa_ext_image_create_with_layout;
     ext_table.hsa_ext_sampler_create_v2 = hsa_ext_sampler_create_v2;
+    ext_table.hsa_ext_sampler_create_v3 = hsa_ext_sampler_create_v3;
 
     memcpy(table, &ext_table, Min(sizeof(ext_table), table_length));
 

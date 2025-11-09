@@ -304,6 +304,7 @@ if(${IMAGE_SUPPORT})
                    image/blit_object_gfx8xx.cpp
                    image/blit_object_gfx9xx.cpp
                    image/blit_kernel.cpp
+                   image/hsa_amd_mipmap.cpp
                    ${CMAKE_CURRENT_BINARY_DIR}/image/blit_src/opencl_blit_objects.cpp )
 
   set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/image/blit_src/opencl_blit_objects.cpp PROPERTIES GENERATED TRUE)

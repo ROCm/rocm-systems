@@ -159,6 +159,7 @@ endfunction(buildCodeObjects)
 buildCodeObjects("read")
 buildCodeObjects("write")
 buildCodeObjects("binary_search")
+buildCodeObjects("mipmap_sample")
 
 #
 # Create a custom target which will build the full suite

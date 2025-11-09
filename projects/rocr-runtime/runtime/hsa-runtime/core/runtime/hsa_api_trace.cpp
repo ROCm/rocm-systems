@@ -88,7 +88,7 @@ void HsaApiTable::Init() {
 
   constexpr size_t expected_core_api_table_size = 1016;
   constexpr size_t expected_amd_ext_table_size = 624;
-  constexpr size_t expected_image_ext_table_size = 128;
+  constexpr size_t expected_image_ext_table_size = 136;
   constexpr size_t expected_finalizer_ext_table_size = 64;
   constexpr size_t expected_tools_table_size = 64;
   constexpr size_t expected_pc_sampling_ext_table_size = 72;

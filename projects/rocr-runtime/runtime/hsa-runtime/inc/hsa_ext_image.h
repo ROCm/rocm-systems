@@ -1243,6 +1243,78 @@ typedef struct hsa_ext_sampler_descriptor_v2_s {
 } hsa_ext_sampler_descriptor_v2_t;
 
 /**
+ * @brief Implementation independent sampler descriptor v3 which supports
+ * mipmap LOD (Level of Detail) control for mipmapped texture sampling.
+ *
+ * This descriptor extends v2 with fields for controlling mipmap level selection
+ * and filtering between mipmap levels, enabling features like:
+ * - LOD bias to adjust automatic level selection
+ * - Min/max LOD clamping to restrict which mipmap levels can be sampled
+ * - Mipmap filter mode for interpolation between adjacent mipmap levels
+ *
+ * Used with hsa_ext_sampler_create_v3() to create samplers for mipmapped images.
+ */
+typedef struct hsa_ext_sampler_descriptor_v3_s {
+  /**
+   * Sampler coordinate mode describes the normalization of image coordinates.
+   */
+  hsa_ext_sampler_coordinate_mode32_t coordinate_mode;
+
+  /**
+   * Sampler filter type describes the type of sampling performed within
+   * a single mipmap level (NEAREST or LINEAR).
+   */
+  hsa_ext_sampler_filter_mode32_t filter_mode;
+
+  /**
+   * Sampler address mode describes the processing of out-of-range image
+   * coordinates in X, Y, and Z axes.
+   */
+  hsa_ext_sampler_addressing_mode32_t address_modes[3];
+
+  /**
+   * Mipmap filter mode describes filtering between adjacent mipmap levels.
+   * - HSA_EXT_SAMPLER_FILTER_MODE_NEAREST: Use nearest mipmap level (no interpolation)
+   * - HSA_EXT_SAMPLER_FILTER_MODE_LINEAR: Linearly interpolate between two nearest levels (trilinear filtering)
+   *
+   * This field controls the MIP_FILTER hardware setting in the sampler SRD.
+   */
+  hsa_ext_sampler_filter_mode32_t mipmap_filter_mode;
+
+  /**
+   * LOD bias value added to the computed LOD before clamping and level selection.
+   * Positive values select coarser (lower resolution) mipmap levels.
+   * Negative values select finer (higher resolution) mipmap levels.
+   * Typical range: -16.0 to +16.0
+   *
+   * Final LOD = computed_lod + lod_bias (then clamped to [min_lod, max_lod])
+   */
+  float lod_bias;
+
+  /**
+   * Minimum LOD clamp value. Prevents sampling from mipmap levels finer (higher resolution)
+   * than this level. Level 0 is the finest (full resolution).
+   *
+   * Valid range: [0.0, max_lod]
+   * Default: 0.0 (allow finest level)
+   *
+   * Example: min_lod = 2.0 ensures sampling only from level 2 or coarser
+   */
+  float min_lod;
+
+  /**
+   * Maximum LOD clamp value. Prevents sampling from mipmap levels coarser (lower resolution)
+   * than this level.
+   *
+   * Valid range: [min_lod, 16.0] (hardware-dependent maximum)
+   * Default: 16.0 (allow coarsest level)
+   *
+   * Example: max_lod = 5.0 ensures sampling only up to level 5
+   */
+  float max_lod;
+} hsa_ext_sampler_descriptor_v3_t;
+
+/**
  * @brief Create an agent specific sampler handle for a given agent
  * independent sampler descriptor and agent.
  *
@@ -1311,8 +1383,46 @@ hsa_status_t HSA_API hsa_ext_sampler_create_v2(
     hsa_ext_sampler_t *sampler);
 
 /**
- * @brief Destroy a sampler handle previously created using ::hsa_ext_sampler_create or
- * ::hsa_ext_sampler_create_v2.
+ * @brief Create an agent specific sampler handle for a given agent
+ * independent sampler descriptor v3 with mipmap LOD control support.
+ *
+ * This version supports mipmapped texture sampling with full LOD control including:
+ * - LOD bias for adjusting automatic level selection
+ * - Min/max LOD clamping to restrict accessible mipmap levels
+ * - Mipmap filter mode (nearest or linear interpolation between levels)
+ *
+ * @param[in] agent Agent to be associated with the sampler handle created.
+ *
+ * @param[in] sampler_descriptor Pointer to a v3 sampler descriptor with LOD fields. Must not be NULL.
+ *
+ * @param[out] sampler Memory location where the HSA runtime stores the newly
+ * created sampler handle. Must not be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid.
+ *
+ * @retval ::HSA_EXT_STATUS_ERROR_SAMPLER_DESCRIPTOR_UNSUPPORTED The
+ * @p agent does not have the capability to support the properties
+ * specified by @p sampler_descriptor or it is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to allocate
+ * the required resources.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p sampler_descriptor is NULL, or
+ * @p sampler is NULL, or LOD values are invalid (min_lod > max_lod).
+ */
+hsa_status_t HSA_API hsa_ext_sampler_create_v3(
+    hsa_agent_t agent,
+    const hsa_ext_sampler_descriptor_v3_t *sampler_descriptor,
+    hsa_ext_sampler_t *sampler);
+
+/**
+ * @brief Destroy a sampler handle previously created using ::hsa_ext_sampler_create,
+ * ::hsa_ext_sampler_create_v2, or ::hsa_ext_sampler_create_v3.
  *
  * @details The sampler handle should not be destroyed while there are
  * references to it queued for execution or currently being used in a
@@ -1503,6 +1613,11 @@ typedef struct hsa_ext_images_1_pfn_s {
   hsa_status_t (*hsa_ext_sampler_create_v2)(
     hsa_agent_t agent,
     const hsa_ext_sampler_descriptor_v2_t *sampler_descriptor,
+    hsa_ext_sampler_t *sampler);
+
+  hsa_status_t (*hsa_ext_sampler_create_v3)(
+    hsa_agent_t agent,
+    const hsa_ext_sampler_descriptor_v3_t *sampler_descriptor,
     hsa_ext_sampler_t *sampler);
 
 } hsa_ext_images_1_pfn_t;

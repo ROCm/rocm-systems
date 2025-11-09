@@ -118,6 +118,56 @@ void Sampler::Destroy(const Sampler* sampler) {
   assert(status == HSA_STATUS_SUCCESS);
 }
 
+MipmappedArray* MipmappedArray::Create(hsa_agent_t agent) {
+  hsa_amd_memory_pool_t pool = ImageRuntime::instance()->kernarg_pool();
+
+  MipmappedArray* mipmapped_array = NULL;
+
+  // Find a GPU memory pool for image data
+  hsa_status_t status = hsa_amd_agent_iterate_memory_pools(
+                        agent, [](hsa_amd_memory_pool_t p, void* data) {
+      hsa_amd_segment_t segment;
+      hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+      if (segment == HSA_AMD_SEGMENT_GLOBAL) {
+        bool allowed = false;
+        hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &allowed);
+        if (allowed) {
+          *reinterpret_cast<hsa_amd_memory_pool_t*>(data) = p;
+          return HSA_STATUS_INFO_BREAK;
+        }
+      }
+    }, &pool);
+
+  assert(status == HSA_STATUS_INFO_BREAK);
+
+  // Allocate memory for image data
+  status = AMD::hsa_amd_memory_pool_allocate(pool, sizeof(MipmappedArray), 0,
+                reinterpret_cast<void**>(&mipmapped_array));
+  assert(status == HSA_STATUS_SUCCESS);
+
+  if (status != HSA_STATUS_SUCCESS) return nullptr;
+
+  new (mipmapped_array) MipmappedArray();
+
+  // Allow agent access to the image data
+  status = AMD::hsa_amd_agents_allow_access(1, &agent, nullptr, mipmapped_array);
+  if (status != HSA_STATUS_SUCCESS) {
+    MipmappedArray::Destroy(mipmapped_array);
+    return nullptr;
+  }
+
+  return mipmapped_array;
+}
+
+void MipmappedArray::Destroy(const MipmappedArray* mipmapped_array) {
+  assert(mipmapped_array != NULL);
+  mipmapped_array->~MipmappedArray();
+
+  hsa_status_t status = AMD::hsa_amd_memory_pool_free(
+                        const_cast<MipmappedArray*>(mipmapped_array));
+  assert(status == HSA_STATUS_SUCCESS);
+}
+
 ImageManager::ImageManager() {}
 
 ImageManager::~ImageManager() {}
