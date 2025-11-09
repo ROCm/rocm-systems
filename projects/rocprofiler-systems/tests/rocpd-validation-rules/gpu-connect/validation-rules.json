@@ -1,0 +1,102 @@
+{
+    "required_tables": [
+        {
+            "name": "memory_copies",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "nid",
+                "pid",
+                "tid",
+                "start",
+                "end",
+                "dst_agent_abs_index",
+                "src_agent_abs_index"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that we have memory copy operations",
+                    "error_message": "No memory copy operations found",
+                    "expected_result": 10,
+                    "query": "SELECT COUNT(*) as count FROM memory_copies"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for null IDs in memory copies",
+                    "error_message": "NULL entries found in id column of memory_copies",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM memory_copies WHERE id IS NULL"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for zero or null sizes in memory copies",
+                    "error_message": "Found memory copies with zero or NULL size",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM memory_copies WHERE size IS NULL OR size = 0"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for NULL destination agents",
+                    "error_message": "NULL entries found in dst_agent_abs_index",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM memory_copies WHERE dst_agent_abs_index IS NULL"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for NULL source agents",
+                    "error_message": "NULL entries found in src_agent_abs_index",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM memory_copies WHERE src_agent_abs_index IS NULL"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for device-to-device memory copies",
+                    "error_message": "No device-to-device memory copies found",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM memory_copies mc JOIN rocpd_info_agent src ON mc.src_agent_abs_index = src.absolute_index AND mc.guid = src.guid JOIN rocpd_info_agent dst ON mc.dst_agent_abs_index = dst.absolute_index AND mc.guid = dst.guid WHERE src.agent_type = 1 AND dst.agent_type = 1"
+                }
+            ]
+        },
+        {
+            "name": "rocpd_info_agent",
+            "required_columns": [
+                "id",
+                "guid",
+                "nid",
+                "pid",
+                "type",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that we have GPU agents detected",
+                    "error_message": "No GPU agents found",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent WHERE type = 'GPU'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for NULL agent names",
+                    "error_message": "Found agents with NULL names",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent WHERE name IS NULL"
+                }
+            ]
+        },
+        {
+            "min_rows": 0,
+            "name": "threads",
+            "required_columns": [
+                "tid",
+                "start",
+                "end",
+                "name"
+            ]
+        }
+    ]
+}
+
+
