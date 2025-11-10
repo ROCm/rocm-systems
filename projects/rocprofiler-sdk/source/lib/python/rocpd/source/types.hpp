@@ -288,7 +288,6 @@ struct kernel_dispatch
     uint64_t                stack_id            = 0;
     uint64_t                parent_stack_id     = 0;
     uint64_t                corr_id             = 0;
-    uint64_t                vgpr_count          = 0;
     uint64_t                accum_vgpr_count    = 0;
     uint64_t                sgpr_count          = 0;
 };
@@ -716,7 +715,6 @@ load(ArchiveT& ar, rocpd::types::kernel_dispatch& data)
     load_dim3("grid", data.grid_size);
     LOAD_DATA_FIELD(lds_size);
     LOAD_DATA_FIELD(scratch_size);
-    LOAD_DATA_FIELD(vgpr_count);
     LOAD_DATA_FIELD(accum_vgpr_count);
     LOAD_DATA_FIELD(sgpr_count);
     LOAD_DATA_FIELD(static_lds_size);

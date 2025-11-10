@@ -135,13 +135,16 @@ struct RocpdImportData
     RocpdImportData()  = default;
     ~RocpdImportData() = default;
 
-    RocpdImportData(const RocpdImportData&)     = default;
-    RocpdImportData(RocpdImportData&&) noexcept = default;
-    RocpdImportData& operator=(const RocpdImportData&) = default;
+    RocpdImportData(const RocpdImportData&)                = default;
+    RocpdImportData(RocpdImportData&&) noexcept            = default;
+    RocpdImportData& operator=(const RocpdImportData&)     = default;
     RocpdImportData& operator=(RocpdImportData&&) noexcept = default;
 
-    RocpdImportData(const py::object& _obj, const std::vector<std::string>& _dbs)
+    RocpdImportData(const py::object&               _obj,
+                    const std::vector<py::object>&  _objs,
+                    const std::vector<std::string>& _dbs)
     : connection{_obj}
+    , connections{_objs}
     , databases{_dbs}
     {
         if(py::isinstance<RocpdImportData>(_obj))
@@ -161,13 +164,34 @@ struct RocpdImportData
                 throw py::type_error{_errmsg};
             }
         }
+        for(size_t i = 0; i != _objs.size(); ++i)
+        {
+            if(py::isinstance<RocpdImportData>(_objs[i]))
+            {
+                connections[i] = _objs[i].cast<RocpdImportData>().connection;
+            }
+            else
+            {
+                if(!is_sqlite3_connection(_objs[i]))
+                {
+                    auto _errmsg =
+                        fmt::format("libpyrocpd.RocpdImportData cannot be constructed "
+                                    "from provided Python object of type {} (databases: {})",
+                                    get_type_name(_objs[i]),
+                                    fmt::join(_dbs.begin(), _dbs.end(), ", "));
+                    ROCP_CI_LOG(WARNING) << _errmsg;
+                    throw py::type_error{_errmsg};
+                }
+            }
+        }
     }
 
     size_t size() const { return (connection) ? databases.size() : 0; }
     bool   empty() const { return databases.empty() || !connection; }
 
-    py::object               connection = {};
-    std::vector<std::string> databases  = {};
+    py::object               connection  = {};
+    std::vector<py::object>  connections = {};
+    std::vector<std::string> databases   = {};
 };
 
 struct jinja_variables
@@ -324,8 +348,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
     py::class_<rocpd::RocpdImportData>(pyrocpd, "RocpdImportData", "RocPD database(s) instances")
         .def(py::init<>())
         .def(py::init<rocpd::RocpdImportData>())
-        .def(py::init<py::object, std::vector<std::string>>())
+        .def(py::init<py::object, std::vector<py::object>, std::vector<std::string>>())
         .def_readonly("connection", &rocpd::RocpdImportData::connection)
+        .def_readonly("connections", &rocpd::RocpdImportData::connections)
         .def_readonly("databases", &rocpd::RocpdImportData::databases);
 
     pyrocpd.def("load_schema",
@@ -417,90 +442,98 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             auto perfetto_session = rocpd::output::PerfettoSession{output_cfg};
             auto sqlgen_perf      = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
-            for(auto obj : {data.connection})
+
+            for(auto connection : data.connections)
             {
-                auto* conn  = rocpd::interop::get_connection(std::move(obj));
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
-
-                for(const auto& nitr : nodes)
+                for(auto obj : {connection})
                 {
-                    auto agents = rocpd::read<rocpd::types::agent>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
-                    auto processes = rocpd::read<rocpd::types::process>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
+                    auto* conn  = rocpd::interop::get_connection(std::move(obj));
+                    auto  nodes = rocpd::read<rocpd::types::node>(conn);
 
-                    for(const auto& pitr : processes)
+                    for(const auto& nitr : nodes)
                     {
-                        ROCP_FATAL_IF(pitr.nid != nitr.id || pitr.guid != nitr.guid)
-                            << fmt::format("Found process with a mismatched nid/guid. process: "
-                                           "{}/{} vs. node: {}/{}",
-                                           pitr.nid,
-                                           pitr.guid,
-                                           nitr.id,
-                                           nitr.guid);
-                        auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl) {
-                            return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND nid "
-                                               "= {} AND pid = {}",
-                                               tbl,
+                        auto agents = rocpd::read<rocpd::types::agent>(
+                            conn,
+                            fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
+                        auto processes = rocpd::read<rocpd::types::process>(
+                            conn,
+                            fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
+
+                        for(const auto& pitr : processes)
+                        {
+                            ROCP_FATAL_IF(pitr.nid != nitr.id || pitr.guid != nitr.guid)
+                                << fmt::format("Found process with a mismatched nid/guid. process: "
+                                               "{}/{} vs. node: {}/{}",
+                                               pitr.nid,
                                                pitr.guid,
                                                nitr.id,
-                                               pitr.pid);
-                        };
+                                               nitr.guid);
+                            auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl) {
+                                return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND nid "
+                                                   "= {} AND pid = {}",
+                                                   tbl,
+                                                   pitr.guid,
+                                                   nitr.id,
+                                                   pitr.pid);
+                            };
 
-                        auto _sqlgen_perft = common::simple_timer{fmt::format(
-                            "Perfetto generation from SQL for process {} (total)", pitr.pid)};
+                            auto _sqlgen_perft = common::simple_timer{fmt::format(
+                                "Perfetto generation from SQL for process {} (total)", pitr.pid)};
 
-                        auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
-                            conn, select_guid_nid_pid("kernels"), kernels_order_by};
+                            auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
+                                conn, select_guid_nid_pid("kernels"), kernels_order_by};
 
-                        auto memory_allocations =
-                            rocpd::sql_generator<rocpd::types::memory_allocation>{
-                                conn, select_guid_nid_pid("memory_allocations")};
+                            auto memory_allocations =
+                                rocpd::sql_generator<rocpd::types::memory_allocation>{
+                                    conn, select_guid_nid_pid("memory_allocations")};
 
-                        auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
-                            conn, select_guid_nid_pid("memory_copies")};
+                            auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
+                                conn, select_guid_nid_pid("memory_copies")};
 
-                        auto scratch_memory = rocpd::sql_generator<rocpd::types::scratch_memory>{
-                            conn, select_guid_nid_pid("scratch_memory")};
+                            auto scratch_memory =
+                                rocpd::sql_generator<rocpd::types::scratch_memory>{
+                                    conn, select_guid_nid_pid("scratch_memory")};
 
-                        auto counters = rocpd::sql_generator<rocpd::types::counter>{
-                            conn, select_guid_nid_pid("counters_collection")};
+                            auto counters = rocpd::sql_generator<rocpd::types::counter>{
+                                conn, select_guid_nid_pid("counters_collection")};
 
-                        auto regions = rocpd::sql_generator<rocpd::types::region>{
-                            conn, select_guid_nid_pid("regions"), region_order_by};
+                            auto regions = rocpd::sql_generator<rocpd::types::region>{
+                                conn, select_guid_nid_pid("regions"), region_order_by};
 
-                        auto samples = rocpd::sql_generator<rocpd::types::sample>{
-                            conn, select_guid_nid_pid("samples"), sample_order_by};
+                            auto samples = rocpd::sql_generator<rocpd::types::sample>{
+                                conn, select_guid_nid_pid("samples"), sample_order_by};
 
-                        auto threads = rocpd::sql_generator<rocpd::types::thread>{
-                            conn, select_guid_nid_pid("threads")};
+                            auto threads = rocpd::sql_generator<rocpd::types::thread>{
+                                conn, select_guid_nid_pid("threads")};
 
-                        // absolute_index |-> (agent, agent_index)
-                        auto agents_map =
-                            std::unordered_map<uint64_t,
-                                               std::pair<rocpd::types::agent, tool::agent_index>>{};
+                            // absolute_index |-> (agent, agent_index)
+                            auto agents_map = std::unordered_map<
+                                uint64_t,
+                                std::pair<rocpd::types::agent, tool::agent_index>>{};
 
-                        for(const auto& itr : agents)
-                        {
-                            auto new_index = _create_agent_index(itr);
-                            agents_map.emplace(itr.absolute_index, std::make_pair(itr, new_index));
+                            for(const auto& itr : agents)
+                            {
+                                auto new_index = _create_agent_index(itr);
+                                agents_map.emplace(itr.absolute_index,
+                                                   std::make_pair(itr, new_index));
+                            }
+
+                            ROCP_TRACE << "Starting Perfetto generation from SQL for process "
+                                       << pitr.pid;
+                            auto _sqlgen_perfw = common::simple_timer{fmt::format(
+                                "Perfetto generation from SQL for process {} (write)", pitr.pid)};
+                            rocpd::output::write_perfetto(perfetto_session,
+                                                          pitr,
+                                                          agents_map,
+                                                          threads,
+                                                          regions,
+                                                          samples,
+                                                          kernels,
+                                                          memory_copies,
+                                                          scratch_memory,
+                                                          memory_allocations,
+                                                          counters);
                         }
-
-                        ROCP_TRACE << "Starting Perfetto generation from SQL for process "
-                                   << pitr.pid;
-                        auto _sqlgen_perfw = common::simple_timer{fmt::format(
-                            "Perfetto generation from SQL for process {} (write)", pitr.pid)};
-                        rocpd::output::write_perfetto(perfetto_session,
-                                                      pitr,
-                                                      agents_map,
-                                                      threads,
-                                                      regions,
-                                                      samples,
-                                                      kernels,
-                                                      memory_copies,
-                                                      scratch_memory,
-                                                      memory_allocations,
-                                                      counters);
                     }
                 }
             }
@@ -530,6 +563,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             // (2) find the process with the longest duration
             uint64_t min_start_time = std::numeric_limits<uint64_t>::max();
             uint64_t max_fini_time  = std::numeric_limits<uint64_t>::min();
+
             for(auto obj : {data.connection})
             {
                 auto* conn = rocpd::interop::get_connection(std::move(obj));

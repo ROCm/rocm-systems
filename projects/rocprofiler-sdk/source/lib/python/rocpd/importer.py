@@ -50,6 +50,8 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 )
             elif isinstance(input, str):
                 _connection = libpyrocpd.connect(input)
+                _connections = []
+                _connections.append(libpyrocpd.connect(input))
                 _filenames = [input]
             elif isinstance(input, list) and len(input) > 0 and isinstance(input[0], str):
                 _connection = libpyrocpd.connect(":memory:")
@@ -57,11 +59,17 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 _connection.execute("PRAGMA foreign_keys = ON")
                 self.table_info = _create_temp_views(_connection, input)
                 _create_meta_views(_connection)
+
+                _connections = []
+                for i, inp in enumerate(input):
+                    connection = libpyrocpd.connect(":memory:")
+                    _create_temp_views(connection, [inp])
+                    _connections.append(connection)
             else:
                 raise ValueError(
                     f"input is unsupported type. Expected sqlite3.Connection, string, or (non-empty) list of strings. type={type(input).__name__}"
                 )
-            super(RocpdImportData, self).__init__(_connection, _filenames)
+            super(RocpdImportData, self).__init__(_connection, _connections, _filenames)
 
     def __getattr__(self, name):
         # any attribute or method not found in RocpdImportData will be looked up on self.connection
