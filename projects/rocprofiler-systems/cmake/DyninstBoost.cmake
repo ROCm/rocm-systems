@@ -44,7 +44,7 @@
 
 include_guard(GLOBAL)
 
-if(NOT BUILD_BOOST)
+if(NOT ROCPROFSYS_BUILD_BOOST)
     find_package(Boost)
 endif()
 
@@ -153,13 +153,13 @@ set(_boost_components
     timer
 )
 
-if(NOT BUILD_BOOST)
+if(NOT ROCPROFSYS_BUILD_BOOST)
     find_package(Boost ${Boost_MIN_VERSION} QUIET COMPONENTS ${_boost_components})
 endif()
 
 # -------------- SOURCE BUILD -------------------------------------------------
 
-if(Boost_FOUND AND NOT BUILD_BOOST)
+if(Boost_FOUND AND NOT ROCPROFSYS_BUILD_BOOST)
     # Force the cache entries to be updated Normally, these would not be exported.
     # However, we need them in the Testsuite
     set(Boost_INCLUDE_DIRS
@@ -179,10 +179,10 @@ elseif(NOT Boost_FOUND AND STERILE_BUILD)
     rocprofiler_systems_message(
         FATAL_ERROR "Boost not found and cannot be downloaded because build is sterile."
     )
-elseif(NOT BUILD_BOOST)
+elseif(NOT ROCPROFSYS_BUILD_BOOST)
     rocprofiler_systems_message(
         FATAL_ERROR
-        "Boost was not found. Either configure cmake to find Boost properly or set BUILD_BOOST=ON to download and build"
+        "Boost was not found. Either configure cmake to find Boost properly or set ROCPROFSYS_BUILD_BOOST=ON to download and build"
     )
 else()
     rocprofiler_systems_add_option(BOOST_LINK_STATIC "Link to boost libraries statically"
