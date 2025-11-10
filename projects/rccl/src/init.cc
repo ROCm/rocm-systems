@@ -1313,7 +1313,7 @@ NCCL_PARAM(GroupSize, "P2P_SCHEDULE_GROUP_SIZE", NCCL_MAX_DEV_WORK_P2P_PER_BATCH
 
 static ncclResult_t ncclP2pSchedule(struct ncclComm* comm) {
   struct ncclNodeRanks* nodeRanks = comm->nodeRanks;
-  int groupSize = ncclParamGroupSize();
+  int groupSize = (comm->nNodes > 1) ? ncclParamGroupSize() : comm->maxLocalRanks;
   for (int node = 0; node < comm->nNodes; node++) {
     int localRanks = nodeRanks[node].localRanks;
     if (localRanks % groupSize != 0 || localRanks < groupSize) groupSize = gcd(groupSize, nodeRanks[node].localRanks);
