@@ -2176,6 +2176,9 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags) const 
   if (flags.executable_) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
+  if (flags.uncached_ && isa().versionMajor() == 12) {
+    hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  }
 
   void* ptr = nullptr;
   hsa_status_t stat = Hsa::memory_pool_allocate(pool, size, hsa_mem_flags, &ptr);

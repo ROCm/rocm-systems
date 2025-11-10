@@ -214,6 +214,18 @@ rocprofiler_systems_add_option(ROCPROFSYS_USE_PYTHON "Enable Python support" OFF
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from submodule"
                                OFF
 )
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from submodule"
+                               OFF
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
+                               OFF
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_BOOST "Build boost from submodule"
+                               OFF
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TBB "Build tbb from submodule"
+                               OFF
+)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
                                "Build libunwind from submodule" ON
 )

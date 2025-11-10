@@ -2,7 +2,7 @@
 declare -A commands=(
     [path]=' '
     [no_roof]='--no-roof'
-    [kernel_names]='--roof-only --kernel-names'
+    [kernel_names]='--roof-only'
     [device_filter]='--device 0'
     [kernel]='--kernel "vecCopy(double*, double*, double*, int, int) [clone .kd]"'
     [ipblocks_SQ]='-b SQ'

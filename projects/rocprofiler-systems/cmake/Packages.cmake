@@ -172,11 +172,7 @@ if(ROCPROFSYS_USE_ROCM)
             HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
             PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
         )
-        if(SPACK_BUILD)
-            find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-        else()
-            find_package(ROCmVersion REQUIRED HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-        endif()
+        find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
     endif()
 
     if(NOT ROCmVersion_FOUND)
@@ -196,7 +192,7 @@ if(ROCPROFSYS_USE_ROCM)
         list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
     endif()
 
-    set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_FULL_VERSION})
+    set(ROCPROFSYS_ROCM_VERSION_FULL ${ROCmVersion_FULL_VERSION})
     set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
     set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
     set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
@@ -219,6 +215,7 @@ endif()
 # ----------------------------------------------------------------------------------------#
 
 if(ROCPROFSYS_USE_ROCM)
+    # ROCProfiler SDK
     find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
     rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm
                                                    INTERFACE ROCPROFSYS_USE_ROCM
@@ -228,8 +225,47 @@ if(ROCPROFSYS_USE_ROCM)
         INTERFACE rocprofiler-sdk::rocprofiler-sdk
     )
 
-    find_package(amd-smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd-smi::amd-smi)
+    # AMD SMI
+    find_package(
+        amd_smi
+        ${rocprofiler_systems_FIND_QUIETLY}
+        HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        REQUIRED
+    )
+
+    # amd_smi in ROCm 6.4 requires both drm and drm_amdgpu libraries to be explicitly linked.
+    # This is no longer the case in ROCm 7.0.
+    if(ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6 AND ROCPROFSYS_ROCM_VERSION_MINOR EQUAL 4)
+        # Find drm library
+        find_library(
+            drm_LIBRARY
+            NAMES drm
+            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES lib lib64
+            REQUIRED
+        )
+        # Find drm_amdgpu library
+        find_library(
+            drm_amdgpu_LIBRARY
+            NAMES drm_amdgpu
+            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES lib lib64
+            REQUIRED
+        )
+
+        get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
+        get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
+
+        set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
+        list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
+
+        target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
+    endif()
+
+    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 endif()
 
 # ----------------------------------------------------------------------------------------#
