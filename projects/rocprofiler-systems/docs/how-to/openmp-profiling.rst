@@ -76,7 +76,10 @@ Callback APIs, such as OMPT, can be traced using ``rocprof-sys-run``. To collect
 
 .. code-block:: shell
 
-  ROCPROFSYS_USE_OMPT=ON rocprof-sys-run -- ./jacobi
+  rocprof-sys-run -I "ompt" -- ./jacobi
+
+.. note::
+  The ``-I "ompt"`` option is equivalent to setting ``ROCPROFSYS_USE_OMPT=ON``.
 
 Once the command completes, a ``.proto`` file will be generated in the output directory:
 
@@ -90,7 +93,7 @@ Understanding the proto file output
 -----------------------------------------------
 
 To view the generated ``.proto`` file in a browser, open the `Perfetto UI page <https://ui.perfetto.dev/>`_. Then, click on ``Open trace file`` and select the ``.proto`` file.
-The output should match:
+The output trace should resemble the following image:
 
 .. image:: ../data/openmp-profiling/perfetto-jacobi-initial-view.png
     :alt: Initial view of the perfetto trace file
@@ -129,7 +132,7 @@ For this example, the important tracks are ``./jacobi`` (1), ``GPU Kernel dispat
 Visualizing data transfer and kernel execution on the GPU
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``laplacian`` subroutine in ``laplacian.f90`` contains the following block of code that offloads compute to the GPU:
+Certain OpenMP constructs offload compute to the GPU. As an example, consider the ``laplacian`` subroutine in ``laplacian.f90`` which contains the following OpenMP block:
 
 .. code-block:: fortran
 
@@ -141,9 +144,24 @@ The ``laplacian`` subroutine in ``laplacian.f90`` contains the following block o
       end do
   end do
 
+This OpenMP construct offloads compute to the GPU. Due to the nature of the program, this specific kernel code is executed many times. 
+To find the corresponding traces, look for the corresponding kernel dispatch trace in the ``GPU Kernel Dispatch`` track. For ``flang`` based compilers (which includes ``amdflang``), the kernel has the following name:
+
+.. code-block:: shell
+
+  __omp_offloading_<Device-ID>_<File-ID>_QMlaplacian_modPlaplacian_l22.kd
+
+``Device-ID`` and ``File-ID`` are unique to the system and are not important for our purposes.
+
+In general, for ``flang`` compiled code containing modules with subroutines using OpenMP to perform GPU offloading, the kernel's name will be of the following form:
+
+.. code-block:: shell
+
+  __omp_offloading_<Device-ID>_<File-ID>_QM<module-Name>P<subroutine-Name>_l<OpenMP-Pragma-Source-Line>[_<Count-ID>].kd
+
 .. note::
-    This specific kernel code is executed many times. To find it in your trace, look for the corresponding ``__omp_offloading`` trace in the ``GPU Kernel Dispatch`` track that contains ``laplacian``
-    in its name (for example: ``__omp_offloading_10302_8e8155f__QMlaplacian_modPlaplacian_l21.kd``)
+  * The ``<OpenMP-Pragma-Source-Line>`` is the line number corresponding to the OpenMP pragma in the source code.
+  * ``Count-ID`` is appended when multiple OpenMP offload constructs exist on the same source line. Since the Jacobi example has only one construct per line, ``Count-ID`` is omitted.
 
 The image below shows a group of traces that correspond to the execution of the block above:
 
@@ -156,7 +174,7 @@ The general sequence of events for this code block is as follows:
   2. Memory is allocated on the GPU for variables. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_alloc``.
   3. The variables are then transferred to the GPU. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_to_device``.
   4. A corresponding ``MEMORY_COPY_HOST_TO_DEVICE`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (3).
-  5. Once the necessary data transfers are complete, the code can be executed on the kernel. An ``omp_target_submit_emi`` trace is generated and points to the kernel being executed on the GPU.
+  5. Once the necessary data transfers are complete, the kernel can be launched. An ``omp_target_submit_emi`` trace is generated and points to the kernel being executed on the GPU.
   6. A corresponding ``__omp_offloading`` kernel is generated on the ``GPU Kernel Dispatch`` track for each occurrence of (5), representing the GPU code being executed.
   7. Once complete, the data is transferred back to the host. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_from_device``.
   8. A corresponding ``MEMORY_COPY_DEVICE_TO_HOST`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (7).
@@ -187,7 +205,7 @@ This command generates an instrumented binary, ``jacobi.inst``. To profile this 
 
 .. code-block:: shell
 
-  ROCPROFSYS_USE_OMPT=ON rocprof-sys-run -- ./jacobi.inst
+  rocprof-sys-run -I "ompt" -- ./jacobi.inst
 
 When profiling finishes, a ``.proto`` file will be generated in the output directory:
 
