@@ -54,8 +54,7 @@ endif()
 if(PLATFORM MATCHES i386)
     set(ARCH_DEFINES arch_x86)
     list(
-        APPEND
-        CAP_DEFINES
+        APPEND CAP_DEFINES
         cap_fixpoint_gen
         cap_noaddr_gen
         cap_stripped_binaries
@@ -66,8 +65,7 @@ if(PLATFORM MATCHES i386)
 elseif(PLATFORM MATCHES x86_64 OR PLATFORM MATCHES amd64)
     set(ARCH_DEFINES arch_x86_64 arch_64bit)
     list(
-        APPEND
-        CAP_DEFINES
+        APPEND CAP_DEFINES
         cap_32_64
         cap_fixpoint_gen
         cap_noaddr_gen
@@ -97,8 +95,7 @@ endif()
 if(PLATFORM MATCHES linux)
     set(OS_DEFINES os_linux)
     list(
-        APPEND
-        CAP_DEFINES
+        APPEND CAP_DEFINES
         cap_async_events
         cap_binary_rewriter
         cap_dwarf
@@ -109,8 +106,7 @@ if(PLATFORM MATCHES linux)
 elseif(PLATFORM MATCHES cnl)
     set(OS_DEFINES os_linux os_cnl)
     list(
-        APPEND
-        CAP_DEFINES
+        APPEND CAP_DEFINES
         cap_async_events
         cap_binary_rewriter
         cap_dwarf

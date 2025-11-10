@@ -148,8 +148,7 @@ else()
         # Generate library filenames
         list(APPEND _tbb_libraries ${_tbb_${c}_lib})
         list(
-            APPEND
-            _tbb_build_byproducts
+            APPEND _tbb_build_byproducts
             "${TBB_ROOT_DIR}/lib/lib${c}${CMAKE_SHARED_LIBRARY_SUFFIX}"
         )
 
