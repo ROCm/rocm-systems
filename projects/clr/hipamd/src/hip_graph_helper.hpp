@@ -35,7 +35,9 @@ hipError_t hipMemcpy2DValidateBuffer(const void* buf, size_t pitch, size_t width
 hipError_t ihipMemcpy_validate(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
 
 hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src, size_t sizeBytes,
-                             hipMemcpyKind kind, hip::Stream& stream, bool isAsync = true);
+                             hipMemcpyKind kind, hip::Stream& stream, bool isAsync = true,
+                             amd::Memory* srcMemory = nullptr, size_t srcOffset = 0,
+                             amd::Memory* dstMemory = nullptr, size_t dstOffset = 0);
 
 void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, hip::Stream& stream);
 
@@ -123,5 +125,7 @@ hipError_t ihipMemcpyAtoHValidate(hipArray_t srcArray, void* dstHost, amd::Coord
 
 hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams);
 
-hip::MemcpyType ihipGetMemcpyType(const void* src, void* dst, hipMemcpyKind kind);
+hip::MemcpyType ihipGetMemcpyType(const void* src, void* dst, hipMemcpyKind kind,
+                                  amd::Memory* srcMemory = nullptr,
+                                  amd::Memory* dstMemory = nullptr);
 }  // namespace hip
