@@ -223,17 +223,18 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_code_util.cpp
            libamdhsacode/amd_hsa_locks.cpp
            libamdhsacode/amd_options.cpp
-           libamdhsacode/amd_hsa_code.cpp
-           libamdhsacode/amd_core_dump.cpp )
+           libamdhsacode/amd_hsa_code.cpp)
 
 if(UNIX)
-  set(SRC_OS core/util/lnx/os_linux.cpp)
+  set(SRC_OS core/util/lnx/os_linux.cpp
+	     libamdhsacode/lnx/amd_core_dump.cpp)
   set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
                core/runtime/amd_aie_agent.cpp
                core/runtime/amd_aie_aql_queue.cpp)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
-  set(SRC_OS core/util/win/os_win.cpp)
+  set(SRC_OS core/util/win/os_win.cpp
+	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
          
 if ( BUILD_THUNK_VIRTIO )
