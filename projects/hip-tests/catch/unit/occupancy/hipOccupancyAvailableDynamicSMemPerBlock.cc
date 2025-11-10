@@ -40,13 +40,13 @@ THE SOFTWARE.
 #include <iomanip>
 #include <iostream>
 
-const size_t LEN = 1024;
+constexpr size_t SIZE = 1024;
 
-__global__ void dynamicReverse(int *d, int n) {
-  __shared__ int s[LEN];
+static __global__ void dynamicReverse(int *d, int n) {
+  __shared__ int s[SIZE];
 
-  int t = threadIdx.x;
-  int tr = n - t - 1;
+  int t = threadIdx.x;  // unique index it starts from 0
+  int tr = n - t - 1;  //  it is reverse index of t, if t = 0, then tr = n-1
 
   s[t] = d[t];
   __syncthreads();
@@ -70,11 +70,10 @@ static __global__ void f1(float *a) { *a = 1.0; }
 TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative") {
   size_t dynamicSmemSize;
   int numBlocks = 1;
-  int blockSize = 1024;
   SECTION("Number of blocks are zero") {
-    HIP_CHECK_ERROR(hipOccupancyAvailableDynamicSMemPerBlock(&dynamicSmemSize,
-                                                             f1, 0, blockSize),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipOccupancyAvailableDynamicSMemPerBlock(&dynamicSmemSize, f1, 0, SIZE),
+        hipErrorInvalidValue);
   }
 
   SECTION("Block size is zero") {
@@ -86,14 +85,14 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative") {
 #if HT_AMD
   SECTION("Invalid driver funtion") {
     HIP_CHECK_ERROR(hipOccupancyAvailableDynamicSMemPerBlock(
-                        &dynamicSmemSize, NULL, numBlocks, blockSize),
+                        &dynamicSmemSize, NULL, numBlocks, SIZE),
                     hipErrorInvalidDeviceFunction);
   }
 
   SECTION("dynamicSmemSize is null") {
-    HIP_CHECK_ERROR(hipOccupancyAvailableDynamicSMemPerBlock(
-                        nullptr, f1, numBlocks, blockSize),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipOccupancyAvailableDynamicSMemPerBlock(nullptr, f1, numBlocks, SIZE),
+        hipErrorInvalidValue);
   }
 #endif
 }
@@ -112,33 +111,40 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative") {
 TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive") {
   size_t dynamicSmemSize = 0;
   int numBlocks = 1;
-  int blockSize = 1024;
-  int a[LEN], r[LEN], d[LEN];
+  int inputArray[SIZE], expectedOutput[SIZE], actualOutput[SIZE];
 
-  for (int i = 0; i < LEN; i++) {
-    a[i] = i;
-    r[i] = LEN - i - 1;  // Expected reversed array
-    d[i] = 0;
+  for (int i = 0; i < SIZE; i++) {
+    inputArray[i] = i;
+    expectedOutput[i] = SIZE - i - 1;  // Expected reversed array
+    actualOutput[i] = 0;
   }
 
-  int *d_d;                                      // Device pointer
-  HIP_CHECK(hipMalloc(&d_d, LEN * sizeof(int)));  // Allocate device memory
+  int *deviceArray{};  // Device pointer
+  HIP_CHECK(
+      hipMalloc(&deviceArray, SIZE * sizeof(int)));  // Allocate device memory
 
-  HIP_CHECK(hipMemcpy(d_d, a, LEN * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceArray, inputArray, SIZE * sizeof(int),
+                      hipMemcpyHostToDevice));
 
   HIP_CHECK(hipOccupancyAvailableDynamicSMemPerBlock(
-      &dynamicSmemSize, dynamicReverse, numBlocks, blockSize));
+      &dynamicSmemSize, dynamicReverse, numBlocks, SIZE));
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
-  REQUIRE(dynamicSmemSize == devProp.sharedMemPerBlock - LEN * sizeof(int));
-  dynamicReverse<<<1, LEN, LEN * sizeof(int)>>>(d_d, LEN);
+  INFO("Available Dynamic shared memory size : "
+       << dynamicSmemSize
+       << ", Dynamic shared memory calculated from device properties : "
+       << devProp.sharedMemPerBlock - SIZE * sizeof(int));
+  REQUIRE(dynamicSmemSize == devProp.sharedMemPerBlock - SIZE * sizeof(int));
+  dynamicReverse<<<numBlocks, SIZE, SIZE * sizeof(int)>>>(deviceArray, SIZE);
 
-  HIP_CHECK(hipMemcpy(d, d_d, LEN * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(actualOutput, deviceArray, SIZE * sizeof(int),
+                      hipMemcpyDeviceToHost));
   // Verify results
-  for (int i = 0; i < LEN; i++) {
-    if (d[i] != r[i]) {
-      printf("Error: d[%d]!=r[%d] (%d, %d)\n", i, i, d[i], r[i]);
-    }
+  for (int i = 0; i < SIZE; i++) {
+    INFO("Results mismatched : actualOutput[" << i << "]!=expectedOutput[" << i
+                                              << "],(" << actualOutput[i] << ","
+                                              << expectedOutput[i] << ")");
+    REQUIRE(actualOutput[i] == expectedOutput[i]);
   }
 }
 
@@ -146,4 +152,3 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive") {
  * End doxygen group occupancyTest.
  * @}
  */
-
