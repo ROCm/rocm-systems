@@ -193,7 +193,7 @@ Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
   }
 
   // The check below handles a special case of single context with multiple devices
-  // when the devices use different compilers(HSAIL and LC) and have different signatures
+  // when the devices have different signatures
   const amd::KernelSignature& signature =
       (this->signature().version() == kernel.signature().version()) ? kernel.signature()
                                                                     : this->signature();

@@ -997,7 +997,7 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
   uint32_t numParams = params.size();
   // Append the hidden arguments to the OCL arguments
   params.insert(params.end(), hiddenParams.begin(), hiddenParams.end());
-  createSignature(params, numParams, amd::KernelSignature::ABIVersion_2);
+  createSignature(params, numParams, amd::KernelSignature::ABIVersion_LC);
 }
 
 // ================================================================================================

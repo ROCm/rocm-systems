@@ -247,11 +247,6 @@ TEMPLATE_TEST_CASE("Unit_surf1Dread_Positive_Basic", "", char, uchar, short, ush
                    uint4, float4) {
   CHECK_IMAGE_SUPPORT;
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   const int width = GENERATE(31, 67, 131, 263);
   runTestR<TestType>(width);
 }
@@ -273,11 +268,6 @@ TEMPLATE_TEST_CASE("Unit_surf1Dwrite_Positive_Basic", "", char, uchar, short, us
                    uint4, float4) {
   CHECK_IMAGE_SUPPORT;
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   const int width = GENERATE(31, 67, 131, 263);
   runTestW<TestType>(width);
 }
@@ -298,11 +288,6 @@ TEMPLATE_TEST_CASE("Unit_surf1D_Positive_ReadWrite", "", char, uchar, short, ush
                    short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
                    uint4, float4) {
   CHECK_IMAGE_SUPPORT;
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   const int width = GENERATE(31, 67, 131, 263);
   runTestRW<TestType>(width);

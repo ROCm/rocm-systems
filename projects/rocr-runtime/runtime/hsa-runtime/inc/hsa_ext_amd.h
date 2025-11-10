@@ -2321,7 +2321,7 @@ hsa_status_t HSA_API
  */
 hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents,
                                         hsa_agent_t* agents,
-                                        int interop_handle,
+                                        hsa_handle_t interop_handle,
                                         uint32_t flags,
                                         size_t* size,
                                         void** ptr,
