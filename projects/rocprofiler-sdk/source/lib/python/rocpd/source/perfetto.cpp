@@ -567,9 +567,9 @@ write_perfetto(
                     else
                         group_index.stream_id = it->stream_id;
 
-                    // Define each dispatch by the middle timestap to keep their relative order
+                    // Define each dispatch by the middle timestamp to keep their relative order
                     // correct.
-                    kernel_groups[group_index].push_back({it, it->start / 2 + it->end / 2});
+                    kernel_groups[group_index].push_back({it, (it->start + it->end) / 2});
                 }
 
                 for(auto group_it = begin(kernel_groups); group_it != end(kernel_groups);
