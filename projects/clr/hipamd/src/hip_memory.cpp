@@ -38,8 +38,10 @@ template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr 
 
 // ================================================================================================
 amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size) {
+  LogError("getMemoryObject");
   auto memObj = amd::MemObjMap::FindMemObj(ptr, &offset);
   if (memObj == nullptr) {
+    LogError("MemoryObject not found in MemObjMap");
     // If memObj not found, use arena_mem_obj. arena_mem_obj is null, if HMM is disabled.
     memObj =
         (hip::getCurrentDevice()->asContext()->svmDevices()[0])->GetArenaMemObj(ptr, offset, size);

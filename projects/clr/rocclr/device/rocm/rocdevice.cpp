@@ -2466,6 +2466,7 @@ bool Device::SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvi
 // ================================================================================================
 bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
                               size_t num_attributes, const void* dev_ptr, size_t count) const {
+  LogError("GetSvmAttributes");
   if (settings().hmmFlags_ & Settings::Hmm::EnableSvmTracking) {
     amd::Memory* svm_mem = amd::MemObjMap::FindMemObj(dev_ptr);
     if ((nullptr == svm_mem) || ((svm_mem->getMemFlags() & CL_MEM_ALLOC_HOST_PTR) == 0) ||
@@ -3327,6 +3328,7 @@ amd::Memory* Device::GetArenaMemObj(const void* ptr, size_t& offset, size_t size
   // Only create arena_mem_object if CPU memory is accessible from HMM
   // or if runtime received an interop from another ROCr's client
   // Disable arena for XNACK
+  LogError("GetArenaMemObj");
   hsa_amd_pointer_info_t ptr_info = {};
   ptr_info.size = sizeof(hsa_amd_pointer_info_t);
   if (!IsValidAllocation(ptr, size, &ptr_info)) {
@@ -3382,6 +3384,7 @@ void Device::SetUserEvent(amd::UserEvent* event) const {
 
 // ================================================================================================
 bool Device::IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer_info_t* ptr_info) {
+  LogError("IsValidAllocation");
   // Query ptr type to see if it's a HMM allocation
   hsa_status_t status =
       Hsa::pointer_info(const_cast<void*>(dev_ptr), ptr_info, nullptr, nullptr, nullptr);
