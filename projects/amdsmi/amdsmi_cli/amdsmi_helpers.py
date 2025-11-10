@@ -844,12 +844,17 @@ class AMDSMIHelpers():
         for dev in device_handles:
             try:
                 soc_pstate_info = amdsmi_interface.amdsmi_get_soc_pstate(dev)
+                # Check if 'policies' key exists before accessing it
+                if 'policies' in soc_pstate_info and soc_pstate_info['policies']:
+                    for policy in soc_pstate_info['policies']:
+                        policy_string = f"{policy['policy_id']}: {policy['policy_description']}"
+                        if not policy_string in soc_pstate_profile_list:
+                            soc_pstate_profile_list.append(policy_string)
             except amdsmi_interface.AmdSmiLibraryException as e:
                 continue
-            for policy in soc_pstate_info['policies']:
-                policy_string = f"{policy['policy_id']}: {policy['policy_description']}"
-                if not policy_string in soc_pstate_profile_list:
-                    soc_pstate_profile_list.append(policy_string)
+            except KeyError as e:
+                logging.debug(f"AMDSMIHelpers.get_soc_pstates - Missing key in soc_pstate_info: {e}")
+                continue
         if len(soc_pstate_profile_list) == 0:
             soc_pstate_profile_list.append("N/A")
         return soc_pstate_profile_list
@@ -861,12 +866,17 @@ class AMDSMIHelpers():
         for dev in device_handles:
             try:
                 xgmi_plpd_info = amdsmi_interface.amdsmi_get_xgmi_plpd(dev)
+                # Check if 'policies' key exists before accessing it
+                if 'policies' in xgmi_plpd_info and xgmi_plpd_info['policies']:
+                    for policy in xgmi_plpd_info['policies']:
+                        policy_string = f"{policy['policy_id']}: {policy['policy_description']}"
+                        if not policy_string in xgmi_plpd_profile_list:
+                            xgmi_plpd_profile_list.append(policy_string)
             except amdsmi_interface.AmdSmiLibraryException as e:
                 continue
-            for policy in xgmi_plpd_info['policies']:
-                policy_string = f"{policy['policy_id']}: {policy['policy_description']}"
-                if not policy_string in xgmi_plpd_profile_list:
-                    xgmi_plpd_profile_list.append(policy_string)
+            except KeyError as e:
+                logging.debug(f"AMDSMIHelpers.get_xgmi_plpd_policies - Missing key in xgmi_plpd_info: {e}")
+                continue
         if len(xgmi_plpd_profile_list) == 0:
             xgmi_plpd_profile_list.append("N/A")
         return xgmi_plpd_profile_list
