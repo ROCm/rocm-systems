@@ -138,11 +138,6 @@ static void runTest_hipTextureFilterMode() {
 TEST_CASE("Unit_hipNormalizedFloatValueTex_CheckModes") {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
 #if HT_AMD
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));

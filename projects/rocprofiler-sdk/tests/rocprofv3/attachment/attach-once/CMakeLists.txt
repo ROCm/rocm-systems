@@ -45,6 +45,7 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "${attachment-env}"
+    SKIP_REGULAR_EXPRESSION "This test is skipped."
     FIXTURES_SETUP rocprofv3-test-attachment-attach-once
     FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 # Validate the output from the attached profiling
@@ -56,6 +57,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 30
     LABELS "integration-tests;attachment"
     DISABLED ${IS_DISABLED}
+    SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once
     ARGS --kernel-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_kernel_trace.csv
@@ -64,7 +66,8 @@ rocprofiler_add_integration_validate_test(
          --memory-copy-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_memory_copy_trace.csv
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv)
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
+         --skip-if ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-attachment-attach-once-json
@@ -74,6 +77,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 30
     LABELS "integration-tests;attachment"
     DISABLED ${IS_DISABLED}
+    SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once
     ARGS --kernel-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
@@ -82,4 +86,6 @@ rocprofiler_add_integration_validate_test(
          --memory-copy-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json)
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json 
+         --skip-if
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
