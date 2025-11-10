@@ -36,6 +36,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 namespace rocprofiler
 {
@@ -77,7 +78,12 @@ queue_cb(const context::context*                                         ctx,
     ctx->counter_collection->enabled.rlock(
         [&](const auto& collect_ctx) { is_enabled = collect_ctx; });
 
-    if(!is_enabled || !info->user_cb) return {no_instrumentation(), true};
+    auto packet_type = rocprofiler::sdk::utility::bit_extract(
+        pkt.kernel_dispatch.header,
+        HSA_PACKET_HEADER_TYPE,
+        HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+    if(!is_enabled || !info->user_cb || packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+        return {no_instrumentation(), true};
 
     auto _corr_id_v =
         rocprofiler_async_correlation_id_t{.internal = 0, .external = context::null_user_data};

@@ -38,6 +38,7 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -127,20 +128,20 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
 
         kernel_dispatch::dispatch_complete(queue_info_session, dispatch_time);
-    }
 
-    // Calls our internal callbacks to callers who need to be notified post
-    // kernel execution.
-    queue_info_session.queue.signal_callback([&](const auto& map) {
-        for(const auto& [client_id, cb_pair] : map)
-        {
-            cb_pair.second(queue_info_session.queue,
-                           queue_info_session.kernel_pkt,
-                           shared_ptr_info,
-                           queue_info_session.inst_pkt,
-                           dispatch_time);
-        }
-    });
+        // Calls our internal callbacks to callers who need to be notified post
+        // kernel execution.
+        queue_info_session.queue.signal_callback([&](const auto& map) {
+            for(const auto& [client_id, cb_pair] : map)
+            {
+                cb_pair.second(queue_info_session.queue,
+                               queue_info_session.kernel_pkt,
+                               shared_ptr_info,
+                               queue_info_session.inst_pkt,
+                               dispatch_time);
+            }
+        });
+    }
 
     if(queue_info_session.is_serialized)
     {
@@ -184,26 +185,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     delete &shared_ptr_info;
 
     return false;
-}
-
-template <typename Integral = uint64_t>
-constexpr Integral
-bit_mask(int first, int last)
-{
-    assert(last >= first && "Error: hsa_support::bit_mask -> invalid argument");
-    size_t num_bits = last - first + 1;
-    return ((num_bits >= sizeof(Integral) * 8) ? ~Integral{0}
-                                               /* num_bits exceed the size of Integral */
-                                               : ((Integral{1} << num_bits) - 1))
-           << first;
-}
-
-/* Extract bits [last:first] from t.  */
-template <typename Integral>
-constexpr Integral
-bit_extract(Integral x, int first, int last)
-{
-    return (x >> first) & bit_mask<Integral>(0, last - first);
 }
 
 /**
@@ -274,10 +255,11 @@ WriteInterceptor(const void* packets,
     for(size_t i = 0; i < pkt_count; ++i)
     {
         const auto& original_packet = packets_arr[i].kernel_dispatch;
-        auto        packet_type     = bit_extract(original_packet.header,
-                                       HSA_PACKET_HEADER_TYPE,
-                                       HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
-        bool        is_blit_kernel  = packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+        auto        packet_type     = rocprofiler::sdk::utility::bit_extract(
+            original_packet.header,
+            HSA_PACKET_HEADER_TYPE,
+            HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+        bool is_blit_kernel = packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
                               original_packet.workgroup_size_x > 0 &&
                               original_packet.workgroup_size_y > 0 &&
                               original_packet.workgroup_size_z > 0;
@@ -287,7 +269,7 @@ WriteInterceptor(const void* packets,
             continue;
         }
 
-        auto*                    corr_id      = context::get_latest_correlation_id();
+        auto* corr_id = is_blit_kernel ? nullptr : context::get_latest_correlation_id();
         context::correlation_id* _corr_id_pop = nullptr;
 
         if(!corr_id && !is_blit_kernel)

@@ -707,8 +707,7 @@ core::Queue* GpuAgent::CreateInterceptibleQueue(void (*callback)(hsa_status_t st
   auto _q = core::Queue::Convert(queue);
   hsa_queue_create(this->public_handle(), size, HSA_QUEUE_TYPE_MULTI, callback, data, 0, 0, &_q);
   queue = core::Queue::Convert(_q);
-  // QueueCreate(size, HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_CREATE_SYSTEM_MEM, callback, data, 0, 0,
-              // &queue);
+
   if (queue != nullptr)
     core::Runtime::runtime_singleton_->InternalQueueCreateNotify(core::Queue::Convert(queue),
                                                                  this->public_handle());

@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <iomanip>
 #include <sstream>
@@ -46,6 +47,26 @@ as_hex(Tp val, size_t width = 0)
     auto ss = std::stringstream{};
     ss << "0x" << std::hex << std::setfill('0') << std::setw(width) << _uintp_val;
     return ss.str();
+}
+
+template <typename Integral = uint64_t>
+constexpr Integral
+bit_mask(int first, int last)
+{
+    assert(last >= first && "Error: hsa_support::bit_mask -> invalid argument");
+    size_t num_bits = last - first + 1;
+    return ((num_bits >= sizeof(Integral) * 8) ? ~Integral{0}
+                                               /* num_bits exceed the size of Integral */
+                                               : ((Integral{1} << num_bits) - 1))
+           << first;
+}
+
+/* Extract bits [last:first] from t.  */
+template <typename Integral>
+constexpr Integral
+bit_extract(Integral x, int first, int last)
+{
+    return (x >> first) & bit_mask<Integral>(0, last - first);
 }
 }  // namespace utility
 }  // namespace sdk

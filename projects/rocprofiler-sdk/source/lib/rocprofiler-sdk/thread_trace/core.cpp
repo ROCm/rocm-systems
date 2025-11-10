@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/intercept_table.h>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <hsa/hsa_api_trace.h>
 
@@ -317,6 +318,7 @@ DispatchThreadTracer::resource_deinit()
  */
 hsa::Queue::pkt_and_serialize_t
 DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
+                                      const hsa::rocprofiler_packet& pkt,
                                       rocprofiler_kernel_id_t        kernel_id,
                                       rocprofiler_dispatch_id_t      dispatch_id,
                                       rocprofiler_user_data_t*       user_data,
@@ -330,12 +332,17 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
         rocprof_corr_id.internal = corr_id->internal;
     }
     // TODO: Get external
+    auto packet_type = rocprofiler::sdk::utility::bit_extract(
+        pkt.kernel_dispatch.header,
+        HSA_PACKET_HEADER_TYPE,
+        HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+    auto is_kernel_dispatch = packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH;
 
     std::shared_lock<std::shared_mutex> lk(agents_map_mut);
 
     auto it = agents.find(queue.get_agent().get_hsa_agent());
 
-    if(it == agents.end()) return {nullptr, false};
+    if(it == agents.end() || !is_kernel_dispatch) return {nullptr, false};
 
     auto&       agent      = *CHECK_NOTNULL(it->second);
     const auto& parameters = agent.params;
@@ -391,26 +398,26 @@ DispatchThreadTracer::start_context()
     client.wlock([&](auto& client_id) {
         if(client_id) return;
 
-        client_id =
-            CHECK_NOTNULL(hsa::get_queue_controller())
-                ->add_callback(
-                    std::nullopt,
-                    [=](const hsa::Queue& q,
-                        const hsa::rocprofiler_packet& /* kern_pkt */,
-                        rocprofiler_kernel_id_t   kernel_id,
-                        rocprofiler_dispatch_id_t dispatch_id,
-                        rocprofiler_user_data_t*  user_data,
-                        const corr_id_map_t& /* extern_corr_ids */,
-                        const context::correlation_id* corr_id) {
-                        return this->pre_kernel_call(q, kernel_id, dispatch_id, user_data, corr_id);
-                    },
-                    [=](const hsa::Queue& /* q */,
-                        hsa::rocprofiler_packet /* kern_pkt */,
-                        std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
-                        inst_pkt_t&                                        aql,
-                        kernel_dispatch::profiling_time) {
-                        this->post_kernel_call(aql, *session);
-                    });
+        client_id = CHECK_NOTNULL(hsa::get_queue_controller())
+                        ->add_callback(
+                            std::nullopt,
+                            [=](const hsa::Queue&              q,
+                                const hsa::rocprofiler_packet& kern_pkt,
+                                rocprofiler_kernel_id_t        kernel_id,
+                                rocprofiler_dispatch_id_t      dispatch_id,
+                                rocprofiler_user_data_t*       user_data,
+                                const corr_id_map_t& /* extern_corr_ids */,
+                                const context::correlation_id* corr_id) {
+                                return this->pre_kernel_call(
+                                    q, kern_pkt, kernel_id, dispatch_id, user_data, corr_id);
+                            },
+                            [=](const hsa::Queue& /* q */,
+                                hsa::rocprofiler_packet /* kern_pkt */,
+                                std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
+                                inst_pkt_t&                                        aql,
+                                kernel_dispatch::profiling_time) {
+                                this->post_kernel_call(aql, *session);
+                            });
     });
 }
 
