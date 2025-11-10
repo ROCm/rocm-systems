@@ -8,6 +8,7 @@ on:
     branches:
       - develop
     paths:
+      - '.github/workflows/rocprofiler-compute-rhel-8.yml'
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'
       - '!projects/rocprofiler-compute/.github/**/*.md'
@@ -15,6 +16,7 @@ on:
       - '!projects/rocprofiler-compute/docker/**'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-compute-rhel-8.yml'
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'
       - '!projects/rocprofiler-compute/.github/**/*.md'

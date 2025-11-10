@@ -7,6 +7,7 @@ on:
     branches:
       - develop
     paths:
+      - '.github/workflows/rocprofiler-compute-ubuntu-jammy.yml'
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'
       - '!projects/rocprofiler-compute/.github/**/*.md'
@@ -14,6 +15,7 @@ on:
       - '!projects/rocprofiler-compute/docker/**'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-compute-ubuntu-jammy.yml'
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'
       - '!projects/rocprofiler-compute/.github/**/*.md'
