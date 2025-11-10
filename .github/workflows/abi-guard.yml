@@ -39,6 +39,12 @@ on:
         type: boolean
         default: false
 
+      use_cached_build:
+        description: "Whether to use cached build artifacts."
+        required: false
+        type: boolean
+        default: true
+
       cmake_generator:
         description: "CMake generator."
         required: false
@@ -146,6 +152,7 @@ jobs:
           echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
 
       - name: Cache CMake build (HEAD)
+        if: ${{ inputs.use_cached_build }}
         uses: actions/cache@v4
         with:
           path: |
@@ -241,6 +248,7 @@ jobs:
           echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
 
       - name: Cache CMake build (baseline)
+        if: ${{ inputs.use_cached_build }}
         uses: actions/cache@v4
         with:
           path: |
