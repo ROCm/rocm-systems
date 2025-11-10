@@ -2367,6 +2367,47 @@ write_perfetto()
         return getenv("ROCPROFILER_TOOL_DISABLE_PERFETTO_ANNOTATIONS") == nullptr;
     }();
 
+    // BUILD LOOKUP MAPS FOR ALL CALLBACK ARGUMENTS
+    auto hsa_args_by_corr_id       = std::unordered_map<uint64_t, callback_arg_array_t>{};
+    auto hip_args_by_corr_id       = std::unordered_map<uint64_t, callback_arg_array_t>{};
+    auto rccl_args_by_corr_id      = std::unordered_map<uint64_t, callback_arg_array_t>{};
+    auto rocdecode_args_by_corr_id = std::unordered_map<uint64_t, callback_arg_array_t>{};
+    auto rocjpeg_args_by_corr_id   = std::unordered_map<uint64_t, callback_arg_array_t>{};
+    auto ompt_args_by_corr_id      = std::unordered_map<uint64_t, callback_arg_array_t>{};
+
+    if(enable_debug_annotations)
+    {
+        // Build HSA API argument lookup map
+        for(const auto& rec : hsa_api_cb_records)
+            if(!rec.args.empty())
+                hsa_args_by_corr_id.try_emplace(rec.record.correlation_id.internal, rec.args);
+
+        // Build HIP API argument lookup map
+        for(const auto& rec : hip_api_cb_records)
+            if(!rec.args.empty())
+                hip_args_by_corr_id.try_emplace(rec.record.correlation_id.internal, rec.args);
+
+        // Build RCCL API argument lookup map
+        for(const auto& rec : rccl_api_cb_records)
+            if(!rec.args.empty())
+                rccl_args_by_corr_id.try_emplace(rec.record.correlation_id.internal, rec.args);
+
+        // Build RocDecode API argument lookup map
+        for(const auto& rec : rocdecode_api_cb_records)
+            if(!rec.args.empty())
+                rocdecode_args_by_corr_id.try_emplace(rec.record.correlation_id.internal, rec.args);
+
+        // Build RocJPEG API argument lookup map
+        for(const auto& rec : rocjpeg_api_cb_records)
+            if(!rec.args.empty())
+                rocjpeg_args_by_corr_id.try_emplace(rec.record.correlation_id.internal, rec.args);
+
+        // Build OMPT argument lookup map
+        for(const auto& rec : ompt_cb_records)
+            if(!rec.args.empty())
+                ompt_args_by_corr_id.try_emplace(rec.record.correlation_id.internal, rec.args);
+    }
+
     // environment settings
     auto shmem_size_hint = size_t{64};
     auto buffer_size_kb  = size_t{1024000};
@@ -2562,14 +2603,18 @@ write_perfetto()
 
             auto _args = callback_arg_array_t{};
             if(enable_debug_annotations)
-            {
-                auto ritr = std::find_if(
-                    hsa_api_cb_records.begin(), hsa_api_cb_records.end(), [&itr](const auto& citr) {
-                        return (citr.record.correlation_id.internal ==
-                                    itr.correlation_id.internal &&
-                                !citr.args.empty());
-                    });
-                if(ritr != hsa_api_cb_records.end()) _args = ritr->args;
+            {  // The lookup with find_if which runs a linear search
+                // auto ritr = std::find_if(
+                //     hsa_api_cb_records.begin(), hsa_api_cb_records.end(), [&itr](const auto&
+                //     citr) {
+                //         return (citr.record.correlation_id.internal ==
+                //                     itr.correlation_id.internal &&
+                //                 !citr.args.empty());
+                //     });
+                // if(ritr != hsa_api_cb_records.end()) _args = ritr->args;
+
+                auto args_it = hsa_args_by_corr_id.find(itr.correlation_id.internal);
+                if(args_it != hsa_args_by_corr_id.end()) _args = args_it->second;
             }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hsa_api>::name,
@@ -2608,13 +2653,8 @@ write_perfetto()
             auto _args = callback_arg_array_t{};
             if(enable_debug_annotations)
             {
-                auto ritr = std::find_if(
-                    hip_api_cb_records.begin(), hip_api_cb_records.end(), [&itr](const auto& citr) {
-                        return (citr.record.correlation_id.internal ==
-                                    itr.correlation_id.internal &&
-                                !citr.args.empty());
-                    });
-                if(ritr != hip_api_cb_records.end()) _args = ritr->args;
+                auto args_it = hip_args_by_corr_id.find(itr.correlation_id.internal);
+                if(args_it != hip_args_by_corr_id.end()) _args = args_it->second;
             }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hip_api>::name,
@@ -2653,14 +2693,8 @@ write_perfetto()
             auto _args = callback_arg_array_t{};
             if(enable_debug_annotations)
             {
-                auto ritr = std::find_if(rccl_api_cb_records.begin(),
-                                         rccl_api_cb_records.end(),
-                                         [&itr](const auto& citr) {
-                                             return (citr.record.correlation_id.internal ==
-                                                         itr.correlation_id.internal &&
-                                                     !citr.args.empty());
-                                         });
-                if(ritr != rccl_api_cb_records.end()) _args = ritr->args;
+                auto args_it = rccl_args_by_corr_id.find(itr.correlation_id.internal);
+                if(args_it != rccl_args_by_corr_id.end()) _args = args_it->second;
             }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rccl_api>::name,
@@ -2699,14 +2733,8 @@ write_perfetto()
             auto _args = callback_arg_array_t{};
             if(enable_debug_annotations)
             {
-                auto ritr = std::find_if(rocdecode_api_cb_records.begin(),
-                                         rocdecode_api_cb_records.end(),
-                                         [&itr](const auto& citr) {
-                                             return (citr.record.correlation_id.internal ==
-                                                         itr.correlation_id.internal &&
-                                                     !citr.args.empty());
-                                         });
-                if(ritr != rocdecode_api_cb_records.end()) _args = ritr->args;
+                auto args_it = rocdecode_args_by_corr_id.find(itr.correlation_id.internal);
+                if(args_it != rocdecode_args_by_corr_id.end()) _args = args_it->second;
             }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rocdecode_api>::name,
@@ -2745,14 +2773,8 @@ write_perfetto()
             auto _args = callback_arg_array_t{};
             if(enable_debug_annotations)
             {
-                auto ritr = std::find_if(rocjpeg_api_cb_records.begin(),
-                                         rocjpeg_api_cb_records.end(),
-                                         [&itr](const auto& citr) {
-                                             return (citr.record.correlation_id.internal ==
-                                                         itr.correlation_id.internal &&
-                                                     !citr.args.empty());
-                                         });
-                if(ritr != rocjpeg_api_cb_records.end()) _args = ritr->args;
+                auto args_it = rocjpeg_args_by_corr_id.find(itr.correlation_id.internal);
+                if(args_it != rocjpeg_args_by_corr_id.end()) _args = args_it->second;
             }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rocjpeg_api>::name,
@@ -2791,13 +2813,8 @@ write_perfetto()
             auto _args = callback_arg_array_t{};
             if(enable_debug_annotations)
             {
-                auto ritr = std::find_if(
-                    ompt_cb_records.begin(), ompt_cb_records.end(), [&itr](const auto& citr) {
-                        return (citr.record.correlation_id.internal ==
-                                    itr.correlation_id.internal &&
-                                !citr.args.empty());
-                    });
-                if(ritr != ompt_cb_records.end()) _args = ritr->args;
+                auto args_it = ompt_args_by_corr_id.find(itr.correlation_id.internal);
+                if(args_it != ompt_args_by_corr_id.end()) _args = args_it->second;
             }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::openmp>::name,
