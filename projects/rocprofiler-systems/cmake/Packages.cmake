@@ -225,32 +225,7 @@ if(ROCPROFSYS_USE_ROCM)
         INTERFACE rocprofiler-sdk::rocprofiler-sdk
     )
 
-    # Find drm library. amd-smi requires both drm and drm_amdgpu.
-    find_library(
-        drm_LIBRARY
-        NAMES drm
-        HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES lib lib64
-        REQUIRED
-    )
-    # Find drm_amdgpu library. amd-smi requires both drm and drm_amdgpu.
-    find_library(
-        drm_amdgpu_LIBRARY
-        NAMES drm_amdgpu
-        HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES lib lib64
-        REQUIRED
-    )
-
-    get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
-    get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
-
-    set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
-    list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
-
-    # AMD SMI and link directories to the DRM libraries (amd-smi requires both drm and drm_amdgpu in rocm 6.4.0).
+    # AMD SMI
     find_package(
         amd_smi
         ${rocprofiler_systems_FIND_QUIETLY}
@@ -259,7 +234,36 @@ if(ROCPROFSYS_USE_ROCM)
         REQUIRED
     )
 
-    target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
+    # amd_smi in ROCm 6.4 requires both drm and drm_amdgpu libraries to be explicitly linked.
+    # This is no longer the case in ROCm 7.0.
+    if(ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6 AND ROCPROFSYS_ROCM_VERSION_MINOR EQUAL 4)
+        # Find drm library
+        find_library(
+            drm_LIBRARY
+            NAMES drm
+            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES lib lib64
+            REQUIRED
+        )
+        # Find drm_amdgpu library
+        find_library(
+            drm_amdgpu_LIBRARY
+            NAMES drm_amdgpu
+            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES lib lib64
+            REQUIRED
+        )
+
+        get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
+        get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
+
+        set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
+        list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
+
+        target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
+    endif()
 
     target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 endif()
