@@ -72,10 +72,9 @@ rocprofiler_systems_add_test(
 if(NOT skip_validation)
     rocprofiler_systems_add_validation_test(
         NAME transferbench-sampling
-        PERFETTO_METRIC "rocm_memory_copy"
         PERFETTO_FILE "perfetto-trace.proto"
         LABELS "transferbench;perfetto"
-        ARGS -c 2 -d 1 -p
+        ARGS --counter-names "XGMI Read Data" "XGMI Write Data" -p
     )
 
     if(NOT skip_validation AND ${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})

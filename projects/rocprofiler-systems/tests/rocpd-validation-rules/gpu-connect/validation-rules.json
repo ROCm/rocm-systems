@@ -1,61 +1,80 @@
 {
     "required_tables": [
         {
-            "name": "memory_copies",
+            "commit": "Validation rules for hsa_api",
+            "name": "events_args",
             "required_columns": [
-                "id",
-                "guid",
+                "event_id",
                 "category",
-                "nid",
-                "pid",
-                "tid",
-                "start",
-                "end",
-                "dst_agent_abs_index",
-                "src_agent_abs_index"
+                "stack_id",
+                "parent_stack_id",
+                "correlation_id"
             ],
             "validation_queries": [
                 {
                     "comparison": "greater_than",
-                    "description": "Check that we have memory copy operations",
-                    "error_message": "No memory copy operations found",
-                    "expected_result": 10,
-                    "query": "SELECT COUNT(*) as count FROM memory_copies"
+                    "description": "Verify that 'rocm_hsa_api' appears in category at least 1500 times in table events_args",
+                    "error_message": "'rocm_hsa_api' category entries are fewer than expected in events_args",
+                    "expected_result": 100,
+                    "query": "SELECT COUNT(*) FROM events_args WHERE category = 'rocm_hsa_api';"
                 },
                 {
                     "comparison": "equals",
-                    "description": "Check for null IDs in memory copies",
-                    "error_message": "NULL entries found in id column of memory_copies",
+                    "description": "Check for missing category entries",
+                    "error_message": "Empty or NULL category entries found in events_args",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM memory_copies WHERE id IS NULL"
-                },
-                {
-                    "comparison": "equals",
-                    "description": "Check for zero or null sizes in memory copies",
-                    "error_message": "Found memory copies with zero or NULL size",
-                    "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM memory_copies WHERE size IS NULL OR size = 0"
-                },
-                {
-                    "comparison": "equals",
-                    "description": "Check for NULL destination agents",
-                    "error_message": "NULL entries found in dst_agent_abs_index",
-                    "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM memory_copies WHERE dst_agent_abs_index IS NULL"
-                },
-                {
-                    "comparison": "equals",
-                    "description": "Check for NULL source agents",
-                    "error_message": "NULL entries found in src_agent_abs_index",
-                    "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM memory_copies WHERE src_agent_abs_index IS NULL"
-                },
+                    "query": "SELECT COUNT(*) FROM events_args WHERE category IS NULL OR TRIM(category) = '';"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for hsa_api",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
                 {
                     "comparison": "greater_than",
-                    "description": "Check for device-to-device memory copies",
-                    "error_message": "No device-to-device memory copies found",
+                    "description": "Verify that 'rocm_hsa_api' appears in category at least 50 times in table regions",
+                    "error_message": "'rocm_hsa_api' category entries are fewer than expected in regions",
+                    "expected_result": 50,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hsa_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Ensure there are no HSA API calls that last 0 seconds",
+                    "error_message": "Found HSA API captures where duration is 0",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM memory_copies mc JOIN rocpd_info_agent src ON mc.src_agent_abs_index = src.absolute_index AND mc.guid = src.guid JOIN rocpd_info_agent dst ON mc.dst_agent_abs_index = dst.absolute_index AND mc.guid = dst.guid WHERE src.agent_type = 1 AND dst.agent_type = 1"
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hsa_api' AND duration = 0;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for any NULL values in the 'name' column of regions",
+                    "error_message": "NULL entries found in the name column of regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name IS NULL;"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rule for hsa_api",
+            "name": "rocpd_string",
+            "required_columns": [
+                "id",
+                "guid",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_hsa_api' string is present in the table",
+                    "error_message": "'rocm_hsa_api' string not found in the table rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%rocm_hsa_api%';"
                 }
             ]
         },

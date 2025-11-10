@@ -31,6 +31,7 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/defines.hpp"
+#include "core/gpu_metrics.hpp"
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 
@@ -95,30 +96,8 @@ struct data
     using mem_usage_t = uint64_t;
     using temp_t      = int64_t;
 
-    struct gpu_metrics_t
-    {
-        // VCN metrics
-        std::vector<uint16_t> vcn_activity;  // Device-level VCN (when supported)
-        std::vector<std::vector<uint16_t>>
-            vcn_busy;  // XCP-level VCN (per-XCP organization)
-
-        // JPEG metrics
-        std::vector<uint16_t> jpeg_activity;  // Device-level JPEG (when supported)
-        std::vector<std::vector<uint16_t>>
-            jpeg_busy;  // XCP-level JPEG (per-XCP organization)
-
-        // XGMI metrics
-        uint16_t              xgmi_link_width = 0;
-        uint16_t              xgmi_link_speed = 0;
-        std::vector<uint64_t> xgmi_read_data_acc;
-        std::vector<uint64_t> xgmi_write_data_acc;
-
-        // PCIe metrics
-        uint16_t pcie_link_width     = 0;
-        uint16_t pcie_link_speed     = 0;
-        uint64_t pcie_bandwidth_acc  = 0;
-        uint64_t pcie_bandwidth_inst = 0;
-    };
+    // Use the shared gpu_metrics_t from core/gpu_metrics.hpp
+    using gpu_metrics_t = rocprofsys::gpu::gpu_metrics_t;
 
     ROCPROFSYS_DEFAULT_OBJECT(data)
 

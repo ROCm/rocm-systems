@@ -41,6 +41,7 @@
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/gpu.hpp"
+#include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
@@ -450,163 +451,19 @@ std::vector<uint8_t>
 serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
                       bool is_vcn_activity_supported, bool is_jpeg_activity_supported)
 {
-    // Serialization format:
-    // 1. Support flags byte (1 byte):
-    //      - bit 0: is_vcn_activity_supported (device-level vs per-XCP)
-    //      - bit 1: is_jpeg_activity_supported (device-level vs per-XCP)
-    //      - bits 2-7: reserved
-    // 2. Data element counts (4 bytes):
-    //      - vcn_count (1 byte): total VCN values (flattened across all XCPs)
-    //      - jpeg_count (1 byte): total JPEG values (flattened across all XCPs)
-    //      - xgmi_read_count (1 byte): number of XGMI read data values
-    //      - xgmi_write_count (1 byte): number of XGMI write data values
-    // 3. XCP structure metadata (2 bytes):
-    //      - vcn_xcp_count (1 byte): number of XCPs with VCN data
-    //      - jpeg_xcp_count (1 byte): number of XCPs with JPEG data
-    // 4. Per-XCP size arrays (variable):
-    //      - vcn_xcp_sizes[0..vcn_xcp_count-1]: size of each XCP's VCN data (1 byte each)
-    //      - jpeg_xcp_sizes[0..jpeg_xcp_count-1]: size of each XCP's JPEG data (1 byte
-    //      each)
-    //        Note: Sizes vary due to filtering of UINT16_MAX (unsupported features in
-    //        AMD-SMI)
-    // 5. Flattened data arrays (conditionally serialized based on settings from
-    // serialize_settings):
-    //      - VCN data (if vcn_activity setting enabled): flattened uint16 values
-    //      - JPEG data (if jpeg_activity setting enabled): flattened uint16 values
-    //      - XGMI data (if xgmi setting enabled):
-    //          link_width (uint16), link_speed (uint16)
-    //          xgmi_read_data array (uint64[xgmi_read_count])
-    //          xgmi_write_data array (uint64[xgmi_write_count])
-    //      - PCIe data (if pcie setting enabled):
-    //          link_width (uint16), link_speed (uint16)
-    //          bandwidth_acc (uint64), bandwidth_inst (uint64)
-
+    // Get settings for this device
     auto settings = get_settings(device_id);
 
-    // Flatten XCP data if needed and pre-calculate counts
-    // Example::
-    // XCP 0: [10, 20, 30]        (3 values)
-    // XCP 1: [15, 25]            (2 values)
-    // XCP 2: [5, 10, 15, 20]     (4 values)
-    // vcn_xcp_count: 3
-    // vcn_xcp_sizes: [3, 2, 4]
-    // vcn_data_flat: [10, 20, 30, 15, 25, 5, 10, 15, 20]
-    std::vector<uint16_t> vcn_data_flat;
-    std::vector<uint16_t> jpeg_data_flat;
-    std::vector<uint8_t>  vcn_xcp_sizes;   // Size of each XCP's VCN data
-    std::vector<uint8_t>  jpeg_xcp_sizes;  // Size of each XCP's JPEG data
+    // Convert amd_smi::settings to gpu::gpu_metrics_settings_t
+    gpu::gpu_metrics_settings_t gpu_settings;
+    gpu_settings.vcn_activity  = settings.vcn_activity;
+    gpu_settings.jpeg_activity = settings.jpeg_activity;
+    gpu_settings.xgmi          = settings.xgmi;
+    gpu_settings.pcie          = settings.pcie;
 
-    if(is_vcn_activity_supported)
-    {
-        vcn_data_flat = metrics.vcn_activity;
-    }
-    else
-    {
-        // Flatten per-XCP VCN data and record sizes
-        for(const auto& xcp_data : metrics.vcn_busy)
-        {
-            vcn_xcp_sizes.push_back(static_cast<uint8_t>(xcp_data.size()));
-            vcn_data_flat.insert(vcn_data_flat.end(), xcp_data.begin(), xcp_data.end());
-        }
-    }
-
-    if(is_jpeg_activity_supported)
-    {
-        jpeg_data_flat = metrics.jpeg_activity;
-    }
-    else
-    {
-        // Flatten per-XCP JPEG data and record sizes
-        for(const auto& xcp_data : metrics.jpeg_busy)
-        {
-            jpeg_xcp_sizes.push_back(static_cast<uint8_t>(xcp_data.size()));
-            jpeg_data_flat.insert(jpeg_data_flat.end(), xcp_data.begin(), xcp_data.end());
-        }
-    }
-
-    uint8_t vcn_count        = static_cast<uint8_t>(vcn_data_flat.size());
-    uint8_t jpeg_count       = static_cast<uint8_t>(jpeg_data_flat.size());
-    uint8_t vcn_xcp_count    = static_cast<uint8_t>(vcn_xcp_sizes.size());
-    uint8_t jpeg_xcp_count   = static_cast<uint8_t>(jpeg_xcp_sizes.size());
-    uint8_t xgmi_read_count  = static_cast<uint8_t>(metrics.xgmi_read_data_acc.size());
-    uint8_t xgmi_write_count = static_cast<uint8_t>(metrics.xgmi_write_data_acc.size());
-
-    // Helper lambdas for efficient serialization
-    auto serialize_uint8 = [](std::vector<uint8_t>& data, uint8_t val) {
-        data.push_back(val);
-    };
-
-    auto serialize_uint16 = [](std::vector<uint8_t>& data, uint16_t val) {
-        data.push_back(static_cast<uint8_t>(val & 0xFF));
-        data.push_back(static_cast<uint8_t>((val >> 8) & 0xFF));
-    };
-
-    auto serialize_uint16_vector = [](std::vector<uint8_t>&        data,
-                                      const std::vector<uint16_t>& vec, uint8_t count) {
-        for(uint8_t i = 0; i < count; ++i)
-        {
-            data.push_back(static_cast<uint8_t>(vec[i] & 0xFF));
-            data.push_back(static_cast<uint8_t>((vec[i] >> 8) & 0xFF));
-        }
-    };
-
-    auto serialize_uint64 = [](std::vector<uint8_t>& data, uint64_t val) {
-        for(int i = 0; i < 8; ++i)
-            data.push_back(static_cast<uint8_t>((val >> (i * 8)) & 0xFF));
-    };
-
-    auto serialize_uint64_vector = [](std::vector<uint8_t>&        data,
-                                      const std::vector<uint64_t>& vec, uint8_t count) {
-        for(uint8_t i = 0; i < count; ++i)
-        {
-            for(int j = 0; j < 8; ++j)
-                data.push_back(static_cast<uint8_t>((vec[i] >> (j * 8)) & 0xFF));
-        }
-    };
-
-    std::vector<uint8_t> result;
-
-    uint8_t _flags = 0;
-    if(is_vcn_activity_supported) _flags |= (1 << 0);  // Set bit for VCN activity support
-    if(is_jpeg_activity_supported)
-        _flags |= (1 << 1);  // Set bit for JPEG activity support
-    serialize_uint8(result, _flags);
-
-    // Serialize counts
-    serialize_uint8(result, vcn_count);
-    serialize_uint8(result, jpeg_count);
-    serialize_uint8(result, vcn_xcp_count);
-    serialize_uint8(result, jpeg_xcp_count);
-    serialize_uint8(result, xgmi_read_count);
-    serialize_uint8(result, xgmi_write_count);
-
-    for(uint8_t size : vcn_xcp_sizes)
-        serialize_uint8(result, size);
-
-    for(uint8_t size : jpeg_xcp_sizes)
-        serialize_uint8(result, size);
-
-    // Serialize the flattened data
-    if(settings.vcn_activity && vcn_count > 0)
-        serialize_uint16_vector(result, vcn_data_flat, vcn_count);
-    if(settings.jpeg_activity && jpeg_count > 0)
-        serialize_uint16_vector(result, jpeg_data_flat, jpeg_count);
-    if(settings.xgmi)
-    {
-        serialize_uint16(result, metrics.xgmi_link_width);
-        serialize_uint16(result, metrics.xgmi_link_speed);
-        serialize_uint64_vector(result, metrics.xgmi_read_data_acc, xgmi_read_count);
-        serialize_uint64_vector(result, metrics.xgmi_write_data_acc, xgmi_write_count);
-    }
-    if(settings.pcie)
-    {
-        serialize_uint16(result, metrics.pcie_link_width);
-        serialize_uint16(result, metrics.pcie_link_speed);
-        serialize_uint64(result, metrics.pcie_bandwidth_acc);
-        serialize_uint64(result, metrics.pcie_bandwidth_inst);
-    }
-
-    return result;
+    // Use the shared serialization function
+    return gpu::serialize_gpu_metrics(metrics, is_vcn_activity_supported,
+                                      is_jpeg_activity_supported, gpu_settings);
 }
 
 size_t

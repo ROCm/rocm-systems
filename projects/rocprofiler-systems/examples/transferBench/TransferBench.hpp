@@ -1,5 +1,5 @@
 /*
-Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -3660,21 +3660,27 @@ __launch_bounds__(BLOCKSIZE)
 }
 
 #define GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, DWORD)                               \
-    { GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_NONE>,                          \
-      GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_LOAD>,                          \
-      GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_STORE>,                         \
-      GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_BOTH> }
+    {                                                                                    \
+        GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_NONE>,                        \
+            GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_LOAD>,                    \
+            GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_STORE>,                   \
+            GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_BOTH>                     \
+    }
 
 #define GPU_KERNEL_DWORD_DECL(BLOCKSIZE, UNROLL)                                         \
-    { GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float),                                \
-      GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float2),                               \
-      GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float4) }
+    {                                                                                    \
+        GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float),                              \
+            GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float2),                         \
+            GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float4)                          \
+    }
 
 #define GPU_KERNEL_UNROLL_DECL(BLOCKSIZE)                                                \
-    { GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 1), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 2),          \
-      GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 3), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 4),          \
-      GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 5), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 6),          \
-      GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 7), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 8) }
+    {                                                                                    \
+        GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 1), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 2),        \
+            GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 3), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 4),    \
+            GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 5), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 6),    \
+            GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 7), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 8)     \
+    }
 
 // Table of all GPU Reduction kernel functions (templated blocksize / unroll / dword size)
 typedef void (*GpuKernelFuncPtr)(SubExecParam*, int, int);
@@ -3994,7 +4000,7 @@ RunExecutor(int const iteration, ConfigOptions const& cfg, ExeDevice const& exeD
 
 ErrResult::ErrResult(ErrType err)
 : errType(err)
-, errMsg("") {};
+, errMsg(""){};
 
 ErrResult::ErrResult(hipError_t err)
 {
