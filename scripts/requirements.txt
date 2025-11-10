@@ -1,4 +1,1 @@
-black
-flake8
-jinja2
-pyyaml
+-r abi-guard-requirements.txt
