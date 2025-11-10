@@ -135,6 +135,9 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
                                       rocprofiler_dispatch_counting_record_cb_t  record_callback,
                                       void* record_callback_args)
 {
+    // ensure we attempt to lock all devices only once
+    static std::once_flag flag{};
+
     auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
@@ -145,9 +148,6 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
     // FIXME: Due to the clock gating issue, counter collection and PC sampling service
     // cannot coexist in the same context for now.
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
-
-    // ensure we attempt to lock all devices only once
-    static std::once_flag flag{};
 
     if(!ctx.counter_collection)
     {
