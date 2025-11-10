@@ -24,12 +24,20 @@ THE SOFTWARE.
 
 #include <variant>
 
+#ifdef USE_GLEW
+#include <GL/glew.h>
+#elif defined(__linux__)
 #define GL_GLEXT_PROTOTYPES
-#include <GL/freeglut.h>
-#include <GL/freeglut_ext.h>
+#else
+#error "Only GLEW or Linux native GL extensions are supported"
+#endif
 
+#include <GL/freeglut.h>
+
+#ifdef __linux__
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#endif
 
 #include <hip_test_common.hh>
 
@@ -77,6 +85,11 @@ class GLImageObject {
   GLuint tex_;
 };
 
+class IContextScopeGuard {
+public:
+    virtual ~IContextScopeGuard() = default;
+};
+
 static std::once_flag glut_init_flag;
 static void GlutError(const char *fmt, va_list ap)
 {
@@ -93,14 +106,16 @@ static void GlutError(const char *fmt, va_list ap)
     exit(1);
 }
 
-class GLUTContextScopeGuard {
+class GLUTContextScopeGuard : public IContextScopeGuard {
  public:
   GLUTContextScopeGuard() {
     std::call_once(glut_init_flag, &GLUTContextScopeGuard::init);
     glut_window_ = glutCreateWindow("");
   }
 
-  ~GLUTContextScopeGuard() { glutDestroyWindow(glut_window_); }
+  ~GLUTContextScopeGuard() override {
+    glutDestroyWindow(glut_window_);
+  }
 
   GLUTContextScopeGuard(const GLUTContextScopeGuard&) = delete;
   GLUTContextScopeGuard& operator=(const GLUTContextScopeGuard&) = delete;
@@ -122,7 +137,8 @@ class GLUTContextScopeGuard {
   }
 };
 
-class EGLContextScopeGuard {
+#ifdef __linux__
+class EGLContextScopeGuard : public IContextScopeGuard {
  public:
   EGLContextScopeGuard() {
 
@@ -156,7 +172,7 @@ class EGLContextScopeGuard {
     REQUIRE(eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_));
   }
 
-  ~EGLContextScopeGuard() {
+  ~EGLContextScopeGuard() override {
     // 6. Terminate EGL when finished
     eglTerminate(egl_display_);
   }
@@ -198,13 +214,11 @@ class EGLContextScopeGuard {
   EGLSurface egl_surface_;
   EGLContext egl_context_;
 };
+#endif
 
 class GLContextScopeGuard {
  public:
-  using GLUTContextScopeGuardPtr = std::unique_ptr<GLUTContextScopeGuard>;
-  using EGLContextScopeGuardPtr = std::unique_ptr<EGLContextScopeGuard>;
-  using GLContextScopeGuardVariant =
-      std::variant<GLUTContextScopeGuardPtr, EGLContextScopeGuardPtr>;
+  using GLContextScopeGuardVariant = std::unique_ptr<IContextScopeGuard>;
 
   static constexpr char kEnvarName[] = "GL_CONTEXT_TYPE";
 
@@ -220,8 +234,10 @@ class GLContextScopeGuard {
 
     if (val_str.empty() || val_str == "GLUT") {
       gl_context_ = std::make_unique<GLUTContextScopeGuard>();
+#ifdef __linux__
     } else if (val_str == "EGL") {
       gl_context_ = std::make_unique<EGLContextScopeGuard>();
+#endif
     } else {
       INFO("Unsupported " << kEnvarName << " value '" << val_str << "'");
       INFO("Supported values are ['GLUT', 'EGL']");
