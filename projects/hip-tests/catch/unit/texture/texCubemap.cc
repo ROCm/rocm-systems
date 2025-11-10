@@ -92,23 +92,22 @@ TEMPLATE_TEST_CASE("Unit_texCubemap_Positive_ReadModeElementType", "", char, uns
                                 params.tex_desc.normalizedCoords);
         float z = GetCoordinate(k, params.NumItersZ(), params.Depth(), params.num_subdivisions,
                                 params.tex_desc.normalizedCoords);
-
-        INFO("i: " << i);
-        INFO("j: " << j);
-        INFO("k: " << k);
-        INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
-        INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
-        INFO("Address mode X: " << AddressModeToString(params.tex_desc.addressMode[0]));
-        INFO("Address mode Y: " << AddressModeToString(params.tex_desc.addressMode[1]));
-        INFO("Address mode Z: " << AddressModeToString(params.tex_desc.addressMode[2]));
-        INFO("x: " << std::fixed << std::setprecision(16) << x);
-        INFO("y: " << std::fixed << std::setprecision(16) << y);
-        INFO("z: " << std::fixed << std::setprecision(16) << z);
-
         auto index = k * params.NumItersX() * params.NumItersY() + j * params.NumItersX() + i;
-
         const auto ref_val = fixture.tex_h.TexCubemap(x, y, z, params.tex_desc);
-        REQUIRE(fixture.Verify(fixture.out_alloc_h[index], ref_val));
+        if (!fixture.Verify(fixture.out_alloc_h[index], ref_val)) {
+          INFO("i: " << i);
+          INFO("j: " << j);
+          INFO("k: " << k);
+          INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
+          INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
+          INFO("Address mode X: " << AddressModeToString(params.tex_desc.addressMode[0]));
+          INFO("Address mode Y: " << AddressModeToString(params.tex_desc.addressMode[1]));
+          INFO("Address mode Z: " << AddressModeToString(params.tex_desc.addressMode[2]));
+          INFO("x: " << std::fixed << std::setprecision(16) << x);
+          INFO("y: " << std::fixed << std::setprecision(16) << y);
+          INFO("z: " << std::fixed << std::setprecision(16) << z);
+          REQUIRE(false);
+        }
       }
     }
   }
@@ -175,23 +174,22 @@ TEMPLATE_TEST_CASE("Unit_texCubemap_Positive_ReadModeNormalizedFloat", "", char,
                                 params.tex_desc.normalizedCoords);
         float z = GetCoordinate(k, params.NumItersZ(), params.Depth(), params.num_subdivisions,
                                 params.tex_desc.normalizedCoords);
-
-        INFO("i: " << i);
-        INFO("j: " << j);
-        INFO("k: " << k);
-        INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
-        INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
-        INFO("Address mode X: " << AddressModeToString(params.tex_desc.addressMode[0]));
-        INFO("Address mode Y: " << AddressModeToString(params.tex_desc.addressMode[1]));
-        INFO("Address mode Z: " << AddressModeToString(params.tex_desc.addressMode[2]));
-        INFO("x: " << std::fixed << std::setprecision(16) << x);
-        INFO("y: " << std::fixed << std::setprecision(16) << y);
-        INFO("z: " << std::fixed << std::setprecision(16) << z);
-
         auto index = k * params.NumItersX() * params.NumItersY() + j * params.NumItersX() + i;
-
         auto ref_val = fixture.tex_h.TexCubemap(x, y, z, params.tex_desc);
-        REQUIRE(fixture.Verify(fixture.out_alloc_h[index], ref_val));
+        if (!fixture.Verify(fixture.out_alloc_h[index], ref_val)) {
+          INFO("i: " << i);
+          INFO("j: " << j);
+          INFO("k: " << k);
+          INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
+          INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
+          INFO("Address mode X: " << AddressModeToString(params.tex_desc.addressMode[0]));
+          INFO("Address mode Y: " << AddressModeToString(params.tex_desc.addressMode[1]));
+          INFO("Address mode Z: " << AddressModeToString(params.tex_desc.addressMode[2]));
+          INFO("x: " << std::fixed << std::setprecision(16) << x);
+          INFO("y: " << std::fixed << std::setprecision(16) << y);
+          INFO("z: " << std::fixed << std::setprecision(16) << z);
+          REQUIRE(false);
+        }
       }
     }
   }

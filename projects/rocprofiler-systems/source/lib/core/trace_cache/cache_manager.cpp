@@ -39,6 +39,31 @@ namespace trace_cache
 {
 namespace
 {
+void
+remove_if_exists(const std::string& fname)
+{
+    if(fname.empty()) return;
+    std::ifstream file(fname);
+    if(file.is_open())
+    {
+        file.close();
+        auto result = std::remove(fname.c_str());
+        if(result == 0)
+        {
+            ROCPROFSYS_DEBUG("Removed file: %s\n", fname.c_str());
+        }
+        else if(errno == ENOENT)
+        {
+            ROCPROFSYS_DEBUG("File does not exist: %s\n", fname.c_str());
+        }
+        else
+        {
+            ROCPROFSYS_WARNING(0, "Failed to remove file: %s (errno: %d - %s)\n",
+                               fname.c_str(), errno, std::strerror(errno));
+        }
+    }
+}
+
 std::vector<std::string>
 list_dir_files(const std::string& path)
 {
@@ -105,6 +130,30 @@ get_cache_files()
     std::for_each(tmp_files.begin(), tmp_files.end(), parse_and_fill_cache);
     return cache_map;
 }
+
+std::vector<std::string>
+get_all_cache_files()
+{
+    const auto               tmp_files = list_dir_files(tmp_directory);
+    std::vector<std::string> result{};
+    auto                     parse_and_fill_cache = [&](const std::string& filename) {
+        const std::regex buff_regex(R"(buffered_storage.*\.bin)");
+        const std::regex meta_regex(R"(metadata.*\.json)");
+        std::smatch      match;
+
+        if(std::regex_match(filename, match, buff_regex))
+        {
+            result.push_back(tmp_directory + filename);
+        }
+        else if(std::regex_match(filename, match, meta_regex))
+        {
+            result.push_back(tmp_directory + filename);
+        }
+    };
+    std::for_each(tmp_files.begin(), tmp_files.end(), parse_and_fill_cache);
+    return result;
+}
+
 }  // namespace
 
 cache_manager&
@@ -127,12 +176,12 @@ cache_manager::post_process_bulk()
             shutdown();
         }
 
+        auto _cache_files = get_cache_files();
+
         if(get_use_rocpd())
         {
             ROCPROFSYS_PRINT(
                 "Generating rocpd with collected data. This may take a while..\n");
-
-            auto _cache_files = get_cache_files();
 
             std::vector<std::thread> rocpd_threads;
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -179,7 +228,6 @@ cache_manager::post_process_bulk()
                         _post_processing.register_parser_callback(_parser);
                         _post_processing.post_process_metadata();
                         _parser.consume_storage();
-                        std::remove(files.metadata.c_str());  // Remove metadata file
                     });
                 }
             }
@@ -188,6 +236,15 @@ cache_manager::post_process_bulk()
             {
                 thread.join();
             }
+        }
+
+        ROCPROFSYS_PRINT("Removing all cached temporary files...\n");
+
+        auto all_cache_files = get_all_cache_files();
+        for(const auto& filename : all_cache_files)
+        {
+            ROCPROFSYS_PRINT("Removing cached temporary file: %s\n", filename.c_str());
+            remove_if_exists(filename);
         }
     }
 }
