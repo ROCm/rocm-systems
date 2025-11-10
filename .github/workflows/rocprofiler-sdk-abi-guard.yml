@@ -23,3 +23,8 @@ jobs:
       cmake_build_type: "RelWithDebInfo"
       install_packages: "libsqlite3-dev libdw-dev"
       container: "rocm/dev-ubuntu-22.04:7.0.2"
+      # rocprofiler-sdk build has hidden folders in build tree:
+      #  - build/external/packages/otf2-source-src/build-backend/.libs
+      #  - build/external/packages/otf2-source-src/build-backend/.deps
+      # which aren't preserved/restored properly by the cache action, so we disable it.
+      use_cached_build: false
