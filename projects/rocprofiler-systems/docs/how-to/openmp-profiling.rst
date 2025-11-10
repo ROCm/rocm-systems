@@ -24,7 +24,7 @@ Only a subset of OMPT callbacks are processed. The list of supported callbacks c
   * ``omp_thread_end`` events are not supported.
 
 .. important::
-  If your system does not have a device to offload to, OMPT traces will not be generated.
+  If your system does not have a device to offload to, OMPT callbacks will not be traced.
 
 Configuration
 ================
@@ -102,14 +102,14 @@ The output trace should resemble the following image:
 To view the collected traces, click on the drop-down arrow in the ``./jacobi`` track. You will then be able to see the full trace, which should resemble:
 
 .. image:: ../data/openmp-profiling/perfetto-jacobi-tracks-view.png
-    :alt: Expanded view of the proto file showing tracks and the collected traces
+    :alt: Expanded view of the proto file showing tracks and the collected events
     :width: 800
 
 .. tip::
   You can pin important tracks in perfetto by hovering over the track name and clicking the pin icon.
 
 Multiple tracks are displayed, each representing different information:
-  1. Shows the traces captured on the main thread. The main program is executed here (represented by the trace labelled ``jacobi``).
+  1. Shows the events captured on the main thread. The main program is executed here (represented by the trace labelled ``jacobi``).
   2. Shows the power being used by the GPU.
   3. Measures graphics engine utilization as a percentage.
   4. Shows GPU kernel executions.
@@ -123,16 +123,16 @@ For this example, the important tracks are ``./jacobi`` (1), ``GPU Kernel dispat
 
 .. tip::
 
-  Certain traces have extra information attached to them which can be viewed by selecting the trace and looking at its details and argument fields:
+  Certain events have extra information attached to them which can be viewed by selecting the event and looking at its details and argument fields:
 
 .. image:: ../data/openmp-profiling/perfetto-jacobi-trace-details.png
-    :alt: Zoomed in view of the jacobi track showing details for the first ``omp_target_emi`` track
+    :alt: Zoomed in view of the jacobi track showing details for the first ``omp_target_emi`` event
     :width: 800
 
 Visualizing data transfer and kernel execution on the GPU
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Certain OpenMP constructs offload compute to the GPU. As an example, consider the ``laplacian`` subroutine in ``laplacian.f90`` which contains the following OpenMP block:
+In this program, there are specific OpenMP constructs that offload compute to the GPU. As an example, consider the ``laplacian`` subroutine in ``laplacian.f90`` which contains the following OpenMP code block:
 
 .. code-block:: fortran
 
@@ -144,8 +144,9 @@ Certain OpenMP constructs offload compute to the GPU. As an example, consider th
       end do
   end do
 
-This OpenMP construct offloads compute to the GPU. Due to the nature of the program, this specific kernel code is executed many times. 
-To find the corresponding traces, look for the corresponding kernel dispatch trace in the ``GPU Kernel Dispatch`` track. For ``flang`` based compilers (which includes ``amdflang``), the kernel has the following name:
+This OpenMP construct offloads the loop to the GPU. Due to the nature of the program, this specific kernel code is executed many times.
+The easiest way to locate the events linked to the execution of this code is to find the corresponding kernel dispatch in the ``GPU Kernel Dispatch`` track.
+For ``flang`` based compilers (which includes ``amdflang``), the kernel has the following name:
 
 .. code-block:: shell
 
@@ -163,30 +164,30 @@ In general, for ``flang`` compiled code containing modules with subroutines usin
   * The ``<OpenMP-Pragma-Source-Line>`` is the line number corresponding to the OpenMP pragma in the source code.
   * ``Count-ID`` is appended when multiple OpenMP offload constructs exist on the same source line. Since the Jacobi example has only one construct per line, ``Count-ID`` is omitted.
 
-The image below shows a group of traces that correspond to the execution of the block above:
+The image below shows a group of events that correspond to the execution of the block above:
 
 .. image:: ../data/openmp-profiling/perfetto-jacobi-laplacian-traces-view.png
-    :alt: Traces corresponding to the Laplacian OpenMP pragma
+    :alt: Events corresponding to the Laplacian OpenMP pragma
     :width: 1400
 
 The general sequence of events for this code block is as follows:
   1. An ``omp_target_emi`` callback is generated and spans the entire duration of the OpenMP ``target teams`` construct.
-  2. Memory is allocated on the GPU for variables. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_alloc``.
-  3. The variables are then transferred to the GPU. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_to_device``.
+  2. Memory is allocated on the GPU for variables. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_alloc``.
+  3. The variables are then transferred to the GPU. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_transfer_to_device``.
   4. A corresponding ``MEMORY_COPY_HOST_TO_DEVICE`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (3).
-  5. Once the necessary data transfers are complete, the kernel can be launched. An ``omp_target_submit_emi`` trace is generated and points to the kernel being executed on the GPU.
+  5. Once the necessary data transfers are complete, the kernel can be launched. An ``omp_target_submit_emi`` event is generated and points to the kernel being executed on the GPU.
   6. A corresponding ``__omp_offloading`` kernel is generated on the ``GPU Kernel Dispatch`` track for each occurrence of (5), representing the GPU code being executed.
-  7. Once complete, the data is transferred back to the host. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_from_device``.
+  7. Once complete, the data is transferred back to the host. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_transfer_from_device``.
   8. A corresponding ``MEMORY_COPY_DEVICE_TO_HOST`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (7).
-  9. The previously allocated memory is deallocated from the GPU. This is represented by an ``omp_target_data_op_emi`` trace with ``optype = target_data_delete``.
+  9. The previously allocated memory is deallocated from the GPU. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_delete``.
 
-In general, if a trace directly relates to another trace, an arrow will be generated between the two. These arrows are called "flow events". A flow event is visible only when a trace is selected.
+In general, if an event directly relates to another event, an arrow will be generated between the two. These arrows are called "flow events". A flow event is visible only when an event on a track is selected.
 For the sake of showing all relations at once, black arrows were inserted in the image above.
 
 The image below show the standard way that flow events are displayed in perfetto.
 
 .. image:: ../data/openmp-profiling/perfetto-memory-flow-event-view.png
-    :alt: An ``omp_target_data_op_emi`` trace with ``optype = target_data_transfer_to_device`` pointing to its corresponding ``MEMORY_COPY_HOST_TO_DEVICE``
+    :alt: An ``omp_target_data_op_emi`` event with ``optype = target_data_transfer_to_device`` pointing to its corresponding ``MEMORY_COPY_HOST_TO_DEVICE``
     :width: 800
 
 Instrumenting the application with rocprof-sys-instrument
