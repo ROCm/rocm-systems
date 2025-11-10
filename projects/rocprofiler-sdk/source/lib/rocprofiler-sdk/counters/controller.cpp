@@ -144,27 +144,27 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
     // cannot coexist in the same context for now.
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
-    if(counters::counter_collection_has_device_lock())
-    {
-        /**
-         * Note: This should retrun if the lock fails to aquire in the future. However, this
-         * is a change in the required permissions for rocprofiler and needs to be communicated
-         * with partners before strict enforcement. If the required permissions are not obtained,
-         * those profilers will function as they currently do (without any of the benefits of the
-         * IOCTL).
-         */
-        for(const auto& agent : agent::get_agents())
-        {
-            if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-            {
-                counters::counter_collection_device_lock(rocprofiler::agent::get_agent(agent->id),
-                                                         false);
-            }
-        }
-    }
-
     if(!ctx.counter_collection)
     {
+        if(counters::counter_collection_has_device_lock())
+        {
+            /**
+             * Note: This should retrun if the lock fails to aquire in the future. However, this
+             * is a change in the required permissions for rocprofiler and needs to be communicated
+             * with partners before strict enforcement. If the required permissions are not
+             * obtained, those profilers will function as they currently do (without any of the
+             * benefits of the IOCTL).
+             */
+            for(const auto& agent : agent::get_agents())
+            {
+                if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                {
+                    counters::counter_collection_device_lock(
+                        rocprofiler::agent::get_agent(agent->id), false);
+                }
+            }
+        }
+
         ctx.counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
     }
