@@ -67,7 +67,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_memory_copy_trace.csv
          --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
-         --skip-if ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
+         --skip-if
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-attachment-attach-once-json
@@ -86,6 +87,6 @@ rocprofiler_add_integration_validate_test(
          --memory-copy-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json 
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
          --skip-if
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)

@@ -58,7 +58,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_memory_copy_trace.csv
          --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
-         --skip-if 
+         --skip-if
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped
     TIMEOUT 30
     LABELS "integration-tests;attachment"
