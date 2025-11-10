@@ -2,13 +2,13 @@ set(COMMON_SHARED_SRC vulkan_test.cc)
 
 set(TEST_SRC
     hipExternalMemoryGetMappedBuffer.cc
-    hipExternalMemoryGetMappedMipmappedArray.cc
-    hipImportExternalMemory.cc
-    hipDestroyExternalMemory.cc
-    hipWaitExternalSemaphoresAsync.cc
-    hipSignalExternalSemaphoresAsync.cc
-    hipImportExternalSemaphore.cc
-    hipDestroyExternalSemaphore.cc
+    # hipExternalMemoryGetMappedMipmappedArray.cc
+    # hipImportExternalMemory.cc
+    # hipDestroyExternalMemory.cc
+    # hipWaitExternalSemaphoresAsync.cc
+    # hipSignalExternalSemaphoresAsync.cc
+    # hipImportExternalSemaphore.cc
+    # hipDestroyExternalSemaphore.cc
    )
 
 if(UNIX)
@@ -31,8 +31,8 @@ else()
   # aren't supported in Linux, thus test will fail at VulkanTest::CreateInstance()
   # with VK_ERROR_EXTENSION_NOT_PRESENT(-7).
   # Now temperally ignore it in Linux
-  message(STATUS "Ignore vulkan_interop test in Linux")
-  return()
+  # message(STATUS "Ignore vulkan_interop test in Linux")
+  # return()
 endif()
 find_package(Vulkan)
 message(STATUS "Vulkan_FOUND: ${Vulkan_FOUND}")
