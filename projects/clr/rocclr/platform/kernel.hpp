@@ -63,9 +63,8 @@ class KernelSignature : public HeapObject {
 
  public:
   enum {
-    ABIVersion_0 = 0,  //! ABI constructed based on the OCL semantics
-    ABIVersion_1 = 1,  //! ABI constructed based on the HW ABI returned from HSAIL
-    ABIVersion_2 = 2   //! ABI constructed based on the HW ABI returned from LC
+    ABIVersion_OCL = 0,  //! ABI constructed based on the OCL semantics
+    ABIVersion_LC  = 1   //! ABI constructed based on the HW ABI returned from LC
   };
 
   //! Default constructor
@@ -75,7 +74,7 @@ class KernelSignature : public HeapObject {
         numMemories_(0),
         numSamplers_(0),
         numQueues_(0),
-        version_(ABIVersion_0) {}
+        version_(ABIVersion_OCL) {}
 
   //! Construct a new signature.
   KernelSignature(const std::vector<KernelParameterDescriptor>& params, const std::string& attrib,
