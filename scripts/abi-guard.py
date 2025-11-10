@@ -697,7 +697,7 @@ def generate(args) -> str:
 
     data = {
         "name": f"{args.project_name}",
-        "build_directory": "build",
+        "build_directory": args.build_directory,
         "cmake_build_type": "RelWithDebInfo",
         "cmake_generator": "Ninja",
         "cmake_config_args": "",
@@ -837,11 +837,10 @@ def main() -> None:
         )
 
         _parser.add_argument(
-            "-p",
-            "--package",
-            help="Select package to operate on (from versioning.yml).",
+            "--build-directory",
+            help="Select/specify build directory (overrides versioning.yml).",
             type=str,
-            default=None,
+            default="build",
         )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -994,14 +993,16 @@ def main() -> None:
         action="store_true",
     )
 
-    abi_dump_parser = subparsers.add_parser(
-        "abi-generate", help="ABI Guard using libabigail (abidw/abidiff)"
+    abi_generate_parser = subparsers.add_parser(
+        "abi-generate", help="Generate a ABI XML using libabigail (abidw)"
     )
 
-    _add_head_spec_arg(abi_dump_parser)
+    _add_head_spec_arg(abi_generate_parser)
 
-    abi_dump_parser.add_argument("--abidw-args", default="", help="Extra args for abidw.")
-    abi_dump_parser.add_argument(
+    abi_generate_parser.add_argument(
+        "--abidw-args", default="", help="Extra args for abidw."
+    )
+    abi_generate_parser.add_argument(
         "-d",
         "--output-directory",
         default=os.path.join(os.getcwd(), "abi-guard"),

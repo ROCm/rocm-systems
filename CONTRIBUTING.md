@@ -298,6 +298,7 @@ to be marked as imported when defined in a external shared library.
   - This is a CMake module with various functions to assist with compliance to our versioning standards.
 - `scripts/abi-guard.py`
   - This is a Python3 command-line tool for generating/updating the project's VERSION file, generating a versioning YAML spec, listing the files included or excluded from API/ABI checks, executing API/ABI checks, etc.
+  A quick start guide is provided in [scripts/abi-guard-README.md](scripts/abi-guard-README.md).
 
 #### Versioning Workflows
 
