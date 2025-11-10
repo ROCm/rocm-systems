@@ -561,10 +561,30 @@ class RocProfCompute_Base:
                 return 0.0
 
         if args.iteration_multiplexing is not None:
-            console_log(f"Iteration multiplexing: {args.iteration_multiplexing}")
+            console_log(
+                "profiling", f"Iteration multiplexing: {args.iteration_multiplexing}"
+            )
+            if args.iteration_multiplexing == "kernel":
+                console_warning(
+                    "profiling",
+                    (
+                        "Each kernel should be called atleast "
+                        f"{len(input_files)} times to collect all counters."
+                    ),
+                )
+            elif args.iteration_multiplexing == "kernel_launch_params":
+                console_warning(
+                    "profiling",
+                    (
+                        "Each kernel should be called atleast "
+                        f"{len(input_files)} times with the exact launch parameters "
+                        "to collect all counters."
+                    ),
+                )
+
             profile(input_files, options)
         else:
-            console_log("Iteration multiplexing: Disabled")
+            console_log("profiling", "Iteration multiplexing: Disabled")
 
             total_runs = len(input_files)
             total_profiling_time = 0.0

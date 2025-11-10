@@ -1545,9 +1545,13 @@ def merge_counters_iteration_multiplex(
                     delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
                     median_delta_time = delta_time.median()
                     merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
+                    merged_row["Median_Time"] = median_delta_time
+                    merged_row["Mean_Time"] = delta_time.mean()
                 elif pd.api.types.is_numeric_dtype(group[col]):
                     # For other non-counter numeric columns, take the median value
                     merged_row[col] = group[col].median()
+                    if pd.api.types.is_integer_dtype(group[col]):
+                        merged_row[col] = merged_row[col].astype(int)
                 else:
                     # For other non-counter columns, take the first occurrence (0th row)
                     merged_row[col] = group.iloc[0][col]
@@ -1566,6 +1570,8 @@ def merge_counters_iteration_multiplex(
                     else None
                 )
                 merged_row[counter_col] = first_valid_value
+
+            merged_row["Count"] = group["Dispatch_ID"].nunique()
 
             # Append the merged row to the result list
             result_data.append(merged_row)
