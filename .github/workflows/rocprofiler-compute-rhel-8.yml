@@ -34,13 +34,14 @@ concurrency:
 jobs:
   build:
     # The type of runner that the job will run on
-    # https://hub.docker.com/r/rocm/dev-almalinux-8/tags
+    # Using rocprofiler-systems images and later installing rocm, the official rocm images for al8 red hat variant are too large- this is a workaround.
     runs-on: ubuntu-latest
     container:
-      image: rocm/dev-almalinux-8:7.1-complete
+      image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.os-release }}
     strategy:
       fail-fast: false
       matrix:
+        os-release: [ '8.10', '9.4' ]
         build-type: ['Release']
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -54,6 +55,16 @@ jobs:
           yum -y install cmake3
           yum -y install which
           yum -y install glibc-langpack-en
+      - name: Install ROCm Packages
+        timeout-minutes: 30
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 30
+          timeout_minutes: 30
+          max_attempts: 3
+          command: |
+            yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/${{ matrix.os-release }}/amdgpu-install-7.1.70100-1.el8.noarch.rpm
+            yum install -y rocm-dev
       - name: Checkout
         uses: actions/checkout@v4
         with:
