@@ -1,5 +1,5 @@
 /*
- * Copyright © 2014 Advanced Micro Devices, Inc.
+ * Copyright © 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -23,34 +23,41 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#include "kfdcontext.h"
 #include "libhsakmt.h"
 #include <stdlib.h>
-#include <string.h>
-#include "hsakmt/linux/kfd_ioctl.h"
+#include <stddef.h>
+#include <assert.h>
+#include <stdio.h>
+#include <errno.h>
 
-HsaVersionInfo hsakmt_kfd_version_info;
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo *VersionInfo)
+void hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx)
 {
-	CHECK_KFD_OPEN();
+    assert(fd >= 0);
+    assert(ctx);
 
-	*VersionInfo = hsakmt_kfd_version_info;
-
-	return HSAKMT_STATUS_SUCCESS;
+    ctx->fd = fd;
+    ctx->queue_context = NULL;
+    ctx->fmm_context = NULL;
+    ctx->event_context = NULL;
 }
 
-HSAKMT_STATUS hsakmt_init_kfd_version(void)
+void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx)
 {
-	struct kfd_ioctl_get_version_args args = {0};
+    if (!ctx)
+        return;
 
-	if (hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_GET_VERSION, &args) == -1)
-		return HSAKMT_STATUS_ERROR;
-
-	hsakmt_kfd_version_info.KernelInterfaceMajorVersion = args.major_version;
-	hsakmt_kfd_version_info.KernelInterfaceMinorVersion = args.minor_version;
-
-	if (args.major_version != 1)
-		return HSAKMT_STATUS_DRIVER_MISMATCH;
-
-	return HSAKMT_STATUS_SUCCESS;
+    if (ctx->queue_context) {
+        free(ctx->queue_context);
+        ctx->queue_context = NULL;
+    }
+    if (ctx->fmm_context) {
+        free(ctx->fmm_context);
+        ctx->fmm_context = NULL;
+    }
+    if (ctx->event_context) {
+        free(ctx->event_context);
+        ctx->event_context = NULL;
+    }
+    ctx->fd = -1;
 }

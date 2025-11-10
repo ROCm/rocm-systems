@@ -107,159 +107,159 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       // the ANY value. If the target feature is disabled then use a '-' suffix,
       // and if enabled use a '+' suffix.
       //
-      // If the HSAIL or AMD IL compilers do not support the target, then use
+      // If the AMD IL compilers do not support the target, then use
       // nullptr for the ID.
       //
-      // -------------- Compiler ----------    - Runtime -    ---- IP ----   -- Target -- ----------
-      // Target Properties ----------
-      //                                        Supported        Version       Features
-      //                                                                                    SIMD/
-      //                                                                                    SIMD
-      //                                                                                    Instr
-      //                                                                                    Bank LDS
-      //                                                                                    Mem
-      // Target ID                 HSAIL ID     ROC    PAL      Maj/Min/Stp   SRAMECC XNACK CU Width
-      // Width Width   Size    Banks    LDSAlignment
-      {"gfx801", nullptr, true, true, 8, 0, 1, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx801:xnack-", nullptr, true, false, 8, 0, 1, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx801:xnack+", "gfx801", true, true, 8, 0, 1, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx802", "gfx802", true, true, 8, 0, 2, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx803", "gfx803", true, true, 8, 0, 3, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx805", nullptr, true, true, 8, 0, 5, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx810", nullptr, true, true, 8, 1, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx810:xnack-", nullptr, true, false, 8, 1, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx810:xnack+", "gfx810", true, true, 8, 1, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx900", "gfx901", true, true, 9, 0, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx900:xnack-", "gfx900", true, true, 9, 0, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx900:xnack+", "gfx901", true, true, 9, 0, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx902", "gfx903", true, true, 9, 0, 2, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx902:xnack-", "gfx902", true, true, 9, 0, 2, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx902:xnack+", "gfx903", true, true, 9, 0, 2, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx904", "gfx905", true, true, 9, 0, 4, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx904:xnack-", "gfx904", true, true, 9, 0, 4, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx904:xnack+", "gfx905", true, true, 9, 0, 4, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx906", "gfx907", true, true, 9, 0, 6, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx906:sramecc-", "gfx907", true, true, 9, 0, 6, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx906:sramecc+", nullptr, true, true, 9, 0, 6, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx906:xnack-", "gfx906", true, true, 9, 0, 6, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx906:xnack+", "gfx907", true, true, 9, 0, 6, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx906:sramecc-:xnack-", "gfx906", true, true, 9, 0, 6, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
+      // -- Compiler --|-- Runtime --|-- IP --|-- Target --|-- Target Properties --
+      //               |  Supported  | Version|  Features  |
+      // --------------|-------------|--------|------------|-----------------------               
+      //   Target ID   |   ROC PAL   | Major  |  SRAMECC   | SIMD/CU
+      //               |             |  Minor |   XNACK    |  SIMD Width
+      //               |             |   Step |            |   Instr Width
+      //               |             |        |            |    Bank Width
+      //               |             |        |            |     LDS Size
+      //               |             |        |            |      Mem Banks
+      //               |             |        |            |       LDS Alignment
+      {"gfx801", true, true, 8, 0, 1, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx801:xnack-", true, false, 8, 0, 1, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx801:xnack+", true, true, 8, 0, 1, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx802", true, true, 8, 0, 2, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx803", true, true, 8, 0, 3, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx805", true, true, 8, 0, 5, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx810", true, true, 8, 1, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx810:xnack-", true, false, 8, 1, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx810:xnack+", true, true, 8, 1, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx900", true, true, 9, 0, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx900:xnack-", true, true, 9, 0, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx900:xnack+", true, true, 9, 0, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx902", true, true, 9, 0, 2, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx902:xnack-", true, true, 9, 0, 2, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx902:xnack+", true, true, 9, 0, 2, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx904", true, true, 9, 0, 4, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx904:xnack-", true, true, 9, 0, 4, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx904:xnack+", true, true, 9, 0, 4, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906", true, true, 9, 0, 6, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:sramecc-", true, true, 9, 0, 6, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:sramecc+", true, true, 9, 0, 6, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:xnack-", true, true, 9, 0, 6, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:xnack+", true, true, 9, 0, 6, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:sramecc-:xnack-", true, true, 9, 0, 6, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx906:sramecc-:xnack+", "gfx907", true, true, 9, 0, 6, OFF, ON, 4, 16, 1, 256, 64 * Ki,
+      {"gfx906:sramecc-:xnack+", true, true, 9, 0, 6, OFF, ON, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx906:sramecc+:xnack-", nullptr, true, true, 9, 0, 6, ON, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx906:sramecc+:xnack+", nullptr, true, true, 9, 0, 6, ON, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx908", nullptr, true, false, 9, 0, 8, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx908:sramecc-", nullptr, true, false, 9, 0, 8, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx908:sramecc+", nullptr, true, false, 9, 0, 8, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx908:xnack-", nullptr, true, false, 9, 0, 8, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx908:xnack+", nullptr, true, false, 9, 0, 8, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx908:sramecc-:xnack-", nullptr, true, false, 9, 0, 8, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
+      {"gfx906:sramecc+:xnack-", true, true, 9, 0, 6, ON, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:sramecc+:xnack+", true, true, 9, 0, 6, ON, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908", true, false, 9, 0, 8, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908:sramecc-", true, false, 9, 0, 8, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908:sramecc+", true, false, 9, 0, 8, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908:xnack-", true, false, 9, 0, 8, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908:xnack+", true, false, 9, 0, 8, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908:sramecc-:xnack-", true, false, 9, 0, 8, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx908:sramecc-:xnack+", nullptr, true, false, 9, 0, 8, OFF, ON, 4, 16, 1, 256, 64 * Ki,
+      {"gfx908:sramecc-:xnack+", true, false, 9, 0, 8, OFF, ON, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx908:sramecc+:xnack-", nullptr, true, false, 9, 0, 8, ON, OFF, 4, 16, 1, 256, 64 * Ki,
+      {"gfx908:sramecc+:xnack-", true, false, 9, 0, 8, ON, OFF, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx908:sramecc+:xnack+", nullptr, true, false, 9, 0, 8, ON, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx909", nullptr, false, true, 9, 0, 2, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx909:xnack-", nullptr, false, true, 9, 0, 2, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx909:xnack+", nullptr, false, true, 9, 0, 2, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx90a", nullptr, true, false, 9, 0, 10, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx90a:sramecc-", nullptr, true, false, 9, 0, 10, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx90a:sramecc+", nullptr, true, false, 9, 0, 10, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx90a:xnack-", nullptr, true, false, 9, 0, 10, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx90a:xnack+", nullptr, true, false, 9, 0, 10, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx90a:sramecc-:xnack-", nullptr, true, false, 9, 0, 10, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
+      {"gfx908:sramecc+:xnack+", true, false, 9, 0, 8, ON, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx909", false, true, 9, 0, 2, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx909:xnack-", false, true, 9, 0, 2, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx909:xnack+", false, true, 9, 0, 2, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a", true, false, 9, 0, 10, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a:sramecc-", true, false, 9, 0, 10, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a:sramecc+", true, false, 9, 0, 10, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a:xnack-", true, false, 9, 0, 10, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a:xnack+", true, false, 9, 0, 10, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a:sramecc-:xnack-", true, false, 9, 0, 10, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx90a:sramecc-:xnack+", nullptr, true, false, 9, 0, 10, OFF, ON, 4, 16, 1, 256, 64 * Ki,
+      {"gfx90a:sramecc-:xnack+", true, false, 9, 0, 10, OFF, ON, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx90a:sramecc+:xnack-", nullptr, true, false, 9, 0, 10, ON, OFF, 4, 16, 1, 256, 64 * Ki,
+      {"gfx90a:sramecc+:xnack-", true, false, 9, 0, 10, ON, OFF, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx90a:sramecc+:xnack+", nullptr, true, false, 9, 0, 10, ON, ON, 4, 16, 1, 256, 64 * Ki,
+      {"gfx90a:sramecc+:xnack+", true, false, 9, 0, 10, ON, ON, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx942", nullptr, true, false, 9, 4, 2, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx942:sramecc-", nullptr, true, false, 9, 4, 2, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx942:sramecc+", nullptr, true, false, 9, 4, 2, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx942:xnack-", nullptr, true, false, 9, 4, 2, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx942:xnack+", nullptr, true, false, 9, 4, 2, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx942:sramecc-:xnack-", nullptr, true, false, 9, 4, 2, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
+      {"gfx942", true, false, 9, 4, 2, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx942:sramecc-", true, false, 9, 4, 2, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx942:sramecc+", true, false, 9, 4, 2, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx942:xnack-", true, false, 9, 4, 2, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx942:xnack+", true, false, 9, 4, 2, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx942:sramecc-:xnack-", true, false, 9, 4, 2, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx942:sramecc-:xnack+", nullptr, true, false, 9, 4, 2, OFF, ON, 4, 16, 1, 256, 64 * Ki,
+      {"gfx942:sramecc-:xnack+", true, false, 9, 4, 2, OFF, ON, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx942:sramecc+:xnack-", nullptr, true, false, 9, 4, 2, ON, OFF, 4, 16, 1, 256, 64 * Ki,
+      {"gfx942:sramecc+:xnack-", true, false, 9, 4, 2, ON, OFF, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx942:sramecc+:xnack+", nullptr, true, false, 9, 4, 2, ON, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx90c", nullptr, true, true, 9, 0, 12, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx90c:xnack-", "gfx90c", true, true, 9, 0, 12, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx90c:xnack+", "gfx90d", true, true, 9, 0, 12, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx950", nullptr, true, false, 9, 5, 0, ANY, ANY, 4, 16, 1, 256, 160 * Ki, 64, 1280},
-      {"gfx950:sramecc-", nullptr, true, false, 9, 5, 0, OFF, ANY, 4, 16, 1, 256, 160 * Ki, 64, 1280},
-      {"gfx950:sramecc+", nullptr, true, false, 9, 5, 0, ON, ANY, 4, 16, 1, 256, 160 * Ki, 64, 1280},
-      {"gfx950:xnack-", nullptr, true, false, 9, 5, 0, ANY, OFF, 4, 16, 1, 256, 160 * Ki, 64, 1280},
-      {"gfx950:xnack+", nullptr, true, false, 9, 5, 0, ANY, ON, 4, 16, 1, 256, 160 * Ki, 64, 1280},
-      {"gfx950:sramecc-:xnack-", nullptr, true, false, 9, 5, 0, OFF, OFF, 4, 16, 1, 256, 160 * Ki,
+      {"gfx942:sramecc+:xnack+", true, false, 9, 4, 2, ON, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90c", true, true, 9, 0, 12, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90c:xnack-", true, true, 9, 0, 12, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90c:xnack+", true, true, 9, 0, 12, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx950", true, false, 9, 5, 0, ANY, ANY, 4, 16, 1, 256, 160 * Ki, 64, 1280},
+      {"gfx950:sramecc-", true, false, 9, 5, 0, OFF, ANY, 4, 16, 1, 256, 160 * Ki, 64, 1280},
+      {"gfx950:sramecc+", true, false, 9, 5, 0, ON, ANY, 4, 16, 1, 256, 160 * Ki, 64, 1280},
+      {"gfx950:xnack-", true, false, 9, 5, 0, ANY, OFF, 4, 16, 1, 256, 160 * Ki, 64, 1280},
+      {"gfx950:xnack+", true, false, 9, 5, 0, ANY, ON, 4, 16, 1, 256, 160 * Ki, 64, 1280},
+      {"gfx950:sramecc-:xnack-", true, false, 9, 5, 0, OFF, OFF, 4, 16, 1, 256, 160 * Ki,
        64, 1280},
-      {"gfx950:sramecc-:xnack+", nullptr, true, false, 9, 5, 0, OFF, ON, 4, 16, 1, 256, 160 * Ki,
+      {"gfx950:sramecc-:xnack+", true, false, 9, 5, 0, OFF, ON, 4, 16, 1, 256, 160 * Ki,
        64, 1280},
-      {"gfx950:sramecc+:xnack-", nullptr, true, false, 9, 5, 0, ON, OFF, 4, 16, 1, 256, 160 * Ki,
+      {"gfx950:sramecc+:xnack-", true, false, 9, 5, 0, ON, OFF, 4, 16, 1, 256, 160 * Ki,
        64, 1280},
-      {"gfx950:sramecc+:xnack+", nullptr, true, false, 9, 5, 0, ON, ON, 4, 16, 1, 256, 160 * Ki,
+      {"gfx950:sramecc+:xnack+", true, false, 9, 5, 0, ON, ON, 4, 16, 1, 256, 160 * Ki,
        64, 1280},
-      {"gfx9-generic", nullptr, true, true, 9, 0, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx9-generic:xnack-", nullptr, true, true, 9, 0, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx9-generic:xnack+", nullptr, true, true, 9, 0, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx9-4-generic", nullptr, true, true, 9, 4, 0, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx9-4-generic:sramecc-", nullptr, true, true, 9, 4, 0, OFF, ANY, 4, 16, 1, 256, 64 * Ki,
+      {"gfx9-generic", true, true, 9, 0, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-generic:xnack-", true, true, 9, 0, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-generic:xnack+", true, true, 9, 0, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-4-generic", true, true, 9, 4, 0, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-4-generic:sramecc-", true, true, 9, 4, 0, OFF, ANY, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx9-4-generic:sramecc+", nullptr, true, true, 9, 4, 0, ON, ANY, 4, 16, 1, 256, 64 * Ki,
+      {"gfx9-4-generic:sramecc+", true, true, 9, 4, 0, ON, ANY, 4, 16, 1, 256, 64 * Ki,
        32, 512},
-      {"gfx9-4-generic:xnack-", nullptr, true, true, 9, 4, 0, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx9-4-generic:xnack+", nullptr, true, true, 9, 4, 0, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
-      {"gfx9-4-generic:sramecc-:xnack-", nullptr, true, true, 9, 4, 0, OFF, OFF, 4, 16, 1, 256,
+      {"gfx9-4-generic:xnack-", true, true, 9, 4, 0, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-4-generic:xnack+", true, true, 9, 4, 0, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-4-generic:sramecc-:xnack-", true, true, 9, 4, 0, OFF, OFF, 4, 16, 1, 256,
        64 * Ki, 32, 512},
-      {"gfx9-4-generic:sramecc-:xnack+", nullptr, true, true, 9, 4, 0, OFF, ON, 4, 16, 1, 256,
+      {"gfx9-4-generic:sramecc-:xnack+", true, true, 9, 4, 0, OFF, ON, 4, 16, 1, 256,
        64 * Ki, 32, 512},
-      {"gfx9-4-generic:sramecc+:xnack-", nullptr, true, true, 9, 4, 0, ON, OFF, 4, 16, 1, 256,
+      {"gfx9-4-generic:sramecc+:xnack-", true, true, 9, 4, 0, ON, OFF, 4, 16, 1, 256,
        64 * Ki, 32, 512},
-      {"gfx9-4-generic:sramecc+:xnack+", nullptr, true, true, 9, 4, 0, ON, ON, 4, 16, 1, 256,
+      {"gfx9-4-generic:sramecc+:xnack+", true, true, 9, 4, 0, ON, ON, 4, 16, 1, 256,
        64 * Ki, 32, 512},
-      {"gfx1010", "gfx1010", true, true, 10, 1, 0, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1010:xnack-", "gfx1010", true, true, 10, 1, 0, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1010:xnack+", nullptr, true, true, 10, 1, 0, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1011", "gfx1011", true, true, 10, 1, 1, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1011:xnack-", "gfx1011", true, true, 10, 1, 1, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1011:xnack+", nullptr, true, true, 10, 1, 1, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1012", "gfx1012", true, true, 10, 1, 2, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1012:xnack-", "gfx1012", true, true, 10, 1, 2, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1012:xnack+", nullptr, true, true, 10, 1, 2, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1013", "gfx1013", true, false, 10, 1, 3, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1013:xnack-", "gfx1013", true, false, 10, 1, 3, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1013:xnack+", nullptr, true, false, 10, 1, 3, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx10-1-generic", nullptr, true, true, 10, 1, 0, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx10-1-generic:xnack-", nullptr, true, true, 10, 1, 0, NONE, OFF, 2, 32, 1, 256, 64 * Ki,
+      {"gfx1010", true, true, 10, 1, 0, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1010:xnack-", true, true, 10, 1, 0, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1010:xnack+", true, true, 10, 1, 0, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1011", true, true, 10, 1, 1, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1011:xnack-", true, true, 10, 1, 1, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1011:xnack+", true, true, 10, 1, 1, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1012", true, true, 10, 1, 2, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1012:xnack-", true, true, 10, 1, 2, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1012:xnack+", true, true, 10, 1, 2, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1013", true, false, 10, 1, 3, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1013:xnack-", true, false, 10, 1, 3, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1013:xnack+", true, false, 10, 1, 3, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx10-1-generic", true, true, 10, 1, 0, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx10-1-generic:xnack-", true, true, 10, 1, 0, NONE, OFF, 2, 32, 1, 256, 64 * Ki,
        32, 1024},
-      {"gfx10-1-generic:xnack+", nullptr, true, true, 10, 1, 0, NONE, ON, 2, 32, 1, 256, 64 * Ki,
+      {"gfx10-1-generic:xnack+", true, true, 10, 1, 0, NONE, ON, 2, 32, 1, 256, 64 * Ki,
        32, 1024},
-      {"gfx1030", "gfx1030", true, true, 10, 3, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1031", "gfx1031", true, true, 10, 3, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1032", "gfx1032", true, true, 10, 3, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1033", "gfx1033", true, false, 10, 3, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1034", "gfx1034", true, true, 10, 3, 4, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1035", "gfx1035", true, true, 10, 3, 5, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1036", "gfx1036", true, true, 10, 3, 6, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx10-3-generic", nullptr, true, true, 10, 3, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1100", "gfx1100", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1101", "gfx1101", true, true, 11, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1102", "gfx1102", true, true, 11, 0, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1103", "gfx1103", true, true, 11, 0, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1150", "gfx1150", true, true, 11, 5, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1151", "gfx1151", true, true, 11, 5, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1152", "gfx1152", true, true, 11, 5, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1153", "gfx1153", true, true, 11, 5, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx11-generic", nullptr, true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1200", "gfx1200", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx1201", "gfx1201", true, true, 12, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
-      {"gfx12-generic", nullptr, true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1030", true, true, 10, 3, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1031", true, true, 10, 3, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1032", true, true, 10, 3, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1033", true, false, 10, 3, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1034", true, true, 10, 3, 4, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1035", true, true, 10, 3, 5, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1036", true, true, 10, 3, 6, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx10-3-generic", true, true, 10, 3, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1100", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1101", true, true, 11, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1102", true, true, 11, 0, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1103", true, true, 11, 0, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1150", true, true, 11, 5, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1151", true, true, 11, 5, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1152", true, true, 11, 5, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1153", true, true, 11, 5, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx11-generic", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1200", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1201", true, true, 12, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx12-generic", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
   };
   return std::make_pair(std::begin(supportedIsas_), std::end(supportedIsas_));
 }
@@ -1240,7 +1240,7 @@ bool ClBinary::setElfTarget() {
   static const uint32_t Target = 21;
   assert(((0xFFFF8000 & Target) == 0) && "ASIC target ID >= 2^15");
   uint16_t elf_target = static_cast<uint16_t>(0x7FFF & Target);
-  return elfOut()->setTarget(elf_target, amd::Elf::CAL_PLATFORM);
+  return elfOut()->setTarget(elf_target);
 }
 
 void ClBinary::init(amd::option::Options* optionsObj) {
@@ -1270,37 +1270,6 @@ void ClBinary::init(amd::option::Options* optionsObj) {
     flags_ = (flags_ & (~BinaryASMask));
     flags_ |= ((optionsObj->oVariables->BinAS) ? BinarySaveAS : BinaryNoSaveAS);
   }
-}
-
-bool ClBinary::isRecompilable(std::string& llvmBinary, amd::Elf::ElfPlatform thePlatform) {
-  /* It is recompilable if there is llvmir that was generated for
-     the same platform (CPU or GPU) and with the same bitness.
-
-     Note: the bitness has been checked in initClBinary(), no need
-           to check it here.
-   */
-  if (llvmBinary.empty()) {
-    DevLogError("LLVM Binary string is empty \n");
-    return false;
-  }
-
-  uint16_t elf_target;
-  amd::Elf::ElfPlatform platform;
-  if (elfIn()->getTarget(elf_target, platform)) {
-    if (platform == thePlatform) {
-      return true;
-    }
-    if ((platform == amd::Elf::COMPLIB_PLATFORM) &&
-        (((thePlatform == amd::Elf::CAL_PLATFORM) &&
-          ((elf_target == (uint16_t)EM_HSAIL) || (elf_target == (uint16_t)EM_HSAIL_64))) ||
-         ((thePlatform == amd::Elf::CPU_PLATFORM) &&
-          ((elf_target == (uint16_t)EM_386) || (elf_target == (uint16_t)EM_X86_64))))) {
-      return true;
-    }
-  }
-
-  DevLogPrintfError("LLVM_Binary: %s is not recompilable \n", llvmBinary.c_str());
-  return false;
 }
 
 void ClBinary::release() {
