@@ -269,3 +269,51 @@ TEST_CASE("Unit_hipMemset_2AsyncOperations") {
   HIP_CHECK(hipFree(p2));
   HIP_CHECK(hipStreamDestroy(s));
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemset while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemset.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipMemset_Capture") {
+  const size_t N = 1024;
+  void* dst = nullptr;
+  HIP_CHECK(hipMalloc(&dst, N));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemset(dst, 0xAB, N), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFree(dst));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemsetD8 while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemset.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipMemsetD8_Capture") {
+  const size_t N = 512;
+  void* dst = nullptr;
+  HIP_CHECK(hipMalloc(&dst, N  * sizeof(uint8_t)));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemsetD8(dst, 0xCD, N), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFree(dst));
+}

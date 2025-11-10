@@ -195,3 +195,27 @@ TEST_CASE("Unit_hipMemsetD16_KernelBuffer") {
 
   REQUIRE(result == true);
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemsetD16 while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemsetD16.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipMemsetD16_Capture") {
+  const size_t N = 256;
+  void* dst = nullptr;
+  HIP_CHECK(hipMalloc(&dst, N * sizeof(uint16_t)));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemsetD16(dst, 0xAB, N), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFree(dst));
+}
