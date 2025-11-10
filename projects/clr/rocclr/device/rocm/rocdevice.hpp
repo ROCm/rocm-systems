@@ -148,7 +148,7 @@ class NullDevice : public amd::Device {
 
   const Settings& settings() const { return static_cast<Settings&>(*settings_); }
 
-  //! Construct an HSAIL program object from the ELF assuming it is valid
+  //! Construct an device program object from the ELF assuming it is valid
   device::Program* createProgram(amd::Program& owner,
                                  amd::option::Options* options = nullptr) override;
 
@@ -373,7 +373,7 @@ class Device : public NullDevice {
   //! Instantiate a new virtual device
   virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr);
 
-  //! Construct an HSAIL program object from the ELF assuming it is valid
+  //! Construct an device program object from the ELF assuming it is valid
   virtual device::Program* createProgram(amd::Program& owner,
                                          amd::option::Options* options = nullptr);
 

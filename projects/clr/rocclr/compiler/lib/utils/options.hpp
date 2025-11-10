@@ -25,7 +25,6 @@
 #include <vector>
 #include <cstdio>
 #include "top.hpp"
-#include "library.hpp"
 #include <cassert>
 #include <sstream>
 #ifdef __linux__
@@ -316,7 +315,6 @@ class Options {
   void setDumpFileName(const char* val);
 
  public:
-  LibrarySelector libraryType_;
   std::string sourceFileName_;
 };
 
