@@ -964,7 +964,22 @@ def patch_args(data):
     return data
 
 
-def get_args(cmd_args, inp_args, filter=[]):
+def get_args(cmd_args, inp_args, filter=[], require_in_both=False):
+    """
+    Merges key and values in dict cmd_args and inp_args and returns the merged dict. This is typically used to combine
+    arguments from multiple sources (e.g. command line and an input file).
+
+    If a key has conflicting values in cmd_args and inp_args, a RuntimeError is thrown.
+    If a filter is provided (as a list of regex strings), only keys matching at least one filter regex will throw a
+    RuntimeError for conflicting values. If the key with conflicting values does not match a filter, a warning is
+    generated instead, and the value from cmd_args is used in the merged dict.
+    If require_in_both is True, all keys must be present in both cmd_args and inp_args or a RuntimeError is thrown.
+    This is typically used when arguments must match exactly.
+    If a filter is provided and require_in_both is True, only keys matching at least one filter regex will throw a
+    RuntimeError if they are not present in both cmd_args and inp_args. If the key does not match a filter, a warning
+    is generated instead, and the unique key is used in the merged dict.
+    """
+
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):
             raise TypeError(
@@ -994,38 +1009,49 @@ def get_args(cmd_args, inp_args, filter=[]):
             return getattr(inp_args, key)
         return None
 
+    def is_filtered(key):
+        if filter:
+            for fitr in filter:
+                import re
+
+                if re.match(fitr, key):
+                    return True
+        else:
+            # if there are no filters, all keys match
+            return True
+        return False
+
     for itr in set(cmd_keys + inp_keys):
+        # check for conflicting args between the two argument lists
         if (
             has_set_attr(cmd_args, itr)
             and has_set_attr(inp_args, itr)
             and getattr(cmd_args, itr) != getattr(inp_args, itr)
         ):
-            should_raise = True
-            if filter:
-                is_filtered = False
-                for fitr in filter:
-                    import re
-
-                    if re.match(fitr, itr):
-                        is_filtered = True
-                        break
-
-                if not is_filtered:
-                    warning(
-                        f"Option '{itr}' has been modified. {itr}={getattr(cmd_args, itr)} (previously {itr}={getattr(inp_args, itr)})"
-                    )
-                    should_raise = False
-
-            # should raise error if not in filter list
-            if should_raise:
+            if is_filtered(itr):
                 raise RuntimeError(
-                    f"conflicting value for {itr} : {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
+                    f"Option '{itr}' has conflicting values: {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
                 )
             else:
-                # has preference towards command line args
-                data[itr] = get_attr(itr)
-        else:
-            data[itr] = get_attr(itr)
+                warning(
+                    f"Option '{itr}' has been modified. {itr}={getattr(cmd_args, itr)} (previously {itr}={getattr(inp_args, itr)})"
+                )
+
+        # if require_in_both was set, check for keys unique to each argument list
+        if require_in_both and (
+            has_set_attr(cmd_args, itr) != has_set_attr(inp_args, itr)
+        ):
+            if is_filtered(itr):
+                raise RuntimeError(
+                    f"Option '{itr}' was only present in one argument list : {getattr(cmd_args, itr, None)} vs {getattr(inp_args, itr, None)}"
+                )
+            else:
+                warning(
+                    f"Option '{itr}' was only present in one argument list, but will be used : {itr}={get_attr(itr)}"
+                )
+
+        # has preference towards command line args
+        data[itr] = get_attr(itr)
 
     return patch_args(dotdict(data))
 
@@ -1748,22 +1774,36 @@ def main(argv=None):
         args = get_args(cmd_args, inp_args[0])
 
         if args.pid:
+            # For reattachment support, args must be the same as previous rocprofv3 sessions
+            # Store args in a temporary file for future sessions. If the temporary file already exists,
+            # compare those args and error out if the tracing options are not the same.
             import pickle
 
             if args.collection_period:
                 fatal_error("--collection-period is not compatible with attach mode")
 
             fname = f"/tmp/rocprofv3_attach_{args.pid}.pkl"
-            if os.path.exists(fname):
+            if not os.path.exists(fname):
+                # if this is the first attachment, write the temp configuration file for future attachments
+                with open(fname, "wb") as ofs:
+                    if args.log_level in ("config", "info", "trace"):
+                        print(f"Saving attach configuration to {fname}...")
+                    pickle.dump(args, ofs)
+            else:
+                # if this is not the first attachment
                 # load the configuration from the previous attachment
                 with open(fname, "rb") as ifs:
                     if args.log_level in ("config", "info", "trace"):
                         print(f"Loading attach configuration from {fname}...")
                     prev_args = pickle.load(ifs)
 
+                # get_args will compare the arguments used to the previous attachments's arguments
+                # arguments matching the filter will throw an error if they are different
                 args = get_args(
                     args,
                     dotdict(prev_args),
+                    # when updating this filter, please also update documentation on reattachment
+                    # in using-rocprofv3-process-attachment.rst
                     filter=[
                         ".*_trace",
                         "^pc_sampling_.*$",
@@ -1771,13 +1811,8 @@ def main(argv=None):
                         "^(pmc|pmc_groups|output_config|extra_counters)$",
                         "^kernel_(include_regex|exclude_regex|iteration_range)$",
                     ],
+                    require_in_both=True,
                 )
-
-            # write the configuration for future attachments
-            with open(fname, "wb") as ofs:
-                if args.log_level in ("config", "info", "trace"):
-                    print(f"Saving attach configuration to {fname}...")
-                pickle.dump(args, ofs)
 
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
