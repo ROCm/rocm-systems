@@ -17,10 +17,45 @@ configure_file(smallkernel.bin smallkernel.bin COPYONLY)
 configure_file(hipcc_output.s hipcc_output.s COPYONLY)
 
 install(
-    FILES ${CMAKE_CURRENT_BINARY_DIR}/smallkernel.bin
-          ${CMAKE_CURRENT_BINARY_DIR}/hipcc_output.s
+    FILES ${CMAKE_CURRENT_BINARY_DIR}/hipcc_output.s
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin
     COMPONENT tests)
+
+find_program(
+    ROCM_LLVM_STRIP
+    NAMES llvm-strip
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES llvm/bin bin)
+
+set(_SMALLBIN "${CMAKE_CURRENT_BINARY_DIR}/smallkernel.bin")
+set(_SMALLBIN_STRIPPED "${CMAKE_CURRENT_BINARY_DIR}/smallkernel.bin.stripped")
+
+if(ROCM_LLVM_STRIP)
+    add_custom_command(
+        OUTPUT "${_SMALLBIN_STRIPPED}"
+        COMMAND "${ROCM_LLVM_STRIP}" -s "${_SMALLBIN}" -o "${_SMALLBIN_STRIPPED}"
+        DEPENDS "${_SMALLBIN}"
+        COMMENT
+            "Stripping ALL symbols from smallkernel.bin so CPack won't try to create a dbgsym"
+        VERBATIM)
+
+    add_custom_target(strip_smallkernel ALL DEPENDS "${_SMALLBIN_STRIPPED}")
+
+    install(
+        FILES "${_SMALLBIN_STRIPPED}"
+        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin"
+        RENAME smallkernel.bin
+        COMPONENT tests)
+else()
+    message(
+        WARNING
+            "llvm-strip not found; installing unmodified smallkernel.bin (CPack may fail on debuginfo)."
+        )
+    install(
+        FILES "${_SMALLBIN}"
+        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin"
+        COMPONENT tests)
+endif()
 
 target_link_libraries(
     codeobj-library-tests
