@@ -2029,7 +2029,7 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
   void* deviceMemory = nullptr;
   uint32_t memFlags = 0;
   if (memSegment == kIoMemory) {
-    memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+    memFlags |= 7;
   }
 
   hsa_status_t status = Hsa::memory_lock_to_pool(
@@ -2141,7 +2141,7 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags) const 
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
   if (flags.uncached_ && isa().versionMajor() == 12) {
-    hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+    hsa_mem_flags |= 7;
   }
 
   void* ptr = nullptr;
