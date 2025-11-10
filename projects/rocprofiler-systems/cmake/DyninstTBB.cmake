@@ -43,11 +43,7 @@ endif()
 set(TBB_USE_DEBUG_BUILD OFF CACHE BOOL "Use debug versions of TBB libraries")
 
 # Minimum version of TBB (assumes a dotted-decimal format: YYYY.XX)
-if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
-    set(_tbb_min_version 2019.7)
-else()
-    set(_tbb_min_version 2018.6)
-endif()
+set(_tbb_min_version 2018.6)
 
 set(TBB_MIN_VERSION
     ${_tbb_min_version}
