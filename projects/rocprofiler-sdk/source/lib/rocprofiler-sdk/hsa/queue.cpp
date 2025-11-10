@@ -120,9 +120,14 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
     auto& queue_info_session = *shared_ptr_info;
 
-    auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
+    auto dispatch_time = tracing::profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
 
-    kernel_dispatch::dispatch_complete(queue_info_session, dispatch_time);
+    if(!queue_info_session.is_blit_kernel)
+    {
+        dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
+
+        kernel_dispatch::dispatch_complete(queue_info_session, dispatch_time);
+    }
 
     // Calls our internal callbacks to callers who need to be notified post
     // kernel execution.
@@ -272,7 +277,11 @@ WriteInterceptor(const void* packets,
         auto        packet_type     = bit_extract(original_packet.header,
                                        HSA_PACKET_HEADER_TYPE,
                                        HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
-        if(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+        bool        is_blit_kernel  = packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                              original_packet.workgroup_size_x > 0 &&
+                              original_packet.workgroup_size_y > 0 &&
+                              original_packet.workgroup_size_z > 0;
+        if(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH && !is_blit_kernel)
         {
             transformed_packets.emplace_back(packets_arr[i]);
             continue;
@@ -281,7 +290,7 @@ WriteInterceptor(const void* packets,
         auto*                    corr_id      = context::get_latest_correlation_id();
         context::correlation_id* _corr_id_pop = nullptr;
 
-        if(!corr_id)
+        if(!corr_id && !is_blit_kernel)
         {
             constexpr auto ref_count = 1;
             corr_id                  = context::correlation_tracing_service::construct(ref_count);
@@ -289,8 +298,11 @@ WriteInterceptor(const void* packets,
         }
 
         // increase the reference count to denote that this correlation id is being used in a kernel
-        corr_id->add_ref_count();
-        corr_id->add_kern_count();
+        if(!is_blit_kernel)
+        {
+            corr_id->add_ref_count();
+            corr_id->add_kern_count();
+        }
 
         auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
         auto user_data        = rocprofiler_user_data_t{.value = 0};
@@ -307,12 +319,15 @@ WriteInterceptor(const void* packets,
             }
         }};
 
-        tracing::populate_external_correlation_ids(
-            tracing_data_v.external_correlation_ids,
-            thr_id,
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
-            ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
-            internal_corr_id);
+        if(!is_blit_kernel)
+        {
+            tracing::populate_external_correlation_ids(
+                tracing_data_v.external_correlation_ids,
+                thr_id,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+                ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                internal_corr_id);
+        }
 
         queue.async_started();
 
@@ -334,7 +349,7 @@ WriteInterceptor(const void* packets,
         static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
                       "failed to compute size field based on offset of reserved_padding field");
 
-        auto dispatch_id     = ++sequence_counter;
+        auto dispatch_id     = is_blit_kernel ? 0 : ++sequence_counter;
         auto callback_record = callback_record_t{
             sizeof(callback_record_t),
             rocprofiler_timestamp_t{0},
@@ -354,25 +369,27 @@ WriteInterceptor(const void* packets,
                                                 kernel_pkt.kernel_dispatch.grid_size_y,
                                                 kernel_pkt.kernel_dispatch.grid_size_z},
                 .reserved_padding = {0}}};
-
+        if(!is_blit_kernel)
         {
-            auto tracer_data = callback_record;
-            tracing::execute_phase_enter_callbacks(tracing_data_v.callback_contexts,
-                                                   thr_id,
-                                                   internal_corr_id,
-                                                   tracing_data_v.external_correlation_ids,
-                                                   ancestor_corr_id,
-                                                   ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                                                   ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
-                                                   tracer_data);
-        }
+            {
+                auto tracer_data = callback_record;
+                tracing::execute_phase_enter_callbacks(tracing_data_v.callback_contexts,
+                                                       thr_id,
+                                                       internal_corr_id,
+                                                       tracing_data_v.external_correlation_ids,
+                                                       ancestor_corr_id,
+                                                       ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                                       ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                                                       tracer_data);
+            }
 
-        // map all the external correlation ids (after enqueue enter phase) for all the contexts
-        // captured by the info session
-        tracing::update_external_correlation_ids(
-            tracing_data_v.external_correlation_ids,
-            thr_id,
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
+            // map all the external correlation ids (after enqueue enter phase) for all the contexts
+            // captured by the info session
+            tracing::update_external_correlation_ids(
+                tracing_data_v.external_correlation_ids,
+                thr_id,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
+        }
 
         // If there is a lot of contention for HSA signals, then schedule out the thread
         if(get_balanced_signal_slots().fetch_sub(1) <= 0)
@@ -475,7 +492,7 @@ WriteInterceptor(const void* packets,
             get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
         }
 
-        ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+        ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH && !is_blit_kernel)
             << "get_kernel_id below might need to be updated";
 
         // Enqueue the signal into the handler. Will call completed_cb when
@@ -492,19 +509,23 @@ WriteInterceptor(const void* packets,
                                                      .kernel_pkt       = kernel_pkt,
                                                      .callback_record  = callback_record,
                                                      .tracing_data     = tracing_data_v,
-                                                     .is_serialized    = bRequest_Serialize};
+                                                     .is_serialized    = bRequest_Serialize,
+                                                     .is_blit_kernel   = is_blit_kernel};
 
             auto shared = std::make_shared<Queue::queue_info_session_t>(std::move(info_session));
 
             queue.signal_async_handler(completion_signal,
                                        new std::shared_ptr<Queue::queue_info_session_t>(shared));
 
-            auto tracer_data = callback_record;
-            tracing::execute_phase_exit_callbacks(tracing_data_v.callback_contexts,
-                                                  tracing_data_v.external_correlation_ids,
-                                                  ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                                                  ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
-                                                  tracer_data);
+            if(!is_blit_kernel)
+            {
+                auto tracer_data = callback_record;
+                tracing::execute_phase_exit_callbacks(tracing_data_v.callback_contexts,
+                                                      tracing_data_v.external_correlation_ids,
+                                                      ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                                      ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                                                      tracer_data);
+            }
         }
     }
 

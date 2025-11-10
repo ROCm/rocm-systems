@@ -65,6 +65,7 @@ struct queue_info_session
     callback_record_t        callback_record  = {};
     tracing::tracing_data    tracing_data     = {};
     bool                     is_serialized    = false;
+    bool                     is_blit_kernel   = false;
 };
 }  // namespace hsa
 }  // namespace rocprofiler
