@@ -1,8 +1,15 @@
+# Minimum required c++ standard is 17 for compilation
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # Set cmake_prefix_path for searching, ROCM_PATH if avail otherwise default to general rocm install path
 set(CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 
 set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
-if((CMAKE_HIP_COMPILER_ID STREQUAL "Clang") OR (CMAKE_HIP_COMPILER_ID STREQUAL "ROCMClang"))
+if(
+    (CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
+    OR (CMAKE_HIP_COMPILER_ID STREQUAL "ROCMClang")
+)
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
 else()
     message(
