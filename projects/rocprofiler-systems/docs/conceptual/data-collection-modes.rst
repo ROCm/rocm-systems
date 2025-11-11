@@ -149,7 +149,7 @@ Statistical sampling of the Fibonacci function
 Overview of Profiling Modes
 ----------------------------
 
-ROCm Systems Profiler provides several complementary profiling approaches that can be used independently or in combination. The default mode is **tracing**. Profiling modes are controlled via the ``ROCPROFSYS_MODE`` environment variable, which determines the active backends and features.
+ROCm Systems Profiler provides several complementary profiling approaches that can be used independently or in combination. Profiling modes are controlled via the ``ROCPROFSYS_MODE`` environment variable, which determines the active backends and features.
 
 Available values for ``ROCPROFSYS_MODE``: `trace, sampling, causal, coverage`
 
@@ -176,7 +176,7 @@ Primary Collection Modes
 Trace Mode (Default)
 --------------------
 
-Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This is the default mode but can also be enabled via ``ROCPROFSYS_TRACE=true`` or with ``ROCPROFSYS_MODE``.
+Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This mode can be enabled via ``ROCPROFSYS_TRACE=true`` or with ``ROCPROFSYS_MODE=trace`` setting.
 
 Additional configuration options to control the tracing behavior include:
 
@@ -185,10 +185,10 @@ Additional configuration options to control the tracing behavior include:
 - ``ROCPROFSYS_TRACE_PERIODS`` (``--trace-periods``): Specify multiple delay/duration periods in the format ``<DELAY>:<DURATION>``, ``<DELAY>:<DURATION>:<REPEAT>``, or ``<DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>``.
 - ``ROCPROFSYS_TRACE_PERIOD_CLOCK_ID`` (``--trace-clock-id``): Clock type for timing (``realtime``, ``monotonic``, ``cputime``, etc.).
 
-Profiling Mode
+Profile Mode
 --------------
 
-Profiling mode generates high-level summary profiles with statistical aggregations (mean, min, max, stddev). This mode  can be enable via ``ROCPROFSYS_PROFILE=true``. This mode uses the **Timemory** backend. When tracing is enabled profiling is turned off by default and vice versa. However both modes can be turned on at the same time.
+Profile mode generates high-level summary profiles with statistical aggregations (mean, min, max, stddev). This mode  can be enable via ``ROCPROFSYS_PROFILE=true``. This mode uses the **Timemory** backend. When tracing is enabled profiling is turned off by default and vice versa. However both modes can be turned on at the same time.
 
 By default, only wall-clock timing is collected. Additional metrics can be configured via ``ROCPROFSYS_TIMEMORY_COMPONENTS`` which can enables hardware counters (via PAPI), CPU, memory, and system metrics. View available components with: ``rocprof-sys-avail --components --description``.
 
@@ -238,8 +238,10 @@ Enabling Sampling:
 
 1. Use ``rocprof-sys-sample`` (auto-enables sampling).
 2. Set ``ROCPROFSYS_USE_SAMPLING=ON``.
-3. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``.
-4. Set ``ROCPROFSYS_MODE=sampling``.
+3. Set ``ROCPROFSYS_MODE=sampling``. 
+4. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``. 
+5. Use ``-M sampling`` or ``--mode sampling`` with ``rocprof-sys-instrument``. 
+Use of ``rocprof-sys-sample`` is **recommended** over ``rocprof-sys-instrument -M sampling`` when binary instrumentation is not necessary. Please refer this section for more details: `Sampling the call stack <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/sampling-call-stack.rst?plain=1#L43>`_ .
 
 Causal Mode
 -----------

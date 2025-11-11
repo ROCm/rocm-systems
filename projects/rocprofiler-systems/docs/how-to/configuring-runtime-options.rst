@@ -190,17 +190,21 @@ There are two distinct approaches for collecting PAPI-based hardware counters, e
 
 1. Instrumentation-based collection: Uses function instrumentation system to collect PAPI counters at function entry and exit points. This works with profiling mode via ``ROCPROFSYS_TIMEMORY_COMPONENTS``:
 
+**Example 1: **Using ``papi_array`` for a fixed list of events**
+
 .. code-block:: shell   
    
    # Enable profiling mode (required)
    export ROCPROFSYS_PROFILE=ON
 
-   # Specify PAPI components in the timemory component list
+   # Specify papi_array in the timemory component list
    export ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock,papi_array"
 
    # Specify which PAPI events to collect
    export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
 
+
+**Example 2: **Using ``papi_vector`` for dynamically allocated array of events**
 
 .. code-block:: shell 
    
