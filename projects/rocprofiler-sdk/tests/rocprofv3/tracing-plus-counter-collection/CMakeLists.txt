@@ -25,8 +25,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;application-replay"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection
-    UNSTABLE)
+    FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection)
 
 foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
     rocprofiler_add_integration_validate_test(
@@ -46,8 +45,7 @@ foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
              ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_counter_collection.csv
         TIMEOUT 45
         LABELS "integration-tests;application-replay"
-        FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection
-        UNSTABLE)
+        FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection)
 endforeach()
 
 set(cmdl_single "GRBM_COUNT")
@@ -65,8 +63,7 @@ foreach(_GROUP "single" "multiple")
         DEPENDS transpose
         TIMEOUT 45
         PRELOAD "${PRELOAD_ENV}"
-        FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP}
-        UNSTABLE)
+        FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
 
     set(_TEST_OUTPUT_PREFIX
         ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/cmdl/${_GROUP})
@@ -88,6 +85,5 @@ foreach(_GROUP "single" "multiple")
              ${_TEST_OUTPUT_PREFIX}_counter_collection.csv
         TIMEOUT 45
         LABELS "integration-tests"
-        FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP}
-        UNSTABLE)
+        FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
 endforeach()
