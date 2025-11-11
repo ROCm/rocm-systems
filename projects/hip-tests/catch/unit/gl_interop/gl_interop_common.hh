@@ -34,7 +34,7 @@ THE SOFTWARE.
 
 #include <GL/freeglut.h>
 
-#ifdef __linux__
+#ifdef USE_EGL
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #endif
@@ -137,7 +137,7 @@ class GLUTContextScopeGuard : public IContextScopeGuard {
   }
 };
 
-#ifdef __linux__
+#ifdef USE_EGL
 class EGLContextScopeGuard : public IContextScopeGuard {
  public:
   EGLContextScopeGuard() {
@@ -234,7 +234,7 @@ class GLContextScopeGuard {
 
     if (val_str.empty() || val_str == "GLUT") {
       gl_context_ = std::make_unique<GLUTContextScopeGuard>();
-#ifdef __linux__
+#ifdef USE_EGL
     } else if (val_str == "EGL") {
       gl_context_ = std::make_unique<EGLContextScopeGuard>();
 #endif

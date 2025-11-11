@@ -60,6 +60,7 @@ target_link_libraries(GLInteropTest OpenGL::GL GLUT::GLUT)
 
 if (OpenGL_EGL_FOUND)
   target_link_libraries(GLInteropTest OpenGL::EGL)
+  target_compile_definitions(GLInteropTest PRIVATE USE_EGL)
 endif()
 
 if (GLEW_FOUND)
