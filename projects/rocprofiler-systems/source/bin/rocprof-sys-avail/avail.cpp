@@ -162,6 +162,9 @@ main(int argc, char** argv)
     _category_options.emplace("hw_counters::CPU");
     _category_options.emplace("hw_counters::GPU");
 
+    // Remove unused TIMEMORY tuples
+    _category_options.erase("component::tpls::openmp");
+
     array_t<bool, TOTAL> options    = { false, false, false, false, false, false, false };
     array_t<string_t, TOTAL> fields = {};
     array_t<bool, TOTAL>     use_mark = {};
@@ -267,6 +270,108 @@ main(int argc, char** argv)
         .action([_category_options](parser_t&) {
             std::cout << "Categories:\n";
             for(const auto& itr : _category_options)
+                std::cout << "    " << itr << "\n";
+        });
+
+    parser
+        .add_argument({ "--list-operations" },
+                      "List available operations for a specific ROCm domain, or "
+                      "list all available domains if no argument provided")
+        .max_count(1)
+        .dtype("string")
+        .action([](parser_t& p) {
+            auto _settings = tim::settings::shared_instance();
+
+            // Helper to extract domain name from full env var name
+            auto _extract_domain = [](const std::string& _name) -> std::string {
+                // Remove "ROCPROFSYS_ROCM_" prefix and "_OPERATIONS" suffix
+                const std::string _prefix = "ROCPROFSYS_ROCM_";
+                const std::string _suffix = "_OPERATIONS";
+                if(_name.find(_prefix) == 0 &&
+                   _name.rfind(_suffix) == _name.length() - _suffix.length())
+                {
+                    auto _domain =
+                        _name.substr(_prefix.length(), _name.length() - _prefix.length() -
+                                                           _suffix.length());
+                    // Convert to lowercase
+                    std::transform(_domain.begin(), _domain.end(), _domain.begin(),
+                                   ::tolower);
+                    return _domain;
+                }
+                return _name;
+            };
+
+            // If no argument provided, list all domain names
+            if(p.get_count("list-operations") == 0)
+            {
+                std::cout << "Available ROCm domains with operations:\n";
+                std::vector<std::string> _domains;
+
+                for(const auto& itr : *_settings)
+                {
+                    auto _name = itr.second->get_env_name();
+                    // Match settings that end with _OPERATIONS (but not _EXCLUDE or
+                    // _ANNOTATE_BACKTRACE to avoid duplicates)
+                    if(_name.find("_OPERATIONS") != std::string::npos &&
+                       _name.find("_OPERATIONS_EXCLUDE") == std::string::npos &&
+                       _name.find("_OPERATIONS_ANNOTATE_BACKTRACE") == std::string::npos)
+                    {
+                        _domains.push_back(_extract_domain(_name));
+                    }
+                }
+
+                std::sort(_domains.begin(), _domains.end());
+                for(const auto& domain : _domains)
+                    std::cout << "    " << domain << "\n";
+
+                std::cout << "\nUse '--list-operations <domain_name>' to see operations "
+                             "for a specific domain.\n";
+                return;
+            }
+
+            // If argument provided, list filtered operations for the given domain
+            auto _domain_name_input = p.get<std::string>("list-operations");
+
+            // Lowercase for display, uppercase for env var lookup
+            auto _domain_name_lower = _domain_name_input;
+            std::transform(_domain_name_lower.begin(), _domain_name_lower.end(),
+                           _domain_name_lower.begin(), ::tolower);
+            auto _domain_name_upper = _domain_name_input;
+            std::transform(_domain_name_upper.begin(), _domain_name_upper.end(),
+                           _domain_name_upper.begin(), ::toupper);
+
+            // Reconstruct full env var name
+            auto _setting_name =
+                std::string("ROCPROFSYS_ROCM_") + _domain_name_upper + "_OPERATIONS";
+            auto _sitr = _settings->find(_setting_name);
+
+            if(_sitr == _settings->end())
+            {
+                std::cerr << "Error: Domain '" << _domain_name_lower << "' not found.\n";
+                std::cerr << "Use 'rocprof-sys-avail --list-operations' "
+                          << "to see available domains.\n";
+                return;
+            }
+
+            auto _choices = _sitr->second->get_choices();
+            if(_choices.empty())
+            {
+                std::cerr << "Domain '" << _domain_name_lower
+                          << "' has no operation choices.\n";
+                return;
+            }
+
+            // Filter operations based on exclusion list
+            filter_operations(_setting_name, _choices);
+
+            if(_choices.empty())
+            {
+                std::cerr << "Domain '" << _domain_name_lower << "' has no operations.\n";
+                return;
+            }
+
+            std::cout << "Operations for " << _domain_name_lower << ":\n";
+            for(const auto& itr : _choices)
                 std::cout << "    " << itr << "\n";
         });
     parser.add_argument({ "--list-keys" }, "List the output keys")
@@ -567,7 +672,8 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    if(parser.exists("list-categories") || parser.exists("list-keys"))
+    if(parser.exists("list-categories") || parser.exists("list-keys") ||
+       parser.exists("list-operations"))
         return EXIT_SUCCESS;
 
     std::string _pos_regex{};

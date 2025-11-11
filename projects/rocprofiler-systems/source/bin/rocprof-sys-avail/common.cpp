@@ -26,8 +26,11 @@
 #include <timemory/settings/settings.hpp>
 #include <timemory/variadic/macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <sys/stat.h>
+#include <unordered_map>
+#include <unordered_set>
 
 using settings = ::tim::settings;
 
@@ -393,6 +396,49 @@ file_exists(const std::string& _fname)
     if(stat(_fname.c_str(), &_buffer) == 0)
         return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
     return false;
+}
+
+//--------------------------------------------------------------------------------------//
+
+void
+filter_operations(const std::string& env_var_name, std::vector<std::string>& choices)
+{
+    // Define operations to exclude for each environment variable that supports operations
+    // The exclusions apply to _OPERATIONS, _OPERATIONS_EXCLUDE, and
+    // _OPERATIONS_ANNOTATE_BACKTRACE
+    static const std::unordered_map<std::string, std::unordered_set<std::string>>
+        exclusions = {
+            { "ROCPROFSYS_ROCM_OMPT_OPERATIONS",
+              { "omp_callback_functions", "omp_thread_end" } },
+        };
+
+    std::string      base_name     = env_var_name;
+    constexpr size_t exclude_len   = 8;   // "_EXCLUDE"
+    constexpr size_t backtrace_len = 19;  // "_ANNOTATE_BACKTRACE"
+
+    const size_t len = env_var_name.size();
+
+    if(len > exclude_len &&
+       env_var_name.compare(len - exclude_len, exclude_len, "_EXCLUDE") == 0)
+    {
+        base_name = env_var_name.substr(0, len - exclude_len);
+    }
+    else if(len > backtrace_len &&
+            env_var_name.compare(len - backtrace_len, backtrace_len,
+                                 "_ANNOTATE_BACKTRACE") == 0)
+    {
+        base_name = env_var_name.substr(0, len - backtrace_len);
+    }
+
+    auto it = exclusions.find(base_name);
+    if(it != exclusions.end())
+    {
+        choices.erase(std::remove_if(choices.begin(), choices.end(),
+                                     [&it](const std::string& op) {
+                                         return it->second.count(op) > 0;
+                                     }),
+                      choices.end());
+    }
 }
 
 //--------------------------------------------------------------------------------------//

@@ -148,6 +148,9 @@ remove(std::string inp, const std::set<std::string>& entries);
 bool
 file_exists(const std::string&);
 
+void
+filter_operations(const std::string& env_var_name, std::vector<std::string>& choices);
+
 // control debug printf statements
 #define errprintf(LEVEL, ...)                                                            \
     {                                                                                    \
