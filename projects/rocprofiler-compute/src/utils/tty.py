@@ -155,9 +155,20 @@ def is_roofline_shown(
     ):
         return False
 
-    print(f"\n{'=' * 80}", file=output)
+    # Check if any run has valid roofline data (already validated in analysis_base.py)
+    # This check determines whether to display roofline section in the output report
+    has_valid_roofline_data = any(
+        hasattr(workload, "roofline_peaks") and not workload.roofline_peaks.empty
+        for workload in runs.values()
+    )
+
+    if not has_valid_roofline_data:
+        # roofline_peaks is empty, meaning CSV validation failed earlier.
+        # Skip displaying this section entirely (error already logged).
+        return False
+
+    print(f"\n{'-' * 80}", file=output)
     print("4. Roofline", file=output)
-    print("=" * 80, file=output)
 
     # Display roofline metrics for each run
     for run_path, workload in runs.items():
@@ -166,7 +177,6 @@ def is_roofline_shown(
                 "\n(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points",
                 file=output,
             )
-            print("-" * 80, file=output)
 
             kernel_top_df = workload.dfs.get(1, pd.DataFrame())
             if not kernel_top_df.empty:
@@ -490,9 +500,10 @@ def show_all(
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        if panel_id == 400 and not is_roofline_shown(
-            args, runs, output, panel, roof_plot, hidden_cols
-        ):
+        # Handle roofline panel (400) with custom display logic, then skip normal
+        # table processing to prevent duplicate printing.
+        if panel_id == 400:
+            is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
             continue
 
         panel_content = ""  # store content of all data_source from one panel

@@ -46,6 +46,7 @@ from utils.logger import (
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
+from utils.roofline_calc import validate_roofline_csv
 from utils.specs import MachineSpecs
 from utils.utils import (
     METRIC_ID_RE,
@@ -688,6 +689,17 @@ class OmniSoC_Base:
             )
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
                 mibench(self.get_args(), self._mspec)
+
+            # Validate roofline.csv before post-processing
+            is_valid, error_msg = validate_roofline_csv(self.get_args().path)
+            if not is_valid:
+                console_error(
+                    "roofline",
+                    f"Roofline post-processing skipped: {error_msg}",
+                    exit=False,
+                )
+                return
+
             self.roofline_obj.post_processing()
 
     @abstractmethod
