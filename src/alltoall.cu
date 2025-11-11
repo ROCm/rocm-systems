@@ -48,7 +48,7 @@ void AlltoAllGetBw(size_t count, int typesize, double sec, double* algBw, double
 }
 
 testResult_t AlltoAllRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, void* bias = nullptr) {
-  NCCLCHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
+  NCCLCHECK(ncclAlltoAll(sendbuff, recvbuff, count, type, comm, stream));
   return testSuccess;
 }
 
