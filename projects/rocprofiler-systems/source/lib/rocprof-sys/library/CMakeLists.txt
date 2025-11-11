@@ -11,6 +11,7 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/thread_deleter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_info.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tracing.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_ainic.cpp
 )
 
 set(library_headers
@@ -28,6 +29,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/thread_deleter.hpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_info.hpp
     ${CMAKE_CURRENT_LIST_DIR}/tracing.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_ainic.hpp
 )
 
 target_sources(

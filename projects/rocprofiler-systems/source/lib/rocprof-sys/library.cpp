@@ -493,6 +493,9 @@ rocprofsys_init_library_hidden()
 extern "C" bool
 rocprofsys_init_tooling_hidden(void)
 {
+
+fprintf(stderr, "aleks: enter rocprofsys_init_tooling_hidden: %s:%d\n", __FILE__, __LINE__);
+    
     if(get_env("ROCPROFSYS_MONOCHROME", false, false)) tim::log::monochrome() = true;
 
     if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true))

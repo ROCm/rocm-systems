@@ -25,6 +25,7 @@
 #include "core/debug.hpp"
 #include "library/amd_smi.hpp"
 #include "library/cpu_freq.hpp"
+#include "library/amd_ainic.hpp"
 #include "library/runtime.hpp"
 
 #include <memory>
@@ -158,6 +159,18 @@ sampler::setup()
         _cpu_freq->post_process = []() { cpu_freq::post_process(); };
         _cpu_freq->config       = []() { cpu_freq::config(); };
         _cpu_freq->sample       = []() { cpu_freq::sample(); };
+    }
+
+fprintf(stderr, "aleks: in sampler::setup %s:%d\n", __FILE__, __LINE__);
+    if(get_ainic_stat_enabled())
+    {
+fprintf(stderr, "aleks: in sampler::setup %s:%d\n", __FILE__, __LINE__);
+        auto& _amd_ainic         = instances.emplace_back(std::make_unique<instance>());
+        _amd_ainic->setup        = []() { amd_ainic::setup(); };
+        _amd_ainic->shutdown     = []() { amd_ainic::shutdown(); };
+        _amd_ainic->post_process = []() { amd_ainic::post_process(); };
+        _amd_ainic->config       = []() { amd_ainic::config(); };
+        _amd_ainic->sample       = []() { amd_ainic::sample(); };
     }
 
     for(auto& itr : instances)
