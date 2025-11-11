@@ -25,7 +25,13 @@
 #include <dlfcn.h>
 //#define DEBUG_PRINT
 
+#include "util.h"
 #include "verifiable.h"
+
+#pragma weak ncclCommWindowRegister
+#pragma weak ncclCommWindowDeregister
+#pragma weak ncclDevCommCreate
+#pragma weak ncclDevCommDestroy
 #include "git_version.h"
 
 #define DIVUP(x, y) \
@@ -111,31 +117,36 @@ int is_main_proc = 0;
 thread_local int is_main_thread = 0;
 
 // Command line parameter defaults
-static int nThreads = 1;
-static int nGpus = 1;
-static size_t minBytes = 32*1024*1024;
-static size_t maxBytes = 32*1024*1024;
-static size_t stepBytes = 1*1024*1024;
-static size_t stepFactor = 1;
-static int datacheck = 1;
-static int warmup_iters = 5;
-static int iters = 20;
-static int agg_iters = 1;
+int nThreads = 1;
+int nGpus = 1;
+size_t minBytes = 32*1024*1024;
+size_t maxBytes = 32*1024*1024;
+size_t stepBytes = 1*1024*1024;
+size_t stepFactor = 1;
+int datacheck = 1;
+int warmup_iters = 1;
+int iters = 20;
+int agg_iters = 1;
 static int run_cycles = 1;
 static int ncclop = ncclSum;
 static int nccltype = ncclFloat;
 static int ncclroot = 0;
-static int parallel_init = 0;
-static int blocking_coll = 0;
+int parallel_init = 0;
+int blocking_coll = 0;
 static int output_algo_proto_channels = 0;
 static int memorytype = 0;
 static uint32_t cumask[4];
 static int streamnull = 0;
 static int timeout = 0;
-static int cudaGraphLaunches = 0;
+int cudaGraphLaunches = 0;
 std::string output_file;
 std::string output_format;
 static int report_cputime = 0;
+static int report_timestamps = 0;
+static int deviceImpl = 0;
+
+int deviceCtaCount = 16; // Default number of CTAs for device implementation
+
 // Report average iteration time: (0=RANK0,1=AVG,2=MIN,3=MAX)
 static int average = 1;
 static int numDevices = 1;
@@ -144,10 +155,11 @@ static int enable_out_of_place = 1;
 static int enable_in_place = 1;
 static int enable_cache_flush = 0;
 static int enable_rotating_tensor = 0;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
 #define LOCAL_REGISTER 1
 #define SYMMETRIC_REGISTER 2
 static int local_register = 0;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+static int ctaPolicy = -1;
 #endif
 static int minCudaArch = 1<<30;
 
@@ -247,7 +259,74 @@ void Reporter::writeFile() {
 
 bool Reporter::isMainThread() { return is_main_thread == 1; }
 
-#define NUM_BLOCKS 32
+enum output_file_type_t {
+  JSON_FILE_OUTPUT,
+  UNSPECIFIED_FILE_OUTPUT
+};
+
+// Return pointer to extension in `path` if one is found. An extension
+// is the last `.` in the `path`, if there is no `/` following the `.`
+// and there are characters after `.`.
+//
+// Therefore: returns 0 if no meaningful extension was found, or returns offset
+// into string where extension begins
+static const char *getExtension(const char *path) {
+  if (path == nullptr) return nullptr;
+  int last_dot = -1;
+  int last_slash = -1;
+
+  int pos;
+  for (pos = 0; path[pos] != '\0'; ++pos) {
+    switch (path[pos]) {
+    case '.':
+      last_dot = pos;
+      break;
+    case '/':
+      last_slash = pos;
+      break;
+    default:
+      break;
+    }
+  }
+
+  if (last_dot > last_slash && last_dot + 1 != pos) {
+    return path + last_dot + 1;
+  }
+
+  return nullptr;
+}
+
+static output_file_type_t classifyOutputFile(const char *filename) {
+  const char *extension = getExtension(filename);
+  if (extension != nullptr && strcasecmp(extension, "json") == 0) {
+    return JSON_FILE_OUTPUT;
+  }
+
+  return UNSPECIFIED_FILE_OUTPUT;
+}
+
+static void outputFileInit(output_file_type_t output_file_type,
+                           const char *output_file, char argc, char **argv, char **envp) {
+  switch (output_file_type) {
+  case JSON_FILE_OUTPUT:
+    jsonOutputInit(output_file, argc, argv, envp);
+    break;
+  case UNSPECIFIED_FILE_OUTPUT:
+  default:
+    break;
+  }
+}
+
+static void outputFileFinalize(output_file_type_t output_file_type) {
+  switch (output_file_type) {
+  case JSON_FILE_OUTPUT:
+    jsonOutputFinalize();
+    break;
+  case UNSPECIFIED_FILE_OUTPUT:
+  default:
+    break;
+  }
+}
 
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(error)                    \
@@ -632,10 +711,22 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, args->streams[i]);
     }
 
-    TESTCHECK(args->collTest->runColl(
-          (void*)(in_place ? recvBuff + args->sendInplaceOffset*rank : sendBuff),
-          (void*)(in_place ? recvBuff + args->recvInplaceOffset*rank : recvBuff),
-        count, type, op, root, args->comms[i], args->streams[i], bias));
+    if (deviceImpl == 0) {
+      TESTCHECK(args->collTest->runColl(
+            (void*)(in_place ? recvBuff : sendBuff), in_place ? args->sendInplaceOffset*rank : 0,
+            (void*)recvBuff, in_place ? args->recvInplaceOffset*rank : 0,
+            count, type, op, root, args->comms[i], args->streams[i], 0));
+    } else {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+      void* sendwin = args->sendRegHandles[i];
+      void* recvwin = args->recvRegHandles[i];
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+      TESTCHECK(args->collTest->runColl(
+            (void*)(in_place ? recvwin : sendwin), shift + in_place ? args->sendInplaceOffset*rank : 0,
+            (void*)recvwin, shift + in_place ? args->recvInplaceOffset*rank : 0,
+            count, type, op, root, (ncclComm_t)(args->devComms+i), args->streams[i], deviceImpl));
+#endif
+    }
 
     #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
     if(opIndex >= ncclNumOps) {
@@ -803,19 +894,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 
   double timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
-  char timeStr[100];
-  if (timeUsec >= 10000.0) {
-    sprintf(timeStr, "%7.0f", timeUsec);
-  } else if (timeUsec >= 100.0) {
-    sprintf(timeStr, "%7.1f", timeUsec);
-  } else {
-    sprintf(timeStr, "%7.2f", timeUsec);
-  }
-  if (args->reportErrors) {
-    PRINT("  %7s  %6.2f  %6.2f  %5g", timeStr, algBw, busBw, (double)wrongElts);
-  } else {
-    PRINT("  %7s  %6.2f  %6.2f  %5s", timeStr, algBw, busBw, "N/A");
-  }
+  writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
 
   auto largestMessageSize = std::max(args->sendBytes, args->expectedBytes);
   if (args->reporter) {
@@ -939,7 +1018,6 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   }
 #endif
 
-  TESTCHECK(completeColl(args));
 
 #if HIP_VERSION >= 50221310
   if (cudaGraphLaunches >= 1) {
@@ -962,9 +1040,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
     }
     for (size_t size = args->minbytes; size<=args->maxbytes; size = ((args->stepfactor > 1) ? size*args->stepfactor : size+args->stepbytes)) {
       setupArgs(size, type, args);
-      char rootName[100];
-      sprintf(rootName, "%6i", root);
-      PRINT("%12li  %12li  %8s  %6s  %6s", std::max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, rootName);
+      writeBenchmarkLinePreamble(std::max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
       if (enable_out_of_place) {
         TESTCHECK(BenchTime(args, type, op, root, 0));
         usleep(delay_inout_place);
@@ -984,7 +1060,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           PRINT("%8s  %8s  %10s","N/A", "N/A", "N/A");
         }
       }
-      PRINT("\n");
+      writeBenchmarkLineTerminator(iters, "");
     }
     --repeat;
     ++iter;
@@ -1010,49 +1086,66 @@ testResult_t threadInit(struct threadArgs* args) {
   //set main thread again
   is_main_thread = (is_main_proc && args->thread == 0) ? 1 : 0;
 
+  jsonIdentifyWriter(is_main_thread);
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+     if (ctaPolicy >= 0)
+       config.CTAPolicy = ctaPolicy;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+     config.nvlinkCentricSched = 1;
+#endif
+#endif
+#endif
+
   NCCLCHECK(ncclGroupStart());
   for (int i=0; i<args->nGpus; i++) {
     int rank = args->proc*args->nThreads*args->nGpus + args->thread*args->nGpus + i;
     CUDACHECK(cudaSetDevice(args->gpus[i]));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+    NCCLCHECK(ncclCommInitRankConfig(args->comms+i, nranks, args->ncclId, rank, &config));
+#else
     NCCLCHECK(ncclCommInitRank(args->comms+i, nranks, args->ncclId, rank));
+#endif
   }
   NCCLCHECK(ncclGroupEnd());
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
   NCCLCHECK(ncclGroupStart());
-  void **sendRegHandles = (local_register) ? (void **)malloc(sizeof(*sendRegHandles)*args->nGpus) : NULL;
-  void **recvRegHandles = (local_register) ? (void **)malloc(sizeof(*recvRegHandles)*args->nGpus) : NULL;
   for (int i=0; i<args->nGpus; i++) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
     if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, (ncclWindow_t*)&sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
-      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, (ncclWindow_t*)&recvRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
+      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, (ncclWindow_t*)&args->sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
+      NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, (ncclWindow_t*)&args->recvRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
     } else
 #endif
     {
-      if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, &sendRegHandles[i]));
-      if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, &recvRegHandles[i]));
+      if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, &args->sendRegHandles[i]));
+      if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, &args->recvRegHandles[i]));
     }
   }
   NCCLCHECK(ncclGroupEnd());
 #endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  /* Create device communicators based on test-specific requirements */
+  if (deviceImpl) {
+    ncclDevCommRequirements reqs;
+    if (!ncclTestEngine.getDevCommRequirements ||
+        !ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs)) {
+      fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
+      return testNotImplemented;
+    }
+
+    NCCLCHECK(ncclGroupStart());
+    for (int i = 0; i < args->nGpus; i++) {
+      NCCLCHECK(ncclDevCommCreate(args->comms[i], &reqs, args->devComms+i));
+    }
+    NCCLCHECK(ncclGroupEnd());
+  }
+#endif
 
   TESTCHECK(threadRunTests(args));
 
-  for (int i=0; i<args->nGpus; i++) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
-    if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-      NCCLCHECK(ncclCommWindowDeregister(args->comms[i], (ncclWindow_t)sendRegHandles[i]));
-      NCCLCHECK(ncclCommWindowDeregister(args->comms[i], (ncclWindow_t)recvRegHandles[i]));
-    } else
-#endif
-    {
-      if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], sendRegHandles[i]));
-      if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], recvRegHandles[i]));
-    }
-#endif
-    NCCLCHECK(ncclCommDestroy(args->comms[i]));
-  }
   return testSuccess;
 }
 
@@ -1123,7 +1216,7 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
 
 testResult_t run(); // Main function
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[], char **envp) {
   // Make sure everyline is flushed so that we see the progress of the test
   setlinebuf(stdout);
 
@@ -1132,7 +1225,7 @@ int main(int argc, char* argv[]) {
   #else
     test_ncclVersion = NCCL_VERSION_CODE;
   #endif
-  //printf("# NCCL_VERSION_CODE=%d ncclGetVersion=%d\n", NCCL_VERSION_CODE, test_ncclVersion);
+  //printf("# nccl-tests version %s NCCL_VERSION_CODE=%d ncclGetVersion=%d\n", NCCL_TESTS_VERSION, NCCL_VERSION_CODE, test_ncclVersion);
   #if NCCL_VERSION_CODE >= NCCL_VERSION(2,0,0)
     test_opnum = 4;
     test_typenum = 9;
@@ -1157,6 +1250,8 @@ int main(int argc, char* argv[]) {
   // Parse args
   double parsed;
   int longindex;
+  char *output_file = nullptr;
+
   static struct option longopts[] = {
     {"nthreads", required_argument, 0, 't'},
     {"ngpus", required_argument, 0, 'g'},
@@ -1178,6 +1273,8 @@ int main(int argc, char* argv[]) {
     {"timeout", required_argument, 0, 'T'},
     {"cudagraph", required_argument, 0, 'G'},
     {"report_cputime", required_argument, 0, 'C'},
+    {"report_timestamps", required_argument, 0, 'S'},
+    {"output_file", required_argument, 0, 'J'},
     {"average", required_argument, 0, 'a'},
     {"local_register", required_argument, 0, 'R'},
     {"memory_type", required_argument, 0, 'y'},                     //RCCL
@@ -1189,6 +1286,9 @@ int main(int argc, char* argv[]) {
     {"output_file", required_argument, 0, 'x'},                     //RCCL
     {"output_format", required_argument, 0, 'Z'},                   //RCCL
     {"output_algo_proto_channels", required_argument, 0, 'M'},      //RCCL
+    {"cta_policy", required_argument, 0, 'x'},
+    {"device_implementation", required_argument, 0, 'D'},
+    {"device_cta_count", required_argument, 0, 'V'},
     {"help", no_argument, 0, 'h'},
     {}
   };
@@ -1285,6 +1385,12 @@ int main(int argc, char* argv[]) {
       case 'C':
         report_cputime = strtol(optarg, NULL, 0);
         break;
+      case 'J':
+        output_file = strdup(optarg);
+        break;
+      case 'S':
+        report_timestamps = strtol(optarg, NULL, 0);
+        break;
       case 'a':
         average = (int)strtol(optarg, NULL, 0);
         break;
@@ -1299,46 +1405,39 @@ int main(int argc, char* argv[]) {
         printf("Option -R (register) is not supported before NCCL 2.19. Ignoring\n");
 #endif
         break;
-      case 'Y':
-        memorytype = ncclstringtomtype(optarg);
-        break;
-      case 'u':
-        {
-          int nmasks = 0;
-          char *mask = strtok(optarg, ",");
-          while (mask != NULL && nmasks < 4) {
-            cumask[nmasks++] = strtol(mask, NULL, 16);
-            mask = strtok(NULL, ",");
-          };
-        }
-	break;
-      case 'O':
-        enable_out_of_place = strtol(optarg, NULL, 0);
-        enable_in_place = enable_out_of_place ? 0 : 1;
-        break;
-      case 'q':
-        delay_inout_place = (int)strtol(optarg, NULL, 10);
-      	break;
-      case 'F':
-        enable_cache_flush = strtol(optarg, NULL, 0);
-        if (enable_cache_flush > 0) {
-          hipDeviceProp_t deviceProps;
-          CHECK_HIP_ERROR(hipGetDeviceProperties(&deviceProps, 0));
-          gpu_block3 = deviceProps.multiProcessorCount * 60;
-        }
-        break;
-      case 'E':
-        enable_rotating_tensor = strtol(optarg, NULL, 0);
-        break;
       case 'x':
-        output_file = optarg;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+        ctaPolicy = (int)strtol(optarg, NULL, 0);
+        if (ctaPolicy > 1 && test_ncclVersion < NCCL_VERSION(2,28,0)) {
+          printf("Option -x (cta_policy) %d is not supported before NCCL 2.28. Ignoring\n", ctaPolicy);
+          ctaPolicy = -1;
+        }
+#else
+        printf("Option -x (cta_policy) is not supported before NCCL 2.27. Ignoring\n");
+#endif
         break;
-      case 'Z':
-        output_format = optarg;
+      case 'D':
+	if (test_ncclVersion >= NCCL_VERSION(2,28,0)) {
+          deviceImpl = (int)strtol(optarg, NULL, 0);
+	}
+	else {
+          fprintf(stderr, "Option -D (device implementation) requires NCCL >= 2.28.0\n");
+          return -1;
+        }
         break;
-      case 'M':
-        output_algo_proto_channels = strtol(optarg, NULL, 0);
-        if(rcclTestsGetAlgoInfo == NULL || rcclTestsGetAlgoName == NULL || rcclTestsGetProtocolName == NULL) output_algo_proto_channels = 0;
+      case 'V':
+	if (test_ncclVersion >= NCCL_VERSION(2,28,0)) {
+          deviceCtaCount = (int)strtol(optarg, NULL, 0);
+          if (deviceCtaCount <= 0 || deviceCtaCount > 128) {
+            fprintf(stderr, "device_cta_count (-V) must be positive and less than 128, got %d. "
+                    "Using default value 16.\n", deviceCtaCount);
+            deviceCtaCount = 16;
+	  }
+        }
+	else {
+          fprintf(stderr, "Option -V (device CTA count) requires NCCL >= 2.28.0\n");
+          return -1;
+	}
         break;
       case 'h':
       default:
@@ -1370,6 +1469,8 @@ int main(int argc, char* argv[]) {
             "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
             "[-C,--report_cputime <0/1>] \n\t"
+            "[-S,--report_timestamps <0/1> report timestamps (default 0)] \n\t"
+            "[-J,--output_file <file> write output to filepath, if accessible. Infer type from suffix (only json supported presently.)] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
             "[-R,--local_register <0/1/2> enable local (1) or symmetric (2) buffer registration on send/recv buffers (default: disable (0))] \n\t"
             "[-Y,--memory_type <coarse/fine/host/managed>] \n\t"
@@ -1380,6 +1481,9 @@ int main(int argc, char* argv[]) {
 	    "[-E,--rotating_tensor <0/1>] \n\t"
             "[-x,--output_file <output file name>] \n\t"
             "[-Z,--output_format <output format <csv|json>] \n\t"
+            "[-x,--cta_policy <0/1/2> set CTA policy (NCCL_CTA_POLICY_DEFAULT (0), NCCL_CTA_POLICY_EFFICIENCY (1), NCCL_CTA_POLICY_ZERO (2)) (default: do not set)] \n\t"
+            "[-D,--device_implementation <implementation number> enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0)] \n\t"
+            "[-V,--device_cta_count <number> set number of CTAs for device implementation (default: 16)] \n\t"
             "[-h,--help]\n",
           basename(argv[0]));
         return 0;
@@ -1406,10 +1510,29 @@ int main(int argc, char* argv[]) {
       return -1;
     }
   }
+  if (deviceImpl > 0 && (local_register != SYMMETRIC_REGISTER)) {
+    fprintf(stderr, "device implementation (-D > 0) requires enabling symmetric memory registration (-R 2)\n");
+    return -1;
+  }
+
 #ifdef MPI_SUPPORT
   MPI_Init(&argc, &argv);
 #endif
-  TESTCHECK(run());
+
+  const output_file_type_t output_file_type = classifyOutputFile(output_file);
+  outputFileInit(output_file_type, output_file, argc, argv, envp);
+
+  if(output_file) {
+    free(output_file);
+    output_file = nullptr;
+  }
+
+  testResult_t result = run();
+
+  outputFileFinalize(output_file_type);
+
+  TESTCHECK(result);
+
   return 0;
 }
 
@@ -1538,10 +1661,6 @@ testResult_t run() {
       PRINT("%s", lines+MAX_LINE*p);
     free(lines);
   }
-  MPI_Allreduce(MPI_IN_PLACE, &maxMem, 1, MPI_LONG, MPI_MIN, MPI_COMM_WORLD);
-#else
-  PRINT("%s", line);
-#endif
 
   // Reserve 1GiB of memory for each 16GiB installed, but limit to a max of 4GiB
   const size_t GB = (1ULL << 30);
@@ -1573,8 +1692,8 @@ testResult_t run() {
 
   ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)ncclProcs*nGpus*nThreads);
 
-  envstr = getenv("NCCL_TESTS_DEVICE");
-  gpu0 = envstr ? atoi(envstr) : -1;
+  char* envstr = getenv("NCCL_TESTS_DEVICE");
+  int gpu0 = envstr ? atoi(envstr) : -1;
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = ((gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i)%numDevices;
     CUDACHECK(cudaSetDevice(gpus[i]));
@@ -1613,24 +1732,37 @@ testResult_t run() {
   //if parallel init is not selected, use main thread to initialize NCCL
   ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nThreads*nGpus);
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-  void **sendRegHandles = NULL;
-  void **recvRegHandles = NULL;
+  void* sendRegHandles[nThreads*nGpus];
+  void* recvRegHandles[nThreads*nGpus];
+  memset(sendRegHandles, 0, sizeof(sendRegHandles));
+  memset(recvRegHandles, 0, sizeof(recvRegHandles));
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  ncclDevComm devComms[nThreads*nGpus];
 #endif
   if (!parallel_init) {
-     if (ncclProcs == 1) {
-       NCCLCHECK(ncclCommInitAll(comms, nGpus*nThreads, gpus.data()));
-     } else {
-       NCCLCHECK(ncclGroupStart());
-       for (int i=0; i<nGpus*nThreads; i++) {
-         CUDACHECK(cudaSetDevice(gpus[i]));
-         NCCLCHECK(ncclCommInitRank(comms+i, ncclProcs*nThreads*nGpus, ncclId, ncclProc*nThreads*nGpus+i));
-       }
-       NCCLCHECK(ncclGroupEnd());
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+     if (ctaPolicy >= 0)
+       config.CTAPolicy = ctaPolicy;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+     config.nvlinkCentricSched = 1;
+#endif
+#endif
+#endif
+     NCCLCHECK(ncclGroupStart());
+     for (int i=0; i<nGpus*nThreads; i++) {
+       CUDACHECK(cudaSetDevice(gpus[i]));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+       NCCLCHECK(ncclCommInitRankConfig(comms+i, ncclProcs*nThreads*nGpus, ncclId, ncclProc*nThreads*nGpus+i, &config));
+#else
+       NCCLCHECK(ncclCommInitRank(comms+i, ncclProcs*nThreads*nGpus, ncclId, ncclProc*nThreads*nGpus+i));
+#endif
      }
+     NCCLCHECK(ncclGroupEnd());
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
      NCCLCHECK(ncclGroupStart());
-     sendRegHandles = (local_register) ? (void **)malloc(sizeof(*sendRegHandles)*nThreads*nGpus) : NULL;
-     recvRegHandles = (local_register) ? (void **)malloc(sizeof(*recvRegHandles)*nThreads*nGpus) : NULL;
      for (int i=0; i<nGpus*nThreads; i++) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
        if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
@@ -1644,6 +1776,23 @@ testResult_t run() {
        }
      }
      NCCLCHECK(ncclGroupEnd());
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+     /* Create device communicators based on test-specific requirements */
+     if (deviceImpl) {
+       ncclDevCommRequirements reqs;
+       if (!ncclTestEngine.getDevCommRequirements ||
+           !ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs)) {
+         fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
+         return testNotImplemented;
+       }
+
+       NCCLCHECK(ncclGroupStart());
+       for (int i = 0; i < nGpus * nThreads; i++) {
+         NCCLCHECK(ncclDevCommCreate(comms[i], &reqs, devComms+i));
+       }
+       NCCLCHECK(ncclGroupEnd());
+     }
 #endif
   }
 
@@ -1783,11 +1932,6 @@ testResult_t run() {
     if (datacheck) CUDACHECK(cudaFree(expected[i]));
 #endif
   }
-  CUDACHECK(cudaFreeHost(delta));
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
-  free(sendRegHandles);
-  free(recvRegHandles);
-#endif
 
   envstr = getenv("NCCL_TESTS_MIN_BW");
   double check_avg_bw = envstr ? atof(envstr) : -1;
@@ -1810,7 +1954,7 @@ testResult_t run() {
   cudaDeviceReset();
 
   if (errors[0] || bw[0] < check_avg_bw*(0.9))
-    exit(EXIT_FAILURE);
+    return testNumResults;
   else
-    exit(EXIT_SUCCESS);
+    return testSuccess;
 }

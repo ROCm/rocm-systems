@@ -51,8 +51,14 @@ void ReduceScatterGetBw(size_t count, int typesize, double sec, double* algBw, d
   *busBw = baseBw * factor;
 }
 
-testResult_t ReduceScatterRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, void* bias = nullptr) {
-  NCCLCHECK(ncclReduceScatter(sendbuff, recvbuff, count, type, op, comm, stream));
+testResult_t ReduceScatterRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+  if (deviceImpl == 0) {
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
+    NCCLCHECK(ncclReduceScatter(sptr, rptr, count, type, op, comm, stream));
+  } else {
+    return testNotImplemented;
+  }
   return testSuccess;
 }
 
@@ -109,7 +115,7 @@ if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_op
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  ReduceScatterGetBuffSize,
-  ReduceScatterRunTest
+struct testEngine reduceScatterEngine = {
+  .getBuffSize = ReduceScatterGetBuffSize,
+  .runTest = ReduceScatterRunTest
 };
