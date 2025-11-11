@@ -72,9 +72,10 @@ static void PAL_STDCALL UberTraceStateChangeCallback(const GpuUtil::TraceSession
         // boundary for end of detailed trace
 #if (PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939)
         case GpuUtil::TraceSessionState::Postamble:
-#endif
+#else
         // boundary for end of trace
         case GpuUtil::TraceSessionState::Waiting:
+#endif
         {
             VirtualGPU* current_gpu = mgr->GetCurrentGPU();
             if (current_gpu != nullptr) {

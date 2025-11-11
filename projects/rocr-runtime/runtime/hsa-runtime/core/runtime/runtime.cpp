@@ -889,7 +889,8 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
 }
 
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
-                                 int interop_handle, uint32_t flags,
+                                 hsa_handle_t interop_handle,
+                                 uint32_t flags,
                                  size_t* size, void** ptr,
                                  size_t* metadata_size, const void** metadata) {
   static const int tinyArraySize=8;
@@ -897,6 +898,16 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
 
   HSAuint32 short_nodes[tinyArraySize];
   HSAuint32* nodes = short_nodes;
+
+  static_assert(sizeof(HSAint64) >= sizeof(interop_handle),
+                "HSAint64 too small for interop_handle");
+  HSAint64 resource_handle =
+#ifdef _WIN32
+      static_cast<HSAint64>(reinterpret_cast<uintptr_t>(interop_handle));
+#else
+      static_cast<HSAint64>(interop_handle);
+#endif
+
   if (num_agents > tinyArraySize) {
     nodes = new HSAuint32[num_agents];
     if (nodes == NULL) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -912,7 +923,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
     agents[i]->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &nodes[i]);
   }
 
-  if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(interop_handle, &info, num_agents,
+  if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(resource_handle, &info, num_agents,
                                           nodes)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
@@ -1416,7 +1427,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   if (agent->device_type() == Agent::kAmdGpuDevice) {
 #if defined(__linux__)
-    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);    
+    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
     amdgpu_bo_import_result res;
 
     srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
