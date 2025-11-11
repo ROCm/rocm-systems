@@ -108,7 +108,7 @@ release(uint, OPENCL_VERSION, 200,                                            \
         "Force GPU opencl version")                                           \
 release(bool, HSA_LOCAL_MEMORY_ENABLE, true,                                  \
         "Enable HSA device local memory usage")                               \
-release(uint, HSA_KERNARG_POOL_SIZE, 1024 * 1024,                             \
+release(uint, HSA_KERNARG_POOL_SIZE, 4 * 1024 * 1024,                         \
         "Kernarg pool size")                                                  \
 release(bool, GPU_MIPMAP, true,                                               \
         "Enables GPU mipmap extension")                                       \
@@ -141,8 +141,6 @@ release(uint, PAL_MALL_POLICY, 0,                                             \
         "2 = Allocations will always be put through the MALL")                \
 release(bool, GPU_ENABLE_WAVE32_MODE, true,                                   \
         "Enables Wave32 compilation in HW if available")                      \
-release(bool, GPU_ENABLE_LC, true,                                            \
-        "Enables LC path")                                                    \
 release(bool, GPU_ENABLE_HW_P2P, false,                                       \
         "Enables HW P2P path")                                                \
 release(bool, GPU_ENABLE_COOP_GROUPS, true,                                   \

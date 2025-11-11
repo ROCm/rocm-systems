@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
+#include "lib/rocprofiler-sdk/counters/tests/metrics_test_helpers.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
@@ -286,13 +287,14 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {0}});
 
         {
-            auto metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");
+            auto metrics = rocprofiler::counters::getMetricsForAgent(agent);
 
             rocprofiler_thread_trace_parameter_t att_param;
             att_param.type      = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
             att_param.simd_mask = 0xF;
             for(auto& metric : metrics)
-                if(metric.name() == "SQ_WAVES") rocprofiler_counter_id_t{.handle = metric.id()};
+                if(metric.name() == "SQ_WAVES")
+                    att_param.counter_id = rocprofiler_counter_id_t{.handle = metric.id()};
 
             params.push_back(att_param);
         }

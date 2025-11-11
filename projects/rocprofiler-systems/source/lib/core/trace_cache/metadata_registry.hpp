@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <optional>
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/callback_tracing.h>
@@ -56,6 +57,8 @@ struct process
     pid_t       pid;  // < Unique
     pid_t       ppid;
     std::string command;
+    uint32_t    start;
+    uint32_t    end;
 };
 
 template <typename Category>
@@ -168,7 +171,7 @@ struct kernel_symbol_less
         const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& rhs)
         const
     {
-        return lhs.kernel_object < rhs.kernel_object;
+        return lhs.kernel_id < rhs.kernel_id;
     }
 };
 #endif
@@ -196,6 +199,11 @@ struct metadata_registry
     std::vector<uint64_t>       get_queue_list() const;
     std::vector<uint64_t>       get_stream_list() const;
     std::vector<std::string_view> get_string_list() const;
+
+    bool save_to_file(const std::string&                         filepath,
+                      const std::vector<std::shared_ptr<agent>>& _agents) const;
+    bool load_from_file(const std::string&                   filepath,
+                        std::vector<std::shared_ptr<agent>>& _agents);
 
 #if ROCPROFSYS_USE_ROCM > 0
     void add_code_object(

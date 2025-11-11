@@ -65,9 +65,10 @@
  * - 1.12 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_HSA_VMEM and HSA_EXT_POINTER_TYPE_RESERVED_ADDR
  * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
  * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
+ * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 14
+#define HSA_AMD_INTERFACE_VERSION_MINOR 15
 
 #ifdef __cplusplus
 extern "C" {
@@ -2320,7 +2321,7 @@ hsa_status_t HSA_API
  */
 hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents,
                                         hsa_agent_t* agents,
-                                        int interop_handle,
+                                        hsa_handle_t interop_handle,
                                         uint32_t flags,
                                         size_t* size,
                                         void** ptr,
@@ -2665,6 +2666,11 @@ typedef enum hsa_amd_event_type_s {
    AMD GPU memory error.
    */
   HSA_AMD_GPU_MEMORY_ERROR_EVENT,
+  /*
+   System shut down
+    - All other fields in hsa_amd_event_t are unused
+   */
+  HSA_AMD_SYSTEM_SHUTDOWN_EVENT,
 } hsa_amd_event_type_t;
 
 /**

@@ -24,7 +24,6 @@
 
 namespace amd::roc {
 
-#if defined(USE_COMGR_LIBRARY)
 bool Kernel::init() { return GetAttrCodePropMetadata(); }
 
 bool Kernel::postLoad() {
@@ -157,6 +156,5 @@ bool Kernel::postLoad() {
   program()->rocDevice().AddKernel(*this);
   return true;
 }
-#endif  // defined(USE_COMGR_LIBRARY)
 
 }  // namespace amd::roc

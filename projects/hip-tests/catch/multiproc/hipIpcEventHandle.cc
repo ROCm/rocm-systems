@@ -337,12 +337,14 @@ TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
   hipEvent_t event;
   hipIpcEventHandle_t eventHandle;
   hipError_t ret;
-  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
+
 #if HT_AMD
   // Test disabled for nvidia due to segfault with cuda api
   SECTION("Get event handle with eventHandle(nullptr)") {
+    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
     ret = hipIpcGetEventHandle(nullptr, event);
     REQUIRE(ret == hipErrorInvalidValue);
+    HIP_CHECK(hipEventDestroy(event));
   }
 #endif
 
@@ -362,27 +364,24 @@ TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
   }
 
   SECTION("Get event handle for event allocated without Interprocess flag") {
-    hipEvent_t eventNoIpc;
-    HIP_CHECK(hipEventCreateWithFlags(&eventNoIpc, hipEventDisableTiming));
+    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
 
-    ret = hipIpcGetEventHandle(&eventHandle, eventNoIpc);
+    ret = hipIpcGetEventHandle(&eventHandle, event);
     if ((ret != hipErrorInvalidResourceHandle) && (ret != hipErrorInvalidConfiguration)) {
       INFO("Error returned : " << ret);
       REQUIRE(false);
     }
-    HIP_CHECK(hipEventDestroy(eventNoIpc));
+    HIP_CHECK(hipEventDestroy(event));
   }
 
   SECTION("Open event handle with event(nullptr)") {
-    hipIpcEventHandle_t ipc_handle{};
-    ret = hipIpcOpenEventHandle(nullptr, ipc_handle);
+    ret = hipIpcOpenEventHandle(nullptr, eventHandle);
     REQUIRE(ret == hipErrorInvalidValue);
   }
 
   SECTION("Open event handle with eventHandle as invalid") {
     hipIpcEventHandle_t ipc_handle{};
-    hipEvent_t eventOut;
-    ret = hipIpcOpenEventHandle(&eventOut, ipc_handle);
+    ret = hipIpcOpenEventHandle(&event, ipc_handle);
     if ((ret != hipErrorInvalidValue) && (ret != hipErrorMapFailed)) {
       INFO("Error returned : " << ret);
       REQUIRE(false);
@@ -390,22 +389,18 @@ TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
   }
 
   SECTION("Open handle in process that created it") {
-    hipIpcEventHandle_t event_handle;
     hipEvent_t event1, event2;
     HIP_CHECK(hipEventCreateWithFlags(&event1, hipEventDisableTiming | hipEventInterprocess));
-    HIP_CHECK(hipIpcGetEventHandle(&event_handle, event1));
-    HIP_CHECK_ERROR(hipIpcOpenEventHandle(&event2, event_handle), hipErrorInvalidContext);
+    HIP_CHECK(hipIpcGetEventHandle(&eventHandle, event1));
+    HIP_CHECK_ERROR(hipIpcOpenEventHandle(&event2, eventHandle), hipErrorInvalidContext);
     HIP_CHECK(hipEventDestroy(event1));
   }
 
 // Disabled on AMD because of return value mismatch - EXSWHTEC-41
 #if HT_NVIDIA
   SECTION("Event created with no flags") {
-    hipEvent_t event;
-    hipIpcEventHandle_t event_handle;
-
     HIP_CHECK(hipEventCreate(&event));
-    HIP_CHECK_ERROR(hipIpcGetEventHandle(&event_handle, event), hipErrorInvalidResourceHandle);
+    HIP_CHECK_ERROR(hipIpcGetEventHandle(&eventHandle, event), hipErrorInvalidResourceHandle);
     HIP_CHECK(hipEventDestroy(event));
   }
 #endif

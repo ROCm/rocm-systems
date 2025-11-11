@@ -123,6 +123,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
@@ -131,22 +132,6 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
 )
-
-file(GLOB ROCPD_SCHEMA_FILES "${CMAKE_CURRENT_LIST_DIR}/rocpd/data_storage/schema/*.sql")
-
-foreach(_SRC ${ROCPD_SCHEMA_FILES})
-    cmake_path(GET _SRC FILENAME _BASE)
-    configure_file(
-        ${_SRC}
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/${_BASE}
-        COPYONLY
-    )
-    install(
-        FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/${_BASE}
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
-        COMPONENT core
-    )
-endforeach()
 
 set_target_properties(
     rocprofiler-systems-core-library
