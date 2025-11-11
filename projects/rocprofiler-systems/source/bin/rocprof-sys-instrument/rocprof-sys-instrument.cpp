@@ -22,7 +22,6 @@
 
 #include "rocprof-sys-instrument.hpp"
 #include "common/defines.h"
-#include "common/join.hpp"
 #include "common/path.hpp"
 #include "dl/dl.hpp"
 #include "fwd.hpp"
@@ -44,7 +43,6 @@
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>

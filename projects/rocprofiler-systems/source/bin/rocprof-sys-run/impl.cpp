@@ -23,14 +23,10 @@
 #include "rocprof-sys-run.hpp"
 
 #include "common/defines.h"
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
 #include "common/path.hpp"
-#include "common/setup.hpp"
 #include "core/argparse.hpp"
-#include "core/config.hpp"
-#include "core/state.hpp"
 #include "core/timemory.hpp"
 
 #include <timemory/environment.hpp>
@@ -44,11 +40,8 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <array>
 #include <cctype>
-#include <chrono>
 #include <cmath>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -58,7 +51,6 @@
 #include <string>
 #include <string_view>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 #include <vector>
 

@@ -22,11 +22,9 @@
 
 #include "rocprof-sys-sample.hpp"
 
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
 #include "common/path.hpp"
-#include "common/setup.hpp"
 
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
@@ -35,7 +33,6 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>

@@ -23,11 +23,9 @@
 #include "rocprof-sys-causal.hpp"
 
 #include "common/defines.h"
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
 #include "common/path.hpp"
-#include "common/setup.hpp"
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
 
@@ -39,8 +37,6 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -53,7 +49,6 @@
 #include <string>
 #include <string_view>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -63,7 +58,6 @@ namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;
 using namespace ::timemory::join;
-using rocprofsys::common::remove_env;
 using ::rocprofsys::utility::parse_numeric_range;
 using ::tim::get_env;
 using ::tim::log::monochrome;

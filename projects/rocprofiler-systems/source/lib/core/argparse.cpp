@@ -25,7 +25,6 @@
 #include "common/join.hpp"
 #include "common/path.hpp"
 #include "config.hpp"
-#include "defines.hpp"
 #include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
@@ -44,7 +43,6 @@ namespace filepath   = ::tim::filepath;
 namespace path       = rocprofsys::common::path;
 using array_config_t = ::timemory::join::array_config;
 using rocprofsys::common::remove_env;
-using ::tim::get_env;
 using ::timemory::join::join;
 
 auto
