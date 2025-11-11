@@ -2446,10 +2446,7 @@ def test_iteration_multiplexing_kernel(binary_handler_profile_rocprof_compute):
 def test_iteration_multiplexing_kernel_launch_params(
     binary_handler_profile_rocprof_compute,
 ):
-    options = [
-        "--iteration-multiplexing",
-        "kernel_launch_params"
-    ]
+    options = ["--iteration-multiplexing", "kernel_launch_params"]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False

@@ -8680,6 +8680,7 @@ def test_get_gpu_memory_partition():
 def test_merge_counters_iteration_multiplex():
     """Test merge_counters_iteration_multiplex with sample DataFrame."""
     import pandas as pd
+
     import utils.utils as utils_mod
 
     data = {

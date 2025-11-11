@@ -1517,18 +1517,21 @@ def merge_counters_iteration_multiplex(
         unique_occurences = (
             df.groupby(kernel_name_column_name)
             if policy == "kernel"
-            else df.groupby([
-                kernel_name_column_name,
-                "Grid_Size",
-                "Workgroup_Size",
-                "LDS_Per_Workgroup",
-            ], as_index=False)
+            else df.groupby(
+                [
+                    kernel_name_column_name,
+                    "Grid_Size",
+                    "Workgroup_Size",
+                    "LDS_Per_Workgroup",
+                ],
+                as_index=False,
+            )
         )
 
         # Define a list to store the merged rows
         result_data: list[dict[str, Any]] = []
 
-        pd.set_option('display.max_columns', None)
+        pd.set_option("display.max_columns", None)
 
         for name, group in unique_occurences:
             # Create a dictionary to store the merged row for the current group

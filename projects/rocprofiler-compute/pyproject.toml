@@ -106,5 +106,5 @@ markers = [
     "roofline",
     "path",
     "sci_notion",
-    "iteration_multiplexing"
+    "iteration_multiplexing",
 ]
