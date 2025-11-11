@@ -93,7 +93,10 @@ else()
 endif()
 
 find_package(Catch2 3.8.1 QUIET)
-if(NOT Catch2_FOUND)
+if(Catch2_FOUND)
+    message(STATUS "Catch2 v3.8.1 found: ${Catch2_DIR}")
+    set(CATCH_ADD_TESTS_SCRIPT ${Catch2_DIR}/CatchAddTests.cmake) # for packaging
+else()
     # Setup catch2 manually
     include(FetchContent)
     FetchContent_Declare(
@@ -103,6 +106,7 @@ if(NOT Catch2_FOUND)
         URL_HASH SHA256=18b3f70ac80fccc340d8c6ff0f339b2ae64944782f8d2fca2bd705cf47cadb79
     )
     FetchContent_MakeAvailable(Catch2)
+    set(CATCH_ADD_TESTS_SCRIPT ${Catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
 endif()
 
 include(cmake/hip-tests.cmake)
@@ -259,7 +263,6 @@ set(_subdirs ${_autogen} "subdirs(..)\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
 
 set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
-set(CATCH_ADD_TESTS_SCRIPT ${Catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
      DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 file(COPY ${CATCH_ADD_TESTS_SCRIPT}
