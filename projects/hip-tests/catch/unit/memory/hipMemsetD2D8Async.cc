@@ -20,6 +20,9 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip_test_defgroups.hh>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
 /**
  * @addtogroup hipMemsetD2D8Async hipMemsetD2D8Async
  * @{

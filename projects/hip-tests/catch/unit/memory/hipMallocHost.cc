@@ -22,6 +22,10 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
+
 static __global__ void write_integer(int* memory, int value) { *memory = value; }
 
 TEST_CASE("Unit_hipMallocHost_Positive") {

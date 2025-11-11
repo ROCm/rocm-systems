@@ -20,6 +20,9 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <limits>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
 /**
  * @addtogroup hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
  hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags

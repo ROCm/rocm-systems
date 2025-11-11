@@ -20,6 +20,10 @@ THE SOFTWARE.
 #include "warp_common.hh"
 #include <hip_test_common.hh>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 69 // suppress integer truncation warning
+#endif
+
 // For all threads in the warp, shfl the value "down" by three threads. To
 // account for the end of the warp, we set the delta to zero near the warp-32
 // boundary. This also works for warp-64 since it is a multiple.

@@ -20,6 +20,11 @@ THE SOFTWARE.
 #include "warp_common.hh"
 #include <hip_test_common.hh>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 69 // suppress integer truncation warning
+#pragma nv_diag_suppress 68 // suppress integer conversion change of sign warning
+#endif
+
 __global__ void any_1(int* Input, int* Output) {
   auto tid = threadIdx.x;
   Output[tid] = __any_sync(AllThreads, Input[tid]);

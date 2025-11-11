@@ -20,7 +20,9 @@ THE SOFTWARE.
 #include "warp_vote_common.hh"
 
 #include <bitset>
-
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 1444 // suppress variable unused warning
+#endif
 /**
  * @addtogroup ballot ballot
  * @{

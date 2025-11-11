@@ -24,6 +24,10 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
+
 /**
  * @addtogroup hipDeviceGetGraphMemAttribute hipDeviceGetGraphMemAttribute
  * @{

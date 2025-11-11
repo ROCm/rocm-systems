@@ -23,6 +23,10 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 1215 // suppress kernel launch warning
+#endif
+
 /**
  * @addtogroup multi_grid_group multi_grid_group
  * @{

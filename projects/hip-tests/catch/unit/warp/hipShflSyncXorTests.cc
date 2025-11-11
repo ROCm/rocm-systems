@@ -20,6 +20,10 @@ THE SOFTWARE.
 #include "warp_common.hh"
 #include <hip_test_common.hh>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 69 // suppress integer truncation warning
+#endif
+
 template <typename T> __global__ void shflXor_1(T* Input, T* Output) {
   auto tid = threadIdx.x;
   Output[tid] = __shfl_xor_sync(AllThreads, Input[tid], 16);

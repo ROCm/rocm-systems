@@ -32,6 +32,10 @@ THE SOFTWARE.
 #define BLOCK_SIZE 512
 #define VALUE 32
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
+
 enum SYNC_VALUES { SYNC_EVENT, SYNC_STREAM, SYNC_DEVICE };
 
 static constexpr int NUMELEMENTS{1024 * 16};

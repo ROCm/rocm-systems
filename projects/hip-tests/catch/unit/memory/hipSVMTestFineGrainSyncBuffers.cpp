@@ -26,6 +26,10 @@
 #include "hipSVMCommon.h"
 #define MAX_TARGETS 1024
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
+
 __global__ void find_targets(unsigned int* image, unsigned int target,
                              unsigned int* numTargetsFound, unsigned int* targetLocations) {
   size_t i = blockIdx.x * blockDim.x + threadIdx.x;

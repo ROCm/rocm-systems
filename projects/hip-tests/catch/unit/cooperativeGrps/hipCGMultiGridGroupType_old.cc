@@ -24,6 +24,10 @@ THE SOFTWARE.
 
 #include "hip_cg_common.hh"
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 1215 // suppress kernel launch warning
+#endif
+
 namespace cg = cooperative_groups;
 
 static __global__ void kernel_cg_multi_grid_group_type(int* grid_rank_dev, int* size_dev,
