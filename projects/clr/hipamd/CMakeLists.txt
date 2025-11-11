@@ -43,7 +43,6 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 # Options
 #############################
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
-option(HIP_OFFICIAL_BUILD "Enable/Disable for mainline/staging builds" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 if(MSVC)
@@ -87,16 +86,50 @@ endmacro()
 # Setup version information
 #############################
 find_package(Perl REQUIRED)
+find_package(Git)
 
-# Determine HIP_BASE_VERSION
 set(ENV{HIP_PATH} "")
 file(STRINGS ${HIP_COMMON_DIR}/VERSION VERSION_LIST REGEX "^[0-9]+")
 list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
 list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
 list(GET VERSION_LIST 2 HIP_VERSION_PATCH)
-set(HIP_VERSION_GITDATE 0)
 
-find_package(Git)
+if(HIP_VERSION_PATCH EQUAL 0 AND GIT_FOUND AND UNIX)
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} fetch --tags origin
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    OUTPUT_QUIET
+    ERROR_QUIET)
+
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} describe --tags --match "hip-version_*" --abbrev=0 HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    RESULT_VARIABLE _git_tag_result
+    OUTPUT_VARIABLE _git_tag_string
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+
+  if(_git_tag_result EQUAL 0 AND _git_tag_string)
+    string(REGEX MATCH "hip-version_([0-9]+)\\.([0-9]+)\\.([0-9]+)" _version_matched "${_git_tag_string}")
+
+    if(_version_matched)
+      set(HIP_VERSION_MAJOR ${CMAKE_MATCH_1})
+      set(HIP_VERSION_MINOR ${CMAKE_MATCH_2})
+      set(HIP_VERSION_PATCH ${CMAKE_MATCH_3})
+
+      file(WRITE ${HIP_COMMON_DIR}/VERSION
+           "#HIP_VERSION_MAJOR\n${HIP_VERSION_MAJOR}\n"
+           "#HIP_VERSION_MINOR\n${HIP_VERSION_MINOR}\n"
+           "#HIP_VERSION_PATCH\n${HIP_VERSION_PATCH}\n")
+
+      message(STATUS "Updated HIP version from git tag: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH} -> ${HIP_COMMON_DIR}/VERSION")
+    endif()
+  endif()
+else()
+  message(STATUS "Using HIP version from VERSION file: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
+endif()
+
+set(HIP_VERSION_GITDATE 0)
 
 # FIXME: Two different version strings used.
 # Below we use UNIX commands, not compatible with Windows.
@@ -134,9 +167,6 @@ if(GIT_FOUND)
 
   set(HIP_VERSION_BUILD_ID 0)
   set(HIP_VERSION_BUILD_NAME "")
-  if(NOT DEFINED ENV{HIP_OFFICIAL_BUILD} AND NOT HIP_OFFICIAL_BUILD)
-    set(HIP_VERSION_PATCH ${HIP_VERSION_GITDATE})
-  endif()
 
   if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
     set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
