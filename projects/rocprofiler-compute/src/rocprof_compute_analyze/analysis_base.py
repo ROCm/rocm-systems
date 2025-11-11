@@ -429,7 +429,7 @@ class OmniAnalyze_Base:
     def run_analysis(self) -> None:
         """Run analysis."""
         console_debug("analysis", "generating analysis")
-        if self._profiling_config["iteration_multiplexing"] is not None:
+        if self._profiling_config.get("iteration_multiplexing") is not None:
             console_log(
                 "analysis",
                 (
