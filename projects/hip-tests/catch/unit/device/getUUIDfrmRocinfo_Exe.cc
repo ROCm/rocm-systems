@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
   const char* rocmInfo = "rocminfo";
 
   snprintf(command, COMMAND_LEN, "%s", rocmInfo);
-  strncat(command, " | grep -i Uuid:", COMMAND_LEN);
+  strncat(command, " | grep -i Uuid:", COMMAND_LEN - strlen(command) - 1);
   // Execute the rocminfo command and extract the UUID info
   fpipe = popen(command, "r");
   if (fpipe == nullptr) {
