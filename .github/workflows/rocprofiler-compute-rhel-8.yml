@@ -68,7 +68,11 @@ jobs:
           timeout_minutes: 30
           max_attempts: 3
           command: |
-            yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/${{ matrix.os-release }}/amdgpu-install-7.1.70100-1.el8.noarch.rpm
+            if [ ${{ matrix.os-release }} == "8.10" ]; then
+              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/8.10/amdgpu-install-7.1.70100-1.el8.noarch.rpm
+            else
+              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/9.4/amdgpu-install-7.1.70100-1.el9.noarch.rpm
+            fi
             yum install -y rocm-dev
       - name: Checkout
         uses: actions/checkout@v4
