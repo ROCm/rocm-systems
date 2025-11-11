@@ -54,7 +54,7 @@ if (NOT WIN32)
                      -I${HIP_INCLUDE_DIR}
                      -o launch_kernel_module.code
                      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
-  target_link_libraries(launch_kernel_module.code hip::host hip::device)
+  #target_link_libraries(launch_kernel_module.code hip::host hip::device)
   add_custom_target(launch_kernel_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
 
   add_custom_target(coopKernel.code
@@ -63,7 +63,7 @@ if (NOT WIN32)
                     -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/coopKernel.code
                     -I${HIP_INCLUDE_DIR}
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  target_link_libraries(coopKernel.code hip::host hip::device)
+  #target_link_libraries(coopKernel.code hip::host hip::device)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS 
   ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
@@ -151,7 +151,7 @@ if(NOT WIN32)
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
                     -I${HIP_INCLUDE_DIR}
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  target_link_libraries(addKernel.spv hip::host hip::device)   
+  #target_link_libraries(addKernel.spv hip::host hip::device)
 
   add_custom_target(addKernel-bundle.spv
                     COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
@@ -159,7 +159,7 @@ if(NOT WIN32)
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
                     -I${HIP_INCLUDE_DIR}
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  target_link_libraries(addKernel-bundle.spv hip::host hip::device)  
+  #target_link_libraries(addKernel-bundle.spv hip::host hip::device)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
@@ -221,7 +221,7 @@ add_custom_target(copiousArgKernel.code
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-target_link_libraries(copiousArgKernel.code hip::host hip::device)
+#target_link_libraries(copiousArgKernel.code hip::host hip::device)
 
 add_custom_target(copiousArgKernel0.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
@@ -229,7 +229,7 @@ add_custom_target(copiousArgKernel0.code
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel0.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-target_link_libraries(copiousArgKernel0.code hip::host hip::device)
+#target_link_libraries(copiousArgKernel0.code hip::host hip::device)
 
 add_custom_target(copiousArgKernel1.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
@@ -237,7 +237,7 @@ add_custom_target(copiousArgKernel1.code
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel1.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-target_link_libraries(copiousArgKernel1.code hip::host hip::device)
+#target_link_libraries(copiousArgKernel1.code hip::host hip::device)
 
 add_custom_target(copiousArgKernel2.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
@@ -245,7 +245,7 @@ add_custom_target(copiousArgKernel2.code
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel2.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-target_link_libraries(copiousArgKernel2.code hip::host hip::device)
+#target_link_libraries(copiousArgKernel2.code hip::host hip::device)
 
 add_custom_target(copiousArgKernel3.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
@@ -253,7 +253,7 @@ add_custom_target(copiousArgKernel3.code
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel3.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-target_link_libraries(copiousArgKernel3.code hip::host hip::device)
+#target_link_libraries(copiousArgKernel3.code hip::host hip::device)
 
 add_custom_target(copiousArgKernel16.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
@@ -261,7 +261,7 @@ add_custom_target(copiousArgKernel16.code
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel16.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-target_link_libraries(copiousArgKernel16.code hip::host hip::device)
+#target_link_libraries(copiousArgKernel16.code hip::host hip::device)
 
 add_custom_target(copiousArgKernel17.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
@@ -269,7 +269,7 @@ add_custom_target(copiousArgKernel17.code
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copiousArgKernel17.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-target_link_libraries(copiousArgKernel17.code hip::host hip::device)
+#target_link_libraries(copiousArgKernel17.code hip::host hip::device)
 
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel.code
