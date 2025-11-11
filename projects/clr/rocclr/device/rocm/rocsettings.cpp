@@ -91,9 +91,11 @@ Settings::Settings() {
   gwsInitSupported_ = true;
   limit_blit_wg_ = 16;
 
-  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : false;
+  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : 0;
   // note: OCL user events don't allow CPU blocking calls in DD mode
   blocking_blit_ = amd::IS_HIP || !AMD_DIRECT_DISPATCH;
+
+  max_hw_queues_ = GPU_MAX_HW_QUEUES;
 }
 
 // ================================================================================================

@@ -568,6 +568,13 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
   // Reset all current waiting signals
   waiting_signals_.clear();
 
+  // Append extra raw waits
+  if (!dynamic_queue_waits_.empty()) {
+    waiting_signals_.insert(waiting_signals_.end(), dynamic_queue_waits_.begin(),
+                            dynamic_queue_waits_.end());
+    dynamic_queue_waits_.clear();
+  }
+
   // Does runtime switch the active engine?
   if (engine != engine_) {
     // Yes, return the signal from the previous operation for a wait
@@ -912,8 +919,9 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 
 // ================================================================================================
 uint64_t VirtualGPU::getQueueID() {
-  amd::ScopedLock lock(execution());
-  if (gpu_queue_ == nullptr) {
+  // Null streams keep their dedicated queue, never acquire from pool
+  if (!is_null_stream_ && gpu_queue_ == nullptr) {
+    amd::ScopedLock lock(execution());
     gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
   }
   return gpu_queue_->id;
@@ -1594,7 +1602,8 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
 
 // ================================================================================================
 VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
-                       const std::vector<uint32_t>& cuMask, amd::CommandQueue::Priority priority)
+                       const std::vector<uint32_t>& cuMask, amd::CommandQueue::Priority priority,
+                       bool is_null_stream)
     : device::VirtualDevice(device),
       state_(0),
       gpu_queue_(nullptr),
@@ -1609,9 +1618,10 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_),
       cuMask_(cuMask),
       priority_(priority),
-     copy_command_type_(0),
-     fence_state_(Device::CacheState::kCacheStateInvalid),
-     fence_dirty_(false) {
+      copy_command_type_(0),
+      fence_state_(Device::CacheState::kCacheStateInvalid),
+      fence_dirty_(false),
+      is_null_stream_(is_null_stream) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
   printfdbg_ = nullptr;
@@ -1668,7 +1678,8 @@ VirtualGPU::~VirtualGPU() {
 
   if (tracking_created_) {
     amd::ScopedLock l(execution());
-    if (gpu_queue_ == nullptr) {
+    // Null streams keep their dedicated queue, never acquire from pool
+    if (!is_null_stream_ && gpu_queue_ == nullptr) {
       gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
     }
     // Release the resources of signal
@@ -1703,7 +1714,17 @@ VirtualGPU::~VirtualGPU() {
   }
 
   if (gpu_queue_ != nullptr) {
-    roc_device_.releaseQueue(gpu_queue_, cuMask_, cooperative_);
+    // For null streams, just mark it for cleanup but DON'T destroy it here
+    // The Device destructor will handle destroying the null stream queue
+    if (is_null_stream_) {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+              "Releasing null stream queue %p (will be destroyed by Device destructor)",
+              gpu_queue_->base_address);
+      // Don't destroy the queue here, just clear our reference
+      gpu_queue_ = nullptr;
+    } else {
+      roc_device_.releaseQueue(gpu_queue_, cuMask_, cooperative_);
+    }
   }
 }
 
@@ -1711,7 +1732,8 @@ VirtualGPU::~VirtualGPU() {
 bool VirtualGPU::create() {
   // Pick a reasonable queue size
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
-  gpu_queue_ = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_);
+  gpu_queue_ = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
+                                         is_null_stream_);
   if (!gpu_queue_) return false;
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
@@ -1868,8 +1890,13 @@ address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
 
 // ================================================================================================
 void VirtualGPU::ReleaseAllHwQueues() {
+   // Account for null stream reservation when checking limit
+  uint32_t effective_limit = roc_device_.settings().max_hw_queues_;
+  if (DEBUG_HIP_EXCLUSIVE_NULL_STREAM && effective_limit > 1) {
+    effective_limit--;
+  }
   if (roc_device_.settings().dynamic_queues_ &&
-      (roc_device_.NumNormalQueues() > GPU_MAX_HW_QUEUES)) {
+      (roc_device_.NumNormalQueues() > effective_limit)) {
     // Lock the device to make the following thread safe
     amd::ScopedLock lock(roc_device_.vgpusAccess());
     for (uint idx = 0; idx < roc_device_.vgpus().size(); ++idx) {
@@ -1880,8 +1907,13 @@ void VirtualGPU::ReleaseAllHwQueues() {
 
 // ================================================================================================
 void VirtualGPU::ReleaseHwQueue() {
+  // Null streams keep their dedicated queue, never release to pool
+  if (is_null_stream_) {
+    return;
+  }
+
   // Try to release normal queue to the pool of active queues
-  if (roc_device_.settings().dynamic_queues_ &&
+  if (roc_device_.settings().dynamic_queues_ >= 1 &&
       (priority_ == amd::CommandQueue::Priority::Normal) && !cooperative_ &&
       (cuMask_.size() == 0)) {
     amd::ScopedLock lock(execution());
@@ -1901,8 +1933,16 @@ void VirtualGPU::ReleaseHwQueue() {
  * and then calls start() to get the current host timestamp.
  */
 void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
-  if (gpu_queue_ == nullptr) {
+  // Null streams keep their dedicated queue, never acquire from pool
+  if (!is_null_stream_ && gpu_queue_ == nullptr) {
     gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
+    // If we have a valid completion signal from the previous queue, we must wait for it
+    if (last_completion_signal_.handle != 0) {
+      // Check if the signal is still active
+      if (Hsa::signal_load_relaxed(last_completion_signal_) > 0) {
+        Barriers().AddDynamicQueueWait(last_completion_signal_);
+      }
+    }
   }
   // Track the current command
   command_ = &command;
@@ -3767,7 +3807,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
   // Copy scheduler's AQL packet for possible relaunch from the scheduler itself
   if (aql_packet != nullptr) {
-    *aql_packet = dispatchPacket;
+    *aql_packet = dispatchPacket;91
     aql_packet->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
                          (1 << HSA_PACKET_HEADER_BARRIER) |
                          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
@@ -3907,7 +3947,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     if (vcmd.CpuWaitRequested()) {
       // It should be safe to call flush directly if there are not pending dispatches without
       // HSA signal callback
-      if (gpu_queue_ == nullptr) {
+      if (!is_null_stream_ && gpu_queue_ == nullptr) {
         gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
       }
       flush(vcmd.GetBatchHead());

@@ -299,6 +299,9 @@ class VirtualGPU : public device::VirtualDevice {
     //! Empty check for external signals
     bool IsExternalSignalListEmpty() const { return external_signals_.empty(); }
 
+    //! Adds a raw signal for dependency tracking
+    void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
+
     //! Get/Set SDMA profiling
     bool GetSDMAProfiling() { return sdma_profiling_; }
     void SetSDMAProfiling(bool profile) {
@@ -328,12 +331,14 @@ class VirtualGPU : public device::VirtualDevice {
     bool sdma_profiling_ = false;                    //!< If TRUE, then SDMA profiling is enabled
     const VirtualGPU& gpu_;                          //!< VirtualGPU, associated with this tracker
     std::vector<ProfilingSignal*> external_signals_;  //!< External signals for a wait in this queue
+    std::vector<hsa_signal_t> dynamic_queue_waits_;   //!< Extra raw signals for a wait in this queue
     std::vector<hsa_signal_t> waiting_signals_;       //!< Current waiting signals in this queue
   };
 
   VirtualGPU(Device& device, bool profiling = false, bool cooperative = false,
              const std::vector<uint32_t>& cuMask = {},
-             amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal);
+             amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
+             bool is_null_stream = false);
   ~VirtualGPU();
 
   bool create();
@@ -538,7 +543,7 @@ class VirtualGPU : public device::VirtualDevice {
     last_write_index_ = index;
     // Update the last completion signal if the packet has one
     if (packet.completion_signal.handle != 0) {
-      last_barrier_index_ = index;
+      last_packet_with_signal_index_ = index;
       last_completion_signal_ = packet.completion_signal;
     }
   }
@@ -546,16 +551,35 @@ class VirtualGPU : public device::VirtualDevice {
   //! Returns true if the queue is considered as idle. That means all submitted packets are
   //! complete. Note: it doesn't track the state of caches
   bool IsQueueIdle() const {
-    bool result = false;
-    // Make sure the last packet contained a completion signal
-    if (last_barrier_index_ == last_write_index_) {
-      if ((last_write_index_ == 0) && (last_completion_signal_.handle == 0)) {
-        result = true;
-      } else {
-        result = (Hsa::signal_load_relaxed(last_completion_signal_) == 0);
-      }
+    if (gpu_queue_ == nullptr) {
+      return true;
     }
-    return result;
+
+    // Use wptr/rptr to accurately determine if queue has pending work
+    uint64_t wptr = Hsa::queue_load_write_index_relaxed(gpu_queue_);
+    uint64_t rptr = Hsa::queue_load_read_index_relaxed(gpu_queue_);
+
+    if (wptr == rptr) {
+      return true;
+    }
+
+    // We add the completion signal wait via AddDynamicQueueWait
+    if (last_packet_with_signal_index_ == last_write_index_ &&
+        last_completion_signal_.handle != 0) {
+      return true;
+    }
+
+    return false;
+  }
+
+  //! Get the current queue depth (number of pending packets)
+  uint64_t GetQueueDepth() const {
+    if (gpu_queue_ == nullptr) {
+      return 0;
+    }
+    uint64_t wptr = Hsa::queue_load_write_index_relaxed(gpu_queue_);
+    uint64_t rptr = Hsa::queue_load_read_index_relaxed(gpu_queue_);
+    return wptr - rptr;
   }
 
   std::vector<amd::Memory*> pinnedMems_;  //!< Pinned memory list
@@ -613,6 +637,7 @@ class VirtualGPU : public device::VirtualDevice {
   //!< bit-vector representing the CU mask. Each active bit represents using one CU
   const std::vector<uint32_t> cuMask_;
   amd::CommandQueue::Priority priority_;  //!< The priority for the hsa queue
+  bool is_null_stream_;                   //!< TRUE if this VirtualGPU is for a HIP null stream
 
   cl_command_type copy_command_type_;  //!< Type of the copy command, used for ROC profiler
                                        //!< OCL doesn't distinguish diffrent copy types,
@@ -621,10 +646,10 @@ class VirtualGPU : public device::VirtualDevice {
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
   std::atomic<bool> fence_dirty_;      //!< Fence modified flag
 
-  uint64_t last_write_index_ = 0;             //!< The last HW queue write index for any packet
-  uint64_t last_barrier_index_ = 0;           //!< The last HW queue write index for a packet
-                                              //!< with a complition signal
-  hsa_signal_t last_completion_signal_{};     //!< The last completion signal
+  uint64_t last_write_index_ = 0;               //!< The last HW queue write index for any packet
+  uint64_t last_packet_with_signal_index_ = 0;  //!< The last HW queue write index for a packet
+                                                //!< with a completion signal
+  hsa_signal_t last_completion_signal_{};       //!< The last completion signal
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };

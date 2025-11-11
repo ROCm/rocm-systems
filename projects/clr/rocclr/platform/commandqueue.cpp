@@ -35,9 +35,10 @@
 namespace amd {
 
 HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properties props,
-                     uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask)
+                     uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask,
+                     bool is_null_stream)
     : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs, priority,
-                   cuMask),
+                   cuMask, is_null_stream),
       lastEnqueueCommand_(nullptr),
       head_(nullptr),
       tail_(nullptr),
