@@ -10,7 +10,7 @@ Required: ROCm SMI library installed (librocm_smi64)
 
 ## Installation
 
-Follow installation procedure for rocm_smi_lib. Refer to [https://github.com/RadeonOpenCompute/rocm_smi_lib](https://github.com/RadeonOpenCompute/rocm_smi_lib) for the installation guide.
+Follow installation procedure for rocm_smi_lib. Refer to [ROCm/rocm-systems](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib) for the installation guide.
 LD_LIBRARY_PATH  should be set to the folder containing librocm_smi64.
 
 ## Version

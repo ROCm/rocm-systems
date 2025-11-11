@@ -45,8 +45,7 @@ def initRsmiBindings(silent=False):
     except OSError:
         print('Unable to load the rocm_smi library.\n'\
               'Set LD_LIBRARY_PATH to the folder containing librocm_smi64.so.@VERSION_MAJOR@\n'\
-              '{0}Please refer to https://github.com/'\
-              'RadeonOpenCompute/rocm_smi_lib for the installation guide.{1}'\
+              '{0}Please refer to https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib for the installation guide.{1}'\
               .format('\33[33m', '\033[0m'))
         exit()
 

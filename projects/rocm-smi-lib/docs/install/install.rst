@@ -45,7 +45,7 @@ To build the latest documentation, the following are required:
 * Python 3.8+
 * NPM (sass)
 
-The source code for ROCm SMI is available on `Github <https://github.com/RadeonOpenCompute/rocm_smi_lib>`_.
+The source code for ROCm SMI is available on `Github <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib>`_.
 
 After the ROCm SMI library git repository is cloned to a local Linux machine, use the following CMake build sequence to build the library. Specifically,
 

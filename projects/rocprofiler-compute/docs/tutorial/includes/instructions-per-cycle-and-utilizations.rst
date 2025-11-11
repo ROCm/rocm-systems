@@ -150,7 +150,7 @@ Exploring “issued” IPC via MFMA operations
 Unlike the simple quad-cycle ``v_mov_b32`` operation discussed in our
 :ref:`previous example <ipc-valu-utilization>`, some operations take many
 quad-cycles to execute. For example, using the
-`AMD Matrix Instruction Calculator <https://github.com/RadeonOpenCompute/amd_matrix_instruction_calculator#example-of-querying-instruction-information>`_
+`AMD Matrix Instruction Calculator <https://github.com/ROCm/amd_matrix_instruction_calculator#example-of-querying-instruction-information>`_
 we can see that some :ref:`MFMA <desc-mfma>` operations take 64 cycles, e.g.:
 
 .. code-block:: shell

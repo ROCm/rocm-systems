@@ -30,7 +30,7 @@
 // Currently hip external semaphores are not working under Linux when
 // compiling for the AMD platform.
 // TODO: Remove once this is implemented in hipamd.
-// See https://github.com/ROCm-Developer-Tools/hipamd/issues/48.
+// See https://github.com/ROCm/hipamd/issues/48.
 #ifndef USE_EXTERNAL_SEMAPHORES
     #if defined(__HIP_PLATFORM_AMD__) && !defined(_WIN64)
         #define USE_EXTERNAL_SEMAPHORES 0
@@ -112,7 +112,7 @@ struct uuid
         // by mesa (see https://gitlab.freedesktop.org/mesa/mesa/-/blob/5cd3e395037250946ba2519600836341df02c8ca/src/amd/common/ac_gpu_info.c#L1366-1382)
         // and by xgl (see https://github.com/GPUOpen-Drivers/xgl/blob/4118707939c2f4783d28ce2a383184a3794ca477/icd/api/vk_physical_device.cpp#L4363-L4421)
         // Those drivers _do_ align with each other, so we can create our own UUID here.
-        // \see https://github.com/ROCm-Developer-Tools/hipamd/issues/50.
+        // \see https://github.com/ROCm/hipamd/issues/50.
         hipDeviceProp_t props;
         HIP_CHECK(hipGetDeviceProperties(&props, device));
 
@@ -127,7 +127,7 @@ struct uuid
 #elif defined(__HIP_PLATFORM_NVIDIA__)
         // Work around a compile error related to hipDeviceGetUuid when compiling for NVIDIA:
         // "undefined reference to `cuDeviceGetUuid'"
-        // \see https://github.com/ROCm-Developer-Tools/hipamd/issues/51.
+        // \see https://github.com/ROCm/hipamd/issues/51.
         cudaDeviceProp props;
         HIP_CHECK(hipCUDAErrorTohipError(cudaGetDeviceProperties(&props, device)));
 

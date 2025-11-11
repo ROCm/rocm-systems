@@ -4,5 +4,5 @@ Maintainer: Advanced Micro Devices Inc.
 Priority: optional
 Version: MODULE_VERSION
 Depends:
-Homepage: https://github.com/RadeonOpenCompute/rocm_smi_lib
+Homepage: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib
 Description: System Management Interface Library for ROCm

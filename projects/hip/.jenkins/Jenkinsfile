@@ -11,7 +11,7 @@ def hipBuildTest(String backendLabel) {
             // Clone hip-tests repository
             dir("${WORKSPACE}/hip-tests") {
               git branch: 'develop',
-              url: 'https://github.com/ROCm-Developer-Tools/hip-tests'
+              url: 'https://github.com/ROCm/hip-tests'
               env.HIP_TESTS_DIR = "${WORKSPACE}" + "/hip-tests"
             }
 
@@ -19,7 +19,7 @@ def hipBuildTest(String backendLabel) {
             dir("${WORKSPACE}/clr") {
               git branch: 'develop',
               credentialsId: 'branch-credentials',
-              url: 'https://github.com/ROCm-Developer-Tools/clr'
+              url: 'https://github.com/ROCm/clr'
               env.CLR_DIR = "${WORKSPACE}" + "/clr"
             }
 
@@ -27,7 +27,7 @@ def hipBuildTest(String backendLabel) {
             dir("${WORKSPACE}/hipcc") {
               git branch: 'develop',
               credentialsId: 'branch-credentials',
-              url: 'https://github.com/ROCm-Developer-Tools/hipcc'
+              url: 'https://github.com/ROCm/llvm-project'
               env.HIPCC_DIR = "${WORKSPACE}" + "/hipcc"
             }
         }

@@ -1,7 +1,7 @@
 # rocprof
 ## 1. Overview
 The rocProf is a command line tool implemented on the top of  rocProfiler and rocTracer APIs. Source code for rocProf may be found here:
-GitHub: https://github.com/ROCm-Developer-Tools/rocprofiler/blob/amd-master/bin/rocprof
+GitHub: https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler/bin/rocprofv2
 This command line tool is implemented as a script which is setting up the environment for attaching the profiler and then run the provided application command line. The tool uses two profiling plugins loaded by ROC runtime and based on rocProfiler and rocTracer for collecting metrics/counters, HW traces and runtime API/activity traces. The tool consumes an input XML or text file with counters list or trace parameters and provides output profiling data and statistics in various formats as text, CSV and JSON traces. Google Chrome tracing can be used to visualize the JSON traces with runtime API/activity timelines and per kernel counters data.
 ## 2. Profiling Modes
 ‘rocprof’ can be used for GPU profiling using HW counters and application tracing
@@ -348,7 +348,7 @@ Counters:
 •	TCP_TCP_TA_DATA_STALL_CYCLES[0-15] : TCP stalls TA data interface. Now Windowed.
 ```
 
-The following derived metrics have been defined and the profiler metrics XML specification can be found at: https://github.com/ROCm-Developer-Tools/rocprofiler/blob/amd-master/test/tool/metrics.xml.
+The following derived metrics have been defined and the profiler metrics XML specification can be found at: https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler/test/tool/metrics.xml.
 
 Metrics:
 ```

@@ -153,7 +153,7 @@ message(
 set(CMAKE_INSTALL_MESSAGE LAZY)
 
 # this must go after some CMAKE_* variables
-project(${RDC} VERSION "${VERSION_STRING}" HOMEPAGE_URL "https://github.com/RadeonOpenCompute/rdc")
+project(${RDC} VERSION "${VERSION_STRING}" HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/projects/rdc")
 
 # Include CMAKE_INSTALL_* variables
 # this must go after project()

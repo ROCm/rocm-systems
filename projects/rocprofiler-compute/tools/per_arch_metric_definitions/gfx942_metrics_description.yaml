@@ -511,7 +511,7 @@ Pipeline statistics:
     unit: Percent
   MFMA Instruction Cycles:
     plain: The average duration of MFMA instructions in this kernel in cycles. Computed as the ratio of the total number of cycles the MFMA unit was busy over the total number of MFMA instructions.
-    rst: The average duration of :ref:`MFMA <desc-mfma>` instructions in this kernel in cycles. Computed as the ratio of the total number of cycles the MFMA unit was busy over the total number of MFMA instructions. Compare to, for example, the `AMD Matrix Instruction Calculator <https://github.com/RadeonOpenCompute/amd_matrix_instruction_calculator>`_.
+    rst: The average duration of :ref:`MFMA <desc-mfma>` instructions in this kernel in cycles. Computed as the ratio of the total number of cycles the MFMA unit was busy over the total number of MFMA instructions. Compare to, for example, the `AMD Matrix Instruction Calculator <https://github.com/ROCm/amd_matrix_instruction_calculator>`_.
     unit: Cycles per Instruction
   VMEM Latency:
     plain: The average number of round-trip cycles (that is, from issue to data return / acknowledgment) required for a VMEM instruction to complete.

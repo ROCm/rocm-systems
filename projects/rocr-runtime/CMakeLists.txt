@@ -218,7 +218,7 @@ else()
 endif()
 message("Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}")
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/RadeonOpenCompute/ROCR-Runtime")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocr-runtime/DEBIAN")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/Binary/postinst.in DEBIAN/Binary/postinst @ONLY)

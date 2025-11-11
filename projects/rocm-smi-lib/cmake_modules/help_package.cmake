@@ -42,7 +42,7 @@ function(generic_package)
 
     # Add address sanitizer
     # derived from:
-    # https://github.com/RadeonOpenCompute/ROCm-OpenCL-Runtime/blob/e176056061bf11fdd98b58dd57deb4ac5625844d/amdocl/CMakeLists.txt#L27
+    # https://github.com/ROCm/ROCm-OpenCL-Runtime/blob/e176056061bf11fdd98b58dd57deb4ac5625844d/amdocl/CMakeLists.txt#L27
     if(${ADDRESS_SANITIZER})
         set(ASAN_COMPILER_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
         set(ASAN_LINKER_FLAGS "-fsanitize=address")

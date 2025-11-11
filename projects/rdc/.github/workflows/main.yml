@@ -67,7 +67,7 @@ jobs:
         apt install -y \
           rocm-core \
           amd-smi-lib \
-          rocm-developer-tools \
+          rocm \
           rocm-device-libs \
           rocm-smi-lib \
           rocprofiler-dev \
