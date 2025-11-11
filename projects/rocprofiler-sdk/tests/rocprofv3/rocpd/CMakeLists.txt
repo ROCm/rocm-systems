@@ -376,19 +376,19 @@ set_tests_properties(
 
 #########################################################################################
 #
-# Perfetto generation using package
+# Query SQL string using package
 #
 #########################################################################################
 
 add_test(
-    NAME rocprofv3-test-rocpd-perfetto-generation-using-package
+    NAME rocprofv3-test-rocpd-query-using-package
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -o out_package -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package.rpdb)
+        ${Python3_EXECUTABLE} -m rocpd query -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package.rpdb --query
+        "SELECT id, type FROM rocpd_info_agent LIMIT 10;")
 
 set_tests_properties(
-    rocprofv3-test-rocpd-perfetto-generation-using-package
+    rocprofv3-test-rocpd-query-using-package
     PROPERTIES TIMEOUT
                120
                LABELS
@@ -403,15 +403,14 @@ set_tests_properties(
                rocprofv3-test-rocpd)
 
 add_test(
-    NAME rocprofv3-test-rocpd-perfetto-generation-using-package-multiproc
+    NAME rocprofv3-test-rocpd-query-using-package-multiproc
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f perfetto --kernel-rename
-        --group-by-queue -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-multiproc -o
-        out_package_mp -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi.rpdb)
+        ${Python3_EXECUTABLE} -m rocpd query -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi.rpdb
+        --query "SELECT id, type FROM rocpd_info_agent LIMIT 10;")
 
 set_tests_properties(
-    rocprofv3-test-rocpd-perfetto-generation-using-package-multiproc
+    rocprofv3-test-rocpd-query-using-package-multiproc
     PROPERTIES TIMEOUT
                120
                LABELS
@@ -481,19 +480,19 @@ set_tests_properties(
 
 #########################################################################################
 #
-# Perfetto generation using merged database
+# Query SQL string using merged database
 #
 #########################################################################################
 
 add_test(
-    NAME rocprofv3-test-rocpd-perfetto-generation-using-mergedDB
+    NAME rocprofv3-test-rocpd-query-using-mergedDB
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -o out_mergedDB -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/merged_db.db)
+        ${Python3_EXECUTABLE} -m rocpd query -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/merged_db.db --query
+        "SELECT id, type FROM rocpd_info_agent LIMIT 10;")
 
 set_tests_properties(
-    rocprofv3-test-rocpd-perfetto-generation-using-mergedDB
+    rocprofv3-test-rocpd-query-using-mergedDB
     PROPERTIES TIMEOUT
                120
                LABELS
@@ -508,15 +507,14 @@ set_tests_properties(
                rocprofv3-test-rocpd)
 
 add_test(
-    NAME rocprofv3-test-rocpd-perfetto-generation-using-mergedDB-multiproc
+    NAME rocprofv3-test-rocpd-query-using-mergedDB-multiproc
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f perfetto --kernel-rename
-        --group-by-queue -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-multiproc -o
-        out_mergedDB_mp -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/merged_db_multi.db)
+        ${Python3_EXECUTABLE} -m rocpd query -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/merged_db_multi.db --query
+        "SELECT id, type FROM rocpd_info_agent LIMIT 10;")
 
 set_tests_properties(
-    rocprofv3-test-rocpd-perfetto-generation-using-mergedDB-multiproc
+    rocprofv3-test-rocpd-query-using-mergedDB-multiproc
     PROPERTIES TIMEOUT
                120
                LABELS

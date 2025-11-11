@@ -141,6 +141,13 @@ def add_args(parser):
         required=False,
     )
 
+    io_options.add_argument(
+        "--automerge-limit",
+        help="Change database auto-merge limit (default: 1, auto-merge to 1 DB. max: 8)",
+        type=int,
+        required=False,
+    )
+
     def process_args(input, args):
         valid_args = ["output_file", "output_path"]
         ret = {}

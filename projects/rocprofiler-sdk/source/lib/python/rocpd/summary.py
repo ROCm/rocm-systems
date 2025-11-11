@@ -533,7 +533,9 @@ def add_args(parser):
 
 def execute(input, **kwargs: Any) -> RocpdImportData:
 
-    importData = RocpdImportData(input)
+    importData = RocpdImportData(
+        input, automerge_limit=getattr(kwargs, "automerge_limit", None)
+    )
 
     generate_all_summaries(importData, **kwargs)
 

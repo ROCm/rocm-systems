@@ -75,8 +75,8 @@ Example usage:
     Merge the three databases and output to a folder called merged3DBs
     $ rocpd merge -i db0.db db1.db db2.db -d merged3DBs
 
-    Merge all the databases from the node0 folder and output to the node0_output folder, with filename called massiveMerged.db
-    $ rocpd merge -i node0/*.db -d node0_output -o massiveMerged
+    Merge all the databases from the node0 folder and output to the node0_output folder, with filename called largeMerged.db
+    $ rocpd merge -i node0/*.db -d node0_output -o largeMerged
 """
 
     package_examples = """
@@ -261,7 +261,12 @@ Example usage:
     # if the user requested converter, process the conversion
     if args.command == "convert":
         # construct the rocpd import data object
-        input = RocpdImportData(args.input)
+        input = RocpdImportData(
+            args.input,
+            automerge_limit=getattr(
+                args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
+            ),
+        )
 
         all_args = {}
         for pitr in process_converter_args:
@@ -315,7 +320,12 @@ Example usage:
     # if the user requested query module, execute the query
     elif args.command == "query":
         # construct the rocpd import data object
-        input = RocpdImportData(args.input)
+        input = RocpdImportData(
+            args.input,
+            automerge_limit=getattr(
+                args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
+            ),
+        )
 
         # query subparser args
         query_args = {}
@@ -331,7 +341,12 @@ Example usage:
     # if the user requested a summary, generate the views
     elif args.command == "summary":
         # construct the rocpd import data object
-        input = RocpdImportData(args.input)
+        input = RocpdImportData(
+            args.input,
+            automerge_limit=getattr(
+                args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
+            ),
+        )
 
         # summary subparser args
         summary_args = {}

@@ -448,22 +448,6 @@ def add_args(parser):
     )
 
     def process_args(input, args):
-        # valid_args = [
-        #     "query",
-        #     "script",
-        #     "email_to",
-        #     "email_from",
-        #     "email_subject",
-        #     "smtp_server",
-        #     "smtp_port",
-        #     "smtp_user",
-        #     "smtp_password",
-        #     "inline_preview",
-        #     "zip_attachments",
-        #     "format",
-        #     "template_path",
-        # ]
-        # do not add any of the arguments to the output config dict
         ret = {}
         return ret
 
@@ -472,7 +456,9 @@ def add_args(parser):
 
 def execute(input, args, config=None, **kwargs):
 
-    importData = RocpdImportData(input)
+    importData = RocpdImportData(
+        input, automerge_limit=getattr(args, "automerge_limit", None)
+    )
 
     config = (
         output_config.output_config(**kwargs)

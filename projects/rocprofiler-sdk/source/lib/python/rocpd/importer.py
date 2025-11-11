@@ -37,11 +37,11 @@ from . import libpyrocpd
 __all__ = ["RocpdImportData", "execute_statement"]
 
 
-def internal_init(_input, _output, skip_auto_merge):
+def internal_init(_input, _output, skip_auto_merge, automerge_limit):
     from . import package
 
     _input = package.flatten_rocpd_yaml_input_file(
-        _input, skip_auto_merge=skip_auto_merge
+        _input, skip_auto_merge=skip_auto_merge, automerge_limit=automerge_limit
     )
     assert not os.path.isdir(_output), "Output database name must not be a directory"
     assert _check_for_valid_dbs(
@@ -56,7 +56,14 @@ def internal_init(_input, _output, skip_auto_merge):
 
 class RocpdImportData(libpyrocpd.RocpdImportData):
 
-    def __init__(self, input, skip_auto_merge=False, dbname=":memory:"):
+    def __init__(
+        self, input, skip_auto_merge=False, automerge_limit=None, dbname=":memory:"
+    ):
+        from . import package
+
+        if automerge_limit is None:
+            automerge_limit = package.IDEAL_NUMBER_OF_DATABASE_FILES
+
         if isinstance(input, RocpdImportData):
             super(RocpdImportData, self).__init__(input)
             self.table_info = input.table_info
@@ -70,7 +77,7 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 isinstance(input, list) and len(input) > 0 and isinstance(input[0], str)
             ):
                 _connection, _filenames, _table_info = internal_init(
-                    input, dbname, skip_auto_merge
+                    input, dbname, skip_auto_merge, automerge_limit
                 )
                 self.table_info = _table_info
             else:

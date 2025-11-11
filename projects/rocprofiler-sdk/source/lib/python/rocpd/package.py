@@ -33,7 +33,8 @@ from . import output_config
 rocpd_package_version = "1.0"
 rocpd_metadata_param_version = "rocpd_package_version"
 
-IDEAL_NUMBER_OF_DATABASE_FILES = 5
+IDEAL_NUMBER_OF_DATABASE_FILES = 1
+MAX_LIMIT_OF_DATABASE_FILES = 8
 
 
 def prepare_output_folder(output_path, consolidate) -> str:
@@ -51,7 +52,7 @@ def prepare_output_folder(output_path, consolidate) -> str:
         str: The output folder path with .rpdb extension.
     """
     # Current directory with consolidation - generate timestamped folder
-    if output_path == ".":
+    if output_path == os.getcwd():
         if consolidate:
             date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             output_path = f"rocpd-{date_str}.rpdb"
@@ -182,16 +183,27 @@ def flatten_rocpd_yaml_input_file(input, **kwargs) -> list:
 
     # Optionally merge databases if count exceeds threshold
     skip_auto_merge = kwargs.get("skip_auto_merge", False)
+    auto_merge_max_limit = kwargs.get("automerge_limit", IDEAL_NUMBER_OF_DATABASE_FILES)
+
+    # Check if user tried to exceed MAX_LIMIT of DBs.  Conservatively set to 8.  SQLite limit is 10.
+    if auto_merge_max_limit > MAX_LIMIT_OF_DATABASE_FILES:
+        print(
+            f"SQLite has a database attach limit of 10.  Max auto-merge limit of {MAX_LIMIT_OF_DATABASE_FILES} set."
+        )
+        auto_merge_max_limit = MAX_LIMIT_OF_DATABASE_FILES
+
     if skip_auto_merge:
         print("Skip auto merge and packaging.")
         return input_files
 
-    if num_dbs > IDEAL_NUMBER_OF_DATABASE_FILES:
+    if num_dbs > auto_merge_max_limit:
         print(
-            f"More than {IDEAL_NUMBER_OF_DATABASE_FILES} database files found. "
+            f"More than {auto_merge_max_limit} database files found. "
             f"It is recommended to merge and package databases"
         )
-        merged_files = merge_and_repackage(input_files, **kwargs)
+        merged_files = merge_and_repackage(
+            input_files, max_limit=auto_merge_max_limit, **kwargs
+        )
         print(f"Reduced to {len(merged_files)} database files.")
         return merged_files
 
@@ -215,7 +227,6 @@ def merge_and_repackage(
     Returns:
         list: List of merged database file paths.
     """
-    from . import merge
     import uuid
 
     original_num_dbs = len(input_files)
@@ -237,7 +248,7 @@ def merge_and_repackage(
 
     # Prepare output folder for merged databases
     unique_str = uuid.uuid4()
-    merged_output_folder = prepare_output_folder(".", consolidate=True)
+    merged_output_folder = prepare_output_folder(os.getcwd(), consolidate=True)
     os.makedirs(merged_output_folder, exist_ok=True)
 
     # Process databases in batches
@@ -419,7 +430,7 @@ def add_args(parser):
 def execute(input_files, **kwargs):
     import glob
 
-    output_path_kw = kwargs.get("output_path", ".")
+    output_path_kw = kwargs.get("output_path", os.getcwd())
     consolidate = kwargs.get("consolidate", False)
     copy_instead_of_move = kwargs.get("copy", False)
 
