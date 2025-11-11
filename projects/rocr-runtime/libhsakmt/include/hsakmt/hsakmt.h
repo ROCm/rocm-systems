@@ -500,6 +500,18 @@ hsaKmtRegisterMemoryWithFlags(
     );
 
 /**
+  Register with KFD memory ranges with memory attributes
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtRegisterRangesWithFlags(
+  void *MemoryAddress,
+  HSAuint64 MemorySizeInBytes,
+  HsaMemoryRange *MemoryRanges,
+  HSAuint64 RangesCount,
+  HsaMemFlags MemFlags);
+
+/**
   Registers with KFD a graphics buffer and returns graphics metadata
 */
 

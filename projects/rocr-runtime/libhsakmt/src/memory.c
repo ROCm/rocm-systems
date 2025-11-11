@@ -348,6 +348,33 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryWithFlagsCtx(HsaKFDContext *ctx,
 	return ret;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterRangesWithFlagsCtx(HsaKFDContext *ctx,
+							void *MemoryAddress,
+							HSAuint64 MemorySizeInBytes,
+							HsaMemoryRange *MemoryRanges,
+							HSAuint64 RangesCount,
+							HsaMemFlags MemFlags)
+{
+	CHECK_KFD_OPEN();
+	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+
+	pr_debug("[%s] address %p\n",
+		__func__, MemoryAddress);
+
+	// Registered memory should be ordinary paged host memory.
+	if ((MemFlags.ui32.HostAccess != 1) || (MemFlags.ui32.NonPaged == 1))
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	if (!hsakmt_is_dgpu || !hsakmt_allow_mapped_userptr)
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	ret = hsakmt_fmm_register_ranges(ctx, MemoryAddress, MemorySizeInBytes,
+									(struct kfd_ioctl_svm_range*)MemoryRanges, RangesCount,
+									MemFlags.ui32.CoarseGrain, MemFlags.ui32.ExtendedCoherent);
+
+	return ret;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesCtx(HsaKFDContext *ctx,
 							    HSAuint64 GraphicsResourceHandle,
 							    HsaGraphicsResourceInfo *GraphicsResourceInfo,
@@ -779,6 +806,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryWithFlags(void *MemoryAddress,
 {
 	return hsaKmtRegisterMemoryWithFlagsCtx(&hsakmt_primary_kfd_ctx,
 					      MemoryAddress, MemorySizeInBytes, MemFlags);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterRangesWithFlags(void* MemoryAddress, 
+							HSAuint64 MemorySizeInBytes,
+							HsaMemoryRange* MemoryRanges,
+							HSAuint64 RangesCount,
+							HsaMemFlags MemFlags)
+{
+
+	return hsaKmtRegisterRangesWithFlagsCtx(&hsakmt_primary_kfd_ctx,
+					      MemoryAddress, MemorySizeInBytes,
+					      MemoryRanges, RangesCount, MemFlags);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodes(HSAuint64 GraphicsResourceHandle,

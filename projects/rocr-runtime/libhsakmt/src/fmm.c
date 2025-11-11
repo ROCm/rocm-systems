@@ -1129,6 +1129,64 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS fmm_register_mem_ranges_svm_api(HsaKFDContext* ctx, void* address, uint64_t size,
+                                              struct kfd_ioctl_svm_range* ranges,
+                                              uint64_t nranges,
+                                              bool coarse_grain,
+											  bool ext_coherent) {
+  struct kfd_ioctl_svm_ranges_args args;
+  struct kfd_ioctl_svm_attribute attrs[3];
+  HSAuint32 page_offset = (HSAuint64)address & (PAGE_SIZE - 1);
+  HSAuint64 aligned_addr = (HSAuint64)address - page_offset;
+  HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
+  struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+
+	if (!fmm_ctx->first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+
+  if (!ranges || !nranges) return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  args.start_addr = aligned_addr;
+  args.size = aligned_size;
+  args.op = KFD_IOCTL_SVM_OP_SET_ATTR;
+  args.nattr = 3;
+  attrs[0].type = coarse_grain ? HSA_SVM_ATTR_CLR_FLAGS : HSA_SVM_ATTR_SET_FLAGS;
+  attrs[0].value = HSA_SVM_FLAG_COHERENT;
+  attrs[1].type = ext_coherent ? HSA_SVM_ATTR_SET_FLAGS : HSA_SVM_ATTR_CLR_FLAGS;
+  attrs[1].value = HSA_SVM_FLAG_EXT_COHERENT;
+  attrs[2].type = HSA_SVM_ATTR_MAPPED;
+  attrs[2].value = 1;
+  args.attrs_ptr = (HSAuint64)&attrs[0];
+
+  args.ranges_ptr = (HSAuint64)ranges;
+  args.nranges = nranges;
+
+  pr_debug("Registering ranges to SVM %p size: %ld\n", (void*)aligned_addr, aligned_size);
+  /* Driver does one copy_from_user, with extra attrs size */
+  if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM_RANGES + (0 << _IOC_SIZESHIFT), &args)) {
+    pr_debug("op set range attrs failed %s\n", strerror(errno));
+    return HSAKMT_STATUS_ERROR;
+  }
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS hsakmt_fmm_register_ranges(HsaKFDContext* ctx, void* address, uint64_t size_in_bytes,
+                                         struct kfd_ioctl_svm_range* ranges,
+                                         uint64_t nranges,
+                                         bool coarse_grain, bool ext_coherent) {
+  HSAKMT_STATUS ret;
+
+  if (coarse_grain && ext_coherent) return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  if (!hsakmt_is_svm_api_supported) return HSAKMT_STATUS_NOT_SUPPORTED;
+
+  ret = fmm_register_mem_ranges_svm_api(ctx, address, size_in_bytes, ranges, nranges, coarse_grain,
+                                        ext_coherent);
+
+  return ret;
+}
+
 static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 					      void *address,
 					      uint64_t size,
@@ -1144,6 +1202,8 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_ERROR;
 
 	nattr = nodes_array_size;
+	if (hsakmt_allow_mapped_userptr)
+		nattr += 1;
 	s_attr = sizeof(struct kfd_ioctl_svm_attribute) * nattr;
 	args = alloca(sizeof(*args) + s_attr);
 
@@ -1154,6 +1214,10 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 	for (i = 0; i < nodes_array_size; i++) {
 		args->attrs[i].type = HSA_SVM_ATTR_ACCESS_IN_PLACE;
 		args->attrs[i].value = nodes_to_map[i];
+	}
+	if (hsakmt_allow_mapped_userptr) {
+		args->attrs[nattr-1].type = HSA_SVM_ATTR_MAPPED;
+		args->attrs[nattr-1].value = 1;
 	}
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {

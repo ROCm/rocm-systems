@@ -141,6 +141,12 @@ HSAKMT_STATUS hsakmt_fmm_get_mem_info(HsaKFDContext *ctx,
 HSAKMT_STATUS hsakmt_fmm_set_mem_user_data(HsaKFDContext *ctx,
 						const void *mem,
 						void *usr_data);
+HSAKMT_STATUS hsakmt_fmm_register_ranges(HsaKFDContext* ctx, void* address, uint64_t size_in_bytes,
+                                         struct kfd_ioctl_svm_range* ranges, uint64_t nranges,
+                                         bool coarse_grain, bool ext_coherent);
+HSAKMT_STATUS fmm_register_mem_ranges_svm_api(HsaKFDContext* ctx, void* address, uint64_t size,
+                                              struct kfd_ioctl_svm_range* ranges, uint64_t nranges,
+                                              bool coarse_grain, bool ext_coherent);
 #ifdef SANITIZER_AMDGPU
 HSAKMT_STATUS hsakmt_fmm_replace_asan_header_page(HsaKFDContext *ctx, void* address);
 HSAKMT_STATUS hsakmt_fmm_return_asan_header_page(HsaKFDContext *ctx, void* address);
