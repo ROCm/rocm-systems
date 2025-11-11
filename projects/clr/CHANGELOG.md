@@ -20,6 +20,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New HIP flags  
     - `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory. 
     - `hipHostRegisterIoMemory` is supported in `hipHostRegister`, used to register I/O memory with HIP runtime so it can be accessed by the GPU.
+    - Support for flags in `hipGetProcAddress`, enables searching for the per-thread version symbols.
+      - `HIP_GET_PROC_ADDRESS_DEFAULT`
+      - `HIP_GET_PROC_ADDRESS_LEGACY_STREAM`
+      - `HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM`
 
 ## HIP 7.1.1 for ROCm 7.1.1
 
