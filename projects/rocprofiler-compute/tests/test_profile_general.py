@@ -2370,3 +2370,12 @@ class TestSetsIntegration:
         # workload dir should not exist
         assert not Path(workload_dir).exists()
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_profiler_options(binary_handler_profile_rocprof_compute):
+    options = ["--no-native-tool", "--iteration-multiplexing"]
+    workload_dir = test_utils.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    assert code == 1
