@@ -87,12 +87,12 @@ Example usage:
     $ rocpd package -i node0/db0.db node1/db1.db node2/db2.db
 
     Package and copy/consolidate all the databases into a my_MPI_run_1.rpdb folder so it can be managed easier
-    $ rocpd package -i node0/db0.db node1/db1.db node2/db2.db -d my_MPI_run_1 --consolidate
+    $ rocpd package -i node0/db0.db node1/db1.db node2/db2.db -d my_MPI_run_1 --consolidate --copy
 
     Package and copy/consolidate all the databases from my_MPI_run_1.rpdb folder append node5/db5.db and make new folder
-    $ rocpd package -i my_MPI_run_1.rpdb node5/db5.db -d my_MPI_run_1_append_5 --consolidate
+    $ rocpd package -i my_MPI_run_1.rpdb node5/db5.db -d my_MPI_run_1_append_5 --consolidate --copy
 
-    Package and copy/consolidate all the databases from my_MPI_run_1.rpdb folder append node7/db7.db and re-use same .rpdb folder
+    Use my_MPI_run_1.rpdb folder and move/consolidate node7/db7.db and re-use same .rpdb folder
     $ rocpd package -i my_MPI_run_1.rpdb node7/db7.db -d my_MPI_run_1 --consolidate
 """
 
