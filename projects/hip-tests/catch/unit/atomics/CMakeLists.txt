@@ -62,7 +62,7 @@ if(HIP_PLATFORM MATCHES "amd")
   hip_add_exe_to_target(NAME AtomicsTest
                         TEST_SRC ${TEST_SRC}
                         TEST_TARGET_NAME build_tests
-                        LINKER_LIBS hiprtc)
+                        LINKER_LIBS hiprtc::hiprtc)
 
 if(UNIX)
   set(EXPECTED_ERRORS 40)
