@@ -468,7 +468,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   }
 
-  hipError_t hip_status = hipErrorInvalidImage;
+  hipError_t hip_status = hipErrorNoBinaryForGpu;
   do {
     bool spirv_isa_found = code_obj_map.find(spirv_isa_name) != code_obj_map.end() ||
                            code_obj_map.find(spirv_isa_name_empty) != code_obj_map.end();

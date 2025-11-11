@@ -702,8 +702,8 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   hipError_t hip_error =
       PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
 
-  // Handle invalid image
-  if(hip_error == hipErrorInvalidImage) {
+  // Handle no binary for GPU
+  if(hip_error == hipErrorNoBinaryForGpu) {
     return hip_error;
   }
 
