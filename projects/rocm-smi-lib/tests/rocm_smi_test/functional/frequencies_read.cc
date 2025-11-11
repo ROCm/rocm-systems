@@ -45,6 +45,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <iomanip>
 #include <string>
 
 #include "gtest/gtest.h"
