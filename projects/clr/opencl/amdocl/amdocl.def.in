@@ -128,47 +128,6 @@ clGetKernelSubGroupInfo
 clSetDefaultDeviceCommandQueue
 #endif
 
-#if !defined(WITH_LIGHTNING_COMPILER)
-aclCompilerInit
-aclCompilerFini
-aclCompilerVersion
-aclVersionSize
-aclGetErrorString
-aclGetArchInfo
-aclGetDeviceInfo
-aclGetTargetInfo
-aclGetArchitecture
-aclGetFamily
-aclGetChip
-aclBinaryInit
-aclBinaryFini
-aclReadFromFile
-aclReadFromMem
-aclWriteToFile
-aclWriteToMem
-aclCreateFromBinary
-aclBinaryVersion
-aclInsertSection
-aclRemoveSection
-aclExtractSection
-aclInsertSymbol
-aclRemoveSymbol
-aclExtractSymbol
-aclDbgAddArgument
-aclDbgRemoveArgument
-aclQueryInfo
-aclCompile
-aclLink
-aclGetCompilerLog
-aclRetrieveType
-aclSetType
-aclConvertType
-aclDisassemble
-aclInsertKernelStatistics
-aclGetDeviceBinary
-aclDumpBinary
-#endif // !defined(WITH_LIGHTNING_COMPILER)
-
 #if (OPENCL_MAJOR > 2) || (OPENCL_MAJOR == 2 && OPENCL_MINOR >= 1)
 clCreateProgramWithIL
 #endif

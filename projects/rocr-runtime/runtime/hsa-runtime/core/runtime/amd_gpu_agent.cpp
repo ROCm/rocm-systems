@@ -244,6 +244,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 }
 
 GpuAgent::~GpuAgent() {
+  for (auto& blit : blits_) blit.reset();
+
   std::for_each(regions_.begin(), regions_.end(), DeleteObject());
   regions_.clear();
 }
@@ -494,6 +496,9 @@ void GpuAgent::InitScratchPool() {
 
   if (!core::Runtime::runtime_singleton_->flag().enable_scratch()) {
     scratch_pool_. ~SmallHeap();
+
+    // Reconstruct the object as default to allow ~GpuAgent to destruct the member variable
+    new (&scratch_pool_) SmallHeap();
     return;
   }
 

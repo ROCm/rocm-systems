@@ -34,9 +34,6 @@
 #include "devprogram.hpp"
 #include "devkernel.hpp"
 #include "amdocl/cl_profile_amd.h"
-#if defined(WITH_COMPILER_LIB)
-#include "hsailctx.hpp"
-#endif
 #include "devsignal.hpp"
 
 #if defined(__clang__)
@@ -572,6 +569,8 @@ struct Info : public amd::EmbeddedObject {
   uint32_t localMemSizePerCU_;
   //! Number of banks of local memory
   uint32_t localMemBanks_;
+  //! LDS alignment
+  uint32_t ldsAlignment_;
   //! Number of available async queues
   uint32_t numAsyncQueues_;
   //! Number of available real time queues
@@ -692,8 +691,6 @@ class Settings : public amd::HeapObject {
                                               //  that replaces generic OS allocation routines
       uint supportDepthsRGB_ : 1;             //!< Support DEPTH and sRGB channel order format
       uint singleFpDenorm_ : 1;               //!< Support Single FP Denorm
-      uint hsailExplicitXnack_ : 1;           //!< Xnack in hsail path for this device
-      uint useLightning_ : 1;                 //!< Enable LC path for this device
       uint enableWgpMode_ : 1;                //!< Enable WGP mode for this device
       uint enableWave32Mode_ : 1;             //!< Enable Wave32 mode for this device
       uint lcWavefrontSize64_ : 1;            //!< Enable Wave64 mode for this device
@@ -705,7 +702,7 @@ class Settings : public amd::HeapObject {
       uint gwsInitSupported_ : 1;             //!< Check if GWS is supported on this machine.
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
-      uint reserved_ : 12;
+      uint reserved_ : 14;
     };
     uint value_;
   };
@@ -968,7 +965,7 @@ class Memory : public amd::HeapObject {
     HostMemoryRegistered = 0x00000010,    //!< Host memory was registered
     MemoryCpuUncached = 0x00000020,       //!< Memory is uncached on CPU access(slow read)
     AllowedPeerAccess = 0x00000040,       //!< Memory can be accessed from peer
-    PersistentMap = 0x00000080            //!< Map Peristent memory
+    PersistentMap = 0x00000080            //!< Map Persistent memory
   };
   uint flags_;  //!< Memory object flags
 
@@ -1086,25 +1083,6 @@ class ClBinary : public amd::HeapObject {
                       amd::Elf::ElfSections& elfSectionType  //!< LLVMIR binary is in SPIR format
   ) const;
 
-  //! Loads compile options from OCL binary file
-  bool loadCompileOptions(std::string& compileOptions  //!< return the compile options loaded
-  ) const;
-
-  //! Loads link options from OCL binary file
-  bool loadLinkOptions(std::string& linkOptions  //!< return the link options loaded
-  ) const;
-
-  //! Store compile options into OCL binary file
-  void storeCompileOptions(const std::string& compileOptions  //!< the compile options to be stored
-  );
-
-  //! Store link options into OCL binary file
-  void storeLinkOptions(const std::string& linkOptions  //!< the link options to be stored
-  );
-
-  //! Check if the binary is recompilable
-  bool isRecompilable(std::string& llvmBinary, amd::Elf::ElfPlatform thePlatform);
-
   void saveOrigBinary(const char* origBinary, size_t origSize) {
     origBinary_ = origBinary;
     origSize_ = origSize;
@@ -1164,12 +1142,6 @@ class ClBinary : public amd::HeapObject {
 
   //! Returns TRUE if binary file was allocated
   bool isBinaryAllocated() const { return (flags_ & BinaryAllocated) ? true : false; }
-
-#if defined(WITH_COMPILER_LIB)
-  //! Returns BIF symbol name by symbolID,
-  //! returns empty string if not found or if BIF version is unsupported
-  std::string getBIFSymbol(unsigned int symbolID) const;
-#endif
 
  protected:
   const amd::Device& dev_;  //!< Device object
@@ -1280,7 +1252,7 @@ class ThreadTrace : public amd::HeapObject {
 };
 
 //! A device execution environment.
-class VirtualDevice : public amd::HeapObject {
+class VirtualDevice : public amd::ReferenceCountedObject {
  public:
   //! Construct a new virtual device for the given physical device.
   VirtualDevice(amd::Device& device)
@@ -1377,10 +1349,7 @@ class VirtualDevice : public amd::HeapObject {
   mutable std::atomic<uint64_t> queued_async_handlers_ = 0;  //!< Outstanding HSA async handlers
 };
 
-#if defined(USE_COMGR_LIBRARY)
 extern bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue);
-#endif
-
 }  // namespace amd::device
 
 namespace amd {
@@ -1483,9 +1452,6 @@ class Isa {
   /// @returns This Isa's target ID name.
   const char* targetId() const { return targetId_; }
 
-  /// @returns This Isa's name to use with the HSAIL compiler.
-  const char* hsailName() const { return hsailId_; }
-
   /// @returns If the ROCm runtime supports the ISA.
   bool runtimeRocSupported() const {
     if (!IS_HIP && (versionMajor_ == 8)) {
@@ -1541,6 +1507,9 @@ class Isa {
   /// @returns This Isa's number of banks of local memory.
   uint32_t localMemBanks() const { return localMemBanks_; }
 
+  /// @returns This Isa's LDS alignment
+  uint32_t ldsAlignment() const { return ldsAlignment_; }
+
   /// @returns True if @p codeObjectIsa and @p agentIsa are compatible,
   /// false otherwise.
   static bool isCompatible(const Isa& codeObjectIsa, const Isa& agentIsa);
@@ -1559,13 +1528,12 @@ class Isa {
   static const Isa* end();
 
  private:
-  constexpr Isa(const char* targetId, const char* hsailId, bool runtimeRocSupported,
-                bool runtimePalSupported, uint32_t versionMajor, uint32_t versionMinor,
-                uint32_t versionStepping, Feature sramecc, Feature xnack, uint32_t simdPerCU,
-                uint32_t simdWidth, uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
-                uint32_t localMemSizePerCU, uint32_t localMemBanks)
+  constexpr Isa(const char* targetId, bool runtimeRocSupported, bool runtimePalSupported,
+                uint32_t versionMajor, uint32_t versionMinor, uint32_t versionStepping,
+                Feature sramecc, Feature xnack, uint32_t simdPerCU, uint32_t simdWidth,
+                uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
+                uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment)
       : targetId_(targetId),
-        hsailId_(hsailId),
         runtimeRocSupported_(runtimeRocSupported),
         runtimePalSupported_(runtimePalSupported),
         versionMajor_(versionMajor),
@@ -1578,7 +1546,8 @@ class Isa {
         simdInstructionWidth_(simdInstructionWidth),
         memChannelBankWidth_(memChannelBankWidth),
         localMemSizePerCU_(localMemSizePerCU),
-        localMemBanks_(localMemBanks) {}
+        localMemBanks_(localMemBanks),
+        ldsAlignment_(ldsAlignment) {}
 
   // @brief Returns the begin and end iterators for the suppported ISAs.
   static std::pair<const Isa*, const Isa*> supportedIsas();
@@ -1586,11 +1555,6 @@ class Isa {
   // @brief Isa's target ID name. Used for LLVM COde Object Manager
   // compilations.
   const char* targetId_;
-
-  // @brief Isa's HSAIL name. Used for the Compiler Library for HSAIL
-  // compilation using the Shader Compiler Finalizer. Empty string if
-  // unsupported.
-  const char* hsailId_;
 
   bool runtimeRocSupported_;       //!< ROCm runtime is supported.
   bool runtimePalSupported_;       //!< PAL runtime is supported.
@@ -1605,6 +1569,7 @@ class Isa {
   uint32_t memChannelBankWidth_;   //!< Memory channel bank width.
   uint32_t localMemSizePerCU_;     //!< Local memory size per CU.
   uint32_t localMemBanks_;         //!< Number of banks of local memory.
+  uint32_t ldsAlignment_;          //!< LDS alignment.
 };  // class Isa
 
 /*! \addtogroup Runtime
@@ -1615,9 +1580,6 @@ class Isa {
  */
 class Device : public RuntimeObject {
  protected:
-#if defined(WITH_COMPILER_LIB)
-  typedef aclCompiler Compiler;
-#endif
 
  public:
   // The structures below for MGPU launch match the device library format
@@ -1648,7 +1610,8 @@ class Device : public RuntimeObject {
     kNoAtomics = 0,
     kAtomics = 1,
     kKernArg = 2,
-    kUncachedAtomics = 4
+    kUncachedAtomics = 4,
+    kIoMemory = 8
   } MemorySegment;
 
   typedef enum CacheState {
@@ -1690,11 +1653,6 @@ class Device : public RuntimeObject {
                 const std::string& extraOptions  //!< Extra compilation options
     );
   };
-
-#if defined(WITH_COMPILER_LIB)
-  virtual Compiler* compiler() const = 0;
-  virtual Compiler* binCompiler() const { return compiler(); }
-#endif
 
   Device();
   virtual ~Device();
@@ -1856,7 +1814,8 @@ class Device : public RuntimeObject {
       uint32_t pseudo_fine_grain_ : 1; //!< True if pseudo fine grain memory is required
       uint32_t contiguous_ : 1;        //!< True if contiguous memory allocation is required
       uint32_t executable_ : 1;        //!< True if executable memory is required
-      uint32_t reserved_ : 28;         //!< Reserved for future use
+      uint32_t uncached_ : 1;          //!< True if uncached memory is required
+      uint32_t reserved_ : 27;         //!< Reserved for future use
     };
     uint32_t data_;
   } AllocationFlags;
@@ -2040,7 +1999,10 @@ class Device : public RuntimeObject {
 
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const {};
 
-  virtual const uint32_t getPreferredNumaNode() const { return 0; }
+  virtual uint32_t getPreferredNumaNode() const {
+    return static_cast<uint32_t>(-1); //!< PAL doesn't support it
+  }
+
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
@@ -2113,9 +2075,6 @@ class Device : public RuntimeObject {
 
   //! Checks if OCL runtime can use code object manager for compilation
   bool ValidateComgr();
-
-  //! Checks if OCL runtime can use hsail for compilation
-  bool ValidateHsail();
 
   bool IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* mem_offset) const;
 

@@ -292,7 +292,14 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                 "Could not query counter_id");
             cap.expected_counter_names.emplace(found_counter.handle, std::string(info.name));
             cap.remaining.push_back(found_counter);
-            cap.expected.emplace(found_counter.handle, info.dimensions_instances_count);
+
+            // Query instance count for the specific agent being dispatched to
+            size_t instance_count = 0;
+            ROCPROFILER_CALL(
+                rocprofiler_query_counter_instance_count(
+                    dispatch_data.dispatch_info.agent_id, found_counter, &instance_count),
+                "Could not query counter instance count");
+            cap.expected.emplace(found_counter.handle, instance_count);
 
             auto& info_vector =
                 cap.expected_data_dims.emplace(found_counter.handle, validate_dim_presence{})

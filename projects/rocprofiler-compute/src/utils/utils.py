@@ -60,6 +60,8 @@ from utils.logger import (
     demarcate,
 )
 
+METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+
 rocprof_cmd = ""
 rocprof_args = ""
 
@@ -975,6 +977,7 @@ def pc_sampling_prof(
             "ROCPROF_PC_SAMPLING_UNIT": unit,
             "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
             "ROCPROF_PC_SAMPLING_METHOD": method,
+            "ROCPROF_KERNEL_TRACE": "1",
         }
         new_env = os.environ.copy()
         for key, value in options.items():
@@ -986,6 +989,7 @@ def pc_sampling_prof(
         )
     else:
         options = [
+            "--kernel-trace",
             "--pc-sampling-beta-enabled",
             "--pc-sampling-method",
             method,
@@ -1629,3 +1633,18 @@ def format_scientific_notation_if_needed(
         formatted = normal_str
 
     return formatted
+
+
+def load_yaml(filepath: str) -> dict[str, Any]:
+    """Load YAML file and return as dictionary."""
+    with open(filepath) as f:
+        return yaml.safe_load(f)
+
+
+def get_panel_alias() -> dict[str, str]:
+    panel_yaml = load_yaml(
+        f"{config.rocprof_compute_home}/rocprof_compute_soc/analysis_configs/gfx9_config_template.yaml"
+    )
+    return {
+        panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml["panels"]
+    }

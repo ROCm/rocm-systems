@@ -53,6 +53,8 @@ set_tests_properties(
                "${attachment-env}"
                FAIL_REGULAR_EXPRESSION
                "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               SKIP_REGULAR_EXPRESSION
+               "This test is skipped."
                FIXTURES_SETUP
                rocprofv3-test-attachment-attach-twice
                DISABLED
@@ -67,7 +69,8 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_hsa_api_trace.csv
         --memory-copy-input
         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_memory_copy_trace.csv
-        --agent-input ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv)
+        --agent-input ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
+        --skip-if ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
 
 set_tests_properties(
     rocprofv3-test-attachment-attach-twice-csv-validate
@@ -77,6 +80,8 @@ set_tests_properties(
                "integration-tests;attachment"
                DEPENDS
                rocprofv3-test-attachment-attach-twice-execute
+               SKIP_REGULAR_EXPRESSION
+               "SKIPPED"
                FIXTURES_REQUIRED
                rocprofv3-test-attachment-attach-twice
                DISABLED
@@ -90,7 +95,8 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
         --memory-copy-input
         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json)
+        ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json --skip-if
+        ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
 
 set_tests_properties(
     rocprofv3-test-attachment-attach-twice-json-validate
@@ -100,6 +106,8 @@ set_tests_properties(
                "integration-tests;attachment"
                DEPENDS
                rocprofv3-test-attachment-attach-twice-execute
+               SKIP_REGULAR_EXPRESSION
+               "SKIPPED"
                FIXTURES_REQUIRED
                rocprofv3-test-attachment-attach-twice
                DISABLED

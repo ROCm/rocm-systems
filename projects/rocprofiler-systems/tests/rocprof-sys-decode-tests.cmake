@@ -61,13 +61,11 @@ if(MI300_DETECTED)
     list(APPEND _vcn_counter_names --counter-names "VCN Activity")
     list(APPEND _jpeg_counter_names --counter-names "JPEG Activity")
     list(
-        APPEND
-        _vcn_rocpd_validation_rules
+        APPEND _vcn_rocpd_validation_rules
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/video-decode/amd-smi-rules.json"
     )
     list(
-        APPEND
-        _jpeg_rocpd_validation_rules
+        APPEND _jpeg_rocpd_validation_rules
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/jpeg-decode/amd-smi-rules.json"
     )
 endif()
@@ -90,7 +88,7 @@ rocprofiler_systems_add_validation_test(
     ARGS -l rocDecCreateVideoParser -c 2 -d 1 ${_vcn_counter_names} -p
 )
 
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST video-decode-sampling)
     set_property(TEST video-decode-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(
@@ -126,7 +124,7 @@ rocprofiler_systems_add_validation_test(
     ARGS -l rocJpegCreate -c 1 -d 1 ${_jpeg_counter_names} -p
 )
 
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST jpeg-decode-sampling)
     set_property(TEST jpeg-decode-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(

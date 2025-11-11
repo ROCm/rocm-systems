@@ -470,8 +470,8 @@ int Ffs(int i) {
 
 int Ctz(uint64_t i) {
   unsigned long index;
-  if (_BitScanReverse64(&index, i)) {
-    return sizeof(i) * 8 - 1 - index;
+  if (_BitScanForward64(&index, i)) {
+    return index;
   } else {
     return sizeof(i) * 8;
   }
