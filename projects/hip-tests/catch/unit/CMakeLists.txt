@@ -19,7 +19,6 @@
 # THE SOFTWARE.
 
 add_subdirectory(rtc)
-add_subdirectory(deviceLib)
 add_subdirectory(graph)
 add_subdirectory(memory)
 add_subdirectory(stream)
@@ -49,12 +48,14 @@ add_subdirectory(vector_types)
 add_subdirectory(atomics)
 add_subdirectory(complex)
 add_subdirectory(p2p)
-add_subdirectory(syncthreads)
 add_subdirectory(threadfence)
 add_subdirectory(virtualMemoryManagement)
 # TODO Rock build failures
 if(UNIX)
     add_subdirectory(math)
+    # TODO compute build failures
+    add_subdirectory(deviceLib)
+    add_subdirectory(syncthreads)
 endif()
 if(HIP_PLATFORM STREQUAL "amd")
     add_subdirectory(callback)

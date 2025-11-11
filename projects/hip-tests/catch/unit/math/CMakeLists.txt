@@ -46,7 +46,7 @@ elseif(HIP_PLATFORM MATCHES "amd")
     half_precision_arithmetic.cc
     half_precision_comparison.cc
   )
-  set(LINKER_LIBS hiprtc)
+  set(LINKER_LIBS hiprtc::hiprtc)
 endif()
 
 find_package(Boost 1.70.0)

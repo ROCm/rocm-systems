@@ -28,7 +28,7 @@ set(TEST_SRC
 if(HIP_PLATFORM MATCHES "nvidia")
   set(LINKER_LIBS nvrtc)
 elseif(HIP_PLATFORM MATCHES "amd")
-  set(LINKER_LIBS hiprtc)
+  set(LINKER_LIBS hiprtc::hiprtc)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
