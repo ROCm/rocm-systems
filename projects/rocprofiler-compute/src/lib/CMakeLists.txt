@@ -2,7 +2,7 @@
 set(CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 
 set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
-if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
+if((CMAKE_HIP_COMPILER_ID STREQUAL "Clang") OR (CMAKE_HIP_COMPILER_ID STREQUAL "ROCMClang"))
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
 else()
     message(
