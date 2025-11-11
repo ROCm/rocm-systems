@@ -151,17 +151,22 @@ producer_loop(
     // Wait until ATT start packets have been executed
     CHECK_NOTNULL(parameters.start_pkt_signal)->WaitOn();
 
-    auto send_to_consumer = [&](void* src, size_t size, int flags) {
+    auto send_to_consumer = [&](void* src, size_t size, int flags, bool isHeader = false) {
         auto t0 = std::chrono::system_clock::now();
 
-        auto& buffer = buffers.at(write_index % buffers.size());
-        auto  lock   = std::unique_lock{buffer.mutex};
-        buffer.flags = flags;
-        buffer.size  = size;
+        auto&       buffer    = buffers.at(write_index % buffers.size());
+        auto        lock      = std::unique_lock{buffer.mutex};
+        const auto& near_cpu  = queue.near_cpu;
+        const auto& hsa_agent = queue.hsa_agent;
+        buffer.flags          = flags;
+        buffer.size           = size;
 
         // Perform the actual GPU->CPU memory copy into our triple-buffer slot
-        parameters.copy_data_fn(
-            buffer.memory, src, queue.near_cpu, queue.hsa_agent, size, &submit_signal);
+        if(!isHeader)
+            parameters.copy_data_fn(buffer.memory, src, near_cpu, hsa_agent, size, &submit_signal);
+        else
+            std::memcpy(buffer.memory, src, size);
+
         auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
         ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << size / copy_time;
 
@@ -205,6 +210,7 @@ producer_loop(
 
         if(auto status = buffer_packet.query_buffer_status())
         {
+            ROCP_TRACE << "Sending buffer swap";
             // PHASE 2: Copy GPU buffer to CPU memory
             // The GPU has signaled that a buffer is full. We need to:
             // a) Submit a packet to trigger GPU-side buffer swap
@@ -232,11 +238,13 @@ producer_loop(
                     iterate_trace();
                     ROCP_INFO << "Restarting the trace!";
 
-                    // We need to resend the header is applicable
+                    // We need to resend the header if applicable
                     if(buffer_packet.header != 0)
                         send_to_consumer(&buffer_packet.header,
                                          sizeof(buffer_packet.header),
-                                         ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE);
+                                         ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
+                                         true);
+
                     queue.SubmitAndSignalLast(parameters.control_packet->before_krn_pkt);
                 }
             }
