@@ -21,6 +21,10 @@ THE SOFTWARE.
 
 #include <bitset>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 1444 // suppress __any deprecated warning
+#endif
+
 /**
  * @addtogroup any any
  * @{

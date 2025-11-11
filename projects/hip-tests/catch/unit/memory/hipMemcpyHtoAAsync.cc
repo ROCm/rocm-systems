@@ -24,6 +24,10 @@ THE SOFTWARE.
 
 #define N 32
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
+
 TEMPLATE_TEST_CASE("Unit_hipMemcpyHtoAAsync_Basic", "", char, int, float) {
   CHECK_IMAGE_SUPPORT
 

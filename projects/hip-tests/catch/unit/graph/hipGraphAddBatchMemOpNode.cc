@@ -39,6 +39,10 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
+
 TEST_CASE("Unit_hipGraphAddBatchMemOpNode_NegativeTsts") {
   HIP_CHECK(hipInit(0));
   hipGraph_t graph;

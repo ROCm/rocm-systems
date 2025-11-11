@@ -42,6 +42,10 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
+
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
 TEST_CASE("Unit_hipMemsetD2D16Async_BasicFunctional") {
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;

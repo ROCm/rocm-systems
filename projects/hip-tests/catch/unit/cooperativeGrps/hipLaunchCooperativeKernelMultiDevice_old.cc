@@ -82,6 +82,10 @@ overlap-allowing flags work as expected.
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 1215 // suppress kernel launch warning
+#endif
+
 namespace cg = cooperative_groups;
 
 static constexpr size_t kBufferLen = 1024 * 1024;
