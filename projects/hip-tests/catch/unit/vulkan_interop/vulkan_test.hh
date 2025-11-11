@@ -182,6 +182,11 @@ class VulkanTest {
 
   VkQueue GetQueue() const { return _queue; }
 
+  void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
+                    VkBuffer& buffer, VkDeviceMemory& buffer_memory, bool external = false);
+
+  void CopyBuffer(VkBuffer src_buffer, VkBuffer dst_buffer, VkDeviceSize size);
+
  private:
   void CreateInstance();
 

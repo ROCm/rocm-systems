@@ -311,11 +311,6 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType", 
                    short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   SECTION(
       "Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType, hipFilterModePoint, "
       "hipAddressModeClamp 23") {
@@ -364,11 +359,6 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeNormalizedFloa
                    short, ushort, char1, uchar1, short1, ushort1, char2, uchar2, short2, ushort2,
                    char4, uchar4, short4, ushort4) {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   SECTION(
       "Unit_hipTextureMipmapObj1D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
@@ -442,11 +432,6 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeNormalizedFloa
 TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType float only", "",
                    float, float1, float2, float4) {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   SECTION(
       "Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType, hipFilterModeLinear, "
