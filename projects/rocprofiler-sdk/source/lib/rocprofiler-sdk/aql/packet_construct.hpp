@@ -58,6 +58,11 @@ operator<(aqlprofile_pmc_event_t lhs, aqlprofile_pmc_event_t rhs)
 
 namespace rocprofiler
 {
+namespace thread_trace
+{
+struct thread_trace_parameter_pack;
+}
+
 namespace aql
 {
 /**

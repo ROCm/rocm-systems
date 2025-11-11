@@ -134,7 +134,7 @@ ThreadTracerAgent::~ThreadTracerAgent()
     ROCP_TRACE << "Destroying ATT Queue...";
     if(active_traces.load() < 1) return;
 
-    ROCP_CI_LOG(WARNING) << "Thread tracer being destroyed with thread trace active";
+    ROCP_WARNING << "Thread tracer being destroyed with thread trace active";
 
     if(worker_flag) worker_flag->store(false);
     stop_thread_trace();
@@ -309,6 +309,8 @@ ThreadTracerAgent::stop_thread_trace()
 {
     ROCP_TRACE << "Stopping Thread trace for agent " << agent_id.handle;
     auto lock = std::unique_lock{trace_resources_mut};
+
+    if(active_traces.load() == 0) return nullptr;
 
     if(params.triple_buffering)
     {
