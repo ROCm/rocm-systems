@@ -49,6 +49,7 @@ jobs:
         run: |
           yum clean all
           yum makecache
+          yum -y update
           yum -y install git
           yum -y install python39
           yum -y install python39-devel
