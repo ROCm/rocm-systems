@@ -63,6 +63,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
 
 ### Resolved issues
+* Corrected peak VALU Roofline profiling and analysis by removing FP8 VALU and BF16 VALU benchmarking.
 
 * Bugfixes for stability
 
