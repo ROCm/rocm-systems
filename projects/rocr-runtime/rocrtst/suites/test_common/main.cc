@@ -69,6 +69,7 @@
 #include "suites/stress/memory_concurrent_tests.h"
 #include "suites/stress/queue_write_index_concurrent_tests.h"
 #include "suites/test_common/test_case_template.h"
+#include "suites/functional/test_fault_example.h"
 #include "suites/test_common/main.h"
 #include "suites/test_common/test_common.h"
 #include "suites/functional/concurrent_init.h"
@@ -130,6 +131,12 @@ static void RunGenericTest(TestBase *test) {
 
 TEST(rocrtst, Test_Example) {
   TestExample tst;
+
+  RunGenericTest(&tst);
+}
+
+TEST(rocrtst, DISABLED_Test_Fault_Example) {
+  TestFaultExample tst;
 
   RunGenericTest(&tst);
 }

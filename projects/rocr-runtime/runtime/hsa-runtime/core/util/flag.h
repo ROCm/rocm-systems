@@ -438,9 +438,12 @@ class Flag {
 
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
 
+  [[nodiscard]]
   bool core_dump_disable() const { return core_dump_disable_; }
 
-  bool enable_core_dump_progress() const { return enable_core_dump_progress_; }
+  [[nodiscard]]
+  bool enable_core_dump_progress() const {
+                                       return enable_core_dump_progress_; }
 
   const std::string& core_dump_pattern() const { return core_dump_pattern_; }
 
