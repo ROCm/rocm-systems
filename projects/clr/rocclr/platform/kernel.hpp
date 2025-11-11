@@ -250,7 +250,7 @@ class KernelParameters : protected HeapObject {
   //! get the number of svmPtr in the execInfo container
   size_t getNumberOfSvmPtr() const { return execSvmPtr_.size(); }
 
-  //! get the offset of svmPtr in the parameters
+  //! Get the total size of parameters / offset where execInfo (SVM pointers) are stored
   uint32_t getTotalSize() const { return totalSize_; }
 
   //! get the offset of memory objects in the parameters
