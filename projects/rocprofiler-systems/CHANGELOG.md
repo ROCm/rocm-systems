@@ -8,6 +8,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- Profiling and metric collection capabilities for XGMI and PCIE data.
+- How-to document for XGMI and PCIE sampling and tracing.
 - Added a `ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS` configuration setting to set the flush period for Perfetto traces. The default value is 10000 ms (10 seconds).
 - Added tracing of VAAPI, MPI and host events inside `rocpd` output database.
 - Added fetching of the `rocpd` schema from rocprofiler-sdk-rocpd
