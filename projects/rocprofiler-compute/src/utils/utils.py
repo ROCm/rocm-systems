@@ -1479,10 +1479,8 @@ def merge_counters_iteration_multiplex(
     policy: str,
 ) -> pd.DataFrame:
     """
-    For iteration multiplexing, this merges counter values for the same kernel that
-    runs on different devices. For time stamp, start time stamp will use median
-    while for end time stamp, it will be equal to the summation between median
-    start stamp and median delta time.
+    For iteration multiplexing, this merges counter values for the kernel collected
+    over multiple iterations.
     """
     non_counter_column_index = [
         "Dispatch_ID",
@@ -1524,13 +1522,15 @@ def merge_counters_iteration_multiplex(
                 "Grid_Size",
                 "Workgroup_Size",
                 "LDS_Per_Workgroup",
-            ])
+            ], as_index=False)
         )
 
         # Define a list to store the merged rows
         result_data: list[dict[str, Any]] = []
 
-        for _, group in unique_occurences:
+        pd.set_option('display.max_columns', None)
+
+        for name, group in unique_occurences:
             # Create a dictionary to store the merged row for the current group
             merged_row: dict[str, Any] = {}
 
