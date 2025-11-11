@@ -275,10 +275,13 @@ TEST(thread_trace, multiple_calls)
 
 TEST(thread_trace, data_integrity)
 {
+    using pair_t = std::pair<std::atomic<int>, std::vector<size_t>>;
+
     rocprofiler::thread_trace::test_init();
     const size_t BUFFER_SIZE = rocprofiler::thread_trace::QueueMock::BUFFER_SIZE;
 
-    auto output_buffer = std::vector<size_t>();
+    auto  pair          = pair_t{};
+    auto& output_buffer = pair.second;
     output_buffer.reserve(128 * BUFFER_SIZE / sizeof(size_t));
 
     // Capture every word of the buffer so we can assert exact ordering after many copies.
@@ -288,13 +291,14 @@ TEST(thread_trace, data_integrity)
                        size_t data_size,
                        rocprofiler_thread_trace_shader_data_flags_t,
                        rocprofiler_user_data_t userdata) {
-        auto* buf  = static_cast<std::vector<size_t>*>(userdata.ptr);
+        auto* buf  = static_cast<pair_t*>(userdata.ptr);
         auto* data = static_cast<size_t*>(datain);
 
         for(size_t i = 0; i < data_size / sizeof(size_t); i++)
         {
-            buf->emplace_back(data[i]);
+            buf->second.emplace_back(data[i]);
         }
+        buf->first += 1;
     };
 
     auto input_buffer = std::vector<size_t>();
@@ -302,9 +306,8 @@ TEST(thread_trace, data_integrity)
 
     auto status_called = std::atomic<int>{0};
     auto return_synced = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
+        if(status_called > pair.first + 1) return std::nullopt;
         auto called = status_called.fetch_add(1);
-        // Small delay to let consumer keep pace
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
         for(size_t i = 0; i < input_buffer.size(); i++)
             input_buffer[i] = i + called * input_buffer.size();
@@ -315,7 +318,7 @@ TEST(thread_trace, data_integrity)
         return status;
     };
 
-    auto userdata = rocprofiler_user_data_t{.ptr = &output_buffer};
+    auto userdata = rocprofiler_user_data_t{.ptr = &pair};
     auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
 
     while(status_called < 100)
@@ -546,7 +549,7 @@ TEST(thread_trace, buffer_alternation)
     auto status_called = std::atomic<int>{0};
     auto return_synced = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
         // Throttle the mock producer so it never outruns the consumer in this scenario.
-        if(status_called > callback_state.callback_count) return std::nullopt;
+        if(status_called > callback_state.callback_count + 1) return std::nullopt;
         status_called.fetch_add(1);
 
         auto status = rocprofiler::hsa::sqtt_buffer_status_t{};
