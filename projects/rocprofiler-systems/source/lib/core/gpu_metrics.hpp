@@ -68,8 +68,8 @@ struct gpu_metrics_settings_t
  *
  * Serialization format:
  * 1. Support flags byte (1 byte):
- *      - bit 0: is_vcn_activity_supported (device-level vs per-XCP)
- *      - bit 1: is_jpeg_activity_supported (device-level vs per-XCP)
+ *      - bit 0: vcn_is_device_level_only (device-level vs per-XCP)
+ *      - bit 1: jpeg_is_device_level_only (device-level vs per-XCP)
  *      - bits 2-7: reserved
  * 2. Data element counts (6 bytes):
  *      - vcn_count (1 byte): total VCN values (flattened across all XCPs)
@@ -93,14 +93,14 @@ struct gpu_metrics_settings_t
  *          bandwidth_acc (uint64), bandwidth_inst (uint64)
  *
  * @param metrics GPU metrics to serialize
- * @param is_vcn_activity_supported Whether VCN activity is device-level (vs per-XCP)
- * @param is_jpeg_activity_supported Whether JPEG activity is device-level (vs per-XCP)
+ * @param vcn_is_device_level_only Whether VCN activity is device-level (vs per-XCP)
+ * @param jpeg_is_device_level_only Whether JPEG activity is device-level (vs per-XCP)
  * @param settings Controls which metrics to include in serialization
  * @return Binary serialized data
  */
 std::vector<uint8_t>
-serialize_gpu_metrics(const gpu_metrics_t& metrics, bool is_vcn_activity_supported,
-                      bool                          is_jpeg_activity_supported,
+serialize_gpu_metrics(const gpu_metrics_t& metrics, bool vcn_is_device_level_only,
+                      bool                          jpeg_is_device_level_only,
                       const gpu_metrics_settings_t& settings);
 
 /**
@@ -112,15 +112,15 @@ serialize_gpu_metrics(const gpu_metrics_t& metrics, bool is_vcn_activity_support
  * @param is_jpeg_enabled Whether to deserialize JPEG data
  * @param is_xgmi_enabled Whether to deserialize XGMI data
  * @param is_pcie_enabled Whether to deserialize PCIe data
- * @param is_vcn_supported Output: whether VCN activity is device-level
- * @param is_jpeg_supported Output: whether JPEG activity is device-level
+ * @param vcn_is_device_level_only Output: whether VCN activity is device-level
+ * @param jpeg_is_device_level_only Output: whether JPEG activity is device-level
  * @throws std::runtime_error if serialized data is invalid
  */
 void
 deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
                         gpu_metrics_t& result, bool is_vcn_enabled, bool is_jpeg_enabled,
                         bool is_xgmi_enabled, bool is_pcie_enabled,
-                        bool& is_vcn_supported, bool& is_jpeg_supported);
+                        bool& vcn_is_device_level_only, bool& jpeg_is_device_level_only);
 
 }  // namespace gpu
 }  // namespace rocprofsys

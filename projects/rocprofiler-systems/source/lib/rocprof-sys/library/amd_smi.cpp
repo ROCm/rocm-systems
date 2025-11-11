@@ -128,7 +128,7 @@ metadata_initialize_smi_tracks(size_t gpu_id)
         }
     };
 
-    if(gpu::is_vcn_activity_supported(gpu_id))
+    if(gpu::vcn_is_device_level_only(gpu_id))
     {
         add_vcn_track(std::nullopt);
     }
@@ -140,7 +140,7 @@ metadata_initialize_smi_tracks(size_t gpu_id)
         }
     }
 
-    if(gpu::is_jpeg_activity_supported(gpu_id))
+    if(gpu::jpeg_is_device_level_only(gpu_id))
     {
         add_jpeg_track(std::nullopt);
     }
@@ -294,7 +294,7 @@ metadata_initialize_smi_pmc(size_t gpu_id)
         }
     };
 
-    if(gpu::is_vcn_activity_supported(gpu_id))
+    if(gpu::vcn_is_device_level_only(gpu_id))
     {
         add_vcn_pmc(std::nullopt);
     }
@@ -306,7 +306,7 @@ metadata_initialize_smi_pmc(size_t gpu_id)
         }
     }
 
-    if(gpu::is_jpeg_activity_supported(gpu_id))
+    if(gpu::jpeg_is_device_level_only(gpu_id))
     {
         add_jpeg_pmc(std::nullopt);
     }
@@ -449,7 +449,7 @@ get_state()
 
 std::vector<uint8_t>
 serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
-                      bool is_vcn_activity_supported, bool is_jpeg_activity_supported)
+                      bool vcn_is_device_level_only, bool jpeg_is_device_level_only)
 {
     // Get settings for this device
     auto settings = get_settings(device_id);
@@ -462,8 +462,8 @@ serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
     gpu_settings.pcie          = settings.pcie;
 
     // Use the shared serialization function
-    return gpu::serialize_gpu_metrics(metrics, is_vcn_activity_supported,
-                                      is_jpeg_activity_supported, gpu_settings);
+    return gpu::serialize_gpu_metrics(metrics, vcn_is_device_level_only,
+                                      jpeg_is_device_level_only, gpu_settings);
 }
 
 size_t
@@ -571,9 +571,9 @@ data::sample(uint32_t _device_id)
     if(_gpu_metrics_needed)
     {
         gpu_metrics_t metrics;
-        bool          has_data           = false;
-        bool _is_vcn_activity_supported  = gpu::is_vcn_activity_supported(m_dev_id);
-        bool _is_jpeg_activity_supported = gpu::is_jpeg_activity_supported(m_dev_id);
+        bool          has_data              = false;
+        bool          vcn_is_device_level_only  = gpu::vcn_is_device_level_only(m_dev_id);
+        bool          jpeg_is_device_level_only = gpu::jpeg_is_device_level_only(m_dev_id);
 
         // Helper lambda to filter max uint values (unsupported) - returns 0 if max,
         // otherwise the value
@@ -592,7 +592,7 @@ data::sample(uint32_t _device_id)
 
         if(get_settings(m_dev_id).vcn_activity)
         {
-            if(_is_vcn_activity_supported)
+            if(vcn_is_device_level_only)
             {
                 fill_gpu_metrics(metrics.vcn_activity, _gpu_metrics.vcn_activity,
                                  UINT16_MAX);
@@ -615,7 +615,7 @@ data::sample(uint32_t _device_id)
 
         if(get_settings(m_dev_id).jpeg_activity)
         {
-            if(_is_jpeg_activity_supported)
+            if(jpeg_is_device_level_only)
             {
                 fill_gpu_metrics(metrics.jpeg_activity, _gpu_metrics.jpeg_activity,
                                  UINT16_MAX);
@@ -683,8 +683,8 @@ data::sample(uint32_t _device_id)
                 _device_id, _timestamp, m_busy_perc.gfx_activity,
                 m_busy_perc.umc_activity, m_busy_perc.mm_activity,
                 m_power.current_socket_power, m_temp, m_mem_usage,
-                serialize_gpu_metrics(m_dev_id, metrics, _is_vcn_activity_supported,
-                                      _is_jpeg_activity_supported));
+                serialize_gpu_metrics(m_dev_id, metrics, vcn_is_device_level_only,
+                                      jpeg_is_device_level_only));
 
             m_gpu_metrics.push_back(metrics);
         }
@@ -887,7 +887,7 @@ data::post_process(uint32_t _dev_id)
                     ROCPROFSYS_VERBOSE(
                         1, "No VCN activity data collected from device %u\n", _dev_id);
                 }
-                else if(gpu::is_vcn_activity_supported(_dev_id))
+                else if(gpu::vcn_is_device_level_only(_dev_id))
                 {
                     // For VCN activity supported: use vcn_activity vector
                     for(std::size_t i = 0;
@@ -918,7 +918,7 @@ data::post_process(uint32_t _dev_id)
                     ROCPROFSYS_VERBOSE(
                         1, "No JPEG activity data collected from device %u\n", _dev_id);
                 }
-                else if(gpu::is_jpeg_activity_supported(_dev_id))
+                else if(gpu::jpeg_is_device_level_only(_dev_id))
                 {
                     // For JPEG activity supported: use jpeg_activity vector
                     for(std::size_t i = 0;
@@ -1012,7 +1012,7 @@ data::post_process(uint32_t _dev_id)
 
             if(_settings.vcn_activity && !itr.m_gpu_metrics.empty())
             {
-                if(gpu::is_vcn_activity_supported(_dev_id))
+                if(gpu::vcn_is_device_level_only(_dev_id))
                 {
                     // Device-level VCN activity
                     for(const auto& vcn_val : itr.m_gpu_metrics[0].vcn_activity)
@@ -1039,7 +1039,7 @@ data::post_process(uint32_t _dev_id)
 
             if(_settings.jpeg_activity && !itr.m_gpu_metrics.empty())
             {
-                if(gpu::is_jpeg_activity_supported(_dev_id))
+                if(gpu::jpeg_is_device_level_only(_dev_id))
                 {
                     // Device-level JPEG activity
                     for(const auto& jpeg_val : itr.m_gpu_metrics[0].jpeg_activity)

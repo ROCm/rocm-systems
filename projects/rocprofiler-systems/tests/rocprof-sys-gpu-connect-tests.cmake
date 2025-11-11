@@ -30,6 +30,7 @@ set(_gpu_connect_environment
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,memory_copy,hsa_api"
     "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,xgmi,pcie"
     "ROCPROFSYS_SAMPLING_CPUS=none"
+    "ROCPROFSYS_USE_SAMPLING=OFF"
 )
 
 set(_gpu_connect_rocpd_validation_rules
@@ -60,28 +61,28 @@ if(EXISTS "${PROJECT_BINARY_DIR}/transferBench")
 endif()
 
 rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE
+    SKIP_BASELINE SKIP_REWRITE SKIP_SAMPLING
     NAME transferbench
     TARGET transferBench
     GPU ON
     ENVIRONMENT "${_base_environment};${_gpu_connect_environment}"
-    LABELS "transferbench"
-    SAMPLING_SKIP_REGEX "Error: No valid transfers created"
+    LABELS "transferbench;xgmi;pcie"
+    RUNTIME_SKIP_REGEX "Error: No valid transfers created"
 )
 
 if(NOT skip_validation)
     rocprofiler_systems_add_validation_test(
-        NAME transferbench-sampling
+        NAME transferbench-runtime
         PERFETTO_FILE "perfetto-trace.proto"
         LABELS "transferbench;perfetto"
         ARGS --counter-names "XGMI Read Data" "XGMI Write Data" -p
     )
 
-    if(NOT skip_validation AND ${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
-        set_property(TEST transferbench-sampling APPEND PROPERTY LABELS rocpd)
+    if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+        set_property(TEST transferbench-runtime APPEND PROPERTY LABELS rocpd)
 
         rocprofiler_systems_add_validation_test(
-            NAME transferbench-sampling
+            NAME transferbench-runtime
             ROCPD_FILE "rocpd.db"
             LABELS "transferbench;rocpd"
             ARGS --validation-rules

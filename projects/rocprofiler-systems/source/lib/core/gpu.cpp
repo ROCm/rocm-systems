@@ -245,12 +245,12 @@ add_device_metadata()
  * Required amdsmi methods to get processors and handles
  */
 
-uint32_t                             processors::total_processor_count   = 0;
-std::vector<amdsmi_processor_handle> processors::processors_list         = {};
-std::vector<bool>                    processors::vcn_activity_supported  = {};
-std::vector<bool>                    processors::jpeg_activity_supported = {};
-std::vector<bool>                    processors::vcn_busy_supported      = {};
-std::vector<bool>                    processors::jpeg_busy_supported     = {};
+uint32_t                             processors::total_processor_count = 0;
+std::vector<amdsmi_processor_handle> processors::processors_list       = {};
+std::vector<bool>                    processors::vcn_device_level_only  = {};
+std::vector<bool>                    processors::jpeg_device_level_only = {};
+std::vector<bool>                    processors::vcn_busy_supported     = {};
+std::vector<bool>                    processors::jpeg_busy_supported    = {};
 
 void
 get_processor_handles()
@@ -321,8 +321,8 @@ get_processor_handles()
                     if(v_busy_supported && j_busy_supported) break;
                 }
             }
-            processors::vcn_activity_supported.push_back(vcn_supported);
-            processors::jpeg_activity_supported.push_back(jpeg_supported);
+            processors::vcn_device_level_only.push_back(vcn_supported);
+            processors::jpeg_device_level_only.push_back(jpeg_supported);
             processors::vcn_busy_supported.push_back(v_busy_supported);
             processors::jpeg_busy_supported.push_back(j_busy_supported);
         }
@@ -331,17 +331,17 @@ get_processor_handles()
 }
 
 bool
-is_vcn_activity_supported(uint32_t dev_id)
+vcn_is_device_level_only(uint32_t dev_id)
 {
-    if(dev_id >= processors::vcn_activity_supported.size()) return false;
-    return processors::vcn_activity_supported[dev_id];
+    if(dev_id >= processors::vcn_device_level_only.size()) return false;
+    return processors::vcn_device_level_only[dev_id];
 }
 
 bool
-is_jpeg_activity_supported(uint32_t dev_id)
+jpeg_is_device_level_only(uint32_t dev_id)
 {
-    if(dev_id >= processors::jpeg_activity_supported.size()) return false;
-    return processors::jpeg_activity_supported[dev_id];
+    if(dev_id >= processors::jpeg_device_level_only.size()) return false;
+    return processors::jpeg_device_level_only[dev_id];
 }
 
 bool

@@ -15,7 +15,7 @@
                     "comparison": "greater_than",
                     "description": "Verify that 'rocm_hsa_api' appears in category at least 1500 times in table events_args",
                     "error_message": "'rocm_hsa_api' category entries are fewer than expected in events_args",
-                    "expected_result": 100,
+                    "expected_result": 1500,
                     "query": "SELECT COUNT(*) FROM events_args WHERE category = 'rocm_hsa_api';"
                 },
                 {

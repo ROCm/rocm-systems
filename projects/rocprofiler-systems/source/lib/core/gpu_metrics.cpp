@@ -127,8 +127,8 @@ deserialize_uint64_vector(const std::vector<uint8_t>& data, size_t& offset, uint
 }  // namespace
 
 std::vector<uint8_t>
-serialize_gpu_metrics(const gpu_metrics_t& metrics, bool is_vcn_activity_supported,
-                      bool                          is_jpeg_activity_supported,
+serialize_gpu_metrics(const gpu_metrics_t& metrics, bool vcn_is_device_level_only,
+                      bool                          jpeg_is_device_level_only,
                       const gpu_metrics_settings_t& settings)
 {
     // Flatten XCP data if needed and pre-calculate counts
@@ -144,7 +144,7 @@ serialize_gpu_metrics(const gpu_metrics_t& metrics, bool is_vcn_activity_support
     std::vector<uint8_t>  vcn_xcp_sizes;   // Size of each XCP's VCN data
     std::vector<uint8_t>  jpeg_xcp_sizes;  // Size of each XCP's JPEG data
 
-    if(is_vcn_activity_supported)
+    if(vcn_is_device_level_only)
     {
         vcn_data_flat = metrics.vcn_activity;
     }
@@ -158,7 +158,7 @@ serialize_gpu_metrics(const gpu_metrics_t& metrics, bool is_vcn_activity_support
         }
     }
 
-    if(is_jpeg_activity_supported)
+    if(jpeg_is_device_level_only)
     {
         jpeg_data_flat = metrics.jpeg_activity;
     }
@@ -182,11 +182,25 @@ serialize_gpu_metrics(const gpu_metrics_t& metrics, bool is_vcn_activity_support
     std::vector<uint8_t> result;
 
     // Serialize capability flags
-    uint8_t flags = 0;
-    if(is_vcn_activity_supported) flags |= (1 << 0);  // Set bit for VCN activity support
-    if(is_jpeg_activity_supported)
-        flags |= (1 << 1);  // Set bit for JPEG activity support
-    serialize_uint8(result, flags);
+    // These flags determine how the activity information is provided in the data
+    // structures.
+    //      - bit 0: vcn_is_device_level_only (device-level vs per-XCP)
+    //      - bit 1: jpeg_is_device_level_only (device-level vs per-XCP)
+    struct
+    {
+        union
+        {
+            struct
+            {
+                uint8_t vcn_is_device_level_only  : 1;
+                uint8_t jpeg_is_device_level_only : 1;
+            };
+            uint8_t value;
+        };
+    } capabilities;
+    capabilities.vcn_is_device_level_only  = vcn_is_device_level_only ? 1 : 0;
+    capabilities.jpeg_is_device_level_only = jpeg_is_device_level_only ? 1 : 0;
+    serialize_uint8(result, capabilities.value);
 
     // Serialize counts
     serialize_uint8(result, vcn_count);
@@ -230,7 +244,7 @@ void
 deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
                         gpu_metrics_t& result, bool is_vcn_enabled, bool is_jpeg_enabled,
                         bool is_xgmi_enabled, bool is_pcie_enabled,
-                        bool& is_vcn_supported, bool& is_jpeg_supported)
+                        bool& vcn_is_device_level_only, bool& jpeg_is_device_level_only)
 {
     if(serialized_data.empty())
     {
@@ -239,9 +253,9 @@ deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
     size_t offset = 0;
 
     // Deserialize capability flags
-    uint8_t flags     = deserialize_uint8(serialized_data, offset);
-    is_vcn_supported  = (flags & 0x01) != 0;
-    is_jpeg_supported = (flags & 0x02) != 0;
+    uint8_t flags             = deserialize_uint8(serialized_data, offset);
+    vcn_is_device_level_only  = (flags & 0x01) != 0;
+    jpeg_is_device_level_only = (flags & 0x02) != 0;
 
     // Deserialize counts
     uint8_t vcn_count        = deserialize_uint8(serialized_data, offset);
@@ -263,7 +277,7 @@ deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
     if(is_vcn_enabled && vcn_count > 0)
     {
         auto flat_data = deserialize_uint16_vector(serialized_data, offset, vcn_count);
-        if(is_vcn_supported)
+        if(vcn_is_device_level_only)
         {
             result.vcn_activity = flat_data;
         }
@@ -286,7 +300,7 @@ deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
     if(is_jpeg_enabled && jpeg_count > 0)
     {
         auto flat_data = deserialize_uint16_vector(serialized_data, offset, jpeg_count);
-        if(is_jpeg_supported)
+        if(jpeg_is_device_level_only)
         {
             result.jpeg_activity = flat_data;
         }
