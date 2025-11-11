@@ -21,7 +21,6 @@
 // SOFTWARE.
 //
 // undefine NDEBUG so asserts are implemented
-#include <cstddef>
 #ifdef NDEBUG
 #    undef NDEBUG
 #endif
@@ -31,6 +30,7 @@
 
 #include <cxxabi.h>
 #include <array>
+#include <cstdint>
 #include <iostream>
 #include <map>
 #include <string>

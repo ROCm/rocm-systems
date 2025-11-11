@@ -18,11 +18,12 @@ write_other_simd_json(
     int64_t                                                                begin_time,
     int64_t                                                                end_time)
 {
-    nlohmann::json out;
-    out["type"]       = "OTHER_SIMD_INSTRUCTIONS";
-    out["begin_time"] = begin_time;
-    out["end_time"]   = end_time;
-    out["wgp"]        = records.front().wgp;
+    nlohmann::ordered_json out;
+    out["type"]                = "OTHER_SIMD_INSTRUCTIONS";
+    out["begin_time"]          = begin_time;
+    out["end_time"]            = end_time;
+    out["wgp"]                 = records.front().wgp;
+    out["instructions_schema"] = {"time", "duration", "category"};
 
     nlohmann::json::array_t events;
     events.reserve(records.size());
@@ -30,9 +31,9 @@ write_other_simd_json(
     for(const auto& in : records)
     {
         events.push_back({
-            {"time", in.time},
-            {"duration", in.cycles},
-            {"category", static_cast<uint8_t>(in.category)},
+            in.time,
+            static_cast<int>(in.cycles),
+            static_cast<int>(in.category),
         });
     }
 
