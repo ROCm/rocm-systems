@@ -440,13 +440,6 @@ Examples:
         help="\t\t\tTarget GPU device ID. (DEFAULT: 0)",
     )
     roofline_group.add_argument(
-        "--kernel-names",
-        required=False,
-        default=False,
-        action="store_true",
-        help="\t\t\tInclude kernel names in roofline plot.",
-    )
-    roofline_group.add_argument(
         "-R",
         "--roofline-data-type",
         required=False,

@@ -196,7 +196,7 @@ class VirtualGPU : public device::VirtualDevice {
   class ManagedBuffer : public amd::EmbeddedObject {
    public:
     //! The number of chunks the arg pool will be divided
-    static constexpr uint32_t kPoolNumSignals = 4;
+    static constexpr uint32_t kPoolNumSignals = 16;
     ManagedBuffer(VirtualGPU& gpu, uint32_t pool_size)
         : gpu_(gpu), pool_size_(pool_size), pool_signal_(kPoolNumSignals) {}
     ~ManagedBuffer();
@@ -411,7 +411,7 @@ class VirtualGPU : public device::VirtualDevice {
   //! Returns memory dependency class
   MemoryDependency& memoryDependency() { return memoryDependency_; }
 
-  //! Detects memory dependency for HSAIL kernels and uses appropriate AQL header
+  //! Detects memory dependency for HSA kernels and uses appropriate AQL header
   bool processMemObjects(const amd::Kernel& kernel,  //!< AMD kernel object for execution
                          const_address params,       //!< Pointer to the param's store
                          size_t& ldsAddress,         //!< LDS usage
@@ -453,8 +453,6 @@ class VirtualGPU : public device::VirtualDevice {
   void WaitCompleteSignal(hsa_signal_t signal);
 
   void HiddenHeapInit();
-  void setLastUsedSdmaEngine(uint32_t mask) { lastUsedSdmaEngineMask_ = mask; }
-  uint32_t getLastUsedSdmaEngine() const { return lastUsedSdmaEngineMask_.load(); }
   uint64_t getQueueID();
 
   //! Analyzes a crashed AQL queue to find a broken AQL packet
@@ -623,7 +621,6 @@ class VirtualGPU : public device::VirtualDevice {
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
   std::atomic<bool> fence_dirty_;      //!< Fence modified flag
 
-  std::atomic<uint> lastUsedSdmaEngineMask_;  //!< Last Used SDMA Engine mask
   uint64_t last_write_index_ = 0;             //!< The last HW queue write index for any packet
   uint64_t last_barrier_index_ = 0;           //!< The last HW queue write index for a packet
                                               //!< with a complition signal

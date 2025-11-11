@@ -58,8 +58,6 @@ Settings::Settings() {
 
   hostMemDirectAccess_ = HostMemDisable;
 
-  libSelector_ = amd::LibraryUndefined;
-
   // By default use host blit
   blitEngine_ = BlitEngineHost;
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
@@ -213,7 +211,6 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
       // L1 cache size is 16KB
       cacheSize_ = 16 * Ki;
 
-      libSelector_ = amd::GPU_Library_CI;
       if (LP64_SWITCH(false, true)) {
         oclVersion_ =
             !reportAsOCL12Device ? XCONCAT(OpenCL, XCONCAT(OPENCL_MAJOR, OPENCL_MINOR)) : OpenCL12;

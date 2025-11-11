@@ -62,13 +62,22 @@ def main(
     print(f"Attaching to PID {pid} using library {attach_library} :: success")
 
     def detach():
+        print("Detaching. Please wait, this can take up to 1-2 minutes")
+        sys.stdout.flush()
         try:
-            c_lib.detach()
+            detach_status = c_lib.detach()
         except Exception as e:
             print(f"Exception during detachment: {e}")
 
+        if detach_status != 0:
+            print(
+                f"Calling detach in {attach_library} returned non-zero status {detach_status}"
+            )
+        else:
+            print(f"Detaching from PID {pid} using library {attach_library} :: success")
+
     def signal_handler(sig, frame):
-        print("\nCaught signal SIGINT, detaching")
+        print("\nCaught signal SIGINT")
         detach()
         sys.exit(0)
 
@@ -79,6 +88,8 @@ def main(
         sys.stdout.flush()  # Force the prompt to appear immediately
         input()  # Now wait for input
     else:
+        print(f"Attaching for {duration} msec...\n")
+        sys.stdout.flush()
         time.sleep(int(duration) / 1000)
 
     detach()
