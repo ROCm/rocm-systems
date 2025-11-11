@@ -92,7 +92,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_AMD_SMI_METRICS",
         "amd-smi metrics to collect: " + default_metrics + jpeg_activity_support +
-            vcn_activity_support + ". " +
+            vcn_activity_support + " xgmi, pcie. " +
             "An empty value implies 'all' and 'none' suppresses all.",
         "busy, temp, power, mem_usage", "backend", "amd_smi", "rocm", "process_sampling");
 }
