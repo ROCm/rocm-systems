@@ -679,19 +679,29 @@ def generate(args) -> str:
     def patch_dirs_arg(val):
         return val if "*" in val else val + "/**"
 
-    def patch_lib_arg(val):
+    def patch_lib_arg(val, nlibs):
         _lib_prefix = "lib"
+        _lib_suffix = ".so"
+        _lib_match = "*"
         if val.startswith("lib"):
             _lib_prefix = ""
-        return val if "*" in val else f"{_lib_prefix}{val}*.so*"
+        if ".so" in val:
+            _lib_suffix = ""
+        # if multiple libraries are specified, do not add wildcard matching
+        if nlibs > 1 or "*" in val or "?" in val:
+            _lib_match = ""
+
+        return f"{_lib_prefix}{val}{_lib_suffix}{_lib_match}"
 
     _source_dirs = [patch_dirs_arg(d) for d in args.source_dirs]
     _include_dirs = [patch_dirs_arg(d) for d in args.include_dirs]
     _test_dirs = ["'**/test/**'", "'**/tests/**'"]
     _sample_dirs = ["'**/samples/**'"]
-    _lib_names = [f"lib{args.project_name}*.so*"] + [
-        patch_lib_arg(p) for p in args.library_names
-    ]
+    _lib_names = (
+        [f"lib{args.project_name}*.so*"]
+        if not args.library_names
+        else [patch_lib_arg(p, len(args.library_names)) for p in args.library_names]
+    )
 
     logging.warning(f"Library names: {_lib_names}")
 
@@ -733,7 +743,7 @@ def generate(args) -> str:
             "abi_check": {
                 "include": [],
                 "exclude": [],
-                "recursive_include": _lib_names,
+                "recursive_include": [f"'**/{name}'" for name in _lib_names],
                 "recursive_exclude": [],
             },
         },
@@ -741,15 +751,20 @@ def generate(args) -> str:
             "version_file": f"share/{args.project_name}/VERSION",
             "working_directory": "../..",
             "require_working_directory_exists": True,
-            "sources": [],
-            "headers": [
-                f"include/{args.project_name}/**/*.h",
-                f"include/{args.project_name}/**/*.hpp",
-            ],
+            "sources": {},
+            "headers": {
+                "include": [],
+                "exclude": [],
+                "recursive_exclude": [],
+                "recursive_include": [
+                    f"include/{args.project_name}/**/*.h",
+                    f"include/{args.project_name}/**/*.hpp",
+                ],
+            },
             "abi_check": {
                 "include": [],
                 "exclude": [],
-                "recursive_include": _lib_names,
+                "recursive_include": [f"lib/{name}" for name in _lib_names],
                 "recursive_exclude": [],
             },
         },
@@ -991,6 +1006,12 @@ def main() -> None:
         "--quiet",
         help="Suppress printing configuration to stdout.",
         action="store_true",
+    )
+    generate_parser.add_argument(
+        "--build-directory",
+        help="Select/specify build directory name.",
+        type=str,
+        default="build",
     )
 
     abi_generate_parser = subparsers.add_parser(
