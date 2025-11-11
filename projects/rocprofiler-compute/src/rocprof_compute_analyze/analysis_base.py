@@ -402,6 +402,17 @@ class OmniAnalyze_Base:
         # Read profiling config
         self._profiling_config = file_io.load_profiling_config(args.path[0][0])
 
+        # Check dispatch filtering isn't used with iteration multiplexing
+        if (
+            self._profiling_config.get("iteration_multiplexing") is not None
+            and args.gpu_dispatch_id
+        ):
+            console_error(
+                "analysis",
+                "Dispatch filtering (-d/--dispatch) cannot be used "
+                "with profiling data collected with iteration multiplexing.",
+            )
+
         # initalize runs
         self._runs = self.initalize_runs()
 
