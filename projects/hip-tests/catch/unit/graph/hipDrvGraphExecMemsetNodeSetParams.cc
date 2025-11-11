@@ -208,7 +208,7 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_Negative") {
     memsetParams.height = height;
     memsetParams.value = value;
 
-    HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode, nullptr, context),
+    HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode, &memsetParams, context),
                     hipErrorInvalidValue);
   }
 
