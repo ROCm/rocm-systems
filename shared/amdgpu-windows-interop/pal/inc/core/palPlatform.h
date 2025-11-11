@@ -168,6 +168,7 @@ enum class ApplicationProfileClient : uint32
     Count
 };
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
 /// Describes a primary surface view
 ///
 /// @see IPlatform::GetPrimaryLayout()
@@ -198,6 +199,7 @@ struct GetPrimaryLayoutOutput
         uint32 u32All;  ///< Flags packed as 32-bit uint.
     } flags;            ///< specifies primary surface layout flags.
 };
+#endif
 
 /// Specifies TurboSync control mode
 enum class TurboSyncControlMode : uint32
@@ -463,6 +465,7 @@ public:
     /// @returns A reference to a PalPlatformSettings structure.
     virtual const PalPlatformSettings& PlatformSettings() const = 0;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
     /// Get primary surface layout based upon VidPnSource provided by client.
     ///
     /// This function is used by client to query the layout of the primary surface. The layout describes how primary
@@ -481,9 +484,10 @@ public:
     ///          + ErrorInvalidValue if pPrimaryLayoutOutput is invalid.
     ///          + ErrorUnavailable if no implementation on current platform.
     ///          + ErrorOutOfMemory if there is not enough system memory.
-    virtual Result GetPrimaryLayout(
+    inline Result GetPrimaryLayout(
         uint32                  vidPnSourceId,
-        GetPrimaryLayoutOutput* pPrimaryLayoutOutput) = 0;
+        GetPrimaryLayoutOutput* pPrimaryLayoutOutput) { return Result::ErrorUnavailable; }
+#endif
 
     /// Calls TurboSyncControl escape to control TurboSync on specific vidPnSourceId.
     ///

@@ -28,7 +28,7 @@
 
 include_guard(GLOBAL)
 
-if(NOT BUILD_ELFUTILS)
+if(NOT ROCPROFSYS_BUILD_ELFUTILS)
     find_package(Elfutils)
 endif()
 
@@ -84,7 +84,7 @@ endforeach()
 
 # -------------- PACKAGES------------------------------------------------------
 
-if(NOT BUILD_ELFUTILS)
+if(NOT ROCPROFSYS_BUILD_ELFUTILS)
     find_package(LibElf ${ElfUtils_MIN_VERSION})
 
     # Don't search for libdw or libdebuginfod if we didn't find a suitable libelf
@@ -123,10 +123,10 @@ elseif(NOT (LibElf_FOUND AND LibDwarf_FOUND) AND STERILE_BUILD)
         FATAL_ERROR
         "ElfUtils not found and cannot be downloaded because build is sterile."
     )
-elseif(NOT BUILD_ELFUTILS)
+elseif(NOT ROCPROFSYS_BUILD_ELFUTILS)
     rocprofiler_systems_message(
         FATAL_ERROR
-        "ElfUtils was not found. Either configure cmake to find ElfUtils properly or set BUILD_ELFUTILS=ON to download and build"
+        "ElfUtils was not found. Either configure cmake to find ElfUtils properly or set ROCPROFSYS_BUILD_ELFUTILS=ON to download and build"
     )
 else()
     # If we didn't find a suitable version on the system, then download one from the web
@@ -188,8 +188,8 @@ else()
             CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3
             [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] <SOURCE_DIR>/configure
             --enable-install-elfh --prefix=${_eu_root} --disable-libdebuginfod
-            --disable-debuginfod --enable-thread-safety ${ElfUtils_CONFIG_OPTIONS}
-            --libdir=${_eu_root}/lib
+            --disable-debuginfod --enable-thread-safety --disable-nls
+            ${ElfUtils_CONFIG_OPTIONS} --libdir=${_eu_root}/lib
         BUILD_COMMAND make install
         BUILD_BYPRODUCTS ${_eu_build_byproducts}
         INSTALL_COMMAND ""

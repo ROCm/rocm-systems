@@ -133,22 +133,6 @@ target_link_libraries(
         $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
 )
 
-file(GLOB ROCPD_SCHEMA_FILES "${CMAKE_CURRENT_LIST_DIR}/rocpd/data_storage/schema/*.sql")
-
-foreach(_SRC ${ROCPD_SCHEMA_FILES})
-    cmake_path(GET _SRC FILENAME _BASE)
-    configure_file(
-        ${_SRC}
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/${_BASE}
-        COPYONLY
-    )
-    install(
-        FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/${_BASE}
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
-        COMPONENT core
-    )
-endforeach()
-
 set_target_properties(
     rocprofiler-systems-core-library
     PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-core

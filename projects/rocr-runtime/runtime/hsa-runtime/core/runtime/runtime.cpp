@@ -377,6 +377,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     //track the exporter BO to clear meta data via set_metadata
     //clear the set metadata here if possible if theres an existing ldrm_bo
     if (it->second.ldrm_bo) {
+#if defined(__linux__)
       struct amdgpu_bo_info info = {0};
       auto err = amdgpu_bo_query_info(it->second.ldrm_bo, &info);
 
@@ -384,6 +385,9 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
       amdgpu_bo_metadata zero_metadata = {0};
       memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
       amdgpu_bo_set_metadata(it->second.ldrm_bo, &zero_metadata);
+#else
+      assert(!"Unimplemented!");
+#endif
     }
 
     allocation_map_.erase(it);
@@ -885,7 +889,8 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
 }
 
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
-                                 int interop_handle, uint32_t flags,
+                                 hsa_handle_t interop_handle,
+                                 uint32_t flags,
                                  size_t* size, void** ptr,
                                  size_t* metadata_size, const void** metadata) {
   static const int tinyArraySize=8;
@@ -893,6 +898,16 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
 
   HSAuint32 short_nodes[tinyArraySize];
   HSAuint32* nodes = short_nodes;
+
+  static_assert(sizeof(HSAint64) >= sizeof(interop_handle),
+                "HSAint64 too small for interop_handle");
+  HSAint64 resource_handle =
+#ifdef _WIN32
+      static_cast<HSAint64>(reinterpret_cast<uintptr_t>(interop_handle));
+#else
+      static_cast<HSAint64>(interop_handle);
+#endif
+
   if (num_agents > tinyArraySize) {
     nodes = new HSAuint32[num_agents];
     if (nodes == NULL) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -901,25 +916,30 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
     if (num_agents > tinyArraySize) delete[] nodes;
   });
 
-  for (uint32_t i = 0; i < num_agents; i++)
-    agents[i]->GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_DRIVER_NODE_ID,
-                       &nodes[i]);
+  for (uint32_t i = 0; i < num_agents; i++) {
+    if (agents[i]->driver().kernel_driver_type_ != DriverType::KFD) {
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    }
+    agents[i]->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &nodes[i]);
+  }
 
-  if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(interop_handle, &info, num_agents,
+  if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(resource_handle, &info, num_agents,
                                           nodes)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
-  HSAuint64 altAddress;
+  assert(num_agents > 0);
+  auto& driver = agents[0]->driver();
+
+  uint64_t altAddress;
   HsaMemMapFlags map_flags;
   map_flags.Value = 0;
   map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-  if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(info.MemoryAddress, info.SizeInBytes,
-                                &altAddress, map_flags, num_agents,
-                                nodes)) != HSAKMT_STATUS_SUCCESS) {
+  if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
+                                num_agents, nodes) != HSA_STATUS_SUCCESS) {
     map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-    if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(info.MemoryAddress, info.SizeInBytes, &altAddress, map_flags,
-                                  num_agents, nodes)) != HSAKMT_STATUS_SUCCESS) {
-      HSAKMT_CALL(hsaKmtDeregisterMemory(info.MemoryAddress));
+    if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
+                                  num_agents, nodes) != HSA_STATUS_SUCCESS) {
+      driver.DeregisterMemory(info.MemoryAddress);
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
   }
@@ -938,10 +958,14 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
 }
 
 hsa_status_t Runtime::InteropUnmap(void* ptr) {
-  if(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(ptr))!=HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if(HSAKMT_CALL(hsaKmtDeregisterMemory(ptr))!=HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  auto& driver = core::Runtime::runtime_singleton_->AgentDriver(DriverType::KFD);
+
+  hsa_status_t err = driver.MakeMemoryUnresident(ptr);
+  if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  err = driver.DeregisterMemory(ptr);
+  if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1402,7 +1426,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   if (err != HSA_STATUS_SUCCESS) return err;
 
   if (agent->device_type() == Agent::kAmdGpuDevice) {
-    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);    
+#if defined(__linux__)
+    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
     amdgpu_bo_import_result res;
 
     srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
@@ -1426,6 +1451,9 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       amdgpu_bo_set_metadata(res.buf_handle, &buf_info);
       allocation_map_[ptr].ldrm_bo = res.buf_handle;
     }
+#else
+    assert(!"Unimplemented!");
+#endif
   }
 
   close(dmabuf_fd);
@@ -1587,6 +1615,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
       if (ret) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (ipc_dmabuf_supported_ && !isSysMem) {
+#if defined(__linux__)
         // use the bo from the allocation map
         // Only check metadata for GPU memory
         struct amdgpu_bo_info info = {0};
@@ -1597,6 +1626,9 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
             fprintf(stderr, "IPC Attach: Invalid IPC handle! %u and %u\n", importHandle.handle[7], info.metadata.umd_metadata[0]);
             return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
+#else
+        assert(!"Unimplemented!");
+#endif
       }
       return HSA_STATUS_SUCCESS;
     };
@@ -3777,6 +3809,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
+#if defined(__linux__)
       if (munmap(va, size) != 0) return HSA_STATUS_ERROR;
 
       /* We need to keep the CPU mapping. So change it to PROT_NONE */
@@ -3787,6 +3820,10 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
         return HSA_STATUS_ERROR;
 
       permissions = HSA_ACCESS_PERMISSION_NONE;
+#else
+      assert(!"Unimplemented!");
+#endif
+
     }
   } else {
     return targetAgent->driver().Unmap(
