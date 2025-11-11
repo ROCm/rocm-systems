@@ -6,4 +6,4 @@ set(TEST_SRC
 hip_add_exe_to_target(NAME module_stress
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME stress_test
-                      LINKER_LIBS hiprtc)
+                      LINKER_LIBS hiprtc::hiprtc)

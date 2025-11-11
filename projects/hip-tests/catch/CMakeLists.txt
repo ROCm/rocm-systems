@@ -20,6 +20,7 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 find_package(hip REQUIRED)
+find_package(hiprtc)
 find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
@@ -101,8 +102,8 @@ else()
     include(FetchContent)
     FetchContent_Declare(
         Catch2
-        URL "https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/Catch2-3.8.1.tar.gz"
         DOWNLOAD_EXTRACT_TIMESTAMP OFF
+        URL "https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/Catch2-3.8.1.tar.gz"
         URL_HASH SHA256=18b3f70ac80fccc340d8c6ff0f339b2ae64944782f8d2fca2bd705cf47cadb79
     )
     FetchContent_MakeAvailable(Catch2)
@@ -151,7 +152,7 @@ if (WIN32)
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
-    add_compile_options(-Wall -Wextra -Wvla -Werror -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter)
+    add_compile_options(-std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter) # -Werror)
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+

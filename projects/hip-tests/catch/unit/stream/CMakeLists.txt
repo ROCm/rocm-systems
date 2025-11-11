@@ -57,6 +57,7 @@ hip_add_exe_to_target(
 add_executable(hipStreamLegacy_exe EXCLUDE_FROM_ALL hipStreamLegacy_exe.cc)
 set_source_files_properties(hipStreamLegacy_exe.cc PROPERTIES LANGUAGE HIP)
 set_target_properties(hipStreamLegacy_exe PROPERTIES LINKER_LANGUAGE HIP)
+target_link_libraries(hipStreamLegacy_exe hip::host hip::device)
 
 add_dependencies(StreamTest hipStreamLegacy_exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamLegacy_exe)
