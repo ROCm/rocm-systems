@@ -182,7 +182,7 @@ if(HIP_PLATFORM MATCHES "amd")
 endif()
 
 add_custom_target(add_Kernel.code COMMAND ${CMAKE_CXX_COMPILER}
-  --cuda-device-only ${OFFLOAD_ARCH_STR} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+  --cuda-device-only ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
   -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
   -I${HIP_INCLUDE_DIR}
   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
@@ -195,7 +195,7 @@ hip_add_exe_to_target(NAME GraphsTest2
 
 if(HIP_PLATFORM MATCHES "amd")
   add_custom_target(hipMatMul COMMAND ${CMAKE_CXX_COMPILER}
-    --cuda-device-only ${OFFLOAD_ARCH_STR}
+    --cuda-device-only ${OFFLOAD_ARCH_LIST}
     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
     -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/graph/hipMatMul.code
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/

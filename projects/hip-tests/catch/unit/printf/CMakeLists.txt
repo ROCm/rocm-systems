@@ -10,7 +10,7 @@ set(TEST_SRC
 if(HIP_PLATFORM MATCHES "nvidia")
   set(LINKER_LIBS nvrtc)
 elseif(HIP_PLATFORM MATCHES "amd")
-  set(LINKER_LIBS hiprtc)
+  set(LINKER_LIBS hiprtc::hiprtc)
 endif()
 
 if(UNIX)
@@ -77,6 +77,11 @@ set_target_properties(printfLength_exe PROPERTIES LINKER_LANGUAGE HIP)
 set_target_properties(printfSpecifiers_exe PROPERTIES LINKER_LANGUAGE HIP)
 set_target_properties(printfFlagsNonHost_exe PROPERTIES LINKER_LANGUAGE HIP)
 set_target_properties(printfSpecifiersNonHost_exe PROPERTIES LINKER_LANGUAGE HIP)
+target_link_libraries(printfFlags_exe hip::host hip::device)
+target_link_libraries(printfLength_exe hip::host hip::device)
+target_link_libraries(printfSpecifiers_exe hip::host hip::device)
+target_link_libraries(printfFlagsNonHost_exe hip::host hip::device)
+target_link_libraries(printfSpecifiersNonHost_exe hip::host hip::device)
 
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
              printfFlags_exe

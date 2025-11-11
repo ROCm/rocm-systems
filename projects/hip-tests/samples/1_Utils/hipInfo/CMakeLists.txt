@@ -20,8 +20,8 @@
 
 # hipcc.bat fails to qualify as a valid compiler for CMAKE_CXX_COMPILER_ID = ROCMClang
 # so  the simple compiler test is skipped and forced to use hipcc.bat as compiler
-set(CMAKE_C_COMPILER_WORKS 1)
-set(CMAKE_CXX_COMPILER_WORKS 1)
+#set(CMAKE_C_COMPILER_WORKS 1)
+#set(CMAKE_CXX_COMPILER_WORKS 1)
 
 project(hipInfo)
 
@@ -38,21 +38,13 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-# flag is set to ON in compute build for windows
-option(HIPINFO_INTERNAL_BUILD "Enable building hipInfo from compute" OFF)
-
-# need to set hip-path for windows
-# since clang and hip are two different folders during build/install step
-if (WIN32 AND HIPINFO_INTERNAL_BUILD)
-     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hip-path=${CMAKE_PREFIX_PATH}")
-endif()
-
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hip-path=${CMAKE_PREFIX_PATH}")
 # Find hip
 find_package(hip)
 
 # Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+#set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
+#set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
 set(CMAKE_BUILD_TYPE Release)
 
 # Create the excutable
@@ -68,12 +60,7 @@ target_link_libraries(hipInfo hip::host)
 
 target_include_directories(hipInfo PRIVATE ../../common)
 
-# Used only when make install is called
-# when hipInfo is built as part of compute project
-# hipInfo.exe will be installed to install/hip/bin path
-if (WIN32 AND HIPINFO_INTERNAL_BUILD)
-     install(FILES ${PROJECT_BINARY_DIR}/hipInfo.exe DESTINATION .)
-endif()
+install(FILES ${PROJECT_BINARY_DIR}/hipInfo.exe DESTINATION ${CMAKE_INSTALL_PREFIX})
 
 if(TARGET build_utils)
 add_dependencies(build_utils hipInfo)
