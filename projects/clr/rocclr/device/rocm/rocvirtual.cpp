@@ -233,9 +233,6 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
   auto gpu = ts->gpu();
   gpu->QueuedAsyncHandlers()--;
 
-  // Reset last used SDMA engine mask
-  gpu->setLastUsedSdmaEngine(0);
-
   bool isBlocking = ts->GetBlocking();
 
   // Update the batch, since signal is complete
@@ -1612,10 +1609,9 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_),
       cuMask_(cuMask),
       priority_(priority),
-      copy_command_type_(0),
-      fence_state_(Device::CacheState::kCacheStateInvalid),
-      fence_dirty_(false),
-      lastUsedSdmaEngineMask_(0) {
+     copy_command_type_(0),
+     fence_state_(Device::CacheState::kCacheStateInvalid),
+     fence_dirty_(false) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
   printfdbg_ = nullptr;
