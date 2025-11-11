@@ -761,6 +761,7 @@ def run_prof(
                 counter_defs["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
+    # TODO: Write counter definitions to a user specified path
     # Write counter definitions to a temporary file
     tmpfile_path = (
         Path(tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp"))
