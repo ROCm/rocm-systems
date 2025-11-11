@@ -247,10 +247,12 @@ TEST(thread_trace, perfcounters_configure_test)
     ASSERT_NE(tracer, nullptr);
     for(auto& [id, agent] : tracer->get_agents())
     {
+        // We expect perfcounters.size() to match the number of counters we added
         ASSERT_EQ(agent->params.perfcounter_ctrl, 1);
         ASSERT_EQ(agent->params.perfcounters.size(), NUM_COUNTERS);
         for(const auto& param : agent->params.perfcounters)
         {
+            // We expect a nonzero event id (.first) and nonzero simd mask (.second)
             EXPECT_TRUE(param.first != 0);
             EXPECT_TRUE(param.second != 0)
                 << "valid AQLprofile mask not generated for perfcounters";
@@ -280,6 +282,7 @@ TEST(thread_trace, perfcounters_configure_fail_test)
 
         auto sq_waves = rocprofiler_thread_trace_parameter_t{};
         sq_waves.type = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
+        // We are not initializing the counter, so we expect the configuration to fail
         params.emplace_back(sq_waves);
 
         auto status = rocprofiler_configure_dispatch_thread_trace_service(
