@@ -23,8 +23,7 @@ set(_sources src/RTcommon.c src/RTheap.c src/RTthread.c)
 if(PLATFORM MATCHES linux)
     set(_static_sources src/RTstatic_ctors_dtors_begin.c src/RTstatic_ctors_dtors_end.c)
     list(
-        APPEND
-        _sources
+        APPEND _sources
         src/RTposix.c
         src/RTlinux.c
         src/RTheap-linux.c

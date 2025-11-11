@@ -40,15 +40,9 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#if defined(__linux__)
 #include <unistd.h>
 #include <sys/resource.h>
 #include <elf.h>
-#else
-#include <cstdint>
-#include <stdio.h>
-#include <win32/elf.h>
-#endif
 #include <fcntl.h>
 #include <cstring>
 #include <vector>
@@ -227,7 +221,6 @@ struct LoadSegmentBuilder : public SegmentBuilder {
   ~LoadSegmentBuilder() {
     if (fd_ != -1) close(fd_);
   }
-
   hsa_status_t Collect(SegmentsInfo& segments) override {
     const std::string maps_path = "/proc/self/maps";
     std::ifstream maps(maps_path);
@@ -278,12 +271,8 @@ struct LoadSegmentBuilder : public SegmentBuilder {
     size_t done = 0;
     size_t read;
     do {
-    #if defined(__linux__)
       read = pread(fd_, static_cast<char *>(buf) + done, buf_size - done,
                    offset + done);
-    #else
-      assert(!"Unimplemented!");
-    #endif
       if (read == -1 && errno != EINTR) {
         perror("Failed to read GPU memory");
         return HSA_STATUS_ERROR;
@@ -314,7 +303,7 @@ hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& se
     debug_print("Core file size over limit\n");
     return HSA_STATUS_SUCCESS;
   }
-#if defined(__linux__)
+
   int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
   if (fd == -1) {
     perror("Failed to create GPU coredump");
@@ -433,9 +422,7 @@ hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& se
   }
   printf("GPU core dump created: %s\n", filename.c_str());
   close(fd);
-#else
-  assert(!"Unimplemented!");
-#endif
+
   return HSA_STATUS_SUCCESS;
 }
 }   //  namespace impl
@@ -444,7 +431,6 @@ hsa_status_t dump_gpu_core() {
   impl::NoteSegmentBuilder nbuilder;
   impl::LoadSegmentBuilder lbuilder;
   impl::SegmentsInfo segments;
-#if defined(__linux__)
   struct rlimit rlimit;
 
   if (getrlimit(RLIMIT_CORE, &rlimit)) {
@@ -464,11 +450,8 @@ hsa_status_t dump_gpu_core() {
 
   std::stringstream st;
   st << PREFIX_FILE_NAME << "." << getpid();
+
   return build_core_dump(st.str(), segments, rlimit.rlim_cur);
-#else
-  assert(!"Unimplemented!");
-  return HSA_STATUS_SUCCESS;
-#endif
 }
 }   //  namespace coredump
 }   //  namespace amd

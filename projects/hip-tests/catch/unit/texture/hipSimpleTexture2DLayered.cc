@@ -64,11 +64,6 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
                    uchar4, short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   constexpr int SIZE = 512;
   constexpr int num_layers = 5;
   constexpr unsigned int width = SIZE;
@@ -214,11 +209,6 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray
                    int1, uint1, float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4,
                    uchar4, short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   constexpr int SIZE = 512;
   constexpr int num_layers = 5;

@@ -42,7 +42,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
 
 	args.gpu_id = gpu_id;
 
-	err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &args);
+	err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &args);
 	if (err < 0) {
 		result = HSAKMT_STATUS_ERROR;
 	} else {
