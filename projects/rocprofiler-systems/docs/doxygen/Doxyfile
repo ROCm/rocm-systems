@@ -135,8 +135,7 @@ EXCLUDE                =
 EXCLUDE_SYMLINKS       = YES
 EXCLUDE_PATTERNS       = */.git/* \
                          ../../external/* \
-                         ../../examples/* \
-                         ../../tests/*
+                         ../../examples/*
 EXCLUDE_SYMBOLS        = "std::*" \
                          "ROCPROFSYS_ATTRIBUTE" \
                          "ROCPROFSYS_VISIBILITY" \

@@ -77,20 +77,13 @@ if(
         ${PROJECT_SOURCE_DIR}/examples/*.hpp
         ${PROJECT_SOURCE_DIR}/examples/*.h
     )
-    file(
-        GLOB_RECURSE tests_source
-        ${PROJECT_SOURCE_DIR}/tests/source/*.cpp
-        ${PROJECT_SOURCE_DIR}/tests/source/*.hpp
-    )
     file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/kokkos/*)
     file(
         GLOB_RECURSE cmake_files
         ${PROJECT_SOURCE_DIR}/source/*CMakeLists.txt
         ${PROJECT_SOURCE_DIR}/examples/*CMakeLists.txt
-        ${PROJECT_SOURCE_DIR}/tests/*CMakeLists.txt
         ${PROJECT_SOURCE_DIR}/source/*.cmake
         ${PROJECT_SOURCE_DIR}/examples/*.cmake
-        ${PROJECT_SOURCE_DIR}/tests/*.cmake
         ${PROJECT_SOURCE_DIR}/cmake/*.cmake
         ${PROJECT_SOURCE_DIR}/source/*.cmake
     )

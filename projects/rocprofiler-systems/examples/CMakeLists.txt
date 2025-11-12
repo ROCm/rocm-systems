@@ -69,7 +69,7 @@ if(ROCPROFSYS_BUILD_TESTING)
     set(ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH
         "${CMAKE_CURRENT_LIST_DIR}/generic-tests/rocpd-validation-rules"
     )
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake) # TODO: Determine if we want to move rocprof-sys-capchk.cpp somewhere else
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
 endif()
 
 add_subdirectory(transpose)
@@ -90,4 +90,4 @@ add_subdirectory(jpegdecode)
 add_subdirectory(roctx)
 add_subdirectory(thread-limit)
 
-add_subdirectory(generic-tests) # Required to be here (instrument-tests depend on this)
+add_subdirectory(generic-tests) # Must be added after all examples
