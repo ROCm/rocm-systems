@@ -41,8 +41,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Removed
 
 * Removed `database` mode from ROCm Compute Profiler in favor of other visualization methods, rather than Grafana and MongoDB integration, such as the upcoming Analysis DB-based Visualizer.
-  and mongodb integration to other visualization methods such as:
-  * Analysis DB based Visualizer (upcoming)
   * Plotly server based standalone GUI
   * Commandline based Textual User Interface
 
@@ -54,7 +52,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   of the kernel to profile and not which dispatch ids to profile.
 * The description of the ``--dispatch`` option in analyze is still, which dispatch IDs to analyze.
 * Fixed the functioning of ``--dispatch`` option to act as a 1-based index and ensure that correct kernel iterations are being profiled.
-  profiled
 
 ### Known issues
 
