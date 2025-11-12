@@ -993,7 +993,8 @@ hsa_status_t hsa_amd_agent_memory_pool_get_info(
 }
 
 hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
-                                        hsa_agent_t* agents, int interop_handle,
+                                        hsa_agent_t* agents,
+                                        hsa_handle_t interop_handle,
                                         uint32_t flags, size_t* size,
                                         void** ptr, size_t* metadata_size,
                                         const void** metadata) {
