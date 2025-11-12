@@ -15,10 +15,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* Default output format for underlying rocprofiler-sdk tool has been changed from csv to rocpd
-  * If rocprofiler-sdk rocpd public library is not available, will fallback to csv format
+* Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
+  * If the ROCprofiler-SDK ``rocpd`` public library is not available, will fall back to ``csv`` format
 
-* Option --rocprofiler-sdk-library-path has been changed to --rocprofiler-tool-library-path to better reflect the fact that we provide flexibility in choosing the path to rocprofiler-sdk tool and not the library.
+* Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-tool-library-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool and not the library.
 
 ### Resolved issues
 
