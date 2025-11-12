@@ -1,3 +1,0 @@
-@DEB_OVERRIDES_INSTALL_FILENM@: no-copyright-file
-@DEB_OVERRIDES_INSTALL_FILENM@: debian-changelog-file-missing
-@DEB_OVERRIDES_INSTALL_FILENM@: dir-or-file-in-opt
