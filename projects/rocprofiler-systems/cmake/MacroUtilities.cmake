@@ -837,13 +837,13 @@ function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
         set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
         configure_file(
             ${CMAKE_SOURCE_DIR}/cmake/Templates/console-script.in
-            ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION}
+            ${CMAKE_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION}
             @ONLY
         )
 
         if(CMAKE_INSTALL_PYTHONDIR)
             install(
-                PROGRAMS ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION}
+                PROGRAMS ${CMAKE_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION}
                 DESTINATION ${CMAKE_INSTALL_BINDIR}
                 COMPONENT python
                 OPTIONAL
@@ -853,8 +853,8 @@ function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
         if(ROCPROFSYS_BUILD_TESTING OR ROCPROFSYS_BUILD_PYTHON)
             add_test(
                 NAME ${SCRIPT_NAME}-console-script-test-${ARG_VERSION}
-                COMMAND ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION} --help
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                COMMAND ${CMAKE_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION} --help
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
             set_tests_properties(
                 ${SCRIPT_NAME}-console-script-test-${ARG_VERSION}
@@ -862,8 +862,8 @@ function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
             )
             add_test(
                 NAME ${SCRIPT_NAME}-generic-console-script-test-${ARG_VERSION}
-                COMMAND ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME} --help
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                COMMAND ${CMAKE_BINARY_DIR}/bin/${SCRIPT_NAME} --help
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
             set_tests_properties(
                 ${SCRIPT_NAME}-generic-console-script-test-${ARG_VERSION}
@@ -877,13 +877,13 @@ function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
 
         configure_file(
             ${CMAKE_SOURCE_DIR}/cmake/Templates/console-script.in
-            ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}
+            ${CMAKE_BINARY_DIR}/bin/${SCRIPT_NAME}
             @ONLY
         )
 
         if(CMAKE_INSTALL_PYTHONDIR)
             install(
-                PROGRAMS ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}
+                PROGRAMS ${CMAKE_BINARY_DIR}/bin/${SCRIPT_NAME}
                 DESTINATION ${CMAKE_INSTALL_BINDIR}
                 COMPONENT python
                 OPTIONAL
