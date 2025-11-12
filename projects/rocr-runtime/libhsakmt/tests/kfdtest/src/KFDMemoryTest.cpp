@@ -131,7 +131,7 @@ TEST_F(KFDMemoryTest, MMapLarge) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MMapLarge(gpuNode);
     }));
 
@@ -214,7 +214,7 @@ void KFDMemoryTest::MapUnmapToNodes(int gpuNode) {
 TEST_F(KFDMemoryTest, MapUnmapToNodes) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         MapUnmapToNodes(gpuNode);
     }));
 
@@ -240,7 +240,7 @@ void KFDMemoryTest::MapMemoryToGPU(int gpuNode) {
 TEST_F(KFDMemoryTest, MapMemoryToGPU) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MapMemoryToGPU(gpuNode);
     }));
 
@@ -318,7 +318,7 @@ void KFDMemoryTest::MemoryAllocAll(int gpuNode) {
 TEST_F(KFDMemoryTest, MemoryAllocAll) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MemoryAllocAll(gpuNode);
     }));
 
@@ -366,7 +366,7 @@ void KFDMemoryTest::AccessPPRMem(int gpuNode) {
 TEST_F(KFDMemoryTest, AccessPPRMem) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->AccessPPRMem(gpuNode);
     }));
 
@@ -478,7 +478,7 @@ void KFDMemoryTest::MemoryRegister(int gpuNode) {
 TEST_F(KFDMemoryTest, MemoryRegister) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MemoryRegister(gpuNode);
     }));
 
@@ -553,7 +553,7 @@ void KFDMemoryTest::MemoryRegisterSamePtr(int gpuNode) {
 TEST_F(KFDMemoryTest, MemoryRegisterSamePtr) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MemoryRegisterSamePtr(gpuNode);
     }));
 
@@ -672,7 +672,7 @@ void KFDMemoryTest::FlatScratchAccess(int gpuNode) {
 TEST_F(KFDMemoryTest, FlatScratchAccess) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->FlatScratchAccess(gpuNode);
     }));
 
@@ -712,7 +712,7 @@ void KFDMemoryTest::GetTileConfigTest(int gpuNode) {
 TEST_F(KFDMemoryTest, GetTileConfigTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->GetTileConfigTest(gpuNode);
     }));
 
@@ -814,7 +814,7 @@ TEST_F(KFDMemoryTest, LargestSysBufferTest) {
      TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	 TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->LargestSysBufferTest(gpuNode);
     }));
 
@@ -860,7 +860,7 @@ TEST_F(KFDMemoryTest, LargestVramBufferTest) {
      TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	 TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->LargestVramBufferTest(gpuNode);
     }));
 
@@ -927,7 +927,7 @@ TEST_F(KFDMemoryTest, BigSysBufferStressTest) {
      TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	 TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->BigSysBufferStressTest(gpuNode);
     }));
 
@@ -1171,7 +1171,7 @@ TEST_F(KFDMemoryTest, MMBench) {
      TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	 TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MMBench(gpuNode);
     }));
 
@@ -1275,7 +1275,7 @@ TEST_F(KFDMemoryTest, QueryPointerInfo) {
 
 	 TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
             this->QueryPointerInfo(gpuNode);
     }));
 
@@ -1430,7 +1430,7 @@ void KFDMemoryTest::PtraceAccess(int gpuNode) {
 TEST_F(KFDMemoryTest, PtraceAccess) {
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->PtraceAccess(gpuNode);
     }));
 
@@ -1586,7 +1586,7 @@ void KFDMemoryTest::PtraceAccessInvisibleVram(int gpuNode) {
 TEST_F(KFDMemoryTest, PtraceAccessInvisibleVram) {
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->PtraceAccessInvisibleVram(gpuNode);
     }));
 
@@ -1677,7 +1677,7 @@ void KFDMemoryTest::SignalHandling(int gpuNode) {
 TEST_F(KFDMemoryTest, SignalHandling) {
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SignalHandling(gpuNode);
     }));
 
@@ -1748,7 +1748,7 @@ TEST_F(KFDMemoryTest, CheckZeroInitializationSysMem) {
 	TEST_START(TESTPROFILE_RUNALL);
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->CheckZeroInitializationSysMem(gpuNode);
     }));
 
@@ -1906,7 +1906,7 @@ TEST_F(KFDMemoryTest, MMBandWidth) {
 	TEST_START(TESTPROFILE_RUNALL);
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MMBandWidth(gpuNode);
     }));
 
@@ -2010,7 +2010,7 @@ TEST_F(KFDMemoryTest, HostHdpFlush) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->HostHdpFlush(gpuNode);
     }));
 
@@ -2167,7 +2167,7 @@ TEST_F(KFDMemoryTest, DeviceHdpFlush) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->DeviceHdpFlush(gpuNode);
     }));
 
@@ -2236,7 +2236,7 @@ TEST_F(KFDMemoryTest, CacheInvalidateOnSdmaWrite) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->CacheInvalidateOnSdmaWrite(gpuNode);
     }));
 
@@ -2302,7 +2302,7 @@ TEST_F(KFDMemoryTest, CacheInvalidateOnCPUWrite) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->CacheInvalidateOnCPUWrite(gpuNode);
     }));
 
@@ -2390,7 +2390,7 @@ TEST_F(KFDMemoryTest, CacheInvalidateOnRemoteWrite) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->CacheInvalidateOnRemoteWrite(gpuNode);
     }));
 
@@ -2487,7 +2487,7 @@ TEST_F(KFDMemoryTest, VramCacheCoherenceWithRemoteGPU) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->VramCacheCoherenceWithRemoteGPU(gpuNode); 
     }));
 
@@ -2563,7 +2563,7 @@ TEST_F(KFDMemoryTest, VramCacheCoherenceWithCPU) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->VramCacheCoherenceWithCPU(gpuNode);
     }));
 
@@ -2642,7 +2642,7 @@ TEST_F(KFDMemoryTest, SramCacheCoherenceWithGPU) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SramCacheCoherenceWithGPU(gpuNode);
     }));
 
@@ -3137,7 +3137,7 @@ TEST_F(KFDMemoryTest, ExportDMABufTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->ExportDMABufTest(gpuNode);
     }));
 
@@ -3193,7 +3193,7 @@ TEST_F(KFDMemoryTest, VA_VRAM_Only_AllocTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->VA_VRAM_Only_AllocTest(gpuNode);
     }));
 

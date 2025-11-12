@@ -137,7 +137,7 @@ void KFDGraphicsInterop::RegisterGraphicsHandle(int gpuNode) {
 TEST_F(KFDGraphicsInterop, RegisterGraphicsHandle) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->RegisterGraphicsHandle(gpuNode);
     }));
 

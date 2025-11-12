@@ -133,7 +133,7 @@ TEST_F(KFDHWSTest, MultiProcessOversubscribed) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->RunTest(gpuNode);
     }));
 

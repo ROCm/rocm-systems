@@ -73,7 +73,7 @@ void KFDLocalMemoryTest::AccessLocalMem(int gpuNode) {
 TEST_F(KFDLocalMemoryTest, AccessLocalMem) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->AccessLocalMem(gpuNode);
     }));
 
@@ -135,7 +135,7 @@ TEST_F(KFDLocalMemoryTest, BasicTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->BasicTest(gpuNode);
     }));
 
@@ -193,7 +193,7 @@ TEST_F(KFDLocalMemoryTest, VerifyContentsAfterUnmapAndMap) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->VerifyContentsAfterUnmapAndMap(gpuNode);
     }));
 
@@ -434,7 +434,7 @@ TEST_F(KFDLocalMemoryTest, DISABLED_Fragmentation) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->Fragmentation(gpuNode);
     }));
 
@@ -495,7 +495,7 @@ TEST_F(KFDLocalMemoryTest, CheckZeroInitializationVram) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->CheckZeroInitializationVram(gpuNode);
     }));
 

@@ -69,7 +69,7 @@ void KFDEventTest::CreateDestroyEvent(int gpuNode) {
 TEST_F(KFDEventTest, CreateDestroyEvent) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->CreateDestroyEvent(gpuNode);
     }));
 
@@ -99,7 +99,7 @@ void KFDEventTest::CreateMaxEvents(int gpuNode) {
 TEST_F(KFDEventTest, CreateMaxEvents) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->CreateMaxEvents(gpuNode);
     }));
 
@@ -141,7 +141,7 @@ void KFDEventTest::SignalEvent(int gpuNode) {
 TEST_F(KFDEventTest, SignalEvent) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SignalEvent(gpuNode);
     }));
 
@@ -215,7 +215,7 @@ void KFDEventTest::SignalEventExt(int gpuNode) {
 TEST_F(KFDEventTest, SignalEventExt) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SignalEventExt(gpuNode);
     }));
 
@@ -361,7 +361,7 @@ void KFDEventTest::SignalMaxEvents(int gpuNode) {
 TEST_F(KFDEventTest, SignalMaxEvents) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SignalMaxEvents(gpuNode);
     }));
 
@@ -408,7 +408,7 @@ void KFDEventTest::SignalMultipleEventsWaitForAll(int gpuNode) {
 TEST_F(KFDEventTest, SignalMultipleEventsWaitForAll) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SignalMultipleEventsWaitForAll(gpuNode);
     }));
 
@@ -499,7 +499,7 @@ void KFDEventTest::SignalInvalidEvent(int gpuNode) {
 TEST_F(KFDEventTest, SignalInvalidEvent) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SignalInvalidEvent(gpuNode);
     }));
 

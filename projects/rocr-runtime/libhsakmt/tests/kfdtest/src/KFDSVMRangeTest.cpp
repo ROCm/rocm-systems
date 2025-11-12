@@ -96,7 +96,7 @@ TEST_P(KFDSVMRangeTest, BasicSystemMemTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->BasicSystemMemTest(gpuNode);
     }));
 
@@ -182,7 +182,7 @@ TEST_P(KFDSVMRangeTest, SetGetAttributesTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SetGetAttributesTest(gpuNode);
     }));
 
@@ -245,7 +245,7 @@ void KFDSVMRangeTest::InvalidRangeTest(int gpuNode) {
 TEST_P(KFDSVMRangeTest, InvalidRangeTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->InvalidRangeTest(gpuNode);
     }));
 
@@ -346,7 +346,7 @@ void KFDSVMRangeTest::SplitSystemRangeTest(int gpuNode) {
 TEST_P(KFDSVMRangeTest, SplitSystemRangeTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SplitSystemRangeTest(gpuNode);
     }));
 
@@ -458,7 +458,7 @@ void KFDSVMRangeTest::EvictSystemRangeTest(int gpuNode) {
 TEST_P(KFDSVMRangeTest, EvictSystemRangeTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->EvictSystemRangeTest(gpuNode);
     }));
 
@@ -523,7 +523,7 @@ TEST_P(KFDSVMRangeTest, PartialUnmapSysMemTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->PartialUnmapSysMemTest(gpuNode);
     }));
 
@@ -581,7 +581,7 @@ TEST_P(KFDSVMRangeTest, BasicVramTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->BasicVramTest(gpuNode);
     }));
 
@@ -606,7 +606,7 @@ void KFDSVMRangeTest::SplitVramRangeTest(int gpuNode) {
 TEST_P(KFDSVMRangeTest, SplitVramRangeTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SplitVramRangeTest(gpuNode);
     }));
 
@@ -657,7 +657,7 @@ void KFDSVMRangeTest::PrefetchTest(int gpuNode) {
 TEST_P(KFDSVMRangeTest, PrefetchTest) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->PrefetchTest(gpuNode);
     }));
 
@@ -740,7 +740,7 @@ TEST_P(KFDSVMRangeTest, MigrateTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MigrateTest(gpuNode);
     }));
 
@@ -803,7 +803,7 @@ TEST_P(KFDSVMRangeTest, MigrateAccessInPlaceTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MigrateAccessInPlaceTest(gpuNode);
     }));
 
@@ -883,7 +883,7 @@ TEST_P(KFDSVMRangeTest, MigrateGranularityTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MigrateGranularityTest(gpuNode);
     }));
 
@@ -984,7 +984,7 @@ TEST_P(KFDSVMRangeTest, MigrateLargeBufTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MigrateLargeBufTest(gpuNode);
     }));
 
@@ -1079,7 +1079,7 @@ TEST_P(KFDSVMRangeTest, MigratePolicyTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MigratePolicyTest(gpuNode);
     }));
 
@@ -1339,7 +1339,7 @@ TEST_P(KFDSVMRangeTest, MultiThreadMigrationTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MultiThreadMigrationTest(gpuNode);
     }));
 
@@ -1406,7 +1406,7 @@ TEST_P(KFDSVMRangeTest, MigrateFileBackedRangeTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->MigrateFileBackedRangeTest(gpuNode);
     }));
 
@@ -1661,7 +1661,7 @@ TEST_P(KFDSVMRangeTest, HMMProfilingEvent) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->HMMProfilingEvent(gpuNode);
     }));
 
@@ -1731,7 +1731,7 @@ TEST_P(KFDSVMRangeTest, VramOvercommitTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->VramOvercommitTest(gpuNode);
     }));
 
@@ -1842,7 +1842,7 @@ TEST_P(KFDSVMRangeTest, PrefaultPartialRangeTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->PrefaultPartialRangeTest(gpuNode);
     }));
 

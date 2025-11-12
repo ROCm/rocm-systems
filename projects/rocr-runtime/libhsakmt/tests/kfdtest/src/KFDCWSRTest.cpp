@@ -157,7 +157,7 @@ void KFDCWSRTest::BasicTest(int gpuNode) {
 TEST_P(KFDCWSRTest, BasicTest) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->BasicTest(gpuNode);
     }));
 
@@ -244,7 +244,7 @@ void KFDCWSRTest::InterruptRestore(int gpuNode) {
 TEST_F(KFDCWSRTest, InterruptRestore) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->InterruptRestore(gpuNode);
     }));
 

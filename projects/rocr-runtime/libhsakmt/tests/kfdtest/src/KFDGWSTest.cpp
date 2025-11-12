@@ -64,7 +64,7 @@ void KFDGWSTest::Allocate(int gpuNode) {
 TEST_F(KFDGWSTest, Allocate) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->Allocate(gpuNode);
     }));
 
@@ -120,7 +120,7 @@ void KFDGWSTest::Semaphore(int gpuNode) {
 TEST_F(KFDGWSTest, Semaphore) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->Semaphore(gpuNode);
     }));
 

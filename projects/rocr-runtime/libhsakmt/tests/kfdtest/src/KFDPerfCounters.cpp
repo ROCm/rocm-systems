@@ -137,7 +137,7 @@ void KFDPerfCountersTest::GetCounterProperties(int gpuNode) {
 TEST_F(KFDPerfCountersTest, GetCounterProperties) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->GetCounterProperties(gpuNode);
     }));
 
@@ -183,7 +183,7 @@ void KFDPerfCountersTest::RegisterTrace(int gpuNode) {
 TEST_F(KFDPerfCountersTest, RegisterTrace) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->RegisterTrace(gpuNode);
     }));
 
@@ -262,7 +262,7 @@ void KFDPerfCountersTest::StartStopQueryTrace(int gpuNode) {
 TEST_F(KFDPerfCountersTest, StartStopQueryTrace) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->StartStopQueryTrace(gpuNode); 
     }));
 
@@ -293,7 +293,7 @@ void KFDPerfCountersTest::ClockCountersBasicTest(int gpuNode) {
 TEST_F(KFDPerfCountersTest, ClockCountersBasicTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTestLaunchStd([this](int gpuNode) {
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->ClockCountersBasicTest(gpuNode);
     }));
 
