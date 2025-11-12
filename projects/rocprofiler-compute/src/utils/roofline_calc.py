@@ -845,11 +845,11 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
                         )
                 row_count += 1
 
-            if row_count != 2:
+            if row_count < 2:
                 return (
                     False,
                     f"Insufficient data in roofline.csv. "
-                    f"Found {row_count} rows (need 2)."
+                    f"Found {row_count} rows (need at least 2)."
                     f" Roofline data appears corrupted or incomplete.",
                 )
     except Exception as e:
