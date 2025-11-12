@@ -240,7 +240,11 @@ class GLContextScopeGuard {
 #endif
     } else {
       INFO("Unsupported " << kEnvarName << " value '" << val_str << "'");
+#ifdef USE_EGL
       INFO("Supported values are ['GLUT', 'EGL']");
+#else
+      INFO("Supported values are ['GLUT']");
+#endif
       REQUIRE(false);
     }
   }
