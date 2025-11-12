@@ -77,8 +77,6 @@
         "Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters",
         "Unit_hipGraphicsUnmapResources_Negative_Parameters",
         "Unit_hipGraphicsUnregisterResource_Negative_Parameters",
-        "Note: Test disabled due to defect - EXSWHTEC-151",
-        "Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module",
         "SWDEV-442583: Below tests failing in stress test on 12/01/24 ===",
         "Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters",
         "Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice",
