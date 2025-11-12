@@ -1233,8 +1233,7 @@ Options::Options()
       dumpFileRoot(),
       currKernelName(NULL),
       encryptCode(0),
-      MemoryHandles(),
-      libraryType_(amd::LibraryUndefined) {
+      MemoryHandles() {
   oVariables = new OptionVariables();
   ::memset(flags, 0, sizeof(flags));
 

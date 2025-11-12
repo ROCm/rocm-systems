@@ -1557,7 +1557,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx32_to_fp6x3
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx32_to_fp6x32_sr_scale(
     const __amd_floatx32_storage_t val, const __amd_fp6_interpretation_t interpret,
     const unsigned int round, const __amd_scale_t scale) {
-#if __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_pk32_fp6_f32) and                               \
+#if __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_pk32_fp6_f32) &&                                \
     __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_pk32_bf6_f32)
   return interpret == __AMD_OCP_E2M3 ? __builtin_amdgcn_cvt_scalef32_sr_pk32_fp6_f32(
                                            val, round, __amd_scale_to_float(scale))
