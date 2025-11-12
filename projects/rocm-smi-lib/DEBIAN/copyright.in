@@ -4,7 +4,7 @@ Upstream-Contact: @DEB_MAINTAINER_NAME@ <@DEB_MAINTAINER_EMAIL@>
 Source: https://github.com/ROCm/rocm-systems
 Files: *
 License: @DEB_LICENSE@
-Copyright: @DEB_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc. All rights Reserved.
+Copyright: @DEB_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -193,6 +193,26 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
         @ONLY
       )
 
+      # Install Change Log
+      find_program ( DEB_GZIP_EXEC gzip )
+      if(NOT DEB_GZIP_EXEC)
+        message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
+      endif()
+      if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
+        execute_process(
+          COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
+          WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN"
+          RESULT_VARIABLE result
+          OUTPUT_VARIABLE output
+          ERROR_VARIABLE error
+        )
+        if(NOT ${result} EQUAL 0)
+          message(FATAL_ERROR "Failed to compress: ${error}")
+        endif()
+        install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
+                  DESTINATION ${CMAKE_INSTALL_DOCDIR}
+                  COMPONENT ${COMPONENT_NAME_T})
+      endif()
       if( BUILD_ENABLE_LINTIAN_OVERRIDES )
         if(ENABLE_ASAN_PACKAGING)
           string( FIND ${DEB_OVERRIDES_INSTALL_FILENM} "asan" OUT_VAR2)
@@ -209,28 +229,6 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
           FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
           @ONLY
         )
-      endif()
-
-      # Install Change Log
-      find_program ( DEB_GZIP_EXEC gzip )
-      if(DEB_GZIP_EXEC)
-        if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
-          execute_process(
-            COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
-            WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN"
-            RESULT_VARIABLE result
-            OUTPUT_VARIABLE output
-            ERROR_VARIABLE error
-          )
-          if(NOT ${result} EQUAL 0)
-            message(FATAL_ERROR "Failed to compress: ${error}")
-          endif()
-          install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
-                    DESTINATION ${CMAKE_INSTALL_DOCDIR}
-                    COMPONENT ${COMPONENT_NAME_T})
-        endif()
-      else()
-        message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
       endif()
     endif()
 endfunction()
@@ -254,24 +252,23 @@ function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DE
 
     # Get TimeStamp
     find_program( DEB_DATE_TIMESTAMP_EXEC date )
-    if(DEB_DATE_TIMESTAMP_EXEC)
-      set ( DEB_TIMESTAMP_FORMAT_OPTION "-R" )
-      execute_process (
-          COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_TIMESTAMP_FORMAT_OPTION}
-          OUTPUT_VARIABLE TIMESTAMP_T
-          OUTPUT_STRIP_TRAILING_WHITESPACE
-      )
-      set( DEB_TIMESTAMP                "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
-
-      message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}" )
-      message(STATUS "DEB_PACKAGE_VERSION          : ${DEB_PACKAGE_VERSION}" )
-      message(STATUS "DEB_MAINTAINER_NAME          : ${DEB_MAINTAINER_NAME}" )
-      message(STATUS "DEB_MAINTAINER_EMAIL         : ${DEB_MAINTAINER_EMAIL}" )
-      message(STATUS "DEB_COPYRIGHT_YEAR           : ${DEB_COPYRIGHT_YEAR}" )
-      message(STATUS "DEB_LICENSE                  : ${DEB_LICENSE}" )
-      message(STATUS "DEB_TIMESTAMP                : ${DEB_TIMESTAMP}" )
-      message(STATUS "DEB_CHANGELOG_INSTALL_FILENM : ${DEB_CHANGELOG_INSTALL_FILENM}" )
-    else()
+    if(NOT DEB_DATE_TIMESTAMP_EXEC)
       message(FATAL_ERROR "date command not found: Failed to Configure the timestamp for Copyright/Changelog.")
     endif()
+    set ( DEB_TIMESTAMP_FORMAT_OPTION "-R" )
+    execute_process (
+        COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_TIMESTAMP_FORMAT_OPTION}
+        OUTPUT_VARIABLE TIMESTAMP_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    set( DEB_TIMESTAMP "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
+
+    message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}" )
+    message(STATUS "DEB_PACKAGE_VERSION          : ${DEB_PACKAGE_VERSION}" )
+    message(STATUS "DEB_MAINTAINER_NAME          : ${DEB_MAINTAINER_NAME}" )
+    message(STATUS "DEB_MAINTAINER_EMAIL         : ${DEB_MAINTAINER_EMAIL}" )
+    message(STATUS "DEB_COPYRIGHT_YEAR           : ${DEB_COPYRIGHT_YEAR}" )
+    message(STATUS "DEB_LICENSE                  : ${DEB_LICENSE}" )
+    message(STATUS "DEB_TIMESTAMP                : ${DEB_TIMESTAMP}" )
+    message(STATUS "DEB_CHANGELOG_INSTALL_FILENM : ${DEB_CHANGELOG_INSTALL_FILENM}" )
 endfunction()
