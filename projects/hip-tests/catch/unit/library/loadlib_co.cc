@@ -76,6 +76,13 @@ TEST_CASE("Unit_hip_library_load_co") {
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
     REQUIRE(count == 3);
 
+    size_t offset, paramsize;
+    for (size_t k = 0; k < count; ++k) {
+      HIP_CHECK(hipKernelGetParamInfo(function, k, &offset, &paramsize));
+      REQUIRE(offset == k * sizeof(float*));
+      REQUIRE(paramsize == sizeof(float*));
+    }
+
     void* args[] = {&d_out, &d_in1, &d_in2};
 
     HIP_CHECK(hipLaunchKernel(function, 1, size, args, 0, stream));
@@ -104,6 +111,13 @@ TEST_CASE("Unit_hip_library_load_co") {
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
     REQUIRE(count == 3);
 
+    size_t offset, paramsize;
+    for (size_t k = 0; k < count; ++k) {
+      HIP_CHECK(hipKernelGetParamInfo(function, k, &offset, &paramsize));
+      REQUIRE(offset == k * sizeof(float*));
+      REQUIRE(paramsize == sizeof(float*));
+    }
+
     void* args[] = {&d_out, &d_in1, &d_in2};
 
     HIP_CHECK(hipLaunchKernel(function, 1, size, args, 0, stream));
@@ -131,6 +145,13 @@ TEST_CASE("Unit_hip_library_load_co") {
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
     REQUIRE(count == 3);
+
+    size_t offset, paramsize;
+    for (size_t k = 0; k < count; ++k) {
+      HIP_CHECK(hipKernelGetParamInfo(function, k, &offset, &paramsize));
+      REQUIRE(offset == k * sizeof(float*));
+      REQUIRE(paramsize == sizeof(float*));
+    }
 
     void* args[] = {&d_out, &d_in1, &d_in2};
 
@@ -169,9 +190,13 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     
     std::vector<float> out(size, 0);
+    size_t offset, paramsize;
     for (int k = 0; k < num_kernels; k++) {
       const char* kName = nullptr;
       HIP_CHECK(hipKernelGetName(&kName, functions[k]));
+      HIP_CHECK(hipKernelGetParamInfo(functions[k], k, &offset, &paramsize));
+      REQUIRE(paramsize == sizeof(float*));
+      REQUIRE(offset == k * sizeof(float*));
       HIP_CHECK(hipLaunchKernel(functions[k], 1, size, args, 0, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
       HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
@@ -186,4 +211,25 @@ TEST_CASE("Unit_hip_library_load_co") {
   HIP_CHECK(hipFree(d_in1));
   HIP_CHECK(hipFree(d_in2));
   HIP_CHECK(hipFree(d_out));
+}
+
+TEST_CASE("Unit_hipKernelGetParamInfo_Negative") {
+  size_t offset, paramsize;
+
+  SECTION("Kernel as nullptr") {
+    HIP_CHECK_ERROR(hipKernelGetParamInfo(nullptr, 0, &offset, &paramsize), hipErrorInvalidValue);
+  }
+
+  std::string lib_co = "library_code_load.code";
+  hipLibrary_t library;
+  hipKernel_t function;
+
+  HIP_CHECK(
+      hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  HIP_CHECK(hipLibraryGetKernel(&function, library, "mul_kernel"));
+
+  SECTION("Param offset as nullptr") {
+    HIP_CHECK_ERROR(hipKernelGetParamInfo(function, 0, nullptr, &paramsize), hipErrorInvalidValue);
+  }
+
 }
