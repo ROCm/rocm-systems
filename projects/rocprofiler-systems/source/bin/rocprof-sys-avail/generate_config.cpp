@@ -409,8 +409,6 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             if((_options[VAL] || all_info) && !itr->get_choices().empty())
             {
                 auto _choices = itr->get_choices();
-
-                // Filter operations based on exclusion list
                 filter_operations(itr->get_env_name(), _choices);
 
                 if(!_choices.empty())

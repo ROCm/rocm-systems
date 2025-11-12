@@ -282,9 +282,7 @@ main(int argc, char** argv)
         .action([](parser_t& p) {
             auto _settings = tim::settings::shared_instance();
 
-            // Helper to extract domain name from full env var name
             auto _extract_domain = [](const std::string& _name) -> std::string {
-                // Remove "ROCPROFSYS_ROCM_" prefix and "_OPERATIONS" suffix
                 const std::string _prefix = "ROCPROFSYS_ROCM_";
                 const std::string _suffix = "_OPERATIONS";
                 if(_name.find(_prefix) == 0 &&
@@ -352,7 +350,6 @@ main(int argc, char** argv)
                           << "to see available domains.\n";
                 return;
             }
-
             auto _choices = _sitr->second->get_choices();
             if(_choices.empty())
             {
@@ -361,7 +358,6 @@ main(int argc, char** argv)
                 return;
             }
 
-            // Filter operations based on exclusion list
             filter_operations(_setting_name, _choices);
 
             if(_choices.empty())
@@ -369,7 +365,6 @@ main(int argc, char** argv)
                 std::cerr << "Domain '" << _domain_name_lower << "' has no operations.\n";
                 return;
             }
-
             std::cout << "Operations for " << _domain_name_lower << ":\n";
             for(const auto& itr : _choices)
                 std::cout << "    " << itr << "\n";
