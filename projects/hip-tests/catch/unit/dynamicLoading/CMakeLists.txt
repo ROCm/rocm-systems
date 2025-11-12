@@ -33,7 +33,7 @@ hip_add_exe_to_target(NAME dynamicLoading
 
 if(HIP_PLATFORM MATCHES "amd")
   add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} -fPIC -lpthread -shared 
-    ${OFFLOAD_ARCH_STR} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc
+    ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
     -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes
     -o libLazyLoad.so)
@@ -45,7 +45,7 @@ endif()
 
 add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp
-  ${OFFLOAD_ARCH_STR} -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
+  ${OFFLOAD_ARCH_LIST} -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(vecadd.cc COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/vecadd.cc ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/)
