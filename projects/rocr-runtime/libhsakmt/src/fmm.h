@@ -45,59 +45,113 @@ typedef struct {
 	void *start_address;
 } aperture_properties_t;
 
-HSAKMT_STATUS hsakmt_fmm_get_amdgpu_device_handle(uint32_t node_id,  HsaAMDGPUDeviceHandle *DeviceHandle);
-HSAKMT_STATUS hsakmt_fmm_init_process_apertures(unsigned int NumNodes);
-void hsakmt_fmm_destroy_process_apertures(void);
+HSAKMT_STATUS hsakmt_fmm_get_amdgpu_device_handle(HsaKFDContext *ctx,
+						uint32_t node_id,  HsaAMDGPUDeviceHandle *DeviceHandle);
+HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx, unsigned int NumNodes);
+void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx);
 
 /* Memory interface */
-void *hsakmt_fmm_allocate_scratch(uint32_t gpu_id, void *address, uint64_t MemorySizeInBytes);
-void *hsakmt_fmm_allocate_device(uint32_t gpu_id, uint32_t node_id, void *address,
-			uint64_t MemorySizeInBytes, uint64_t alignment, HsaMemFlags flags);
-void *hsakmt_fmm_allocate_doorbell(uint32_t gpu_id, uint64_t MemorySizeInBytes, uint64_t doorbell_offset);
-void *hsakmt_fmm_allocate_host(uint32_t gpu_id, uint32_t node_id, void *address, uint64_t MemorySizeInBytes,
-			uint64_t alignment, HsaMemFlags flags);
-void hsakmt_fmm_print(uint32_t node);
-HSAKMT_STATUS hsakmt_fmm_release(void *address);
-HSAKMT_STATUS hsakmt_fmm_map_to_gpu(void *address, uint64_t size, uint64_t *gpuvm_address);
-int hsakmt_fmm_unmap_from_gpu(void *address);
-bool hsakmt_fmm_get_handle(void *address, uint64_t *handle, uint64_t *size_offset);
-HSAKMT_STATUS hsakmt_fmm_get_mem_info(const void *address, HsaPointerInfo *info);
-HSAKMT_STATUS hsakmt_fmm_set_mem_user_data(const void *mem, void *usr_data);
+// Memory allocation/free functions
+void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,
+						uint32_t gpu_id,
+						void *address,
+						uint64_t MemorySizeInBytes);
+
+void *hsakmt_fmm_allocate_device(HsaKFDContext *ctx,
+						uint32_t gpu_id,
+						uint32_t node_id,
+						void *address,
+						uint64_t MemorySizeInBytes,
+						uint64_t alignment,
+						HsaMemFlags flags);
+
+void *hsakmt_fmm_allocate_host(HsaKFDContext *ctx,
+						uint32_t gpu_id,
+						uint32_t node_id,
+						void *address,
+						uint64_t MemorySizeInBytes,
+						uint64_t alignment,
+						HsaMemFlags flags);
+
+void *hsakmt_fmm_allocate_doorbell(HsaKFDContext *ctx,
+						uint32_t gpu_id,
+						uint64_t MemorySizeInBytes,
+						uint64_t doorbell_offset);
+
+void hsakmt_fmm_print(HsaKFDContext *ctx, uint32_t node);
+HSAKMT_STATUS hsakmt_fmm_release(HsaKFDContext *ctx, void *address);
+
+// Memory mmap/munmap functions
+HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
+						void *address,
+						uint64_t size,
+						uint64_t *gpuvm_address);
+
+HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(HsaKFDContext *ctx,
+						void *address,
+						uint64_t size,
+						uint32_t *nodes_to_map,
+						uint64_t num_of_nodes,
+						uint64_t *gpuvm_address);
+
+int hsakmt_fmm_unmap_from_gpu(HsaKFDContext *ctx, void *address);
+
+// Memory register/deregister functions
+HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
+						void *address, uint64_t size_in_bytes,
+						uint32_t *gpu_id_array,
+						uint32_t gpu_id_array_size,
+						HsaMemFlags flags);
+
+HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
+						HSAuint64 GraphicsResourceHandle,
+						HsaGraphicsResourceInfo *GraphicsResourceInfo,
+						uint32_t *gpu_id_array,
+						uint32_t gpu_id_array_size,
+						HSA_REGISTER_MEM_FLAGS RegisterFlags);
+
+HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address);
+
+// Memory export functions
+HSAKMT_STATUS hsakmt_fmm_export_dma_buf_fd(HsaKFDContext *ctx,
+						void *MemoryAddress,
+						HSAuint64 MemorySizeInBytes,
+						int *DMABufFd,
+						HSAuint64 *Offset);
+
+HSAKMT_STATUS hsakmt_fmm_share_memory(HsaKFDContext *ctx,
+						void *MemoryAddress,
+						HSAuint64 SizeInBytes,
+						HsaSharedMemoryHandle *SharedMemoryHandle);
+
+HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
+						const HsaSharedMemoryHandle *SharedMemoryHandle,
+						HSAuint64 *SizeInBytes,
+						void **MemoryAddress,
+						uint32_t *gpu_id_array,
+						uint32_t gpu_id_array_size);
+
+bool hsakmt_fmm_get_handle(HsaKFDContext *ctx,
+						void *address,
+						uint64_t *handle,
+						uint64_t *size_offset);
+HSAKMT_STATUS hsakmt_fmm_get_mem_info(HsaKFDContext *ctx,
+						const void *address,
+						 HsaPointerInfo *info);
+HSAKMT_STATUS hsakmt_fmm_set_mem_user_data(HsaKFDContext *ctx,
+						const void *mem,
+						void *usr_data);
 #ifdef SANITIZER_AMDGPU
-HSAKMT_STATUS hsakmt_fmm_replace_asan_header_page(void* address);
-HSAKMT_STATUS hsakmt_fmm_return_asan_header_page(void* address);
+HSAKMT_STATUS hsakmt_fmm_replace_asan_header_page(HsaKFDContext *ctx, void* address);
+HSAKMT_STATUS hsakmt_fmm_return_asan_header_page(HsaKFDContext *ctx, void* address);
 #endif
 
 /* Topology interface*/
-HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(aperture_type_e aperture_type, HSAuint32 gpu_id,
+HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
+		aperture_type_e aperture_type, HSAuint32 gpu_id,
 		HSAuint64 *aperture_base, HSAuint64 *aperture_limit);
 
-HSAKMT_STATUS hsakmt_fmm_register_memory(void *address, uint64_t size_in_bytes,
-								  uint32_t *gpu_id_array,
-								  uint32_t gpu_id_array_size,
-								  HsaMemFlags flags);
-HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HSAuint64 GraphicsResourceHandle,
-					   HsaGraphicsResourceInfo *GraphicsResourceInfo,
-					   uint32_t *gpu_id_array,
-					   uint32_t gpu_id_array_size,
-					   HSA_REGISTER_MEM_FLAGS RegisterFlags);
-HSAKMT_STATUS hsakmt_fmm_deregister_memory(void *address);
-HSAKMT_STATUS hsakmt_fmm_export_dma_buf_fd(void *MemoryAddress,
-				    HSAuint64 MemorySizeInBytes,
-				    int *DMABufFd,
-				    HSAuint64 *Offset);
-HSAKMT_STATUS hsakmt_fmm_share_memory(void *MemoryAddress,
-			       HSAuint64 SizeInBytes,
-			       HsaSharedMemoryHandle *SharedMemoryHandle);
-HSAKMT_STATUS hsakmt_fmm_register_shared_memory(const HsaSharedMemoryHandle *SharedMemoryHandle,
-					 HSAuint64 *SizeInBytes,
-					 void **MemoryAddress,
-					 uint32_t *gpu_id_array,
-					 uint32_t gpu_id_array_size);
-HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(void *address, uint64_t size,
-		uint32_t *nodes_to_map, uint64_t num_of_nodes, uint64_t *gpuvm_address);
-
-int hsakmt_open_drm_render_device(int minor);
+int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor);
 void *hsakmt_mmap_allocate_aligned(int prot, int flags, uint64_t size, uint64_t align,
 			    uint64_t guard_size, void *aper_base, void *aper_limit, int fd);
 

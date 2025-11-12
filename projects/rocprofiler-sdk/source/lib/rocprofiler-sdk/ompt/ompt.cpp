@@ -164,10 +164,18 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     context::pop_latest_correlation_id(corr_id);
     corr_id->sub_ref_count();
 
+    /* Warning: some tasks like early_fulfill may be scheduled
+     * out twice. The ordering between the early_fulfill and the complete
+     * (for example) is not specified. In this case the prior_task_state
+     * needs to be added to the early return if condition below.
+     */
     auto* pprior = INTERNAL(prior_task_data);
     auto* pnext  = INTERNAL(next_task_data);
     assert(pprior != nullptr);
-    auto* state_prior  = reinterpret_cast<ompt_task_save_state*>(pprior->ptr);
+    auto* state_prior = reinterpret_cast<ompt_task_save_state*>(pprior->ptr);
+    if(state_prior == nullptr)
+        ROCP_FATAL << "state_prior == nullptr prior_task_status: " << prior_task_status << ".";
+
     auto* state_next   = pnext ? reinterpret_cast<ompt_task_save_state*>(pnext->ptr) : nullptr;
     auto* prior_corrid = context::get_latest_correlation_id();
     if(state_prior->corr_id == prior_corrid && state_prior->task_flags != 0)
@@ -182,9 +190,10 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
         context::push_correlation_id(state_next->corr_id);
     }
     if(prior_task_status == ompt_task_yield || prior_task_status == ompt_task_detach ||
-       prior_task_status == ompt_task_switch)
+       prior_task_status == ompt_task_switch || prior_task_status == ompt_task_early_fulfill)
         return;
     // the prior task is done
+    assert(state_prior != nullptr);
     assert(state_prior->task_flags != 0);
     if(prior_task_status == ompt_task_complete)
     {

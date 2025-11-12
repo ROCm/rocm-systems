@@ -567,9 +567,6 @@
         "Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg",
         "=== SWDEV-457316 Below tests are disabled temporarily to avoid combined PSDB ===",
         "Unit_hipGraphAddMemFreeNode_Negative_NotSupported",
-        "=== SWDEV-475482 - Disable tests to merge clr change ===",
-        "Unit_hipCreateTextureObject_LinearResource",
-        "Unit_hipCreateTextureObject_Pitch2DResource",
         "=== SWDEV-511679 : Below tests fail in stress test ===",
         "Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device",
         "Unit_hipIpcCloseMemHandle_Positive_Reference_Counting",
@@ -591,7 +588,6 @@
         "=== SWDEV-556658 multiple test failures ===",
         "Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic",
         "Unit_hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams",
-        "Unit_TexObjectCreate_TypePitch2D_IncompleteInit",
         "=== SWDEV-553920 disabled until multi device graph issues are resolved ===",
         "Unit_hipGraphUpload_Functional_multidevice_test",
     #endif

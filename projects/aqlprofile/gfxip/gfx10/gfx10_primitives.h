@@ -83,6 +83,9 @@ class gfx10_cntx_prim {
   static constexpr Register SQ_THREAD_TRACE_BUF0_BASE_LO_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BUF0_SIZE_ADDR{};
+  static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR{};
+  static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR{};
+  static constexpr Register SQ_THREAD_TRACE_BUF1_SIZE_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BASE_ADDR =
       REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_BUF0_BASE);
   static constexpr Register SQ_THREAD_TRACE_BASE2_ADDR{};
@@ -93,6 +96,7 @@ class gfx10_cntx_prim {
   static const uint32_t SQ_THREAD_TRACE_HIWATER_VAL = 0x6;
   static constexpr Register SQ_THREAD_TRACE_STATUS_ADDR =
       REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_STATUS);
+  static constexpr Register SQ_THREAD_TRACE_STATUS2_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_CNTR_ADDR =
       REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_DROPPED_CNTR);
   static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR = REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_WPTR);
@@ -600,7 +604,7 @@ class gfx10_cntx_prim {
   // Thread trace mode OFF value
   static uint32_t sqtt_mode_off_value() { return 0; }
   // Thread trace mode ON value
-  static uint32_t sqtt_mode_on_value() { return 0; }
+  static uint32_t sqtt_mode_on_value(bool) { return 0; }
 
   // Base address of buffer to use for thread trace
   static uint32_t sqtt_base_value_lo(const uint64_t& base_addr) {
@@ -636,7 +640,7 @@ class gfx10_cntx_prim {
   static uint32_t sqtt_zero_size_value() { return 0; }
 
   // Thread trace ctrl register value
-  static uint32_t sqtt_ctrl_value(bool on) {
+  static uint32_t sqtt_ctrl_value(bool on, bool) {
 #if SQTT_PRIM_ENABLED
     uint32_t sq_thread_trace_ctrl{0};
     sq_thread_trace_ctrl =
@@ -665,7 +669,8 @@ class gfx10_cntx_prim {
     TT_CONTROL_UTC_ERR_MASK = 0x1000000,
     // TODO: Navi has 2 full bits on status2, one for each buffer
     TT_CONTROL_FULL_MASK = 0x0,
-    TT_WRITE_PTR_MASK = 0x1FFFFFFF
+    TT_WRITE_PTR_MASK = 0x1FFFFFFF,
+    TT_LOCKDOWN_FAIL = 0
   };
 
   static uint32_t sqtt_busy_mask() {
