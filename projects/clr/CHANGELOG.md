@@ -17,6 +17,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipLibraryGetKernelCount` gets kernel count in library
     - `hipStreamCopyAttributes` copies attributes from source stream to destination stream
     - `hipOccupancyAvailableDynamicSMemPerBlock` Returns dynamic shared memory available per block when launching numBlocks blocks on CU.
+* Support for the following flags in `hipGetProcAddress`, enabling searching for the per-thread version symbols.
+    - `HIP_GET_PROC_ADDRESS_DEFAULT`
+    - `HIP_GET_PROC_ADDRESS_LEGACY_STREAM`
+    - `HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM`
 
 ## HIP 7.1 for ROCm 7.1
 
