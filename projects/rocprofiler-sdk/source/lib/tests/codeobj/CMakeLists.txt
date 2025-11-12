@@ -10,8 +10,12 @@ set(CODEOBJ_LIB_TEST_SOURCES "codeobj_library_test.cpp")
 
 target_sources(codeobj-library-tests PRIVATE ${CODEOBJ_LIB_TEST_SOURCES})
 
-target_compile_definitions(codeobj-library-tests
-                           PRIVATE -DCODEOBJ_BINARY_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/\")
+set(PKG_TEST_BIN_DIR "${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin")
+
+target_compile_definitions(
+    codeobj-library-tests
+    PRIVATE CODEOBJ_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}/"
+            CODEOBJ_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${PKG_TEST_BIN_DIR}/")
 
 configure_file(smallkernel.bin smallkernel.bin COPYONLY)
 configure_file(hipcc_output.s hipcc_output.s COPYONLY)
