@@ -22,8 +22,6 @@ THE SOFTWARE.
 
 #pragma once
 
-#include <variant>
-
 #ifdef USE_GLEW
 #include <GL/glew.h>
 #elif defined(__linux__)
@@ -87,7 +85,7 @@ class GLImageObject {
 
 class IContextScopeGuard {
 public:
-    virtual ~IContextScopeGuard() = default;
+  virtual ~IContextScopeGuard() = default;
 };
 
 static std::once_flag glut_init_flag;
@@ -218,7 +216,7 @@ class EGLContextScopeGuard : public IContextScopeGuard {
 
 class GLContextScopeGuard {
  public:
-  using GLContextScopeGuardVariant = std::unique_ptr<IContextScopeGuard>;
+  using GLContextScopeGuardPtr = std::unique_ptr<IContextScopeGuard>;
 
   static constexpr char kEnvarName[] = "GL_CONTEXT_TYPE";
 
@@ -240,11 +238,11 @@ class GLContextScopeGuard {
 #endif
     } else {
       INFO("Unsupported " << kEnvarName << " value '" << val_str << "'");
+      INFO("Supported values are ['GLUT'"
 #ifdef USE_EGL
-      INFO("Supported values are ['GLUT', 'EGL']");
-#else
-      INFO("Supported values are ['GLUT']");
+        << ", 'EGL'"
 #endif
+        << "]");
       REQUIRE(false);
     }
 
@@ -253,7 +251,6 @@ class GLContextScopeGuard {
     if (err != GLEW_OK) {
       fprintf(stderr, "GLEW initialization failed: %s\n", glewGetErrorString(err));
       HipTest::HIP_SKIP_TEST("GLEW Init Failed");
-      glutExit();
       exit(1);
     }
 #endif
@@ -266,5 +263,5 @@ class GLContextScopeGuard {
   GLContextScopeGuard& operator=(GLContextScopeGuard&&) = delete;
 
  private:
-  GLContextScopeGuardVariant gl_context_;
+  GLContextScopeGuardPtr gl_context_;
 };

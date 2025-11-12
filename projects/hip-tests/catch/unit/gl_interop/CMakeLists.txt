@@ -51,6 +51,10 @@ else()
 endif()
 
 find_package(GLEW)
+if(WIN32 AND NOT GLEW_FOUND)
+  message(STATUS "GLEW is required on Windows but was not found, OpenGL interop tests not enabled.")
+  return()
+endif()
 
 hip_add_exe_to_target(NAME GLInteropTest
                       TEST_SRC ${TEST_SRC}
