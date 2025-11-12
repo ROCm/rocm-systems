@@ -52,6 +52,12 @@ is_vcn_busy_supported(uint32_t dev_id);
 bool
 is_jpeg_busy_supported(uint32_t dev_id);
 
+bool
+is_xgmi_supported(uint32_t dev_id);
+
+bool
+is_pcie_supported(uint32_t dev_id);
+
 struct processors
 {
     static uint32_t                             total_processor_count;
@@ -60,6 +66,8 @@ struct processors
     static std::vector<bool>                    jpeg_device_level_only;
     static std::vector<bool>                    vcn_busy_supported;
     static std::vector<bool>                    jpeg_busy_supported;
+    static std::vector<bool>                    xgmi_supported;
+    static std::vector<bool>                    pcie_supported;
 
 private:
     friend void                    rocprofsys::gpu::get_processor_handles();
@@ -69,6 +77,8 @@ private:
     friend bool rocprofsys::gpu::jpeg_is_device_level_only(uint32_t dev_id);
     friend bool rocprofsys::gpu::is_vcn_busy_supported(uint32_t dev_id);
     friend bool rocprofsys::gpu::is_jpeg_busy_supported(uint32_t dev_id);
+    friend bool rocprofsys::gpu::is_xgmi_supported(uint32_t dev_id);
+    friend bool rocprofsys::gpu::is_pcie_supported(uint32_t dev_id);
 };
 #endif
 

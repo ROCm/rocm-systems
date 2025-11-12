@@ -567,116 +567,131 @@ data::sample(uint32_t _device_id)
     ROCPROFSYS_AMDSMI_GET(_gpu_metrics_needed, amdsmi_get_gpu_metrics_info, sample_handle,
                           &_gpu_metrics);
 
+    // Determine if basic metrics are enabled
+    bool _basic_metrics_enabled =
+        get_settings(m_dev_id).busy || get_settings(m_dev_id).temp ||
+        get_settings(m_dev_id).power || get_settings(m_dev_id).mem_usage;
+
     // Process GPU metrics if needed
-    if(_gpu_metrics_needed)
+    if(_gpu_metrics_needed || _basic_metrics_enabled)
     {
         gpu_metrics_t metrics;
-        bool          has_data              = false;
-        bool          vcn_is_device_level_only  = gpu::vcn_is_device_level_only(m_dev_id);
-        bool          jpeg_is_device_level_only = gpu::jpeg_is_device_level_only(m_dev_id);
+        bool          has_data                  = false;
+        bool          vcn_is_device_level_only  = false;
+        bool          jpeg_is_device_level_only = false;
 
-        // Helper lambda to filter max uint values (unsupported) - returns 0 if max,
-        // otherwise the value
-        auto filter_max_uint_value = [](const auto& value) {
-            using ValueType = std::decay_t<decltype(value)>;
-            return (value == std::numeric_limits<ValueType>::max()) ? ValueType{ 0 }
-                                                                    : value;
-        };
-
-        auto fill_gpu_metrics = [](auto& dest, const auto& src, auto max_val) {
-            for(const auto& val : src)
-            {
-                if(val != max_val) dest.push_back(val);
-            }
-        };
-
-        if(get_settings(m_dev_id).vcn_activity)
+        if(_gpu_metrics_needed)
         {
-            if(vcn_is_device_level_only)
-            {
-                fill_gpu_metrics(metrics.vcn_activity, _gpu_metrics.vcn_activity,
-                                 UINT16_MAX);
-                if(!metrics.vcn_activity.empty()) has_data = true;
-            }
-            else
-            {
-                for(const auto& xcp : _gpu_metrics.xcp_stats)
+            vcn_is_device_level_only  = gpu::vcn_is_device_level_only(m_dev_id);
+            jpeg_is_device_level_only = gpu::jpeg_is_device_level_only(m_dev_id);
+
+            // Helper lambda to filter max uint values (unsupported) - returns 0 if max,
+            // otherwise the value
+            auto filter_max_uint_value = [](const auto& value) {
+                using ValueType = std::decay_t<decltype(value)>;
+                return (value == std::numeric_limits<ValueType>::max()) ? ValueType{ 0 }
+                                                                        : value;
+            };
+
+            auto fill_gpu_metrics = [](auto& dest, const auto& src, auto max_val) {
+                for(const auto& val : src)
                 {
-                    std::vector<uint16_t> xcp_vcn_data;
-                    fill_gpu_metrics(xcp_vcn_data, xcp.vcn_busy, UINT16_MAX);
-                    if(!xcp_vcn_data.empty())
+                    if(val != max_val) dest.push_back(val);
+                }
+            };
+
+            if(get_settings(m_dev_id).vcn_activity)
+            {
+                if(vcn_is_device_level_only)
+                {
+                    fill_gpu_metrics(metrics.vcn_activity, _gpu_metrics.vcn_activity,
+                                     UINT16_MAX);
+                    if(!metrics.vcn_activity.empty()) has_data = true;
+                }
+                else
+                {
+                    for(const auto& xcp : _gpu_metrics.xcp_stats)
                     {
-                        metrics.vcn_busy.push_back(std::move(xcp_vcn_data));
-                        has_data = true;
+                        std::vector<uint16_t> xcp_vcn_data;
+                        fill_gpu_metrics(xcp_vcn_data, xcp.vcn_busy, UINT16_MAX);
+                        if(!xcp_vcn_data.empty())
+                        {
+                            metrics.vcn_busy.push_back(std::move(xcp_vcn_data));
+                            has_data = true;
+                        }
                     }
+                }
+            }
+
+            if(get_settings(m_dev_id).jpeg_activity)
+            {
+                if(jpeg_is_device_level_only)
+                {
+                    fill_gpu_metrics(metrics.jpeg_activity, _gpu_metrics.jpeg_activity,
+                                     UINT16_MAX);
+                    if(!metrics.jpeg_activity.empty()) has_data = true;
+                }
+                else
+                {
+                    for(const auto& xcp : _gpu_metrics.xcp_stats)
+                    {
+                        std::vector<uint16_t> xcp_jpeg_data;
+                        fill_gpu_metrics(xcp_jpeg_data, xcp.jpeg_busy, UINT16_MAX);
+                        if(!xcp_jpeg_data.empty())
+                        {
+                            metrics.jpeg_busy.push_back(std::move(xcp_jpeg_data));
+                            has_data = true;
+                        }
+                    }
+                }
+            }
+
+            // Process XGMI metrics if enabled
+            if(get_settings(m_dev_id).xgmi)
+            {
+                // Filter scalar values - returns 0 if unsupported (max value)
+                metrics.xgmi_link_width =
+                    filter_max_uint_value(_gpu_metrics.xgmi_link_width);
+                metrics.xgmi_link_speed =
+                    filter_max_uint_value(_gpu_metrics.xgmi_link_speed);
+
+                // Vector values filtered by fill_gpu_metrics
+                fill_gpu_metrics(metrics.xgmi_read_data_acc,
+                                 _gpu_metrics.xgmi_read_data_acc, UINT64_MAX);
+                fill_gpu_metrics(metrics.xgmi_write_data_acc,
+                                 _gpu_metrics.xgmi_write_data_acc, UINT64_MAX);
+
+                if(metrics.xgmi_link_width != 0 || metrics.xgmi_link_speed != 0 ||
+                   !metrics.xgmi_read_data_acc.empty() ||
+                   !metrics.xgmi_write_data_acc.empty())
+                {
+                    has_data = true;
+                }
+            }
+
+            // Process PCIe metrics if enabled
+            if(get_settings(m_dev_id).pcie)
+            {
+                // Filter scalar values - returns 0 if unsupported (max value)
+                metrics.pcie_link_width =
+                    filter_max_uint_value(_gpu_metrics.pcie_link_width);
+                metrics.pcie_link_speed =
+                    filter_max_uint_value(_gpu_metrics.pcie_link_speed);
+                metrics.pcie_bandwidth_acc =
+                    filter_max_uint_value(_gpu_metrics.pcie_bandwidth_acc);
+                metrics.pcie_bandwidth_inst =
+                    filter_max_uint_value(_gpu_metrics.pcie_bandwidth_inst);
+
+                if(metrics.pcie_link_width != 0 || metrics.pcie_link_speed != 0 ||
+                   metrics.pcie_bandwidth_acc != 0 || metrics.pcie_bandwidth_inst != 0)
+                {
+                    has_data = true;
                 }
             }
         }
 
-        if(get_settings(m_dev_id).jpeg_activity)
-        {
-            if(jpeg_is_device_level_only)
-            {
-                fill_gpu_metrics(metrics.jpeg_activity, _gpu_metrics.jpeg_activity,
-                                 UINT16_MAX);
-                if(!metrics.jpeg_activity.empty()) has_data = true;
-            }
-            else
-            {
-                for(const auto& xcp : _gpu_metrics.xcp_stats)
-                {
-                    std::vector<uint16_t> xcp_jpeg_data;
-                    fill_gpu_metrics(xcp_jpeg_data, xcp.jpeg_busy, UINT16_MAX);
-                    if(!xcp_jpeg_data.empty())
-                    {
-                        metrics.jpeg_busy.push_back(std::move(xcp_jpeg_data));
-                        has_data = true;
-                    }
-                }
-            }
-        }
-
-        // Process XGMI metrics if enabled
-        if(get_settings(m_dev_id).xgmi)
-        {
-            // Filter scalar values - returns 0 if unsupported (max value)
-            metrics.xgmi_link_width = filter_max_uint_value(_gpu_metrics.xgmi_link_width);
-            metrics.xgmi_link_speed = filter_max_uint_value(_gpu_metrics.xgmi_link_speed);
-
-            // Vector values filtered by fill_gpu_metrics
-            fill_gpu_metrics(metrics.xgmi_read_data_acc, _gpu_metrics.xgmi_read_data_acc,
-                             UINT64_MAX);
-            fill_gpu_metrics(metrics.xgmi_write_data_acc,
-                             _gpu_metrics.xgmi_write_data_acc, UINT64_MAX);
-
-            if(metrics.xgmi_link_width != 0 || metrics.xgmi_link_speed != 0 ||
-               !metrics.xgmi_read_data_acc.empty() ||
-               !metrics.xgmi_write_data_acc.empty())
-            {
-                has_data = true;
-            }
-        }
-
-        // Process PCIe metrics if enabled
-        if(get_settings(m_dev_id).pcie)
-        {
-            // Filter scalar values - returns 0 if unsupported (max value)
-            metrics.pcie_link_width = filter_max_uint_value(_gpu_metrics.pcie_link_width);
-            metrics.pcie_link_speed = filter_max_uint_value(_gpu_metrics.pcie_link_speed);
-            metrics.pcie_bandwidth_acc =
-                filter_max_uint_value(_gpu_metrics.pcie_bandwidth_acc);
-            metrics.pcie_bandwidth_inst =
-                filter_max_uint_value(_gpu_metrics.pcie_bandwidth_inst);
-
-            if(metrics.pcie_link_width != 0 || metrics.pcie_link_speed != 0 ||
-               metrics.pcie_bandwidth_acc != 0 || metrics.pcie_bandwidth_inst != 0)
-            {
-                has_data = true;
-            }
-        }
-
-        // Only serialize and store metrics if there's actual data
-        if(has_data)
+        // Store samples if basic metrics are enabled OR if there's advanced metric data
+        if(_basic_metrics_enabled || has_data)
         {
             trace_cache::get_buffer_storage().store(
                 trace_cache::entry_type::amd_smi_sample, serialize_settings(m_dev_id),
@@ -686,7 +701,7 @@ data::sample(uint32_t _device_id)
                 serialize_gpu_metrics(m_dev_id, metrics, vcn_is_device_level_only,
                                       jpeg_is_device_level_only));
 
-            m_gpu_metrics.push_back(metrics);
+            if(has_data) m_gpu_metrics.push_back(metrics);
         }
     }
 #undef ROCPROFSYS_AMDSMI_GET

@@ -481,8 +481,7 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         bool          jpeg_is_device_level_only = false;
         gpu::deserialize_gpu_metrics(_amd_smi.gpu_activity, gpu_metrics, is_vcn_enabled,
                                      is_jpeg_enabled, is_xgmi_enabled, is_pcie_enabled,
-                                     vcn_is_device_level_only,
-                                     jpeg_is_device_level_only);
+                                     vcn_is_device_level_only, jpeg_is_device_level_only);
 
         // Insert VCN and JPEG activity metrics
         auto insert_decode_vector_metrics = [&](auto category, bool _is_enabled,

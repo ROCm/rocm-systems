@@ -181,26 +181,17 @@ serialize_gpu_metrics(const gpu_metrics_t& metrics, bool vcn_is_device_level_onl
 
     std::vector<uint8_t> result;
 
-    // Serialize capability flags
+    // Serialize capability flags (1 byte)
     // These flags determine how the activity information is provided in the data
-    // structures.
-    //      - bit 0: vcn_is_device_level_only (device-level vs per-XCP)
-    //      - bit 1: jpeg_is_device_level_only (device-level vs per-XCP)
-    struct
-    {
-        union
-        {
-            struct
-            {
-                uint8_t vcn_is_device_level_only  : 1;
-                uint8_t jpeg_is_device_level_only : 1;
-            };
-            uint8_t value;
-        };
-    } capabilities;
-    capabilities.vcn_is_device_level_only  = vcn_is_device_level_only ? 1 : 0;
-    capabilities.jpeg_is_device_level_only = jpeg_is_device_level_only ? 1 : 0;
-    serialize_uint8(result, capabilities.value);
+    // Current flags:
+    //      - bit 0 (0x01): vcn_is_device_level_only (device-level vs per-XCP)
+    //      - bit 1 (0x02): jpeg_is_device_level_only (device-level vs per-XCP)
+    //      - bits 2-7: Reserved for future use
+    //
+    uint8_t capabilities = 0;
+    if(vcn_is_device_level_only) capabilities |= 0x01;
+    if(jpeg_is_device_level_only) capabilities |= 0x02;
+    serialize_uint8(result, capabilities);
 
     // Serialize counts
     serialize_uint8(result, vcn_count);
@@ -252,10 +243,12 @@ deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
     }
     size_t offset = 0;
 
-    // Deserialize capability flags
+    // Deserialize capability flags (1 byte)
+    // Extract boolean flags from packed byte using bitwise AND operations.
+    // See serialize_gpu_metrics() for flag definitions.
     uint8_t flags             = deserialize_uint8(serialized_data, offset);
-    vcn_is_device_level_only  = (flags & 0x01) != 0;
-    jpeg_is_device_level_only = (flags & 0x02) != 0;
+    vcn_is_device_level_only  = (flags & 0x01) != 0;  // bit 0
+    jpeg_is_device_level_only = (flags & 0x02) != 0;  // bit 1
 
     // Deserialize counts
     uint8_t vcn_count        = deserialize_uint8(serialized_data, offset);

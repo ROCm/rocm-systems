@@ -743,7 +743,13 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
             runtime-instrument
             sys-run
         )
-            string(REGEX REPLACE "rewrite-run(-|/)" "rewrite\\1" _prefix "${TEST_NAME}-${_TEST}/")
+            string(
+                REGEX REPLACE
+                "rewrite-run(-|/)"
+                "rewrite\\1"
+                _prefix
+                "${TEST_NAME}-${_TEST}/"
+            )
             set(_labels "${_TEST}")
             string(REPLACE "rewrite-run" "rewrite" _labels "${_TEST}")
             if(TEST_TARGET)
@@ -793,7 +799,11 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                 set(_REGEX_VAR)
             endif()
 
-            if("${_TEST}" MATCHES "binary-rewrite-run|runtime-instrument|sampling|sys-run")
+            if(
+                "${_TEST}"
+                    MATCHES
+                    "binary-rewrite-run|runtime-instrument|sampling|sys-run"
+            )
                 rocprofiler_systems_patch_sanitizer_environment(_environ)
             endif()
 
