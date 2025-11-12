@@ -97,7 +97,7 @@ if(HIP_PLATFORM MATCHES "amd")
   # SWDEV-548807 skip building hipSpirvTest
   if(false)
     add_custom_target(hipSpirvTest ALL
-                    COMMAND ${CMAKE_CXX_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
+                    COMMAND ${CMAKE_HIP_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
