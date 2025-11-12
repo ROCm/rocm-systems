@@ -171,12 +171,12 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST transpose-sampling)
         NAME transpose-sampling
         ROCPD_FILE "rocpd.db"
         ARGS --validation-rules
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/validation-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/amd-smi-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/cpu-metrics-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/timer-sampling-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/sdk-metrics-rules.json"
+        "${ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH}/transpose/validation-rules.json"
+        "${ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH}/default-rules.json"
+        "${ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH}/transpose/amd-smi-rules.json"
+        "${ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH}/transpose/cpu-metrics-rules.json"
+        "${ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH}/transpose/timer-sampling-rules.json"
+        "${ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH}/transpose/sdk-metrics-rules.json"
         LABELS "rocpd"
     )
 endif()

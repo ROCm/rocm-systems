@@ -48,3 +48,7 @@ if(Python3_FOUND)
         endif()
     endforeach()
 endif()
+
+if(ROCPROFSYS_BUILD_TESTING)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-code-coverage-tests.cmake)
+endif()

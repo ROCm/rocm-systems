@@ -95,3 +95,7 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
         )
     endif()
 endif()
+
+if(ROCPROFSYS_BUILD_TESTING)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kokkos-tests.cmake)
+endif()

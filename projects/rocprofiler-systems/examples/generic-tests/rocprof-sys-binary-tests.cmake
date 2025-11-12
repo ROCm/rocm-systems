@@ -86,7 +86,7 @@ rocprofiler_systems_add_bin_test(
         "\\\[rocprof-sys\\\]\\\[exe\\\] Runtime instrumentation is not possible!(.*)\n(.*)\\\[rocprof-sys\\\]\\\[exe\\\] Switching to binary rewrite mode and assuming '--simulate --all-functions'"
 )
 
-file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/tmp)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/rocprof-sys-tests-output/tmp)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-instrument-simulate-lib-basename
@@ -96,12 +96,12 @@ rocprofiler_systems_add_bin_test(
          -v
          2
          -o
-         ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/rocprof-sys-instrument-simulate-lib-basename/${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:rocprofiler-systems-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
+         ${CMAKE_BINARY_DIR}/rocprof-sys-tests-output/rocprof-sys-instrument-simulate-lib-basename/${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:rocprofiler-systems-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
          --
          ${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:rocprofiler-systems-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
     LABELS "simulate"
     TIMEOUT 120
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/tmp
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/rocprof-sys-tests-output/tmp
 )
 
 rocprofiler_systems_add_bin_test(
@@ -241,7 +241,7 @@ string(
     "+"
     "\\\+"
     _AVAIL_CFG_PATH
-    "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/rocprof-sys-avail/rocprof-sys-"
+    "${CMAKE_BINARY_DIR}/rocprof-sys-tests-output/rocprof-sys-avail/rocprof-sys-"
 )
 # use of TWD == Test Working Directory (added by function)
 rocprofiler_systems_add_bin_test(
@@ -320,10 +320,10 @@ rocprofiler_systems_add_bin_test(
     LABELS "rocprofiler-systems-run"
 )
 
-file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config")
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/rocprof-sys-tests-config")
 file(
     WRITE
-    "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config/empty.cfg"
+    "${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/empty.cfg"
     "
 #
 # empty config file

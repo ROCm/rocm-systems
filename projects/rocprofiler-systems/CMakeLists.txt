@@ -457,24 +457,13 @@ include(ConfigInstall)
 
 # ------------------------------------------------------------------------------#
 #
-# examples
+# examples and tests
 #
 # ------------------------------------------------------------------------------#
 
 if(ROCPROFSYS_BUILD_EXAMPLES)
     set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME examples)
     add_subdirectory(examples)
-endif()
-
-# ------------------------------------------------------------------------------#
-#
-# tests
-#
-# ------------------------------------------------------------------------------#
-
-if(ROCPROFSYS_BUILD_TESTING)
-    set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME testing)
-    add_subdirectory(tests)
 endif()
 
 # ------------------------------------------------------------------------------#

@@ -125,3 +125,7 @@ if(ROCPROFSYS_DISABLE_EXAMPLES)
 else()
     add_subdirectory(target)
 endif()
+
+if(ROCPROFSYS_BUILD_TESTING)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-openmp-tests.cmake)
+endif()

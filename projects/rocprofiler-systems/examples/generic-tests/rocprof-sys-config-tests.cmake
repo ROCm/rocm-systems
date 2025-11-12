@@ -44,7 +44,7 @@ endif()
 add_test(
     NAME rocprofiler-systems-invalid-config
     COMMAND $<TARGET_FILE:rocprofiler-systems-instrument> -- ${_CONFIG_TEST_EXE}
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
 set_tests_properties(
@@ -60,7 +60,7 @@ set_tests_properties(
 add_test(
     NAME rocprofiler-systems-missing-config
     COMMAND $<TARGET_FILE:rocprofiler-systems-instrument> -- ${_CONFIG_TEST_EXE}
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
 set_tests_properties(

@@ -92,11 +92,11 @@ rocprofiler_systems_message(
 if(DEFINED ROCM_PATH)
     set(ROCM_LLVM_LIB_PATH "${ROCM_PATH}/lib/llvm/lib")
     set(_test_library_path
-        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_LLVM_LIB_PATH}/:$ENV{LD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_LLVM_LIB_PATH}/:$ENV{LD_LIBRARY_PATH}"
     )
 else()
     set(_test_library_path
-        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
     )
 endif()
 
@@ -186,7 +186,7 @@ set(_python_environment
     "ROCPROFSYS_USE_PID=OFF"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count"
     "${_test_library_path}"
-    "PYTHONPATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}"
+    "PYTHONPATH=${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}"
 )
 
 set(_attach_environment
@@ -273,7 +273,7 @@ execute_process(
     COMMAND
         ${CMAKE_CXX_COMPILER} -O2 -g -std=c++17
         ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-capchk.cpp -o rocprof-sys-capchk
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/bin
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bin
     RESULT_VARIABLE _capchk_compile
     OUTPUT_QUIET
     ERROR_QUIET
@@ -281,16 +281,16 @@ execute_process(
 
 if(_capchk_compile EQUAL 0)
     execute_process(
-        COMMAND ${PROJECT_BINARY_DIR}/bin/rocprof-sys-capchk CAP_SYS_ADMIN effective
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        COMMAND ${CMAKE_BINARY_DIR}/bin/rocprof-sys-capchk CAP_SYS_ADMIN effective
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         RESULT_VARIABLE rocprofiler_systems_cap_sys_admin
         OUTPUT_QUIET
         ERROR_QUIET
     )
 
     execute_process(
-        COMMAND ${PROJECT_BINARY_DIR}/bin/rocprof-sys-capchk CAP_PERFMON effective
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        COMMAND ${CMAKE_BINARY_DIR}/bin/rocprof-sys-capchk CAP_PERFMON effective
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         RESULT_VARIABLE rocprofiler_systems_cap_perfmon
         OUTPUT_QUIET
         ERROR_QUIET
@@ -395,7 +395,7 @@ function(ROCPROFILER_SYSTEMS_WRITE_TEST_CONFIG _FILE _ENV)
         endif()
     endforeach()
 
-    set(_CONFIG_FILE ${PROJECT_BINARY_DIR}/rocprof-sys-tests-config/${_FILE})
+    set(_CONFIG_FILE ${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/${_FILE})
     file(
         WRITE
         ${_CONFIG_FILE}
@@ -670,7 +670,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
             add_test(
                 NAME ${TEST_NAME}-baseline
                 COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
         endif()
 
@@ -680,7 +680,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                 COMMAND
                     ${COMMAND_PREFIX} $<TARGET_FILE:rocprofiler-systems-sample>
                     ${TEST_SAMPLE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
         endif()
 
@@ -691,7 +691,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                     $<TARGET_FILE:rocprofiler-systems-instrument> -o
                     $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
                     ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
 
             add_test(
@@ -699,7 +699,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                 COMMAND
                     ${COMMAND_PREFIX} $<TARGET_FILE:rocprofiler-systems-run> --
                     $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
         endif()
 
@@ -709,7 +709,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                 COMMAND
                     $<TARGET_FILE:rocprofiler-systems-instrument> ${TEST_RUNTIME_ARGS} --
                     $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
         endif()
 
@@ -741,7 +741,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
             set(_environ
                 "ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS=64"
                 "${TEST_ENVIRONMENT}"
-                "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+                "ROCPROFSYS_OUTPUT_PATH=${CMAKE_BINARY_DIR}/rocprof-sys-tests-output"
                 "ROCPROFSYS_OUTPUT_PREFIX=${_prefix}"
             )
 
@@ -872,14 +872,14 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
             add_test(
                 NAME ${TEST_NAME}-baseline
                 COMMAND $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
         endif()
 
         add_test(
             NAME causal-${TEST_NAME}
             COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         )
 
         if(NOT "${TEST_CAUSAL_VALIDATE_ARGS}" STREQUAL "")
@@ -896,9 +896,9 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
             add_test(
                 NAME validate-causal-${TEST_NAME}
                 COMMAND
-                    ${CMAKE_CURRENT_LIST_DIR}/validate-causal-json.py ${_VALIDATE_EXTRA}
-                    ${TEST_CAUSAL_VALIDATE_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                    ${ROCPROFSYS_PYTHON_VALIDATION_SCRIPT_PATH}/validate-causal-json.py
+                    ${_VALIDATE_EXTRA} ${TEST_CAUSAL_VALIDATE_ARGS}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
         endif()
 
@@ -933,7 +933,7 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
 
             set(_environ
                 "${_causal_environment}"
-                "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+                "ROCPROFSYS_OUTPUT_PATH=${CMAKE_BINARY_DIR}/rocprof-sys-tests-output"
                 "ROCPROFSYS_OUTPUT_PREFIX=${_prefix}"
                 "ROCPROFSYS_CI=ON"
                 "ROCPROFSYS_USE_PID=OFF"
@@ -1025,11 +1025,11 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
             APPEND
             TEST_ENVIRONMENT
             "ROCPROFSYS_CI=ON"
-            "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+            "ROCPROFSYS_OUTPUT_PATH=${CMAKE_BINARY_DIR}/rocprof-sys-tests-output"
         )
         get_filename_component(_TEST_FILE "${TEST_FILE}" NAME)
         set(_TEST_FILE
-            ${PROJECT_BINARY_DIR}/python/tests/${TEST_PYTHON_VERSION}/${_TEST_FILE}
+            ${CMAKE_BINARY_DIR}/python/tests/${TEST_PYTHON_VERSION}/${_TEST_FILE}
         )
 
         if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
@@ -1043,7 +1043,7 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
             add_test(
                 NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}
                 COMMAND ${TEST_PYTHON_EXECUTABLE} ${_TEST_FILE} ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
         else()
             add_test(
@@ -1051,14 +1051,14 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
                 COMMAND
                     ${TEST_PYTHON_EXECUTABLE} -m rocprofsys ${TEST_PROFILE_ARGS} --
                     ${_TEST_FILE} ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
             add_test(
                 NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}-annotated
                 COMMAND
                     ${TEST_PYTHON_EXECUTABLE} -m rocprofsys ${TEST_PROFILE_ARGS}
                     --annotate-trace -- ${_TEST_FILE} ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             )
         endif()
     else()
@@ -1066,7 +1066,7 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
         add_test(
             NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}
             COMMAND ${TEST_COMMAND} ${TEST_FILE}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         )
     endif()
 
@@ -1237,9 +1237,8 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         add_test(
             NAME validate-${TEST_NAME}-${_FILE}-exists
             COMMAND
-                test -e
-                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${_FILE}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                test -e ${CMAKE_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${_FILE}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         )
     endforeach()
 
@@ -1248,10 +1247,10 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
             NAME validate-${TEST_NAME}-timemory
             COMMAND
                 ${ROCPROFSYS_VALIDATION_PYTHON}
-                ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py -m
+                ${ROCPROFSYS_PYTHON_VALIDATION_SCRIPT_PATH}/validate-timemory-json.py -m
                 "${TEST_TIMEMORY_METRIC}" ${TEST_ARGS} -i
-                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_TIMEMORY_FILE}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                ${CMAKE_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_TIMEMORY_FILE}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         )
     endif()
 
@@ -1260,11 +1259,11 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
             NAME validate-${TEST_NAME}-perfetto
             COMMAND
                 ${ROCPROFSYS_VALIDATION_PYTHON}
-                ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -m
+                ${ROCPROFSYS_PYTHON_VALIDATION_SCRIPT_PATH}/validate-perfetto-proto.py -m
                 "${TEST_PERFETTO_METRIC}" ${TEST_ARGS} -i
-                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_PERFETTO_FILE}
+                ${CMAKE_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_PERFETTO_FILE}
                 -t /opt/trace_processor/bin/trace_processor_shell
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         )
     endif()
 
@@ -1273,10 +1272,10 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
             NAME validate-${TEST_NAME}-rocpd
             COMMAND
                 ${ROCPROFSYS_VALIDATION_PYTHON}
-                ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py -db
-                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_ROCPD_FILE}
+                ${ROCPROFSYS_PYTHON_VALIDATION_SCRIPT_PATH}/validate-rocpd.py -db
+                ${CMAKE_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_ROCPD_FILE}
                 ${TEST_ARGS}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         )
     endif()
 
@@ -1344,7 +1343,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
     )
 
     if(NOT TEST_WORKING_DIRECTORY)
-        set(TEST_WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+        set(TEST_WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     endif()
 
     if(NOT TEST_ENVIRONMENT)
@@ -1353,7 +1352,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
             "ROCPROFSYS_PROFILE=ON"
             "ROCPROFSYS_USE_SAMPLING=ON"
             "ROCPROFSYS_TIME_OUTPUT=OFF"
-            "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
+            "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
         )
     endif()
 
@@ -1364,7 +1363,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
         "ROCPROFSYS_CI=ON"
         "ROCPROFSYS_CI_TIMEOUT=${TEST_TIMEOUT}"
         "ROCPROFSYS_CONFIG_FILE="
-        "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+        "ROCPROFSYS_OUTPUT_PATH=${CMAKE_BINARY_DIR}/rocprof-sys-tests-output"
         "TWD=${TEST_WORKING_DIRECTORY}"
     )
     # copy for inverse

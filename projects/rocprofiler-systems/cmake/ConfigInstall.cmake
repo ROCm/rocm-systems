@@ -48,7 +48,7 @@ export(PACKAGE ${PROJECT_NAME})
 # install the validate-causal-json python script as a utility
 #
 configure_file(
-    ${PROJECT_SOURCE_DIR}/tests/validate-causal-json.py
+    ${PROJECT_SOURCE_DIR}/examples/generic-tests/validation-scripts/validate-causal-json.py
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-sys-causal-print
     COPYONLY
 )

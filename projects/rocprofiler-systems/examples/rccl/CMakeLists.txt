@@ -121,3 +121,7 @@ if(hip_FOUND AND rccl_FOUND)
         set(RCCL_TEST_TARGETS "${_RCCL_TEST_TARGETS}" CACHE INTERNAL "rccl-test targets")
     endif()
 endif()
+
+if(ROCPROFSYS_BUILD_TESTING)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rccl-tests.cmake)
+endif()

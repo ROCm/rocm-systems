@@ -836,7 +836,7 @@ function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
         find_package(Python3 ${ARG_VERSION} EXACT QUIET MODULE COMPONENTS Interpreter)
         set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
         configure_file(
-            ${PROJECT_SOURCE_DIR}/cmake/Templates/console-script.in
+            ${CMAKE_SOURCE_DIR}/cmake/Templates/console-script.in
             ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION}
             @ONLY
         )
@@ -876,7 +876,7 @@ function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
         set(PYTHON_EXECUTABLE "python3")
 
         configure_file(
-            ${PROJECT_SOURCE_DIR}/cmake/Templates/console-script.in
+            ${CMAKE_SOURCE_DIR}/cmake/Templates/console-script.in
             ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}
             @ONLY
         )

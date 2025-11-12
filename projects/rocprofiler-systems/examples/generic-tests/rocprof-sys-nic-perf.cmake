@@ -9,7 +9,7 @@
 
 # Get the name of the default NIC and write it to _network_interface.
 execute_process(
-    COMMAND "${CMAKE_SOURCE_DIR}/tests/get_default_nic.sh"
+    COMMAND "${ROCPROFSYS_NIC_SCRIPT_PATH}/get_default_nic.sh"
     OUTPUT_STRIP_TRAILING_WHITESPACE
     OUTPUT_VARIABLE _network_interface
 )
@@ -18,7 +18,7 @@ message(STATUS "The list of default network interfaces is ${_network_interface}"
 
 # Generate the list of all events that we want PAPI to record.
 execute_process(
-    COMMAND "${CMAKE_SOURCE_DIR}/tests/generate_papi_nic_events.sh"
+    COMMAND "${ROCPROFSYS_NIC_SCRIPT_PATH}/generate_papi_nic_events.sh"
     OUTPUT_STRIP_TRAILING_WHITESPACE
     OUTPUT_VARIABLE _event_list
 )
@@ -27,7 +27,7 @@ message(STATUS "The list of all PAPI network events is ${_event_list}")
 
 set(_nic_perf_environment
     "${_base_environment}"
-    "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/nic-performance"
+    "ROCPROFSYS_OUTPUT_PATH=${CMAKE_BINARY_DIR}/rocprof-sys-tests-output/nic-performance"
     "ROCPROFSYS_USE_PID=OFF"
     "ROCPROFSYS_VERBOSE=1"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
@@ -59,8 +59,8 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-systems-sample> -- wget --no-check-certificate
         ${_download_url} ${_download2_url} -O
-        ${PROJECT_BINARY_DIR}/rocprofiler-systems.test.bin
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        ${CMAKE_BINARY_DIR}/rocprofiler-systems.test.bin
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
 set_tests_properties(
@@ -73,11 +73,11 @@ add_test(
     NAME validate-nic-performance-perfetto
     COMMAND
         ${ROCPROFSYS_VALIDATION_PYTHON}
-        ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -i
-        ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/nic-performance/perfetto-trace.proto
+        ${ROCPROFSYS_PYTHON_VALIDATION_SCRIPT_PATH}/validate-perfetto-proto.py -i
+        ${CMAKE_BINARY_DIR}/rocprof-sys-tests-output/nic-performance/perfetto-trace.proto
         --counter-names rx:byte rx:packet tx:byte tx:packet -t
         /opt/trace_processor/bin/trace_processor_shell -p
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
 set(_test_pass_regex

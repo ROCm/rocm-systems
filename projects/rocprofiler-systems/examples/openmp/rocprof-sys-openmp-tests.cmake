@@ -103,8 +103,8 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST openmp-target-sampling)
         ROCPD_FILE "rocpd.db"
         LABELS "openmp;openmp-target;rocpd"
         ARGS --validation-rules
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/openmp-target/kernel-rules.json"
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/openmp-target/sdk-metrics-rules.json"
+            "${ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH}/openmp-target/kernel-rules.json"
+            "${ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH}/openmp-target/sdk-metrics-rules.json"
     )
 endif()
 

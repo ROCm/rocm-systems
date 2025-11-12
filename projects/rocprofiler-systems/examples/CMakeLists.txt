@@ -62,6 +62,16 @@ set(ROCPROFSYS_EXAMPLE_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 # defines function for creating causal profiling exes
 include(${CMAKE_CURRENT_LIST_DIR}/causal-helpers.cmake)
 
+if(ROCPROFSYS_BUILD_TESTING)
+    set(ROCPROFSYS_PYTHON_VALIDATION_SCRIPT_PATH
+        "${CMAKE_CURRENT_LIST_DIR}/generic-tests/validation-scripts"
+    )
+    set(ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH
+        "${CMAKE_CURRENT_LIST_DIR}/generic-tests/rocpd-validation-rules"
+    )
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake) # TODO: Determine if we want to move rocprof-sys-capchk.cpp somewhere else
+endif()
+
 add_subdirectory(transpose)
 add_subdirectory(parallel-overhead)
 add_subdirectory(code-coverage)
@@ -79,3 +89,5 @@ add_subdirectory(videodecode)
 add_subdirectory(jpegdecode)
 add_subdirectory(roctx)
 add_subdirectory(thread-limit)
+
+add_subdirectory(generic-tests) # Required to be here (instrument-tests depend on this)

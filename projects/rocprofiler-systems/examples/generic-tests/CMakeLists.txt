@@ -20,27 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
+# Generic tests
 
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
-endif()
+set(ROCPROFSYS_NIC_SCRIPT_PATH "${CMAKE_CURRENT_LIST_DIR}")
 
-set(CMAKE_BUILD_TYPE "Release")
-find_package(Threads REQUIRED)
-
-add_library(tests-compile-options INTERFACE)
-target_compile_options(tests-compile-options INTERFACE -g)
-
-add_executable(thread-limit thread-limit.cpp)
-target_compile_definitions(thread-limit PRIVATE MAX_THREADS=${ROCPROFSYS_MAX_THREADS})
-target_link_libraries(thread-limit PRIVATE Threads::Threads tests-compile-options)
-
-if(ROCPROFSYS_BUILD_TESTING)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
-endif()
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake) # Does not require any examples
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake) # TODO: Verify that ls and parallel-overhead are available
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake) # TODO: This will not work off the bat

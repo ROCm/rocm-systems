@@ -39,3 +39,10 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
         COMPONENT rocprofiler-systems-examples
     )
 endif()
+
+if(ROCPROFSYS_BUILD_TESTING)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-annotate-tests.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach-tests.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pthread-tests.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-overflow-tests.cmake)
+endif()

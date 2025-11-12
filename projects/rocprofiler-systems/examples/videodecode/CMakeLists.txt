@@ -199,3 +199,7 @@ else()
         message(WARNING "-- ERROR!: rocDecode Not Found! - please install rocDecode!")
     endif()
 endif()
+
+if(ROCPROFSYS_BUILD_TESTING)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-video-decode-tests.cmake)
+endif()

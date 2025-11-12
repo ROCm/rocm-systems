@@ -116,3 +116,7 @@ endif()
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(TARGETS roctx DESTINATION bin COMPONENT rocprofiler-systems-examples)
 endif()
+
+if(ROCPROFSYS_BUILD_TESTING)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
+endif()

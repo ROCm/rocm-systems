@@ -18,3 +18,7 @@ target_compile_options(fork-example PRIVATE ${_FLAGS})
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(TARGETS fork-example DESTINATION bin COMPONENT rocprofiler-systems-examples)
 endif()
+
+if(ROCPROFSYS_BUILD_TESTING)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-fork-tests.cmake)
+endif()

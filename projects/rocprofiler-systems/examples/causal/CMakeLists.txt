@@ -49,3 +49,7 @@ rocprofiler_systems_causal_example_executable(
     LINK_LIBRARIES causal-interface-library
     DEFINITIONS USE_RNG=0 USE_CPU=1
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-causal-tests.cmake)
+endif()

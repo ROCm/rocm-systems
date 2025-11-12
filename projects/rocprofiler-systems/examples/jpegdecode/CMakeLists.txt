@@ -185,3 +185,7 @@ else()
         )
     endif()
 endif()
+
+if(ROCPROFSYS_BUILD_TESTING)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-jpeg-decode-tests.cmake)
+endif()
