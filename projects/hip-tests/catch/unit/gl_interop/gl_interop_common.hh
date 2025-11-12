@@ -29,7 +29,7 @@ THE SOFTWARE.
 #elif defined(__linux__)
 #define GL_GLEXT_PROTOTYPES
 #else
-#error "Only GLEW or Linux native GL extensions are supported"
+#error "GLEW is required on non-Linux platforms. Use GLEW or build on Linux"
 #endif
 
 #include <GL/freeglut.h>
@@ -247,6 +247,16 @@ class GLContextScopeGuard {
 #endif
       REQUIRE(false);
     }
+
+#ifdef USE_GLEW
+    GLenum err = glewInit();
+    if (err != GLEW_OK) {
+      fprintf(stderr, "GLEW initialization failed: %s\n", glewGetErrorString(err));
+      HipTest::HIP_SKIP_TEST("GLEW Init Failed");
+      glutExit();
+      exit(1);
+    }
+#endif
   }
 
   GLContextScopeGuard(const GLContextScopeGuard&) = delete;

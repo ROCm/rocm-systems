@@ -21,8 +21,9 @@ if (OpenGL_EGL_FOUND)
   message(STATUS "OpenGL::EGL: Found")
 endif()
 
-if (NOT DEFINED ENV{GLUT_glut_LIBRARY} OR "$ENV{GLUT_glut_LIBRARY}" STREQUAL ""
-    OR NOT DEFINED ENV{GLUT_INCLUDE_DIR} OR "$ENV{GLUT_INCLUDE_DIR}" STREQUAL "")
+# Check if GLUT paths are provided via environment variables
+if ((NOT DEFINED ENV{GLUT_glut_LIBRARY} OR "$ENV{GLUT_glut_LIBRARY}" STREQUAL "") OR
+    (NOT DEFINED ENV{GLUT_INCLUDE_DIR} OR "$ENV{GLUT_INCLUDE_DIR}" STREQUAL ""))
   message(STATUS "GLUT_glut_LIBRARY or GLUT_INCLUDE_DIR environment variable not set, searching for GLUT...")
   find_package(GLUT)
   if (NOT GLUT_FOUND)
