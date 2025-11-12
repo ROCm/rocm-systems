@@ -211,40 +211,59 @@ void Graph::ScheduleOneNode(Node node, int stream_id) {
 
 // ================================================================================================
 hipError_t Graph::ScheduleNodes() {
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
+  if (use_segment_scheduling_) {
     // Segment packet scheduling logic
-    return ScheduleNodesIntoBatches();
-  } else {
-    // Classic scheduling logic
-    memset(&roots_[0], 0, sizeof(Node) * roots_.size());
-    max_streams_ = 0;
+    hipError_t result = ScheduleNodesIntoBatches();
 
-    int stream_id = 0;
-    for (auto node : vertices_) {
-      if (node->stream_id_ == -1) {
-        ScheduleOneNode(node, stream_id);
-        // Find the root nodes
-        if ((node->GetDependencies().size() == 0) && (node->stream_id_ != 0)) {
-          // Fill in only the first in the sequence
-          if (roots_[node->stream_id_] == nullptr) {
-            roots_[node->stream_id_] = node;
-          }
-        }
-        // 1. Each extra root will get a new stream from the pool
-        // 2. Streams will be recycled if the number of roots > streams
-        stream_id = (stream_id + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
-      }
+    // If ScheduleNodesIntoBatches returns hipErrorNotReady, it indicates
+    // a complex graph that would benefit from classic path, so fall back
+    if (result == hipErrorNotReady) {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
+              "[hipGraph] Falling back to classic scheduling for complex graph");
+      // Clear any partial segment data that might have been created
+      segments_.clear();
+      node_to_segment_id_.clear();
+      segments_per_level_.clear();
+      max_dependency_level_ = -1;
+      // Disable segment scheduling for this graph permanently
+      use_segment_scheduling_ = false;
+
+      // Continue to classic scheduling logic below
+    } else {
+      // Return success or actual error (not the special fallback indicator)
+      return result;
     }
-
-    // Topological order is only needed for original scheduling
-    GraphExec* graphExec = dynamic_cast<GraphExec*>(this);
-    if (graphExec && !graphExec->TopologicalOrder()) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] TopologicalOrder failed - invalid graph");
-      return hipErrorInvalidValue;
-    }
-
-    return hipSuccess;
   }
+
+  // Classic scheduling logic
+  memset(&roots_[0], 0, sizeof(Node) * roots_.size());
+  max_streams_ = 0;
+
+  int stream_id = 0;
+  for (auto node : vertices_) {
+    if (node->stream_id_ == -1) {
+      ScheduleOneNode(node, stream_id);
+      // Find the root nodes
+      if ((node->GetDependencies().size() == 0) && (node->stream_id_ != 0)) {
+        // Fill in only the first in the sequence
+        if (roots_[node->stream_id_] == nullptr) {
+          roots_[node->stream_id_] = node;
+        }
+      }
+      // 1. Each extra root will get a new stream from the pool
+      // 2. Streams will be recycled if the number of roots > streams
+      stream_id = (stream_id + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
+    }
+  }
+
+  // Topological order is only needed for original scheduling
+  GraphExec* graphExec = dynamic_cast<GraphExec*>(this);
+  if (graphExec && !graphExec->TopologicalOrder()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] TopologicalOrder failed - invalid graph");
+    return hipErrorInvalidValue;
+  }
+
+  return hipSuccess;
 }
 
 // ================================================================================================
@@ -253,9 +272,6 @@ hipError_t Graph::ScheduleNodesIntoBatches() {
   if (GetNodeCount() == 0) {
     return hipSuccess;
   }
-
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-          "[hipGraph] ScheduleNodesIntoBatches: Using hierarchical child graph handling");
 
   // Find execution paths hierarchically (new approach)
   auto hierarchical_paths = FindExecutionPathsHierarchical();
@@ -274,6 +290,28 @@ hipError_t Graph::ScheduleNodesIntoBatches() {
             "[hipGraph] No valid segments created from execution paths");
     return hipErrorInvalidValue;
   }
+
+  // Check if this is a complex graph that would benefit from classic path
+  // Complex graphs: 16+ segments with average segment length < 8
+  const size_t kSegmentSizeThreshold = 16;
+  const double kAvgSegmentLengthThreshold = 8.0;
+  if (segments_.size() >= kSegmentSizeThreshold && DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING != 2) {
+    size_t total_nodes = 0;
+    for (const auto& segment : segments_) {
+      total_nodes += segment.nodes.size();
+    }
+    double avg_segment_length = static_cast<double>(total_nodes) / segments_.size();
+
+    if (avg_segment_length < kAvgSegmentLengthThreshold) {
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[hipGraph] Complex graph detected: %zu segments, avg length %.2f - "
+              "falling back to classic path for better performance",
+              segments_.size(), avg_segment_length);
+      // Return special status to indicate fallback to classic path
+      return hipErrorNotReady;
+    }
+  }
+
   // Resolve segment dependencies and calculate dependency levels
   ResolveSegmentDependencies();
 
@@ -286,15 +324,16 @@ hipError_t Graph::ScheduleNodesIntoBatches() {
     return hipErrorInvalidValue;
   }
 
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
+          "[hipGraph] ScheduleNodesIntoBatches: Total nodes = %zu, total segments = %zu max "
+          "dependency level = %d, max streams = %d",
+          GetNodeCount(), segments_.size(), max_dependency_level_, max_streams_);
+
   return hipSuccess;
 }
 
 // ================================================================================================
 void Graph::ResolveSegmentDependencies() {
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-          "[hipGraph] ResolveSegmentDependencies: Processing %zu segments",
-          segments_.size());
-
   // Resolve dependencies within this graph
   for (size_t i = 0; i < segments_.size(); ++i) {
     auto& segment = segments_[i];
@@ -336,8 +375,9 @@ void Graph::ResolveSegmentDependencies() {
   // it implicitly depends on ALL segments in that child graph completing.
   for (auto& segment : segments_) {
     if (segment.child_graph_ptr != nullptr) {
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] Recursively resolving dependencies for child graph %p in segment [id=%d]",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
+              "[hipGraph] Recursively resolving dependencies"
+              "for child graph %p in segment [id=%d]",
               segment.child_graph_ptr, segment.id);
 
       // Child graph resolves its own internal segment dependencies
@@ -347,10 +387,6 @@ void Graph::ResolveSegmentDependencies() {
 
   // Calculate dependency levels and max_streams_ using topological sort
   CalculateSegmentTopoDependencyLevels();
-
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-          "[hipGraph] ResolveSegmentDependencies complete: max_dependency_level=%d, max_streams=%d",
-          max_dependency_level_, max_streams_);
 }
 
 // ================================================================================================
@@ -431,11 +467,6 @@ hip::Graph::GraphExecutionPaths Graph::FindExecutionPathsHierarchical() {
     std::vector<Node> current_path;
     FindPathsRecursiveHierarchical(root, current_path, visited, graph_paths);
   }
-
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-          "[hipGraph] FindExecutionPathsHierarchical: Found %zu paths, %zu child graphs",
-          graph_paths.paths.size(), graph_paths.child_graph_paths.size());
-
   return graph_paths;
 }
 
@@ -478,10 +509,6 @@ void Graph::FindPathsRecursiveHierarchical(Node node,
 
   // Handle child graph nodes specially
   if (node->GetType() == hipGraphNodeTypeGraph) {
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] Processing child graph node %p",
-            node);
-
     // Save path before child graph node (if any)
     if (!current_path.empty()) {
       savePath(current_path, current_path.back()->GetDeviceId());
@@ -514,10 +541,6 @@ void Graph::FindPathsRecursiveHierarchical(Node node,
       // Create a path containing just the child graph node
       std::vector<Node> child_node_path = {childGraphNode};
       savePath(child_node_path, current_device_id, childGraphNode, child_graph_index);
-
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] Child graph %p has %zu paths",
-              node, graph_paths.child_graph_paths[child_graph_index].paths.size());
     }
 
     // Clear current path and continue with edges from the child graph node
@@ -601,10 +624,6 @@ void Graph::CreateSegmentsFromPaths(const hip::Graph::GraphExecutionPaths& exec_
   segments_.clear();
   node_to_segment_id_.clear();
 
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-          "[hipGraph] CreateSegmentsFromPaths: Processing %zu paths",
-          exec_paths.paths.size());
-
   // Create a segment for each execution path at this level
   int segment_id = 0;
   for (size_t i = 0; i < exec_paths.paths.size(); ++i) {
@@ -622,11 +641,6 @@ void Graph::CreateSegmentsFromPaths(const hip::Graph::GraphExecutionPaths& exec_
       // Get direct pointer to child graph from the node
       auto childGraphNode = reinterpret_cast<hip::ChildGraphNode*>(h_path.child_graph_node);
       segment.child_graph_ptr = childGraphNode->GetChildGraph();
-
-      ClPrint(
-          amd::LOG_INFO, amd::LOG_CODE,
-          "[hipGraph] Segment [id=%d] contains child graph node %p with child graph %p",
-          segment_id, h_path.child_graph_node, segment.child_graph_ptr);
     }
 
     segments_.push_back(segment);
@@ -640,19 +654,11 @@ void Graph::CreateSegmentsFromPaths(const hip::Graph::GraphExecutionPaths& exec_
     segment_id++;
   }
 
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-          "[hipGraph] Created %zu segments (segment IDs 0-%zu)",
-          segments_.size(), segments_.size() - 1);
-
   // Recursively process child graphs
   for (size_t i = 0; i < exec_paths.child_graph_paths.size(); ++i) {
     const auto& child_paths = exec_paths.child_graph_paths[i];
 
     if (child_paths.graph_ptr != nullptr) {
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] Processing child graph with %zu paths",
-              child_paths.paths.size());
-
       // Let the child graph create its own segments
       child_paths.graph_ptr->CreateSegmentsFromPaths(child_paths);
     }
@@ -897,7 +903,7 @@ hipError_t GraphExec::Init() {
 
   // create extra stream to avoid queue collision with the default execution stream
   if (max_streams_ >= 1) {
-    if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
+    if (use_segment_scheduling_) {
       // For packet engine: analyze segments to determine per-device stream requirements
       FindStreamsReqPerDevForSegments();
     } else {
@@ -910,23 +916,17 @@ hipError_t GraphExec::Init() {
     // the number of extra streams to create
     for (auto const& [dev_id, num_streams] : max_streams_dev_) {
       if (num_streams > 0) {
-        ClPrint(amd::LOG_INFO, amd::LOG_API,
-                "[hipGraph] For device id :%d creating %d extra streams (launch stream already "
-                "available)",
-                dev_id, num_streams);
         status = CreateStreams(num_streams, dev_id);
         if (status != hipSuccess) {
           return status;
         }
       } else {
-        ClPrint(amd::LOG_INFO, amd::LOG_API,
-                "[hipGraph] For device id :%d using only launch stream, no extra streams needed",
-                dev_id);
+        // No extra streams needed
       }
     }
   }
 
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
+  if (use_segment_scheduling_) {
     // For graph nodes capture AQL packets to dispatch them directly during graph launch.
     status = CaptureAQLPackets();
   }
@@ -942,15 +942,10 @@ void GraphExec::GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernAr
   // Calculate the kernel argument size required for all graph kernel nodes
   // when GPU packet capture is enabled
 
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING && !segments_.empty()) {
+  if (use_segment_scheduling_ && !segments_.empty()) {
     for (const auto& segment : segments_) {
       // Handle child graph segments - skip node iteration, process recursively
       if (segment.child_graph_ptr != nullptr) {
-        ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-                "[hipGraph] GetKernelArgSizeForGraph: Recursively processing child graph %p in "
-                "segment [id=%d]",
-                segment.child_graph_ptr, segment.id);
-
         auto childGraphExec = dynamic_cast<GraphExec*>(segment.child_graph_ptr);
         if (childGraphExec != nullptr) {
           // Child graphs share the same kernel arg manager as parent
@@ -1050,10 +1045,6 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
     // Skip segments that only contain a child graph metadata node
     // Child graphs are processed recursively later
     if (segment.child_graph_ptr != nullptr) {
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] CaptureAndFormPacketsForGraph: Skipping child graph segment [id=%d], "
-              "will process child graph %p recursively",
-              segment.id, segment.child_graph_ptr);
       continue;
     }
 
@@ -1133,11 +1124,6 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
   // Recursively process child graphs to capture their packets
   for (const auto& segment : segments_) {
     if (segment.child_graph_ptr != nullptr) {
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] CaptureAndFormPacketsForGraph: Recursively processing child graph %p in "
-              "segment [id=%d]",
-              segment.child_graph_ptr, segment.id);
-
       auto childGraphExec = dynamic_cast<GraphExec*>(segment.child_graph_ptr);
       if (childGraphExec != nullptr) {
         // Child graphs share the same kernel arg manager as parent
@@ -1250,7 +1236,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
             static_cast<int64_t>(newPacketCount) - static_cast<int64_t>(oldPacketCount);
 
         ClPrint(
-            amd::LOG_INFO, amd::LOG_CODE,
+            amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
             "[hipGraph] Packet count change for node (type=%d): %zu -> %zu packets (delta=%ld)",
             node->GetType(), oldPacketCount, newPacketCount, packetDelta);
 
@@ -1586,10 +1572,6 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
   if (segment.child_graph_ptr != nullptr) {
     auto childGraphExec = dynamic_cast<GraphExec*>(segment.child_graph_ptr);
     if (childGraphExec != nullptr) {
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] EnqueueSegment: Recursively enqueuing child graph %p in segment [id=%d]",
-              segment.child_graph_ptr, segment.id);
-
       // Child graphs share the same kernel arg manager as parent (for packet capture)
       if (childGraphExec->GetKernelArgManager() == nullptr) {
         auto kernArgMgr = GetKernelArgManager();
@@ -1888,7 +1870,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
 
   // Get the first node based on scheduling mode
   Node firstNode = nullptr;
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING && !segments_.empty() && !segments_[0].nodes.empty()) {
+  if (use_segment_scheduling_ && !segments_.empty() && !segments_[0].nodes.empty()) {
     firstNode = segments_[0].nodes[0];
   } else if (!topoOrder_.empty()) {
     firstNode = topoOrder_[0];
@@ -1919,7 +1901,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "GraphExec::Run max_streams: %d, on device: %d",
           max_streams_, launch_stream->DeviceId());
 
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING && instantiateDeviceId_ == launch_stream->DeviceId()) {
+  if (use_segment_scheduling_ && instantiateDeviceId_ == launch_stream->DeviceId()) {
     // If the graph has kernels that does device side allocation,  during packet capture, heap is
     // allocated because heap pointer has to be added to the AQL packet, and initialized during
     // graph launch.

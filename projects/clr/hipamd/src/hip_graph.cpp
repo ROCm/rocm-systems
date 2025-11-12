@@ -1418,9 +1418,9 @@ hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t hGraphExec, hipGraph
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
-    status = reinterpret_cast<hip::GraphExec*>(hGraphExec)
-                 ->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
+  auto graphExec = reinterpret_cast<hip::GraphExec*>(hGraphExec);
+  if (graphExec->IsSegmentSchedulingEnabled()) {
+    status = graphExec->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
   }
   HIP_RETURN(status);
 }
@@ -1536,7 +1536,7 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
 
   graph->SetGraphInstantiated(true);
 
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
+  if ((*pGraphExec)->IsSegmentSchedulingEnabled()) {
     (*pGraphExec)->SetKernelArgManager(new hip::GraphKernelArgManager());
   }
   return (*pGraphExec)->Init();
@@ -1818,9 +1818,9 @@ hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
-    status = reinterpret_cast<hip::GraphExec*>(hGraphExec)
-                 ->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
+  auto graphExec = reinterpret_cast<hip::GraphExec*>(hGraphExec);
+  if (graphExec->IsSegmentSchedulingEnabled()) {
+    status = graphExec->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
   }
   HIP_RETURN(status);
 }
@@ -1869,9 +1869,9 @@ hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
-    status = reinterpret_cast<hip::GraphExec*>(hGraphExec)
-                 ->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
+  auto graphExec = reinterpret_cast<hip::GraphExec*>(hGraphExec);
+  if (graphExec->IsSegmentSchedulingEnabled()) {
+    status = graphExec->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
   }
   HIP_RETURN(status);
 }
@@ -1929,9 +1929,9 @@ hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
-    status = reinterpret_cast<hip::GraphExec*>(hGraphExec)
-                 ->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
+  auto graphExec = reinterpret_cast<hip::GraphExec*>(hGraphExec);
+  if (graphExec->IsSegmentSchedulingEnabled()) {
+    status = graphExec->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
   }
   HIP_RETURN(status);
 }
@@ -2010,7 +2010,8 @@ hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGra
   hip::ChildGraphNode* childNode = reinterpret_cast<hip::ChildGraphNode*>(clonedNode);
 
   // After SetParams updates node parameters in-place, we need to update the cached AQL packets
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING || childNode->GetGraphCaptureStatus()) {
+  auto graphExec = reinterpret_cast<hip::GraphExec*>(hGraphExec);
+  if (graphExec->IsSegmentSchedulingEnabled() || childNode->GetGraphCaptureStatus()) {
     std::vector<hip::GraphNode*> childGraphNodes;
     childNode->TopologicalOrder(childGraphNodes);
     for (std::vector<hip::GraphNode*>::size_type i = 0; i != childGraphNodes.size(); i++) {
@@ -2416,9 +2417,9 @@ hipError_t hipGraphExecMemcpyNodeSetParamsFromSymbol(hipGraphExec_t hGraphExec, 
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
-    status = reinterpret_cast<hip::GraphExec*>(hGraphExec)
-                 ->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
+  auto graphExec = reinterpret_cast<hip::GraphExec*>(hGraphExec);
+  if (graphExec->IsSegmentSchedulingEnabled()) {
+    status = graphExec->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
   }
   HIP_RETURN(status);
 }
@@ -2499,9 +2500,9 @@ hipError_t hipGraphExecMemcpyNodeSetParamsToSymbol(hipGraphExec_t hGraphExec, hi
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
-    status = reinterpret_cast<hip::GraphExec*>(hGraphExec)
-                 ->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
+  auto graphExec = reinterpret_cast<hip::GraphExec*>(hGraphExec);
+  if (graphExec->IsSegmentSchedulingEnabled()) {
+    status = graphExec->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(clonedNode));
   }
   HIP_RETURN(status);
 }
@@ -2736,10 +2737,11 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
           *updateResult_out = hipGraphExecUpdateErrorNotSupported;
         }
         HIP_RETURN(hipErrorGraphExecUpdateFailure);
-      } else if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING && newGraphNodes[i]->GraphCaptureEnabled()) {
-        status =
-            reinterpret_cast<hip::GraphExec*>(hGraphExec)
-                ->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(oldGraphExecNodes[i]));
+      } else {
+        auto graphExec = reinterpret_cast<hip::GraphExec*>(hGraphExec);
+        if (graphExec->IsSegmentSchedulingEnabled() && newGraphNodes[i]->GraphCaptureEnabled()) {
+          status = graphExec->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(oldGraphExecNodes[i]));
+        }
       }
     } else {
       *hErrorNode_out = reinterpret_cast<hipGraphNode_t>(newGraphNodes[i]);
@@ -3095,7 +3097,7 @@ hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNod
   clonedNode->SetEnabled(isEnabled);
 
   hipError_t status = hipSuccess;
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
+  if (graphExec->IsSegmentSchedulingEnabled()) {
     // Update packet batches when node is enabled/disabled
     status = graphExec->UpdatePacketBatchesForNodeEnableDisable(clonedNode, isEnabled != 0);
     if (status != hipSuccess) {
@@ -3455,8 +3457,9 @@ hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGrap
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
-    status = reinterpret_cast<hip::GraphExec*>(hGraphExec)->UpdateAQLPacket(clonedNode);
+  auto graphExec = reinterpret_cast<hip::GraphExec*>(hGraphExec);
+  if (graphExec->IsSegmentSchedulingEnabled()) {
+    status = graphExec->UpdateAQLPacket(clonedNode);
   }
   HIP_RETURN(status);
 }
@@ -3578,8 +3581,9 @@ hipError_t hipGraphExecNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t no
     return status;
   }
 
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING) {
-    status = reinterpret_cast<hip::GraphExec*>(graphExec)->UpdateAQLPacket(clonedNode);
+  auto graphExecPtr = reinterpret_cast<hip::GraphExec*>(graphExec);
+  if (graphExecPtr->IsSegmentSchedulingEnabled()) {
+    status = graphExecPtr->UpdateAQLPacket(clonedNode);
   }
   return status;
 }
