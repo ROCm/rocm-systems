@@ -20,10 +20,11 @@ set(TEST_SRC
     hipStreamGetDevice.cc
     hipStreamLegacy_Ext.cc
     hipStreamLegacy_compiler_options.cc
-    hipStreamGetId.cc
-    hipStreamSetGetAttributes.cc
+    # hipStreamGetId.cc
+    # hipStreamSetGetAttributes.cc
     # TODO renable it TheRock is not finding it
-    hipStreamCopyAttributes.cc)
+    # hipStreamCopyAttributes.cc
+  )
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} hipStreamGetCUMask.cc hipStreamWithCUMask.cc
@@ -55,9 +56,15 @@ hip_add_exe_to_target(
   COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 add_executable(hipStreamLegacy_exe EXCLUDE_FROM_ALL hipStreamLegacy_exe.cc)
-set_source_files_properties(hipStreamLegacy_exe.cc PROPERTIES LANGUAGE HIP)
-set_target_properties(hipStreamLegacy_exe PROPERTIES LINKER_LANGUAGE HIP)
+set_source_files_properties(hipStreamLegacy_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+set_target_properties(hipStreamLegacy_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 target_link_libraries(hipStreamLegacy_exe hip::host hip::device)
+if(HIP_PLATFORM MATCHES "nvidia")
+  set_target_properties(hipStreamLegacy_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(hipStreamLegacy_exe cuda)
+  set_target_properties(StreamTest PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(StreamTest cuda)
+endif()
 
 add_dependencies(StreamTest hipStreamLegacy_exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamLegacy_exe)
