@@ -1227,7 +1227,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_perf_det_help = f"Set performance determinism and select one of the corresponding performance levels:\n\t{perf_det_choices_str}"
                 (accelerator_set_choices, _) = self.helpers.get_accelerator_choices_types_indices()
                 memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
-                set_compute_partition_help = f"Set one of the following the accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
+                accelerator_set_choices_str = ", ".join(accelerator_set_choices)
+                set_compute_partition_help = f"Set one of the following accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices_str}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
                 set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
                 soc_pstate_help_info = ", ".join(self.helpers.get_soc_pstates())
                 set_soc_pstate_help = f"Set the GPU soc pstate policy using policy id, an integer. Valid id's include:\n\t{soc_pstate_help_info}"
