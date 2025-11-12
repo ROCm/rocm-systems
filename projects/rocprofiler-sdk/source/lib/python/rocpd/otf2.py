@@ -34,15 +34,13 @@ def write_otf2(importData, config):
 
 def execute(input, config=None, **kwargs):
 
-    importData = RocpdImportData(input)
-
     config = (
         output_config.output_config(**kwargs)
         if config is None
         else config.update(**kwargs)
     )
 
-    write_otf2(importData, config)
+    write_otf2(input, config)
 
 
 def add_args(parser):
@@ -99,7 +97,9 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
-    input = RocpdImportData(args.input)
+    input = RocpdImportData(
+        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+    )
 
     out_cfg_args = process_out_config_args(input, args)
     generic_out_cfg_args = process_generic_args(input, args)

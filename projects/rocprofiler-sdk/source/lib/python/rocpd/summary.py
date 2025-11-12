@@ -533,13 +533,9 @@ def add_args(parser):
 
 def execute(input, **kwargs: Any) -> RocpdImportData:
 
-    importData = RocpdImportData(
-        input, automerge_limit=getattr(kwargs, "automerge_limit", None)
-    )
+    generate_all_summaries(input, **kwargs)
 
-    generate_all_summaries(importData, **kwargs)
-
-    return importData
+    return input
 
 
 def main(argv=None) -> int:
@@ -565,7 +561,9 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
 
-    input = RocpdImportData(args.input)
+    input = RocpdImportData(
+        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+    )
 
     summary_args = process_summary_args(input, args)
     io_args = process_outcfg_args(input, args)
@@ -574,7 +572,7 @@ def main(argv=None) -> int:
     all_args = {**summary_args, **io_args}
 
     execute(
-        args.input,
+        input,
         **all_args,
     )
 
