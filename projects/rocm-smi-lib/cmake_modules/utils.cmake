@@ -196,39 +196,43 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
       )
 
       if( BUILD_ENABLE_LINTIAN_OVERRIDES )
-          if(ENABLE_ASAN_PACKAGING)
-	    string( FIND ${DEB_OVERRIDES_INSTALL_FILENM} "asan" OUT_VAR2)
-	    if(OUT_VAR2 EQUAL -1)
-	      set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_OVERRIDES_INSTALL_FILENM}-asan" )
-	    endif()
+        if(ENABLE_ASAN_PACKAGING)
+          string( FIND ${DEB_OVERRIDES_INSTALL_FILENM} "asan" OUT_VAR2)
+          if(OUT_VAR2 EQUAL -1)
+            set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_OVERRIDES_INSTALL_FILENM}-asan" )
           endif()
-	set( DEB_OVERRIDES_INSTALL_FILENM
-		"${DEB_OVERRIDES_INSTALL_FILENM}" CACHE STRING "Debian Package Lintian Override File Name" FORCE)
-	# Configure the Lintian overrides file
+        endif()
+        set( DEB_OVERRIDES_INSTALL_FILENM
+             "${DEB_OVERRIDES_INSTALL_FILENM}" CACHE STRING "Debian Package Lintian Override File Name" FORCE)
+       # Configure the Lintian overrides file
         configure_file(
           "${CMAKE_SOURCE_DIR}/DEBIAN/overrides.in"
           "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
-	   FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+          FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
           @ONLY
         )
       endif()
 
       # Install Change Log
       find_program ( DEB_GZIP_EXEC gzip )
-      if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
-        execute_process(
-          COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
-          WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN"
-          RESULT_VARIABLE result
-          OUTPUT_VARIABLE output
-          ERROR_VARIABLE error
-        )
-        if(NOT ${result} EQUAL 0)
-          message(FATAL_ERROR "Failed to compress: ${error}")
+      if(DEB_GZIP_EXEC)
+        if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
+          execute_process(
+            COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
+            WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN"
+            RESULT_VARIABLE result
+            OUTPUT_VARIABLE output
+            ERROR_VARIABLE error
+          )
+          if(NOT ${result} EQUAL 0)
+            message(FATAL_ERROR "Failed to compress: ${error}")
+          endif()
+          install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
+                    DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}
+                    COMPONENT ${COMPONENT_NAME_T})
         endif()
-        install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
-                  DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}
-                  COMPONENT ${COMPONENT_NAME_T})
+      else()
+        message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
       endif()
     endif()
 endfunction()
@@ -247,24 +251,29 @@ function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DE
 
     if( BUILD_ENABLE_LINTIAN_OVERRIDES )
       set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_PACKAGE_NAME}" CACHE STRING "Debian Package Lintian Override File Name" )
-      set( DEB_OVERRIDES_INSTALL_PATH   "/usr/share/lintian/overrides/" CACHE STRING "Deb Pkg Lintian Override Install Loc" )
+      set( DEB_OVERRIDES_INSTALL_PATH   "/usr/share/lintian/overrides/" CACHE STRING "Deb Pkg Lintian Override Install Location" )
     endif()
 
     # Get TimeStamp
     find_program( DEB_DATE_TIMESTAMP_EXEC date )
-    set ( DEB_TIMESTAMP_FORMAT_OPTION "-R" )
-    execute_process (
-        COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_TIMESTAMP_FORMAT_OPTION}
-        OUTPUT_VARIABLE TIMESTAMP_T
-    )
-    set( DEB_TIMESTAMP                "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
+    if( DEB_DATE_TIMESTAMP_EXEC )
+      set ( DEB_TIMESTAMP_FORMAT_OPTION "-R" )
+      execute_process (
+          COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_TIMESTAMP_FORMAT_OPTION}
+          OUTPUT_VARIABLE TIMESTAMP_T
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+      )
+      set( DEB_TIMESTAMP                "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
 
-    message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}" )
-    message(STATUS "DEB_PACKAGE_VERSION          : ${DEB_PACKAGE_VERSION}" )
-    message(STATUS "DEB_MAINTAINER_NAME          : ${DEB_MAINTAINER_NAME}" )
-    message(STATUS "DEB_MAINTAINER_EMAIL         : ${DEB_MAINTAINER_EMAIL}" )
-    message(STATUS "DEB_COPYRIGHT_YEAR           : ${DEB_COPYRIGHT_YEAR}" )
-    message(STATUS "DEB_LICENSE                  : ${DEB_LICENSE}" )
-    message(STATUS "DEB_TIMESTAMP                : ${DEB_TIMESTAMP}" )
-    message(STATUS "DEB_CHANGELOG_INSTALL_FILENM : ${DEB_CHANGELOG_INSTALL_FILENM}" )
+      message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}" )
+      message(STATUS "DEB_PACKAGE_VERSION          : ${DEB_PACKAGE_VERSION}" )
+      message(STATUS "DEB_MAINTAINER_NAME          : ${DEB_MAINTAINER_NAME}" )
+      message(STATUS "DEB_MAINTAINER_EMAIL         : ${DEB_MAINTAINER_EMAIL}" )
+      message(STATUS "DEB_COPYRIGHT_YEAR           : ${DEB_COPYRIGHT_YEAR}" )
+      message(STATUS "DEB_LICENSE                  : ${DEB_LICENSE}" )
+      message(STATUS "DEB_TIMESTAMP                : ${DEB_TIMESTAMP}" )
+      message(STATUS "DEB_CHANGELOG_INSTALL_FILENM : ${DEB_CHANGELOG_INSTALL_FILENM}" )
+    else()
+      message(FATAL_ERROR "date command not found: Failed to Configure the timestamp for Copyright/Changelog.")
+    endif()
 endfunction()
