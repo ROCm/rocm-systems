@@ -69,7 +69,7 @@ __forceinline int PermissionsToMmapFlags(hsa_access_permission_t perms) {
       return PROT_NONE;
   }
 }
-#elif defined(_WIN32)
+#endif
 __forceinline rocr::os::MemProt PermissionsToMemProt(hsa_access_permission_t perms) {
   switch (perms) {
     case HSA_ACCESS_PERMISSION_RO:
@@ -84,8 +84,6 @@ __forceinline rocr::os::MemProt PermissionsToMemProt(hsa_access_permission_t per
       return rocr::os::MEM_PROT_NONE;
   }
 }
-#endif
-
 }  // namespace rocr
 
 #endif  // HSA_RUNTIME_CORE_UTIL_MEMORY_H_

@@ -849,6 +849,17 @@ size_t PageSize() {
   return g_page_size_;
 }
 
+bool ProtectMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) {
+  if (perms == MEM_PROT_NONE && munmap(va, size) != 0) {
+    return false;
+  }
+  void* mapped_ptr =
+        mmap(va, size, MemProtToOsProt(perms), MAP_SHARED | MAP_FIXED, fd, cpu_addr);
+  if (mapped_ptr != va)
+      return false;
+  return true;
+}
+
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   size = AlignUp(size, PageSize());
   // check for invalid input size
