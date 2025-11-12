@@ -106,8 +106,8 @@ jobs:
       - name: GPU Info
         shell: bash
         run : | 
-          rocm-smi
-          rocminfo
+          /opt/rocm/bin/rocm-smi
+          /opt/rocm/bin/rocminfo
 
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
