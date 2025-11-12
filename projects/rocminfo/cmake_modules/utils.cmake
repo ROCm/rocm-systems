@@ -168,6 +168,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
     # Check If Debian Platform
     find_file (DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
+      set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" FORCE )
       set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" FORCE )
       set_debian_pkg_cmake_flags( ${PACKAGE_NAME_T} ${PACKAGE_VERSION_T}
                                   ${MAINTAINER_NM_T} ${MAINTAINER_EMAIL_T} )
@@ -184,8 +185,8 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
 
       # Install copyright file
       install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/copyright"
-	        DESTINATION "${CMAKE_INSTALL_DOCDIR}"
-	        COMPONENT ${COMPONENT_NAME_T} )
+                DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+                COMPONENT ${COMPONENT_NAME_T} )
 
       # Configure the changelog file
       configure_file(
@@ -203,7 +204,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
           endif()
 	set( DEB_OVERRIDES_INSTALL_FILENM
 		"${DEB_OVERRIDES_INSTALL_FILENM}" CACHE STRING "Debian Package Lintian Override File Name" FORCE)
-        # Configure the changelog file
+	# Configure the Lintian overrides file
         configure_file(
           "${CMAKE_SOURCE_DIR}/DEBIAN/overrides.in"
           "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
@@ -229,14 +230,6 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
                   DESTINATION ${CMAKE_INSTALL_DOCDIR}
                   COMPONENT ${COMPONENT_NAME_T})
       endif()
-
-      # Install lintian overrides
-      #if( BUILD_ENABLE_LINTIAN_OVERRIDES STREQUAL "ON" AND BUILD_DEBIAN_PKGING_FLAG STREQUAL "ON")
-      #  set( OVERRIDE_FILE "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}" )
-      #  install ( FILES ${OVERRIDE_FILE}
-      #      DESTINATION ${DEB_OVERRIDES_INSTALL_PATH}
-      #      COMPONENT ${COMPONENT_NAME_T})
-      #endif()
     endif()
 endfunction()
 

@@ -92,8 +92,8 @@ set(PKG_VERSION_GIT_TAG_PREFIX "rocminfo_pkg_ver")
 find_program (GIT NAMES git)
 
 # Set Lintian Support Flags
-set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
-set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+set( BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG OFF CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 # No Library for rocminfo, So no ASAN specific package, no asan comp type
 set( COMP_TYPE "dev" )
 

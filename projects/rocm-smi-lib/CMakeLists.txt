@@ -40,8 +40,8 @@ set(SHARE_INSTALL_PREFIX
 find_program (GIT NAMES git)
 
 # Set Lintian Support Flags
-set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
-set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+set( BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG OFF CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
 # sets DRM_INCLUDE_DIRS
 pkg_check_modules(DRM REQUIRED libdrm)
