@@ -75,9 +75,9 @@ to_string(bool _v)
 namespace
 {
 int  verbose       = 0;
-auto updated_envs  = std::set<std::string_view>{};
-auto original_envs = std::set<std::string>{};
-auto child_pids    = std::set<pid_t>{};
+auto updated_envs  = std::unordered_set<std::string_view>{};
+auto original_envs = std::unordered_set<std::string>{};
+auto child_pids    = std::unordered_set<pid_t>{};
 auto launcher      = std::string{};
 
 inline signal_handler&
@@ -365,7 +365,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
     using parser_err_t = typename parser_t::result_type;
 
     auto help_check = [](parser_t& p, int _argc, char** _argv) {
-        std::set<std::string> help_args = { "-h", "--help", "-?" };
+        std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
         return (p.exists("help") || _argc == 1 ||
                 (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
     };

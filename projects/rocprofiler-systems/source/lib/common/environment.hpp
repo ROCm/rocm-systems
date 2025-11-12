@@ -29,13 +29,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <timemory/utility/filepath.hpp>
 #include <type_traits>
 #include <unistd.h>
+#include <unordered_set>
 
 #if !defined(ROCPROFSYS_ENVIRON_LOG_NAME)
 #    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
@@ -84,7 +84,7 @@ inline namespace common
 {
 namespace
 {
-auto original_envs = std::set<std::string>{};
+auto original_envs = std::unordered_set<std::string>{};
 
 inline std::string
 get_env_impl(std::string_view env_id, std::string_view _default)

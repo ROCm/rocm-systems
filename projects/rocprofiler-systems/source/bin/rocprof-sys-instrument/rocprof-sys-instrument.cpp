@@ -1469,8 +1469,8 @@ main(int argc, char** argv)
     image_t*                   app_image     = addr_space->getImage();
     std::vector<module_t*>*    app_modules   = app_image->getModules();
     std::vector<procedure_t*>* app_functions = app_image->getProcedures(include_uninstr);
-    std::set<module_t*>        modules       = {};
-    std::set<procedure_t*>     functions     = {};
+    std::unordered_set<module_t*>    modules = {};
+    std::unordered_set<procedure_t*> functions = {};
 
     if(app_modules) process_modules(*app_modules);
 

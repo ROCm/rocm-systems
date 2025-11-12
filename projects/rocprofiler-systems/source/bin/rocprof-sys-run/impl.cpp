@@ -76,7 +76,7 @@ to_string(bool _v)
 
 namespace
 {
-auto original_envs = std::set<std::string>{};
+auto original_envs = std::unordered_set<std::string>{};
 enum update_mode : int
 {
     UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
@@ -314,7 +314,7 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
     using parser_err_t = typename parser_t::result_type;
 
     auto help_check = [](parser_t& p, int _argc, char** _argv) {
-        std::set<std::string> help_args = { "-h", "--help", "-?" };
+        std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
         return (p.exists("help") || _argc == 1 ||
                 (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
     };
