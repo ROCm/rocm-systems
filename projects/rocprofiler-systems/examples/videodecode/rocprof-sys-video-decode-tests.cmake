@@ -48,8 +48,7 @@ rocprofiler_systems_get_gfx_archs(MI300_DETECTED GFX_MATCH "gfx9[4-9][A-Fa-f0-9]
 if(MI300_DETECTED)
     list(APPEND _vcn_counter_names --counter-names "VCN Activity")
     list(
-        APPEND
-        _vcn_rocpd_validation_rules
+        APPEND _vcn_rocpd_validation_rules
         "${ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH}/video-decode/amd-smi-rules.json"
     )
 endif()

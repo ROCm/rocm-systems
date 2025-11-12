@@ -322,8 +322,7 @@ rocprofiler_systems_add_bin_test(
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/rocprof-sys-tests-config")
 file(
-    WRITE
-    "${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/empty.cfg"
+    WRITE "${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/empty.cfg"
     "
 #
 # empty config file

@@ -49,8 +49,7 @@ rocprofiler_systems_get_gfx_archs(MI300_DETECTED GFX_MATCH "gfx9[4-9][A-Fa-f0-9]
 if(MI300_DETECTED)
     list(APPEND _jpeg_counter_names --counter-names "JPEG Activity")
     list(
-        APPEND
-        _jpeg_rocpd_validation_rules
+        APPEND _jpeg_rocpd_validation_rules
         "${ROCPROFSYS_ROCPD_VALIDATION_RULES_PATH}/jpeg-decode/amd-smi-rules.json"
     )
 endif()
