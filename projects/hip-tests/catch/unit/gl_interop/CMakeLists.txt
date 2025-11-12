@@ -9,58 +9,76 @@ set(TEST_SRC
     hipGraphicsUnregisterResource.cc
 )
 
-find_package(OpenGL COMPONENTS OpenGL)
+# Find OpenGL with optional EGL support
+find_package(OpenGL COMPONENTS OpenGL OPTIONAL_COMPONENTS EGL)
 message(STATUS "OpenGL_FOUND: ${OpenGL_FOUND}")
-if(NOT OpenGL_FOUND)
-  message(STATUS "OpenGL not found, OpenGL interop tests not enabled.")
+
+if(NOT OpenGL_FOUND OR NOT TARGET OpenGL::GL)
+  message(STATUS "OpenGL not found or OpenGL::GL target unavailable, "
+                 "OpenGL interop tests not enabled.")
   return()
 endif()
 
-find_package(OpenGL OPTIONAL_COMPONENTS EGL)
 if (OpenGL_EGL_FOUND)
   message(STATUS "OpenGL::EGL: Found")
 endif()
 
-# Check if GLUT paths are provided via environment variables
-if ((NOT DEFINED ENV{GLUT_glut_LIBRARY} OR "$ENV{GLUT_glut_LIBRARY}" STREQUAL "") OR
-    (NOT DEFINED ENV{GLUT_INCLUDE_DIR} OR "$ENV{GLUT_INCLUDE_DIR}" STREQUAL ""))
-  message(STATUS "GLUT_glut_LIBRARY or GLUT_INCLUDE_DIR environment variable not set, searching for GLUT...")
+# Handle GLUT - env vars first, then find_package
+set(USE_ENV_GLUT FALSE)
+if (DEFINED ENV{GLUT_glut_LIBRARY} AND
+    DEFINED ENV{GLUT_INCLUDE_DIR})
+  if (NOT "$ENV{GLUT_glut_LIBRARY}" STREQUAL "" AND
+      NOT "$ENV{GLUT_INCLUDE_DIR}" STREQUAL "")
+    if (EXISTS "$ENV{GLUT_glut_LIBRARY}" AND
+        EXISTS "$ENV{GLUT_INCLUDE_DIR}")
+      set(USE_ENV_GLUT TRUE)
+    else()
+      message(WARNING "GLUT env vars invalid, using find_package")
+    endif()
+  endif()
+endif()
+
+if (USE_ENV_GLUT)
+  message(STATUS "Using GLUT from environment variables")
+  message(STATUS "  GLUT_glut_LIBRARY: $ENV{GLUT_glut_LIBRARY}")
+  message(STATUS "  GLUT_INCLUDE_DIR: $ENV{GLUT_INCLUDE_DIR}")
+
+  set(GLUT_glut_LIBRARY "$ENV{GLUT_glut_LIBRARY}"
+      CACHE FILEPATH "Path to GLUT library")
+  set(GLUT_INCLUDE_DIR "$ENV{GLUT_INCLUDE_DIR}"
+      CACHE PATH "Path to GLUT include directory")
+
+  add_library(GLUT::GLUT UNKNOWN IMPORTED)
+  set_target_properties(GLUT::GLUT PROPERTIES
+      IMPORTED_LOCATION "${GLUT_glut_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${GLUT_INCLUDE_DIR}"
+  )
+else()
+  message(STATUS "Searching for GLUT via find_package...")
   find_package(GLUT)
   if (NOT GLUT_FOUND)
     message(STATUS "GLUT not found, OpenGL interop tests not enabled.")
     return()
   endif()
   message(STATUS "GLUT_FOUND: ${GLUT_FOUND}")
-else()
-  message(STATUS "Using GLUT paths from environment variables.")
-  message(STATUS "GLUT_glut_LIBRARY: $ENV{GLUT_glut_LIBRARY}")
-  message(STATUS "GLUT_INCLUDE_DIR: $ENV{GLUT_INCLUDE_DIR}")
-
-  if (NOT EXISTS "$ENV{GLUT_glut_LIBRARY}")
-    message(FATAL_ERROR "GLUT_glut_LIBRARY path '$ENV{GLUT_glut_LIBRARY}' does not exist!")
-  endif()
-  if (NOT EXISTS "$ENV{GLUT_INCLUDE_DIR}")
-    message(FATAL_ERROR "GLUT_INCLUDE_DIR path '$ENV{GLUT_INCLUDE_DIR}' does not exist!")
-  endif()
-
-  add_library(GLUT::GLUT UNKNOWN IMPORTED)
-  set_target_properties(GLUT::GLUT PROPERTIES
-      IMPORTED_LOCATION "$ENV{GLUT_glut_LIBRARY}"
-      INTERFACE_INCLUDE_DIRECTORIES "$ENV{GLUT_INCLUDE_DIR}"
-  )
 endif()
 
+# GLEW is required on Windows for OpenGL extension access
+# On Linux, extensions are available via native headers
 find_package(GLEW)
 if(WIN32 AND NOT GLEW_FOUND)
-  message(STATUS "GLEW is required on Windows but was not found, OpenGL interop tests not enabled.")
+  message(STATUS "GLEW required on Windows but not found, "
+                 "GL interop tests not enabled.")
   return()
 endif()
 
+# Create test executable
 hip_add_exe_to_target(NAME GLInteropTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS -std=c++17)
 
+# Link dependencies
 target_link_libraries(GLInteropTest OpenGL::GL GLUT::GLUT)
 
 if (OpenGL_EGL_FOUND)

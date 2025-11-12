@@ -27,7 +27,8 @@ THE SOFTWARE.
 #elif defined(__linux__)
 #define GL_GLEXT_PROTOTYPES
 #else
-#error "GLEW is required on non-Linux platforms. Use GLEW or build on Linux"
+#error "GLEW is required on non-Linux platforms. Define USE_GLEW and link" \
+       " against the GLEW library, or build on Linux."
 #endif
 
 #include <GL/freeglut.h>
@@ -249,7 +250,8 @@ class GLContextScopeGuard {
 #ifdef USE_GLEW
     GLenum err = glewInit();
     if (err != GLEW_OK) {
-      fprintf(stderr, "GLEW initialization failed: %s\n", glewGetErrorString(err));
+      fprintf(stderr, "GLEW initialization failed: %s\n",
+              glewGetErrorString(err));
       HipTest::HIP_SKIP_TEST("GLEW Init Failed");
       exit(1);
     }
