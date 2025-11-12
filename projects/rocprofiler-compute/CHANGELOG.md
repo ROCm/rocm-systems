@@ -8,17 +8,17 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Native tool to perform counter collection using ROCprofiler-SDK public API
-  * Native tool is default for counter collection
-  * Native tool for counter collection will not be used in the following conditions:
-    * User provides a specific profiler through ``ROCPROF`` environment variable
-    * ``--no-native-tool`` option is provided, forcing usage of default profiler
+* Native tool to perform counter collection using ROCprofiler-SDK public API. It is only supported for ROCm version 7.0.0 (and later).
+  * Native tool is now the default for counter collection.
+  * Native tool for counter collection will not be used under the following conditions:
+    * Specific profiler is provided through the ``ROCPROF`` environment variable.
+    * ``--no-native-tool`` option is provided, forcing usage of the default profiler.
     * System has ROCm version 7.0.0 or earlier. [Please confirm if it is for earlier (eg.6.4.1, 6.4.2) or later (eg. 7.0.1, 7.0.2)]
-    * Performing a live attach to a process for profiling
+    * When performing a dynamic attach to a process for profiling.
 
-* Add `--list-blocks <arch>` option to general options to list available IP blocks on specified arch (similar to `--list-metrics`), cannot be used with `--block`.
+* `--list-blocks <arch>` option to general options. It lists the available IP blocks on the specified arch (similar to `--list-metrics`), however cannot be used with `--block`.
 
-* Added `config_delta/gfx950_diff.yaml` to analysis config yamls to track the revision between a gfx9 architecture against the latest supported architecture gfx950
+* `config_delta/gfx950_diff.yaml` to analysis config YAMLs to track the revision between the gfx9xx GPUs against the latest supported gfx950 GPUs.
 
 * Analysis db features
   * Add support for per kernel metrics analysis.
@@ -27,20 +27,20 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* Default output format for underlying rocprofiler-sdk tool has been changed from csv to rocpd
-  * If rocprofiler-sdk rocpd public library is not available, will fallback to csv format
+* Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
+  * If the ROCprofiler-SDK ``rocpd`` public library is not available, will fall back to ``csv`` format
 
-* Option --rocprofiler-sdk-library-path has been changed to --rocprofiler-tool-library-path to better reflect the fact that we provide flexibility in choosing the path to rocprofiler-sdk tool and not the library.
+* Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-tool-library-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool and not the library.
 
-* `-b/--block` accepts block alias(es) (See block aliases using command-line option `--list-blocks <arch>`).
+* `-b/--block` accepts block alias(es). See block aliases using command-line option `--list-blocks <arch>`.
 
-* analysis configs yamls are now managed with the new config management workflow in `tools/config_management/`
+* Analysis configs YAMLs are now managed with the new config management workflow in `tools/config_management/`.
 
 * `amdsmi` python API is used instead of `amd-smi` CLI to query GPU specifications.
 
 ### Removed
 
-* Removed `database` mode from `rocprofiler-compute`. This is to move our focus from grafana
+* Removed `database` mode from ROCm Compute Profiler in favor of other visualization methods, rather than Grafana and MongoDB integration, such as the upcoming Analysis DB-based Visualizer.
   and mongodb integration to other visualization methods such as:
   * Analysis DB based Visualizer (upcoming)
   * Plotly server based standalone GUI
@@ -50,10 +50,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
-* Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations
+* Fixed the description of ``--dispatch`` option in profile mode under ``argparser`` to clarify that it controls which kernel iterations are profiled, rather than which dispatch IDs are profiled.
   of the kernel to profile and not which dispatch ids to profile.
-* The meaning of --dispatch option in analyze is still the same which is which dispatch ids to analyzer
-* Fix the functioning of --dispatch option to act as 1-based index and ensure that correct kernel iterations are being
+* The description of the ``--dispatch`` option in analyze is still, which dispatch IDs to analyze.
+* Fixed the functioning of ``--dispatch`` option to act as a 1-based index and ensure that correct kernel iterations are being profiled.
   profiled
 
 ### Known issues
