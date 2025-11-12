@@ -103,6 +103,12 @@ jobs:
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
+      - name: GPU Info
+        shell: bash
+        run : | 
+          rocm-smi
+          rocminfo
+
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
         with:
