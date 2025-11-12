@@ -36,8 +36,8 @@ check_root() {
 }
 
 check_module_built() {
-    if [ ! -f "../src/${MODULE_NAME}.ko" ]; then
-        log_error "Module not found. Please build first with 'make'"
+    if [ ! -f "../build/src/${MODULE_NAME}.ko" ]; then
+        log_error "Module not found. Please build first with 'cmake -B build && cmake --build build'"
         exit 1
     fi
 }
@@ -54,7 +54,7 @@ load_module() {
         unload_module
     fi
 
-    insmod "../src/${MODULE_NAME}.ko" debug_enable=true timer_period_ms=100
+    insmod "../build/src/${MODULE_NAME}.ko" debug_enable=true timer_period_ms=100
 
     # Wait a bit for module to initialize
     sleep 2

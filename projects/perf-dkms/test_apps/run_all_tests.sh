@@ -21,9 +21,8 @@ if [ ! -d "${BUILD_DIR}" ]; then
     echo -e "${RED}Error: Build directory not found at ${BUILD_DIR}${NC}"
     echo "Please build the tests first:"
     echo "  cd ${SCRIPT_DIR}"
-    echo "  mkdir build && cd build"
-    echo "  cmake .."
-    echo "  make"
+    echo "  cmake -B build"
+    echo "  cmake --build build"
     exit 1
 fi
 

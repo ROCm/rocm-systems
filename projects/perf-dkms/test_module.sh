@@ -14,12 +14,12 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Module path
-MODULE_PATH="src/amdgpu_pmu.ko"
+MODULE_PATH="build/src/amdgpu_pmu.ko"
 
 # Check if module exists
 if [ ! -f "$MODULE_PATH" ]; then
     echo "Error: Module not found at $MODULE_PATH"
-    echo "Please build the module first with: make"
+    echo "Please build the module first with: cmake -B build && cmake --build build"
     exit 1
 fi
 

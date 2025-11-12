@@ -13,18 +13,18 @@ Since you're running a development kernel, here's how to test the module:
 ### 1. Build the Module
 ```bash
 cd perf-pmu-stub
-make clean && make
+rm -rf build && cmake -B build && cmake --build build
 ```
 
-**Expected Output**: Should see compilation complete without errors, producing `amdgpu_pmu.o`.
+**Expected Output**: Should see compilation complete without errors, producing `build/src/amdgpu_pmu.ko`.
 
 ### 2. Test Loading (Requires Root)
 ```bash
-# Method 1: Try loading the .o file directly (some kernels support this)
-sudo insmod src/amdgpu_pmu.o
+# Method 1: Try loading the .ko file
+sudo insmod build/src/amdgpu_pmu.ko
 
-# Method 2: If that fails, try with explicit path
-sudo insmod ./src/amdgpu_pmu.o debug_enable=1 timer_period_ms=100
+# Method 2: If that fails, try with explicit path and parameters
+sudo insmod ./build/src/amdgpu_pmu.ko debug_enable=1 timer_period_ms=100
 ```
 
 ### 3. Verify Loading
@@ -72,7 +72,7 @@ sudo rmmod amdgpu_pmu
 This can happen with development kernels. Try:
 ```bash
 # Check module info
-modinfo src/amdgpu_pmu.o
+modinfo build/src/amdgpu_pmu.ko
 
 # Verify kernel compatibility
 uname -r

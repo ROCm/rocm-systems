@@ -13,6 +13,7 @@ set(KERNEL_MODULE_SOURCES
     pmu_main.c
     pmu_events.c
     amdgpu_pmu.h
+    pmu_dimension.h
     kfd_test.c
     kfd_test.h
     aql_perf.c
@@ -79,7 +80,6 @@ add_custom_command(
         ${KBUILD_SRC_DIR}/aql_c/counter_registry.c
         ${KBUILD_SRC_DIR}/aql_c/gfx12_events.c
         ${KBUILD_SRC_DIR}/aql_c/packet_generation.c
-        ${KBUILD_SRC_DIR}/Makefile
     COMMENT "Building kernel module ${MODULE_KO}"
     VERBATIM
 )

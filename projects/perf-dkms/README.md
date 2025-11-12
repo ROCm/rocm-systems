@@ -75,23 +75,23 @@ perf --version
 cd perf-pmu-stub
 
 # Build kernel module and tools
-make
+cmake -B build && cmake --build build
 
 # The build produces:
-# - src/amdgpu_pmu.ko (kernel module)
-# - src/aql_c/tools/packet_gen_tool (PM4 packet generator)
-# - src/aql_c/tools/pm4_decoder (PM4 packet decoder)
-# - src/aql_c/tests/* (validation tests)
+# - build/src/amdgpu_pmu.ko (kernel module)
+# - build/src/aql_c/tools/packet_gen_tool (PM4 packet generator)
+# - build/src/aql_c/tools/pm4_decoder (PM4 packet decoder)
+# - build/src/aql_c/tests/* (validation tests)
 ```
 
 ### Loading the Module
 
 ```bash
 # Load the module
-sudo insmod src/amdgpu_pmu.ko
+sudo insmod build/src/amdgpu_pmu.ko
 
 # Or if using .o file (development kernels):
-sudo insmod src/amdgpu_pmu.o
+sudo insmod build/src/amdgpu_pmu.o
 
 # Verify module is loaded
 lsmod | grep amdgpu_pmu
@@ -296,30 +296,32 @@ The module provides counters for these GPU hardware blocks:
 
 ```bash
 # Build only kernel module
-cd src && make
+cmake -B build -DBUILD_KERNEL_MODULE=ON -DBUILD_USERSPACE_TOOLS=OFF -DBUILD_TESTS=OFF && cmake --build build --target kernel_module
 
 # Build only userspace tools
-cd src/aql_c/tools && make
+cmake -B build -DBUILD_KERNEL_MODULE=OFF -DBUILD_USERSPACE_TOOLS=ON -DBUILD_TESTS=OFF && cmake --build build
 
 # Build only tests
-cd src/aql_c/tests && make
+cmake -B build -DBUILD_KERNEL_MODULE=OFF -DBUILD_USERSPACE_TOOLS=OFF -DBUILD_TESTS=ON && cmake --build build
 
 # Clean everything
-make clean
+rm -rf build
 ```
 
 ### Running Tests
 
 ```bash
+# Build and run tests
+cmake -B build -DBUILD_TESTS=ON && cmake --build build
+
 # Run PM4 packet validation
-cd src/aql_c/tests
-./test_pm4
+build/src/aql_c/tests/test_pm4
 
 # Run counter registry tests
-./test_counter_registry
+build/src/aql_c/tests/test_counter_registry
 
 # Run packet generation tests
-./test_packet_generation
+build/src/aql_c/tests/test_packet_generation
 ```
 
 ### Debug Output
@@ -339,13 +341,12 @@ sudo dmesg -w | grep -i pmu
 
 **PM4 Packet Generator:**
 ```bash
-cd src/aql_c/tools
-./packet_gen_tool <gpu_arch> <block> <event_id>
+build/src/aql_c/tools/packet_gen_tool <gpu_arch> <block> <event_id>
 ```
 
 **PM4 Decoder:**
 ```bash
-./pm4_decoder <hex_packet_data>
+build/src/aql_c/tools/pm4_decoder <hex_packet_data>
 ```
 
 ## File Structure
@@ -453,7 +454,7 @@ sudo chmod -R 755 /sys/bus/event_source/devices/amdgpu_pmu/
 sudo apt install linux-headers-$(uname -r)
 
 # Clean and rebuild
-make clean && make
+rm -rf build && cmake -B build && cmake --build build
 ```
 
 ## Unloading
