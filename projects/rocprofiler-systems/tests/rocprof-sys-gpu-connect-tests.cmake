@@ -61,28 +61,28 @@ if(EXISTS "${PROJECT_BINARY_DIR}/transferBench")
 endif()
 
 rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_REWRITE SKIP_SAMPLING
+    SKIP_BASELINE SKIP_REWRITE SKIP_SAMPLING SKIP_RUNTIME
     NAME transferbench
     TARGET transferBench
     GPU ON
     ENVIRONMENT "${_base_environment};${_gpu_connect_environment}"
     LABELS "transferbench;xgmi;pcie"
-    RUNTIME_SKIP_REGEX "Error: No valid transfers created"
+    SYS_RUN_SKIP_REGEX "Error: No valid transfers created"
 )
 
 if(NOT skip_validation)
     rocprofiler_systems_add_validation_test(
-        NAME transferbench-runtime
+        NAME transferbench-sys-run
         PERFETTO_FILE "perfetto-trace.proto"
         LABELS "transferbench;perfetto"
         ARGS --counter-names "XGMI Read Data" "XGMI Write Data" -p
     )
 
     if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
-        set_property(TEST transferbench-runtime APPEND PROPERTY LABELS rocpd)
+        set_property(TEST transferbench-sys-run APPEND PROPERTY LABELS rocpd)
 
         rocprofiler_systems_add_validation_test(
-            NAME transferbench-runtime
+            NAME transferbench-sys-run
             ROCPD_FILE "rocpd.db"
             LABELS "transferbench;rocpd"
             ARGS --validation-rules
