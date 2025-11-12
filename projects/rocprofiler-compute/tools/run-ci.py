@@ -147,7 +147,7 @@ endif()
 message(STATUS "Running tests...")
 ctest_test(
     {test_args}
-    PARALLEL_LEVEL 4
+    PARALLEL_LEVEL 1
     RETURN_VALUE test_result
     CAPTURE_CMAKE_ERROR test_error
 )
