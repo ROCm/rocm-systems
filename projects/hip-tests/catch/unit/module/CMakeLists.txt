@@ -103,7 +103,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt
 add_custom_target(empty_file ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt)
 
 add_custom_target(empty_module
-                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_STR}
+                  COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/empty_module.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
