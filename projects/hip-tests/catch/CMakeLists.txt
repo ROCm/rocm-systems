@@ -18,6 +18,9 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set(CMAKE_SKIP_BUILD_RPATH FALSE)
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+set(CMAKE_VERBOSE_MAKEFILE ON)
+
+message(STATUS "CMake Version: ${CMAKE_VERSION}")
 
 find_package(hip REQUIRED)
 find_package(hiprtc)
@@ -353,5 +356,3 @@ if(DOXYGEN_FOUND)
 else()
     message(STATUS "Doxygen was not found. Building test plan documentation will not be available")
 endif()
-
-
