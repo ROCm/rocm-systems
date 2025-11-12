@@ -5,7 +5,7 @@ set(TEST_SRC
 )
 
 add_custom_target(library_code_load.code
-    COMMAND ${CMAKE_CXX_COMPILER} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc
+    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc
             -o ${CMAKE_CURRENT_BINARY_DIR}/../library/library_code_load.code ${OFFLOAD_ARCH_LIST}
             -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
             -I${HIP_INCLUDE_DIR})

@@ -2,7 +2,7 @@
 set(TEST_SRC
     copy_coherency.cc
 )
-add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_CXX_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
                   ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco
                   -I${HIP_INCLUDE_DIR}
