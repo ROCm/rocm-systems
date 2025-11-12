@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(hiptests LANGUAGES C CXX HIP)                                         
+if (HIP_PLATFORM MATCHES "nvidia")
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES 75)
+  endif()
+  set(GPGPU_LANGUAGE "CUDA")
+elseif (HIP_PLATFORM MATCHES "amd")
+  set(GPGPU_LANGUAGE "HIP")
+endif()
+enable_language(${GPGPU_LANGUAGE})
+message(STATUS "USING GPGPU_LANGUAGE ${GPGPU_LANGUAGE}")
+project(hiptests LANGUAGES C CXX ${GPGPU_LANGUAGE})                                         
+
 
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
@@ -20,10 +31,16 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 find_package(hip REQUIRED)
+include_directories(${hip_INCLUDE_DIRS})
 find_package(hiprtc)
 find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
+
+if (HIP_PLATFORM MATCHES "nvidia" )
+set(CMAKE_HIP_LINK_EXECUTABLE
+  "<CMAKE_HIP_HOST_LINK_LAUNCHER> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>${__IMPLICIT_LINKS}")
+endif()
 
 if(UNIX)
     find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
@@ -264,6 +281,7 @@ set(_subdirs ${_autogen} "subdirs(..)\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
 
 set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
+set(CATCH_ADD_TESTS_SCRIPT ${catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
      DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 file(COPY ${CATCH_ADD_TESTS_SCRIPT}

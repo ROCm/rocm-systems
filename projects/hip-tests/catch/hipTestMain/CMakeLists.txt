@@ -27,6 +27,6 @@ set(MAIN_SRC
     hip_test_context.cc
     hip_test_features.cc)
 add_library(Main_Object EXCLUDE_FROM_ALL OBJECT ${MAIN_SRC})
-set_source_files_properties(${MAIN_SRC} PROPERTIES LANGUAGE HIP)
+set_source_files_properties(${MAIN_SRC} PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 #set_property(TARGET Main_Object PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
-target_link_libraries(Main_Object PRIVATE Catch2::Catch2)
+target_link_libraries(Main_Object PRIVATE Catch2::Catch2 hip::host hip::device)

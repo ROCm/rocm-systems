@@ -324,8 +324,8 @@ endif()
 endif()
 
 add_executable(hipGetFuncBySymbol_exe EXCLUDE_FROM_ALL hipGetFuncBySymbol_exe.cc)
-set_source_files_properties(hipGetFuncBySymbol_exe.cc PROPERTIES LANGUAGE HIP)
-set_target_properties(hipGetFuncBySymbol_exe PROPERTIES LINKER_LANGUAGE HIP)
+set_source_files_properties(hipGetFuncBySymbol_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+set_target_properties(hipGetFuncBySymbol_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 add_dependencies(build_tests hipGetFuncBySymbol_exe)
 target_link_libraries(hipGetFuncBySymbol_exe hip::host hip::device)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetFuncBySymbol_exe)
@@ -400,8 +400,8 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code
 )
 add_executable(testhipModuleLoadUnloadFunc_exe EXCLUDE_FROM_ALL testhipModuleLoadUnloadFunc_exe.cc)
-set_source_files_properties(testhipModuleLoadUnloadFunc_exe.cc PROPERTIES LANGUAGE HIP)
-set_target_properties(testhipModuleLoadUnloadFunc_exe PROPERTIES LINKER_LANGUAGE HIP)
+set_source_files_properties(testhipModuleLoadUnloadFunc_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+set_target_properties(testhipModuleLoadUnloadFunc_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS testhipModuleLoadUnloadFunc_exe)
 target_link_libraries(testhipModuleLoadUnloadFunc_exe hip::host hip::device)
 
