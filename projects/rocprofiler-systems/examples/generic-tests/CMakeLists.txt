@@ -21,11 +21,16 @@
 # THE SOFTWARE.
 
 # Generic tests
+# These either require multiple examples or no examples
+
+if(NOT ROCPROFSYS_BUILD_TESTING)
+    return()
+endif()
 
 set(ROCPROFSYS_NIC_SCRIPT_PATH "${CMAKE_CURRENT_LIST_DIR}")
 
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake) # Does not require any examples
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake) # TODO: Verify that ls and parallel-overhead are available
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake) # TODO: This will not work off the bat
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
