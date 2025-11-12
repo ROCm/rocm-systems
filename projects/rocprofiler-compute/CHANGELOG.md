@@ -4,14 +4,17 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ## Unreleased
 
+## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
+
 ### Added
 
-* Counter collection will be performed using native tool which uses rocprofiler-sdk public API
-
-* Native tool for counter collection will not be used in the following conditions:
-  * --no-native-tool option is provided
-  * ROCm stack on the system is >= 7.0.0
-  * attaching to a process for profiling 
+* Native tool to perform counter collection using ROCprofiler-SDK public API
+  * Native tool is default for counter collection
+  * Native tool for counter collection will not be used in the following conditions:
+    * User provides a specific profiler through ``ROCPROF`` environment variable
+    * ``--no-native-tool`` option is provided, forcing usage of default profiler
+    * System has ROCm version 7.0.0 or earlier. [Please confirm if it is for earlier (eg.6.4.1, 6.4.2) or later (eg. 7.0.1, 7.0.2)]
+    * Performing a live attach to a process for profiling
 
 * Add `--list-blocks <arch>` option to general options to list available IP blocks on specified arch (similar to `--list-metrics`), cannot be used with `--block`.
 
@@ -239,7 +242,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * A workaround has been implemented using max(0, calculated_value) to prevent negative display values while the root cause is under investigation.
 
 * The profile mode crashes when `--format-rocprof-output json` is selected.
-  * As a workaround, this option should either not be provided or should be set to `csv` instead of `json`. This issue does not affect the profiling results since both `csv` and `json` output formats lead to the same profiling data.  
+  * As a workaround, this option should either not be provided or should be set to `csv` instead of `json`. This issue does not affect the profiling results since both `csv` and `json` output formats lead to the same profiling data.
 
 ### Upcoming changes
 
