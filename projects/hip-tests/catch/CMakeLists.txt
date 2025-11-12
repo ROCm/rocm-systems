@@ -230,6 +230,7 @@ foreach(__offload_arch ${OFFLOAD_ARCH_LIST})
     string(APPEND hip_gpu_arch_list "${arch};")
     list(REMOVE_DUPLICATES  hip_gpu_arch_list)
 endforeach()
+message(STATUS "Offload arch list: ${OFFLOAD_ARCH_LIST}")
 
 if(WIN32)
     set(configToUse "config_amd_windows")
