@@ -30,6 +30,7 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
 
         if(rocminfo_RET EQUAL 0)
             string(REGEX MATCHALL "gfx([0-9A-Fa-f]+)" rocminfo_GFXINFO "${rocminfo_OUT}")
+            message(STATUS "rocminfo output ${rocminfo_OUT}")
             list(REMOVE_DUPLICATES rocminfo_GFXINFO)
             set(${_VAR}
                 "${rocminfo_GFXINFO}"
