@@ -39,7 +39,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 546512131dca843a03e4d0ff063ceb0a02ffbc1a # 2025-11-11 commit
+          ref: 8e0e3ffe10c3f3066bc96b24abd3da18565e5ea5 # 2025-11-11 commit
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -54,7 +54,7 @@ jobs:
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
           # rm ./TheRock/patches/amd-mainline/rocm-systems/*.patch
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0008-Find-bundled-libelf.patch
+          # rm ./TheRock/patches/amd-mainline/rocm-systems/0008-Find-bundled-libelf.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Install requirements
