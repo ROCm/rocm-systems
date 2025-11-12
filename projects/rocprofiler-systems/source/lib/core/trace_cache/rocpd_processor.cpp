@@ -68,8 +68,9 @@ get_handle_from_code_object(
 }  // namespace
 
 void
-rocpd_processor_t::handle(const kernel_dispatch_sample& _kds)
+rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  agent_primary_key =
@@ -105,11 +106,13 @@ rocpd_processor_t::handle(const kernel_dispatch_sample& _kds)
         _kds.workgroup_size_x, _kds.workgroup_size_y, _kds.workgroup_size_z,
         _kds.grid_size_x, _kds.grid_size_y, _kds.grid_size_z, region_name_primary_key,
         event_id);
+#endif
 }
 
 void
-rocpd_processor_t::handle(const memory_copy_sample& _mcs)
+rocpd_processor_t::handle([[maybe_unused]] const memory_copy_sample& _mcs)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
@@ -142,12 +145,13 @@ rocpd_processor_t::handle(const memory_copy_sample& _mcs)
         _mcs.end_timestamp, name_primary_key, dst_agent_primary_key,
         _mcs.dst_address_value, src_agent_primary_key, _mcs.src_address_value, _mcs.bytes,
         queue_id, _mcs.stream_handle, name_primary_key, event_primary_key);
+#endif
 }
 
-#if(ROCPROFILER_VERSION >= 600)
 void
-rocpd_processor_t::handle(const memory_allocate_sample& _mas)
+rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
 {
+#if ROCPROFSYS_USE_ROCM > 0 && (ROCPROFILER_VERSION >= 600)
     static auto memtype_to_db =
         [](std::string_view memory_type) -> std::pair<std::string, std::string> {
         constexpr auto MEMORY_PREFIX  = std::string_view{ "MEMORY_ALLOCATION_" };
@@ -223,12 +227,13 @@ rocpd_processor_t::handle(const memory_allocate_sample& _mas)
             level.c_str(), _mas.start_timestamp, _mas.end_timestamp, _mas.address_value,
             _mas.allocation_size, queue_id, _mas.stream_handle, event_primary_key);
     }
-}
 #endif
+}
 
 void
-rocpd_processor_t::handle(const region_sample& _rs)
+rocpd_processor_t::handle([[maybe_unused]] const region_sample& _rs)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     static auto parse_args = []([[maybe_unused]] const std::string& arg_str) {
         rocprofiler_sdk::function_args_t args;
         const std::string                delimiter = ";;";
@@ -298,11 +303,13 @@ rocpd_processor_t::handle(const region_sample& _rs)
     m_data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
                                     _rs.start_timestamp, _rs.end_timestamp,
                                     name_primary_key, event_primary_key);
+#endif
 }
 
 void
-rocpd_processor_t::handle(const backtrace_region_sample& _bts)
+rocpd_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bts)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -319,11 +326,13 @@ rocpd_processor_t::handle(const backtrace_region_sample& _bts)
                                     name_primary_key, event_primary_key);
     m_data_processor->insert_sample(_bts.track_name.c_str(), _bts.start_timestamp,
                                     event_primary_key);
+#endif
 }
 
 void
-rocpd_processor_t::handle(const in_time_sample& _its)
+rocpd_processor_t::handle([[maybe_unused]] const in_time_sample& _its)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     auto track_primary_key = m_data_processor->insert_string(_its.track_name.c_str());
 
     auto event_id = m_data_processor->insert_event(
@@ -331,10 +340,13 @@ rocpd_processor_t::handle(const in_time_sample& _its)
         _its.call_stack.c_str(), _its.line_info.c_str(), _its.event_metadata.c_str());
     m_data_processor->insert_sample(_its.track_name.c_str(), _its.timestamp_ns, event_id,
                                     "{}");
+#endif
 }
+
 void
-rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
+rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     auto track_primary_key = m_data_processor->insert_string(_pmc.track_name.c_str());
 
     auto agent_primary_key =
@@ -350,11 +362,13 @@ rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
 
     m_data_processor->insert_pmc_event(event_id, agent_primary_key,
                                        _pmc.pmc_info_name.c_str(), _pmc.value);
+#endif
 }
 
 void
-rocpd_processor_t::handle(const amd_smi_sample& _amd_smi)
+rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     struct xcp_metrics_t
     {
         std::vector<uint16_t> vcn_busy;
@@ -528,11 +542,13 @@ rocpd_processor_t::handle(const amd_smi_sample& _amd_smi)
         insert_xcp_metrics(category::amd_smi_jpeg_activity{}, is_jpeg_enabled,
                            xcp_metrics[idx].jpeg_busy, dimension);
     }
+#endif
 }
 
 void
-rocpd_processor_t::handle(const cpu_freq_sample& _cpu_freq_sample)
+rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_sample)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     struct core_freq_sample
     {
         size_t id;
@@ -594,6 +610,7 @@ rocpd_processor_t::handle(const cpu_freq_sample& _cpu_freq_sample)
     {
         insert_event_and_sample(get_track_name(core.id).c_str(), core.value);
     }
+#endif
 }
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,

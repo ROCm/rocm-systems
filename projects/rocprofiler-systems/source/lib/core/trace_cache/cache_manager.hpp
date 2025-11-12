@@ -33,18 +33,11 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-#if(ROCPROFILER_VERSION >= 600)
 using storage_parser_t =
     storage_parser<type_identifier_t, kernel_dispatch_sample, memory_copy_sample,
                    memory_allocate_sample, region_sample, in_time_sample,
                    pmc_event_with_sample, amd_smi_sample, cpu_freq_sample,
                    backtrace_region_sample>;
-#else
-using storage_parser_t =
-    storage_parser<type_identifier_t, kernel_dispatch_sample, memory_copy_sample,
-                   region_sample, in_time_sample, pmc_event_with_sample, amd_smi_sample,
-                   cpu_freq_sample, backtrace_region_sample>;
-#endif
 
 using buffer_storage_t = buffer_storage<flush_worker_factory_t, type_identifier_t>;
 

@@ -29,10 +29,6 @@
 #include <utility>
 #include <vector>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/version.h>
-#endif
-
 namespace rocprofsys
 {
 namespace trace_cache
@@ -40,14 +36,12 @@ namespace trace_cache
 
 enum class type_identifier_t : uint32_t
 {
-    in_time_sample        = 0x0000,
-    pmc_event_with_sample = 0x0001,
-    region                = 0x0002,
-    kernel_dispatch       = 0x0003,
-    memory_copy           = 0x0004,
-#if(ROCPROFSYS_USE_ROCM && ROCPROFILER_VERSION >= 600)
-    memory_alloc = 0x0005,
-#endif
+    in_time_sample          = 0x0000,
+    pmc_event_with_sample   = 0x0001,
+    region                  = 0x0002,
+    kernel_dispatch         = 0x0003,
+    memory_copy             = 0x0004,
+    memory_alloc            = 0x0005,
     amd_smi_sample          = 0x0006,
     cpu_freq_sample         = 0x0007,
     backtrace_region_sample = 0x0008,
@@ -231,7 +225,6 @@ get_size(const memory_copy_sample& item)
         item.dst_address_value, item.src_address_value, (uint64_t) item.stream_handle);
 }
 
-#if(ROCPROFILER_VERSION >= 600)
 struct memory_allocate_sample : cacheable_t
 {
     static constexpr type_identifier_t type_identifier = type_identifier_t::memory_alloc;
@@ -303,7 +296,6 @@ get_size(const memory_allocate_sample& item)
         item.kind, item.operation, item.allocation_size, item.correlation_id_internal,
         item.correlation_id_ancestor, item.address_value, (uint64_t) item.stream_handle);
 }
-#endif
 
 struct region_sample : cacheable_t
 {

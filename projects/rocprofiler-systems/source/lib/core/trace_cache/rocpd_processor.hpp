@@ -46,9 +46,7 @@ public:
 
     void handle(const kernel_dispatch_sample& sample);
     void handle(const memory_copy_sample& sample);
-#if(ROCPROFILER_VERSION >= 600)
     void handle(const memory_allocate_sample& sample);
-#endif
     void handle(const region_sample& sample);
     void handle(const in_time_sample& sample);
     void handle(const pmc_event_with_sample& sample);
