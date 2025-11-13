@@ -84,7 +84,6 @@ inline namespace common
 {
 namespace
 {
-auto original_envs = std::unordered_set<std::string>{};
 
 inline std::string
 get_env_impl(std::string_view env_id, std::string_view _default)
@@ -184,7 +183,8 @@ struct ROCPROFSYS_INTERNAL_API env_config
 };
 
 inline void
-remove_env(std::vector<char*>& _environ, std::string_view _env_var)
+remove_env(std::vector<char*>& _environ, std::string_view _env_var,
+           const std::unordered_set<std::string>& _original_envs)
 {
     auto key = join("", _env_var, "=");
 
@@ -207,7 +207,7 @@ remove_env(std::vector<char*>& _environ, std::string_view _env_var)
                    _environ.end());
 
     // Restore from original_envs if previously existed
-    for(const auto& orig : original_envs)
+    for(const auto& orig : _original_envs)
     {
         if(std::string_view{ orig.data(), orig.size() }.find(key) == 0)
         {

@@ -753,7 +753,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                remove_env(_env, "KOKKOS_TOOLS_LIBS");
+                remove_env(_env, "KOKKOS_TOOLS_LIBS", original_envs);
         });
 
     parser.start_group("HARDWARE COUNTER OPTIONS", "See also: rocprof-sys-avail -H");

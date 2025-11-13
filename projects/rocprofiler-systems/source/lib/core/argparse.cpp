@@ -613,7 +613,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                    remove_env(_data.current, "KOKKOS_TOOLS_LIBS");
+                    remove_env(_data.current, "KOKKOS_TOOLS_LIBS", _data.initial);
             });
 
         _data.processed_environs.emplace("exclude");
