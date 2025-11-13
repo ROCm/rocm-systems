@@ -723,7 +723,6 @@ void
 load(ArchiveT& ar, rocpd::types::event::decoded_extdata& data)
 {
     LOAD_DATA_FIELD(kfd);
-    LOAD_DATA_FIELD(kfd);
 }
 
 template <typename ArchiveT>
