@@ -182,7 +182,11 @@ jobs:
           key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           max-size: 2G
           save: true
-
+      - name: GPU Info-bf-depen
+        shell: bash
+        run : | 
+          /opt/rocm/bin/rocm-smi
+          /opt/rocm/bin/rocminfo
       - name: Install Missing ROCm Dependencies
         shell: bash
         run: |
@@ -208,7 +212,11 @@ jobs:
           cmake --build build-rocjpeg --target all --parallel 16
           cmake --build build-rocjpeg --target install
           echo -e "ROCJPEG Installed Successfully!"
-
+      - name: GPU Info-bf-rocp
+        shell: bash
+        run : | 
+          /opt/rocm/bin/rocm-smi
+          /opt/rocm/bin/rocminfo
       - name: Build and Install ROCProfiler-Register
         shell: bash
         working-directory: projects/rocprofiler-register
@@ -226,7 +234,11 @@ jobs:
           cmake --build build-rocprofiler-register --target all --parallel 16
           cmake --build build-rocprofiler-register --target install
           echo "✅ ROCProfiler-Register Installation complete!"
-
+      - name: GPU Info-bf-rocr
+        shell: bash
+        run : | 
+          /opt/rocm/bin/rocm-smi
+          /opt/rocm/bin/rocminfo
       - name: Build and Install ROCR-Runtime
         if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
         shell: bash
@@ -243,7 +255,11 @@ jobs:
           cmake --build build --target all --parallel 16
           cmake --build build --target install
           echo "✅ ROCR-Runtime Installation complete!"
-
+      - name: GPU Info-bf-hip
+        shell: bash
+        run : | 
+          /opt/rocm/bin/rocm-smi
+          /opt/rocm/bin/rocminfo
       - name: Build and Install HIP
         if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
         shell: bash
@@ -270,7 +286,11 @@ jobs:
           cmake --build build --target all --parallel 16
           cmake --build build --target install
           echo "✅ HIP Installation complete!"
-
+      - name: GPU Info-bf-aqlp
+        shell: bash
+        run : | 
+          /opt/rocm/bin/rocm-smi
+          /opt/rocm/bin/rocminfo
       - name: Build and Install Aqlprofile
         shell: bash
         working-directory: projects/aqlprofile
