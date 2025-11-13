@@ -22,6 +22,7 @@
 
 #include "rocprof-sys-instrument.hpp"
 #include "common/defines.h"
+#include "common/join.hpp"
 #include "common/path.hpp"
 #include "dl/dl.hpp"
 #include "fwd.hpp"
@@ -192,17 +193,18 @@ strset_t                                   print_formats        = { "txt", "json
 std::string                                modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
-strvec_t lib_search_paths = tim::delimit(
-    JOIN(':', path::get_internal_libdir(), tim::get_env<std::string>("DYNINSTAPI_RT_LIB"),
-         tim::get_env<std::string>("DYNINST_REWRITER_PATHS"),
-         tim::get_env<std::string>("LD_LIBRARY_PATH")),
-    ":");
+strvec_t lib_search_paths =
+    tim::delimit(rocprofsys::join(':', path::get_internal_libdir(),
+                                  tim::get_env<std::string>("DYNINSTAPI_RT_LIB"),
+                                  tim::get_env<std::string>("DYNINST_REWRITER_PATHS"),
+                                  tim::get_env<std::string>("LD_LIBRARY_PATH")),
+                 ":");
 strvec_t bin_search_paths = tim::delimit(tim::get_env<std::string>("PATH"), ":");
 
-auto _dyn_api_rt_paths =
-    tim::delimit(JOIN(":", path::get_internal_libdir(),
-                      JOIN("/", path::get_internal_libdir(), "rocprofsys")),
-                 ":");
+auto _dyn_api_rt_paths = tim::delimit(
+    rocprofsys::join(":", path::get_internal_libdir(),
+                     rocprofsys::join("/", path::get_internal_libdir(), "rocprofsys")),
+    ":");
 
 std::string
 get_absolute_filepath(std::string _name, const strvec_t& _paths);
