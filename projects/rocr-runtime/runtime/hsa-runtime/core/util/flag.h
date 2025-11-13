@@ -300,10 +300,10 @@ class Flag {
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
 
     var = os::GetEnvVar("HSA_COREDUMP_SHOW_PROGRESS");
-    enable_core_dump_progress_ = (var == "1") ? true : false;
+    enable_core_dump_progress_ = (var == "1");
 
     var = os::GetEnvVar("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
-    core_dump_disable_ = (var == "1") ? true : false;
+    core_dump_disable_ = (var == "1");
 
     core_dump_pattern_ = os::GetEnvVar("HSA_COREDUMP_PATTERN");
   }
@@ -445,7 +445,9 @@ class Flag {
   bool enable_core_dump_progress() const {
                                        return enable_core_dump_progress_; }
 
-  const std::string& core_dump_pattern() const { return core_dump_pattern_; }
+  [[nodiscard]]
+  const std::string& core_dump_pattern() const {
+                                         return core_dump_pattern_; }
 
   void set_sdma(bool peer_sdma, bool sdma_gang) {
     enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
