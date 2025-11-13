@@ -62,7 +62,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
 
 add_test(
     NAME rocprofsys-cleanup-tmp-files
-    COMMAND ${CMAKE_COMMAND} -E rm -f /tmp/buffered_storage*.bin /tmp/metadata*.json
+    COMMAND sh -c "rm -f /tmp/buffered_storage*.bin /tmp/metadata*.json"
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
