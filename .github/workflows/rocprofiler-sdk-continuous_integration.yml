@@ -62,8 +62,8 @@ env:
   navi4_EXCLUDE_LABEL_REGEX: ""
 
   GLOBAL_CMAKE_OPTIONS: ""
-  ENABLE_ROCR_BUILD: "false"
-  ENABLE_HIP_CLR_BUILD: "false"
+  ENABLE_ROCR_BUILD: "true"
+  ENABLE_HIP_CLR_BUILD: "true"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
@@ -102,12 +102,6 @@ jobs:
           tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-
-      - name: GPU Info
-        shell: bash
-        run : | 
-          /opt/rocm/bin/rocm-smi
-          /opt/rocm/bin/rocminfo
 
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
@@ -311,6 +305,12 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
+      - name: GPU Info
+        shell: bash
+        run : | 
+          /opt/rocm/bin/rocm-smi
+          /opt/rocm/bin/rocminfo
 
       - name: Configure, Build, and Test
         timeout-minutes: 30
