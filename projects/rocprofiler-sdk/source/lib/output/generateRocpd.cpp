@@ -1505,7 +1505,7 @@ write_rocpd(
                 };
 
                 auto data  = kfd_pmc_event_data_t{};
-                data.value = 1.0;  // default value
+                data.value = 1;  // default value
 
                 if(std::holds_alternative<
                        rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t>(itr.record))
