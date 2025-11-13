@@ -2329,6 +2329,10 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     // Calculate the offset from the original pointer.
     vaddr_offset = (reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
                     reinterpret_cast<address>(vaddr_base_obj->getSvmPtr()));
+  } else {
+    vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
+    vaddr_offset = (reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
+                    reinterpret_cast<address>(vaddr_base_obj->getSvmPtr()));
   }
 
   // The imem() in the backend is shared between base and sub/view object.
