@@ -75,6 +75,7 @@ TEST_CASE("Unit_hipGraphInstantiate_Negative") {
   SECTION("Pass pGraphExec as un-initialize") {
     ret = hipGraphInstantiate(&gExec, graph, nullptr, nullptr, 0);
     REQUIRE(hipSuccess == ret);
+    HIP_CHECK(hipGraphExecDestroy(gExec));
   }
   HIP_CHECK(hipGraphDestroy(graph));
 }

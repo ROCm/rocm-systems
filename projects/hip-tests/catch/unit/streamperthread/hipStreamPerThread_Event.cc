@@ -23,6 +23,7 @@ TEST_CASE("Unit_hipStreamPerThread_EventRecord") {
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
   HIP_CHECK(hipEventRecord(event, hipStreamPerThread));
+  HIP_CHECK(hipEventSynchronize(event));
   HIP_CHECK(hipEventDestroy(event));
 }
 
