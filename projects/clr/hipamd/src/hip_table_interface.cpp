@@ -1811,6 +1811,12 @@ extern "C" hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipV
   return hip::GetHipDispatchTable()->hipGetProcAddress_fn(symbol, pfn, hipVersion, flags,
                                                           symbolStatus);
 }
+extern "C" hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int  hipVersion,
+                                            uint64_t flags,
+                                            hipDriverProcAddressQueryResult* symbolStatus) {
+  return hip::GetHipDispatchTable()->hipGetProcAddress_spt_fn(symbol, pfn, hipVersion, flags,
+                                                              symbolStatus);
+}
 hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         const hipGraphNode_t* dependencies,
                                         const hipGraphEdgeData* dependencyData,
@@ -2056,4 +2062,9 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
 }
 hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
   return hip::GetHipDispatchTable()->hipKernelGetName_fn(name, kernel);
+}
+hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                 size_t* paramSize) {
+  return hip::GetHipDispatchTable()->hipKernelGetParamInfo_fn(kernel, paramIndex, paramOffset,
+                                                              paramSize);
 }

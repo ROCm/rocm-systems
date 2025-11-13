@@ -88,6 +88,8 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Negative_Parameters") {
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(A_d));
+  free(A_h);
 }
 
 /**
@@ -130,6 +132,7 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Positive") {
   for (int i = 0; i < N; i++) {
     REQUIRE(A_h[i] == 99);
   }
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
 
   hipGraphNodeParams node_params2 = {};
   node_params2.type = hipGraphNodeTypeMemset;
