@@ -55,6 +55,7 @@ hip_add_exe_to_target(NAME MathsTest
                       COMMON_SHARED_SRC ${COMMON_SHARED_SRC}
                       LINKER_LIBS ${LINKER_LIBS})
 
+
 if(UNIX)
 file(GLOB NEGATIVE_TEST_SRC
     "trig_single_precision_negative_kernels.cc"

@@ -42,6 +42,8 @@ elseif (HIP_PLATFORM MATCHES "nvidia")
                     TEST_SRC ${TEST_SRC}
                     TEST_TARGET_NAME build_tests
                     LINKER_LIBS ${LINKER_LIBS})
+	set_target_properties(DeviceMemoryTest PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(DeviceMemoryTest cuda)
 endif()
 
 if(UNIX)

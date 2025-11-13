@@ -45,6 +45,8 @@ elseif (HIP_PLATFORM MATCHES "nvidia")
                     TEST_SRC ${TEST_SRC}
                     TEST_TARGET_NAME build_tests
                     LINKER_LIBS ${LINKER_LIBS})
+  set_target_properties(PrintfTest PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(PrintfTest cuda)
 endif()
 
 if(UNIX)
@@ -82,6 +84,18 @@ target_link_libraries(printfLength_exe hip::host hip::device)
 target_link_libraries(printfSpecifiers_exe hip::host hip::device)
 target_link_libraries(printfFlagsNonHost_exe hip::host hip::device)
 target_link_libraries(printfSpecifiersNonHost_exe hip::host hip::device)
+if (HIP_PLATFORM MATCHES "nvidia")
+set_target_properties(printfFlags_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(printfFlags_exe cuda)
+set_target_properties(printfLength_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(printfLength_exe cuda)
+set_target_properties(printfSpecifiers_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(printfSpecifiers_exe cuda)
+set_target_properties(printfFlagsNonHost_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(printfFlagsNonHost_exe cuda)
+set_target_properties(printfSpecifiersNonHost_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(printfSpecifiersNonHost_exe cuda)
+endif()
 
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
              printfFlags_exe

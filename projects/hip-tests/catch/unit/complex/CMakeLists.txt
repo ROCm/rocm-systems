@@ -34,6 +34,10 @@ hip_add_exe_to_target(NAME ComplexTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS ${LINKER_LIBS})
+if(HIP_PLATFORM MATCHES "nvidia")
+	set_target_properties(ComplexTest PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(ComplexTest cuda)
+  endif()
 if(UNIX)
 file(GLOB NEGATIVE_TEST_SRC
       "complex_make_negative_kernels.cc"
