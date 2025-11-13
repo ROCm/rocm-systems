@@ -80,7 +80,15 @@ file(WRITE ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/windows/CTestTestfile
 
 if(NOT WIN32)
 set(INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/hip)
+execute_process(COMMAND rpmbuild --version
+                RESULT_VARIABLE rpm_found
+                OUTPUT_VARIABLE rpm_ver)
+if (rpm_found EQUAL "0" AND NOT rpm_ver STREQUAL "")
 set(CPACK_GENERATOR "TGZ;DEB;RPM" CACHE STRING "Linux package types for catch tests")
+else()
+# skip rpm on Rock since rpm build package not installed
+set(CPACK_GENERATOR "TGZ;DEB" CACHE STRING "Linux package types for catch tests")
+endif()
 set(CPACK_BINARY_DEB "ON")
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_DEBIAN_PACKAGE_PROVIDES "catch")
