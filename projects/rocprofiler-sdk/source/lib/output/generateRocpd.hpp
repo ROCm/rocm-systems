@@ -74,33 +74,5 @@ struct track_data
 bool
 operator==(const track_data& lhs, const track_data& rhs);
 
-#define DEFINE_KFD_DERIVED_ROCPD_TYPE(BASE_TYPE, DERIVED_TYPE)                                     \
-    struct DERIVED_TYPE : BASE_TYPE                                                                \
-    {                                                                                              \
-        using base_type = BASE_TYPE;                                                               \
-        DERIVED_TYPE(const BASE_TYPE& _base)                                                       \
-        : base_type{_base}                                                                         \
-        {}                                                                                         \
-                                                                                                   \
-        DERIVED_TYPE()                        = delete;                                            \
-        ~DERIVED_TYPE()                       = default;                                           \
-        DERIVED_TYPE(const DERIVED_TYPE&)     = default;                                           \
-        DERIVED_TYPE(DERIVED_TYPE&&) noexcept = default;                                           \
-        DERIVED_TYPE& operator=(const DERIVED_TYPE&) = default;                                    \
-        DERIVED_TYPE& operator=(DERIVED_TYPE&&) noexcept = default;                                \
-    };
-
-#define DEFINE_KFD_DERIVED_ROCPD_TYPE_NAME(NAME)                                                   \
-    DEFINE_KFD_DERIVED_ROCPD_TYPE(rocprofiler_buffer_tracing_##NAME, rocpd_##NAME)
-
-DEFINE_KFD_DERIVED_ROCPD_TYPE_NAME(kfd_event_page_migrate_record_t)
-DEFINE_KFD_DERIVED_ROCPD_TYPE_NAME(kfd_event_page_fault_record_t)
-DEFINE_KFD_DERIVED_ROCPD_TYPE_NAME(kfd_event_queue_record_t)
-DEFINE_KFD_DERIVED_ROCPD_TYPE_NAME(kfd_event_unmap_from_gpu_record_t)
-DEFINE_KFD_DERIVED_ROCPD_TYPE_NAME(kfd_event_dropped_events_record_t)
-DEFINE_KFD_DERIVED_ROCPD_TYPE_NAME(kfd_page_migrate_record_t)
-DEFINE_KFD_DERIVED_ROCPD_TYPE_NAME(kfd_page_fault_record_t)
-DEFINE_KFD_DERIVED_ROCPD_TYPE_NAME(kfd_queue_record_t)
-
 }  // namespace tool
 }  // namespace rocprofiler

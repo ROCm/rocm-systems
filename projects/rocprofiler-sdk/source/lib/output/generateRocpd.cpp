@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "generateRocpd.hpp"
+#include "kfd_info.hpp"
 #include "lib/common/uuid_v7.hpp"
 #include "metadata.hpp"
 #include "output_stream.hpp"
@@ -84,63 +85,6 @@ save(ArchiveT& ar, const ::rocprofiler::tool::argument_info& data)
     ar(cereal::make_nvp("name", data.arg_name));
     ar(cereal::make_nvp("value", data.arg_value));
 }
-
-template <typename ArchiveT>
-void
-save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_page_migrate_record_t& data)
-{
-    ar(cereal::make_nvp("start_address", data.start_address.handle));
-    ar(cereal::make_nvp("start_address", data.end_address.handle));
-    ar(cereal::make_nvp("error_code", data.error_code));
-}
-
-template <typename ArchiveT>
-void
-save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_page_fault_record_t& data)
-{
-    ar(cereal::make_nvp("address", data.address.handle));
-}
-
-template <typename ArchiveT>
-void
-save(ArchiveT& /*ar*/, const ::rocprofiler::tool::rocpd_kfd_event_queue_record_t& /*data*/)
-{}
-
-template <typename ArchiveT>
-void
-save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_unmap_from_gpu_record_t& data)
-{
-    ar(cereal::make_nvp("start_address", data.start_address.handle));
-    ar(cereal::make_nvp("start_address", data.end_address.handle));
-}
-
-template <typename ArchiveT>
-void
-save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_dropped_events_record_t& data)
-{
-    ar(cereal::make_nvp("count", data.count));
-}
-
-template <typename ArchiveT>
-void
-save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_page_migrate_record_t& data)
-{
-    ar(cereal::make_nvp("start_address", data.start_address.handle));
-    ar(cereal::make_nvp("start_address", data.end_address.handle));
-    ar(cereal::make_nvp("error_code", data.error_code));
-}
-
-template <typename ArchiveT>
-void
-save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_page_fault_record_t& data)
-{
-    ar(cereal::make_nvp("address", data.address.handle));
-}
-
-template <typename ArchiveT>
-void
-save(ArchiveT& /*ar*/, const ::rocprofiler::tool::rocpd_kfd_queue_record_t& /*data*/)
-{}
 
 ROCPROFILER_SDK_CEREAL_NAMESPACE_END
 
@@ -1556,12 +1500,8 @@ write_rocpd(
                     uint32_t                          tid;
                     rocprofiler_timestamp_t           start;
                     rocprofiler_timestamp_t           end;
-                    float                             value;
-                    std::string                       json_data;
-                };
-
-                auto agent_node_id = [&tool_metadata](const auto& agent) {
-                    return agent.handle == 0 ? -1 : tool_metadata.get_agent(agent)->node_id;
+                    uint64_t                          value;
+                    std::string                       json_data = {};
                 };
 
                 auto data  = kfd_pmc_event_data_t{};
@@ -1581,14 +1521,9 @@ write_rocpd(
                     data.end   = record.timestamp;
                     data.value = record.end_address.value - record.start_address.value;
 
-                    data.json_data = get_json_string([&agent_node_id, &record](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_event_page_migrate_record_t(record));
-                        ar(cereal::make_nvp("src_agent_id", agent_node_id(record.src_agent)));
-                        ar(cereal::make_nvp("dst_agent_id", agent_node_id(record.dst_agent)));
-                        ar(cereal::make_nvp("prefetch_agent_id",
-                                            agent_node_id(record.prefetch_agent)));
-                        ar(cereal::make_nvp("preferred_agent_id",
-                                            agent_node_id(record.preferred_agent)));
+                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
+                        cereal::save(ar,
+                                     rocpd_kfd_event_page_migrate_record_t(record, tool_metadata));
                     });
                 }
                 else if(std::holds_alternative<
@@ -1605,9 +1540,9 @@ write_rocpd(
                     data.end   = record.timestamp;
                     data.value = record.address.value;
 
-                    data.json_data = get_json_string([&agent_node_id, &record](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_event_page_fault_record_t(record));
-                        ar(cereal::make_nvp("agent_id", agent_node_id(record.agent_id)));
+                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
+                        cereal::save(ar,
+                                     rocpd_kfd_event_page_fault_record_t(record, tool_metadata));
                     });
                 }
                 else if(std::holds_alternative<rocprofiler_buffer_tracing_kfd_event_queue_record_t>(
@@ -1622,9 +1557,8 @@ write_rocpd(
                     data.start = record.timestamp;
                     data.end   = record.timestamp;
 
-                    data.json_data = get_json_string([&agent_node_id, &record](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_event_queue_record_t(record));
-                        ar(cereal::make_nvp("agent_id", agent_node_id(record.agent_id)));
+                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
+                        cereal::save(ar, rocpd_kfd_event_queue_record_t(record, tool_metadata));
                     });
                 }
                 else if(std::holds_alternative<
@@ -1642,9 +1576,9 @@ write_rocpd(
                     data.end   = record.timestamp;
                     data.value = record.end_address.value - record.start_address.value;
 
-                    data.json_data = get_json_string([&agent_node_id, &record](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_event_unmap_from_gpu_record_t(record));
-                        ar(cereal::make_nvp("agent_id", agent_node_id(record.agent_id)));
+                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
+                        cereal::save(
+                            ar, rocpd_kfd_event_unmap_from_gpu_record_t(record, tool_metadata));
                     });
                 }
                 else if(std::holds_alternative<
@@ -1662,8 +1596,9 @@ write_rocpd(
                     data.end   = record.timestamp;
                     data.value = record.count;
 
-                    data.json_data = get_json_string([&record](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_event_dropped_events_record_t(record));
+                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
+                        cereal::save(
+                            ar, rocpd_kfd_event_dropped_events_record_t(record, tool_metadata));
                     });
                 }
                 else if(std::holds_alternative<
@@ -1679,14 +1614,8 @@ write_rocpd(
                     data.end   = record.end_timestamp;
                     data.value = record.end_address.value - record.start_address.value;
 
-                    data.json_data = get_json_string([&agent_node_id, &record](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_page_migrate_record_t(record));
-                        ar(cereal::make_nvp("src_agent_id", agent_node_id(record.src_agent)));
-                        ar(cereal::make_nvp("dst_agent_id", agent_node_id(record.dst_agent)));
-                        ar(cereal::make_nvp("prefetch_agent_id",
-                                            agent_node_id(record.prefetch_agent)));
-                        ar(cereal::make_nvp("preferred_agent_id",
-                                            agent_node_id(record.preferred_agent)));
+                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
+                        cereal::save(ar, rocpd_kfd_page_migrate_record_t(record, tool_metadata));
                     });
                 }
                 else if(std::holds_alternative<rocprofiler_buffer_tracing_kfd_page_fault_record_t>(
@@ -1702,9 +1631,8 @@ write_rocpd(
                     data.end   = record.end_timestamp;
                     data.value = record.address.value;
 
-                    data.json_data = get_json_string([&agent_node_id, &record](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_page_fault_record_t(record));
-                        ar(cereal::make_nvp("agent_id", agent_node_id(record.agent_id)));
+                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
+                        cereal::save(ar, rocpd_kfd_page_fault_record_t(record, tool_metadata));
                     });
                 }
                 else if(std::holds_alternative<rocprofiler_buffer_tracing_kfd_queue_record_t>(
@@ -1719,9 +1647,8 @@ write_rocpd(
                     data.start = record.start_timestamp;
                     data.end   = record.end_timestamp;
 
-                    data.json_data = get_json_string([&agent_node_id, &record](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_queue_record_t(record));
-                        ar(cereal::make_nvp("agent_id", agent_node_id(record.agent_id)));
+                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
+                        cereal::save(ar, rocpd_kfd_queue_record_t(record, tool_metadata));
                     });
                 }
                 else
@@ -1735,7 +1662,11 @@ write_rocpd(
                 // get KFD category and create event entry
                 auto category = tool_metadata.buffer_names.at(data.kind);
                 auto evt_id =
-                    create_event(conn, {insert_value("category_id", string_entries.at(category))});
+                    create_event(conn,
+                                 {
+                                     insert_value("category_id", string_entries.at(category)),
+                                     insert_value("extdata", data.json_data),
+                                 });
 
                 // track timestamps with a region
                 auto region_stmt =
@@ -1757,7 +1688,6 @@ write_rocpd(
                                                      insert_value("event_id", evt_id),
                                                      insert_value("pmc_id", _pmc_ids.at(data.kind)),
                                                      insert_value("value", data.value),
-                                                     insert_value("extdata", data.json_data),
                                                  });
 
                 execute_raw_sql_statements(conn, stmt);

@@ -414,13 +414,13 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             constexpr auto region_order_by = "start ASC, end DESC";
             constexpr auto sample_order_by = "timestamp ASC";
 
-            auto perfetto_session = rocpd::output::PerfettoSession{output_cfg};
-            auto sqlgen_perf      = common::simple_timer{
+            auto* conn             = rocpd::interop::get_connection(std::move(data.connection));
+            auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
+            auto  sqlgen_perf      = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
             for(auto obj : {data.connection})
             {
-                auto* conn  = rocpd::interop::get_connection(std::move(obj));
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
+                auto nodes = rocpd::read<rocpd::types::node>(conn);
 
                 for(const auto& nitr : nodes)
                 {

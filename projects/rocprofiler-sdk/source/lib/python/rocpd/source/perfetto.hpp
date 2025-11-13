@@ -45,11 +45,12 @@ namespace tool = ::rocprofiler::tool;
 
 struct PerfettoSession
 {
-    PerfettoSession(const tool::output_config&);
+    PerfettoSession(const tool::output_config&, sqlite3* connection);
     ~PerfettoSession();
 
     std::unique_ptr<::perfetto::TracingSession> tracing_session = {};
     const tool::output_config&                  config;
+    sqlite3*                                    connection = nullptr;
 };
 
 void
