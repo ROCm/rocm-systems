@@ -22,6 +22,6 @@ amdcuid_status_t AmdCuidDevice::get_secondary_cuid(amdcuid& id) const {
     if (status != AMDCUID_STATUS_SUCCESS) {
         return status;
     }
-    AmdCuidUtilities::generate_secondary_cuid(&primary, &id);
+
     return AMDCUID_STATUS_SUCCESS;
 }

@@ -15,22 +15,13 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
-#include <openssl/sha.h>
 
 // Static instance for C API
 static AmdCuidDeviceManager& mgr = AmdCuidDeviceManager::instance();
 
-amdcuid_status_t amdcuid_init(amdcuid_device_type_set_t device_types) {
-    return mgr.init(device_types);
-}
-
-amdcuid_status_t amdcuid_shutdown() {
-    return mgr.shutdown();
-}
-
 amdcuid_status_t amdcuid_get_handles(
     amdcuid_device_type_set_t component_types,
-    uint32_t handle_count,
+    uint32_t *handle_count,
     amdcuid_handle *handles,
     uint32_t *total_available_handles)
 {
@@ -43,10 +34,10 @@ amdcuid_status_t amdcuid_get_handles(
         temp_handles.push_back(amdcuid_handle{const_cast<void*>(reinterpret_cast<const void*>(dev.get()))});
     }
     *total_available_handles = temp_handles.size();
-    if (!handles || handle_count == 0) {
+    if (!handles || *handle_count == 0) {
         return AMDCUID_STATUS_SUCCESS;
     }
-    uint32_t to_copy = std::min(handle_count, static_cast<uint32_t>(temp_handles.size()));
+    uint32_t to_copy = std::min(*handle_count, static_cast<uint32_t>(temp_handles.size()));
     for (uint32_t i = 0; i < to_copy; ++i) {
         handles[i] = temp_handles[i];
     }

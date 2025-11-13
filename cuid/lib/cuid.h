@@ -122,7 +122,7 @@ typedef enum {
  */
 amdcuid_status_t amdcuid_get_handles(
     amdcuid_device_type_set_t component_types,
-    uint32_t handle_count,
+    uint32_t *handle_count,
     amdcuid_handle *handles,
     uint32_t *total_available_handles
 );
