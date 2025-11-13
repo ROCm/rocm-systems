@@ -3379,4 +3379,13 @@ typedef union rocprofiler_hip_api_args_t
 #endif
 } rocprofiler_hip_api_args_t;
 
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 21
+    struct
+    {
+        size_t log_level;
+        size_t log_size;
+        size_t log_mask;
+    } hipExtSetLoggingParams;
+#endif
+
 ROCPROFILER_EXTERN_C_FINI
