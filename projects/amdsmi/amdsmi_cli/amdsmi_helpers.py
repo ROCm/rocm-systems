@@ -846,12 +846,12 @@ class AMDSMIHelpers():
             if power_limit_types[ppt_key]['power_cap_max'] == 0:
                 power_limit_types[ppt_key]['power_cap_max'] = "N/A"
 
-        ppt0_power_cap_max = self.format_power_cap(power_limit_types['ppt0']['power_cap_min'])
-        ppt0_power_cap_min = self.format_power_cap(power_limit_types['ppt0']['power_cap_max'])
+        ppt0_power_cap_max = self.format_power_cap(power_limit_types['ppt0']['power_cap_max'])
+        ppt0_power_cap_min = self.format_power_cap(power_limit_types['ppt0']['power_cap_min'])
         ppt1_power_cap_max = self.format_power_cap(power_limit_types['ppt1']['power_cap_max'])
         ppt1_power_cap_min = self.format_power_cap(power_limit_types['ppt1']['power_cap_min'])
 
-        return (ppt0_power_cap_min, ppt0_power_cap_min, ppt1_power_cap_max, ppt1_power_cap_min)
+        return (ppt0_power_cap_min, ppt0_power_cap_max, ppt1_power_cap_min, ppt1_power_cap_max)
 
 
     def format_power_cap(self, value):

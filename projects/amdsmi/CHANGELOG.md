@@ -58,38 +58,94 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added support for PPT1 power limit information**.  
   - Support has been added for querying and setting the PPT (Package Power Tracking) limits
     - There are two PPT limits, PPT0 has lower limit and tracks a filtered version of the input power and PPT1 has higher limit but tracks the raw input power. This is to catch spikes in the raw data.  
+  - New API added:
+    - amdsmi_get_supported_power_cap(): Returns which power cap types are supported on the device (PPT0, PPT1). This will allow users to know which power cap types they can get/set.
+    - Original APIs remain the same but now can get/set both PPT0 and PPT1 limits (on supported hardware):
+      - amdsmi_get_power_cap_info() 
+      - amdsmi_set_power_cap()
   - See the Changed section for changes made to the `set` and `static` commands regarding support for PPT1.  
 
 ### Changed
 
-- **`amd-smi set --power-cap` now requires sepcification of the power cap type**.  
-  - command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`
-  - acceptable power cap types are "ppt0" and "ppt1"
+- **`amd-smi set --power-cap` now requires specification of the power cap type**.  
+  - Command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`. Acceptable power cap types are "ppt0" and "ppt1".  
+  Ex.
 
-  ```console
-  $ sudo amd-smi set --power-cap ppt1 1150
-  GPU: 0
-    POWERCAP: Successfully set ppt1 power cap to 1150W
-    ...
-  ```
+    ```console
+    $ sudo amd-smi set --power-cap ppt1 1150
+    GPU: 0
+      POWERCAP: Successfully set PPT1 power cap to 1150W
+      ...
+    ```  
+- **`amd-smi reset --power-cap` will attempt to reset both power caps**.  
+  - When using the reset command, both PPT0 and PPT1 power caps will be reset to their default values. If a device only has PPT0, then only PPT0 will be reset.  
+    Ex.
+    ```console
+    $ sudo amd-smi reset --power-cap ppt1 1150
+    GPU: 0
+      POWERCAP:
+          PPT0: Successfully reset power cap to 203W
+          PPT1: [AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap
+      ...
+    ```
 
 - **`amd-smi static --limit` now has a PPT1 section when PPT1 is available**.  
-
-  ```console
-  $ amd-smi static --limit
-  GPU: 0
-    LIMIT:
-        PPT0:
-            MAX_POWER_LIMIT: 1000
-            MIN_POWER_LIMIT: 0
-            SOCKET_POWER_LIMIT: 1000
-        PPT1:
-            MAX_POWER_LIMIT: 1300
-            MIN_POWER_LIMIT: 1100
-            SOCKET_POWER_LIMIT: 1250
-        SLOWDOWN_EDGE_TEMPERATURE: N/A
-        ...
-  ```
+  - The static --limit command has been updated to include PPT1 power limit information when available on the device.
+    ```console
+    $ amd-smi static --limit
+    GPU: 0
+      LIMIT:
+          PPT0:
+              MAX_POWER_LIMIT: 1000
+              MIN_POWER_LIMIT: 0
+              SOCKET_POWER_LIMIT: 1000
+          PPT1:
+              MAX_POWER_LIMIT: 1300
+              MIN_POWER_LIMIT: 1100
+              SOCKET_POWER_LIMIT: 1250
+          SLOWDOWN_EDGE_TEMPERATURE: N/A
+          ...
+    ```
+    - JSON and CSV formats are updated to reflect this change as well.  
+      Ex.
+      ```console
+      $ amd-smi static --limit --json
+      {
+        "gpu_data": [
+            {
+                "gpu": 0,
+                "limit": {
+                    "ppt0": {
+                        "max_power_limit": {
+                            "value": 203,
+                            "unit": "W"
+                        },
+                        "min_power_limit": {
+                            "value": 0,
+                            "unit": "W"
+                        },
+                        "socket_power_limit": {
+                            "value": 100,
+                            "unit": "W"
+                        }
+                    },
+                    "ppt1": {
+                        "max_power_limit": "N/A",
+                        "min_power_limit": "N/A",
+                        "socket_power_limit": "N/A"
+                    },
+                    ...
+                }
+            },
+            ...
+      ```
+    
+      ```console
+      $ amd-smi static --limit --csv
+      gpu,ppt0_max_power_limit,ppt0_min_power_limit,ppt0_socket_power_limit,ppt1_max_power_limit,ppt1_min_power_limit,ppt1_socket_power_limit,slowdown_edge_temperature,slowdown_hotspot_temperature,slowdown_vram_temperature,shutdown_edge_temperature,shutdown_hotspot_temperature,shutdown_vram_temperature
+      0,203,0,100,N/A,N/A,N/A,100,110,100,105,115,105
+      1,213,0,100,N/A,N/A,N/A,109,110,100,114,115,105
+      ```
 
 ### Removed
 
