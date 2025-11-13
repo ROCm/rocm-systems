@@ -110,7 +110,9 @@ extern "C"
 
 #ifndef ROCPROFSYS_USER_CALLBACKS_INIT
 #    define ROCPROFSYS_USER_CALLBACKS_INIT                                               \
-        { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }
+        {                                                                                \
+            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL                   \
+        }
 #endif
 
 #endif  // ROCPROFSYS_TYPES_H_
