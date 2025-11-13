@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 
 #include <fmt/core.h>
@@ -64,6 +65,7 @@ public:
     bool               empty() const { return empty_; }
 
     void setflags(uint32_t flags) { this->flags_ = flags; }
+    void set_id(uint64_t id) { this->id_ = id; }
 
     friend bool operator<(Metric const& lhs, Metric const& rhs);
     friend bool operator==(Metric const& lhs, Metric const& rhs);
@@ -103,11 +105,12 @@ std::shared_ptr<const counter_metrics_t>
 loadMetrics(bool reload = false, std::optional<ArchMetric> add_metric = std::nullopt);
 
 /**
- * Get the metrics that apply to a specific agent. Supplied parameter
- * is the GFXIP of the agent.
+ * Get the metrics that apply to a specific agent.
+ * The returned metrics will have counter IDs that are unique per agent
+ * (encoding both base metric ID and agent's logical_node_id).
  */
 std::vector<Metric>
-getMetricsForAgent(const std::string&);
+getMetricsForAgent(const rocprofiler_agent_t* agent);
 
 /**
  * Get the metric event ids for perfcounters options in thread trace

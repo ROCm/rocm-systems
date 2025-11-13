@@ -32,7 +32,15 @@ from datetime import datetime
 from . import output_config
 from . import libpyrocpd
 from .importer import RocpdImportData
-from .time_window import apply_time_window
+
+__all__ = [
+    "export_sqlite_query",
+    "send_report_email",
+    "zip_files",
+    "add_args",
+    "execute",
+    "main",
+]
 
 
 def export_sqlite_query(
@@ -439,34 +447,18 @@ def add_args(parser):
         "--template-path", help="Path to a Jinja2 HTML template for the dashboard"
     )
 
-    return [
-        "query",
-        "script",
-        "email_to",
-        "email_from",
-        "email_subject",
-        "smtp_server",
-        "smtp_port",
-        "smtp_user",
-        "smtp_password",
-        "inline_preview",
-        "zip_attachments",
-        "format",
-        "template_path",
-    ]
+    def process_args(input, args):
+        ret = {}
+        return ret
+
+    return process_args
 
 
-def process_args(args, valid_args):
-    # do not add any of the arguments to the output config dict
-    ret = {}
-    return ret
+def execute(input, args, config=None, **kwargs):
 
-
-def execute(input, args, config=None, window_args=None, **kwargs):
-
-    importData = RocpdImportData(input)
-
-    apply_time_window(importData, **window_args)
+    importData = RocpdImportData(
+        input, automerge_limit=getattr(args, "automerge_limit", None)
+    )
 
     config = (
         output_config.output_config(**kwargs)
@@ -524,11 +516,8 @@ def execute(input, args, config=None, window_args=None, **kwargs):
 
 def main(argv=None):
     import argparse
-    from .time_window import add_args as add_args_time_window
-    from .time_window import process_args as process_args_time_window
-    from .output_config import add_args as add_args_output_config
-    from .output_config import process_args as process_args_output_config
-    from .output_config import add_generic_args, process_generic_args
+    from . import time_window
+    from . import output_config
 
     parser = argparse.ArgumentParser(
         description="Generate report for rocpd query", allow_abbrev=False
@@ -545,17 +534,19 @@ def main(argv=None):
         help="Input path and filename to one or more database(s), separated by spaces",
     )
 
-    valid_out_config_args = add_args_output_config(parser)
-    valid_generic_args = add_generic_args(parser)
-    valid_time_window_args = add_args_time_window(parser)
-    valid_query_args = add_args(parser)
+    process_out_config_args = output_config.add_args(parser)
+    process_generic_args = output_config.add_generic_args(parser)
+    process_time_window_args = time_window.add_args(parser)
+    process_query_args = add_args(parser)
 
     args = parser.parse_args(argv)
 
-    out_cfg_args = process_args_output_config(args, valid_out_config_args)
-    generic_out_cfg_args = process_generic_args(args, valid_generic_args)
-    window_args = process_args_time_window(args, valid_time_window_args)
-    query_args = process_args(args, valid_query_args)
+    input = RocpdImportData(args.input)
+
+    out_cfg_args = process_out_config_args(input, args)
+    generic_out_cfg_args = process_generic_args(input, args)
+    query_args = process_query_args(input, args)
+    process_time_window_args(input, args)
 
     all_args = {
         **query_args,
@@ -564,9 +555,8 @@ def main(argv=None):
     }
 
     execute(
-        args.input,
+        input,
         args,
-        window_args=window_args,
         **all_args,
     )
 

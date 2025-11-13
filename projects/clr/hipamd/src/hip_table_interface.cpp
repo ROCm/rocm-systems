@@ -1337,6 +1337,12 @@ extern "C" hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
 hipError_t hipModuleUnload(hipModule_t module) {
   return hip::GetHipDispatchTable()->hipModuleUnload_fn(module);
 }
+extern "C" hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
+                                                               int numBlocks, int blockSize) {
+  return hip::GetHipDispatchTable()->hipOccupancyAvailableDynamicSMemPerBlock_fn(dynamicSmemSize,
+                                                                                 f, numBlocks,
+                                                                                 blockSize);
+}
 extern "C" hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f,
                                                                    int blockSize,
                                                                    size_t dynSharedMemPerBlk) {
@@ -1395,6 +1401,9 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
 }
 hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode) {
   return hip::GetHipDispatchTable()->hipStreamBeginCapture_fn(stream, mode);
+}
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
+  return hip::GetHipDispatchTable()->hipStreamCopyAttributes_fn(dst, src);
 }
 hipError_t hipStreamCreate(hipStream_t* stream) {
   return hip::GetHipDispatchTable()->hipStreamCreate_fn(stream);
@@ -1802,6 +1811,12 @@ extern "C" hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipV
   return hip::GetHipDispatchTable()->hipGetProcAddress_fn(symbol, pfn, hipVersion, flags,
                                                           symbolStatus);
 }
+extern "C" hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int  hipVersion,
+                                            uint64_t flags,
+                                            hipDriverProcAddressQueryResult* symbolStatus) {
+  return hip::GetHipDispatchTable()->hipGetProcAddress_spt_fn(symbol, pfn, hipVersion, flags,
+                                                              symbolStatus);
+}
 hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         const hipGraphNode_t* dependencies,
                                         const hipGraphEdgeData* dependencyData,
@@ -2011,17 +2026,17 @@ hipError_t hipGraphExecExternalSemaphoresWaitNodeSetParams(
   return hip::GetHipDispatchTable()->hipGraphExecExternalSemaphoresWaitNodeSetParams_fn(
       hGraphExec, hNode, nodeParams);
 }
-hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption** jitOptions,
+hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption* jitOptions,
                               void** jitOptionsValues, unsigned int numJitOptions,
-                              hipLibraryOption** libraryOptions, void** libraryOptionValues,
+                              hipLibraryOption* libraryOptions, void** libraryOptionValues,
                               unsigned int numLibraryOptions) {
   return hip::GetHipDispatchTable()->hipLibraryLoadData_fn(
       library, code, jitOptions, jitOptionsValues, numJitOptions, libraryOptions,
       libraryOptionValues, numLibraryOptions);
 }
 hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
-                                  hipJitOption** jitOptions, void** jitOptionsValues,
-                                  unsigned int numJitOptions, hipLibraryOption** libraryOptions,
+                                  hipJitOption* jitOptions, void** jitOptionsValues,
+                                  unsigned int numJitOptions, hipLibraryOption* libraryOptions,
                                   void** libraryOptionValues, unsigned int numLibraryOptions) {
   return hip::GetHipDispatchTable()->hipLibraryLoadFromFile_fn(
       library, fileName, jitOptions, jitOptionsValues, numJitOptions, libraryOptions,
@@ -2037,6 +2052,21 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
   return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count,
                                                                  library);
+}
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library) {
+  return hip::GetHipDispatchTable()->hipLibraryEnumerateKernels_fn(kernels, numKernels, library);
+}
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
+  return hip::GetHipDispatchTable()->hipKernelGetLibrary_fn(library, kernel);
+}
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
+  return hip::GetHipDispatchTable()->hipKernelGetName_fn(name, kernel);
+}
+hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                 size_t* paramSize) {
+  return hip::GetHipDispatchTable()->hipKernelGetParamInfo_fn(kernel, paramIndex, paramOffset,
+                                                              paramSize);
 }
 hipError_t hipExtEnableLogging() {
   return hip::GetHipDispatchTable()->hipExtEnableLogging_fn();

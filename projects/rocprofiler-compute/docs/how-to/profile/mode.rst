@@ -27,7 +27,7 @@ Profiling with ROCm Compute Profiler yields the following benefits.
 * :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profile can adjust the
   output format of underlying rocprof tool which changes the output format of raw performance
   counter data in the workload folder created during profiling. Supported output formats are
-  ``json``, ``csv``, and ``rocpd``. The default output format is ``csv``.
+  ``csv`` and ``rocpd``. The default output format is ``csv``.
 
 .. note::
 
@@ -47,7 +47,7 @@ Run ``rocprof-compute profile -h`` for more details. See
 Profiling example
 -----------------
 
-The `<https://github.com/ROCm/rocprofiler-compute/blob/amd-mainline/sample/vcopy.cpp>`__ repository
+The `<https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/sample/vcopy.cpp>`__ repository
 includes source code for a sample GPU compute workload, ``vcopy.cpp``. A copy of
 this file is available in the ``share/sample`` subdirectory after a normal
 ROCm Compute Profiler installation, or via the ``$ROCPROFCOMPUTE_SHARE/sample`` directory when
@@ -239,11 +239,6 @@ of the underlying ``rocprof`` tool. The following formats are supported:
    * The generated csv files across multiple runs of rocprof are processed and dumped into the workload directory as csv files.
    * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
 
-* ``json`` format:
-   * Ask underlying rocprof tool to dump raw performance counter data in json format.
-   * The generated json files across multiple runs of rocprof are processed and dumped into the workload directory as csv files.
-   * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
-
 * ``rocpd`` format:
    * Ask underlying rocprof tool to dump raw performance counter data in rocpd format.
    * Multiple ``rocpd`` database files containding counter collection data are merged into a single csv under the workload folder.
@@ -266,7 +261,7 @@ detailed description of profiling filters available when using ROCm Compute Prof
 Filtering options
 -----------------
 
-``-b``, ``--block <block-name>``
+``-b``, ``--block <block-id|block-alias|metric-id>``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
    Note that this option cannot be used with ``--roof-only`` or ``--set``.
@@ -588,9 +583,11 @@ Roofline options
 
   For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/performance-model`
 
-To distinguish different kernels in your ``.pdf`` roofline plot use
-``--kernel-names``. This will give each kernel a unique marker identifiable from
-the plot's key.
+Each kernel in your ``.pdf`` roofline plot is automatically distinguished with a unique marker identifiable from the plot's key. The roofline PDF includes an integrated multi-subplot layout with:
+
+1. **Roofline Plot** - Shows performance ceilings and kernel arithmetic intensity points
+2. **Plot Points & Values Table** - Displays AI values, performance metrics, memory/compute bound status, and cache levels for each kernel
+3. **Full Kernel Names Table** - Lists complete kernel names with their corresponding plot markers
 
 
 Roofline only
@@ -600,33 +597,52 @@ The following example demonstrates profiling roofline data only:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy -n 1048576 -b 256
-
+   $ rocprof-compute profile --name occupancy --roof-only -- ./tests/occupancy -n 1048576 -b 256
+                                    __                                       _
+   _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
    ...
-   [roofline] Checking for roofline.csv in /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
-   [roofline] No roofline data found. Generating...
-   Checking for roofline.csv in /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
+   INFO [roofline] Generating pmc_perf.csv (roofline counters only).
+   INFO Rocprofiler-Compute version: 3.3.0
+   INFO Profiler choice: rocprofiler-sdk
+   INFO Path: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
+   INFO Target: MI300X_A1
+   INFO Command: ./tests/occupancy -n 1048576 -b 256
+   INFO Kernel Selection: None
+   INFO Dispatch Selection: None
+   INFO Filtered sections: ['4']
+   INFO 
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Collecting Performance Counters (Roofline Only)
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO 
+   INFO [Run 1/3][Approximate profiling time left: pending first measurement...]
+   INFO [profiling] Current input file: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1/perfmon/pmc_perf_0.txt
+   ...
+   INFO [roofline] Checking for roofline.csv in /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
+   INFO [roofline] No roofline data found. Generating...
    Empirical Roofline Calculation
-   Copyright © 2022  Advanced Micro Devices, Inc. All rights reserved.
-   Total detected GPU devices: 4
-   GPU Device 0: Profiling...
-    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-    ...
-   Empirical Roofline PDFs saved!
-
+   Copyright © 2025  Advanced Micro Devices, Inc. All rights reserved.
+   Total detected GPU devices: 8
+   GPU Device 0 (gfx942) with 304 CUs: Profiling...
+   99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
+   ...
 An inspection of our workload output folder shows ``.pdf`` plots were generated
 successfully.
 
 .. code-block:: shell-session
 
-   $ ls workloads/vcopy/MI200/
+   $ ls workloads/occupancy/MI300X_A1
    total 48
-   -rw-r--r-- 1 auser agroup 13331 Mar  1 16:05 empirRoof_gpu-0_FP32.pdf
-   drwxr-xr-x 1 auser agroup     0 Mar  1 16:03 perfmon
-   -rw-r--r-- 1 auser agroup  1101 Mar  1 16:03 pmc_perf.csv
-   -rw-r--r-- 1 auser agroup  1715 Mar  1 16:05 roofline.csv
-   -rw-r--r-- 1 auser agroup   650 Mar  1 16:03 sysinfo.csv
-   -rw-r--r-- 1 auser agroup   399 Mar  1 16:03 timestamps.csv
+   -rw-r--r-- 1 auser agroup 13331 Oct 29 10:33 empirRoof_gpu-0_FP32.pdf
+   drwxr-xr-x 1 auser agroup     0 Oct 29 10:33 perfmon
+   -rw-r--r-- 1 auser agroup  1101 Oct 29 10:33 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup  1715 Oct 29 10:33 roofline.csv
+   -rw-r--r-- 1 auser agroup   650 Oct 29 10:33 sysinfo.csv
+   -rw-r--r-- 1 auser agroup   399 Oct 29 10:33 timestamps.csv
 
 .. note::
 

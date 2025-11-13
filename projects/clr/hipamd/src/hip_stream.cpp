@@ -547,7 +547,7 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   if (stream != nullptr) {
     // If still capturing return error
     if (hip::Stream::StreamCaptureOngoing(stream) == true) {
-      HIP_RETURN(hipErrorStreamCaptureUnsupported);
+      return hipErrorStreamCaptureUnsupported;
     }
   }
   bool wait = (stream == nullptr) ? true : false;
@@ -878,7 +878,8 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
     HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
 
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  constexpr bool wait = false;
+  hip::Stream* s = hip::getStream(stream, wait);
 
   switch (attr) {
     case hipStreamAttributeSynchronizationPolicy: {
@@ -912,7 +913,8 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
   getStreamPerThread(stream);
 
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  constexpr bool wait = false;
+  hip::Stream* s = hip::getStream(stream, wait);
 
   switch (attr) {
     case hipStreamAttributeSynchronizationPolicy: {
@@ -928,6 +930,24 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
     }
   }
 
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
+  HIP_INIT_API(hipStreamCopyAttributes, dst, src);
+
+  if (!hip::isValid(src) || !hip::isValid(dst)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+
+  getStreamPerThread(src);
+  getStreamPerThread(dst);
+
+  constexpr bool wait = false;
+  hip::Stream* src_stream = hip::getStream(src, wait);
+  hip::Stream* dst_stream = hip::getStream(dst, wait);
+  // Currently, SyncPolicy is the only stream attribute we can set during runtime
+  dst_stream->SetSyncPolicy(src_stream->GetSyncPolicy());
   HIP_RETURN(hipSuccess);
 }
 }  // namespace hip

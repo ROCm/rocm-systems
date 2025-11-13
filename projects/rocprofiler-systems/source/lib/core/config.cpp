@@ -645,6 +645,10 @@ configure_settings(bool _init)
                               "default to the value of ROCPROFSYS_COLLAPSE_PROCESSES",
                               false, "perfetto", "data", "advanced");
 
+    ROCPROFSYS_CONFIG_SETTING(uint32_t, "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS",
+                              "Set Perfetto flush period (in ms)", uint32_t{ 10000 },
+                              "perfetto", "data");
+
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_PERFETTO_FILL_POLICY",
         "Behavior when perfetto buffer is full. 'discard' will ignore new entries, "
@@ -1997,6 +2001,13 @@ get_perfetto_buffer_size()
     return static_cast<tim::tsettings<size_t>&>(*_v->second).get();
 }
 
+uint32_t
+get_perfetto_flush_period()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS");
+    return static_cast<tim::tsettings<uint32_t>&>(*_v->second).get();
+}
+
 bool
 get_perfetto_combined_traces()
 {
@@ -2354,14 +2365,13 @@ get_tmpdir()
 }
 
 std::string
-get_database_absolute_path(std::string_view database_name)
+get_database_absolute_path(std::string_view database_name, std::string_view suffix)
 {
     const auto* _existing_path = std::getenv("ROCPROFSYS_DATABASE_DIR");
     auto        _dir = _existing_path ? std::string{ _existing_path } : std::string{};
     auto        _ext = std::string{ "db" };
 
-    auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(),
-                                                   settings::default_process_suffix(),
+    auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(), suffix,
                                                    false, _dir };
 
     const auto get_path = [](const std::string& path) {
@@ -2370,8 +2380,9 @@ get_database_absolute_path(std::string_view database_name)
                                                  : std::string{};
     };
 
-    auto _val = settings::compose_output_filename(std::string(database_name), _ext, _cfg);
-    _dir      = get_path(_val);
+    auto _val =
+        settings::compose_output_filename(std::string{ database_name }, _ext, _cfg);
+    _dir = get_path(_val);
 
     setenv("ROCPROFSYS_DATABASE_DIR", _dir.c_str(), 1);
 

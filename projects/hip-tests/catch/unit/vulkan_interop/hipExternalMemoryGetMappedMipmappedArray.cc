@@ -212,3 +212,55 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Paramet
 
   HIP_CHECK(hipDestroyExternalMemory(ext_memory));
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipExternalMemoryGetMappedMipmappedArray while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/vulkan_interop/hipExternalMemoryGetMappedMipmappedArray.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Capture") {
+  VulkanTest vkt(enable_validation);
+  using type = uint8_t;
+  //  cubemap HIP array is allocated if all three extents are non-zero and the hipArrayCubemap
+  //  flag is set. Width must be equal to height, and depth must be six
+  constexpr uint32_t cube_size = 32;
+  constexpr uint32_t depth = 6;
+  constexpr uint32_t ext_mem_size = cube_size * cube_size * depth;
+
+  const auto vk_storage =
+      vkt.CreateMappedStorage<type>(ext_mem_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+  if (vk_storage.memory == nullptr) {
+    return;
+  }
+
+  const auto ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
+  hipExternalMemory_t ext_memory;
+  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc));
+
+  hipExternalMemoryMipmappedArrayDesc mipmapped_arr_desc = {};
+  mipmapped_arr_desc.extent = {};
+  mipmapped_arr_desc.extent.width = cube_size;
+  mipmapped_arr_desc.extent.height = cube_size;
+  mipmapped_arr_desc.extent.depth = depth;
+  mipmapped_arr_desc.flags = hipArrayCubemap;
+  mipmapped_arr_desc.formatDesc = hipCreateChannelDesc<type>();
+  mipmapped_arr_desc.numLevels = GENERATE(1, 2, 4);
+  mipmapped_arr_desc.offset = 0;
+  hipMipmappedArray_t mipmapped_arr = nullptr;
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, true);
+  HIP_CHECK_ERROR(
+      hipExternalMemoryGetMappedMipmappedArray(&mipmapped_arr, ext_memory, &mipmapped_arr_desc),
+                                               memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFreeMipmappedArray(mipmapped_arr));
+  HIP_CHECK(hipDestroyExternalMemory(ext_memory));
+}

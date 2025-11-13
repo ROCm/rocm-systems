@@ -244,6 +244,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 }
 
 GpuAgent::~GpuAgent() {
+  for (auto& blit : blits_) blit.reset();
+
   std::for_each(regions_.begin(), regions_.end(), DeleteObject());
   regions_.clear();
 }
@@ -494,6 +496,9 @@ void GpuAgent::InitScratchPool() {
 
   if (!core::Runtime::runtime_singleton_->flag().enable_scratch()) {
     scratch_pool_. ~SmallHeap();
+
+    // Reconstruct the object as default to allow ~GpuAgent to destruct the member variable
+    new (&scratch_pool_) SmallHeap();
     return;
   }
 
@@ -1792,13 +1797,16 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   core::SharedQueue* shared_queue = nullptr;
 
   if (dev_mem_queue_descriptor) {
-    shared_queue = static_cast<core::SharedQueue*>(
-        finegrain_allocator()(sizeof(core::SharedQueue), core::MemoryRegion::AllocateUncached));
+    shared_queue = static_cast<core::SharedQueue*>(finegrain_allocator()(
+        sizeof(core::SharedQueue),
+        core::MemoryRegion::AllocateUncached | MemoryRegion::AllocateQueueObject));
   } else {
     shared_queue =
         static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
             sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
-            isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged) : 0,
+            isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged |
+                       MemoryRegion::AllocateQueueObject)
+                    : MemoryRegion::AllocateQueueObject,
             node_id()));
   }
 

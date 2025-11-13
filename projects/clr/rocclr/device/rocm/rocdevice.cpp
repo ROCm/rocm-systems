@@ -54,10 +54,6 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
-#ifdef ROCCLR_SUPPORT_NUMA_POLICY
-#include <numa.h>
-#include <numaif.h>
-#endif  // ROCCLR_SUPPORT_NUMA_POLICY
 #include <sstream>
 #include <vector>
 
@@ -125,8 +121,7 @@ bool NullDevice::create(const amd::Isa& isa) {
   info_.oclcVersion_ = "OpenCL C " OPENCL_C_VERSION_STR " ";
   info_.spirVersions_ = "";
   std::stringstream ss;
-  ss << AMD_BUILD_STRING " (HSA," << (settings().useLightning_ ? "LC" : "HSAIL");
-  ss << ") [Offline]";
+  ss << AMD_BUILD_STRING " (HSA,LC) [Offline]";
   ::strncpy(info_.driverVersion_, ss.str().c_str(), sizeof(info_.driverVersion_) - 1);
   info_.version_ = "OpenCL " OPENCL_VERSION_STR " ";
   return true;
@@ -704,12 +699,7 @@ bool Device::create() {
 
 // ================================================================================================
 device::Program* NullDevice::createProgram(amd::Program& owner, amd::option::Options* options) {
-  device::Program* program;
-  if (settings().useLightning_) {
-    program = new LightningProgram(*this, owner);
-  } else {
-    program = new HSAILProgram(*this, owner);
-  }
+  device::Program* program = new roc::Program(*this, owner);
 
   if (program == nullptr) {
     LogError("Memory allocation has failed!");
@@ -722,19 +712,15 @@ bool Device::createBlitProgram() {
   bool result = true;
   std::string extraKernel;
 
-#if defined(USE_COMGR_LIBRARY)
-  if (settings().useLightning_) {
-    if (amd::IS_HIP) {
-      if (settings().gwsInitSupported_) {
-        extraKernel = device::HipExtraSourceCode;
-      } else {
-        extraKernel = device::HipExtraSourceCodeNoGWS;
-      }
+  if (amd::IS_HIP) {
+    if (settings().gwsInitSupported_) {
+      extraKernel = device::HipExtraSourceCode;
     } else {
-      extraKernel = SchedulerSourceCode;
+      extraKernel = device::HipExtraSourceCodeNoGWS;
     }
+  } else {
+    extraKernel = SchedulerSourceCode;
   }
-#endif  // USE_COMGR_LIBRARY
 
   blitProgram_ = new BlitProgram(context_);
   // Create blit programs
@@ -749,12 +735,7 @@ bool Device::createBlitProgram() {
 }
 
 device::Program* Device::createProgram(amd::Program& owner, amd::option::Options* options) {
-  device::Program* program;
-  if (settings().useLightning_) {
-    program = new LightningProgram(*this, owner);
-  } else {
-    program = new HSAILProgram(*this, owner);
-  }
+  device::Program* program = new roc::Program(*this, owner);
 
   if (program == nullptr) {
     LogError("Memory allocation has failed!");
@@ -1305,9 +1286,7 @@ bool Device::populateOCLDeviceConstants() {
     return false;
   }
   std::stringstream ss;
-  ss << AMD_BUILD_STRING " (HSA" << major << "." << minor << ","
-     << (settings().useLightning_ ? "LC" : "HSAIL");
-  ss << ")";
+  ss << AMD_BUILD_STRING " (HSA" << major << "." << minor << ",LC)";
 
   ::strncpy(info_.driverVersion_, ss.str().c_str(), sizeof(info_.driverVersion_) - 1);
 
@@ -1478,10 +1457,6 @@ bool Device::populateOCLDeviceConstants() {
     }
     if (amd::IS_HIP) {
       if (info_.iommuv2_ || isa().versionMajor() >= 8) {
-        info_.svmCapabilities_ |= CL_DEVICE_SVM_ATOMICS;
-      }
-    } else if (!settings().useLightning_) {
-      if (info_.iommuv2_ || (isa().versionMajor() == 8)) {
         info_.svmCapabilities_ |= CL_DEVICE_SVM_ATOMICS;
       }
     }
@@ -1719,6 +1694,42 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
   // equal to total free local memory
   freeMemory[LargestFreeBlock] = freeMemory[TotalFreeMemory];
 
+  return true;
+}
+
+bool Device::amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                      uint64_t* size_copied, int32_t* status) {
+  hsa_amd_ais_file_handle_t fh{};
+  hsa_status_t ret = HSA_STATUS_ERROR;
+#if defined(_WIN32)
+  fh.handle = handle;
+#else
+  fh.fd = handle;
+  ret = Hsa::ais_file_read(fh, devicePtr, size, file_offset, size_copied, status);
+#endif
+
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("amdFileRead operation failed with err 0x%xh", ret);
+    return false;
+  }
+  return true;
+}
+
+bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) {
+  hsa_amd_ais_file_handle_t fh{};
+  hsa_status_t ret = HSA_STATUS_ERROR;
+#if defined(_WIN32)
+  fh.handle = handle;
+#else
+  fh.fd = handle;
+  ret = Hsa::ais_file_write(fh, devicePtr, size, file_offset, size_copied, status);
+#endif
+
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("amdFileWrite operation failed with err 0x%xh", ret);
+    return false;
+  }
   return true;
 }
 
@@ -1976,6 +1987,7 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
       segment = agentInfo->fine_grain_pool;
       break;
     case kUncachedAtomics:
+    case kIoMemory:
       if (agentInfo->ext_fine_grain_pool.handle != 0) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
                 "Using extended fine grained access system memory pool");
@@ -1998,6 +2010,7 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
   if (mem_seg == kKernArg) {
     memFlags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
+
   hsa_amd_memory_pool_t pool =
       getHostMemoryPool(mem_seg, static_cast<const amd::roc::AgentInfo*>(agentInfo));
   hsa_status_t stat = Hsa::memory_pool_allocate(pool, size, memFlags, &ptr);
@@ -2024,30 +2037,17 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
 // ================================================================================================
 void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const {
   void* ptr = nullptr;
-#ifndef ROCCLR_SUPPORT_NUMA_POLICY
-  ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
-#else
-  int mode = MPOL_DEFAULT;
-  int maxNodes = numa_num_possible_nodes();
-  bitmask* nodeMask = numa_bitmask_alloc(maxNodes);
-  auto cpuCount = cpu_agents_.size();
-
-  long res = get_mempolicy(&mode, nodeMask->maskp, nodeMask->size, NULL, 0);
-  if (res) {
-    LogPrintfError("get_mempolicy failed with error %ld", res);
-    return ptr;
+  auto numa_node_count = cpu_agents_.size(); // count of host numa nodes
+  numa::NumaPolicy np(numa_node_count);
+  if (!np.GetMemPolicy()) {
+    return hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
   }
-  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE,
-          "get_mempolicy() succeed with mode %d, nodeMask 0x%lx, cpuCount %zu", mode,
-          *nodeMask->maskp, cpuCount);
-
-  switch (mode) {
-    // For details, see "man get_mempolicy".
-    case MPOL_BIND:
-    case MPOL_PREFERRED:
+  switch (np.GetPolicy()) {
+    case numa::NumaPolicy::Policy::kPrefered:
+    case numa::NumaPolicy::Policy::kBind:
       // We only care about the first CPU node
-      for (unsigned int i = 0; i < cpuCount; i++) {
-        if ((1u << i) & *nodeMask->maskp) {
+      for (unsigned int i = 0; i < numa_node_count; i++) {
+        if (np.IsPolicySetAt(i)) {
           ptr = hostAlloc(size, alignment, mem_seg, &cpu_agents_[i]);
           break;
         }
@@ -2057,16 +2057,19 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
       //  All other modes fall back to default mode
       ptr = hostAlloc(size, alignment, mem_seg, cpu_agent_info_);
   }
-  numa_free_cpumask(nodeMask);
-#endif  // ROCCLR_SUPPORT_NUMA_POLICY
   return ptr;
 }
 
 void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment) const {
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
+  uint32_t memFlags = 0;
+  if (memSegment == kIoMemory) {
+    memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  }
+
   hsa_status_t status = Hsa::memory_lock_to_pool(
-      hostMem, size, const_cast<hsa_agent_t*>(&bkendDevice_), 1, pool, 0, &deviceMemory);
+      hostMem, size, const_cast<hsa_agent_t*>(&bkendDevice_), 1, pool, memFlags, &deviceMemory);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Locking to pool %p, size 0x%zx, hostMem = %p,"
           " deviceMemory = %p, memSegment = %d",
@@ -2172,6 +2175,9 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags) const 
   }
   if (flags.executable_) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+  }
+  if (flags.uncached_ && isa().versionMajor() == 12) {
+    hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
   void* ptr = nullptr;
@@ -2979,7 +2985,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
 
     for (int i = mask.size() - 1; i >= 0; i--) {
-      ss << std::setfill('0') << std::setw(4) << mask[i];
+      ss << std::setfill('0') << std::setw(8) << mask[i];
     }
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Setting CU mask 0x%s for hardware queue %p",
             ss.str().c_str(), queue->base_address);

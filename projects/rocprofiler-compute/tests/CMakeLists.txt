@@ -45,7 +45,17 @@ set_target_properties(
 set(MAT_MUL_MAX ../sample/mat_mul_max.hip)
 set_source_files_properties(${MAT_MUL_MAX} PROPERTIES LANGUAGE HIP)
 add_executable(mat_mul_max ${MAT_MUL_MAX})
+target_compile_options(mat_mul_max PRIVATE -g -O0)
 set_target_properties(
     mat_mul_max
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+)
+
+set(DYNAMIC_SHARED_SOURCES ../sample/dynamic_shared/dynamic_shared.hip)
+set_source_files_properties(${DYNAMIC_SHARED_SOURCES} PROPERTIES LANGUAGE HIP)
+add_executable(hip_dynamic_shared ${DYNAMIC_SHARED_SOURCES})
+target_include_directories(hip_dynamic_shared PRIVATE ../sample/dynamic_shared)
+set_target_properties(
+    hip_dynamic_shared
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )

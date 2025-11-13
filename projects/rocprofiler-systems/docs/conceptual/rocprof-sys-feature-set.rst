@@ -6,7 +6,7 @@
 ROCm Systems Profiler features and use cases
 ********************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ is designed to be highly extensible.
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ is designed to be highly extensible.
 Internally, it leverages the `Timemory performance analysis toolkit <https://github.com/ROCm/timemory>`_
 to manage extensions, resources, data, and other items. It supports the following features,
 modes, metrics, and APIs.
@@ -86,17 +86,6 @@ CPU metrics
 * Network statistics
 * I/O metrics
 * Many others
-
-Third-party API support
-========================================
-
-* TAU
-* LIKWID
-* Caliper
-* CrayPAT
-* VTune
-* NVTX
-* ROCTX
 
 ROCm Systems Profiler use cases
 ========================================

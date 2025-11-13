@@ -9,13 +9,18 @@ subtrees:
   - caption: Install
     entries:
     - file: install/installation
+  - caption: Quick Reference
+    entries:
+    - file: quick_guide
+      title: ROCprofiler-SDK Quick Reference Guide
   - caption: How to
     entries:
     - file: how-to/samples
       title: Samples
     - file: how-to/using-rocprofv3
-    - file: how-to/using-rocpd-output-format
     - file: how-to/using-rocprofv3-avail
+    - file: how-to/using-rocprofv3-process-attachment
+    - file: how-to/using-rocpd-output-format
     - file: how-to/using-rocprofiler-sdk-roctx
     - file: how-to/using-rocprofv3-with-mpi
     - file: how-to/using-rocprofv3-with-openmp

@@ -49,6 +49,7 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils import (
     detect_rocprof,
+    get_panel_alias,
     get_submodules,
     get_version,
     get_version_display,
@@ -113,11 +114,7 @@ class RocProfCompute:
 
     def detect_profiler(self) -> None:
         profiler_mode = detect_rocprof(self.__args)
-        if str(profiler_mode).endswith("rocprof"):
-            self.__profiler_mode = "rocprofv1"
-        elif str(profiler_mode).endswith("rocprofv2"):
-            self.__profiler_mode = "rocprofv2"
-        elif str(profiler_mode).endswith("rocprofv3"):
+        if str(profiler_mode).endswith("rocprofv3"):
             self.__profiler_mode = "rocprofv3"
         elif str(profiler_mode) == "rocprofiler-sdk":
             self.__profiler_mode = "rocprofiler-sdk"
@@ -146,6 +143,8 @@ class RocProfCompute:
 
         if self.__args.list_metrics is not None and block:
             console_error("Cannot use --list-metrics with --blocks")
+        if self.__args.list_blocks is not None and block:
+            console_error("Cannot use --list-blocks with --blocks")
         if (
             hasattr(self.__args, "list_available_metrics")
             and self.__args.list_available_metrics
@@ -198,6 +197,9 @@ class RocProfCompute:
             elif self.__args.list_metrics is not None:
                 self.list_metrics()
                 sys.exit(0)
+            elif self.__args.list_blocks is not None:
+                self.list_blocks()
+                sys.exit(0)
             elif self.__args.config_dir:
                 parser.print_help(sys.stderr)
                 console_error(
@@ -219,32 +221,6 @@ class RocProfCompute:
             return
         if getattr(self.__args, "list_available_metrics", False):
             return
-
-        # Add --name to workload path if --path is not given
-        if self.__args.path == str(Path.cwd() / "workloads"):
-            if not hasattr(self.__args, "name") or not self.__args.name:
-                console_error("-n/--name is required")
-            self.__args.path = str(Path(self.__args.path) / self.__args.name)
-        # Add node name to workload path
-        if self.__args.subpath == "node_name":
-            self.__args.path = str(Path(self.__args.path) / socket.gethostname())
-        # Or, add gpu model name to workload path
-        elif self.__args.subpath == "gpu_model":
-            if self.__mspec.gpu_model:
-                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
-            else:
-                self.__args.path = str(Path(self.__args.path) / self.__args.name)
-                console_warning(
-                    f"No gpu model found, using default path: {self.__args.path}"
-                )
-
-        # Create workload directory if it does not exist
-        p = Path(self.__args.path)
-        if not p.exists():
-            try:
-                p.mkdir(parents=True, exist_ok=False)
-            except FileExistsError:
-                console_error("Directory already exists.")
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
@@ -276,6 +252,34 @@ class RocProfCompute:
             for key, value in ac.metric_list.items():
                 prefix = "\t" * min(key.count("."), 2)
                 print(f"{prefix}{key} -> {value}")
+            sys.exit(0)
+        else:
+            console_error("Unsupported arch")
+
+    @demarcate
+    def list_blocks(self) -> None:
+        for_current_arch = getattr(self.__args, "list_available_metrics", False)
+
+        arch = (
+            self.__mspec.gpu_arch
+            if (for_current_arch or self.__args.list_blocks is None)
+            else self.__args.list_blocks
+        )
+        if arch in self.__supported_archs.keys():
+            ac = schema.ArchConfig()
+            ac.panel_configs = file_io.load_panel_configs([
+                str(Path(self.__args.config_dir) / arch)
+            ])
+            sys_info = (
+                self.__mspec.get_class_members().iloc[0] if for_current_arch else None
+            )
+            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
+
+            print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+            for key, value in ac.metric_list.items():
+                if key.count(".") > 0:
+                    continue
+                print(f"{key:<8} {get_panel_alias()[value]:<16} {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")
@@ -329,16 +333,32 @@ class RocProfCompute:
 
         sys.exit(0)
 
+        profiler_classes = {
+            "rocprofv3": (
+                "rocprof_compute_profile.profiler_rocprof_v3",
+                "rocprof_v3_profiler",
+            ),
+            "rocprofiler-sdk": (
+                "rocprof_compute_profile.profiler_rocprofiler_sdk",
+                "rocprofiler_sdk_profiler",
+            ),
+        }
+
+        if self.__profiler_mode not in profiler_classes:
+            console_error("Unsupported profiler")
+
+        module_name, class_name = profiler_classes[self.__profiler_mode]
+        module = importlib.import_module(module_name)
+        profiler_class = getattr(module, class_name)
+
+        return profiler_class(
+            self.__args,
+            self.__profiler_mode,
+            self.__soc[self.__mspec.gpu_arch],
+        )
+
     def create_profiler(self) -> object:
         profiler_classes = {
-            "rocprofv1": (
-                "rocprof_compute_profile.profiler_rocprof_v1",
-                "rocprof_v1_profiler",
-            ),
-            "rocprofv2": (
-                "rocprof_compute_profile.profiler_rocprof_v2",
-                "rocprof_v2_profiler",
-            ),
             "rocprofv3": (
                 "rocprof_compute_profile.profiler_rocprof_v3",
                 "rocprof_v3_profiler",
@@ -379,11 +399,27 @@ class RocProfCompute:
 
         # instantiate desired profiler
         profiler = self.create_profiler()
-
-        # -----------------------
-        # run profiling workflow
-        # -----------------------
         profiler.sanitize()
+
+        # Add --name to workload path if --path is not given
+        if self.__args.path == str(Path.cwd() / "workloads"):
+            if not hasattr(self.__args, "name") or not self.__args.name:
+                console_error("-n/--name is required")
+            self.__args.path = str(Path(self.__args.path) / self.__args.name)
+            # Add node name to workload path
+            if self.__args.subpath == "node_name":
+                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
+            # OR, Add gpu model name to workload path
+            elif self.__args.subpath == "gpu_model":
+                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
+
+        # Create workload directory if it does not exist
+        p = Path(self.__args.path)
+        if not p.exists():
+            try:
+                p.mkdir(parents=True, exist_ok=False)
+            except FileExistsError:
+                console_error("Directory already exists.")
 
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.path)
@@ -407,31 +443,6 @@ class RocProfCompute:
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
         self.__soc[self.__mspec.gpu_arch].post_profiling()
-
-    @demarcate
-    def update_db(self) -> None:
-        self.print_graphic()
-
-        console_warning(
-            "Database update mode is deprecated and will "
-            "be removed in a future release "
-            "and no fixes will be made for this mode."
-        )
-
-        from utils.db_connector import DatabaseConnector
-
-        db_connection = DatabaseConnector(self.__args)
-
-        # -----------------------
-        # run database workflow
-        # -----------------------
-        db_connection.pre_processing()
-        if self.__args.upload:
-            db_connection.db_import()
-        else:
-            db_connection.db_remove()
-
-        return
 
     @demarcate
     def run_analysis(self) -> None:

@@ -18,7 +18,6 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#if defined(USE_COMGR_LIBRARY)
 #include "os/os.hpp"
 #include "utils/flags.hpp"
 #include "comgrctx.hpp"
@@ -129,4 +128,3 @@ bool Comgr::LoadLib(bool is_versioned) {
 }
 
 }  // namespace amd
-#endif

@@ -135,6 +135,8 @@ struct RocrEntryPoints {
   decltype(hsa_amd_vmem_address_reserve_align)* hsa_amd_vmem_address_reserve_align_;
   decltype(hsa_amd_enable_logging)* hsa_amd_enable_logging_;
   decltype(hsa_amd_memory_get_preferred_copy_engine)* hsa_amd_memory_get_preferred_copy_engine_;
+  decltype(hsa_amd_ais_file_read)* hsa_amd_ais_file_read_;
+  decltype(hsa_amd_ais_file_write)* hsa_amd_ais_file_write_;
   // Image extensions
   decltype(hsa_ext_image_data_get_info)* hsa_ext_image_data_get_info_;
   decltype(hsa_ext_image_create)* hsa_ext_image_create_;
@@ -384,7 +386,8 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_amd_memory_unlock)(host_ptr);
   }
   static hsa_status_t interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
-    int interop_handle, uint32_t flags, size_t* size,
+    amd::Os::FileDesc interop_handle,
+    uint32_t flags, size_t* size,
     void** ptr, size_t* metadata_size, const void** metadata) {
     return ROCR_DYN(hsa_amd_interop_map_buffer)(num_agents, agents, interop_handle, flags, size,
                                                 ptr, metadata_size, metadata);
@@ -504,6 +507,18 @@ class Hsa : public amd::AllStatic {
     hsa_agent_t src_agent, uint32_t* recommended_ids_mask) {
     return ROCR_DYN(hsa_amd_memory_get_preferred_copy_engine)(
       dst_agent, src_agent, recommended_ids_mask);
+  }
+  static hsa_status_t ais_file_read(hsa_amd_ais_file_handle_t handle, void* devicePtr,
+                                    uint64_t size, int64_t file_offset, uint64_t* size_copied,
+                                    int32_t* status) {
+    return ROCR_DYN(hsa_amd_ais_file_read)(handle, devicePtr, size, file_offset, size_copied,
+                                           status);
+  }
+  static hsa_status_t ais_file_write(hsa_amd_ais_file_handle_t handle, void* devicePtr,
+                                     uint64_t size, int64_t file_offset, uint64_t* size_copied,
+                                     int32_t* status) {
+    return ROCR_DYN(hsa_amd_ais_file_write)(handle, devicePtr, size, file_offset, size_copied,
+                                            status);
   }
 
   // Image extensions

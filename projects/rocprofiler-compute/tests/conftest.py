@@ -23,11 +23,19 @@
 
 ##############################################################################
 
+import os
 import subprocess
+import sys
 from importlib.machinery import SourceFileLoader
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
+SRC = os.path.join(ROOT, "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
 
 rocprof_compute = SourceFileLoader(
     "rocprof-compute", "src/rocprof-compute"
@@ -45,7 +53,9 @@ def pytest_addoption(parser):
     parser.addoption(
         "--rocprofiler-sdk-library-path",
         type=str,
-        default="/opt/rocm/lib/librocprofiler-sdk.so",
+        default=str(
+            Path(os.getenv("ROCM_PATH", "/opt/rocm")) / "lib/librocprofiler-sdk.so"
+        ),
         help="Path to the rocprofiler-sdk library",
     )
 
@@ -59,6 +69,7 @@ def binary_handler_profile_rocprof_compute(request):
         check_success=True,
         roof=False,
         app_name="app_1",
+        attach_detach_para=None,
     ):
         if request.config.getoption("--rocprofiler-sdk-library-path"):
             options.extend(
@@ -77,11 +88,25 @@ def binary_handler_profile_rocprof_compute(request):
             ]
             if not roof:
                 baseline_opts.append("--no-roof")
+
+            command_rocprof_compute = baseline_opts + options + ["--path", workload_dir]
+            if not attach_detach_para:
+                command_rocprof_compute = (
+                    command_rocprof_compute + ["--"] + config[app_name]
+                )
+            else:
+                command_rocprof_compute = command_rocprof_compute + [
+                    "--attach-pid",
+                    str(attach_detach_para["attach_pid"]),
+                ]
+                if attach_detach_para["attach-duration-msec"]:
+                    command_rocprof_compute = command_rocprof_compute + [
+                        "--attach-duration-msec",
+                        str(attach_detach_para["attach-duration-msec"]),
+                    ]
+
             process = subprocess.run(
-                baseline_opts
-                + options
-                + ["--path", workload_dir, "--"]
-                + config[app_name],
+                command_rocprof_compute,
                 text=True,
             )
             # verify run status
@@ -92,13 +117,27 @@ def binary_handler_profile_rocprof_compute(request):
             baseline_opts = ["rocprof-compute", "profile", "-n", app_name, "-VVV"]
             if not roof:
                 baseline_opts.append("--no-roof")
+
+            command_rocprof_compute = baseline_opts + options + ["--path", workload_dir]
+            if not attach_detach_para:
+                command_rocprof_compute = (
+                    command_rocprof_compute + ["--"] + config[app_name]
+                )
+            else:
+                command_rocprof_compute = command_rocprof_compute + [
+                    "--attach-pid",
+                    str(attach_detach_para["attach_pid"]),
+                ]
+                if attach_detach_para["attach-duration-msec"]:
+                    command_rocprof_compute = command_rocprof_compute + [
+                        "--attach-duration-msec",
+                        str(attach_detach_para["attach-duration-msec"]),
+                    ]
+
             with pytest.raises(SystemExit) as e:
                 with patch(
                     "sys.argv",
-                    baseline_opts
-                    + options
-                    + ["--path", workload_dir, "--"]
-                    + config[app_name],
+                    command_rocprof_compute,
                 ):
                     rocprof_compute.main()
             # verify run status

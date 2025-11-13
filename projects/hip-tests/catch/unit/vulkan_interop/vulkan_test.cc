@@ -389,6 +389,96 @@ VkExternalMemoryHandleTypeFlagBits VulkanTest::GetVkMemHandlePlatformType() cons
 #endif
 }
 
+void VulkanTest::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
+                              VkMemoryPropertyFlags properties, VkBuffer& buffer,
+                              VkDeviceMemory& buffer_memory, bool external) {
+  VkBufferCreateInfo buffer_create_info = {};
+  buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  buffer_create_info.size = size;
+  buffer_create_info.usage = usage;
+  buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  VkExternalMemoryBufferCreateInfo external_memory_buffer_info = {};
+  if (external) {
+    external_memory_buffer_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+    external_memory_buffer_info.handleTypes = _mem_handle_type;
+    buffer_create_info.pNext = &external_memory_buffer_info;
+  }
+
+  VK_CHECK_RESULT(vkCreateBuffer(_device, &buffer_create_info, nullptr, &buffer));
+
+  VkMemoryRequirements memory_requirements;
+  vkGetBufferMemoryRequirements(_device, buffer, &memory_requirements);
+
+  VkMemoryAllocateInfo alloc_info = {};
+  alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  alloc_info.allocationSize = memory_requirements.size;
+  alloc_info.memoryTypeIndex = FindMemoryType(memory_requirements.memoryTypeBits, properties);
+
+  VkExportMemoryAllocateInfoKHR vulkan_export_memory_allocate_info = {};
+#ifdef _WIN64
+  WindowsSecurityAttributes win_security_attributes = {};
+  VkExportMemoryWin32HandleInfoKHR vulkan_export_memory_win32_handle_info = {};
+#endif
+
+  if (external) {
+    vulkan_export_memory_allocate_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR;
+    vulkan_export_memory_allocate_info.handleTypes = _mem_handle_type;
+
+#ifdef _WIN64
+    vulkan_export_memory_win32_handle_info.sType =
+        VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+    vulkan_export_memory_win32_handle_info.pNext = NULL;
+    vulkan_export_memory_win32_handle_info.pAttributes = &win_security_attributes;
+    vulkan_export_memory_win32_handle_info.dwAccess =
+        DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE;
+    vulkan_export_memory_win32_handle_info.name = (LPCWSTR)NULL;
+
+    vulkan_export_memory_allocate_info.pNext =
+        _mem_handle_type & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR
+        ? &vulkan_export_memory_win32_handle_info
+        : NULL;
+#endif
+
+    alloc_info.pNext = &vulkan_export_memory_allocate_info;
+  }
+
+  VK_CHECK_RESULT(vkAllocateMemory(_device, &alloc_info, nullptr, &buffer_memory));
+  VK_CHECK_RESULT(vkBindBufferMemory(_device, buffer, buffer_memory, 0));
+}
+
+void VulkanTest::CopyBuffer(VkBuffer src_buffer, VkBuffer dst_buffer, VkDeviceSize size) {
+  VkCommandBufferAllocateInfo alloc_info = {};
+  alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  alloc_info.commandPool = _command_pool;
+  alloc_info.commandBufferCount = 1;
+
+  VkCommandBuffer command_buffer;
+  vkAllocateCommandBuffers(_device, &alloc_info, &command_buffer);
+
+  VkCommandBufferBeginInfo begin_info = {};
+  begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+  vkBeginCommandBuffer(command_buffer, &begin_info);
+
+  VkBufferCopy buffer_copy = {};
+  buffer_copy.size = size;
+  vkCmdCopyBuffer(command_buffer, src_buffer, dst_buffer, 1, &buffer_copy);
+
+  vkEndCommandBuffer(command_buffer);
+
+  VkSubmitInfo submit_info = {};
+  submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit_info.commandBufferCount = 1;
+  submit_info.pCommandBuffers = &command_buffer;
+
+  vkQueueSubmit(_queue, 1, &submit_info, VK_NULL_HANDLE);
+  vkQueueWaitIdle(_queue);
+  vkFreeCommandBuffers(_device, _command_pool, 1, &command_buffer);
+}
+
 // Sometimes in CUDA the stream is not immediately ready after a semaphore has been signaled
 void PollStream(hipStream_t stream, hipError_t expected, uint32_t num_iterations) {
   hipError_t query_result;

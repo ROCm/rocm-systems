@@ -60,7 +60,7 @@ set ( CORE_RUNTIME_TARGET "${CORE_RUNTIME_NAME}" )
 set ( CORE_RUNTIME_LIBRARY "lib${CORE_RUNTIME_TARGET}" )
 
 ## Set project name
-project( ${CORE_RUNTIME_TARGET} )
+project( hsa-rocr )
 
 ## Utilty functions
 list ( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
@@ -223,17 +223,18 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_code_util.cpp
            libamdhsacode/amd_hsa_locks.cpp
            libamdhsacode/amd_options.cpp
-           libamdhsacode/amd_hsa_code.cpp
-           libamdhsacode/amd_core_dump.cpp )
+           libamdhsacode/amd_hsa_code.cpp)
 
 if(UNIX)
-  set(SRC_OS core/util/lnx/os_linux.cpp)
+  set(SRC_OS core/util/lnx/os_linux.cpp
+	     libamdhsacode/lnx/amd_core_dump.cpp)
   set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
                core/runtime/amd_aie_agent.cpp
                core/runtime/amd_aie_aql_queue.cpp)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
-  set(SRC_OS core/util/win/os_win.cpp)
+  set(SRC_OS core/util/win/os_win.cpp
+	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
          
 if ( BUILD_THUNK_VIRTIO )
@@ -261,15 +262,10 @@ if (${PC_SAMPLING_SUPPORT})
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${PCS_SRCS} )
 endif()
 
-if (UNIX)
-  if ( NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64" )
-    set ( IMAGE_SUPPORT ON )
-  endif()
-set ( IMAGE_SUPPORT ${IMAGE_SUPPORT} CACHE BOOL "Build with image support (default: ON for x86, OFF elsewise)." )
-else()
-  # Force IMAGE_SUPPORT to be OFF
-  set(IMAGE_SUPPORT OFF CACHE BOOL "Build with image support (forced to OFF)" FORCE)
+if (NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64")
+  set (IMAGE_SUPPORT ON)
 endif()
+set (IMAGE_SUPPORT ${IMAGE_SUPPORT} CACHE BOOL "Build with image support (default: ON for x86, OFF elsewise).")
 
 ## Optional image module defintions.
 if(${IMAGE_SUPPORT})
@@ -416,7 +412,7 @@ install ( TARGETS ${CORE_RUNTIME_TARGET}
 
 # Install license
 if(ENABLE_ASAN_PACKAGING)
-   install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan )
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan )
 endif()
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
 

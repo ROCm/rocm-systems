@@ -76,6 +76,12 @@ struct uuid_view_t
     }
 };
 
+struct index_and_size
+{
+    uint64_t agent_abs_index = {};
+    uint64_t size            = {0};
+};
+
 std::vector<const rocprofiler_agent_t*>
 get_agents();
 

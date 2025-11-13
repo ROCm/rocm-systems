@@ -20,37 +20,49 @@ contribution process.
 
 ## Development
 
-ROCm Compute Profiler follows a
-[main-dev](https://nvie.com/posts/a-successful-git-branching-model/)
-branching model. As a result, our latest stable release is shipped
-from the `amd-mainline` branch, while new features are developed in our
-`develop` branch.
+ROCm Compute Profiler is now included in the rocm-systems super-repo. The latest sources are in the `develop` branch. You can find particular releases in the `release/rocm-rel-X.Y` branch for the particular release you're looking for.
 
-Users may checkout `amd-staging` to preview upcoming features.
+### Pulling the source using sparse-checkout
+
+Being in the super-repo, if you only want to pull the source for a particular project, do a sparse checkout:
+
+```bash
+git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+cd rocm-systems
+git sparse-checkout init --cone
+git sparse-checkout set projects/rocprofiler-compute
+git checkout develop
+
+cd projects/rocprofiler-compute
+python3 -m pip install -r requirements.txt
+```
 
 ## Testing
 
-Populate the empty variables in `Dockerfile.customrocmtest` based on latest CI build information.
+Populate the <usename> variable in `docker/docker-compose.customrocmtest.yml`.
+Populate the <rocm_build_image> variable in `docker/Dockerfile.customrocmtest` based on latest ROCm CI build information.
 
 To quickly get the environment (bash shell) for building and testing, run the following commands:
 * `cd docker`
-* `docker compose -f docker-compose.customrocmtest.yml up --force-recreate -d && docker attach docker-customrocmtest-1`
+* If the docker image is not available on the machine, then build the image, otherwise skip this step: `docker compose -f docker-compose.customrocmtest.yml build`
+* Launch the container, and check the name of the container: `docker compose -f docker-compose.customrocmtest.yml up --force-recreate -d `
+* Run bash shell on the launched container: `docker exec -it <container_name> bash`
+* If testing is done, kill the container: `docker container kill <container_name>`
 
-Inside the docker container, clean, build and install the project with tests enabled:
+Inside the docker container, clean, build, then install the project with tests enabled:
 ```
 rm -rf build install && cmake -B build -D CMAKE_INSTALL_PREFIX=install -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -DENABLE_COVERAGE=ON -S . && cmake --build build --target install --parallel 8
 ```
 
 Note that per the above command, build assets will be stored under `build` directory and installed assets will be stored under `install` directory.
 
-Then, to run the automated test suite, run the following command:
+Then, to run the automated test suite, run the following commands:
 ```
+mkdir build
 ctest
 ```
 
 For manual testing, you can find the executable at `install/bin/rocprof-compute`
-
-NOTE: This Dockerfile uses `ubuntu 22.04` as the base operating system image
 
 ## Standalone binary
 

@@ -38,7 +38,6 @@
 #include "device/pal/palappprofile.hpp"
 #include "device/pal/palcapturemgr.hpp"
 #include "device/pal/palsignal.hpp"
-#include "acl.h"
 #include "memory"
 
 #include <atomic>
@@ -58,16 +57,6 @@ namespace amd::pal {
 
 //! A nil device object
 class NullDevice : public amd::Device {
- protected:
-#if defined(WITH_COMPILER_LIB)
-  static Compiler* compiler_;
-#endif
-
- public:
-#if defined(WITH_COMPILER_LIB)
-  Compiler* compiler() const { return compiler_; }
-#endif
-
  public:
   static bool init(void);
 
@@ -134,6 +123,20 @@ class NullDevice : public amd::Device {
 
   //! Empty implementation on Null device
   virtual bool globalFreeMemory(size_t* freeMemory) const { return false; }
+
+  //! Empty implementation on Null device
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                        uint64_t* size_copied, int32_t* status) {
+    ShouldNotReachHere();
+    return false;
+  }
+
+  //! Empty implementation on Null device
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                         uint64_t* size_copied, int32_t* status) {
+    ShouldNotReachHere();
+    return false;
+  }
 
   //! Get GPU device settings
   const pal::Settings& settings() const { return reinterpret_cast<pal::Settings&>(*settings_); }
@@ -250,15 +253,16 @@ class Device : public NullDevice {
     uint32_t index_;                 //!< HW queue index for scratch buffer access
     amd::Monitor queue_lock_;        //!< Queue lock for access
     AqlPacketMgmt aql_packet_mgmt_;  //!< AQL packets management class for debugger support
-    QueueRecycleInfo()
+    QueueRecycleInfo(const Device& dev)
         : counter_(1),
           engineType_(Pal::EngineTypeCompute),
           index_(0),
-          queue_lock_(true) /* Queue lock for sharing */ {}
+          queue_lock_(true) /* Queue lock for sharing */,
+          aql_packet_mgmt_(dev) {}
 
-    //! Returns the aql packet list
-    uintptr_t AqlPacketList() const {
-      return reinterpret_cast<uintptr_t>(&aql_packet_mgmt_.aql_packets_);
+    //! Returns the MQD's read_dispatch_id's address.
+    uintptr_t DebuggerData() const {
+      return reinterpret_cast<uintptr_t>(&aql_packet_mgmt_.amd_queue_.read_dispatch_id);
     }
   };
 
@@ -442,6 +446,30 @@ class Device : public NullDevice {
 
   //! Retrieves information about free memory on a GPU device
   virtual bool globalFreeMemory(size_t* freeMemory) const;
+
+  /**
+   * @brief Read data from a file to device memory.
+   * @param[IN] handle: file descriptor of the file to read.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of read.
+   * @param[IN] file_offset: offset into fd where data has to be read.
+   * @param[IN/OUT] size_copied: actual size read.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                        uint64_t* size_copied, int32_t* status);
+
+  /**
+   * Write data from device memory to a file.
+   * @param[IN] handle: file descriptor of the file to write.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of write.
+   * @param[IN] file_offset: offset into fd where data has to written.
+   * @param[IN/OUT] size_copied: actual size copied.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                         uint64_t* size_copied, int32_t* status);
 
   //! Returns a GPU memory object from AMD memory object
   pal::Memory* getGpuMemory(amd::Memory* mem  //!< Pointer to AMD memory object
