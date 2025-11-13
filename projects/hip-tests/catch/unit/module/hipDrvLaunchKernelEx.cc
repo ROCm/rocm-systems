@@ -239,6 +239,7 @@ TEST_CASE("Unit_hipDrvLaunchKernelEx_Functional") {
  *  - HIP_VERSION >= 6.5
  */
 TEST_CASE("Unit_hipDrvLaunchKernelEx_With_Different_Kernels") {
+  CTX_CREATE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -300,6 +301,7 @@ TEST_CASE("Unit_hipDrvLaunchKernelEx_With_Different_Kernels") {
   }
 
   HIP_CHECK(hipModuleUnload(module));
+  CTX_DESTROY();
 }
 
 /**
@@ -317,6 +319,7 @@ TEST_CASE("Unit_hipDrvLaunchKernelEx_With_Different_Kernels") {
  *  - HIP_VERSION >= 6.5
  */
 TEST_CASE("Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs") {
+  CTX_CREATE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -371,6 +374,7 @@ TEST_CASE("Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs") {
   HIP_CHECK(hipFree(devMem1));
   HIP_CHECK(hipFree(devMem2));
   HIP_CHECK(hipModuleUnload(module));
+  CTX_DESTROY();
 }
 
 /**
@@ -391,6 +395,7 @@ TEST_CASE("Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs") {
  *  - HIP_VERSION >= 6.5
  */
 TEST_CASE("Unit_hipDrvLaunchKernelEx_With_MaxBlockDims") {
+  CTX_CREATE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -444,6 +449,7 @@ TEST_CASE("Unit_hipDrvLaunchKernelEx_With_MaxBlockDims") {
   }
 
   HIP_CHECK(hipModuleUnload(module));
+  CTX_DESTROY();
 }
 /**
  * End doxygen group ModuleTest.

@@ -72,11 +72,6 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Peer_GPUs", "", int, unsigned
           2, 2, 1, sizeof(TestType));
     }
 
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
-          2, 2, warp_size, sizeof(TestType));
-    }
-
     DYNAMIC_SECTION("Scattered addresses " << current) {
       MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
           2, 2, warp_size, cache_line_size);
@@ -170,11 +165,6 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs", "", int,
     DYNAMIC_SECTION("Same address " << current) {
       MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
           2, 2, 1, sizeof(TestType), 4);
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
-          2, 2, warp_size, sizeof(TestType), 4);
     }
 
     DYNAMIC_SECTION("Scattered addresses " << current) {

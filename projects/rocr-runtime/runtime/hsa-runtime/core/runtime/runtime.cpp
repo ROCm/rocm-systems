@@ -845,41 +845,18 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
                                             hsa_signal_value_t value,
                                             hsa_amd_signal_handler handler,
                                             void* arg) {
-  struct AsyncEventsInfo* asyncInfo = &asyncSignals_;
-  int priority = runtime_singleton_->flag().async_events_thread_priority();
+  bool exception = false;
 
-  if (signal.handle != 0) {
+  if (signal.handle) {
     // Indicate that this signal is in use.
     hsa_signal_handle(signal)->Retain();
 
     core::Signal* coreSignal = core::Signal::Convert(signal);
-    if (coreSignal->EopEvent() && coreSignal->EopEvent()->EventData.EventType != HSA_EVENTTYPE_SIGNAL) {
-      priority = os::OS_THREAD_PRIORITY_DEFAULT;
-      asyncInfo = &asyncExceptions_;
-    }
+    exception = !!(coreSignal->EopEvent() && coreSignal->EopEvent()->EventData.EventType != HSA_EVENTTYPE_SIGNAL);
   }
 
-
-  // Lazy initializer
-  if (asyncInfo->control.async_events_thread_ == NULL) {
-    // Create monitoring thread control signal
-    auto err = HSA::hsa_signal_create(0, 0, NULL, &asyncInfo->control.wake);
-    if (err != HSA_STATUS_SUCCESS) {
-      assert(false && "Asyncronous events control signal creation error.");
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
-    asyncInfo->events.PushBack(asyncInfo->control.wake, HSA_SIGNAL_CONDITION_NE,
-                          0, NULL, NULL);
-
-    // Start event monitoring thread
-    asyncInfo->control.exit = false;
-    asyncInfo->control.async_events_thread_ =
-        os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
-    if (asyncInfo->control.async_events_thread_ == NULL) {
-      assert(false && "Asyncronous events thread creation error.");
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
-  }
+  // Lazy initializer asyncExceptions_ and asyncSignals_ will be constructed on first dereference
+  struct AsyncEventsInfo* asyncInfo = exception ? (*asyncExceptions_).get() : (*asyncSignals_).get();
 
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
 
@@ -2329,6 +2306,32 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
   }
 }
 
+Runtime::AsyncEventsInfo::AsyncEventsInfo(bool exceptions_)
+  : control(this), events(), new_events(), monitor_exceptions(exceptions_) {
+
+  events.PushBack(control.wake, HSA_SIGNAL_CONDITION_NE, 0, NULL, NULL);
+}
+
+Runtime::AsyncEventsInfo::~AsyncEventsInfo() {
+  control.Shutdown();
+}
+
+Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
+  : exit(false) {
+
+  int priority = asyncInfo->monitor_exceptions ? os::OS_THREAD_PRIORITY_DEFAULT :
+                  runtime_singleton_->flag().async_events_thread_priority();
+
+  auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
+  if (err != HSA_STATUS_SUCCESS)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
+
+  thread_ = os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
+  if (!asyncInfo->control.thread_)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to initialize async handler thread");
+
+}
+
 Runtime::Runtime()
     : loader_(nullptr),
       region_gpu_(nullptr),
@@ -2346,8 +2349,6 @@ Runtime::Runtime()
   virtual_mem_api_supported_ = false;
   ipc_dmabuf_supported_ = false;
   xnack_enabled_ = false;
-  asyncSignals_.monitor_exceptions = false;
-  asyncExceptions_.monitor_exceptions = true;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
   ::_amdgpu_r_debug = {11,
@@ -2356,7 +2357,6 @@ Runtime::Runtime()
                                 &_loader_debug_state),
                      r_debug::RT_CONSISTENT,
                      0};
-
   log_file = stderr;
 }
 
@@ -2387,6 +2387,9 @@ hsa_status_t Runtime::Load() {
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
+
+  asyncSignals_.reset(new AsyncEventsInfo(false));
+  asyncExceptions_.reset(new AsyncEventsInfo(true));
 
   // Setup system clock frequency for the first time.
   if (sys_clock_freq_ == 0) {
@@ -2445,8 +2448,8 @@ void Runtime::Unload() {
       agent->ReleaseResources();
   }
 
-  asyncSignals_.control.Shutdown();
-  asyncExceptions_.control.Shutdown();
+  asyncSignals_.reset();
+  asyncExceptions_.reset();
 
   if (vm_fault_signal_ != nullptr) {
     vm_fault_signal_->DestroySignal();
@@ -2831,14 +2834,12 @@ void Runtime::CloseTools() {
 }
 
 void Runtime::AsyncEventsControl::Shutdown() {
-  if (async_events_thread_ != NULL) {
-    exit = true;
-    hsa_signal_handle(wake)->StoreRelaxed(1);
-    os::WaitForThread(async_events_thread_);
-    os::CloseThread(async_events_thread_);
-    async_events_thread_ = NULL;
-    HSA::hsa_signal_destroy(wake);
-  }
+  exit = true;
+  hsa_signal_handle(wake)->StoreRelaxed(1);
+  os::WaitForThread(thread_);
+  os::CloseThread(thread_);
+  thread_ = NULL;
+  HSA::hsa_signal_destroy(wake);
 }
 
 void Runtime::AsyncEvents::PushBack(hsa_signal_t signal,
