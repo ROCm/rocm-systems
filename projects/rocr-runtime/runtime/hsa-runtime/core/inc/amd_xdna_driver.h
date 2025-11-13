@@ -226,7 +226,7 @@ public:
   hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
                      size_t size) override;
   hsa_status_t GetShareableHandle(void *mem, size_t size,
-                                  core::ShareableHandle &handle) override;
+                                  core::ShareableHandle* handle) override;
   hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
 
   /// @brief Submits @p num_pkts packets in a command chain.

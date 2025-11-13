@@ -117,7 +117,7 @@ public:
                      size_t size) override;
   hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
   hsa_status_t GetShareableHandle(void *mem, size_t size,
-                                  core::ShareableHandle &handle) override;
+                                  core::ShareableHandle* handle) override;
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
   hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes, uint32_t* timeout,

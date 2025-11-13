@@ -234,11 +234,11 @@ public:
 
   /// @brief Get Shareable Memory Handle for physical memory
   ///
-  /// @param[in] mem virtual address associated with handle
+  /// @param[in] mem  physical memory handle
   /// @param[in] size size of memory allocated in bytes
   /// @param[in] handle handle of the memory object
   virtual hsa_status_t GetShareableHandle(void *mem, size_t size,
-                                  core::ShareableHandle &handle) = 0;
+                                  core::ShareableHandle* handle) = 0;
   /// @brief Releases the object associated with the handle.
   ///
   /// @param[in] handle handle of the object to release
