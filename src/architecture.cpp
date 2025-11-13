@@ -232,7 +232,7 @@ protected:
       return address () + m_descriptor.kernel_code_entry_byte_offset;
     }
 
-    bool is_at_kernel_entry (global_address_t pc) const override
+    bool is_at_kernel_entry (agent_address_t pc) const override
     {
       /* There are 2 possible entry points to a kernel, one at offset 0x0 and
          the other at offset 0x100 from the kernel_code_entry address.  The
