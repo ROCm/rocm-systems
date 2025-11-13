@@ -866,6 +866,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         soc_pstate_help = "The available soc pstate policy"
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
+        profile_help = "Display current and available power profiles"
         clk_options = self.helpers.get_clock_types()[0]
         clk_options.remove('PCIE')
         clk_option_str = ", ".join(clk_options) + ", ALL"
@@ -916,6 +917,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
                 static_parser.add_argument('-P', '--soc-pstate', action='store_true', required=False, help=soc_pstate_help)
                 static_parser.add_argument('-x', '--xgmi-plpd', action='store_true', required=False, help=xgmi_plpd_help)
+                static_parser.add_argument('--profile', action='store_true', required=False, help=profile_help)
 
             if self.helpers.is_linux() and not self.helpers.is_virtual_os():
                 static_parser.add_argument('-u', '--numa', action='store_true', required=False, help=numa_help)

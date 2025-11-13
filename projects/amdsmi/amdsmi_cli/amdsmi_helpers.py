@@ -890,6 +890,34 @@ class AMDSMIHelpers():
         return power_profiles_str
 
 
+    def get_power_profile_name_mapping(self):
+        """Returns dict mapping friendly names to enum values"""
+        return {
+            'CUSTOM': amdsmi_interface.AmdSmiPowerProfilePresetMasks.CUSTOM_MASK,
+            'VIDEO': amdsmi_interface.AmdSmiPowerProfilePresetMasks.VIDEO_MASK,
+            'POWER_SAVING': amdsmi_interface.AmdSmiPowerProfilePresetMasks.POWER_SAVING_MASK,
+            'COMPUTE': amdsmi_interface.AmdSmiPowerProfilePresetMasks.COMPUTE_MASK,
+            'VR': amdsmi_interface.AmdSmiPowerProfilePresetMasks.VR_MASK,
+            '3D_FULL_SCREEN': amdsmi_interface.AmdSmiPowerProfilePresetMasks.THREE_D_FULL_SCR_MASK,
+            'BOOTUP_DEFAULT': amdsmi_interface.AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT,
+        }
+
+
+    def get_profile_name_from_mask(self, mask):
+        """Convert mask value to friendly name"""
+        reverse_mapping = {v: k for k, v in self.get_power_profile_name_mapping().items()}
+        return reverse_mapping.get(mask, 'UNKNOWN')
+
+
+    def parse_available_profiles(self, available_profiles_bitfield):
+        """Extract list of profile names from bitfield"""
+        profiles = []
+        for name, mask in self.get_power_profile_name_mapping().items():
+            if available_profiles_bitfield & mask:
+                profiles.append(name)
+        return profiles
+
+
     def get_perf_det_levels(self):
         perf_det_level_str = [level.name for level in amdsmi_interface.AmdSmiDevPerfLevel]
         if 'UNKNOWN' in perf_det_level_str:
