@@ -240,15 +240,11 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Changing_Memcpy_Direc
 
   const auto set_dir = GENERATE(hipMemcpyHostToHost, hipMemcpyHostToDevice, hipMemcpyDeviceToHost,
                                 hipMemcpyDeviceToDevice, hipMemcpyDefault);
-  if (dir == set_dir) {
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
-    return;
+  if (dir != set_dir) {
+    HIP_CHECK_ERROR(
+        hipGraphExecMemcpyNodeSetParams1D(graph_exec, node, dst, src, sizeof(int), set_dir),
+        hipErrorInvalidValue);
   }
-
-  HIP_CHECK_ERROR(
-      hipGraphExecMemcpyNodeSetParams1D(graph_exec, node, dst, src, sizeof(int), set_dir),
-      hipErrorInvalidValue);
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec));
   HIP_CHECK(hipGraphDestroy(graph));

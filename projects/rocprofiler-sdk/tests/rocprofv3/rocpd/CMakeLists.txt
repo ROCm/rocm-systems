@@ -48,8 +48,18 @@ add_test(
         --runtime-trace --kernel-rename --output-config --pmc SQ_WAVES --
         $<TARGET_FILE:reproducible-dispatch-count> 500 2)
 
+# Can remove this test if MULTIPROC is re-enabled and rely on the multiproc databases for
+# packaging
+add_test(
+    NAME rocprofv3-test-rocpd-execute2
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o out2 --output-format rocpd
+        --runtime-trace --kernel-rename --pmc SQ_WAVES --
+        $<TARGET_FILE:reproducible-dispatch-count> 500 2)
+
 set_tests_properties(
-    rocprofv3-test-rocpd-execute
+    rocprofv3-test-rocpd-execute rocprofv3-test-rocpd-execute2
     PROPERTIES TIMEOUT
                120
                LABELS
@@ -140,7 +150,7 @@ set_tests_properties(
 
 #########################################################################################
 #
-# perfetto generate
+# Perfetto generation
 #
 #########################################################################################
 
@@ -194,7 +204,7 @@ set_tests_properties(
 
 #########################################################################################
 #
-# CSV generate
+# CSV generation
 #
 #########################################################################################
 
@@ -224,7 +234,7 @@ set_tests_properties(
 
 #########################################################################################
 #
-# Summary generate
+# Summary generation
 #
 #########################################################################################
 add_test(
@@ -311,3 +321,211 @@ set_tests_properties(
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_REQUIRED
                rocprofv3-test-rocpd-generation)
+
+#########################################################################################
+#
+# Package generation
+#
+#########################################################################################
+
+add_test(
+    NAME rocprofv3-test-rocpd-package-generation
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd package --consolidate -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out*.db)
+
+set_tests_properties(
+    rocprofv3-test-rocpd-package-generation
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;rocpd"
+               ENVIRONMENT
+               "${rocprofv3-rocpd-env}"
+               DEPENDS
+               "rocprofv3-test-rocpd-execute"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd)
+
+add_test(
+    NAME rocprofv3-test-rocpd-package-generation-multiproc
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd package --consolidate -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out*.db)
+
+set_tests_properties(
+    rocprofv3-test-rocpd-package-generation-multiproc
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;rocpd"
+               ENVIRONMENT
+               "${rocprofv3-rocpd-env}"
+               DEPENDS
+               "rocprofv3-test-rocpd-execute-multiproc"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${MULTIPROC_IS_DISABLED}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd-multiproc)
+
+#########################################################################################
+#
+# Query SQL string using package
+#
+#########################################################################################
+
+add_test(
+    NAME rocprofv3-test-rocpd-query-using-package
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd query -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package.rpdb --query
+        "SELECT id, type FROM rocpd_info_agent LIMIT 10;")
+
+set_tests_properties(
+    rocprofv3-test-rocpd-query-using-package
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;rocpd"
+               ENVIRONMENT
+               "${rocprofv3-rocpd-env}"
+               DEPENDS
+               "rocprofv3-test-rocpd-package-generation"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd)
+
+add_test(
+    NAME rocprofv3-test-rocpd-query-using-package-multiproc
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd query -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi.rpdb
+        --query "SELECT id, type FROM rocpd_info_agent LIMIT 10;")
+
+set_tests_properties(
+    rocprofv3-test-rocpd-query-using-package-multiproc
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;rocpd"
+               ENVIRONMENT
+               "${rocprofv3-rocpd-env}"
+               DEPENDS
+               "rocprofv3-test-rocpd-package-generation-multiproc"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${MULTIPROC_IS_DISABLED}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd-multiproc)
+
+#########################################################################################
+#
+# Merge database generation with package
+#
+#########################################################################################
+
+add_test(
+    NAME rocprofv3-test-rocpd-merge-generation-using-package
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd merge -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o merged_db -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package.rpdb)
+
+set_tests_properties(
+    rocprofv3-test-rocpd-merge-generation-using-package
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;rocpd"
+               ENVIRONMENT
+               "${rocprofv3-rocpd-env}"
+               DEPENDS
+               "rocprofv3-test-rocpd-package-generation"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd)
+
+add_test(
+    NAME rocprofv3-test-rocpd-merge-generation-using-package-multiproc
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd merge -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc -o merged_db_multi.db -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi.rpdb)
+
+set_tests_properties(
+    rocprofv3-test-rocpd-merge-generation-using-package-multiproc
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;rocpd"
+               ENVIRONMENT
+               "${rocprofv3-rocpd-env}"
+               DEPENDS
+               "rocprofv3-test-rocpd-package-generation-multiproc"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${MULTIPROC_IS_DISABLED}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd-multiproc)
+
+#########################################################################################
+#
+# Query SQL string using merged database
+#
+#########################################################################################
+
+add_test(
+    NAME rocprofv3-test-rocpd-query-using-mergedDB
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd query -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/merged_db.db --query
+        "SELECT id, type FROM rocpd_info_agent LIMIT 10;")
+
+set_tests_properties(
+    rocprofv3-test-rocpd-query-using-mergedDB
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;rocpd"
+               ENVIRONMENT
+               "${rocprofv3-rocpd-env}"
+               DEPENDS
+               "rocprofv3-test-rocpd-merge-generation-using-package"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd)
+
+add_test(
+    NAME rocprofv3-test-rocpd-query-using-mergedDB-multiproc
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd query -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/merged_db_multi.db --query
+        "SELECT id, type FROM rocpd_info_agent LIMIT 10;")
+
+set_tests_properties(
+    rocprofv3-test-rocpd-query-using-mergedDB-multiproc
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;rocpd"
+               ENVIRONMENT
+               "${rocprofv3-rocpd-env}"
+               DEPENDS
+               "rocprofv3-test-rocpd-merge-generation-using-package-multiproc"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${MULTIPROC_IS_DISABLED}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-rocpd-multiproc)
