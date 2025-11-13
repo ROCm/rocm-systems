@@ -581,9 +581,9 @@ class AMDSMICommands():
                     bus_info['pcie_levels'] = {}
                     for level in range(0, num_supported):
                         speed = str(self.helpers.convert_SI_unit(float(pcie_info['transfer_rate']['frequency'][level]), AMDSMIHelpers.SI_Unit.NANO)) + " GT/s"
-                        width = pcie_info['lanes'][level]
+                        width = str(pcie_info['lanes'][level])
                         level_values = (speed, width)
-                        bus_info['pcie_levels'].update({level: level_values})
+                        bus_info['pcie_levels'].update({str(level): level_values})
                 else:
                     bus_info['pcie_levels'] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
