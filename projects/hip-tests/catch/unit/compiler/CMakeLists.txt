@@ -6,6 +6,10 @@ set(TEST_SRC
 hip_add_exe_to_target(NAME CompilerTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+if (HIP_PLATFORM MATCHES "nvidia")
+	set_target_properties(CompilerTest PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(CompilerTest cuda)
+endif()
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
@@ -93,6 +97,12 @@ if(HIP_PLATFORM MATCHES "amd")
     add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnly)
     add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnlyCompressed)
   endif()
+if (HIP_PLATFORM MATCHES "nvidia")
+	set_target_properties(hipSquareGenericTarget PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(hipSquareGenericTarget cuda)
+	set_target_properties(hipSquareGenericTargetCompressed PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(hipSquareGenericTargetCompressed cuda)
+endif()
 
   # SWDEV-548807 skip building hipSpirvTest
   if(false)

@@ -57,9 +57,14 @@ if(Boost_FOUND)
                         TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC}
                         LINKER_LIBS ${LINKER_LIBS})
   target_include_directories(MathsTest PRIVATE ${Boost_INCLUDE_DIRS})
+if(HIP_PLATFORM MATCHES "nvidia")
+	set_target_properties(MathsTest PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(MathsTest cuda)
+  endif()
 else()
   message(STATUS "Boost not found. Dependent math tests not enabled.")
 endif()
+
 
 if(UNIX)
 file(GLOB NEGATIVE_TEST_SRC

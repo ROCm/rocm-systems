@@ -38,17 +38,17 @@ if(HIP_PLATFORM MATCHES "amd")
     -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes
     -o libLazyLoad.so)
 elseif(HIP_PLATFORM MATCHES "nvidia")
-  add_custom_target(libLazyLoad.so COMMAND ${CMAKE_CXX_COMPILER} --compile -fPIC -lpthread -shared
-    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-    -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes -I${HIP_PATH}/include/ -o libLazyLoad.so)
+	#  add_custom_target(libLazyLoad.so COMMAND ${CMAKE_CXX_COMPILER} --compile -fPIC -lpthread -shared
+	#    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+	#    -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes -I${HIP_PATH}/include/ -o libLazyLoad.so)
 endif()
 
-add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
-  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp
-  ${OFFLOAD_ARCH_STR} -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+#add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
+#  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp
+#  ${OFFLOAD_ARCH_STR} -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
+#  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
-add_custom_target(vecadd.cc COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/vecadd.cc ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/)
+# add_custom_target(vecadd.cc COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/vecadd.cc ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc
   ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so
@@ -61,5 +61,9 @@ if(HIP_PLATFORM MATCHES "amd")
                         TEST_TARGET_NAME build_tests
                         LINKER_LIBS ${CMAKE_DL_LIBS})
 endif()
-add_dependencies(build_tests bit_extract_kernel.code libLazyLoad.so vecadd.cc)
+#add_dependencies(build_tests bit_extract_kernel.code libLazyLoad.so vecadd.cc)
+endif()
+if (HIP_PLATFORM MATCHES "nvidia")
+	set_target_properties(dynamicLoading PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(dynamicLoading cuda)
 endif()

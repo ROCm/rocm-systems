@@ -34,6 +34,10 @@ endif()
 hip_add_exe_to_target(NAME ErrorHandlingTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+if (HIP_PLATFORM MATCHES "nvidia")
+	set_target_properties(ErrorHandlingTest PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(ErrorHandlingTest cuda)
+endif()
 
 add_dependencies(ErrorHandlingTest hipGetLastErrorEnv_Exe hipPeekAtLastErrorEnv_Exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetLastErrorEnv_Exe hipPeekAtLastErrorEnv_Exe)

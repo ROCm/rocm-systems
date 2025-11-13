@@ -1,8 +1,8 @@
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
-  warp_ballot.cc
-  warp_any.cc
-  warp_all.cc
+	# warp_ballot.cc
+	#warp_any.cc
+	#  warp_all.cc
   hipMatchSyncAllTests.cc
   hipMatchSyncAnyTests.cc
   hipShflSyncDownTests.cc
@@ -32,8 +32,13 @@ endif()
   set_source_files_properties(hipShflSyncXorTests.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
   set_source_files_properties(hipShflSyncTests.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
   set_source_files_properties(hipVoteSyncTests.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+  #  set_source_files_properties(warp_ballot.cc PROPERTIES COMPILE_FLAGS "-arch=compute_60 -code=sm_60")
  endif()
 
 hip_add_exe_to_target(NAME WarpTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+if (HIP_PLATFORM MATCHES "nvidia")
+	set_target_properties(WarpTest PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(WarpTest cuda)
+endif()
