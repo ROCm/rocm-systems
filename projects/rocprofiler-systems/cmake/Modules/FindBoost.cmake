@@ -258,8 +258,7 @@ function(_boost_get_existing_target component target_var)
         # handle pythonXY and numpyXY versioned components and also python X.Y, mpi_python
         # etc.
         list(
-            APPEND
-            names
+            APPEND names
             "${CMAKE_MATCH_1}${CMAKE_MATCH_2}" # python
             "${CMAKE_MATCH_1}${CMAKE_MATCH_2}${CMAKE_MATCH_3}" # pythonX
             "${CMAKE_MATCH_1}${CMAKE_MATCH_2}${CMAKE_MATCH_3}${CMAKE_MATCH_4}" # pythonXY
@@ -2128,8 +2127,7 @@ function(
             )
                 if(MSVC_TOOLSET_VERSION GREATER_EQUAL 14${v})
                     list(
-                        APPEND
-                        ${componentlibvar}
+                        APPEND ${componentlibvar}
                         ${basedir}/lib${_arch_suffix}-msvc-14.${v}
                     )
                 endif()
@@ -2137,8 +2135,7 @@ function(
         elseif(MSVC_TOOLSET_VERSION GREATER_EQUAL 80)
             math(EXPR _toolset_major_version "${MSVC_TOOLSET_VERSION} / 10")
             list(
-                APPEND
-                ${componentlibvar}
+                APPEND ${componentlibvar}
                 ${basedir}/lib${_arch_suffix}-msvc-${_toolset_major_version}.0
             )
         endif()
@@ -2399,8 +2396,7 @@ if(NOT Boost_INCLUDE_DIR)
         list(APPEND _boost_INCLUDE_SEARCH_DIRS ${BOOST_ROOT}/include ${BOOST_ROOT})
     elseif(_ENV_BOOST_ROOT)
         list(
-            APPEND
-            _boost_INCLUDE_SEARCH_DIRS
+            APPEND _boost_INCLUDE_SEARCH_DIRS
             ${_ENV_BOOST_ROOT}/include
             ${_ENV_BOOST_ROOT}
         )
@@ -2408,8 +2404,7 @@ if(NOT Boost_INCLUDE_DIR)
 
     if(Boost_NO_SYSTEM_PATHS)
         list(
-            APPEND
-            _boost_INCLUDE_SEARCH_DIRS
+            APPEND _boost_INCLUDE_SEARCH_DIRS
             NO_CMAKE_SYSTEM_PATH
             NO_SYSTEM_ENVIRONMENT_PATH
         )
@@ -2421,8 +2416,7 @@ if(NOT Boost_INCLUDE_DIR)
             endforeach()
         endif()
         list(
-            APPEND
-            _boost_INCLUDE_SEARCH_DIRS
+            APPEND _boost_INCLUDE_SEARCH_DIRS
             PATHS
             C:/boost/include
             C:/boost
@@ -2448,8 +2442,7 @@ if(NOT Boost_INCLUDE_DIR)
         endif()
 
         list(
-            APPEND
-            _boost_PATH_SUFFIXES
+            APPEND _boost_PATH_SUFFIXES
             "boost-${_boost_BOOSTIFIED_VERSION}"
             "boost_${_boost_BOOSTIFIED_VERSION}"
             "boost/boost-${_boost_BOOSTIFIED_VERSION}"
@@ -2486,8 +2479,7 @@ if(Boost_INCLUDE_DIR)
     set(Boost_VERSION_MACRO 0)
     set(Boost_LIB_VERSION "")
     file(
-        STRINGS
-        "${Boost_INCLUDE_DIR}/boost/version.hpp"
+        STRINGS "${Boost_INCLUDE_DIR}/boost/version.hpp"
         _boost_VERSION_HPP_CONTENTS
         REGEX "#define BOOST_(LIB_)?VERSION "
     )
@@ -2742,8 +2734,7 @@ foreach(c DEBUG RELEASE)
 
         if(BOOST_ROOT)
             list(
-                APPEND
-                _boost_LIBRARY_SEARCH_DIRS_${c}
+                APPEND _boost_LIBRARY_SEARCH_DIRS_${c}
                 ${BOOST_ROOT}/lib
                 ${BOOST_ROOT}/stage/lib
             )
@@ -2752,8 +2743,7 @@ foreach(c DEBUG RELEASE)
             )
         elseif(_ENV_BOOST_ROOT)
             list(
-                APPEND
-                _boost_LIBRARY_SEARCH_DIRS_${c}
+                APPEND _boost_LIBRARY_SEARCH_DIRS_${c}
                 ${_ENV_BOOST_ROOT}/lib
                 ${_ENV_BOOST_ROOT}/stage/lib
             )
@@ -2763,8 +2753,7 @@ foreach(c DEBUG RELEASE)
         endif()
 
         list(
-            APPEND
-            _boost_LIBRARY_SEARCH_DIRS_${c}
+            APPEND _boost_LIBRARY_SEARCH_DIRS_${c}
             ${Boost_INCLUDE_DIR}/lib
             ${Boost_INCLUDE_DIR}/../lib
             ${Boost_INCLUDE_DIR}/stage/lib
@@ -2777,8 +2766,7 @@ foreach(c DEBUG RELEASE)
         )
         if(Boost_NO_SYSTEM_PATHS)
             list(
-                APPEND
-                _boost_LIBRARY_SEARCH_DIRS_${c}
+                APPEND _boost_LIBRARY_SEARCH_DIRS_${c}
                 NO_CMAKE_SYSTEM_PATH
                 NO_SYSTEM_ENVIRONMENT_PATH
             )
@@ -2793,8 +2781,7 @@ foreach(c DEBUG RELEASE)
                 _boost_LIBRARY_SEARCH_DIRS_${c} "C:/boost"
             )
             list(
-                APPEND
-                _boost_LIBRARY_SEARCH_DIRS_${c}
+                APPEND _boost_LIBRARY_SEARCH_DIRS_${c}
                 PATHS
                 C:/boost/lib
                 C:/boost
@@ -2920,39 +2907,33 @@ foreach(COMPONENT ${Boost_FIND_COMPONENTS})
     if(COMPONENT_PYTHON_VERSION_MINOR)
         # Boost >= 1.67
         list(
-            APPEND
-            _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
+            APPEND _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
             "${COMPONENT_UNVERSIONED}${COMPONENT_PYTHON_VERSION_MAJOR}${COMPONENT_PYTHON_VERSION_MINOR}"
         )
         # Debian/Ubuntu (Some versions omit the 2 and/or 3 from the suffix)
         list(
-            APPEND
-            _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
+            APPEND _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
             "${COMPONENT_UNVERSIONED}${COMPONENT_PYTHON_VERSION_MAJOR}-py${COMPONENT_PYTHON_VERSION_MAJOR}${COMPONENT_PYTHON_VERSION_MINOR}"
         )
         list(
-            APPEND
-            _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
+            APPEND _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
             "${COMPONENT_UNVERSIONED}-py${COMPONENT_PYTHON_VERSION_MAJOR}${COMPONENT_PYTHON_VERSION_MINOR}"
         )
         # Gentoo
         list(
-            APPEND
-            _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
+            APPEND _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
             "${COMPONENT_UNVERSIONED}-${COMPONENT_PYTHON_VERSION_MAJOR}.${COMPONENT_PYTHON_VERSION_MINOR}"
         )
         # RPMs
         list(
-            APPEND
-            _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
+            APPEND _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
             "${COMPONENT_UNVERSIONED}-${COMPONENT_PYTHON_VERSION_MAJOR}${COMPONENT_PYTHON_VERSION_MINOR}"
         )
     endif()
     if(COMPONENT_PYTHON_VERSION_MAJOR AND NOT COMPONENT_PYTHON_VERSION_MINOR)
         # Boost < 1.67
         list(
-            APPEND
-            _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
+            APPEND _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME
             "${COMPONENT_UNVERSIONED}${COMPONENT_PYTHON_VERSION_MAJOR}"
         )
     endif()
@@ -3004,16 +2985,14 @@ foreach(COMPONENT ${Boost_FIND_COMPONENTS})
     foreach(component IN LISTS _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME COMPONENT)
         foreach(compiler IN LISTS _boost_COMPILER)
             list(
-                APPEND
-                _boost_RELEASE_NAMES
+                APPEND _boost_RELEASE_NAMES
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_RELEASE_ABI_TAG}${_boost_ARCHITECTURE_TAG}-${Boost_LIB_VERSION}
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_RELEASE_ABI_TAG}${_boost_ARCHITECTURE_TAG}
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_RELEASE_ABI_TAG}
             )
         endforeach()
         list(
-            APPEND
-            _boost_RELEASE_NAMES
+            APPEND _boost_RELEASE_NAMES
             ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_RELEASE_ABI_TAG}${_boost_ARCHITECTURE_TAG}-${Boost_LIB_VERSION}
             ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_RELEASE_ABI_TAG}${_boost_ARCHITECTURE_TAG}
             ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_RELEASE_ABI_TAG}
@@ -3024,16 +3003,14 @@ foreach(COMPONENT ${Boost_FIND_COMPONENTS})
             set(_boost_RELEASE_STATIC_ABI_TAG "-s${_boost_RELEASE_ABI_TAG}")
             foreach(compiler IN LISTS _boost_COMPILER)
                 list(
-                    APPEND
-                    _boost_RELEASE_NAMES
+                    APPEND _boost_RELEASE_NAMES
                     ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_RELEASE_STATIC_ABI_TAG}${_boost_ARCHITECTURE_TAG}-${Boost_LIB_VERSION}
                     ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_RELEASE_STATIC_ABI_TAG}${_boost_ARCHITECTURE_TAG}
                     ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_RELEASE_STATIC_ABI_TAG}
                 )
             endforeach()
             list(
-                APPEND
-                _boost_RELEASE_NAMES
+                APPEND _boost_RELEASE_NAMES
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_RELEASE_STATIC_ABI_TAG}${_boost_ARCHITECTURE_TAG}-${Boost_LIB_VERSION}
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_RELEASE_STATIC_ABI_TAG}${_boost_ARCHITECTURE_TAG}
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_RELEASE_STATIC_ABI_TAG}
@@ -3084,16 +3061,14 @@ foreach(COMPONENT ${Boost_FIND_COMPONENTS})
     foreach(component IN LISTS _Boost_FIND_LIBRARY_HINTS_FOR_COMPONENT_NAME COMPONENT)
         foreach(compiler IN LISTS _boost_COMPILER)
             list(
-                APPEND
-                _boost_DEBUG_NAMES
+                APPEND _boost_DEBUG_NAMES
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_DEBUG_ABI_TAG}${_boost_ARCHITECTURE_TAG}-${Boost_LIB_VERSION}
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_DEBUG_ABI_TAG}${_boost_ARCHITECTURE_TAG}
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_DEBUG_ABI_TAG}
             )
         endforeach()
         list(
-            APPEND
-            _boost_DEBUG_NAMES
+            APPEND _boost_DEBUG_NAMES
             ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_DEBUG_ABI_TAG}${_boost_ARCHITECTURE_TAG}-${Boost_LIB_VERSION}
             ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_DEBUG_ABI_TAG}${_boost_ARCHITECTURE_TAG}
             ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_DEBUG_ABI_TAG}
@@ -3104,16 +3079,14 @@ foreach(COMPONENT ${Boost_FIND_COMPONENTS})
             set(_boost_DEBUG_STATIC_ABI_TAG "-s${_boost_DEBUG_ABI_TAG}")
             foreach(compiler IN LISTS _boost_COMPILER)
                 list(
-                    APPEND
-                    _boost_DEBUG_NAMES
+                    APPEND _boost_DEBUG_NAMES
                     ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_DEBUG_STATIC_ABI_TAG}${_boost_ARCHITECTURE_TAG}-${Boost_LIB_VERSION}
                     ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_DEBUG_STATIC_ABI_TAG}${_boost_ARCHITECTURE_TAG}
                     ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${compiler}${_boost_MULTITHREADED}${_boost_DEBUG_STATIC_ABI_TAG}
                 )
             endforeach()
             list(
-                APPEND
-                _boost_DEBUG_NAMES
+                APPEND _boost_DEBUG_NAMES
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_DEBUG_STATIC_ABI_TAG}${_boost_ARCHITECTURE_TAG}-${Boost_LIB_VERSION}
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_DEBUG_STATIC_ABI_TAG}${_boost_ARCHITECTURE_TAG}
                 ${Boost_LIB_PREFIX}${Boost_NAMESPACE}_${component}${_boost_MULTITHREADED}${_boost_DEBUG_STATIC_ABI_TAG}
@@ -3334,15 +3307,13 @@ if(Boost_FOUND)
                     unset(_Boost_${UPPERCOMPONENT}_TARGET_DEPENDENCIES)
                     foreach(dep ${_Boost_${UPPERCOMPONENT}_DEPENDENCIES})
                         list(
-                            APPEND
-                            _Boost_${UPPERCOMPONENT}_TARGET_DEPENDENCIES
+                            APPEND _Boost_${UPPERCOMPONENT}_TARGET_DEPENDENCIES
                             Boost::${dep}
                         )
                     endforeach()
                     if(COMPONENT STREQUAL "thread")
                         list(
-                            APPEND
-                            _Boost_${UPPERCOMPONENT}_TARGET_DEPENDENCIES
+                            APPEND _Boost_${UPPERCOMPONENT}_TARGET_DEPENDENCIES
                             Threads::Threads
                         )
                     endif()

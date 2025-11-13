@@ -10,12 +10,6 @@
         "Unit_atomicExch_system_Positive_Host_And_GPU - float",
         "Unit_hipModuleUnload_Negative_Double_Unload",
         "=== Below tests are failing PSDB ===",
-        "Unit_hipModuleLoad_Positive_Basic",
-        "Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module",
-        "Unit_hipModuleLoadData_Positive_Basic",
-        "Unit_hipModuleLoadData_Negative_Parameters",
-        "Unit_hipModuleLoadDataEx_Positive_Basic",
-        "Unit_hipModuleLoadDataEx_Negative_Parameters",
         "Unit_Assert_Positive_Basic_KernelFail",
         "Unit_hipMemMapArrayAsync_Positive_Basic",
     ]

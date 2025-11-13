@@ -53,22 +53,22 @@
 #endif
 
 /**
- * HSA image object size in bytes (see HSAIL spec)
+ * HSA image object size in bytes (see HSA spec)
  */
 #define HSA_IMAGE_OBJECT_SIZE 48
 
 /**
- * HSA image object alignment in bytes (see HSAIL spec)
+ * HSA image object alignment in bytes (see HSA spec)
  */
 #define HSA_IMAGE_OBJECT_ALIGNMENT 16
 
 /**
- * HSA sampler object size in bytes (see HSAIL spec)
+ * HSA sampler object size in bytes (see HSA spec)
  */
 #define HSA_SAMPLER_OBJECT_SIZE 32
 
 /**
- * HSA sampler object alignment in bytes (see HSAIL spec)
+ * HSA sampler object alignment in bytes (see HSA spec)
  */
 #define HSA_SAMPLER_OBJECT_ALIGNMENT 16
 
@@ -232,9 +232,6 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
 
   auto gpu = ts->gpu();
   gpu->QueuedAsyncHandlers()--;
-
-  // Reset last used SDMA engine mask
-  gpu->setLastUsedSdmaEngine(0);
 
   bool isBlocking = ts->GetBlocking();
 
@@ -713,7 +710,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
   }
 
   size_t count = kernelParams.getNumberOfSvmPtr();
-  size_t execInfoOffset = kernelParams.getExecInfoOffset();
+  size_t execInfoOffset = kernelParams.getTotalSize();
   bool sync = true;
 
   amd::Memory* memory = nullptr;
@@ -1612,10 +1609,9 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_),
       cuMask_(cuMask),
       priority_(priority),
-      copy_command_type_(0),
-      fence_state_(Device::CacheState::kCacheStateInvalid),
-      fence_dirty_(false),
-      lastUsedSdmaEngineMask_(0) {
+     copy_command_type_(0),
+     fence_state_(Device::CacheState::kCacheStateInvalid),
+     fence_dirty_(false) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
   printfdbg_ = nullptr;
@@ -1801,7 +1797,7 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
   }
   hsa_agent_t agent = gpu_.dev().getBackendDevice();
   for (auto& it : pool_signal_) {
-    if (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 1, &agent, &it)) {
+    if (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 1, &agent, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &it)) {
       return false;
     }
   }
@@ -1810,8 +1806,7 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
 
 // ================================================================================================
 address VirtualGPU::ManagedBuffer::Acquire(uint32_t size) {
-  auto alignment = amd::alignUp(256u, gpu_.dev().info().globalMemCacheLineSize_);
-  return Acquire(size, alignment);
+  return Acquire(size, gpu_.dev().info().globalMemCacheLineSize_);
 }
 
 // ================================================================================================
@@ -3912,6 +3907,9 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     if (vcmd.CpuWaitRequested()) {
       // It should be safe to call flush directly if there are not pending dispatches without
       // HSA signal callback
+      if (gpu_queue_ == nullptr) {
+        gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
+      }
       flush(vcmd.GetBatchHead());
     } else {
       profilingBegin(vcmd);

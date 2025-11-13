@@ -270,4 +270,30 @@ hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
   HIP_RETURN(ret);
 }
 
+hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                 size_t* paramSize ) {
+  HIP_INIT_API(hipKernelGetParamInfo, kernel, paramIndex, paramOffset, paramSize);
+  if (kernel == nullptr || paramOffset == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  const auto* const d_function = hip::DeviceFunc::asFunction(reinterpret_cast<hipFunction_t>(kernel));
+  if (d_function == nullptr) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+  const auto* const d_kernel = d_function->kernel();
+  if (d_kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+  const amd::KernelSignature& signature = d_kernel->signature();
+  if (paramIndex >= signature.numParameters()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  const amd::KernelParameterDescriptor& desc = signature.at(paramIndex);
+  *paramOffset = desc.offset_;
+  if (paramSize != nullptr) {
+    *paramSize = desc.size_;
+  }
+  HIP_RETURN(hipSuccess);
+}
+
 }  // namespace hip

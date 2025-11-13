@@ -59,16 +59,6 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@v1.3.0
-      with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: true
-
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-systems/
@@ -225,16 +215,6 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@v1.3.0
-      with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: true
-
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-systems/
@@ -340,6 +320,19 @@ jobs:
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 
+    - name: Check for Leftover Buffered Files
+      timeout-minutes: 5
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        if find /tmp -maxdepth 1 -name 'buffered*' -print -quit | grep -q .; then
+          echo "Error: Found leftover buffered storage files in /tmp:"
+          ls -lh /tmp/buffered*
+          exit 1
+        else
+          echo "✓ No buffered storage files found in /tmp"
+        fi
+
     - name: Test Clean Up
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
@@ -417,16 +410,6 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@v1.3.0
-      with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: true
-
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-systems/

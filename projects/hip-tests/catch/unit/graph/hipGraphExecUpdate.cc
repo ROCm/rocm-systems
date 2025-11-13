@@ -119,6 +119,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_TypeChange") {
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphDestroy(graph2));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HipTest::freeArrays<int>(A_d, nullptr, nullptr, A_h, nullptr, nullptr, false);
 }
 
 /**
