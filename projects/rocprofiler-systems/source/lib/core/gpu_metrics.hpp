@@ -63,6 +63,26 @@ struct gpu_metrics_settings_t
     bool pcie          = true;
 };
 
+/// GPU metrics capabilities structure with bitfield flags
+struct gpu_metrics_capabilities_t
+{
+    union
+    {
+        struct
+        {
+            uint8_t vcn_is_device_level_only  : 1;  ///< VCN is device-level (vs per-XCP)
+            uint8_t jpeg_is_device_level_only : 1;  ///< JPEG is device-level (vs per-XCP)
+            uint8_t reserved                  : 6;  ///< Reserved for future use
+        } flags;
+        uint8_t value;  ///< Raw byte value for easy serialization
+    };
+
+    /// Default constructor - initializes all flags to zero
+    gpu_metrics_capabilities_t()
+    : value(0)
+    {}
+};
+
 /**
  * @brief Serializes GPU metrics into a compact binary format
  *
@@ -93,15 +113,14 @@ struct gpu_metrics_settings_t
  *          bandwidth_acc (uint64), bandwidth_inst (uint64)
  *
  * @param metrics GPU metrics to serialize
- * @param vcn_is_device_level_only Whether VCN activity is device-level (vs per-XCP)
- * @param jpeg_is_device_level_only Whether JPEG activity is device-level (vs per-XCP)
+ * @param capabilities Capability flags (vcn/jpeg device-level status)
  * @param settings Controls which metrics to include in serialization
  * @return Binary serialized data
  */
 std::vector<uint8_t>
-serialize_gpu_metrics(const gpu_metrics_t& metrics, bool vcn_is_device_level_only,
-                      bool                          jpeg_is_device_level_only,
-                      const gpu_metrics_settings_t& settings);
+serialize_gpu_metrics(const gpu_metrics_t&              metrics,
+                      const gpu_metrics_capabilities_t& capabilities,
+                      const gpu_metrics_settings_t&     settings);
 
 /**
  * @brief Deserializes GPU metrics from binary format
@@ -112,15 +131,14 @@ serialize_gpu_metrics(const gpu_metrics_t& metrics, bool vcn_is_device_level_onl
  * @param is_jpeg_enabled Whether to deserialize JPEG data
  * @param is_xgmi_enabled Whether to deserialize XGMI data
  * @param is_pcie_enabled Whether to deserialize PCIe data
- * @param vcn_is_device_level_only Output: whether VCN activity is device-level
- * @param jpeg_is_device_level_only Output: whether JPEG activity is device-level
+ * @param capabilities Output: capability flags (vcn/jpeg device-level status)
  * @throws std::runtime_error if serialized data is invalid
  */
 void
 deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
                         gpu_metrics_t& result, bool is_vcn_enabled, bool is_jpeg_enabled,
                         bool is_xgmi_enabled, bool is_pcie_enabled,
-                        bool& vcn_is_device_level_only, bool& jpeg_is_device_level_only);
+                        gpu_metrics_capabilities_t& capabilities);
 
 }  // namespace gpu
 }  // namespace rocprofsys

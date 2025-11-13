@@ -127,9 +127,9 @@ deserialize_uint64_vector(const std::vector<uint8_t>& data, size_t& offset, uint
 }  // namespace
 
 std::vector<uint8_t>
-serialize_gpu_metrics(const gpu_metrics_t& metrics, bool vcn_is_device_level_only,
-                      bool                          jpeg_is_device_level_only,
-                      const gpu_metrics_settings_t& settings)
+serialize_gpu_metrics(const gpu_metrics_t&              metrics,
+                      const gpu_metrics_capabilities_t& capabilities,
+                      const gpu_metrics_settings_t&     settings)
 {
     // Flatten XCP data if needed and pre-calculate counts
     // Example:
@@ -144,7 +144,7 @@ serialize_gpu_metrics(const gpu_metrics_t& metrics, bool vcn_is_device_level_onl
     std::vector<uint8_t>  vcn_xcp_sizes;   // Size of each XCP's VCN data
     std::vector<uint8_t>  jpeg_xcp_sizes;  // Size of each XCP's JPEG data
 
-    if(vcn_is_device_level_only)
+    if(capabilities.flags.vcn_is_device_level_only)
     {
         vcn_data_flat = metrics.vcn_activity;
     }
@@ -158,7 +158,7 @@ serialize_gpu_metrics(const gpu_metrics_t& metrics, bool vcn_is_device_level_onl
         }
     }
 
-    if(jpeg_is_device_level_only)
+    if(capabilities.flags.jpeg_is_device_level_only)
     {
         jpeg_data_flat = metrics.jpeg_activity;
     }
@@ -188,10 +188,7 @@ serialize_gpu_metrics(const gpu_metrics_t& metrics, bool vcn_is_device_level_onl
     //      - bit 1 (0x02): jpeg_is_device_level_only (device-level vs per-XCP)
     //      - bits 2-7: Reserved for future use
     //
-    uint8_t capabilities = 0;
-    if(vcn_is_device_level_only) capabilities |= 0x01;
-    if(jpeg_is_device_level_only) capabilities |= 0x02;
-    serialize_uint8(result, capabilities);
+    serialize_uint8(result, capabilities.value);
 
     // Serialize counts
     serialize_uint8(result, vcn_count);
@@ -235,7 +232,7 @@ void
 deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
                         gpu_metrics_t& result, bool is_vcn_enabled, bool is_jpeg_enabled,
                         bool is_xgmi_enabled, bool is_pcie_enabled,
-                        bool& vcn_is_device_level_only, bool& jpeg_is_device_level_only)
+                        gpu_metrics_capabilities_t& capabilities)
 {
     if(serialized_data.empty())
     {
@@ -244,11 +241,9 @@ deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
     size_t offset = 0;
 
     // Deserialize capability flags (1 byte)
-    // Extract boolean flags from packed byte using bitwise AND operations.
+    // Extract capability flags from packed byte.
     // See serialize_gpu_metrics() for flag definitions.
-    uint8_t flags             = deserialize_uint8(serialized_data, offset);
-    vcn_is_device_level_only  = (flags & 0x01) != 0;  // bit 0
-    jpeg_is_device_level_only = (flags & 0x02) != 0;  // bit 1
+    capabilities.value = deserialize_uint8(serialized_data, offset);
 
     // Deserialize counts
     uint8_t vcn_count        = deserialize_uint8(serialized_data, offset);
@@ -270,7 +265,7 @@ deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
     if(is_vcn_enabled && vcn_count > 0)
     {
         auto flat_data = deserialize_uint16_vector(serialized_data, offset, vcn_count);
-        if(vcn_is_device_level_only)
+        if(capabilities.flags.vcn_is_device_level_only)
         {
             result.vcn_activity = flat_data;
         }
@@ -293,7 +288,7 @@ deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
     if(is_jpeg_enabled && jpeg_count > 0)
     {
         auto flat_data = deserialize_uint16_vector(serialized_data, offset, jpeg_count);
-        if(jpeg_is_device_level_only)
+        if(capabilities.flags.jpeg_is_device_level_only)
         {
             result.jpeg_activity = flat_data;
         }

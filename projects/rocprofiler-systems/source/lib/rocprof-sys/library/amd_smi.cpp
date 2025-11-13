@@ -449,7 +449,7 @@ get_state()
 
 std::vector<uint8_t>
 serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
-                      bool vcn_is_device_level_only, bool jpeg_is_device_level_only)
+                      const gpu::gpu_metrics_capabilities_t& capabilities)
 {
     // Get settings for this device
     auto settings = get_settings(device_id);
@@ -462,8 +462,7 @@ serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
     gpu_settings.pcie          = settings.pcie;
 
     // Use the shared serialization function
-    return gpu::serialize_gpu_metrics(metrics, vcn_is_device_level_only,
-                                      jpeg_is_device_level_only, gpu_settings);
+    return gpu::serialize_gpu_metrics(metrics, capabilities, gpu_settings);
 }
 
 size_t
@@ -575,15 +574,16 @@ data::sample(uint32_t _device_id)
     // Process GPU metrics if needed
     if(_gpu_metrics_needed || _basic_metrics_enabled)
     {
-        gpu_metrics_t metrics;
-        bool          has_data                  = false;
-        bool          vcn_is_device_level_only  = false;
-        bool          jpeg_is_device_level_only = false;
+        gpu_metrics_t                   metrics;
+        bool                            has_data = false;
+        gpu::gpu_metrics_capabilities_t capabilities;
 
         if(_gpu_metrics_needed)
         {
-            vcn_is_device_level_only  = gpu::vcn_is_device_level_only(m_dev_id);
-            jpeg_is_device_level_only = gpu::jpeg_is_device_level_only(m_dev_id);
+            capabilities.flags.vcn_is_device_level_only =
+                gpu::vcn_is_device_level_only(m_dev_id);
+            capabilities.flags.jpeg_is_device_level_only =
+                gpu::jpeg_is_device_level_only(m_dev_id);
 
             // Helper lambda to filter max uint values (unsupported) - returns 0 if max,
             // otherwise the value
@@ -602,7 +602,7 @@ data::sample(uint32_t _device_id)
 
             if(get_settings(m_dev_id).vcn_activity)
             {
-                if(vcn_is_device_level_only)
+                if(capabilities.flags.vcn_is_device_level_only)
                 {
                     fill_gpu_metrics(metrics.vcn_activity, _gpu_metrics.vcn_activity,
                                      UINT16_MAX);
@@ -625,7 +625,7 @@ data::sample(uint32_t _device_id)
 
             if(get_settings(m_dev_id).jpeg_activity)
             {
-                if(jpeg_is_device_level_only)
+                if(capabilities.flags.jpeg_is_device_level_only)
                 {
                     fill_gpu_metrics(metrics.jpeg_activity, _gpu_metrics.jpeg_activity,
                                      UINT16_MAX);
@@ -698,8 +698,7 @@ data::sample(uint32_t _device_id)
                 _device_id, _timestamp, m_busy_perc.gfx_activity,
                 m_busy_perc.umc_activity, m_busy_perc.mm_activity,
                 m_power.current_socket_power, m_temp, m_mem_usage,
-                serialize_gpu_metrics(m_dev_id, metrics, vcn_is_device_level_only,
-                                      jpeg_is_device_level_only));
+                serialize_gpu_metrics(m_dev_id, metrics, capabilities));
 
             if(has_data) m_gpu_metrics.push_back(metrics);
         }

@@ -53,17 +53,18 @@ using namespace TransferBench;
     } while(0)
 
 // Default configuration values
-size_t const DEFAULT_BYTES_PER_TRANSFER = (1 << 28);
+// Reduced to 16KB (1 << 14) for minimal data capture during profiling
+size_t const DEFAULT_BYTES_PER_TRANSFER = (1 << 14);
 char const   ExeTypeName[5][4]          = { "CPU", "GPU", "DMA", "NIC", "NIC" };
 
 // Simplified EnvVars class for standalone use
 class EnvVars
 {
 public:
-    // Environment variables (using defaults appropriate for AllToAll)
-    int                           numIterations    = 10;
+    // Environment variables (using minimal defaults for profiling)
+    int                           numIterations    = 1;
     int                           numSubIterations = 1;
-    int                           numWarmups       = 3;
+    int                           numWarmups       = 0;
     int                           showIterations   = 0;
     int                           useInteractive   = 0;
     int                           alwaysValidate   = 0;
@@ -134,9 +135,9 @@ public:
         hideEnv          = GetEnvVar("HIDE_ENV", 0);
         minNumVarSubExec = GetEnvVar("MIN_VAR_SUBEXEC", 1);
         maxNumVarSubExec = GetEnvVar("MAX_VAR_SUBEXEC", 0);
-        numIterations    = GetEnvVar("NUM_ITERATIONS", 10);
+        numIterations    = GetEnvVar("NUM_ITERATIONS", 1);
         numSubIterations = GetEnvVar("NUM_SUBITERATIONS", 1);
-        numWarmups       = GetEnvVar("NUM_WARMUPS", 3);
+        numWarmups       = GetEnvVar("NUM_WARMUPS", 0);
         outputToCsv      = GetEnvVar("OUTPUT_TO_CSV", 0);
         samplingFactor   = GetEnvVar("SAMPLING_FACTOR", 1);
         showIterations   = GetEnvVar("SHOW_ITERATIONS", 0);
@@ -229,9 +230,9 @@ public:
     {
         printf("Environment variables:\n");
         printf("======================\n");
-        printf(" NUM_ITERATIONS    - # of timed iterations per test (default=10)\n");
+        printf(" NUM_ITERATIONS    - # of timed iterations per test (default=1)\n");
         printf(
-            " NUM_WARMUPS       - # of untimed warmup iterations per test (default=3)\n");
+            " NUM_WARMUPS       - # of untimed warmup iterations per test (default=0)\n");
         printf(" USE_SINGLE_STREAM - Use a single stream per GPU GFX executor "
                "(default=1)\n");
         printf(" GFX_UNROLL        - Unroll factor for GFX kernel (default=4)\n");
@@ -245,9 +246,9 @@ public:
         printf(" A2A_LOCAL         - Include local transfers (default=0)\n");
         printf(" A2A_MODE          - Transfer mode: 0=Copy, 1=Read-Only, 2=Write-Only "
                "(default=0)\n");
-        printf(" NUM_GPU_DEVICES   - Number of GPUs to use (default=all detected)\n");
+        printf(" NUM_GPU_DEVICES   - Number of GPUs to use (default=4 detected)\n");
         printf(
-            " NUM_SUB_EXEC      - Number of subexecutors/CUs per Transfer (default=8)\n");
+            " NUM_SUB_EXEC      - Number of subexecutors/CUs per Transfer (default=1)\n");
         printf(" USE_DMA_EXEC      - Use DMA executor instead of GFX (default=0)\n");
         printf(" USE_FINE_GRAIN    - Use fine-grained memory (default=1)\n");
         printf(" USE_REMOTE_READ   - Use DST as executor instead of SRC (default=0)\n");
@@ -495,11 +496,11 @@ AllToAllPreset(EnvVars& ev, size_t const numBytesPerTransfer,
     int numDetectedGpus = TransferBench::GetNumExecutors(EXE_GPU_GFX);
 
     // Collect env vars for this preset
-    int a2aDirect     = EnvVars::GetEnvVar("A2A_DIRECT", 1);
-    int a2aLocal      = EnvVars::GetEnvVar("A2A_LOCAL", 0);
-    int numGpus       = EnvVars::GetEnvVar("NUM_GPU_DEVICES", numDetectedGpus);
+    int a2aDirect = EnvVars::GetEnvVar("A2A_DIRECT", 1);
+    int a2aLocal  = EnvVars::GetEnvVar("A2A_LOCAL", 0);
+    int numGpus   = EnvVars::GetEnvVar("NUM_GPU_DEVICES", std::min(4, numDetectedGpus));
     int numQueuePairs = EnvVars::GetEnvVar("NUM_QUEUE_PAIRS", 0);
-    int numSubExecs   = EnvVars::GetEnvVar("NUM_SUB_EXEC", 8);
+    int numSubExecs   = EnvVars::GetEnvVar("NUM_SUB_EXEC", 1);
     int useDmaExec    = EnvVars::GetEnvVar("USE_DMA_EXEC", 0);
     int useFineGrain  = EnvVars::GetEnvVar("USE_FINE_GRAIN", 1);
     int useRemoteRead = EnvVars::GetEnvVar("USE_REMOTE_READ", 0);

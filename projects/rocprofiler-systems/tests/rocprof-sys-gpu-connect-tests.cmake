@@ -27,10 +27,12 @@
 # -------------------------------------------------------------------------------------- #
 
 set(_gpu_connect_environment
-    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,memory_copy,hsa_api"
+    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api"
     "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,xgmi,pcie"
     "ROCPROFSYS_SAMPLING_CPUS=none"
     "ROCPROFSYS_USE_SAMPLING=OFF"
+    "ROCPROFSYS_PROCESS_SAMPLING_FREQ=10"
+    "ROCPROFSYS_CPU_FREQ_ENABLED=OFF"
 )
 
 set(_gpu_connect_rocpd_validation_rules

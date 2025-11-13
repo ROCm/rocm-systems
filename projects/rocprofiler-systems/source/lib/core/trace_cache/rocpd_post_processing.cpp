@@ -476,12 +476,11 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled)
             return;
 
-        gpu_metrics_t gpu_metrics;
-        bool          vcn_is_device_level_only  = false;
-        bool          jpeg_is_device_level_only = false;
+        gpu_metrics_t                   gpu_metrics;
+        gpu::gpu_metrics_capabilities_t capabilities;
         gpu::deserialize_gpu_metrics(_amd_smi.gpu_activity, gpu_metrics, is_vcn_enabled,
                                      is_jpeg_enabled, is_xgmi_enabled, is_pcie_enabled,
-                                     vcn_is_device_level_only, jpeg_is_device_level_only);
+                                     capabilities);
 
         // Insert VCN and JPEG activity metrics
         auto insert_decode_vector_metrics = [&](auto category, bool _is_enabled,
@@ -529,7 +528,7 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         };
 
         // Insert VCN activity metrics
-        if(vcn_is_device_level_only)
+        if(capabilities.flags.vcn_is_device_level_only)
         {
             // Device-level: use vcn_activity vector
             insert_decode_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
@@ -547,7 +546,7 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         }
 
         // Insert JPEG activity metrics
-        if(jpeg_is_device_level_only)
+        if(capabilities.flags.jpeg_is_device_level_only)
         {
             // Device-level: use jpeg_activity vector
             insert_decode_vector_metrics(category::amd_smi_jpeg_activity{},
