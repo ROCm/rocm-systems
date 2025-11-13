@@ -431,8 +431,8 @@ struct stats_node
 
 struct pmc_event
 {
-    uint64_t id   = 0;
-    guid_t   guid = {};
+    uint64_t    id       = 0;
+    guid_t      guid     = {};
     uint64_t    event_id = 0;
     uint64_t    pmc_id   = 0;
     double      value    = 0;
