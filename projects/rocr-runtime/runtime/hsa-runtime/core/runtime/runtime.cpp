@@ -2326,7 +2326,7 @@ Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
 
-  thread_ = os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
+  asyncInfo->control.thread_ = os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
   if (!asyncInfo->control.thread_)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to initialize async handler thread");
 
