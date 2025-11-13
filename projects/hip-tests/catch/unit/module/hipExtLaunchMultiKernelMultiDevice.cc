@@ -119,6 +119,7 @@ TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional") {
 
   for (int j = 0; j < nGpu; j++) {
     HIP_CHECK(hipStreamSynchronize(stream[j]));
+    HIP_CHECK(hipStreamDestroy(stream[j]));
 
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, j));
@@ -130,15 +131,12 @@ TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional") {
     for (size_t i = 0; i < N; i++) {
       REQUIRE(fabs(C_h[i] - (A_h[i] * A_h[i])) < 0.00000000001);
     }
+
+    HIP_CHECK(hipFree(A_d[j]));
+    HIP_CHECK(hipFree(C_d[j]));
   }
 
-  for (int i = 0; i < nGpu; i++) {
-    HIP_CHECK(hipFree(A_d[i]));
-    HIP_CHECK(hipFree(C_d[i]));
-    HIP_CHECK(hipStreamDestroy(stream[i]));
-  }
-
-  free(launchParamsList);
   free(A_h);
   free(C_h);
+  free(launchParamsList);
 }

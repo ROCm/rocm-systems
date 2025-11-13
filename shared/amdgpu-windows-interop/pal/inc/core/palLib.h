@@ -43,7 +43,7 @@
 ///            compatible, it is assumed that the client will default-initialize all structs.
 ///
 /// @ingroup LibInit
-#define PAL_INTERFACE_MAJOR_VERSION 942
+#define PAL_INTERFACE_MAJOR_VERSION 960
 
 /// Minimum major interface version. This is the minimum interface version PAL supports in order to support backward
 /// compatibility. When it is equal to PAL_INTERFACE_MAJOR_VERSION, only the latest interface version is supported.
@@ -112,6 +112,8 @@ enum class NullGpuId : uint32
     Navi44,        ///< 12.0.0
     Navi48,        ///< 12.0.1
 #if  (PAL_CLIENT_INTERFACE_MAJOR_VERSION>= 888)
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 958
+#endif
 #endif
     Max,           ///< The maximum count of null devices.
     All,           ///< If you want to enumerate all null devices.

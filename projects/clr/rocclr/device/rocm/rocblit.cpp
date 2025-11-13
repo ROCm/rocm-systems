@@ -470,6 +470,21 @@ bool DmaBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dstMem
   return result;
 }
 
+// Select an SDMA engine using priority-based scheduling
+// Prefers engines in preferredMask (high-bandwidth engines), otherwise any free engine
+static inline uint32_t selectSdmaEngine(uint32_t freeMask, uint32_t preferredMask) {
+  if (freeMask == 0) return 0;
+
+  // Try preferred engines first (high-bandwidth engines)
+  uint32_t preferredFree = freeMask & preferredMask;
+  if (preferredFree != 0) {
+    return preferredFree & (~preferredFree + 1);  // Extract lowest preferred engine
+  }
+
+  // Fall back to non-preferred engines (slower engines)
+  return freeMask & (~freeMask + 1);  // Extract lowest available engine
+}
+
 // ================================================================================================
 inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, const_address src,
                                            hsa_agent_t& srcAgent, size_t size,
@@ -508,31 +523,33 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   hsa_signal_t active = gpu().Barriers().ActiveSignal(kInitSignalValueOne, gpu().timestamp());
 
   if (!kUseRegularCopyApi && engine != HwQueueEngine::Unknown) {
-    copyMask = gpu().getLastUsedSdmaEngine();
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "Last copy mask 0x%x", copyMask);
-    copyMask &= (engine == HwQueueEngine::SdmaRead ? sdmaEngineReadMask_ : sdmaEngineWriteMask_);
-    if (copyMask == 0) {
-      // Check SDMA engine status
-      status = Hsa::memory_copy_engine_status(dstAgent, srcAgent, &freeEngineMask);
+    // Get the mask of valid engines for this operation (read or write)
+    uint32_t validEngineMask =
+        (engine == HwQueueEngine::SdmaRead ? sdmaEngineReadMask_ : sdmaEngineWriteMask_);
 
-      if (status == HSA_STATUS_SUCCESS) {
-        status = Hsa::memory_get_preferred_copy_engine(dstAgent, srcAgent, &recIdMask);
-      }
+    // Check SDMA engine status to get currently free engines
+    status = Hsa::memory_copy_engine_status(dstAgent, srcAgent, &freeEngineMask);
+
+    if (status == HSA_STATUS_SUCCESS) {
+      status = Hsa::memory_get_preferred_copy_engine(dstAgent, srcAgent, &recIdMask);
+    }
+
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+            "Query copy engine status %x, srcAgent %p, "
+            "dstAgent %p, free_engine_mask 0x%x, rec_engine_mask 0x%x",
+            status, srcAgent.handle, dstAgent.handle, freeEngineMask, recIdMask);
+
+    // Constrain to valid engines for this operation
+    freeEngineMask &= validEngineMask;
+    recIdMask &= validEngineMask;
+
+    if (freeEngineMask != 0) {
+      // Use priority-based scheduling: prefer high-bandwidth engines (recIdMask)
+      copyMask = selectSdmaEngine(freeEngineMask, recIdMask);
 
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
-              "Query copy engine status %x, srcAgent %p, "
-              "dstAgent %p, free_engine_mask 0x%x, rec_engine_mask 0x%x",
-              status, srcAgent.handle, dstAgent.handle, freeEngineMask, recIdMask);
-
-      // If requested engine is valid and available, use it
-      if (recIdMask != 0 && (freeEngineMask & recIdMask) != 0) {
-        copyMask = recIdMask - (recIdMask & (recIdMask - 1));
-      } else {
-        // Otherwise use first available engine
-        copyMask = freeEngineMask - (freeEngineMask & (freeEngineMask - 1));
-      }
-
-      gpu().setLastUsedSdmaEngine(copyMask);
+              "Selected SDMA engine: free_mask=0x%x, preferred_mask=0x%x, selected_mask=0x%x",
+              freeEngineMask, recIdMask, copyMask);
     }
 
     if (copyMask != 0 && status == HSA_STATUS_SUCCESS) {
@@ -2259,16 +2276,16 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
                                    amd::CopyMetadata copyMetadata) const {
   amd::ScopedLock k(lockXferOps_);
   bool result = false;
-  bool p2p = false;
   uint32_t blitWg = dev().settings().limit_blit_wg_;
 
-  if (&gpuMem(srcMemory).dev() != &gpuMem(dstMemory).dev()) {
-    if (sizeIn[0] > dev().settings().sdma_p2p_threshold_) {
-      p2p = true;
-    } else {
-      constexpr uint32_t kLimitWgForKernelP2p = 16;
-      blitWg = kLimitWgForKernelP2p;
-    }
+  bool isP2pOrIpc = (&gpuMem(srcMemory).dev() != &gpuMem(dstMemory).dev()) ||
+                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
+
+  // Use SDMA for large P2P/IPC transfers, shader for small ones
+  if (isP2pOrIpc && sizeIn[0] <= dev().settings().sdma_p2p_threshold_) {
+    constexpr uint32_t kLimitWgForKernelP2p = 16;
+    blitWg = kLimitWgForKernelP2p;
+    isP2pOrIpc = false;
   }
 
   // Determine if we should use shader copy path based on various conditions
@@ -2281,7 +2298,6 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
       copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
 
   // Check memory access patterns
-  bool isP2pOrIpc = p2p || srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
   bool neitherMemoryIsHostDirectAccess =
       !srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess();
 

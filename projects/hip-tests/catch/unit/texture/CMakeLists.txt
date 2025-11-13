@@ -65,10 +65,6 @@ set(TEST_SRC
     hipTexRefSetAddressMode.cc
     hipTexRefGetAddressMode.cc
     hipTexRefSetGetFilterMode.cc
-    hipTexRefSetGetMipmapFilterMode.cc
-    hipTexRefSetGetMipmapLevelBias.cc
-    hipTexRefSetGetMipmapLevelClamp.cc
-    hipTexRefSetGetMipmappedArray.cc
     hipDeviceGetTexture1DLinearMaxWidth.cc
 )
 
@@ -147,6 +143,10 @@ set(TEST_SRC
     tex2DLod.cc
     tex2DLayeredLod.cc
     tex3DLod.cc
+    hipTexRefSetGetMipmapFilterMode.cc
+    hipTexRefSetGetMipmapLevelBias.cc
+    hipTexRefSetGetMipmapLevelClamp.cc
+    hipTexRefSetGetMipmappedArray.cc
 )
 endif()
 
