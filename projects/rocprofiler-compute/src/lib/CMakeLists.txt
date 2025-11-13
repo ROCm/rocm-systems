@@ -2,7 +2,12 @@
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(rocprofiler-sdk HINTS $ENV{ROCM_PATH}/lib/cmake /opt/rocm/lib/cmake CONFIG REQUIRED)
+find_package(
+    rocprofiler-sdk
+    HINTS $ENV{ROCM_PATH}/lib/cmake /opt/rocm/lib/cmake
+    CONFIG
+    REQUIRED
+)
 
 add_library(rocprofiler-compute-tool SHARED)
 target_sources(rocprofiler-compute-tool PRIVATE rocprofiler_compute_tool.cpp helper.cpp)
