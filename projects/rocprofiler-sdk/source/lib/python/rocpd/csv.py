@@ -235,6 +235,7 @@ def write_kernel_csv(importData, config) -> None:
         "stack_id AS Correlation_Id",
         "start AS Start_Timestamp",
         "end AS End_Timestamp",
+        "(end - start) AS Duration_NS",
         "lds_size AS Lds_Block_Size",
         "scratch_size",
         "vgpr_count",
@@ -279,7 +280,8 @@ def write_memory_copy_csv(importData, config) -> None:
             {dst_agent_id} AS Destination_Agent_Id,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
-            end AS End_Timestamp
+            end AS End_Timestamp,
+            (end - start) AS Duration_NS
         FROM "memory_copies"
         ORDER BY
             guid ASC, start ASC, end DESC
@@ -309,7 +311,8 @@ def write_memory_allocation_csv(importData, config) -> None:
             '0x' || printf('%016X', address) AS Address,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
-            end AS End_Timestamp
+            end AS End_Timestamp,
+            (end - start) AS Duration_NS
         FROM "memory_allocations"
         ORDER BY
             guid ASC, start ASC, end DESC
@@ -342,6 +345,7 @@ def write_counters_csv(importData, config) -> None:
         "value AS Counter_Value",
         "start AS Start_Timestamp",
         "end AS End_Timestamp",
+        "(end - start) AS Duration_NS",
     ]
 
     aliased_headers = []
@@ -374,7 +378,8 @@ def write_scratch_memory_csv(importData, config) -> None:
             tid AS Thread_Id,
             alloc_flags,
             start AS Start_Timestamp,
-            end AS End_Timestamp
+            end AS End_Timestamp,
+            (end - start) AS Duration_NS
         FROM "scratch_memory"
         ORDER BY
             guid ASC, start ASC, end DESC
@@ -393,7 +398,8 @@ def write_region_csv(importData, config) -> None:
             tid AS Thread_Id,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
-            end AS End_Timestamp
+            end AS End_Timestamp,
+            (end - start) AS Duration_NS
         FROM "regions"
         ORDER BY
             guid ASC, start ASC, end DESC

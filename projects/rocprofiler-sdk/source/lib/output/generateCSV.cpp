@@ -260,31 +260,16 @@ generate_csv(const output_config&                                               
 
     if(cfg.stats && stats)
         write_stats(get_stats_output_file(cfg, domain_type::KERNEL_DISPATCH), stats.entries);
-    auto ofs = tool::csv_output_file{cfg,
-                                     domain_type::KERNEL_DISPATCH,
-                                     tool::csv::kernel_trace_with_stream_csv_encoder{},
-                                     {"Kind",
-                                      "Agent_Id",
-                                      "Queue_Id",
-                                      "Stream_Id",
-                                      "Thread_Id",
-                                      "Dispatch_Id",
-                                      "Kernel_Id",
-                                      "Kernel_Name",
-                                      "Correlation_Id",
-                                      "Start_Timestamp",
-                                      "End_Timestamp",
-                                      "LDS_Block_Size",
-                                      "Scratch_Size",
-                                      "VGPR_Count",
-                                      "Accum_VGPR_Count",
-                                      "SGPR_Count",
-                                      "Workgroup_Size_X",
-                                      "Workgroup_Size_Y",
-                                      "Workgroup_Size_Z",
-                                      "Grid_Size_X",
-                                      "Grid_Size_Y",
-                                      "Grid_Size_Z"}};
+    auto ofs = tool::csv_output_file{
+        cfg,
+        domain_type::KERNEL_DISPATCH,
+        tool::csv::kernel_trace_with_stream_csv_encoder{},
+        {"Kind",           "Agent_Id",         "Queue_Id",         "Stream_Id",
+         "Thread_Id",      "Dispatch_Id",      "Kernel_Id",        "Kernel_Name",
+         "Correlation_Id", "Start_Timestamp",  "End_Timestamp",    "Duration_NS",
+         "LDS_Block_Size", "Scratch_Size",     "VGPR_Count",       "Accum_VGPR_Count",
+         "SGPR_Count",     "Workgroup_Size_X", "Workgroup_Size_Y", "Workgroup_Size_Z",
+         "Grid_Size_X",    "Grid_Size_Y",      "Grid_Size_Z"}};
 
     for(auto ditr : data)
     {
@@ -313,6 +298,7 @@ generate_csv(const output_config&                                               
                 record.correlation_id.internal,
                 record.start_timestamp,
                 record.end_timestamp,
+                (record.end_timestamp - record.start_timestamp),
                 lds_block_size_v,
                 record.dispatch_info.private_segment_size,
                 kernel_info->arch_vgpr_count,
