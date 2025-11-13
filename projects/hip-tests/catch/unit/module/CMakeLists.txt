@@ -112,7 +112,6 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code
-  ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt
   ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt
   ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
