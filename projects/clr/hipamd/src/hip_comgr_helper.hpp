@@ -33,6 +33,74 @@ THE SOFTWARE.
 #include "hip/hip_runtime_api.h"
 
 namespace hip {
+
+// RAII wrapper for Comgr handles to ensure proper resource management
+namespace comgr_helper {
+
+template <typename comgr_T> class ComgrUniqueHandle {
+ public:
+  ComgrUniqueHandle() = default;
+  // constructor which takes ownership of a correctly initialized handle
+  ComgrUniqueHandle(comgr_T& handle) : comgr_obj_(handle) { handle = {0}; };
+
+  template <typename T = comgr_T, std::enable_if_t<std::is_same_v<T, amd_comgr_data_set_t> ||
+                                                       std::is_same_v<T, amd_comgr_action_info_t>,
+                                                   bool> = true>
+  [[nodiscard]] amd_comgr_status_t Create() {
+    if constexpr (std::is_same_v<T, amd_comgr_data_set_t>) {
+      return amd::Comgr::create_data_set(&comgr_obj_);
+    } else if constexpr (std::is_same_v<T, amd_comgr_action_info_t>) {
+      return amd::Comgr::create_action_info(&comgr_obj_);
+    }
+
+    // Unreachable code
+    return AMD_COMGR_STATUS_SUCCESS;
+  }
+
+  template <typename T = comgr_T,
+            std::enable_if_t<std::is_same_v<T, amd_comgr_data_t>, bool> = true>
+  [[nodiscard]] amd_comgr_status_t Create(amd_comgr_data_kind_t kind) {
+    return amd::Comgr::create_data(kind, &comgr_obj_);
+  }
+
+  ~ComgrUniqueHandle() {
+    if (comgr_obj_.handle != 0) {
+      if constexpr (std::is_same_v<comgr_T, amd_comgr_data_set_t>) {
+        amd::Comgr::destroy_data_set(comgr_obj_);
+      } else if constexpr (std::is_same_v<comgr_T, amd_comgr_action_info_t>) {
+        amd::Comgr::destroy_action_info(comgr_obj_);
+      } else if constexpr (std::is_same_v<comgr_T, amd_comgr_data_t>) {
+        amd::Comgr::release_data(comgr_obj_);
+      }
+    }
+  }
+
+  // Delete all copy and move operators
+  ComgrUniqueHandle(ComgrUniqueHandle&) = delete;
+  ComgrUniqueHandle(ComgrUniqueHandle&&) = delete;
+  ComgrUniqueHandle& operator=(ComgrUniqueHandle&) = delete;
+  ComgrUniqueHandle& operator=(ComgrUniqueHandle&&) = delete;
+
+  // Method to access data
+  comgr_T get() const {
+    assert(comgr_obj_.handle != 0);
+    return comgr_obj_;
+  }
+  
+  comgr_T& get() {
+    return comgr_obj_;
+  }
+
+ private:
+  comgr_T comgr_obj_{0};
+};
+
+typedef ComgrUniqueHandle<amd_comgr_data_set_t> ComgrDataSetUniqueHandle;
+typedef ComgrUniqueHandle<amd_comgr_action_info_t> ComgrActionInfoUniqueHandle;
+typedef ComgrUniqueHandle<amd_comgr_data_t> ComgrDataUniqueHandle;
+
+}  // namespace comgr_helper
+
 namespace helpers {
 bool UnbundleBitCode(const std::vector<char>& bundled_bit_code, const std::string& isa,
                      size_t& co_offset, size_t& co_size);
@@ -41,7 +109,8 @@ bool addCodeObjData(amd_comgr_data_set_t& input, const std::vector<char>& source
 bool extractBuildLog(amd_comgr_data_set_t dataSet, std::string& buildLog);
 bool extractByteCodeBinary(const amd_comgr_data_set_t inDataSet,
                            const amd_comgr_data_kind_t dataKind, std::vector<char>& bin);
-bool createAction(amd_comgr_action_info_t& action, std::vector<std::string>& options,
+bool createAction(comgr_helper::ComgrActionInfoUniqueHandle& action,
+                  std::vector<std::string>& options,
                   const std::string& isa,
                   const amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_NONE);
 bool compileToExecutable(const amd_comgr_data_set_t compileInputs, const std::string& isa,
