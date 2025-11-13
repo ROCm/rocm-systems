@@ -508,27 +508,45 @@ TEST(rocrtstFunc, Filter_Devices_Test) {
    process, they can fail with HSA_STATUS_ERROR_NOT_INITIALIZED. */
 
 TEST(rocrtstFunc, Counted_Queue_Basic_Test) {
-  RUN_COUNTED_QUEUE_TEST_IN_CHILD(CountedQueueBasicApiTest);
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueueBasicApiTest();
+  RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Same_Priority_Max_Limit_Test) {
-  RUN_COUNTED_QUEUE_TEST_IN_CHILD(CountedQueues_SamePriority_MaxLimitTest);
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueues_SamePriority_MaxLimitTest();
+  RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Invalid_Args_Test) {
-  RUN_COUNTED_QUEUE_TEST_IN_CHILD(InvalidArgsTest);
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.InvalidArgsTest();
+  RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Multiple_Priorities_Limit_Test) {
-  RUN_COUNTED_QUEUE_TEST_IN_CHILD(CountedQueuesAllPrioritiesLimitTest);
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesAllPrioritiesLimitTest();
+  RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Set_Priority_Nack_Test) {
-  RUN_COUNTED_QUEUE_TEST_IN_CHILD(CountedQueuesSetPriorityNackTest);
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesSetPriorityNackTest();
+  RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Set_CUMask_Nack_Test) {
-  RUN_COUNTED_QUEUE_TEST_IN_CHILD(CountedQueuesSetCUMaskNackTest);
+    CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesSetCUMaskNackTest();
+  RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {

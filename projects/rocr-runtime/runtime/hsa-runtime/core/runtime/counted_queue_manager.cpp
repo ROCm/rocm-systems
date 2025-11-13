@@ -1,17 +1,18 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
 
 #include "core/inc/counted_queue_manager.h"
+#include "core/inc/agent.h"
+#include "core/inc/runtime.h"
+#include <cassert>
 
 namespace rocr {
-
 namespace core {
 
 constexpr size_t DEFAULT_QUEUE_SIZE = 16384;
-std::atomic<bool> CountedQueuePoolManager::instance_created_{false};
 
 static std::map<hsa_amd_queue_priority_t, HSA_QUEUE_PRIORITY> priomap = {
     {HSA_AMD_QUEUE_PRIORITY_LOW, HSA_QUEUE_PRIORITY_MINIMUM},
@@ -19,135 +20,80 @@ static std::map<hsa_amd_queue_priority_t, HSA_QUEUE_PRIORITY> priomap = {
     {HSA_AMD_QUEUE_PRIORITY_HIGH, HSA_QUEUE_PRIORITY_HIGH},
 };
 
-// Validate priority enum value
-static bool IsValidPriority(hsa_amd_queue_priority_t priority) {
-  return priority == HSA_AMD_QUEUE_PRIORITY_LOW || priority == HSA_AMD_QUEUE_PRIORITY_NORMAL ||
-      priority == HSA_AMD_QUEUE_PRIORITY_HIGH;
-}
-
-// Generate a 64-bit unique key using agent+priority combination for hw queue pool lookup
-static uint64_t MakePoolKey(hsa_agent_t agent, hsa_amd_queue_priority_t priority) {
-  return (static_cast<uint64_t>(agent.handle) << 32) | static_cast<uint64_t>(priority);
-}
-
-// Singleton accessor
-CountedQueuePoolManager& CountedQueuePoolManager::Instance() {
-  static CountedQueuePoolManager instance;
-  instance_created_ = true;
-  return instance;
-}
-
-bool CountedQueuePoolManager::IsInstanceCreated() { return instance_created_.load(); }
-
-bool CountedQueuePoolManager::IsCountedQueue(hsa_queue_t* queue) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (counted_queues_.find(queue) == counted_queues_.end()) return false;
-  return true;
+CountedQueuePoolManager::CountedQueuePoolManager(core::Agent* agent) : agent_(agent) {
+  // Read in GPU_MAX_HW_QUEUES flag value
+  max_hw_queues_ = core::Runtime::runtime_singleton_->flag().cp_queues_limit();
 }
 
 hsa_status_t CountedQueuePoolManager::AcquireQueue(
-    hsa_agent_t agent, hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
+    hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
     void (*callback)(hsa_status_t, hsa_queue_t*, void*), void* data, uint64_t flags,
     hsa_queue_t** out_queue) {
-  // Validate parameters
-  if (!out_queue || !IsValidPriority(priority)) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
-  // support only multi-producer queues
-  if (type != HSA_QUEUE_TYPE_MULTI) return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
-
-  // Validate agent
-  core::Agent* gpu_agent = core::Agent::Convert(agent);
-  if (!gpu_agent || !gpu_agent->IsValid()) return HSA_STATUS_ERROR_INVALID_AGENT;
-
-  // Find existing or create a new hardware queue
   std::lock_guard<std::mutex> lock(mutex_);
-  HardwareQueue* hw_queue = FindOrCreateHardwareQueue(agent, type, priority, callback, data, flags);
-  if (!hw_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  // Create a new CountedQueue wrapper to generate unique handles for same HW queues
-  hsa_queue_t* unique_handle = new hsa_queue_t(*hw_queue->hw_queue);
-  auto counted_queue = std::make_unique<CountedQueue>(hw_queue, callback, data);
-  counted_queues_[unique_handle] = std::move(counted_queue);
+  core::Queue* core_queue = FindOrCreateHardwareQueue(type, priority, callback, data, flags);
+  if (!core_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  // Increment internal ref count
-  hw_queue->use_count++;
+  // Create unique handle even if reusing existing HW queue
+  hsa_queue_t* unique_handle = new hsa_queue_t(core_queue->amd_queue_.hsa_queue);
 
-  // Store wrapper to track all queues created via this API and return the new logical queue handle
+  // Track metadata
+  CountedQueue* counted_q = new CountedQueue(core_queue, callback, data);
+  counted_queues_[unique_handle] = counted_q;
+
+  // Increment use count
+  core_queue->use_count++;
+
   *out_queue = unique_handle;
-
   return HSA_STATUS_SUCCESS;
 }
 
-HardwareQueue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
-    hsa_agent_t agent, hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
+core::Queue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
+    hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
     void (*callback)(hsa_status_t, hsa_queue_t*, void*), void* data, uint64_t flags) {
-  // Create pool key using agent and priority values and get the queue pool for the given agent
-  uint64_t pool_key = MakePoolKey(agent, priority);
-  auto& pool = hw_queue_pools_[pool_key];
+  auto& pool = hw_queue_pools_[priority];
 
-  // Check if the number of queues on this agent has hit the limit
-  max_hw_queues_ = core::Runtime::runtime_singleton_->flag().cp_queues_limit();
+  // Reuse least-used queue if max reached
   if (pool.size() >= max_hw_queues_) {
-    // Get the least used hw queue
-    HardwareQueue* leastSharedQueue = nullptr;
+    core::Queue* least_used = nullptr;
     uint32_t min_count = UINT32_MAX;
 
-    for (auto& q : pool) {
+    for (auto* q : pool) {
       if (q->use_count < min_count) {
         min_count = q->use_count;
-        leastSharedQueue = q.get();
+        least_used = q;
       }
     }
-    return leastSharedQueue;
+    return least_used;
   }
 
-  // Within limit, can create a new hardware queue
-  hsa_queue_t* new_hw_queue = nullptr;
+  // Create a new hardware queue
   core::Queue* cmd_queue = nullptr;
-  core::Agent* gpu_agent = core::Agent::Convert(agent);
   hsa_status_t status =
-      gpu_agent->QueueCreate(DEFAULT_QUEUE_SIZE, type, 0, callback, data, 0, 0, &cmd_queue);
+      agent_->QueueCreate(DEFAULT_QUEUE_SIZE, type, 0, callback, data, 0, 0, &cmd_queue);
   if (status != HSA_STATUS_SUCCESS) return nullptr;
-  assert(cmd_queue != nullptr);
 
-  // set given priority
   status = cmd_queue->SetPriority(priomap[priority]);
   if (status != HSA_STATUS_SUCCESS) return nullptr;
 
-  // enable profiling
   cmd_queue->SetProfiling(true);
 
-  new_hw_queue = core::Queue::Convert(cmd_queue);
-  // Create HardwareQueue wrapper for newly created hwQueue
-  auto hw_queue = std::make_unique<HardwareQueue>(new_hw_queue, priority, agent);
-  HardwareQueue* result = hw_queue.get();
-
-  pool.push_back(std::move(hw_queue));
-  return result;
+  // Add to pool
+  pool.push_back(cmd_queue);
+  return cmd_queue;
 }
 
 hsa_status_t CountedQueuePoolManager::ReleaseQueue(hsa_queue_t* queue) {
-  if (!queue) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
-  // free up counted_queues_ first
   std::lock_guard<std::mutex> lock(mutex_);
-
   auto it = counted_queues_.find(queue);
-  if (it == counted_queues_.end()) {
-    return HSA_STATUS_ERROR;
-  }
+  if (it == counted_queues_.end()) return HSA_STATUS_ERROR;
 
-  // valid queue
-  CountedQueue* counted_q = it->second.get();
-  HardwareQueue* hw_queue = counted_q->hw_queue;
+  CountedQueue* counted_q = it->second;
 
-  // decrement internal ref count
-  // Do not destroy underlying HW Queue even if ref count = 0
-  if (hw_queue->use_count > 0) {
-    hw_queue->use_count--;
-  }
+  // Decrement internal ref count inside core::Queue object
+  if (counted_q->hw_queue->use_count > 0) counted_q->hw_queue->use_count--;
 
-  // remove counted queue unique handle entry
+  // Remove the unique handle entry from map
   counted_queues_.erase(it);
   return HSA_STATUS_SUCCESS;
 }
@@ -177,7 +123,7 @@ hsa_status_t CountedQueuePoolManager::GetQueueInfo(hsa_queue_t* queue,
       // Check counted queues map which contains HardwareQueue*
       auto it = counted_queues_.find(queue);
       if (it != counted_queues_.end()) {
-        *static_cast<uint32_t*>(value) = it->second->hw_queue->hw_queue->id;
+        *static_cast<uint32_t*>(value) = it->second->hw_queue->public_handle()->id;
         return HSA_STATUS_SUCCESS;
       }
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -191,13 +137,11 @@ hsa_status_t CountedQueuePoolManager::GetQueueInfo(hsa_queue_t* queue,
 CountedQueuePoolManager::~CountedQueuePoolManager() {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  // Delete all logical handles created for users
-  for (auto& q : counted_queues_) {
-    hsa_queue_t* handle = q.first;
-    delete handle;  // free the copy we created with new
+  // Delete all CountedQueue objects
+  for (auto& entry : counted_queues_) {
+    delete entry.second;  // delete CountedQueue*
   }
   counted_queues_.clear();
-  instance_created_ = false;
 }
 
 

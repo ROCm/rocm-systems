@@ -99,6 +99,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       current_coherency_type_(HSA_AMD_COHERENCY_TYPE_COHERENT),
       scratch_used_large_(0),
       queues_(),
+      queue_pool_(this),
       trap_code_buf_(NULL),
       trap_code_buf_size_(0),
       doorbell_queue_map_(NULL),
@@ -1820,6 +1821,7 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 
   auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
                                 flags);
+  
   *queue = aql_queue;
   aql_queues_.push_back(aql_queue);
 
@@ -3508,6 +3510,22 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
     }
   }
   return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t GpuAgent::AcquireCountedQueue(hsa_queue_type_t type,
+                                           hsa_amd_queue_priority_t priority,
+                                           void (*callback)(hsa_status_t, hsa_queue_t*, void*),
+                                           void* data, uint64_t flags,
+                                           hsa_queue_t** out_queue) {
+  return queue_pool_.AcquireQueue(type, priority, callback, data, flags, out_queue);
+}
+
+hsa_status_t GpuAgent::ReleaseCountedQueue(hsa_queue_t* queue) {
+  return queue_pool_.ReleaseQueue(queue);
+}
+
+hsa_status_t GpuAgent::GetCountedQueueInfo(hsa_queue_t* queue, hsa_counted_queue_info_attribute_t attribute, void* value) {
+  return queue_pool_.GetQueueInfo(queue, attribute, value);
 }
 
 }  // namespace amd

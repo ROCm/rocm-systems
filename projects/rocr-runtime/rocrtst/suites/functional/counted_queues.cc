@@ -70,12 +70,12 @@ void CountedQueuesTest::CountedQueueBasicApiTest() {
 
   // Query counted queue and check internal reference count
   uint32_t use_count = 0;
-  status = hsa_amd_counted_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &use_count);
+  status = hsa_amd_counted_queue_get_info(gpus[0], queue, HSA_QUEUE_INFO_USE_COUNT, &use_count);
   ASSERT_EQ(status, HSA_STATUS_SUCCESS);
   EXPECT_EQ(use_count, 1);  // should be 4 after acquire
 
   // Release the queue
-  status = hsa_amd_counted_queue_release(queue);
+  status = hsa_amd_counted_queue_release(gpus[0], queue);
   ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 }
 
@@ -104,11 +104,11 @@ void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
 
   // Get HW queue ids of all queues
   uint32_t hwid1 = 0, hwid2 = 0, hwid3 = 0, hwid4 = 0;
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q1, HSA_QUEUE_INFO_HW_ID, &hwid1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q3, HSA_QUEUE_INFO_HW_ID, &hwid3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q1, HSA_QUEUE_INFO_HW_ID, &hwid1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q3, HSA_QUEUE_INFO_HW_ID, &hwid3), HSA_STATUS_SUCCESS);
 
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q2, HSA_QUEUE_INFO_HW_ID, &hwid2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q4, HSA_QUEUE_INFO_HW_ID, &hwid4), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q2, HSA_QUEUE_INFO_HW_ID, &hwid2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q4, HSA_QUEUE_INFO_HW_ID, &hwid4), HSA_STATUS_SUCCESS);
 
   // Third queue should reuse first HW queue
   EXPECT_EQ(hwid1, hwid3);
@@ -120,42 +120,42 @@ void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
 
   // Check how many times the first and second queues have been shared
   uint32_t use_count1 = 0, use_count2 = 0;
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q1, HSA_QUEUE_INFO_USE_COUNT, &use_count1),
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q1, HSA_QUEUE_INFO_USE_COUNT, &use_count1),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q2, HSA_QUEUE_INFO_USE_COUNT, &use_count2),
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q2, HSA_QUEUE_INFO_USE_COUNT, &use_count2),
             HSA_STATUS_SUCCESS);
 
   EXPECT_EQ(use_count1, 2);
   EXPECT_EQ(use_count2, 2);
 
   // Release the third and fourth queues
-  EXPECT_EQ(hsa_amd_counted_queue_release(q3), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_release(q4), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], q3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], q4), HSA_STATUS_SUCCESS);
 
   // Check the use counts and hwids of remaining queues; should be two different HW queues with ref
   // counts of 1 for each
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q1, HSA_QUEUE_INFO_USE_COUNT, &use_count1),
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q1, HSA_QUEUE_INFO_USE_COUNT, &use_count1),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q2, HSA_QUEUE_INFO_USE_COUNT, &use_count2),
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q2, HSA_QUEUE_INFO_USE_COUNT, &use_count2),
             HSA_STATUS_SUCCESS);
 
   EXPECT_EQ(use_count1, 1);
   EXPECT_EQ(use_count2, 1);
 
   uint32_t id1 = 0, id2 = 0;
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q1, HSA_QUEUE_INFO_HW_ID, &id1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q2, HSA_QUEUE_INFO_HW_ID, &id2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q1, HSA_QUEUE_INFO_HW_ID, &id1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q2, HSA_QUEUE_INFO_HW_ID, &id2), HSA_STATUS_SUCCESS);
   EXPECT_NE(id1, id2);  // should be two different hw ids now
 
   // Release the two queues
-  EXPECT_EQ(hsa_amd_counted_queue_release(q1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_release(q2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], q1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], q2), HSA_STATUS_SUCCESS);
 
   int32_t c1 = UINT32_MAX, c2 = UINT32_MAX, c3 = UINT32_MAX, c4 = UINT32_MAX;
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q1, HSA_QUEUE_INFO_USE_COUNT, &c1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q2, HSA_QUEUE_INFO_USE_COUNT, &c2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q3, HSA_QUEUE_INFO_USE_COUNT, &c3), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(q4, HSA_QUEUE_INFO_USE_COUNT, &c4), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q1, HSA_QUEUE_INFO_USE_COUNT, &c1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q2, HSA_QUEUE_INFO_USE_COUNT, &c2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q3, HSA_QUEUE_INFO_USE_COUNT, &c3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], q4, HSA_QUEUE_INFO_USE_COUNT, &c4), HSA_STATUS_SUCCESS);
 
   EXPECT_EQ(c1, -1);
   EXPECT_EQ(c2, -1);
@@ -168,15 +168,15 @@ void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
   EXPECT_EQ(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
                                           nullptr, nullptr, 0, &new_queue),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(new_queue, HSA_QUEUE_INFO_HW_ID, &new_hw_id),
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], new_queue, HSA_QUEUE_INFO_HW_ID, &new_hw_id),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(new_queue, HSA_QUEUE_INFO_USE_COUNT, &refCount),
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], new_queue, HSA_QUEUE_INFO_USE_COUNT, &refCount),
             HSA_STATUS_SUCCESS);
   EXPECT_EQ(new_hw_id, 1);
   EXPECT_EQ(refCount, 1);
 
   // Release this queue
-  EXPECT_EQ(hsa_amd_counted_queue_release(new_queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], new_queue), HSA_STATUS_SUCCESS);
 }
 
 void CountedQueuesTest::InvalidArgsTest() {
@@ -206,12 +206,12 @@ void CountedQueuesTest::InvalidArgsTest() {
 
   // Check release API params
   hsa_queue_t* queue = nullptr;
-  status = hsa_amd_counted_queue_release(queue);
+  status = hsa_amd_counted_queue_release(gpus[0], queue);
   EXPECT_EQ(status, HSA_STATUS_ERROR_INVALID_ARGUMENT);
 
   // Invalid queue handle
   hsa_queue_t inv_queue = {};
-  status = hsa_amd_counted_queue_release(&inv_queue);
+  status = hsa_amd_counted_queue_release(gpus[0], &inv_queue);
   EXPECT_EQ(status, HSA_STATUS_ERROR);
 }
 
@@ -269,17 +269,17 @@ void CountedQueuesTest::CountedQueuesAllPrioritiesLimitTest() {
   uint32_t norm_id1 = 0, norm_id2 = 0, norm_id3 = 0;
   uint32_t high_id1 = 0, high_id2 = 0, high_id3 = 0;
 
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(low1, HSA_QUEUE_INFO_HW_ID, &low_id1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(low2, HSA_QUEUE_INFO_HW_ID, &low_id2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(low3, HSA_QUEUE_INFO_HW_ID, &low_id3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], low1, HSA_QUEUE_INFO_HW_ID, &low_id1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], low2, HSA_QUEUE_INFO_HW_ID, &low_id2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], low3, HSA_QUEUE_INFO_HW_ID, &low_id3), HSA_STATUS_SUCCESS);
 
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(normal1, HSA_QUEUE_INFO_HW_ID, &norm_id1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(normal2, HSA_QUEUE_INFO_HW_ID, &norm_id2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(normal3, HSA_QUEUE_INFO_HW_ID, &norm_id3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], normal1, HSA_QUEUE_INFO_HW_ID, &norm_id1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], normal2, HSA_QUEUE_INFO_HW_ID, &norm_id2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], normal3, HSA_QUEUE_INFO_HW_ID, &norm_id3), HSA_STATUS_SUCCESS);
 
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(high1, HSA_QUEUE_INFO_HW_ID, &high_id1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(high2, HSA_QUEUE_INFO_HW_ID, &high_id2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(high3, HSA_QUEUE_INFO_HW_ID, &high_id3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], high1, HSA_QUEUE_INFO_HW_ID, &high_id1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], high2, HSA_QUEUE_INFO_HW_ID, &high_id2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], high3, HSA_QUEUE_INFO_HW_ID, &high_id3), HSA_STATUS_SUCCESS);
 
   // Within same priority: max 2 unique HW queues
   EXPECT_NE(low_id1, low_id2);
@@ -301,17 +301,17 @@ void CountedQueuesTest::CountedQueuesAllPrioritiesLimitTest() {
   uint32_t norm_use1 = 0, norm_use2 = 0, norm_use3 = 0;
   uint32_t high_use1 = 0, high_use2 = 0, high_use3 = 0;
 
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(low1, HSA_QUEUE_INFO_USE_COUNT, &low_use1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(low2, HSA_QUEUE_INFO_USE_COUNT, &low_use2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(low3, HSA_QUEUE_INFO_USE_COUNT, &low_use3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], low1, HSA_QUEUE_INFO_USE_COUNT, &low_use1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], low2, HSA_QUEUE_INFO_USE_COUNT, &low_use2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], low3, HSA_QUEUE_INFO_USE_COUNT, &low_use3), HSA_STATUS_SUCCESS);
 
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(normal1, HSA_QUEUE_INFO_USE_COUNT, &norm_use1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(normal2, HSA_QUEUE_INFO_USE_COUNT, &norm_use2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(normal3, HSA_QUEUE_INFO_USE_COUNT, &norm_use3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], normal1, HSA_QUEUE_INFO_USE_COUNT, &norm_use1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], normal2, HSA_QUEUE_INFO_USE_COUNT, &norm_use2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], normal3, HSA_QUEUE_INFO_USE_COUNT, &norm_use3), HSA_STATUS_SUCCESS);
   
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(high1, HSA_QUEUE_INFO_USE_COUNT, &high_use1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(high2, HSA_QUEUE_INFO_USE_COUNT, &high_use2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_get_info(high3, HSA_QUEUE_INFO_USE_COUNT, &high_use3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], high1, HSA_QUEUE_INFO_USE_COUNT, &high_use1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], high2, HSA_QUEUE_INFO_USE_COUNT, &high_use2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_get_info(gpus[0], high3, HSA_QUEUE_INFO_USE_COUNT, &high_use3), HSA_STATUS_SUCCESS);
 
   EXPECT_EQ(low_use1, 2);
   EXPECT_EQ(low_use2, 1);
@@ -326,17 +326,17 @@ void CountedQueuesTest::CountedQueuesAllPrioritiesLimitTest() {
   EXPECT_TRUE(high_use1 == high_use3); 
 
   // Release all queues
-  EXPECT_EQ(hsa_amd_counted_queue_release(low1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_release(low2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_release(low3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], low1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], low2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], low3), HSA_STATUS_SUCCESS);
 
-  EXPECT_EQ(hsa_amd_counted_queue_release(normal1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_release(normal2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_release(normal3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], normal1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], normal2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], normal3), HSA_STATUS_SUCCESS);
 
-  EXPECT_EQ(hsa_amd_counted_queue_release(high1), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_release(high2), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_counted_queue_release(high3), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], high1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], high2), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], high3), HSA_STATUS_SUCCESS);
 }
 
 void CountedQueuesTest::CountedQueuesSetPriorityNackTest() {
@@ -359,7 +359,7 @@ void CountedQueuesTest::CountedQueuesSetPriorityNackTest() {
   EXPECT_TRUE(status != HSA_STATUS_SUCCESS);
 
   // release queue
-  EXPECT_EQ(hsa_amd_counted_queue_release(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], queue), HSA_STATUS_SUCCESS);
 }
 
 void CountedQueuesTest::CountedQueuesSetCUMaskNackTest() {
@@ -383,5 +383,5 @@ void CountedQueuesTest::CountedQueuesSetCUMaskNackTest() {
   EXPECT_TRUE(status != HSA_STATUS_SUCCESS);
 
   // release queue
-  EXPECT_EQ(hsa_amd_counted_queue_release(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_counted_queue_release(gpus[0], queue), HSA_STATUS_SUCCESS);
 }

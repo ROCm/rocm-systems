@@ -54,27 +54,5 @@
     test;                                                                                          \
   }
 
-#define RUN_COUNTED_QUEUE_TEST_IN_CHILD(testFunc)                                                  \
-  do {                                                                                             \
-    pid_t pid = fork();                                                                            \
-    if (pid == -1) {                                                                               \
-      std::cerr << "fork() failed!" << std::endl;                                                  \
-    } else if (pid == 0) {                                                                         \
-      CountedQueuesTest cq;                                                                        \
-      RunCustomTestProlog(&cq);                                                                    \
-      try {                                                                                        \
-        cq.testFunc();                                                                             \
-        RunCustomTestEpilog(&cq);                                                                  \
-        _exit(0); /* clean exit */                                                                 \
-      } catch (...) {                                                                              \
-        _exit(1); /* test failure */                                                               \
-      }                                                                                            \
-    }                                                                                              \
-    int status = 0;                                                                                \
-    waitpid(pid, &status, 0);                                                                      \
-    EXPECT_TRUE(WIFEXITED(status));                                                                \
-    EXPECT_EQ(WEXITSTATUS(status), 0);                                                             \
-  } while (0)
-
 #endif  // ROCRTST_SUITES_TEST_COMMON_MAIN_H_
 

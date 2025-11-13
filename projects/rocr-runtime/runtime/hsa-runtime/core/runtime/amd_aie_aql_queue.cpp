@@ -67,7 +67,7 @@ namespace AMD {
 
 AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
                          uint32_t node_id, uint64_t flags)
-    : Queue(shared_queue, flags),
+    : Queue(shared_queue, flags, agent),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       agent_(*agent),

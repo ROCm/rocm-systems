@@ -716,15 +716,6 @@ hsa_status_t hsa_amd_queue_cu_set_mask(const hsa_queue_t* queue, uint32_t num_cu
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
 
-  // Check if queue is counted or non-counted type 
-  // Nack if it is counted type
-  if (core::CountedQueuePoolManager::IsInstanceCreated()) {
-    auto& mgr = core::CountedQueuePoolManager::Instance();
-    if (mgr.IsCountedQueue(const_cast<hsa_queue_t*>(queue))) {
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-  }
-
   if (num_cu_mask_count != 0) IS_BAD_PTR(cu_mask);
   if (num_cu_mask_count % 32 != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   return cmd_queue->SetCUMasking(num_cu_mask_count, cu_mask);
@@ -1194,15 +1185,6 @@ hsa_status_t hsa_amd_queue_set_priority(hsa_queue_t* queue,
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
 
-  // Check if queue is counted or non-counted type 
-  // Nack if it is counted type
-  if (core::CountedQueuePoolManager::IsInstanceCreated()) {
-    auto& mgr = core::CountedQueuePoolManager::Instance();
-    if (mgr.IsCountedQueue(queue)) {
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-  }
-
   // Highest queue priority allowed for HSA user is HSA_QUEUE_PRIORITY_HIGH
   // HSA_QUEUE_PRIORITY_MAXIMUM is reserved for PC Sampling and can only be allocated internally
   // in ROCR
@@ -1596,31 +1578,88 @@ hsa_status_t hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devic
   CATCH;
 }
 
-hsa_status_t hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
-                                           hsa_amd_queue_priority_t priority,
-                                           void (*callback)(hsa_status_t status,
-                                                            hsa_queue_t* source, void* data),
-                                           void* data, uint64_t flags, hsa_queue_t** queue) {
+hsa_status_t HSA_API
+hsa_amd_counted_queue_acquire(hsa_agent_t agent,
+                              hsa_queue_type_t type,
+                              hsa_amd_queue_priority_t priority,
+                              void (*callback)(hsa_status_t status,
+                                               hsa_queue_t* source,
+                                               void* data),
+                              void* data,
+                              uint64_t flags,
+                              hsa_queue_t** queue) {
   TRY;
   IS_OPEN();
-  return core::CountedQueuePoolManager::Instance().AcquireQueue(agent, type, priority, callback, data,
-                                                         flags, queue);
+  // Basic validation
+  if (queue == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Check priority 
+  if (priority < HSA_AMD_QUEUE_PRIORITY_LOW || priority > HSA_AMD_QUEUE_PRIORITY_HIGH) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Only support multi-producer queues
+  if (type != HSA_QUEUE_TYPE_MULTI) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+  }
+
+  // Convert handle to internal agent
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  IS_VALID(core_agent);
+  if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
+
+  // Call the queue pool manager
+  return gpu_agent->AcquireCountedQueue(type, priority, callback, data, flags, queue);
   CATCH;
 }
 
-hsa_status_t hsa_amd_counted_queue_release(hsa_queue_t* queue) {
+hsa_status_t HSA_API
+hsa_amd_counted_queue_release(hsa_agent_t agent,
+                              hsa_queue_t* queue) {
   TRY;
-  IS_OPEN();
-  return core::CountedQueuePoolManager::Instance().ReleaseQueue(queue);
+  IS_OPEN();   
+  // Basic validation                           
+  if (queue == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Convert handle to internal agent
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  IS_VALID(core_agent);
+  if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
+
+  return gpu_agent->ReleaseCountedQueue(queue);
   CATCH;
 }
 
-hsa_status_t hsa_amd_counted_queue_get_info(hsa_queue_t* queue,
-                                            hsa_counted_queue_info_attribute_t attribute,
-                                            void* value) {
+hsa_status_t HSA_API
+hsa_amd_counted_queue_get_info(hsa_agent_t agent, hsa_queue_t* queue,
+                               hsa_counted_queue_info_attribute_t attribute,
+                               void* value) {
   TRY;
   IS_OPEN();
-  return core::CountedQueuePoolManager::Instance().GetQueueInfo(queue, attribute, value);
+  if (!queue || !value ) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Convert handle to internal agent
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  IS_VALID(core_agent);
+  if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
+
+  // Forward to the per-agent pool manager
+  return gpu_agent->GetCountedQueueInfo(queue, attribute, value);
   CATCH;
 }
 

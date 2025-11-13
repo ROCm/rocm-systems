@@ -168,12 +168,13 @@ All funtions other than Convert and public_handle must be virtual.
 */
 class Queue : public Checked<0xFA3906A679F9DB49> {
  public:
-  Queue(SharedQueue* shared_queue, uint64_t queue_flags)
-      : Queue(shared_queue, queue_flags, false) {}
+  Queue(SharedQueue* shared_queue, uint64_t queue_flags, core::Agent* agent)
+      : Queue(shared_queue, queue_flags, false, agent) {}
 
-  Queue(SharedQueue* shared_queue, uint64_t queue_flags, bool pcie_write_ordering)
+  Queue(SharedQueue* shared_queue, uint64_t queue_flags, bool pcie_write_ordering, core::Agent* agent)
       : amd_queue_(shared_queue->amd_queue),
         shared_queue_(shared_queue),
+        agent_(agent),
         flags_(queue_flags),
         pcie_write_ordering_(pcie_write_ordering) {
     public_handle_ = Convert(this);
@@ -372,6 +373,12 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
 
   hsa_queue_t* public_handle() const { return public_handle_; }
 
+  // Get a pointer to the agent that owns this queue
+  core::Agent* GetAgent() { return agent_; }
+
+  // @brief Attributes specifically for counted queue types
+  uint32_t use_count;
+
   typedef void* rtti_t;
 
   bool IsType(rtti_t id) { return _IsA(id); }
@@ -400,6 +407,8 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   virtual bool _IsA(rtti_t id) const = 0;
 
   SharedQueue* shared_queue_;
+
+  core::Agent* agent_; // pointer to the agent that owns this queue
 
   hsa_queue_t* public_handle_;
 

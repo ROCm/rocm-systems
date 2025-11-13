@@ -62,6 +62,7 @@
 #include "core/util/locks.h"
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
+#include "core/inc/counted_queue_manager.h"
 
 namespace rocr {
 namespace AMD {
@@ -341,6 +342,19 @@ class GpuAgent : public GpuAgentInt {
 
   void AcquireQueueAltScratch(ScratchInfo& scratch) override;
   void ReleaseQueueAltScratch(ScratchInfo& scratch) override;
+
+  // @brief Create a pool of shared queues for multiple user applications within a max limit 
+  hsa_status_t AcquireCountedQueue(hsa_queue_type_t type,
+                                   hsa_amd_queue_priority_t priority,
+                                   void (*callback)(hsa_status_t, hsa_queue_t*, void*),
+                                   void* data, uint64_t flags,
+                                   hsa_queue_t** out_queue);
+
+  // @brief Release a queue earlier used by application
+  hsa_status_t ReleaseCountedQueue(hsa_queue_t* queue);
+
+  // @brief Get the use count or unique hardware ID of a shared queue 
+  hsa_status_t GetCountedQueueInfo(hsa_queue_t* queue, hsa_counted_queue_info_attribute_t attribute, void* value);
 
   // @brief Override from AMD::GpuAgentInt.
   void TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) override;
@@ -734,6 +748,9 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief list of AQL queues owned by this agent. Indexed by queue pointer
   std::vector<core::Queue*> aql_queues_;
+
+  // @brief Pool of shared queues owned by this agent
+  rocr::core::CountedQueuePoolManager queue_pool_;
 
   // Sets and Tracks pending SDMA status check or request counts
   void SetCopyRequestRefCount(bool set);

@@ -3815,7 +3815,7 @@ hsa_status_t hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t t
  * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
  * @retval ::HSA_STATUS_ERROR Invalid queue or queue was already released
  */
-hsa_status_t hsa_amd_counted_queue_release(hsa_queue_t* queue);
+hsa_status_t hsa_amd_counted_queue_release(hsa_agent_t agent, hsa_queue_t* queue);
 
 typedef enum {
   /*
@@ -3832,7 +3832,7 @@ typedef enum {
   HSA_QUEUE_INFO_HW_ID,
 } hsa_counted_queue_info_attribute_t;
 
-hsa_status_t hsa_amd_counted_queue_get_info(hsa_queue_t* queue, hsa_counted_queue_info_attribute_t attribute,
+hsa_status_t hsa_amd_counted_queue_get_info(hsa_agent_t agent, hsa_queue_t* queue, hsa_counted_queue_info_attribute_t attribute,
                                             void* value);
 
 /**
