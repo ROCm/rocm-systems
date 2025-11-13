@@ -80,7 +80,7 @@ def main(argv=None) -> None:
     definition_ids = {
         "projects/aqlprofile": 365,
         "projects/clr": 335,
-        "projects/hip-tests": 362,
+        #"projects/hip-tests": 362,
         "projects/hip": 335,
         "projects/hipother": 335,
         "projects/rdc": 360,

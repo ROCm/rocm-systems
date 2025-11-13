@@ -315,7 +315,7 @@ Standalone Roofline Options:
 
 - The `--device` \<gpu_id> allows you to specify a device id to collect performance data from when running our roofline benchmark on your system.
 
-- If you would like to distinguish different kernels in your .pdf roofline plot use `--kernel-names`. This will give each kernel a unique marker identifiable from the plot's key.
+- Each kernel in your .pdf roofline plot is automatically distinguished with a unique marker identifiable from the plot's key.
 
 
 #### Roofline Only

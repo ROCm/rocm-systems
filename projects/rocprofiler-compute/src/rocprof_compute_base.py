@@ -49,6 +49,7 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils import (
     detect_rocprof,
+    get_panel_alias,
     get_submodules,
     get_version,
     get_version_display,
@@ -142,6 +143,8 @@ class RocProfCompute:
 
         if self.__args.list_metrics is not None and block:
             console_error("Cannot use --list-metrics with --blocks")
+        if self.__args.list_blocks is not None and block:
+            console_error("Cannot use --list-blocks with --blocks")
         if (
             hasattr(self.__args, "list_available_metrics")
             and self.__args.list_available_metrics
@@ -193,6 +196,9 @@ class RocProfCompute:
                 sys.exit(0)
             elif self.__args.list_metrics is not None:
                 self.list_metrics()
+                sys.exit(0)
+            elif self.__args.list_blocks is not None:
+                self.list_blocks()
                 sys.exit(0)
             elif self.__args.config_dir:
                 parser.print_help(sys.stderr)
@@ -246,6 +252,34 @@ class RocProfCompute:
             for key, value in ac.metric_list.items():
                 prefix = "\t" * min(key.count("."), 2)
                 print(f"{prefix}{key} -> {value}")
+            sys.exit(0)
+        else:
+            console_error("Unsupported arch")
+
+    @demarcate
+    def list_blocks(self) -> None:
+        for_current_arch = getattr(self.__args, "list_available_metrics", False)
+
+        arch = (
+            self.__mspec.gpu_arch
+            if (for_current_arch or self.__args.list_blocks is None)
+            else self.__args.list_blocks
+        )
+        if arch in self.__supported_archs.keys():
+            ac = schema.ArchConfig()
+            ac.panel_configs = file_io.load_panel_configs([
+                str(Path(self.__args.config_dir) / arch)
+            ])
+            sys_info = (
+                self.__mspec.get_class_members().iloc[0] if for_current_arch else None
+            )
+            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
+
+            print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+            for key, value in ac.metric_list.items():
+                if key.count(".") > 0:
+                    continue
+                print(f"{key:<8} {get_panel_alias()[value]:<16} {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")
@@ -409,31 +443,6 @@ class RocProfCompute:
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
         self.__soc[self.__mspec.gpu_arch].post_profiling()
-
-    @demarcate
-    def update_db(self) -> None:
-        self.print_graphic()
-
-        console_warning(
-            "Database update mode is deprecated and will "
-            "be removed in a future release "
-            "and no fixes will be made for this mode."
-        )
-
-        from utils.db_connector import DatabaseConnector
-
-        db_connection = DatabaseConnector(self.__args)
-
-        # -----------------------
-        # run database workflow
-        # -----------------------
-        db_connection.pre_processing()
-        if self.__args.upload:
-            db_connection.db_import()
-        else:
-            db_connection.db_remove()
-
-        return
 
     @demarcate
     def run_analysis(self) -> None:

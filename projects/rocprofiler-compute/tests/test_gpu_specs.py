@@ -92,14 +92,6 @@ def parse_table_dict(output: str) -> dict:
     return result
 
 
-def run(cmd):
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if cmd[0] == "amd-smi" and p.returncode == 8:
-        print("ERROR: No GPU detected. Unable to load amd-smi")
-        assert 0
-    return p.stdout.decode("utf-8")
-
-
 def get_num_xcds():
     num_xcds = None
 

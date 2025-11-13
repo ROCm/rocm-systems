@@ -67,6 +67,7 @@ enum LogMask {
   LOG_MEM_POOL = 262144,  //!< (0x40000) Memory pool allocation, including memory in graphs
   LOG_TS = 524288,        //!< (0x80000) Timestamp details
   LOG_COMGR = 1048576,    //!< (0x100000) Comgr path information print
+  LOG_KERN2 = 2097152,    //!< (0x200000) More detailed kernel info shader name
   LOG_ALWAYS = -1         //!< (0xFFFFFFFF) Log always even mask flag is zero
 };
 

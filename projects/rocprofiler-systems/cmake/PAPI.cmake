@@ -172,8 +172,7 @@ endif()
 
 if("lmsensors" IN_LIST ROCPROFSYS_PAPI_COMPONENTS AND ROCPROFSYS_PAPI_LMSENSORS_ROOT_DIR)
     list(
-        APPEND
-        ROCPROFSYS_PAPI_EXTRA_ENV
+        APPEND ROCPROFSYS_PAPI_EXTRA_ENV
         PAPI_LMSENSORS_ROOT=${ROCPROFSYS_PAPI_LMSENSORS_ROOT_DIR}
     )
 endif()
@@ -349,7 +348,7 @@ foreach(
     if(_UTIL_EXE STREQUAL "papi_hl_output_writer.py")
         file(
             READ
-            "${PROJECT_BINARY_DIR}/external/papi/source/src/high-level/scripts/${_UTIL_EXE}"
+                "${PROJECT_BINARY_DIR}/external/papi/source/src/high-level/scripts/${_UTIL_EXE}"
             _HL_OUTPUT_WRITER
         )
         string(
@@ -361,8 +360,7 @@ foreach(
         )
         file(MAKE_DIRECTORY "${ROCPROFSYS_PAPI_INSTALL_DIR}/bin")
         file(
-            WRITE
-            "${ROCPROFSYS_PAPI_INSTALL_DIR}/bin/${_UTIL_EXE}3"
+            WRITE "${ROCPROFSYS_PAPI_INSTALL_DIR}/bin/${_UTIL_EXE}3"
             "${_HL_OUTPUT_WRITER}"
         )
         set(_UTIL_EXE "${_UTIL_EXE}3")

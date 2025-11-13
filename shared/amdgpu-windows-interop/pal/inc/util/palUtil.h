@@ -99,6 +99,7 @@ static_assert(false, "Clients may not define macros named \"min\" or \"max\".");
 // Equates to [__declspec(align(__x))](https://github.com/MicrosoftDocs/cpp-docs/blob/master/docs/cpp/align-cpp.md) on Windows.
 #define PAL_ALIGN(__x) __declspec(align(__x))
 #define PAL_FORCE_INLINE __forceinline
+#define PAL_NO_INLINE __declspec(noinline)
 #else
 /// Undefined on GCC platforms.
 #define PAL_STDCALL
@@ -107,6 +108,7 @@ static_assert(false, "Clients may not define macros named \"min\" or \"max\".");
 /// Undefined on GCC platforms.
 #define PAL_ALIGN(__x)
 #define PAL_FORCE_INLINE __attribute__((always_inline)) inline
+#define PAL_NO_INLINE __attribute__((noinline))
 #endif
 
 /// Platform cache line size in bytes.
@@ -598,6 +600,16 @@ constexpr bool IsErrorResult(Result result) { return (static_cast<int32>(result)
 /// are errors, the first Result is returned.
 constexpr Result CollapseResults(Result lhs, Result rhs)
     { return (IsErrorResult(lhs) || (static_cast<uint32>(lhs) > static_cast<uint32>(rhs))) ? lhs : rhs; }
+
+/// A simple enum-to-string helper function. Given a result like Result::ErrorOutOfMemory, it returns a pointer to a
+/// global string containing "ErrorOutOfMemory". The caller must not try to free the returned string.
+///
+/// @param [in] result    The Result code to turn into a string.
+///
+/// @returns A valid pointer to the appropriate global string or to "FixTheTables!!!" if someone forgot to update the
+///          internal string tables when they added a new Result value. It's impossible for this to return nullptr.
+extern const char* ResultToString(
+    Result result);
 
 /**
  ***********************************************************************************************************************

@@ -23,11 +23,6 @@
 #include "platform/program.hpp"
 #include "platform/context.hpp"
 #include "utils/options.hpp"
-#if defined(WITH_COMPILER_LIB)
-#include "utils/libUtils.h"
-#include "utils/bif_section_labels.hpp"
-#include "hsailctx.hpp"
-#endif
 
 #include <cstdlib>  // for malloc
 #include <cstring>  // for strcmp
@@ -37,21 +32,6 @@
 #include <utility>
 
 namespace amd {
-
-#if defined(WITH_COMPILER_LIB)
-static aclTargetInfo* aclutGetTargetInfo(aclBinary* binary) {
-  aclTargetInfo* tgt = NULL;
-  if (binary->struct_size == sizeof(aclBinary_0_8)) {
-    tgt = &reinterpret_cast<aclBinary_0_8*>(binary)->target;
-  } else if (binary->struct_size == sizeof(aclBinary_0_8_1)) {
-    tgt = &reinterpret_cast<aclBinary_0_8_1*>(binary)->target;
-  } else {
-    assert(!"Binary format not supported!");
-    tgt = &binary->target;
-  }
-  return tgt;
-}
-#endif
 
 static void remove_g_option(std::string& option) {
   // Remove " -g " option from application.
@@ -114,16 +94,7 @@ int32_t Program::addDeviceProgram(Device& device, const void* image, size_t leng
                                   amd::option::Options* options, const amd::Program* same_prog,
                                   amd::Os::FileDesc fdesc, size_t foffset, std::string uri) {
   if (image != NULL && !amd::Elf::isElfMagic((const char*)image)) {
-    if (device.settings().useLightning_) {
-      return CL_INVALID_BINARY;
-    }
-#if defined(WITH_COMPILER_LIB)
-    else if (!amd::Hsail::ValidateBinaryImage(
-                 image, length,
-                 language_ == SPIRV ? BINARY_TYPE_SPIRV : BINARY_TYPE_ELF | BINARY_TYPE_LLVM)) {
-      return CL_INVALID_BINARY;
-    }
-#endif  // !defined(WITH_COMPILER_LIB)
+    return CL_INVALID_BINARY;
   }
 
   // Check if the device is already associated with this program
@@ -138,43 +109,11 @@ int32_t Program::addDeviceProgram(Device& device, const void* image, size_t leng
     return CL_SUCCESS;
   }
 
-#if defined(WITH_COMPILER_LIB)
-  bool emptyOptions = (options == nullptr);
-#endif
   amd::option::Options emptyOpts;
   if (options == NULL) {
     options = &emptyOpts;
   }
 
-#if defined(WITH_COMPILER_LIB)
-  if (image != NULL && length != 0 &&
-      amd::Hsail::ValidateBinaryImage(image, length, BINARY_TYPE_ELF)) {
-    acl_error errorCode;
-    aclBinary* binary = amd::Hsail::ReadFromMem(image, length, &errorCode);
-    if (errorCode != ACL_SUCCESS) {
-      return CL_INVALID_BINARY;
-    }
-    const oclBIFSymbolStruct* symbol = findBIF30SymStruct(symOpenclCompilerOptions);
-    assert(symbol && "symbol not found");
-    std::string symName = std::string(symbol->str[bif::PRE]) + std::string(symbol->str[bif::POST]);
-    size_t symSize = 0;
-    const void* opts = amd::Hsail::ExtractSymbol(device.binCompiler(), binary, &symSize, aclCOMMENT,
-                                                 symName.c_str(), &errorCode);
-    // if we have options from binary and input options was not specified
-    if (opts != NULL && emptyOptions) {
-      std::string sBinOptions = std::string((char*)opts, symSize);
-      if (!amd::option::parseAllOptions(sBinOptions, *options, false, false)) {
-        programLog_ = options->optionsLog();
-        LogError("Parsing compilation options from binary failed.");
-        return CL_INVALID_COMPILER_OPTIONS;
-      }
-    }
-    options->oVariables->Legacy = !device.settings().useLightning_
-                                      ? isAMDILTarget(*amd::aclutGetTargetInfo(binary))
-                                      : isHSAILTarget(*amd::aclutGetTargetInfo(binary));
-    amd::Hsail::BinaryFini(binary);
-  }
-#endif  // defined(WITH_COMPILER_LIB)
   options->oVariables->BinaryIsSpirv = language_ == SPIRV;
   device::Program* program = rootDev.createProgram(*this, options);
   if (program == NULL) {
@@ -272,8 +211,7 @@ int32_t Program::compile(const std::vector<Device*>& devices, size_t numHeaders,
   for (const auto& it : devices) {
     option::Options parsedOptions;
     constexpr bool LinkOptsOnly = false;
-    if (!ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly,
-                         it->settings().useLightning_)) {
+    if (!ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly)) {
       programLog_ = parsedOptions.optionsLog();
       LogError("Parsing compile options failed.");
       return CL_INVALID_COMPILER_OPTIONS;
@@ -345,8 +283,7 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
   for (const auto& it : devices) {
     option::Options parsedOptions;
     constexpr bool LinkOptsOnly = true;
-    if (!ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly,
-                         it->settings().useLightning_)) {
+    if (!ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly)) {
       programLog_ = parsedOptions.optionsLog();
       LogError("Parsing link options failed.");
       return CL_INVALID_LINKER_OPTIONS;
@@ -366,29 +303,6 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
         continue;
       }
       inputDevPrograms[i] = findIt->second;
-// Check the binary's target for the first found device program.
-// TODO: Revise these binary's target checks
-// and possibly remove them after switching to HSAIL by default.
-#if defined(WITH_COMPILER_LIB)
-      device::Program::binary_t binary = inputDevPrograms[i]->binary();
-      if (!found && binary.first != NULL && binary.second > 0 &&
-          amd::Hsail::ValidateBinaryImage(binary.first, binary.second, BINARY_TYPE_ELF)) {
-        acl_error errorCode = ACL_SUCCESS;
-        void* mem = const_cast<void*>(binary.first);
-        aclBinary* aclBin = amd::Hsail::ReadFromMem(mem, binary.second, &errorCode);
-        if (errorCode != ACL_SUCCESS) {
-          LogWarning("Error while linking: Could not read from raw binary.");
-          return CL_INVALID_BINARY;
-        }
-        if (isHSAILTarget(*amd::aclutGetTargetInfo(aclBin))) {
-          parsedOptions.oVariables->Frontend = "clang";
-          parsedOptions.oVariables->Legacy = it->settings().useLightning_;
-        } else if (isAMDILTarget(*amd::aclutGetTargetInfo(aclBin))) {
-          parsedOptions.oVariables->Frontend = "edg";
-        }
-        amd::Hsail::BinaryFini(aclBin);
-      }
-#endif  // defined(WITH_COMPILER_LIB)
       found = true;
     }
     if (inputDevPrograms.size() == 0) {
@@ -522,8 +436,7 @@ int32_t Program::build(const std::vector<Device*>& devices, const char* options,
   for (const auto& it : devices) {
     option::Options parsedOptions;
     constexpr bool LinkOptsOnly = false;
-    if ((language_ != HIP) && !ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly,
-                                               it->settings().useLightning_)) {
+    if ((language_ != HIP) && !ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly)) {
       programLog_ = parsedOptions.optionsLog();
       LogError("Parsing compile options failed.");
       return CL_INVALID_COMPILER_OPTIONS;
@@ -677,7 +590,7 @@ int Program::GetOclCVersion(const char* clVer) {
 }
 
 bool Program::ParseAllOptions(const std::string& options, option::Options& parsedOptions,
-                              bool optionChangable, bool linkOptsOnly, bool isLC) {
+                              bool optionChangable, bool linkOptsOnly) {
   std::string allOpts = options;
   if (optionChangable) {
     if (linkOptsOnly) {
@@ -704,7 +617,7 @@ bool Program::ParseAllOptions(const std::string& options, option::Options& parse
       }
     }
   }
-  return amd::option::parseAllOptions(allOpts, parsedOptions, linkOptsOnly, isLC);
+  return amd::option::parseAllOptions(allOpts, parsedOptions, linkOptsOnly);
 }
 
 bool Symbol::setDeviceKernel(const Device& device, const device::Kernel* func) {

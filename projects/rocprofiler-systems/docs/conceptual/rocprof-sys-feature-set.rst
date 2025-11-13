@@ -87,17 +87,6 @@ CPU metrics
 * I/O metrics
 * Many others
 
-Third-party API support
-========================================
-
-* TAU
-* LIKWID
-* Caliper
-* CrayPAT
-* VTune
-* NVTX
-* ROCTX
-
 ROCm Systems Profiler use cases
 ========================================
 
