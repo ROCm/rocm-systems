@@ -789,7 +789,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
             list(APPEND _environ "ROCPROFSYS_CI_TIMEOUT=${_timeout}")
 
             rocprofiler_systems_check_pass_fail_regex("${TEST_NAME}-${_TEST}"
-                                                      "${_PASS_REGEX}" "${_FAIL_REGEX}"
+                "${_PASS_REGEX}" "${_FAIL_REGEX}"
             )
             if(TEST ${TEST_NAME}-${_TEST})
                 rocprofiler_systems_write_test_config(${TEST_NAME}-${_TEST}.cfg _environ)
@@ -804,6 +804,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                         SKIP_REGULAR_EXPRESSION "${${_SKIP_REGEX}}"
                         WILL_FAIL ${TEST_WILL_FAIL}
                         DISABLED ${TEST_DISABLED}
+                        FIXTURES_REQUIRED rocprofsys-global-tmp-files
                         ${_props}
                 )
             endif()
@@ -840,7 +841,7 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
 
     if(NOT DEFINED TEST_CAUSAL_MODE)
         rocprofiler_systems_message(FATAL_ERROR
-                                    "${TEST_NAME} :: CAUSAL_MODE must be defined"
+            "${TEST_NAME} :: CAUSAL_MODE must be defined"
         )
     endif()
 
@@ -971,7 +972,7 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
             list(APPEND _environ "ROCPROFSYS_CI_TIMEOUT=${_timeout}")
             rocprofiler_systems_write_test_config(${_NAME}.cfg _environ)
             rocprofiler_systems_check_pass_fail_regex("${_NAME}" "${_PASS_REGEX}"
-                                                      "${_FAIL_REGEX}"
+                "${_FAIL_REGEX}"
             )
             set_tests_properties(
                 ${_NAME}
@@ -982,6 +983,7 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
                     PASS_REGULAR_EXPRESSION "${${_PASS_REGEX}}"
                     FAIL_REGULAR_EXPRESSION "${${_FAIL_REGEX}}"
                     SKIP_REGULAR_EXPRESSION "${${_SKIP_REGEX}}"
+                    FIXTURES_REQUIRED rocprofsys-global-tmp-files
                     ${_props}
             )
         endforeach()
@@ -1096,7 +1098,7 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
         set(_FAIL_REGEX TEST_FAIL_REGEX)
 
         rocprofiler_systems_check_pass_fail_regex("${_TEST}" "${_PASS_REGEX}"
-                                                  "${_FAIL_REGEX}"
+            "${_FAIL_REGEX}"
         )
         set_tests_properties(
             ${_TEST}
@@ -1109,6 +1111,7 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
                 FAIL_REGULAR_EXPRESSION "${${_FAIL_REGEX}}"
                 SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
                 REQUIRED_FILES "${TEST_FILE}"
+                FIXTURES_REQUIRED rocprofsys-global-tmp-files
                 ${_TEST_PROPERTIES}
         )
     endforeach()
@@ -1132,7 +1135,7 @@ if(NOT ROCPROFSYS_USE_PYTHON)
 
         if(NOT ROCPROFSYS_VALIDATION_PYTHON_PERFETTO EQUAL 0)
             rocprofiler_systems_message(AUTHOR_WARNING
-                                        "Python3 found but perfetto support is disabled"
+                "Python3 found but perfetto support is disabled"
             )
         endif()
     endif()
@@ -1306,7 +1309,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         endif()
 
         rocprofiler_systems_check_pass_fail_regex("${_TEST}" "TEST_PASS_REGEX"
-                                                  "TEST_FAIL_REGEX"
+            "TEST_FAIL_REGEX"
         )
         set_tests_properties(
             ${_TEST}
@@ -1319,6 +1322,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
                 SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
                 REQUIRED_FILES "${TEST_FILE}"
+                FIXTURES_REQUIRED rocprofsys-global-tmp-files
                 ${TEST_PROPERTIES}
         )
     endforeach()
@@ -1410,6 +1414,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
                 PASS_REGULAR_EXPRESSION "${TEST_PASS_REGEX}"
                 FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
                 SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
+                FIXTURES_REQUIRED rocprofsys-global-tmp-files
                 ${TEST_PROPERTIES}
         )
     elseif(TARGET ${TEST_TARGET})
@@ -1429,6 +1434,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
                 PASS_REGULAR_EXPRESSION "${TEST_PASS_REGEX}"
                 FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
                 SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
+                FIXTURES_REQUIRED rocprofsys-global-tmp-files
                 ${TEST_PROPERTIES}
         )
     elseif(ROCPROFSYS_BUILD_TESTING)
