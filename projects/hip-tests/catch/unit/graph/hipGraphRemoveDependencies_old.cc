@@ -256,6 +256,9 @@ TEST_CASE("Unit_hipGraphRemoveDependencies_Func_StrmCapture") {
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipStreamDestroy(stream3));
+  HIP_CHECK(hipEventDestroy(forkStreamEvent));
+  HIP_CHECK(hipEventDestroy(memsetEvent1));
+  HIP_CHECK(hipEventDestroy(memsetEvent2));
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 
