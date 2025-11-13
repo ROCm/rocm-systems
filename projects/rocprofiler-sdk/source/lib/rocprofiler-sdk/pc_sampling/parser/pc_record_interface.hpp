@@ -129,7 +129,42 @@ public:
 
 protected:
     /**
-     * @brief Parses the given input data and generates pc sampling records.
+     * @brief New multi-record version: Parses the given input data and emits multi-record sequences
+     * directly to buffer. Does not use intermediate v0 records or generate_upcoming_pc_record().
+     */
+    template <typename GFX>
+    pcsample_status_t _parse_multi_record(const upcoming_samples_t& upcoming,
+                                          const generic_sample_t*   data_)
+    {
+        pcsample_status_t status      = PCSAMPLE_STATUS_SUCCESS;
+        uint64_t          pkt_counter = upcoming.num_samples;
+        auto              dev         = upcoming.device;
+        bool              bIsHostTrap = upcoming.which_sample_type == AMD_HOST_TRAP_V1;
+
+        // Get buffer for this agent
+        std::shared_lock<std::shared_mutex> lock(mut);
+        auto it = _agent_buffers.find(rocprofiler_agent_id_t{dev.handle});
+        if(it == _agent_buffers.end())
+        {
+            return PCSAMPLE_STATUS_CALLBACK_ERROR;  // No buffer registered for this agent
+        }
+        auto buff_id = it->second;
+        lock.unlock();
+
+        rocprofiler::buffer::instance* buff = rocprofiler::buffer::get_buffer(buff_id);
+        if(!buff) return PCSAMPLE_STATUS_CALLBACK_ERROR;
+
+        auto* map = corr_map.get();
+
+        // Process all samples directly into buffer
+        status = add_upcoming_samples<GFX>(
+            dev, data_, pkt_counter, map, buff, next_instance_id, bIsHostTrap);
+
+        return status;
+    }
+
+    /**
+     * @brief Old v0 version: Parses the given input data and generates pc sampling records.
      * Calls generate_upcoming_pc_record().
      */
     template <typename GFX, typename PcSamplingRecordT>
@@ -206,4 +241,5 @@ private:
     parse_funct_ptr_t _get_parse_func_for_method(rocprofiler_pc_sampling_method_t pcs_method);
 
     std::unordered_map<rocprofiler_agent_id_t, rocprofiler_buffer_id_t> _agent_buffers;
+    std::atomic<uint64_t>                                               next_instance_id{1};
 };

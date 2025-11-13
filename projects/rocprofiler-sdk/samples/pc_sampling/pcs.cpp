@@ -32,9 +32,11 @@
 
 #include <cassert>
 #include <cstdio>
+#include <cstring>
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <type_traits>
 
 namespace client
 {
@@ -54,22 +56,44 @@ tool_agent_info_vec_t gpu_agents = {};
 // Instead, it would be better to encapsulate `buffer_ids` inside the
 // `pcs` namespace and export functions for registering/flushing/destroying buffers.
 pc_sampling_buffer_id_vec_t* buffer_ids = nullptr;
+multi_record_aggregator*     aggregator = nullptr;
 
 namespace
 {
 constexpr uint64_t host_trap_interval  = 10000;    // 10ms
 constexpr uint64_t stochastic_interval = 1048576;  // 2 ^ 20 cycles
+
+// Custom deleter for void*
+void
+record_deleter(void* ptr)
+{
+    ::operator delete(ptr);
+}
 }  // namespace
 
 void
 init()
 {
     buffer_ids = new pc_sampling_buffer_id_vec_t();
+    aggregator = new multi_record_aggregator();
 }
 
 void
 fini()
 {
+    // Print any incomplete sample groups
+    if(aggregator)
+    {
+        std::lock_guard<std::mutex> lock(aggregator->mutex);
+        if(!aggregator->pending_samples.empty())
+        {
+            *utils::get_output_stream() << "WARNING: " << aggregator->pending_samples.size()
+                                        << " incomplete sample groups at shutdown\n";
+        }
+        delete aggregator;
+        aggregator = nullptr;
+    }
+
     // Clear the data
     buffer_ids->clear();
     delete buffer_ids;
@@ -80,6 +104,12 @@ pc_sampling_buffer_id_vec_t*
 get_pc_sampling_buffer_ids()
 {
     return buffer_ids;
+}
+
+multi_record_aggregator*
+get_multi_record_aggregator()
+{
+    return aggregator;
 }
 
 rocprofiler_status_t
@@ -375,6 +405,137 @@ print_sample(std::ostream& os, const rocprofiler_pc_sampling_record_invalid_t* /
     os << "Invalid sample detected.\n";
 }
 
+// Print functions for new multi-record types
+void
+print_sample(std::ostream& os, const rocprofiler_pc_sampling_base_record_t* sample)
+{
+    os << "  BASE [instance=" << sample->pc_sample_instance_id
+       << ", total_records=" << sample->total_record_num
+       << ", valid=" << static_cast<int>(sample->is_valid) << "]: ";
+
+    if(sample->is_valid)
+    {
+        os << "(code_obj_id, offset): (" << sample->pc.code_object_id << ", 0x" << std::hex
+           << sample->pc.code_object_offset << std::dec << "), "
+           << "timestamp: " << sample->timestamp << ", "
+           << "exec: 0x" << std::hex << sample->exec_mask << std::dec << ", "
+           << "dispatch_id: " << sample->dispatch_id << ", "
+           << "correlation: {internal=" << sample->correlation_id.internal << ", "
+           << "external=" << sample->correlation_id.external.value << "}";
+    }
+    os << "\n";
+}
+
+void
+print_sample(std::ostream& os, const rocprofiler_pc_sampling_hw_id_record_t* sample)
+{
+    os << "  HW_ID [instance=" << sample->pc_sample_instance_id << "]: "
+       << "chiplet=" << static_cast<int>(sample->chiplet) << ", "
+       << "wave_id=" << static_cast<int>(sample->wave_id) << ", "
+       << "simd_id=" << static_cast<int>(sample->simd_id) << ", "
+       << "pipe_id=" << static_cast<int>(sample->pipe_id) << ", "
+       << "cu/wgp_id=" << static_cast<int>(sample->cu_or_wgp_id) << ", "
+       << "shader_array=" << static_cast<int>(sample->shader_array_id) << ", "
+       << "shader_engine=" << static_cast<int>(sample->shader_engine_id) << "\n";
+}
+
+void
+print_sample(std::ostream& os, const rocprofiler_pc_sampling_workgroup_info_t* sample)
+{
+    os << "  WORKGROUP [instance=" << sample->pc_sample_instance_id << "]: "
+       << "position=(" << sample->workgroup_position.x << ", " << sample->workgroup_position.y
+       << ", " << sample->workgroup_position.z << "), "
+       << "wave_in_group=" << static_cast<int>(sample->wave_in_group) << "\n";
+}
+
+void
+print_sample(std::ostream& os, const rocprofiler_pc_sampling_snapshot_state_t* sample)
+{
+    os << "  SNAPSHOT [instance=" << sample->pc_sample_instance_id << "]: "
+       << "wave_issued=" << static_cast<int>(sample->wave_issued) << ", "
+       << "wave_count=" << static_cast<int>(sample->wave_count) << ", "
+       << "arbiter_state=0x" << std::hex << sample->arbiter_state << std::dec << "\n";
+}
+
+// Function to print a complete sample group
+void
+print_complete_sample_group(std::ostream& os, uint64_t instance_id, const pc_sample_group& group)
+{
+    os << "=== Complete PC Sample (instance " << instance_id << ", " << group.records.size() << "/"
+       << group.expected_count << " records) ===\n";
+
+    for(const auto& rec_info : group.records)
+    {
+        switch(rec_info.kind)
+        {
+            case ROCPROFILER_PC_SAMPLING_RECORD_BASE:
+            {
+                auto* rec =
+                    static_cast<const rocprofiler_pc_sampling_base_record_t*>(rec_info.data.get());
+                print_sample(os, rec);
+                break;
+            }
+            case ROCPROFILER_PC_SAMPLING_RECORD_HW_ID:
+            {
+                auto* rec =
+                    static_cast<const rocprofiler_pc_sampling_hw_id_record_t*>(rec_info.data.get());
+                print_sample(os, rec);
+                break;
+            }
+            case ROCPROFILER_PC_SAMPLING_RECORD_WORKGROUP_INFO:
+            {
+                auto* rec = static_cast<const rocprofiler_pc_sampling_workgroup_info_t*>(
+                    rec_info.data.get());
+                print_sample(os, rec);
+                break;
+            }
+            case ROCPROFILER_PC_SAMPLING_RECORD_SNAPSHOT_STATE:
+            {
+                auto* rec = static_cast<const rocprofiler_pc_sampling_snapshot_state_t*>(
+                    rec_info.data.get());
+                print_sample(os, rec);
+                break;
+            }
+            default: os << "  Unknown record kind: " << rec_info.kind << "\n";
+        }
+    }
+    os << "=== End PC Sample ===\n\n";
+}
+
+// Template function to handle multi-record aggregation
+template <typename RecordT>
+void
+handle_multi_record(std::stringstream&       ss,
+                    uint32_t                 kind,
+                    void*                    payload,
+                    multi_record_aggregator* agg)
+{
+    auto* rec = static_cast<RecordT*>(payload);
+
+    // Allocate and copy
+    void* copy = ::operator new(rec->size);
+    std::memcpy(copy, rec, rec->size);
+
+    std::lock_guard<std::mutex> lock(agg->mutex);
+    auto&                       group = agg->pending_samples[rec->pc_sample_instance_id];
+
+    // Set expected_count if this is the BASE record
+    if constexpr(std::is_same_v<RecordT, rocprofiler_pc_sampling_base_record_t>)
+    {
+        group.expected_count = rec->total_record_num;
+    }
+
+    group.records.emplace_back(
+        static_cast<rocprofiler_pc_sampling_record_kind_t>(kind), copy, record_deleter);
+
+    // Check if complete
+    if(group.expected_count > 0 && group.records.size() == group.expected_count)
+    {
+        print_complete_sample_group(ss, rec->pc_sample_instance_id, group);
+        agg->pending_samples.erase(rec->pc_sample_instance_id);
+    }
+}
+
 void
 rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
                                  rocprofiler_buffer_id_t /*buffer_id*/,
@@ -386,6 +547,8 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
     std::stringstream ss;
     ss << "The number of delivered samples is: " << num_headers << ", "
        << "while the number of dropped samples is: " << drop_count << "\n";
+
+    auto* agg = get_multi_record_aggregator();
 
     for(size_t i = 0; i < num_headers; i++)
     {
@@ -403,6 +566,7 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
         }
         else if(cur_header->category == ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING)
         {
+            // Handle OLD v0 records (keep existing code)
             if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE)
             {
                 auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_host_trap_v0_t*>(
@@ -424,9 +588,30 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
 
                 print_sample(ss, pc_sample);
             }
+            // Handle NEW multi-record types
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_BASE)
+            {
+                handle_multi_record<rocprofiler_pc_sampling_base_record_t>(
+                    ss, cur_header->kind, cur_header->payload, agg);
+            }
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_HW_ID)
+            {
+                handle_multi_record<rocprofiler_pc_sampling_hw_id_record_t>(
+                    ss, cur_header->kind, cur_header->payload, agg);
+            }
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_WORKGROUP_INFO)
+            {
+                handle_multi_record<rocprofiler_pc_sampling_workgroup_info_t>(
+                    ss, cur_header->kind, cur_header->payload, agg);
+            }
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_SNAPSHOT_STATE)
+            {
+                handle_multi_record<rocprofiler_pc_sampling_snapshot_state_t>(
+                    ss, cur_header->kind, cur_header->payload, agg);
+            }
             else
             {
-                assert(false);
+                ss << "Unknown PC sampling record kind: " << cur_header->kind << "\n";
             }
         }
         else

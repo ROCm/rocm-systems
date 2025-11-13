@@ -25,7 +25,9 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <map>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace client
@@ -39,6 +41,30 @@ struct tool_agent_info;
 using avail_configs_vec_t         = std::vector<rocprofiler_pc_sampling_configuration_t>;
 using tool_agent_info_vec_t       = std::vector<std::unique_ptr<tool_agent_info>>;
 using pc_sampling_buffer_id_vec_t = std::vector<rocprofiler_buffer_id_t>;
+
+// Multi-record aggregation structures
+struct collected_record_info
+{
+    rocprofiler_pc_sampling_record_kind_t  kind;
+    std::unique_ptr<void, void (*)(void*)> data;
+
+    collected_record_info(rocprofiler_pc_sampling_record_kind_t k, void* d, void (*deleter)(void*))
+    : kind(k)
+    , data(d, deleter)
+    {}
+};
+
+struct pc_sample_group
+{
+    uint16_t                           expected_count;
+    std::vector<collected_record_info> records;
+};
+
+struct multi_record_aggregator
+{
+    std::map<uint64_t, pc_sample_group> pending_samples;
+    std::mutex                          mutex;
+};
 
 struct tool_agent_info
 {
@@ -64,6 +90,10 @@ fini();
 // Ids of the buffers used as containers for PC sampling records
 pc_sampling_buffer_id_vec_t*
 get_pc_sampling_buffer_ids();
+
+// Get the multi-record aggregator
+multi_record_aggregator*
+get_multi_record_aggregator();
 
 void
 find_all_gpu_agents_supporting_pc_sampling();

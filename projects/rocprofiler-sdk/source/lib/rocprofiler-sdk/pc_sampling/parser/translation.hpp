@@ -173,6 +173,67 @@ copyHwId<GFX12, rocprofiler_pc_sampling_hw_id_v0_t>(rocprofiler_pc_sampling_hw_i
     hw_id.vm_id = EXTRACT_BITS(hw_id_reg, 31, 28);
 }
 
+// copyHwId overloads for new multi-record format (rocprofiler_pc_sampling_hw_id_record_t)
+// Use the same two-parameter template to avoid ambiguity
+// TODO: remove rocprofiler_pc_sampling_hw_id_record_t as unnecessary
+
+template <>
+inline void
+copyHwId<GFX9, rocprofiler_pc_sampling_hw_id_record_t>(
+    rocprofiler_pc_sampling_hw_id_record_t& hw_id,
+    const uint32_t                          hw_id_reg)
+{
+    hw_id.wave_id          = EXTRACT_BITS(hw_id_reg, 3, 0);
+    hw_id.simd_id          = EXTRACT_BITS(hw_id_reg, 5, 4);
+    hw_id.pipe_id          = EXTRACT_BITS(hw_id_reg, 7, 6);
+    hw_id.cu_or_wgp_id     = EXTRACT_BITS(hw_id_reg, 11, 8);
+    hw_id.shader_array_id  = EXTRACT_BITS(hw_id_reg, 12, 12);
+    hw_id.shader_engine_id = EXTRACT_BITS(hw_id_reg, 15, 13);
+    hw_id.group_id         = EXTRACT_BITS(hw_id_reg, 19, 16);
+    hw_id.vm_id            = EXTRACT_BITS(hw_id_reg, 23, 20);
+    hw_id.queue_id         = EXTRACT_BITS(hw_id_reg, 26, 24);
+    hw_id.microengine_id   = EXTRACT_BITS(hw_id_reg, 31, 30);
+}
+
+template <>
+inline void
+copyHwId<GFX12, rocprofiler_pc_sampling_hw_id_record_t>(
+    rocprofiler_pc_sampling_hw_id_record_t& hw_id,
+    const uint32_t                          hw_id_reg)
+{
+    hw_id.wave_id          = EXTRACT_BITS(hw_id_reg, 4, 0);
+    hw_id.queue_id         = EXTRACT_BITS(hw_id_reg, 8, 5);
+    hw_id.cu_or_wgp_id     = EXTRACT_BITS(hw_id_reg, 13, 10);
+    hw_id.simd_id          = EXTRACT_BITS(hw_id_reg, 15, 14);
+    hw_id.shader_array_id  = EXTRACT_BITS(hw_id_reg, 16, 16);
+    hw_id.microengine_id   = EXTRACT_BITS(hw_id_reg, 17, 17);
+    hw_id.shader_engine_id = EXTRACT_BITS(hw_id_reg, 19, 18);
+    hw_id.pipe_id          = EXTRACT_BITS(hw_id_reg, 21, 20);
+    hw_id.group_id         = EXTRACT_BITS(hw_id_reg, 27, 23);
+    hw_id.vm_id            = EXTRACT_BITS(hw_id_reg, 31, 28);
+}
+
+template <>
+inline void
+copyHwId<GFX950, rocprofiler_pc_sampling_hw_id_record_t>(
+    rocprofiler_pc_sampling_hw_id_record_t& hw_id,
+    const uint32_t                          hw_id_reg)
+{
+    // GFX950 uses same layout as GFX9
+    copyHwId<GFX9, rocprofiler_pc_sampling_hw_id_record_t>(hw_id, hw_id_reg);
+}
+
+template <>
+inline void
+copyHwId<GFX11, rocprofiler_pc_sampling_hw_id_record_t>(
+    rocprofiler_pc_sampling_hw_id_record_t& hw_id,
+    const uint32_t                          hw_id_reg)
+{
+    // TODO: implement GFX11 hw_id decoding when spec is available
+    (void) hw_id;
+    (void) hw_id_reg;
+}
+
 template <typename PcSamplingRecordT, typename SType>
 inline PcSamplingRecordT
 copySampleHeader(const SType& sample)
@@ -433,4 +494,6 @@ correct_pc_address<GFX950, rocprofiler_pc_sampling_record_stochastic_v0_t>(
     }
 }
 
-#undef EXTRACT_BITS
+// NOTE: EXTRACT_BITS is intentionally NOT #undef'd here because it's needed
+// by the emit_*_multi_records functions in correlation.hpp
+// It will be #undef'd at the end of correlation.hpp instead

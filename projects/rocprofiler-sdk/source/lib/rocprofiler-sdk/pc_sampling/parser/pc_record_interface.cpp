@@ -90,38 +90,75 @@ PCSamplingParserContext::parse(const upcoming_samples_t& upcoming,
                            ? ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP
                            : ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
 
-    // Template instantiation is faster!
-    parse_funct_ptr_t parseSample_func = nullptr;
-    if(gfxip_major == 9)
+    // Use new multi-record format
+    // TODO: Add environment variable or config option to toggle between old/new format
+    constexpr bool use_multi_record = true;
+
+    pcsample_status_t status = PCSAMPLE_STATUS_SUCCESS;
+
+    if(use_multi_record)
     {
-        if(gfxip_minor == 5)
+        // New multi-record path: directly call _parse_multi_record with appropriate GFXIP
+        if(gfxip_major == 9)
         {
-            parseSample_func = _get_parse_func_for_method<GFX950>(pcs_method);
+            if(gfxip_minor == 5)
+            {
+                status = _parse_multi_record<GFX950>(upcoming, data_);
+            }
+            else
+            {
+                status = _parse_multi_record<GFX9>(upcoming, data_);
+            }
+        }
+        else if(gfxip_major == 11)
+        {
+            status = _parse_multi_record<GFX11>(upcoming, data_);
+        }
+        else if(gfxip_major == 12)
+        {
+            status = _parse_multi_record<GFX12>(upcoming, data_);
         }
         else
         {
-            parseSample_func = _get_parse_func_for_method<GFX9>(pcs_method);
+            return PCSAMPLE_STATUS_INVALID_GFXIP;
         }
-    }
-    else if(gfxip_major == 11)
-    {
-        parseSample_func = _get_parse_func_for_method<GFX11>(pcs_method);
-    }
-    else if(gfxip_major == 12)
-    {
-        parseSample_func = _get_parse_func_for_method<GFX12>(pcs_method);
     }
     else
     {
-        return PCSAMPLE_STATUS_INVALID_GFXIP;
+        // Old v0 path: use function pointers
+        parse_funct_ptr_t parseSample_func = nullptr;
+        if(gfxip_major == 9)
+        {
+            if(gfxip_minor == 5)
+            {
+                parseSample_func = _get_parse_func_for_method<GFX950>(pcs_method);
+            }
+            else
+            {
+                parseSample_func = _get_parse_func_for_method<GFX9>(pcs_method);
+            }
+        }
+        else if(gfxip_major == 11)
+        {
+            parseSample_func = _get_parse_func_for_method<GFX11>(pcs_method);
+        }
+        else if(gfxip_major == 12)
+        {
+            parseSample_func = _get_parse_func_for_method<GFX12>(pcs_method);
+        }
+        else
+        {
+            return PCSAMPLE_STATUS_INVALID_GFXIP;
+        }
+
+        if(parseSample_func == nullptr)
+        {
+            return PCSAMPLE_STATUS_INVALID_METHOD;
+        }
+
+        status = (this->*parseSample_func)(upcoming, data_);
     }
 
-    if(parseSample_func == nullptr)
-    {
-        return PCSAMPLE_STATUS_INVALID_METHOD;
-    }
-
-    auto status = (this->*parseSample_func)(upcoming, data_);
     midway_signal.notify_all();
 
     if(!bRocrBufferFlip || status != PCSAMPLE_STATUS_SUCCESS) return status;
