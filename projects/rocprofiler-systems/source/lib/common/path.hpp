@@ -455,7 +455,7 @@ get_internal_script_path()
 std::string
 get_internal_libdir()
 {
-    return rocprofsys::common::join("/", get_rocprofsys_root(), "lib");
+    return rocprofsys::common::join('/', get_rocprofsys_root(), "lib");
 }
 
 }  // namespace path
