@@ -115,6 +115,7 @@ postfork_child()
         << "Error! child process " << process::get_id()
         << " believes it is the root process " << get_root_process_id() << "\n";
 
+    set_state(State::Finalized);
     settings::enabled() = false;
     settings::verbose() = -127;
     settings::debug()   = false;
