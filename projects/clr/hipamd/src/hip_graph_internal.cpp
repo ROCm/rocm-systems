@@ -736,8 +736,20 @@ void Graph::clone(Graph* newGraph, bool cloneNodes) const {
     userObj.first->owning_graphs_.insert(newGraph);
   }
   // Clone the root nodes to the new graph
+  // Map original root node pointers to their cloned counterparts
   if (roots_.size() > 0) {
-    memcpy(&newGraph->roots_[0], &roots_[0], sizeof(Node) * roots_.size());
+    for (size_t i = 0; i < roots_.size(); ++i) {
+      if (roots_[i] != nullptr) {
+        auto it = newGraph->clonedNodes_.find(roots_[i]);
+        if (it != newGraph->clonedNodes_.end()) {
+          newGraph->roots_[i] = it->second;
+        } else {
+          newGraph->roots_[i] = nullptr;
+        }
+      } else {
+        newGraph->roots_[i] = nullptr;
+      }
+    }
   }
   newGraph->memAllocNodePtrs_ = memAllocNodePtrs_;
 
@@ -987,7 +999,10 @@ void GraphExec::PacketBatch::setEnabled(GraphNode* node, bool enabled) {
   // Update counter based on state change
   if (enabled) {
     // Node being enabled: decrement counter
-    disabledNodeCount--;
+    // Defensive check to prevent underflow
+    if (disabledNodeCount > 0) {
+      disabledNodeCount--;
+    }
   } else {
     // Node being disabled: increment counter
     disabledNodeCount++;

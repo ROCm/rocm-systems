@@ -1403,6 +1403,11 @@ class GraphKernelNode : public GraphNode {
   GraphNode* clone() const override { return new GraphKernelNode(*this); }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
+    // Clear commands_ first, even if node is disabled
+    hipError_t status = GraphNode::CreateCommand(stream);
+    if (status != hipSuccess) {
+      return status;
+    }
     if (!isEnabled_) {
       return hipSuccess;
     }
@@ -1413,12 +1418,8 @@ class GraphKernelNode : public GraphNode {
     hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
     amd::Kernel* kernel = function->kernel();
     amd::ScopedLock lock(function->dflock_);
-    hipError_t status = validateKernelParams(&kernelParams_, func, dev_id_);
+    status = validateKernelParams(&kernelParams_, func, dev_id_);
     if (hipSuccess != status) {
-      return status;
-    }
-    status = GraphNode::CreateCommand(stream);
-    if (status != hipSuccess) {
       return status;
     }
     commands_.reserve(1);
@@ -1632,14 +1633,15 @@ class GraphMemcpyNode : public GraphNode {
   GraphNode* clone() const override { return new GraphMemcpyNode(*this); }
 
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
+    // Clear commands_ first, even if node is disabled
+    hipError_t status = GraphNode::CreateCommand(stream);
+    if (status != hipSuccess) {
+      return status;
+    }
     if (!isEnabled_ ||
         ((copyParams_.kind == hipMemcpyHostToHost || copyParams_.kind == hipMemcpyDefault) &&
          IsHtoHMemcpy(copyParams_.dstPtr.ptr, copyParams_.srcPtr.ptr))) {
       return hipSuccess;
-    }
-    hipError_t status = GraphNode::CreateCommand(stream);
-    if (status != hipSuccess) {
-      return status;
     }
     commands_.reserve(1);
     amd::Command* command;
@@ -1836,13 +1838,14 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   GraphNode* clone() const override { return new GraphMemcpyNode1D(*this); }
 
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
-    if (!isEnabled_ ||
-        ((kind_ == hipMemcpyHostToHost || kind_ == hipMemcpyDefault) && IsHtoHMemcpy(dst_, src_))) {
-      return hipSuccess;
-    }
+    // Clear commands_ first, even if node is disabled
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
+    }
+    if (!isEnabled_ ||
+        ((kind_ == hipMemcpyHostToHost || kind_ == hipMemcpyDefault) && IsHtoHMemcpy(dst_, src_))) {
+      return hipSuccess;
     }
     commands_.reserve(1);
     amd::Command* command = nullptr;
