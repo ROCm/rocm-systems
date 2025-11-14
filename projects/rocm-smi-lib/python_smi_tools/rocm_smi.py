@@ -1414,20 +1414,20 @@ def setClocks(deviceList, clktype, clk):
                 printLog(device, 'Performance level was set to manual', None)
             else:
                 RETCODE = 1
-                return
+                continue
         if clktype != 'pcie':
             # Validate frequency bitmask
             freq = rsmi_frequencies_t()
             ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clktype], byref(freq))
             if not rsmi_ret_ok(ret, device, 'get_gpu_clk_freq_' + str(clktype)):
                 RETCODE = 1
-                return
+                continue
             # The freq_bitmask should be less than 2^(freqs.num_supported)
             # For example, num_supported == 3,  the max bitmask is 0111
             if freq_bitmask >= (1 << freq.num_supported):
                 printErrLog(device, 'Invalid clock frequency %s' % hex(freq_bitmask))
                 RETCODE = 1
-                return
+                continue
 
             ret = rocmsmi.rsmi_dev_gpu_clk_freq_set(device, rsmi_clk_names_dict[clktype], freq_bitmask)
             if rsmi_ret_ok(ret, device, 'set_gpu_clk_freq_' + str(clktype)):
@@ -1440,19 +1440,20 @@ def setClocks(deviceList, clktype, clk):
             ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
             if not rsmi_ret_ok(ret, device, 'get_PCIe_bandwidth'):
                 RETCODE = 1
-                return
+                continue
             # The freq_bitmask should be less than 2^(bw.transfer_rate.num_supported)
             # For example, num_supported == 3,  the max bitmask is 0111
             if freq_bitmask >= (1 << bw.transfer_rate.num_supported):
                 printErrLog(device, 'Invalid PCIe frequency %s' % hex(freq_bitmask))
                 RETCODE = 1
-                return
+                continue
 
             ret = rocmsmi.rsmi_dev_pci_bandwidth_set(device, freq_bitmask)
             if rsmi_ret_ok(ret, device, 'set_PCIe_bandwidth'):
                 printLog(device, 'Successfully set %s to level bitmask' % (clktype), hex(freq_bitmask))
             else:
                 RETCODE = 1
+            continue
     printLogSpacer()
 
 

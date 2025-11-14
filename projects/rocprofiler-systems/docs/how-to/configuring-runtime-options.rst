@@ -81,12 +81,7 @@ data and resources. By default, with ``ROCPROFSYS_PROFILE=ON``, ROCm Systems Pro
 timing values. However, by modifying the ``ROCPROFSYS_TIMEMORY_COMPONENTS`` setting,
 ROCm Systems Profiler can be configured to
 collect hardware counters, CPU-clock timers, memory usage, context switches, page faults, network statistics,
-and much more. ROCm Systems Profiler can even be used as a dynamic instrumentation vehicle
-for other third-party profiling
-APIs such as `Caliper <https://github.com/LLNL/Caliper>`_ and `LIKWID <https://github.com/RRZE-HPC/likwid>`_.
-To leverage this capability, build ROCm Systems Profiler from source with the CMake
-options ``TIMEMORY_USE_CALIPER=ON`` or ``TIMEMORY_USE_LIKWID=ON`` and then add
-``caliper_marker``, ``likwid_marker``, or both to ``ROCPROFSYS_TIMEMORY_COMPONENTS``.
+and much more.
 
 To view all possible components and their descriptions:
 
@@ -313,9 +308,11 @@ Use the following command to view the available domains:
 
 .. note::
 
-Some  settings can enable tracing for multiple domains, such as ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
-And ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, ``hsa_finalize_ext_api``.
-The setting ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
+   Some settings can enable tracing for multiple domains, such as: 
+   
+   * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
+   * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
+   * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
 
 For example, the following is a valid configuration:
 

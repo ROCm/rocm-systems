@@ -70,7 +70,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 
 gtest_add_tests(
@@ -104,7 +105,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 gtest_add_tests(
     TARGET command-buffer-test
@@ -162,7 +164,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 gtest_add_tests(
     TARGET pm4-factory-test
@@ -214,6 +217,7 @@ SET(AQLPROFILE_V2_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../spm_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx12_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx11_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx115x_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx10_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx940_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx908_factory.cpp
@@ -231,7 +235,8 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
-            GTest::gmock_main)
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
 
 gtest_add_tests(
     TARGET aql-profile-v2-test

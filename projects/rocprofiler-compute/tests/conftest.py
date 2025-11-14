@@ -25,11 +25,17 @@
 
 import os
 import subprocess
+import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
+SRC = os.path.join(ROOT, "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
 
 rocprof_compute = SourceFileLoader(
     "rocprof-compute", "src/rocprof-compute"

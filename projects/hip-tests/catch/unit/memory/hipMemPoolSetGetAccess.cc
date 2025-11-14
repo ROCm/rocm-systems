@@ -98,7 +98,7 @@ int CheckP2PMemPoolSupport(int src_device, int dst_device) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU") {
+TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU", "[multigpu]") {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -212,7 +212,7 @@ void MemPoolSetGetAccess_P2P(const MemPools mempool_type) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_P2P") {
+TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_P2P", "[multigpu]") {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -260,32 +260,41 @@ TEST_CASE("Unit_hipMemPoolSetAccess_Negative_Parameters") {
   SECTION("Mempool is nullptr") {
     HIP_CHECK_ERROR(hipMemPoolSetAccess(nullptr, &desc, 1), hipErrorInvalidValue);
   }
+
+  // Cuda segfaults here!
 #if HT_AMD
   SECTION("Desc is nullptr and count is > 0") {
     HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), nullptr, 1), hipErrorInvalidValue);
   }
 #endif
+
   SECTION("Count > num_device") {
+#if HT_AMD
     HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, (num_dev + 1)),
                     hipErrorInvalidDevice);
+#else
+    HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, (num_dev + 1)),
+                    hipErrorNotSupported);
+#endif
   }
 
   SECTION("Passing invalid desc location type") {
     desc.location.type = hipMemLocationTypeInvalid;
+#if HT_AMD
     HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1), hipErrorInvalidValue);
-    desc.location.type = hipMemLocationTypeDevice;
+#else
+    HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1), hipErrorNotSupported);
+#endif
   }
 
   SECTION("Passing invalid desc location id") {
     desc.location.id = num_dev;
     HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1), hipErrorInvalidDevice);
-    desc.location.id = device_id;
   }
 
   SECTION("Revoking access to own memory pool") {
     desc.flags = hipMemAccessFlagsProtNone;
     HIP_CHECK_ERROR(hipMemPoolSetAccess(mempool.mempool(), &desc, 1), hipErrorInvalidDevice);
-    desc.flags = hipMemAccessFlagsProtReadWrite;
   }
 }
 
@@ -397,7 +406,7 @@ static void getDevicePairs(std::vector<std::pair<int, int>>* p2p_pairs, int numD
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAccess_SetAccess") {
+TEST_CASE("Unit_hipMemPoolSetAccess_SetAccess", "[multigpu]") {
   constexpr int N = 1 << 14;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

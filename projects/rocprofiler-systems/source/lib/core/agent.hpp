@@ -55,9 +55,6 @@ struct agent
 
     size_t device_type_index{ 0 };
     size_t base_id{ 0 };
-#if ROCPROFSYS_USE_ROCM > 0
-    amdsmi_processor_handle smi_handle = nullptr;
-#endif
 };
 
 }  // namespace rocprofsys

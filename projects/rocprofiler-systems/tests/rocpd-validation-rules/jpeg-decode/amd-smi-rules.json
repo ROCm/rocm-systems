@@ -1,0 +1,59 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_info_pmc_",
+            "required_columns": [
+                "agent_id",
+                "target_arch",
+                "name",
+                "symbol",
+                "description",
+                "units",
+                "value_type"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for jpeg_activity amd-smi metrics",
+                    "error_message": "Did not find jpeg_activity in amd-smi metrics",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol LIKE 'JpegAct%'"
+                }
+            ]
+        },
+        {
+            "_comment": "The actual number of samples will vary depending on the GPU. This validates presence of samples, not the actual number of samples.",
+            "min_rows": 100,
+            "name_prefix": "rocpd_pmc_event_",
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for amd-smi monitoring busy times",
+                    "error_message": "Less than expected number of captured amd-smi mm-busy samples!",
+                    "expected_result": 10,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_busy_mm'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for amd-smi monitoring GPU memory usage",
+                    "error_message": "Less than expected number of captured amd-smi memory-usage samples!",
+                    "expected_result": 10,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_memory_usage'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for amd-smi monitoring JPEG activity",
+                    "error_message": "Less than expected activity in amd-smi jpeg-activity samples!",
+                    "expected_result": 10,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_jpeg_activity_%' and event.value > 0"
+                }
+            ]
+        }
+    ]
+}

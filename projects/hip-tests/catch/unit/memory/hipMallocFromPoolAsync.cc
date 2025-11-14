@@ -340,7 +340,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_hipStreamPerThread") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_ReleaseThreshold_Mgpu") {
+TEST_CASE("Unit_hipMallocFromPoolAsync_ReleaseThreshold_Mgpu", "[multigpu]") {
   constexpr int N = 1 << 20;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -575,7 +575,7 @@ static bool checkReuseAllowOtherFlags(int N, hipMemPoolAttr attr, enum eTestValu
  *    - HIP_VERSION >= 6.2
  */
 #if HT_AMD
-TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_Concurrent") {
+TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_Concurrent", "[multigpu]") {
   auto testType = GENERATE(testdefault, testMaximum);
   constexpr int N = 1 << 20;
   int num_devices;
@@ -627,7 +627,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_Concurrent") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_MultiStream") {
+TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_MultiStream", "[multigpu]") {
   int num_devices;
   auto testType = GENERATE(testdefault, testMaximum);
   constexpr int N = 1 << 20;

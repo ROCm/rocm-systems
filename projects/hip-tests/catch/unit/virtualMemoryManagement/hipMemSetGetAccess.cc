@@ -340,7 +340,7 @@ TEST_CASE("Unit_hipMemGetAccess_NegTst") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_FuncTstOnMultDev") {
+TEST_CASE("Unit_hipMemSetAccess_FuncTstOnMultDev", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -638,7 +638,7 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2DevMemCpy") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerDevMemCpy") {
+TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerDevMemCpy", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -729,7 +729,7 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerDevMemCpy") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy") {
+TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -891,7 +891,7 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2VMMMemCpy") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy") {
+TEST_CASE("Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -1329,6 +1329,65 @@ TEST_CASE("Unit_hipMemSetAccess_negative") {
   CTX_DESTROY();
 }
 
+TEST_CASE("Unit_hipMemSetGetAccess_Capture") {
+  CTX_CREATE();
+
+  const size_t kBufferBytes = DATA_SIZE * sizeof(int);
+  const int kDeviceId = 0;
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkVMMSupported(device);
+
+  hipMemAllocationProp alloc_prop{};
+  alloc_prop.type = hipMemAllocationTypePinned;
+  alloc_prop.location.type = hipMemLocationTypeDevice;
+  alloc_prop.location.id = device;
+
+  size_t granularity = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &alloc_prop,
+                                           hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+
+  const size_t vmm_bytes = ((granularity + kBufferBytes - 1) / granularity) * granularity;
+
+  hipMemGenericAllocationHandle_t mem_handle;
+  HIP_CHECK(hipMemCreate(&mem_handle, vmm_bytes, &alloc_prop, 0));
+
+  void* vmm_ptr = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&vmm_ptr, vmm_bytes, 0, 0, 0));
+  HIP_CHECK(hipMemMap(vmm_ptr, vmm_bytes, 0, mem_handle, 0));
+  HIP_CHECK(hipMemRelease(mem_handle));
+
+  hipMemAccessDesc access_desc{};
+  access_desc.location.type = hipMemLocationTypeDevice;
+  access_desc.location.id = device;
+  access_desc.flags = hipMemAccessFlagsProtReadWrite;
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+
+  // Test hipMemSetAccess inside stream capture
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemSetAccess(vmm_ptr, vmm_bytes, &access_desc, 1));
+  END_CAPTURE(stream);
+
+  // Test hipMemGetAccess inside stream capture
+  BEGIN_CAPTURE(stream);
+  hipMemLocation mem_location{};
+  mem_location.type = hipMemLocationTypeDevice;
+  mem_location.id = device;
+  unsigned long long access_flags = 0;
+  HIP_CHECK(hipMemGetAccess(&access_flags, &mem_location, vmm_ptr));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemUnmap(vmm_ptr, vmm_bytes));
+  HIP_CHECK(hipMemAddressFree(vmm_ptr, vmm_bytes));
+  CTX_DESTROY();
+}
+
 TEST_CASE("Unit_hipMemSetAccessHostDevice_hostalloc") {
   // Ensure device 0 is selected
   REQUIRE(hipSetDevice(0) == hipSuccess);
@@ -1430,18 +1489,23 @@ TEST_CASE("Unit_hipMemSetAccessHost_devicealloc") {
 
   HIP_CHECK(hipMemMap(addr, mapSize, 0 /*offset*/, handle, 0 /*flags*/));
 
-  // Grant HOST access. 
+  // Grant HOST access.
   hipMemAccessDesc accHost{};
   accHost.flags = hipMemAccessFlagsProtReadWrite;
   accHost.location.type = hipMemLocationTypeHost;
   accHost.location.id = 0;
-  HIP_CHECK_ERROR(hipMemSetAccess(addr, mapSize, &accHost, 1), hipErrorInvalidValue);
+#if HT_AMD
+  // SWDEV-563752: we need to allow setAccess to the host even if location is set to
+  // hipMemLocationTypeDevice in hipMemCreate
+  HIP_CHECK(hipMemSetAccess(addr, mapSize, &accHost, 1));
+#else
+  HIP_CHECK_ERROR(hipMemSetAccess(addr, mapSize, &accHost, 1), hipErrorNotSupported);
+#endif
 
   HIP_CHECK(hipMemUnmap(addr, mapSize));
   HIP_CHECK(hipMemAddressFree(addr, mapSize));
   HIP_CHECK(hipMemRelease(handle));
 }
-
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}
