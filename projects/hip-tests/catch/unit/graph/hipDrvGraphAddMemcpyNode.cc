@@ -368,7 +368,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_test") {
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_MulitDevice") {
+TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_MulitDevice", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;

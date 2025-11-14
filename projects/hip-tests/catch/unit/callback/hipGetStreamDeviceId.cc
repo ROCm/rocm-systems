@@ -65,7 +65,8 @@ TEST_CASE("Unit_hipGetStreamDeviceId_Positive_Threaded_Basic") {
  *  - Platform specific (AMD)
  *  - Multithreaded GPU
  */
-TEST_CASE("Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic") {
+TEST_CASE("Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic",
+          "[multigpu]") {
   const unsigned int max_threads = std::thread::hardware_concurrency();
   const int device_count = HipTest::getDeviceCount();
 

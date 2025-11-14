@@ -137,7 +137,7 @@ TEST_CASE("Unit_hipDeviceGetMemPool_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipDeviceGetMemPool_Multidevice") {
+TEST_CASE("Unit_hipDeviceGetMemPool_Multidevice", "[multigpu]") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 

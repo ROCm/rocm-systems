@@ -74,6 +74,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_Negative") {
     HIP_CHECK(hipGraphCreate(&graph, 0));
     HIP_CHECK(hipGraphAddEmptyNode(&memcpyNode, graph, nullptr, 0));
     REQUIRE(hipGraphNodeGetType(memcpyNode, nullptr) == hipErrorInvalidValue);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
 
   SECTION("Pass invalid node") {
@@ -114,8 +115,11 @@ TEST_CASE("Unit_hipGraphNodeGetType_Functional") {
     HIP_CHECK(hipGraphNodeGetType(waiteventNode, &nodeType));
     REQUIRE(nodeType == hipGraphNodeTypeEmpty);
   }
+
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipEventDestroy(event));
+  HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 /**
  * Functional Test for hipGraphNodeGetType API
@@ -397,6 +401,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread") {
   SECTION("Cloned Graph Node Type") {
     HIP_CHECK(hipGraphClone(&clonedGraph, graph));
     ChkNodeType(clonedGraph, &numNode);
+    HIP_CHECK(hipGraphDestroy(clonedGraph));
   }
   // Thread
   SECTION("Node Type In The Thread") {
@@ -515,6 +520,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfChildGraph") {
   HIP_CHECK(hipGraphChildGraphNodeGetGraph(childGraphNode, &getGraph));
   ChkNodeType(getGraph, &numNodeChild);
 
+  HIP_CHECK(hipStreamSynchronize(stream2));
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipEventDestroy(event1));
   HIP_CHECK(hipStreamDestroy(stream2));
@@ -638,6 +644,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies") {
   SECTION("Cloned Graph Node Type") {
     HIP_CHECK(hipGraphClone(&clonedGraph, graph));
     ChkNodeTypeWithDependency(clonedGraph, Parent);
+    HIP_CHECK(hipGraphDestroy(clonedGraph));
   }
   // Thread
   SECTION("Node Type In The Thread") {
