@@ -274,7 +274,7 @@ jobs:
         export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install ROCR-Runtime..."
         cmake -B build \
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
           -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
           .
