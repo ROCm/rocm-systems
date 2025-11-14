@@ -2389,7 +2389,7 @@ hsa_status_t Runtime::Load() {
   }
 
   asyncSignals_.reset(new AsyncEventsInfo(false));
-  asyncExceptions_.reset(new AsyncEventsInfo(true));
+  asyncExceptions_.reset(new AsyncEventsInfo(g_use_interrupt_wait));
 
   // Setup system clock frequency for the first time.
   if (sys_clock_freq_ == 0) {
