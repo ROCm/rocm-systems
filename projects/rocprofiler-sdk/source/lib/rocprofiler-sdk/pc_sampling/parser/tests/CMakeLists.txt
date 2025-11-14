@@ -12,6 +12,8 @@ set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_ID_TEST_SOURCES
     ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} correlation_id_test.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_BENCH_TEST_SOURCES
     ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} benchmark_test.cpp)
+set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_GEN_BENCH_TEST_SOURCES
+    ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} benchmark_generation_test.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX9_TEST_SOURCES
     ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} gfxtest.hpp gfx9test.cpp
     gfx950test.cpp)
@@ -77,6 +79,30 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
+
+add_executable(pcs_gen_bench_test)
+
+target_compile_options(pcs_gen_bench_test PRIVATE "-O3" "-ffast-math")
+target_sources(pcs_gen_bench_test
+               PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GEN_BENCH_TEST_SOURCES})
+target_include_directories(pcs_gen_bench_test PRIVATE ${PCTEST_INCLUDE_DIR})
+
+target_link_libraries(
+    pcs_gen_bench_test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+gtest_add_tests(
+    TARGET pcs_gen_bench_test
+    SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GEN_BENCH_TEST_SOURCES}
+    TEST_LIST pcs_gen_bench_test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+set_tests_properties(
+    ${pcs_gen_bench_test_TESTS}
+    PROPERTIES TIMEOUT 120 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_executable(pcs_thread_test)
 target_compile_options(pcs_thread_test PRIVATE "-O3" "-ffast-math")

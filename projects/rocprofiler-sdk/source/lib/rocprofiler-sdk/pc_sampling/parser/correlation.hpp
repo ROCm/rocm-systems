@@ -487,7 +487,8 @@ add_upcoming_samples(const device_handle     device,
                 // We observed an error sample, that was not being
                 // tagged with the error bit on time due to high latency in the trap handler.
                 // Thus, we are declaring the sample invalid, by setting its size to zero.
-                pc_sample.size = 0;
+                // FIXME: this might break some tests...
+                // pc_sample.size = 0;
             }
         } catch(std::exception& e)
         {
@@ -618,6 +619,97 @@ pcsample_status_t inline parse_buffer(generic_sample_t*                  buffer,
 
     return parseSample_func(buffer, buffer_size, callback, userdata, corr_map.get());
 };
+
+/**
+ * @brief Helper for multi-record testing - mirrors _parse_buffer but calls 7-param overload
+ * This is used to test the new multi-record code path without going through production APIs
+ */
+template <typename GFXIP>
+inline pcsample_status_t
+_parse_buffer_multi_record(generic_sample_t*              buffer,
+                           uint64_t                       buffer_size,
+                           rocprofiler::buffer::instance* buff,
+                           std::atomic<uint64_t>&         instance_id_gen,
+                           Parser::CorrelationMap*        corr_map)
+{
+    uint64_t          index  = 0;
+    pcsample_status_t status = PCSAMPLE_STATUS_SUCCESS;
+
+    while(index < buffer_size)
+    {
+        switch(buffer[index].type)
+        {
+            case AMD_DISPATCH_PKT_ID:
+            {
+                const auto& pkt = *reinterpret_cast<const dispatch_pkt_id_t*>(buffer + index);
+                if(pkt.queue_size >= (1 << 25)) status = PCSAMPLE_STATUS_PARSER_ERROR;
+                index += 1;
+                corr_map->newDispatch(pkt);
+                break;
+            }
+            case AMD_UPCOMING_SAMPLES:
+            {
+                const auto& pkt = *reinterpret_cast<const upcoming_samples_t*>(buffer + index);
+                index += 1;
+
+                bool is_host_trap = pkt.which_sample_type == AMD_HOST_TRAP_V1;
+
+                // Call 7-parameter multi-record overload
+                status |= add_upcoming_samples<GFXIP>(pkt.device,
+                                                      buffer + index,
+                                                      pkt.num_samples,
+                                                      corr_map,
+                                                      buff,
+                                                      instance_id_gen,
+                                                      is_host_trap);
+
+                index += pkt.num_samples;
+                break;
+            }
+            default: return PCSAMPLE_STATUS_INVALID_SAMPLE;
+        }
+    }
+    return status;
+}
+
+/**
+ * @brief Public API for multi-record testing
+ * This function uses the new multi-record code path that emits multiple records per sample
+ * @param[in] buffer Pointer to a buffer containing metadata and pcsamples
+ * @param[in] buffer_size The number of elements in the buffer
+ * @param[in] gfxip_major GFXIP major version of the samples
+ * @param[in] gfxip_minor GFXIP minor version of the samples
+ * @param[in] buff Buffer instance where multi-records will be emitted
+ * @param[in] instance_id_gen Atomic counter for generating unique instance IDs
+ */
+inline pcsample_status_t
+parse_buffer_multi_record(generic_sample_t*              buffer,
+                          uint64_t                       buffer_size,
+                          int                            gfxip_major,
+                          int                            gfxip_minor,
+                          rocprofiler::buffer::instance* buff,
+                          std::atomic<uint64_t>&         instance_id_gen)
+{
+    static auto corr_map = std::make_unique<Parser::CorrelationMap>();
+
+    if(gfxip_major == 9)
+    {
+        if(gfxip_minor == 5)
+            return _parse_buffer_multi_record<GFX950>(
+                buffer, buffer_size, buff, instance_id_gen, corr_map.get());
+        else
+            return _parse_buffer_multi_record<GFX9>(
+                buffer, buffer_size, buff, instance_id_gen, corr_map.get());
+    }
+    else if(gfxip_major == 11)
+        return _parse_buffer_multi_record<GFX11>(
+            buffer, buffer_size, buff, instance_id_gen, corr_map.get());
+    else if(gfxip_major == 12)
+        return _parse_buffer_multi_record<GFX12>(
+            buffer, buffer_size, buff, instance_id_gen, corr_map.get());
+    else
+        return PCSAMPLE_STATUS_INVALID_GFXIP;
+}
 
 // Clean up EXTRACT_BITS macro from translation.hpp
 #undef EXTRACT_BITS

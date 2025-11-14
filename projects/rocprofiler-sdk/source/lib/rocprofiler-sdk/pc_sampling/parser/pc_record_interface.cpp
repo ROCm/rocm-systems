@@ -24,6 +24,9 @@
 
 #include "lib/common/utility.hpp"
 
+#include <cstdlib>
+#include <string>
+
 template <>
 uint64_t
 PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_host_trap_v0_t>(
@@ -91,8 +94,15 @@ PCSamplingParserContext::parse(const upcoming_samples_t& upcoming,
                            : ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
 
     // Use new multi-record format
-    // TODO: Add environment variable or config option to toggle between old/new format
-    constexpr bool use_multi_record = true;
+    // Can be toggled via ROCPROFILER_PC_SAMPLING_USE_MULTI_RECORD environment variable
+    // Default: true (multi-record mode)
+    // Set to "0" or "false" to use legacy single-record v0 mode
+    static bool use_multi_record = []() {
+        const char* env = std::getenv("ROCPROFILER_PC_SAMPLING_USE_MULTI_RECORD");
+        if(env == nullptr) return true;  // Default: multi-record
+        std::string val(env);
+        return !(val == "0" || val == "false" || val == "FALSE");
+    }();
 
     pcsample_status_t status = PCSAMPLE_STATUS_SUCCESS;
 
