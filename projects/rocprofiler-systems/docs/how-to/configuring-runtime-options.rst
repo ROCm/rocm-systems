@@ -190,7 +190,7 @@ There are two distinct approaches for collecting PAPI-based hardware counters, e
 
 1. Instrumentation-based collection: Uses function instrumentation system to collect PAPI counters at function entry and exit points. This works with profiling mode via ``ROCPROFSYS_TIMEMORY_COMPONENTS``:
 
-**Example 1: **Using ``papi_array`` for a fixed list of events**
+**Example 1: Using ``papi_array`` for a fixed list of events**
 
 .. code-block:: shell   
    
@@ -202,9 +202,9 @@ There are two distinct approaches for collecting PAPI-based hardware counters, e
 
    # Specify which PAPI events to collect
    export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
+   
 
-
-**Example 2: **Using ``papi_vector`` for dynamically allocated array of events**
+**Example 2: Using ``papi_vector`` for dynamically allocated array of events**
 
 .. code-block:: shell 
    
@@ -213,7 +213,7 @@ There are two distinct approaches for collecting PAPI-based hardware counters, e
 
    # Alternative: Use perf event names
    export ROCPROFSYS_PAPI_EVENTS="perf::INSTRUCTIONS,perf::CACHE-REFERENCES,perf::CACHE-MISSES"
-   ```
+   
 
 2. Sampling-based collection: Periodically interrupts program execution to capture hardware counters along with call stack information. This works with sampling mode.
 
