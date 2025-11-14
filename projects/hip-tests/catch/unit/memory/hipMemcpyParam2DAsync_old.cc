@@ -44,7 +44,8 @@ static constexpr size_t NUM_H{10};
  *
  */
 TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-StreamOnDiffDevice",
-                   "[hipMemcpyParam2DAsync]", char, float, int, double, long double) {
+                   "[hipMemcpyParam2DAsync][multigpu]", char, float, int,
+                   double, long double) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -118,8 +119,9 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-StreamOnDiffDevice",
  * it with the initalized data "C_h".
  *
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-D2D", "[hipMemcpyParam2DAsync]", char,
-                   int, float, double, long double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-D2D",
+                   "[hipMemcpyParam2DAsync][multigpu]", char, int, float,
+                   double, long double) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -195,8 +197,9 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-D2D", "[hipMemcpyPara
  *
  * Validating the result by comparing "A_h" to "C_h"
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-H2D-D2H", "[hipMemcpyParam2DAsync]",
-                   char, int, float, double, long double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-H2D-D2H",
+                   "[hipMemcpyParam2DAsync][multigpu]", char, int, float,
+                   double, long double) {
   CHECK_IMAGE_SUPPORT
 
   // 1 refers to pinned host memory and 0 refers
