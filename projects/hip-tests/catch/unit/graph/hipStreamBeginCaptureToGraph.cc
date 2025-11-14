@@ -813,6 +813,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_ModifyChildpGraph") {
   hipGraphNode_t childGraphNode;
   HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, graph, dependncy.data(), dependncy.size(),
                                       graphChild));
+  HIP_CHECK(hipGraphDestroy(graphChild));
   HIP_CHECK(hipGraphChildGraphNodeGetGraph(childGraphNode, &graphChild));
   // Capture stream into graph
   // Capture Nodes from multiple streams
@@ -907,7 +908,6 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_StateTesting") {
   HIP_CHECK(hipStreamCreate(&stream2));
   HIP_CHECK(hipEventCreate(&e));
   hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipStreamIsCapturing(stream1, &captureStatus));
   REQUIRE(captureStatus == hipStreamCaptureStatusNone);
   HIP_CHECK(hipStreamBeginCaptureToGraph(stream1, graph, nullptr, nullptr, 0,
@@ -1009,6 +1009,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_EndingWhileCaptureInProgress") {
     HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), Nbytes, hipMemcpyHostToDevice, stream1));
     REQUIRE(hipSuccess == hipStreamEndCapture(stream1, &graph));
     HIP_CHECK(hipEventDestroy(e));
+    HIP_CHECK(hipGraphDestroy(graph));
   }
 
   SECTION("End strm capture when forked strm still has operations") {
@@ -1132,6 +1133,7 @@ static void threadCaptureStart(hipStream_t* streamCapt, hipStream_t* streamFork,
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, *streamFork));
   HIP_CHECK(hipEventRecord(e, *streamFork));
   HIP_CHECK(hipStreamWaitEvent(*streamCapt, e, 0));
+  HIP_CHECK(hipEventDestroy(e));
 }
 
 TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CapturePartialInThreads") {
