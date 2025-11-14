@@ -51,3 +51,25 @@ include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
+
+# -------------------------------------------------------------------------------------- #
+#
+# Global cleanup test for temporary files
+# This runs once after ALL tests complete to clean up trace cache temporary files
+# Uses FIXTURES_CLEANUP to ensure it runs after all tests requiring the fixture
+#
+# -------------------------------------------------------------------------------------- #
+
+add_test(
+    NAME rocprofsys-cleanup-tmp-files
+    COMMAND sh -c "rm -f /tmp/buffered_storage*.bin /tmp/metadata*.json"
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+)
+
+set_tests_properties(
+    rocprofsys-cleanup-tmp-files
+    PROPERTIES
+        FIXTURES_CLEANUP rocprofsys-global-tmp-files
+        LABELS "cleanup;global"
+        TIMEOUT 30
+)

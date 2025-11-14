@@ -269,7 +269,8 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating dependency graph on GPU-0 and instantiate, launching and verifying
 the result on GPU-1
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg",
+          "[multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -311,7 +312,8 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating capture graph on GPU-0 and instantiate, launching and verifying
 the result on GPU-1
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg",
+          "[multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

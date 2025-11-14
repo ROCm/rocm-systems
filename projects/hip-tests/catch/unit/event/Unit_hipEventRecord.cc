@@ -158,7 +158,7 @@ TEST_CASE("Unit_hipEventRecord") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventRecord_Negative") {
+TEST_CASE("Unit_hipEventRecord_Negative", "[multigpu]") {
   SECTION("Nullptr event") {
     HIP_CHECK_ERROR(hipEventRecord(nullptr, nullptr), hipErrorInvalidResourceHandle);
   }
