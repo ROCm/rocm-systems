@@ -22,8 +22,6 @@
 
 add_executable(rocprof-sys-unit-tests dummy.cpp)
 
-add_dependencies(rocprof-sys-unit-tests rocprofiler-systems-googletest-library)
-
 target_link_libraries(
     rocprof-sys-unit-tests
     PRIVATE rocprofiler-systems-googletest-library
