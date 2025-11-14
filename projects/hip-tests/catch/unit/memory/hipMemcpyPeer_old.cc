@@ -28,7 +28,7 @@ This testfile verifies the following scenarios of hipMemcpyPeer API
 
 /*This testcase verifies the negative scenarios of hipmemcpypeer
  */
-TEST_CASE("Unit_hipMemcpyPeer_Negative") {
+TEST_CASE("Unit_hipMemcpyPeer_Negative", "[multigpu]") {
   constexpr auto numElements{10};
   constexpr auto copy_bytes{numElements * sizeof(int)};
   int numDevices = 0;
@@ -91,7 +91,7 @@ TEST_CASE("Unit_hipMemcpyPeer_Negative") {
  * Copies the data from GPU-0 to GPU-1 using hipMemcpyPeer API
  * Then performs the addition and validates the sum
  */
-TEST_CASE("Unit_hipMemcpyPeer_Basic") {
+TEST_CASE("Unit_hipMemcpyPeer_Basic", "[multigpu]") {
   constexpr auto numElements{10};
   constexpr auto copy_bytes{numElements * sizeof(int)};
   int numDevices = 0;

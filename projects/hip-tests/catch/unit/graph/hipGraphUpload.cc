@@ -152,7 +152,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional") {
   }
 }
 
-TEST_CASE("Unit_hipGraphUpload_Functional_multidevice_test") {
+TEST_CASE("Unit_hipGraphUpload_Functional_multidevice_test", "[multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

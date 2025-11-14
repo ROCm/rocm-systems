@@ -10,6 +10,7 @@ set(TEST_SRC
   hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.cc
   hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags.cc
   hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.cc
+  hipOccupancyAvailableDynamicSMemPerBlock.cc
 )
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code

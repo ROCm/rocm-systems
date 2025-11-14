@@ -70,7 +70,7 @@ static std::vector<int> getSupportedDevices() {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
+TEST_CASE("Unit_hipMemAdvise_v2_Device_Host", "[multigpu]") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
     HipTest::HIP_SKIP_TEST(

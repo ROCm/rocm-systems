@@ -609,7 +609,7 @@ TEST_CASE("Unit_hipMemcpy3D_multiDevice-Negative") {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipMemcpy3D_multiDevice-OnPeerDevice") {
+TEST_CASE("Unit_hipMemcpy3D_multiDevice-OnPeerDevice", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -644,7 +644,7 @@ TEST_CASE("Unit_hipMemcpy3D_multiDevice-OnPeerDevice") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy3D_multiDevice_Basic_Size_Test") {
+TEST_CASE("Unit_hipMemcpy3D_multiDevice_Basic_Size_Test", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;
