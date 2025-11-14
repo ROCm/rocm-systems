@@ -690,7 +690,7 @@ Queue::sync() const
     // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
     // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()
     // should be equivalent to NUM_SIGNALS if all kernel dispatches are completed
-    ROCP_CI_LOG_IF(WARNING, get_balanced_signal_slots().load() != NUM_SIGNALS) << fmt::format(
+    ROCP_WARNING_IF(get_balanced_signal_slots().load() != NUM_SIGNALS) << fmt::format(
         "There are {} incomplete dispatches", NUM_SIGNALS - get_balanced_signal_slots().load());
 }
 
