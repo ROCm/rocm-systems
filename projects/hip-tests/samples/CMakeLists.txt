@@ -92,13 +92,13 @@ if(ENABLE_ADDRESS_SANITIZER)
 endif()
 
 add_custom_target(build_samples
-            DEPENDS build_intro build_utils build_cookbook
+            DEPENDS build_intro build_utils build_cookbook build_libMangment
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 add_subdirectory(0_Intro)
 add_subdirectory(1_Utils)
 add_subdirectory(2_Cookbook)
-
+add_subdirectory(3_Library_Management)
 
 # make package_samples to generate packages for samples
 set(SAMPLES_SRC ${CMAKE_CURRENT_SOURCE_DIR})
