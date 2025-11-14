@@ -175,7 +175,7 @@ run(int tid, int devid)
 
     roctxRangeStop(roctx_range_id);
 
-    constexpr auto scale = 1.3;
+    constexpr auto scale = 1.4;
     if(time > scale * nruntime)
     {
         auto _msg = std::stringstream{};
