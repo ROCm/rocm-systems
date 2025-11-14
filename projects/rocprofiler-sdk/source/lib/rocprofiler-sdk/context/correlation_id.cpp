@@ -75,7 +75,7 @@ correlation_id::sub_ref_count()
 {
     if(m_ref_count == 0)
     {
-        ROCP_CI_LOG(WARNING) << fmt::format(
+        ROCP_WARNING << fmt::format(
             "attempt to decrement correlation id {} reference count but reference count is zero",
             internal);
         return 0;
