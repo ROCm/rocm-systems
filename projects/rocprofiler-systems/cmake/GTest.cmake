@@ -22,7 +22,7 @@
 
 include_guard(GLOBAL)
 
-if(ROCPROFILER_BUILD_GTEST)
+if(ROCPROFSYS_BUILD_GTEST)
     message(STATUS "Setting up GTEST to build from source!")
 
     rocprofiler_systems_checkout_git_submodule(

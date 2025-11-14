@@ -239,8 +239,8 @@ rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
 rocprofiler_systems_add_option(ROCPROFILER_BUILD_SQLITE3
                                "Enable building sqlite3 library internally" OFF
 )
-rocprofiler_systems_add_option(ROCPROFILER_BUILD_GTEST
-                               "Enable building googletest library internally" OFF
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
+                               "Enable building googletest library internally" ON
 )
 
 if(ROCPROFSYS_USE_PAPI)
