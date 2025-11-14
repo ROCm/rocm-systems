@@ -251,7 +251,8 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_logger.cc"
     "${SHR_MUTEX_DIR}/shared_mutex.cc"
     "${ROCM_SRC_DIR}/rocm_smi_binary_parser.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc")
+    "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_npm.cc")
 
 if(ENABLE_ESMI_LIB)
     list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi.c)
@@ -277,7 +278,8 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_logger.h"
     "${SHR_MUTEX_DIR}/shared_mutex.h"
     "${ROCM_INC_DIR}/rocm_smi_binary_parser.h"
-    "${ROCM_INC_DIR}/rocm_smi_board_temp.h")
+    "${ROCM_INC_DIR}/rocm_smi_board_temp.h"
+    "${ROCM_INC_DIR}/rocm_smi_npm.h")
 
 add_subdirectory("rocm_smi")
 add_subdirectory("src")

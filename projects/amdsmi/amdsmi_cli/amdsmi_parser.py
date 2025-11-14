@@ -70,7 +70,8 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, default, sys_argv=None, helpers=None):
+                 xgmi, partition, ras, node, default, sys_argv=None,
+                 helpers=None):
 
         # Helper variables
         if helpers is None:
@@ -122,7 +123,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Store possible subcommands & aliases for later errors
         self.possible_commands = ['version', 'list', 'static', 'firmware', 'ucode', 'bad-pages',
                                   'metric', 'process', 'profile', 'event', 'topology', 'set',
-                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras', 'default']
+                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras',
+                                  'node', 'default']
 
         # Add all subparsers
         if sys_argv is not None:
@@ -143,6 +145,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_xgmi_parser(self.subparsers, xgmi)
                 self._add_partition_parser(self.subparsers, partition)
                 self._add_ras_parser(self.subparsers, ras)
+                self._add_node_parser(self.subparsers, node)
             elif any(arg in sys_argv for arg in ['version']):
                 self._add_version_parser(self.subparsers, version)
             elif any(arg in sys_argv for arg in ['list']):
@@ -175,6 +178,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_partition_parser(self.subparsers, partition)
             elif any(arg in sys_argv for arg in ['ras']):
                 self._add_ras_parser(self.subparsers, ras)
+            elif any(arg in sys_argv for arg in ['node']):
+                self._add_node_parser(self.subparsers, node)
             else:
                 # If no subcommand is given, add the default parser
                 self._add_default_parser(self.subparsers, default)
@@ -1562,6 +1567,32 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add common modifiers and device selection arguments.
         self._add_device_arguments(ras_parser, required=False)
         self._add_command_modifiers(ras_parser)
+
+
+    def _add_node_parser(self, subparsers: argparse._SubParsersAction, func):
+        if self.helpers.is_virtual_os():
+            # This subparser is only available to Guest and Hypervisor systems
+            return
+
+        # Subparser help text
+        node_help = "Gets power information for the node"
+        node_subcommand_help = f"{self.description}\n\nReturns information for node 0 on the system.\
+                                \nIf no node argument is provided, all node information will be displayed."
+        node_optionals_title = "Node arguments"
+
+        # Help text for Node arguments
+        power_management_help = "Displays power management information"
+
+        node_parser = subparsers.add_parser("node", help=node_help, description=node_subcommand_help)
+        node_parser._optionals.title = node_optionals_title
+        node_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
+        node_parser.set_defaults(func=func)
+
+        # Optional Args
+        node_parser.add_argument('-p', '--power-management', action='store_true', required=False, help=power_management_help)
+
+        # Add Universal Arguments
+        self._add_command_modifiers(node_parser)
 
 
     def error(self, message):

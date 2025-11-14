@@ -477,6 +477,78 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
     return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
+                                    amdsmi_node_handle *node_handle) {
+
+    AMDSMI_CHECK_INIT();
+
+    if (node_handle == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Check if OAM ID is 0
+    amdsmi_asic_info_t asic_info;
+    amdsmi_status_t r = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
+    if (r != AMDSMI_STATUS_SUCCESS) {
+        return r;
+    }
+    
+    if (asic_info.oam_id != 0) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    // Get renderPath
+    amdsmi_enumeration_info_t enumeration_info;
+    r = amdsmi_get_gpu_enumeration_info(processor_handle, &enumeration_info);
+    if (r != AMDSMI_STATUS_SUCCESS) {
+        return r;
+    }
+
+    namespace fs = std::filesystem;
+
+    // Construct the path from /sys/class/drm/renderD* device
+    fs::path drm_device_path = fs::path("/sys/class/drm") / ("renderD" + std::to_string(enumeration_info.drm_render)) / "device";
+    fs::path found_board;
+
+    try {
+        // Navigate to the board directory from the DRM device path
+        fs::path board_dir = drm_device_path / "board";
+        fs::path npm_status = board_dir / "npm_status";
+        
+        // Check if board directory and npm_status exist
+        if (fs::exists(board_dir) && fs::is_directory(board_dir) && fs::exists(npm_status)) {
+            found_board = board_dir;
+        }
+    } catch (...) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    if (found_board.empty()) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    // Store board path so node handle remains valid for library lifetime.
+    static std::mutex g_node_mu;
+    static std::map<std::string, std::unique_ptr<std::string>> g_node_registry;
+
+    std::string board_path = found_board.string();
+    {
+        std::lock_guard<std::mutex> lk(g_node_mu);
+        auto it = g_node_registry.find(board_path);
+        if (it == g_node_registry.end()) {
+            auto ptr = std::make_unique<std::string>(board_path);
+            amdsmi_node_handle h = reinterpret_cast<amdsmi_node_handle>(ptr.get());
+            g_node_registry.emplace(board_path, std::move(ptr));
+            *node_handle = h;
+        } else {
+            *node_handle = reinterpret_cast<amdsmi_node_handle>(it->second.get());
+        }
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+
+}
+
 #ifdef ENABLE_ESMI_LIB
 amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
                                                         uint32_t* processor_count, uint32_t* nr_cpusockets,
@@ -877,6 +949,36 @@ amdsmi_status_t  amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle
             static_cast<rsmi_temperature_metric_t>(metric), temperature);
     *temperature /= 1000;
     return amdsmi_status;
+}
+
+amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle,
+                            amdsmi_npm_info_t *npm_info) {
+    AMDSMI_CHECK_INIT();
+
+    if (node_handle == nullptr || npm_info == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Verify board path from node_handle
+    auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+    if (board_path_str == nullptr || board_path_str->empty()) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    rsmi_npm_info_t rsmi_npm_info;
+    rsmi_status_t rstatus = rsmi_dev_npm_info_get(0, reinterpret_cast<uintptr_t>(node_handle), &rsmi_npm_info);
+    amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(rstatus);
+    if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+        return amdsmi_status;
+    }
+
+    if (sizeof(amdsmi_npm_info_t) != sizeof(rsmi_npm_info_t)) {
+        return AMDSMI_STATUS_UNEXPECTED_SIZE;
+    }
+    std::memcpy(npm_info, &rsmi_npm_info, sizeof(amdsmi_npm_info_t));
+
+    return AMDSMI_STATUS_SUCCESS;
+
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,

@@ -55,6 +55,7 @@
 #include "rocm_smi/rocm_smi64Config.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_board_temp.h"
+#include "rocm_smi/rocm_smi_npm.h"
 
 using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
@@ -3254,6 +3255,67 @@ rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
+                              rsmi_npm_info_t *npm_info) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  if (npm_info == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  CHK_SUPPORT_NAME_ONLY(npm_info)
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string *board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  bool npm_status = false;
+  uint64_t npm_limit = UINT64_MAX;
+
+  rsmi_status_t ret = amd::smi::get_npm_board_status(*board_path_str, &npm_status);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_board_status failed: "
+       << getRSMIStatusString(ret);
+    LOG_INFO(ss);
+    return ret;
+  }
+
+  ret = amd::smi::get_npm_board_limit(*board_path_str, &npm_limit);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_board_limit returned "
+       << getRSMIStatusString(ret) << " ; using sentinel limit";
+    LOG_DEBUG(ss);
+    npm_limit = UINT64_MAX;
+  }
+
+  // fill output
+  std::memset(npm_info, 0, sizeof(*npm_info));
+  npm_info->status = npm_status ? RSMI_NPM_STATUS_ENABLED : RSMI_NPM_STATUS_DISABLED;
+  npm_info->limit = npm_limit;
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS);
+  LOG_TRACE(ss);
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -7898,4 +7960,5 @@ rsmi_test_refcount(uint64_t refcnt_type) {
 
   return static_cast<int32_t>(smi.ref_count());
 }
+
 

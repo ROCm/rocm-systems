@@ -624,6 +624,41 @@ class AMDSMIHelpers():
             return False, args.core
 
 
+    # The below handle_nodes function is currently unused as only node 0 is supported.
+    # Marked as a private function until it is needed in the future.
+    def _handle_nodes(self, args, logger, subcommand):
+        """This function will run execute the subcommands based on the number
+            of nodes passed in via args.
+        params:
+            args - argparser args to pass to subcommand
+            current_platform_args (list) - GPU supported platform arguments
+            current_platform_values (list) - GPU supported values for the arguments
+            logger (AMDSMILogger) - Logger to print out output
+            subcommand (AMDSMICommands) - Function that can handle multiple gpus
+
+        return:
+            tuple(bool, device_handle) :
+                bool - True if executed subcommand for multiple devices
+                device_handle - Return the device_handle if the list of devices is a length of 1
+            (handled_multiple_nodes, device_handle)
+
+        """
+        if isinstance(args.node, list):
+            if len(args.node) > 1:
+                for node_handle in args.node:
+                    # Handle multiple_devices to print all output at once
+                    subcommand(args, multiple_devices=True, node=node_handle)
+                logger.print_output(multiple_device_enabled=True)
+                return True, args.node
+            elif len(args.node) == 1:
+                args.node = args.node[0]
+                return False, args.node
+            else:
+                logging.debug("args.node has an empty list")
+        else:
+            return False, args.node
+
+
     def handle_watch(self, args, subcommand, logger):
         """This function will run the subcommand multiple times based
             on the passed watch, watch_time, and iterations passed in.

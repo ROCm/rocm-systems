@@ -4487,6 +4487,37 @@ def amdsmi_get_gpu_fan_speed_max(
     return fan_speed.value
 
 
+def amdsmi_get_node_handle(processor_handle):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle,
+                                       amdsmi_wrapper.amdsmi_processor_handle
+        )
+    node_handle = amdsmi_wrapper.amdsmi_node_handle()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_node_handle(processor_handle, ctypes.byref(node_handle))
+    )
+
+    return node_handle
+
+
+def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    npm_info = amdsmi_wrapper.amdsmi_npm_info_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_npm_info(
+            node_handle, ctypes.byref(npm_info)
+        )
+    )
+
+    dict_ret = {
+        "limit": npm_info.limit,
+        "status": npm_info.status,
+    }
+    return dict_ret
+
+
 def amdsmi_get_temp_metric(
     processor_handle: processor_handle_t,
     sensor_type: AmdSmiTemperatureType,

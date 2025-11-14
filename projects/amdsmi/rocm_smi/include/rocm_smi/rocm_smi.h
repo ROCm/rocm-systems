@@ -597,6 +597,26 @@ typedef enum {
 } rsmi_temperature_type_t;
 
 /**
+ * @brief NPM status
+ *
+ */
+typedef enum  {
+  RSMI_NPM_STATUS_DISABLED,
+  RSMI_NPM_STATUS_ENABLED
+} rsmi_npm_status_t;
+
+/**
+ * @brief NPM info including status, limit.
+ *
+ */
+typedef struct
+{
+  rsmi_npm_status_t status; //!< NPM status (enabled/disabled).
+  uint64_t limit;  //!< Node-level power limit in Watts.
+  uint64_t reserved[6];
+} rsmi_npm_info_t;
+
+/**
  * @brief Activity (Utilization) Metrics.  This enum is used to identify
  * various activity metrics.
  *
@@ -2891,6 +2911,9 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind,
  */
 rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
                                     uint32_t sensor_ind, uint64_t *max_speed);
+
+rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind,
+                              uintptr_t node_handle, rsmi_npm_info_t *npm_info);
 
 /**
  *  @brief Get the temperature metric value for the specified metric, from the
