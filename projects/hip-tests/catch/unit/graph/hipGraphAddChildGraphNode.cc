@@ -1083,7 +1083,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph") {
  in multi GPU environment. Create one nested graph per GPU context. Execute
  all the created graphs in their respective GPUs and validate the output.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU") {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU", "[multigpu]") {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
