@@ -51,12 +51,14 @@
  */
 typedef enum rocattach_status_t  // NOLINT(performance-enum-size)
 {
-    ROCATTACH_STATUS_SUCCESS = 0,  ///< No error occurred
-    ROCATTACH_STATUS_ERROR,        ///< Generalized error
-    ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT,
-    ROCATTACH_STATUS_ERROR_PTRACE_ERROR,
-    ROCATTACH_STATUS_ERROR_PTRACE_OPERATION_NOT_PERMITTED,
-    ROCATTACH_STATUS_ERROR_PTRACE_PROCESS_NOT_FOUND,
+    ROCATTACH_STATUS_SUCCESS = 0,             ///< No error occurred
+    ROCATTACH_STATUS_ERROR,                   ///< Generalized error
+    ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT,  ///< Invalid function argument
+    ROCATTACH_STATUS_ERROR_NOT_SUPPORTED,     ///< Attachment is not supported on this platform
+    ROCATTACH_STATUS_ERROR_PTRACE_ERROR,      ///< General ptrace error
+    ROCATTACH_STATUS_ERROR_PTRACE_OPERATION_NOT_PERMITTED,  ///< ptrace returned EPERM, operation
+                                                            ///< not permitted
+    ROCATTACH_STATUS_ERROR_PTRACE_PROCESS_NOT_FOUND,  ///< ptrace returned ESRCH, no such process
     ROCATTACH_STATUS_LAST,
 } rocattach_status_t;
 

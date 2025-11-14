@@ -31,6 +31,7 @@
 #include <rocprofiler-sdk-rocattach/types.h>
 
 #include <map>
+#include <mutex>
 #include <unordered_map>
 
 extern char** environ;
@@ -58,6 +59,8 @@ struct status_string;
 ROCATTACH_STATUS_STRING(ROCATTACH_STATUS_SUCCESS, "Success")
 ROCATTACH_STATUS_STRING(ROCATTACH_STATUS_ERROR, "General error")
 ROCATTACH_STATUS_STRING(ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT, "Invalid function argument")
+ROCATTACH_STATUS_STRING(ROCATTACH_STATUS_ERROR_NOT_SUPPORTED,
+                        "Attachment not supported on this platform")
 ROCATTACH_STATUS_STRING(ROCATTACH_STATUS_ERROR_PTRACE_ERROR, "General ptrace error")
 ROCATTACH_STATUS_STRING(ROCATTACH_STATUS_ERROR_PTRACE_OPERATION_NOT_PERMITTED,
                         "ptrace returned EPERM, operation not permitted")
@@ -99,6 +102,13 @@ get_sessions()
 {
     static auto*& session_list = rocprofiler::common::static_object<session_list_t>::construct();
     return session_list;
+}
+
+std::lock_guard<std::mutex>
+get_sessions_lock_guard()
+{
+    static auto*& m = rocprofiler::common::static_object<std::mutex>::construct();
+    return std::lock_guard(*CHECK_NOTNULL(m));
 }
 
 // Helper function to allocate memory in target process and write data
@@ -184,25 +194,29 @@ setup(int pid)
                   "for pid "
                << pid;
 
-    auto* sessions = CHECK_NOTNULL(get_sessions());
-
-    if(sessions->count(pid) > 0)
+    auto*      sessions = CHECK_NOTNULL(get_sessions());
+    session_t* session;
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach called for pid " << pid
-                   << ", which already has an active "
-                      "attachment session.";
-        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
-    }
+        auto lg = get_sessions_lock_guard();
+        if(sessions->count(pid) > 0)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach called for pid " << pid
+                       << ", which already has an active "
+                          "attachment session.";
+            return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+        }
 
-    sessions->emplace(pid, pid);
-    auto& session = sessions->at(pid);
-    auto  status  = ROCATTACH_STATUS_SUCCESS;
+        sessions->emplace(pid, pid);
+        session = &(sessions->at(pid));
+    }
+    auto status = ROCATTACH_STATUS_SUCCESS;
 
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting attachment to pid " << pid;
-    status = session.attach();
+    status = session->attach();
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Attachment failed to pid " << pid;
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Attachment failed to pid " << pid
+                   << " with status code " << status;
         return status;
     }
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment success to pid " << pid;
@@ -211,7 +225,7 @@ setup(int pid)
     auto  environment_buffer      = build_environment_buffer();
     void* environment_buffer_addr = nullptr;
     status                        = write_data_to_target(
-        session, "environment buffer", environment_buffer, environment_buffer_addr);
+        *session, "environment buffer", environment_buffer, environment_buffer_addr);
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
         return status;
@@ -228,7 +242,7 @@ setup(int pid)
 
     void* tool_lib_path_addr = nullptr;
     status =
-        write_data_to_target(session, "tool library path", tool_lib_buffer, tool_lib_path_addr);
+        write_data_to_target(*session, "tool library path", tool_lib_buffer, tool_lib_path_addr);
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
         return status;
@@ -236,11 +250,11 @@ setup(int pid)
 
     uint64_t retval = 0;
     // Execute the attach function with both parameters
-    status = session.call_function("librocprofiler-register.so",
-                                   "rocprofiler_register_attach",
-                                   retval,
-                                   environment_buffer_addr,
-                                   tool_lib_path_addr);
+    status = session->call_function("librocprofiler-register.so",
+                                    "rocprofiler_register_attach",
+                                    retval,
+                                    environment_buffer_addr,
+                                    tool_lib_path_addr);
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
         ROCP_ERROR
@@ -259,7 +273,7 @@ setup(int pid)
     }
 
     // Clean up - free the environment buffer and tool library path memory in target process
-    status = session.simple_munmap(environment_buffer_addr, environment_buffer.size());
+    status = session->simple_munmap(environment_buffer_addr, environment_buffer.size());
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to free environment buffer memory in "
@@ -271,7 +285,7 @@ setup(int pid)
         << "[rocprofiler-sdk-rocattach] Cleaned up tool environment memory in target process "
         << pid;
 
-    status = session.simple_munmap(tool_lib_path_addr, tool_lib_path_len);
+    status = session->simple_munmap(tool_lib_path_addr, tool_lib_path_len);
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to free tool library path memory in "
@@ -293,23 +307,26 @@ teardown(int pid)
                   "for pid "
                << pid;
 
-    auto* sessions = CHECK_NOTNULL(get_sessions());
-
-    if(sessions->count(pid) == 0)
+    auto*      sessions = CHECK_NOTNULL(get_sessions());
+    session_t* session;
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_detach called for pid " << pid
-                   << ", which has no active "
-                      "attachment session.";
-        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
-    }
+        auto lg = get_sessions_lock_guard();
+        if(sessions->count(pid) == 0)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_detach called for pid " << pid
+                       << ", which has no active "
+                          "attachment session.";
+            return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+        }
 
-    auto& session = sessions->at(pid);
-    auto  status  = ROCATTACH_STATUS_SUCCESS;
+        session = &(sessions->at(pid));
+    }
+    auto status = ROCATTACH_STATUS_SUCCESS;
 
     uint64_t retval = 0;
     // Execute the attach function with both parameters
     status =
-        session.call_function("librocprofiler-register.so", "rocprofiler_register_detach", retval);
+        session->call_function("librocprofiler-register.so", "rocprofiler_register_detach", retval);
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
         ROCP_ERROR
@@ -328,13 +345,18 @@ teardown(int pid)
     }
 
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting detachment to pid " << pid;
-    session.detach();
+    session->detach();
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Detachment failed from pid " << pid;
         return status;
     }
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Detachment success from pid " << pid;
+
+    {
+        auto lg = get_sessions_lock_guard();
+        sessions->erase(pid);
+    }
 
     return ROCATTACH_STATUS_SUCCESS;
 }
@@ -349,6 +371,13 @@ rocattach_status_t
 rocattach_attach(int pid)
 {
     rocprofiler::rocattach::initialize_logging();
+
+    if(!rocprofiler::rocattach::PTraceSession::is_supported())
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-attach] rocattach is not supported on this platform.";
+        return ROCATTACH_STATUS_ERROR_NOT_SUPPORTED;
+    }
+
     auto status = rocprofiler::rocattach::setup(pid);
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
@@ -376,9 +405,17 @@ rocattach_detach(int pid)
     }
     else
     {
-        for(auto& pair_itr : *(CHECK_NOTNULL(rocprofiler::rocattach::get_sessions())))
+        std::vector<int> pids;
         {
-            int pid_itr = pair_itr.first;
+            auto lg = rocprofiler::rocattach::get_sessions_lock_guard();
+            for(auto& pair_itr : *(CHECK_NOTNULL(rocprofiler::rocattach::get_sessions())))
+            {
+                pids.emplace_back(pair_itr.first);
+            }
+        }
+
+        for(int pid_itr : pids)
+        {
             rocprofiler::rocattach::teardown(pid_itr);
         }
         return ROCATTACH_STATUS_SUCCESS;

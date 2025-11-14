@@ -24,7 +24,7 @@ rocprofiler_activate_clang_tidy()
 
 add_library(rocprofiler-sdk-rocattach-shared-library SHARED)
 target_sources(rocprofiler-sdk-rocattach-shared-library
-               PRIVATE rocattach.cpp ptrace_session.cpp symbol_lookup.cpp)
+               PRIVATE rocattach.cpp auxv.cpp ptrace_session.cpp symbol_lookup.cpp)
 target_include_directories(
     rocprofiler-sdk-rocattach-shared-library
     INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/include>

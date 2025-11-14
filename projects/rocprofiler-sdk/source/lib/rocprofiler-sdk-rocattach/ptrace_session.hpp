@@ -44,6 +44,8 @@ public:
     explicit PTraceSession(int);
     ~PTraceSession();
 
+    static bool is_supported();
+
     rocattach_status_t attach();
     rocattach_status_t detach();
     rocattach_status_t simple_mmap(void*& addr, size_t length);

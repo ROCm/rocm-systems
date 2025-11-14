@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "ptrace_session.hpp"
+#include "auxv.hpp"
 #include "symbol_lookup.hpp"
 
 #include "lib/common/logging.hpp"
@@ -37,73 +38,12 @@
 #include <functional>
 #include <type_traits>
 
-// ptrace memory operations use "word length" which is dependent on system architecture.
-static_assert(sizeof(void*) == 8);
-
-// In addition, this file uses x64 assembly which is inherently platform dependent.
-#ifndef __x86_64__
-static_assert(false);
-#endif
-
 namespace rocprofiler
 {
 namespace rocattach
 {
 namespace
 {
-// When injecting assembly into a process, other threads will continue running and may execute our
-// injected code, resulting in illegal instructions, segmentation faults, or worse. A common
-// technique to avoid this is to inject code at the program entry address, as this is extremely
-// unlikely to be called again in a multithreaded process. To determine this address, we inspect the
-// auxv file for the target process.
-/* Following code is copied from glibc's elf.h.  */
-typedef struct
-{
-    uint64_t a_type; /* Entry type */
-    union
-    {
-        uint64_t a_val; /* Integer value */
-                        /* We use to have pointer elements added here.  We cannot do that,
-                       though, since it does not work when using 32-bit definitions
-                       on 64-bit platforms and vice versa.  */
-    } a_un;
-} Elf64_auxv_t;
-
-void
-get_auxv_entry(int pid, size_t& entry_addr)
-{
-    constexpr int AT_ENTRY = 9; /* Entry point of program */
-    char          filename[PATH_MAX];
-    int           fd{};
-    const int     auxv_size = sizeof(Elf64_auxv_t);
-    char          buf[sizeof(Elf64_auxv_t)]; /* The larger of the two.  */
-
-    snprintf(filename, sizeof filename, "/proc/%d/auxv", pid);
-
-    fd = open(filename, O_RDONLY);
-    if(fd < 0) ROCP_ERROR << "[rocprofiler-sdk-rocattach] Unable to open auxv file " << filename;
-
-    entry_addr = 0;
-    while(read(fd, buf, auxv_size) == auxv_size && entry_addr == 0)
-    {
-        Elf64_auxv_t* const aux = (Elf64_auxv_t*) buf;
-
-        if(aux->a_type == AT_ENTRY)
-        {
-            entry_addr = aux->a_un.a_val;
-        }
-    }
-
-    close(fd);
-
-    if(entry_addr == 0)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Unexpected mising AT_ENTRY for " << filename;
-    }
-    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Entry address found to be " << entry_addr << " from "
-               << filename;
-}
-
 // Very limited list of operations for logging only.
 constexpr const char*
 ptrace_op_name(__ptrace_request op)
@@ -191,6 +131,21 @@ PTraceSession::PTraceSession(int _pid)
 {}
 
 PTraceSession::~PTraceSession() { detach(); }
+
+bool
+PTraceSession::is_supported()
+{
+    // This file uses x64 assembly which is inherently platform dependent.
+#ifdef __x86_64__
+    const bool arch_supported = true;
+#else
+    const bool arch_supported = false;
+#endif
+    // ptrace memory operations use "word length" which is dependent on system architecture.
+    const bool word_size_supported = (sizeof(void*) == 8);
+
+    return (arch_supported && word_size_supported);
+}
 
 rocattach_status_t
 PTraceSession::attach()
@@ -586,14 +541,8 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
     ROCATTACH_CALL(stop());
 
     // Get entry address for safe injection of op codes
-    size_t entry_addr{0};
-    get_auxv_entry(m_pid, entry_addr);
-    if(entry_addr == 0)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] get_auxv_entry failed to retreive program entry "
-                      "address";
-        return ROCATTACH_STATUS_ERROR;
-    }
+    void* entry_addr = nullptr;
+    ROCATTACH_CALL(get_auxv_entry(m_pid, entry_addr));
 
     // Save current register file
     struct user_regs_struct oldregs;
@@ -609,7 +558,8 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
     newregs.r10 = MAP_PRIVATE | MAP_ANONYMOUS;  // flags
     newregs.r8  = -1;                           // fd (unused)
     newregs.r9  = 0;                            // offset
-    newregs.rip = entry_addr;                   // safe injection addr given by get_auxv_entry
+    newregs.rip =
+        reinterpret_cast<size_t>(entry_addr);  // safe injection addr given by get_auxv_entry
     newregs.rsp = oldregs.rsp - 128;    // move sp by at least 128 to not clobber redlined functions
     newregs.rsp -= (newregs.rsp % 16);  // base sp should be on 16-byte boundary
     // Set syscall registers
@@ -622,7 +572,7 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
     std::vector<uint8_t> old_code;
 
     // Write in new opcodes
-    ROCATTACH_CALL(swap_internal(entry_addr, new_code, old_code, 3));
+    ROCATTACH_CALL(swap_internal(reinterpret_cast<size_t>(entry_addr), new_code, old_code, 3));
 
     // Execute
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting to execute mmap syscall";
@@ -633,7 +583,7 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
     PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &returnregs);
 
     // Write in old opcodes
-    ROCATTACH_CALL(write_internal(entry_addr, old_code, 3));
+    ROCATTACH_CALL(write_internal(reinterpret_cast<size_t>(entry_addr), old_code, 3));
 
     // Restore register file
     PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &oldregs);
@@ -661,14 +611,8 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
     ROCATTACH_CALL(stop());
 
     // Get entry address for safe injection of op codes
-    size_t entry_addr{0};
-    get_auxv_entry(m_pid, entry_addr);
-    if(entry_addr == 0)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] get_auxv_entry failed to retreive program entry "
-                      "address";
-        return ROCATTACH_STATUS_ERROR;
-    }
+    void* entry_addr = nullptr;
+    ROCATTACH_CALL(get_auxv_entry(m_pid, entry_addr));
 
     // Save current register file
     struct user_regs_struct oldregs;
@@ -680,7 +624,8 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
     newregs.rax = 11;                              // calling convention: 11 is syscall ID for mumap
     newregs.rdi = reinterpret_cast<size_t>(addr);  // addr
     newregs.rsi = length;                          // length
-    newregs.rip = entry_addr;                      // safe injection addr given by get_auxv_entry
+    newregs.rip =
+        reinterpret_cast<size_t>(entry_addr);  // safe injection addr given by get_auxv_entry
     newregs.rsp = oldregs.rsp - 128;    // move sp by at least 128 to not clobber redlined functions
     newregs.rsp -= (newregs.rsp % 16);  // base sp should be on 16-byte boundary
     // Set syscall registers
@@ -693,7 +638,7 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
     std::vector<uint8_t> old_code;
 
     // Write in new opcodes
-    ROCATTACH_CALL(swap_internal(entry_addr, new_code, old_code, 3));
+    ROCATTACH_CALL(swap_internal(reinterpret_cast<size_t>(entry_addr), new_code, old_code, 3));
 
     // Execute
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting to execute munmap syscall";
@@ -704,7 +649,7 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
     PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &returnregs);
 
     // Write in old opcodes
-    ROCATTACH_CALL(write_internal(entry_addr, old_code, 3));
+    ROCATTACH_CALL(write_internal(reinterpret_cast<size_t>(entry_addr), old_code, 3));
 
     // Restore register file
     PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &oldregs);
@@ -765,14 +710,8 @@ PTraceSession::call_function(const std::string& library,
     }
 
     // Get entry address for safe injection of op codes
-    size_t entry_addr{0};
-    get_auxv_entry(m_pid, entry_addr);
-    if(entry_addr == 0)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] get_auxv_entry failed to retreive program entry "
-                      "address";
-        return ROCATTACH_STATUS_ERROR;
-    }
+    void* entry_addr = nullptr;
+    ROCATTACH_CALL(get_auxv_entry(m_pid, entry_addr));
 
     // Save current register file
     struct user_regs_struct oldregs;
@@ -785,7 +724,8 @@ PTraceSession::call_function(const std::string& library,
     newregs.rax = reinterpret_cast<size_t>(target_addr);   // target function
     newregs.rdi = reinterpret_cast<size_t>(first_param);   // first parameter
     newregs.rsi = reinterpret_cast<size_t>(second_param);  // second parameter
-    newregs.rip = entry_addr;           // safe injection addr given by get_auxv_entry
+    newregs.rip =
+        reinterpret_cast<size_t>(entry_addr);  // safe injection addr given by get_auxv_entry
     newregs.rsp = oldregs.rsp - 128;    // move sp by at least 128 to not clobber redlined functions
     newregs.rsp -= (newregs.rsp % 16);  // base sp should be on 16-byte boundary
     // Set function  registers
@@ -798,7 +738,7 @@ PTraceSession::call_function(const std::string& library,
     std::vector<uint8_t> old_code;
 
     // Write in new opcodes
-    ROCATTACH_CALL(swap_internal(entry_addr, new_code, old_code, 3));
+    ROCATTACH_CALL(swap_internal(reinterpret_cast<size_t>(entry_addr), new_code, old_code, 3));
 
     // Execute
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting to execute " << library << "::" << symbol
@@ -810,7 +750,7 @@ PTraceSession::call_function(const std::string& library,
     PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &returnregs);
 
     // Write in old opcodes
-    ROCATTACH_CALL(write_internal(entry_addr, old_code, 3));
+    ROCATTACH_CALL(write_internal(reinterpret_cast<size_t>(entry_addr), old_code, 3));
 
     // Restore register file
     PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &oldregs);

@@ -100,9 +100,7 @@ def parse_arguments(args=None):
   Can also be specified in environment variable ROCPROF_ATTACH_LIBRARY. This option overrides the environment variable if both are set.""",
         type=str,
         required=False,
-        default=os.environ.get(
-            "ROCPROF_ATTACH_LIBRARY", ROCPROF_ATTACH_LIBRARY
-        ),
+        default=os.environ.get("ROCPROF_ATTACH_LIBRARY", ROCPROF_ATTACH_LIBRARY),
     )
     return parser.parse_args(args)
 
@@ -160,9 +158,7 @@ def attach(
                 f"Calling detach in {attach_library} returned non-zero status {detach_status}"
             )
         else:
-            print(
-                f"Detaching from PID {pid} using library {attach_library} :: success"
-            )
+            print(f"Detaching from PID {pid} using library {attach_library} :: success")
 
     def signal_handler(sig, frame):
         print("\nCaught signal SIGINT")
