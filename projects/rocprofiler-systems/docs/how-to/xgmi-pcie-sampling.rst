@@ -8,14 +8,14 @@ XGMI and PCIe metrics sampling and monitoring
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports
 sampling of XGMI and PCIe interconnect metrics. It allows you to gather key performance metrics for
-GPU-to-GPU communication via XGMI links and CPU-to-GPU communication via PCIe links. This information can be used
+GPU-to-GPU communication via XGMI links, and CPU-to-GPU communication via PCIe links. This information can be used
 to optimize multi-GPU workloads, identify communication bottlenecks, and analyze data transfer efficiency
 in high-performance computing applications.
 
 Sampling support
 =================
 
-Sampling of XGMI and PCIe interconnect metrics is supported by leveraging `AMD SMI <https://rocm.docs.amd.com/projects/amdsmi/en/latest/>`_ which provides the interface for GPU metric collection.
+Sampling of XGMI and PCIe interconnect metrics is supported by leveraging `AMD SMI <https://rocm.docs.amd.com/projects/amdsmi/en/latest/>`_ which provides the interface for GPU metric collection. Follow the steps:
 
 1. Set the ``ROCPROFSYS_USE_AMD_SMI`` environment variable to enable GPU metric collection:
 
@@ -75,8 +75,8 @@ Using TransferBench for testing
 ================================
 
 For testing and benchmarking GPU connectivity, you can use the `TransferBench <https://rocm.docs.amd.com/projects/TransferBench/en/latest/index.html>`_.
-TransferBench. is a benchmarking utility designed to measure the performance of simultaneous data transfers between user-specified devices, such as CPUs and GPUs.
-or this example, we will use Transferbench to profile XGMI and PCIe traffic for analysis.
+TransferBench is a benchmarking utility designed to measure the performance of simultaneous data transfers between user-specified devices, such as CPUs and GPUs.
+For this example, TransferBench is used to profile XGMI and PCIe traffic for analysis.
 
 1. Source the ROCm Systems Profiler Environment using:
 
@@ -113,7 +113,7 @@ Edit ``.rocprofsys.cfg`` with the following settings:
 
 .. note::
 
-   Refer to these steps to `install and build Transferbench <https://rocm.docs.amd.com/projects/TransferBench/en/latest/install/install.html#install-transferbench>`_.
+   Refer to these steps to `Install and build TransferBench <https://rocm.docs.amd.com/projects/TransferBench/en/latest/install/install.html#install-transferbench>`_.
 
 At the end of the run, a similar message appears::
 
@@ -153,7 +153,7 @@ Tips for effective profiling
      ROCPROFSYS_AMD_SMI_METRICS=xgmi  # Only XGMI metrics
      ROCPROFSYS_AMD_SMI_METRICS=pcie  # Only PCIe metrics
 
-4. **Combine with API tracing**: For detailed analysis, combine XGMI/PCIe metrics with HIP / HSA API tracing to correlate data transfers with application behavior:
+4. **Combine with API tracing**: For detailed analysis, combine XGMI/PCIe metrics with HIP/HSA API tracing to correlate data transfers with application behavior:
 
    .. code-block:: shell
 
