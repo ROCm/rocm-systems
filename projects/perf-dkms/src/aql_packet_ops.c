@@ -599,6 +599,7 @@ struct aql_measurement *aql_perf_measurement_create(struct aql_perf_session *ses
     measurement->state = MEASUREMENT_IDLE;
     measurement->counter_mask = 0x1; /* Default to first counter */
     measurement->counter_id = (uint32_t)event->attr.config; /* Use event config as counter ID */
+    measurement->start_counter_value = 0;  /* Will be set when measurement starts */
     measurement->last_counter_value = 0;
     measurement->allocated_counter = NULL; /* No counter allocated yet */
     measurement->shared_ref = NULL; /* No shared reference yet */
@@ -707,6 +708,13 @@ int aql_perf_measurement_start(struct aql_measurement *measurement)
         /* Cleanup PM4 buffer */
         pm4_buffer_destroy(pm4_buffer);
 
+        /* Wait for START packet to complete on GPU before reading baseline.
+         * The START packet needs to configure GRBM, enable perfmon, set SQ control,
+         * and configure counter registers. Reading too early would give an incorrect
+         * baseline before the counter is fully enabled. */
+        msleep(10);
+        aql_info("[PMU] Session %llu: Waited for START packet completion", session->session_id);
+
         aql_info("[PMU] Session %llu: Started measurement for GPU %u (owns_counter=true)",
                  session->session_id, measurement->gpu_id);
     } else {
@@ -718,6 +726,12 @@ int aql_perf_measurement_start(struct aql_measurement *measurement)
     spin_lock_irqsave(&session->measurement_lock, flags);
     measurement->state = MEASUREMENT_ACTIVE;
     spin_unlock_irqrestore(&session->measurement_lock, flags);
+
+    /* Read initial counter value for delta tracking.
+     * GPU counters don't reset on START, so we need to track the baseline. */
+    measurement->start_counter_value = aql_perf_measurement_read(measurement);
+    aql_info("[PMU] Session %llu: GPU %u baseline counter value=%llu",
+             session->session_id, measurement->gpu_id, measurement->start_counter_value);
 
     mutex_unlock(&session->session_mutex);
     return 0;
@@ -872,9 +886,20 @@ static uint64_t aql_aggregate_counter_instances(
         num_instances *= block->dimensions[dim_idx].size;
     }
 
-    /* Sum all instances */
+    aql_info("[PMU] Aggregating %u instances (block dimensions: count=%zu)",
+             num_instances, block->dimension_count);
+
+    /* Sum all instances and log individual values for debugging */
     for (uint32_t i = 0; i < num_instances; i++) {
-        sum += result_buffer[i];
+        uint64_t value = result_buffer[i];
+        sum += value;
+
+        /* Log first 20 and last 5 values to see patterns */
+        if (i < 20 || i >= (num_instances - 5)) {
+            aql_info("[PMU]   instance[%u] = %llu", i, value);
+        } else if (i == 20) {
+            aql_info("[PMU]   ... (skipping middle instances) ...");
+        }
     }
 
     aql_info("[PMU] Aggregated %u instances, total=%llu", num_instances, sum);
@@ -921,6 +946,13 @@ uint64_t aql_perf_measurement_read(struct aql_measurement *measurement)
         return measurement->last_counter_value;
     }
 
+    /* DIAGNOSTIC: Read and log buffer contents BEFORE submitting READ packet */
+    if (measurement->allocated_counter && measurement->allocated_counter->allocation.data_buffer) {
+        uint64_t *test_buffer = (uint64_t*)measurement->allocated_counter->allocation.data_buffer->cpu_addr;
+        aql_info("[PMU] READ_SYNC: GPU %u, buffer BEFORE READ: [0]=0x%llx [1]=0x%llx [2]=0x%llx [3]=0x%llx",
+                 measurement->gpu_id, test_buffer[0], test_buffer[1], test_buffer[2], test_buffer[3]);
+    }
+
     /* Create and submit READ packet */
     pm4_buffer_t *pm4_buffer = NULL;
     aql_info("[PMU] READ_SYNC: GPU %u, creating READ packet", measurement->gpu_id);
@@ -942,6 +974,24 @@ uint64_t aql_perf_measurement_read(struct aql_measurement *measurement)
     }
 
     aql_info("[PMU] READ_SYNC: GPU %u, READ packet submitted successfully", measurement->gpu_id);
+
+    /* DIAGNOSTIC: Wait for GPU to process READ packet.
+     * This function is called from the work handler which runs in process context,
+     * so sleeping is allowed. The KFD ioctl is asynchronous - we need to wait for
+     * the GPU to actually execute the READ and write counter values to memory.
+     * If after this sleep the buffer still contains garbage (0xBEBEBEEF) or zeros,
+     * then the problem is in the GPU not executing READ or counter not configured.
+     * If the buffer has valid values, then the problem is in passing data to perf. */
+    msleep(10);
+    aql_info("[PMU] READ_SYNC: GPU %u, slept 10ms for GPU to complete READ", measurement->gpu_id);
+
+    /* DIAGNOSTIC: Read and log buffer contents AFTER sleep */
+    if (measurement->allocated_counter && measurement->allocated_counter->allocation.data_buffer) {
+        uint64_t *test_buffer = (uint64_t*)measurement->allocated_counter->allocation.data_buffer->cpu_addr;
+        aql_info("[PMU] READ_SYNC: GPU %u, buffer AFTER READ+sleep: [0]=0x%llx [1]=0x%llx [2]=0x%llx [3]=0x%llx [4]=0x%llx [5]=0x%llx [6]=0x%llx [7]=0x%llx",
+                 measurement->gpu_id, test_buffer[0], test_buffer[1], test_buffer[2], test_buffer[3],
+                 test_buffer[4], test_buffer[5], test_buffer[6], test_buffer[7]);
+    }
 
     /* Read result from GPU memory buffer in allocated counter */
     result_buffer = NULL;
@@ -986,16 +1036,29 @@ uint64_t aql_perf_measurement_read(struct aql_measurement *measurement)
         counter_value = aql_aggregate_counter_instances(session, measurement, result_buffer, gpu_idx);
     }
 
-    aql_info("[PMU] READ_SYNC: GPU %u, final counter_value=%llu (dimension_specific=%d)",
+    aql_info("[PMU] READ_SYNC: GPU %u, absolute counter_value=%llu (dimension_specific=%d)",
              measurement->gpu_id, counter_value, measurement->dimension_specific);
 
-    /* Update cached value */
+    /* Update cached value with absolute counter value */
     measurement->last_counter_value = counter_value;
 
-    aql_info("[PMU] READ_SYNC: GPU %u, updated last_counter_value=%llu, returning",
-             measurement->gpu_id, counter_value);
+    /* Compute delta from start value.
+     * GPU counters are cumulative and don't reset on START, so we track
+     * the baseline value and return the delta for this measurement period. */
+    uint64_t delta = 0;
+    if (counter_value >= measurement->start_counter_value) {
+        delta = counter_value - measurement->start_counter_value;
+    } else {
+        /* Counter wrapped around (very unlikely for 64-bit counters) */
+        aql_warn("[PMU] READ_SYNC: GPU %u counter wrapped: start=%llu, current=%llu",
+                 measurement->gpu_id, measurement->start_counter_value, counter_value);
+        delta = counter_value; /* Best effort */
+    }
 
-    return counter_value;
+    aql_info("[PMU] READ_SYNC: GPU %u, delta=%llu (current=%llu - start=%llu)",
+             measurement->gpu_id, delta, counter_value, measurement->start_counter_value);
+
+    return delta;
 }
 
 /**

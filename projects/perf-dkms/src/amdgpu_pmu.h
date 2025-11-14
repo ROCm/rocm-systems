@@ -99,11 +99,13 @@ int aql_pmu_init(void);
 void aql_pmu_cleanup(void);
 bool aql_pmu_is_available(void);
 int aql_pmu_get_gpu_count(void);
+uint32_t aql_pmu_get_gpu_id_for_event(struct perf_event *event);
 int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coords *dims);
 void aql_pmu_event_destroy(struct perf_event *event);
 int aql_pmu_event_start(struct perf_event *event);
 int aql_pmu_event_stop(struct perf_event *event);
 uint64_t aql_pmu_event_read(struct perf_event *event);
+uint64_t aql_pmu_event_read_sync(struct perf_event *event);
 void aql_pmu_get_stats(struct aql_perf_stats *stats);
 
 /* Debug helpers */

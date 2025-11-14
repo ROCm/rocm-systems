@@ -34,6 +34,9 @@
 #include <type_traits>
 #include <vector>
 #include <atomic>
+#include <fstream>
+#include <cstdlib>
+#include <mutex>
 #include "util/reg_offsets.h"
 
 #define APPEND_COMMAND_WRAPPER(cmdbuf, ...)  \
@@ -125,6 +128,45 @@ class CmdBuffer {
 
   /// @brief Clear buffer.
   void Clear() { return data_.clear(); }
+
+  /// @brief Dump packet buffer to file in hex format (compatible with pm4_decoder)
+  /// @param filename Name of file to write to
+  static void DumpPacketsToFile(const std::string& filename, const std::vector<uint32_t>& data) {
+    static std::mutex dump_mutex;
+    std::lock_guard<std::mutex> lock(dump_mutex);
+
+    // Check if dumping is enabled
+    const char* dump_env = std::getenv("AQLPROFILE_DUMP_PM4");
+    if (!dump_env || std::string(dump_env) != "1") {
+      return;
+    }
+
+    // Get dump directory
+    const char* dump_dir = std::getenv("AQLPROFILE_DUMP_DIR");
+    std::string dir = dump_dir ? dump_dir : "/tmp/aqlprofile_packets";
+
+    // Create full path
+    std::string filepath = dir + "/" + filename;
+
+    // Open file in append mode
+    std::ofstream outfile(filepath, std::ios::app);
+    if (!outfile.is_open()) {
+      std::cerr << "Warning: Failed to open packet dump file: " << filepath << std::endl;
+      return;
+    }
+
+    // Dump as continuous hex string (compatible with pm4_decoder)
+    for (size_t i = 0; i < data.size(); ++i) {
+      outfile << std::hex << std::setw(8) << std::setfill('0') << data[i];
+    }
+    outfile << std::endl;
+    outfile.close();
+  }
+
+  /// @brief Dump this buffer's packets to file
+  void DumpToFile(const std::string& filename) const {
+    DumpPacketsToFile(filename, data_);
+  }
 
  private:
   /// @brief Defines Gpu command buffer as a vector of uint32_t

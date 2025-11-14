@@ -313,20 +313,20 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
         return -EINVAL;
     }
 
-    /* Map CPU ID to GPU ID using modulo for systems with more CPUs than GPUs */
-    {
-        int num_gpus = aql_pmu_get_gpu_count();
-        int gpu_id = (num_gpus > 0) ? (event->cpu % num_gpus) : 0;
-        pmu_debug("Mapping CPU %d to GPU %d (num_gpus=%d)\n",
-                  event->cpu, gpu_id, num_gpus);
-        /* Store GPU ID for later use in add/start/stop/read callbacks */
-        event->hw.idx = gpu_id;
+    /* Get actual GPU device ID for this event's CPU affinity */
+    uint32_t gpu_id = aql_pmu_get_gpu_id_for_event(event);
+    if (gpu_id == U32_MAX) {
+        pmu_err("Failed to map CPU %d to GPU\n", event->cpu);
+        return -ENODEV;
     }
+    pmu_debug("Mapped CPU %d to GPU %u\n", event->cpu, gpu_id);
+
+    /* Store GPU ID for later use (note: this is actual GPU device ID, not index) */
+    event->hw.idx = gpu_id;
 
     /* Extract and validate dimensions from config1 if specified */
     if (config1 != 0) {
         struct pmu_dimension_limits gpu_limits;
-        uint32_t gpu_id = event->hw.idx;
 
         pmu_extract_dimensions(config1, &dims);
         pmu_debug("Extracted dimensions: xcc=%u se=%u sa=%u wgp=%u cu=%u agg=%d valid=%d\n",
@@ -349,9 +349,12 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
                     gpu_limits.max_cu);
             return -EINVAL;
         }
+        pmu_debug("Dimension validation passed\n");
 
         /* Get counter definition and validate it supports requested dimensions */
+        pmu_debug("Looking up counter definition for config=0x%llx\n", config);
         counter = lookup_counter_by_id((counter_id_t)config);
+        pmu_debug("lookup_counter_by_id returned %p\n", counter);
         if (counter) {
             ret = pmu_validate_counter_dimensions(counter, &dims);
             if (ret != 0) {
@@ -361,11 +364,14 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
                         dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu);
                 return ret;
             }
+            pmu_debug("Counter dimension validation passed\n");
         }
     }
 
     /* Initialize AQL hardware counter */
+    pmu_debug("About to call aql_pmu_event_init\n");
     ret = aql_pmu_event_init(event, dims.valid ? &dims : NULL);
+    pmu_debug("aql_pmu_event_init returned %d\n", ret);
     if (ret != 0) {
         pmu_err("AQL hardware counter initialization failed for config=0x%llx: %d\n",
                 config, ret);
@@ -429,10 +435,14 @@ static void amdgpu_pmu_del(struct perf_event *event, int flags)
 
     /* Check if this is an AQL hardware event */
     if (hwc->config_base != 0) {
-        /* AQL hardware event - stop measurement */
-        if (flags & PERF_EF_UPDATE) {
-            amdgpu_pmu_read(event);
-        }
+        /* AQL hardware event - always read final count before stopping
+         * For NO_INTERRUPT PMUs like ours, we must update the count here
+         * because perf stat won't explicitly call read().
+         * Use SYNCHRONOUS read to wait for actual hardware read completion. */
+        pmu_debug("del: Reading final counter value before stop (synchronous)\n");
+        uint64_t counter_value = aql_pmu_event_read_sync(event);
+        local64_set(&event->count, counter_value);
+        pmu_info("del: Final counter value=%llu\n", counter_value);
 
         /* Stop the event but DON'T destroy it - the event may be re-added later.
          * Only event_destroy should free the measurement structure. */
