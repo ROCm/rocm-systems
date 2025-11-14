@@ -1128,8 +1128,49 @@ class AMDSMICommands():
         # Convert and store output by pid for csv format
         multiple_devices_csv_override = False
         if self.logger.is_csv_format():
+            # For NUMA data - flatten CPU affinity lists
+            if 'numa' in static_dict and isinstance(static_dict['numa'], dict):
+                numa_data = static_dict.pop('numa')
+                multiple_devices_csv_override = True
+
+                # Get data
+                node = numa_data.get('node', 'N/A')
+                affinity = numa_data.get('affinity', 'N/A')
+                cpu_affinity = numa_data.get('cpu_affinity', {})
+                socket_affinity = numa_data.get('socket_affinity', {})
+                # Create a flattened row for list entry
+                row_dict = static_dict.copy()
+
+                if cpu_affinity and isinstance(cpu_affinity, dict):
+                    for cpu_list_key in cpu_affinity.keys():
+                        cpu_entry = cpu_affinity[cpu_list_key]
+                        socket_entry = socket_affinity.get(cpu_list_key, {"bitmask": "N/A", "cpu_cores_affinity": "N/A"})
+                        row_dict.update({
+                            'node': node,
+                            'affinity': affinity,
+                            'cpu_list': cpu_list_key,
+                            'bitmask': cpu_entry.get('bitmask'),
+                            'cpu_cores_affinity': cpu_entry.get('cpu_cores_affinity'),
+                            'socket_bitmask': socket_entry.get('bitmask'),
+                            'socket_cpu_cores_affinity': socket_entry.get('cpu_cores_affinity')
+                        })
+                        self.logger.store_output(args.gpu, 'values', row_dict)
+                        self.logger.store_gpu_json_output.append(row_dict)
+                        self.logger.store_multiple_device_output()
+                else:
+                    row_dict.update({
+                        'node': node,
+                        'affinity': affinity,
+                        'cpu_list': 'N/A',
+                        'bitmask': 'N/A',
+                        'cpu_cores_affinity': 'N/A',
+                        'socket_bitmask': 'N/A',
+                        'socket_cpu_cores_affinity': 'N/A'
+                    })
+                    self.logger.store_output(args.gpu, 'values', row_dict)
+                    self.logger.store_gpu_json_output.append(row_dict)
             # expand if ras blocks are populated
-            if self.helpers.is_linux() and self.helpers.is_baremetal() and args.ras:
+            elif self.helpers.is_linux() and self.helpers.is_baremetal() and args.ras:
                 if isinstance(static_dict['ras']['ecc_block_state'], list):
                     ecc_block_dicts = static_dict['ras'].pop('ecc_block_state')
                     multiple_devices_csv_override = True
