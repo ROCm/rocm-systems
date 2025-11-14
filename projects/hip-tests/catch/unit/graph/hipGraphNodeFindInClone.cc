@@ -183,8 +183,6 @@ void hipGraphNodeFindInClone_Func(bool ModifyOrigGraph = false) {
   HIP_CHECK(hipGraphAddDependencies(graph, &kernel_vecAdd, &memcpyD2H_C, 1));
 
   if (ModifyOrigGraph) {
-    // Cloned the graph
-    HIP_CHECK(hipGraphClone(&clonedgraph, graph));
     // Modify Original graph by adding new dependency
     HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2D_C, graph, nullptr, 0, C_d, B_d, Nbytes,
                                       hipMemcpyDeviceToHost));
@@ -259,6 +257,10 @@ void hipGraphNodeFindInClone_DoubleClone(bool ModifyOrigGraph = false) {
   hipGraphNode_t clonedgraphnode;
   REQUIRE(hipGraphNodeFindInClone(&clonedgraphnode, memcpyH2D_A, clonedgraph_1) ==
           hipErrorInvalidValue);
+  HIP_CHECK(hipGraphDestroy(clonedgraph_1));
+  HIP_CHECK(hipGraphDestroy(clonedgraph));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 /**
  * Test Description

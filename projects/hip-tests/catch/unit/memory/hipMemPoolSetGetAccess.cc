@@ -98,7 +98,7 @@ int CheckP2PMemPoolSupport(int src_device, int dst_device) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU") {
+TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU", "[multigpu]") {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -212,7 +212,7 @@ void MemPoolSetGetAccess_P2P(const MemPools mempool_type) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_P2P") {
+TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_P2P", "[multigpu]") {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -406,7 +406,7 @@ static void getDevicePairs(std::vector<std::pair<int, int>>* p2p_pairs, int numD
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAccess_SetAccess") {
+TEST_CASE("Unit_hipMemPoolSetAccess_SetAccess", "[multigpu]") {
   constexpr int N = 1 << 14;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

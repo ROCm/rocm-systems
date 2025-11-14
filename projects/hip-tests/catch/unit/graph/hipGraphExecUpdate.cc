@@ -119,6 +119,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_TypeChange") {
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphDestroy(graph2));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HipTest::freeArrays<int>(A_d, nullptr, nullptr, A_h, nullptr, nullptr, false);
 }
 
 /**
@@ -638,7 +639,8 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_NodeType_Changed") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Negative_MultiDevice_Context_Changed") {
+TEST_CASE("Unit_hipGraphExecUpdate_Negative_MultiDevice_Context_Changed",
+          "[multigpu]") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
