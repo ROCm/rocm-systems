@@ -219,6 +219,21 @@ get_cache_files(const pid_t&                   root_pid,
     return cache_map;
 }
 
+void
+clear_cache_files(const data::mapped_cache_files_t& _cache_files)
+{
+    ROCPROFSYS_PRINT("Removing cached temporary files...\n");
+    for(const auto& [_, files] : _cache_files)
+    {
+        ROCPROFSYS_DEBUG("Removing cached temporary file: %s\n",
+                         files.buff_storage.c_str());
+        filesystem_utils::remove_if_exists(files.buff_storage);
+
+        ROCPROFSYS_DEBUG("Removing cached temporary file: %s\n", files.metadata.c_str());
+        filesystem_utils::remove_if_exists(files.metadata);
+    }
+}
+
 }  // namespace filesystem_utils
 
 namespace processing_utils
@@ -282,6 +297,30 @@ create_processor_configs(const data::mapped_cache_files_t& _cache_files,
     return processor_configs;
 }
 
+void
+multithreaded_processing(
+    const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
+    const data::enabled_formats_t&                                _enabled_formats)
+{
+    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+
+    std::vector<std::thread> processing_threads;
+    processing_threads.reserve(_processor_configs.size());
+    for(const auto& processor_config : _processor_configs)
+    {
+        processing_threads.emplace_back(
+            process_buffered_storage, processor_config,
+            utility::get_buffered_storage_filename(processor_config->_ppid,
+                                                   processor_config->_pid),
+            _enabled_formats);
+    }
+
+    for(auto& thread : processing_threads)
+    {
+        thread.join();
+    }
+}
+
 }  // namespace processing_utils
 
 cache_manager&
@@ -322,35 +361,9 @@ cache_manager::post_process_bulk()
         getpid(), root_pid, m_metadata,
         std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
 
-    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+    processing_utils::multithreaded_processing(processor_configs, enabled_formats);
 
-    std::vector<std::thread> processing_threads;
-    processing_threads.reserve(processor_configs.size());
-
-    for(const auto& processor_config : processor_configs)
-    {
-        processing_threads.emplace_back(
-            processing_utils::process_buffered_storage, processor_config,
-            utility::get_buffered_storage_filename(processor_config->_ppid,
-                                                   processor_config->_pid),
-            enabled_formats);
-    }
-
-    for(auto& thread : processing_threads)
-    {
-        thread.join();
-    }
-
-    ROCPROFSYS_PRINT("Removing cached temporary files...\n");
-
-    for(const auto& [_, files] : cache_files)
-    {
-        ROCPROFSYS_PRINT("Removing cached temporary file: %s\n",
-                         files.buff_storage.c_str());
-        ROCPROFSYS_PRINT("Removing cached temporary file: %s\n", files.metadata.c_str());
-        filesystem_utils::remove_if_exists(files.buff_storage);
-        filesystem_utils::remove_if_exists(files.metadata);
-    }
+    filesystem_utils::clear_cache_files(cache_files);
 }
 
 void
