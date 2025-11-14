@@ -156,7 +156,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -171,7 +171,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 != alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified2 = 1;
@@ -195,7 +195,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
@@ -211,7 +211,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 == alloc_mem2);
 
     // Run kernel with the new memory in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified2 = 1;
@@ -230,7 +230,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     // Enable Opportunistic
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
@@ -248,7 +248,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 == alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified2 = 1;  // Notifiy kernel to exit after 500 ms
@@ -270,7 +270,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
@@ -283,7 +283,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 != alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified1 = 1;
@@ -352,7 +352,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
@@ -367,7 +367,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     REQUIRE(alloc_mem1 == alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified1 = 1;
@@ -389,7 +389,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
     HIP_CHECK(hipEventRecord(event, stream1.stream()));
@@ -403,7 +403,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     REQUIRE(alloc_mem1 != alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified1 = 1;
