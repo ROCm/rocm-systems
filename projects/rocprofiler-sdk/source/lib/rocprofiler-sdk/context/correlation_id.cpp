@@ -235,7 +235,7 @@ correlation_id_finalize()
                 {}
             }
         }
-        ROCP_CI_LOG_IF(INFO, ndangling > 0) << "retired dangling correlation IDs: " << ndangling;
+        ROCP_INFO_IF(ndangling > 0) << "retired dangling correlation IDs: " << ndangling;
     });
 }
 }  // namespace context
