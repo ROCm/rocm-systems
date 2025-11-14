@@ -90,6 +90,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Link with stdc++fs for filesystem support (only for GCC < 9.0)
+set(FILESYSTEM_LIB "")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+        set(FILESYSTEM_LIB stdc++fs)
+        message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION} detected, linking with stdc++fs for filesystem support")
+    endif()
+endif()
+
 include(GNUInstallDirs)
 
 option(BUILD_TESTS "Build test suite" OFF)

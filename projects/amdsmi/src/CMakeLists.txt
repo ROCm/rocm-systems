@@ -88,6 +88,7 @@ target_link_libraries(${AMD_SMI} PRIVATE
     rt
     Threads::Threads
     ${CMAKE_DL_LIBS}
+    ${FILESYSTEM_LIB}
 )
 target_include_directories(${AMD_SMI} PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR} 
