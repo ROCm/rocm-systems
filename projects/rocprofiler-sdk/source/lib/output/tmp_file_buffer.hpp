@@ -147,13 +147,13 @@ write_ring_buffer(Tp _v, domain_type type)
 
     if(!filebuf)
     {
-        ROCP_CI_LOG(WARNING) << "rocprofv3 is dropping record from domain "
+        ROCP_WARNING << "rocprofv3 is dropping record from domain "
                              << get_domain_column_name(type) << ". Buffer has been destroyed.";
         return;
     }
     else if(filebuf->buffer.capacity() == 0)
     {
-        ROCP_CI_LOG(WARNING) << "rocprofv3 is dropping record from domain "
+        ROCP_WARNING << "rocprofv3 is dropping record from domain "
                              << get_domain_column_name(type) << ". Buffer has a capacity of zero.";
         return;
     }
