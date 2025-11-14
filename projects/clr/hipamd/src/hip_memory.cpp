@@ -46,9 +46,10 @@ T ReturnPtrValue(T* ptr) {
 // Constructor cannot fail, it hold a valid description of memory so long as ptr, and size are
 // valid. Long term look at splitting up unpinnedHostMemoryObject and hipMemoryObject. This
 // would speed up things, simplify functions, and improve memory safety.
-class hipMemoryObject {
+template <typename Tp>
+class hipMemoryObject_impl {
  public:
-  hipMemoryObject(void* ptr, size_t sizeInBytes) : ptr_(ptr) {
+  hipMemoryObject_impl(Tp ptr, size_t sizeInBytes) : ptr_(ptr) {
     memoryObj_ = amd::MemObjMap::FindMemObj(ptr_, &offset_);
     if (memoryObj_ == nullptr) {
       // If memObj not found, use arena_mem_obj. arena_mem_obj is null, if HMM is disabled.
@@ -93,6 +94,11 @@ class hipMemoryObject {
     assert(memoryObj_ != nullptr && "getContext() not supported with unpinned host memory object!");
     return memoryObj_->getContext();
   }
+  amd::ArenaMemory::UserData& getUserData() {
+    assert(memoryObj_ != nullptr &&
+           "getUserData() not supported with unpinned host memory object!");
+    return memoryObj_->getUserData();
+  }
   amd::Buffer* getBuffer() const {
     return (memoryObj_ != nullptr) ? memoryObj_->asBuffer() : nullptr;
   }
@@ -103,16 +109,18 @@ class hipMemoryObject {
   bool validateMemAccess(const amd::Device& dev, bool read_write) const {
     return (memoryObj_ != nullptr) ? memoryObj_->ValidateMemAccess(dev, read_write) : false;
   }
-
-  void* getPtr() const { return ptr_; }
+  Tp getPtr() const { return ptr_; }
   size_t getOffset() const { return offset_; }
 
  private:
-  void* ptr_;               // Always must be valid even for non-registered host memory
+  Tp ptr_;                  // Always must be valid even for non-registered host memory
   amd::Memory* memoryObj_;  // Valid for Pinned/registered host, device, or virtual memory. Null
                             // ptr if non-pinned host memory
   size_t offset_;           // Offset
 };
+
+using hipMemoryObjectReadWrite = hipMemoryObject_impl<void*>;
+using hipMemoryObjectReadOnly = hipMemoryObject_impl<const void*>;
 
 // ================================================================================================
 hipError_t ihipFree(void* ptr) {
@@ -466,8 +474,8 @@ hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
 }
 
 // ================================================================================================
-bool IsHtoHMemcpyValid(const hipMemoryObject& dstMemory, const hipMemoryObject& srcMemory,
-                       hipMemcpyKind kind) {
+bool IsHtoHMemcpyValid(const hipMemoryObjectReadWrite& dstMemory,
+                       const hipMemoryObjectReadOnly& srcMemory, hipMemcpyKind kind) {
   if (srcMemory.isUnpinnedHostMemory() && dstMemory.isUnpinnedHostMemory()) {
     if (!g_devices[0]->devices()[0]->info().hmmCpuMemoryAccessible_ &&
         kind != hipMemcpyHostToHost && kind != hipMemcpyDefault) {
@@ -478,8 +486,9 @@ bool IsHtoHMemcpyValid(const hipMemoryObject& dstMemory, const hipMemoryObject& 
 }
 
 // ================================================================================================
-hipError_t ihipMemcpy_validate(const hipMemoryObject& dstMemory, const hipMemoryObject& srcMemory,
-                               size_t sizeBytes, hipMemcpyKind kind) {
+hipError_t ihipMemcpy_validate(const hipMemoryObjectReadWrite& dstMemory,
+                               const hipMemoryObjectReadOnly& srcMemory, size_t sizeBytes,
+                               hipMemcpyKind kind) {
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
     return hipErrorInvalidMemcpyDirection;
   }
@@ -529,8 +538,8 @@ hipError_t ihipMemcpy_validate(const hipMemoryObject& dstMemory, const hipMemory
   return hipSuccess;
 }
 
-hip::MemcpyType ihipGetMemcpyType(const hipMemoryObject& srcMemory,
-                                  const hipMemoryObject& dstMemory, hipMemcpyKind kind) {
+hip::MemcpyType ihipGetMemcpyType(const hipMemoryObjectReadOnly& srcMemory,
+                                  const hipMemoryObjectReadWrite& dstMemory, hipMemcpyKind kind) {
   hip::MemcpyType type;
   if (srcMemory.isUnpinnedHostMemory() && dstMemory.isUnpinnedHostMemory()) {
     type = hipHostToHost;
@@ -556,9 +565,9 @@ hip::MemcpyType ihipGetMemcpyType(const hipMemoryObject& srcMemory,
 }
 
 // ================================================================================================
-hipError_t ihipMemcpyCommand(amd::Command*& command, hipMemoryObject& dstMemory,
-                             const hipMemoryObject& srcMemory, size_t sizeBytes, hipMemcpyKind kind,
-                             hip::Stream& stream, bool isAsync) {
+hipError_t ihipMemcpyCommand(amd::Command*& command, hipMemoryObjectReadWrite& dstMemory,
+                             const hipMemoryObjectReadOnly& srcMemory, size_t sizeBytes,
+                             hipMemcpyKind kind, hip::Stream& stream, bool isAsync) {
   amd::Command::EventWaitList waitList;
 
   amd::Device* queueDevice = &stream.device();
@@ -616,7 +625,7 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, hipMemoryObject& dstMemory,
         }
       } else if (srcMemory.getDevice() != dstMemory.getDevice()) {
         // Scenarios such as DtoH where dst is pinned memory
-        if ((queueDevice != srcMemory->getDevice()) &&
+        if ((queueDevice != srcMemory.getDevice()) &&
             (dstMemory.getContext().devices().size() != 1) && !srcMemory.isInVirtualAccessRange()) {
           pStream = hip::getNullStream(srcMemory.getDevice()->context());
           amd::Command* cmd = stream.getLastQueuedCommand(true);
@@ -651,9 +660,9 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, hipMemoryObject& dstMemory,
 
 // TODO: optimize out creation of memcpy objects
 bool IsHtoHMemcpy(void* dst, const void* src) {
-  hipMemoryObject srcMemory(src, /*size*/ 0);
-  hipMemoryObject dstMemory(dst, /*size*/ 0);
-  return srcMemory.isUnpinnedHost() && dstMemory.isUnpinnedHost();
+  hipMemoryObjectReadOnly srcMemory(src, /*size*/ 0);
+  hipMemoryObjectReadWrite dstMemory(dst, /*size*/ 0);
+  return srcMemory.isUnpinnedHostMemory() && dstMemory.isUnpinnedHostMemory();
 }
 
 // ================================================================================================
@@ -670,15 +679,17 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
     // Skip if nothing needs writing.
     return hipSuccess;
   }
-  status = ihipMemcpy_validate(dst, src, sizeBytes, kind);
+
+  hipMemoryObjectReadOnly srcMemory(src, sizeBytes);
+  hipMemoryObjectReadWrite dstMemory(dst, sizeBytes);
+
+  status = ihipMemcpy_validate(dstMemory, srcMemory, sizeBytes, kind);
   if (status != hipSuccess) {
     return status;
   }
   if (src == dst && kind == hipMemcpyDefault) {
     return hipSuccess;
   }
-  hipMemoryObject srcMemory(src, sizeBytes);
-  hipMemoryObject dstMemory(dst, sizeBytes);
 
   hipMemoryType srcMemoryType = srcMemory.getMemoryType();
   hipMemoryType dstMemoryType = dstMemory.getMemoryType();
@@ -694,7 +705,7 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   } else if (srcMemory.getDevice() == dstMemory.getDevice()) {
     // Device to Device copies do not need to host side synchronization.
     if ((srcMemoryType == hipMemoryTypeDevice) && (dstMemoryType == hipMemoryTypeDevice) &&
-        (!srcMemory->getUserData().sync_mem_ops_ || !dstMemory->getUserData().sync_mem_ops_)) {
+        (!srcMemory.getUserData().sync_mem_ops_ || !dstMemory.getUserData().sync_mem_ops_)) {
       isHostAsync = true;
     }
     // Any Host to any Host need host side synchronization.
@@ -704,7 +715,7 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   }
 
   amd::Command* command = nullptr;
-  status = ihipMemcpyCommand(command, dst, src, sizeBytes, kind, stream, isHostAsync);
+  status = ihipMemcpyCommand(command, dstMemory, srcMemory, sizeBytes, kind, stream, isHostAsync);
   if (status != hipSuccess) {
     return status;
   }
@@ -712,7 +723,7 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   if (!isHostAsync) {
     command->queue()->finishCommand(command);
   } else if (!isGPUAsync) {
-    hip::Stream* pStream = hip::getNullStream(dstMemory->GetDeviceById()->context());
+    hip::Stream* pStream = hip::getNullStream(dstMemory->getDevice()->context());
     amd::Command::EventWaitList waitList;
     waitList.push_back(command);
     amd::Command* depdentMarker = new amd::Marker(*pStream, false, waitList);
