@@ -43,7 +43,7 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
-// #include <sys/syscall.h>
+#include <sys/syscall.h>
 #include <libgen.h>
 #include <limits.h>
 #include <elf.h>
@@ -115,7 +115,13 @@ namespace {
 std::string substitute_core_pattern(const std::string& pattern) {
   std::string result;
   pid_t pid = getpid();
-  pid_t tid = gettid();
+  // Use gettid() if available (glibc >= 2.30), otherwise fallback to syscall
+#if defined(__GLIBC__) && \
+       (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 30))
+    pid_t tid = gettid();
+#else
+  pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
+#endif
   time_t now = time(nullptr);
   // Get hostname
   std::array<char, 256> hostname{};
