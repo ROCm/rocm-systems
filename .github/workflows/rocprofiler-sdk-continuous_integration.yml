@@ -194,7 +194,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             ${GITHUB_WORKSPACE}/rocDecode
-          cmake --build build-rocdecode --target all --parallel 16
+          cmake --build build-rocdecode --target all --parallel 8
           cmake --build build-rocdecode --target install
           echo -e "ROCDecode Installed Successfully!"
           echo -e "Building & Installing ROCJPEG..."
