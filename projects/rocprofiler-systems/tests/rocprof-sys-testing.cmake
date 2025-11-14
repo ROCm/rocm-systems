@@ -1227,6 +1227,14 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         list(APPEND TEST_DEPENDS "${TEST_NAME}-run")
     endif()
 
+    # Add labels from the parent test to the validation test
+    get_test_property(${TEST_NAME} LABELS PARENT_TEST_LABELS)
+    if(PARENT_TEST_LABELS)
+        list(APPEND TEST_LABELS "${PARENT_TEST_LABELS}")
+        list(REMOVE_DUPLICATES TEST_LABELS)
+        list(SORT TEST_LABELS)
+    endif()
+
     if(NOT TEST_PASS_REGEX)
         set(TEST_PASS_REGEX
             "rocprof-sys-tests-output/${TEST_NAME}/(${TEST_TIMEMORY_FILE}|${TEST_PERFETTO_FILE}|${TEST_ROCPD_FILE}) validated"
