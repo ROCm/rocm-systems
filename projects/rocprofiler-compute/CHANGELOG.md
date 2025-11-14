@@ -39,6 +39,17 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Upcoming changes
 
+## ROCm Compute Profiler 3.5.0 for ROCm 7.10.0
+
+### Added
+
+### Changed
+
+### Optimized
+
+### Resolved issues
+* Corrected peak VALU Roofline profiling and analysis by removing FP8 VALU and BF16 VALU benchmarking.
+
 ## ROCm Compute Profiler 3.3.1 for ROCm 7.1.1
 
 ### Added
@@ -63,8 +74,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
 
 ### Resolved issues
-* Corrected peak VALU Roofline profiling and analysis by removing FP8 VALU and BF16 VALU benchmarking.
-
 * Bugfixes for stability
 
 ## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
