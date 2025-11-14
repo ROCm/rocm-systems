@@ -26,3 +26,6 @@ target_link_libraries(
     rocprof-sys-unit-tests
     PRIVATE rocprofiler-systems-googletest-library
 )
+
+include(GoogleTest)
+gtest_discover_tests(rocprof-sys-unit-tests)

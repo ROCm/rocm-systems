@@ -23,7 +23,9 @@
 include_guard(GLOBAL)
 
 if(ROCPROFSYS_BUILD_GTEST)
-    message(STATUS "Setting up GTEST to build from source!")
+    message(STATUS "Setting up GoogleTest using FetchContent")
+
+    include(FetchContent)
 
     rocprofiler_systems_checkout_git_submodule(
         RELATIVE_PATH external/googletest
@@ -33,112 +35,26 @@ if(ROCPROFSYS_BUILD_GTEST)
         REPO_BRANCH "v1.17.0"
     )
 
-    set(_GTEST_INSTALL_DIR ${PROJECT_BINARY_DIR}/external/googletest/install)
+    # Configure GoogleTest options before adding it
+    set(BUILD_GMOCK ON CACHE BOOL "Build GMock" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "Disable GTest installation" FORCE)
+    set(gtest_force_shared_crt ON CACHE BOOL "Use shared CRT" FORCE)
 
-    # Configure GoogleTest
-    execute_process(
-        COMMAND
-            ${CMAKE_COMMAND} -B ${PROJECT_BINARY_DIR}/external/googletest/build -G
-            ${CMAKE_GENERATOR} -S ${PROJECT_SOURCE_DIR}/external/googletest
-            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-            -DCMAKE_INSTALL_PREFIX=${_GTEST_INSTALL_DIR}
-            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DBUILD_GMOCK=ON -DINSTALL_GTEST=ON
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/external/googletest
-        RESULT_VARIABLE _GTEST_CONFIGURE_RET
-        ERROR_VARIABLE _GTEST_CONFIGURE_ERR
-        OUTPUT_QUIET
-    )
+    # Declare GoogleTest from the submodule
+    FetchContent_Declare(googletest SOURCE_DIR ${PROJECT_SOURCE_DIR}/external/googletest)
 
-    if(NOT _GTEST_CONFIGURE_RET EQUAL 0)
-        message(FATAL_ERROR "Failed to configure GoogleTest: ${_GTEST_CONFIGURE_ERR}")
-    endif()
-    message(STATUS "GoogleTest configured successfully!")
+    # Make GoogleTest available
+    FetchContent_MakeAvailable(googletest)
 
-    set(_GTEST_LIB_DIR "${_GTEST_INSTALL_DIR}/lib")
-
-    # Build and install GoogleTest
-    add_custom_target(
-        rocprofiler-systems-googletest-library-build
-        ALL
-        COMMAND
-            ${CMAKE_COMMAND} --build ${PROJECT_BINARY_DIR}/external/googletest/build
-            --config ${CMAKE_BUILD_TYPE}
-        COMMAND
-            ${CMAKE_COMMAND} --install ${PROJECT_BINARY_DIR}/external/googletest/build
-            --config ${CMAKE_BUILD_TYPE}
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/external/googletest/build
-        COMMENT "Building and installing GoogleTest"
-        BYPRODUCTS
-            ${PROJECT_BINARY_DIR}/external/googletest/install/lib/libgtest.a
-            ${PROJECT_BINARY_DIR}/external/googletest/install/lib/libgtest_main.a
-            ${PROJECT_BINARY_DIR}/external/googletest/install/lib/libgmock.a
-            ${PROJECT_BINARY_DIR}/external/googletest/install/lib/libgmock_main.a
-    )
-
-    add_library(rocprofiler-systems-gtest STATIC IMPORTED GLOBAL)
-    add_library(rocprofiler-systems-gtest_main STATIC IMPORTED GLOBAL)
-    add_library(rocprofiler-systems-gmock STATIC IMPORTED GLOBAL)
-
-    set_target_properties(
-        rocprofiler-systems-gtest
-        PROPERTIES
-            IMPORTED_LOCATION
-                ${PROJECT_BINARY_DIR}/external/googletest/install/lib/libgtest.a
-            INTERFACE_INCLUDE_DIRECTORIES
-                ${PROJECT_BINARY_DIR}/external/googletest/install/include
-    )
-
-    set_target_properties(
-        rocprofiler-systems-gtest_main
-        PROPERTIES
-            IMPORTED_LOCATION
-                ${PROJECT_BINARY_DIR}/external/googletest/install/lib/libgtest_main.a
-            INTERFACE_INCLUDE_DIRECTORIES
-                ${PROJECT_BINARY_DIR}/external/googletest/install/include
-    )
-
-    set_target_properties(
-        rocprofiler-systems-gmock
-        PROPERTIES
-            IMPORTED_LOCATION
-                ${PROJECT_BINARY_DIR}/external/googletest/install/lib/libgmock.a
-            INTERFACE_INCLUDE_DIRECTORIES
-                ${PROJECT_BINARY_DIR}/external/googletest/install/include
-    )
-
-    add_dependencies(
-        rocprofiler-systems-gtest
-        rocprofiler-systems-googletest-library-build
-    )
-    add_dependencies(
-        rocprofiler-systems-gtest_main
-        rocprofiler-systems-googletest-library-build
-    )
-    add_dependencies(
-        rocprofiler-systems-gmock
-        rocprofiler-systems-googletest-library-build
-    )
-
-    # Create interface library
+    # Create interface library that wraps GoogleTest targets
     add_library(rocprofiler-systems-googletest-library INTERFACE)
 
     target_link_libraries(
         rocprofiler-systems-googletest-library
-        INTERFACE
-            rocprofiler-systems-gtest
-            rocprofiler-systems-gtest_main
-            rocprofiler-systems-gmock
+        INTERFACE GTest::gtest GTest::gtest_main GTest::gmock
     )
 
-    # GoogleTest requires threading support
-    find_package(Threads REQUIRED)
-    target_link_libraries(
-        rocprofiler-systems-googletest-library
-        INTERFACE Threads::Threads
-    )
-
-    message(STATUS "GoogleTest install directory: ${_GTEST_INSTALL_DIR}")
+    message(STATUS "GoogleTest configured successfully using FetchContent")
 else()
     message(STATUS "Using system GTest library")
     find_package(GTest REQUIRED)
