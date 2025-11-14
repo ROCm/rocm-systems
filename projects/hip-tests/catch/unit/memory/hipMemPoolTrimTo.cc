@@ -87,7 +87,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Positive_Basic") {
                                    mempool.mempool(), stream.stream()));
 
   int blocks = 2;
-  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, notified);
+  notifiedKernel<<<blocks, 32, 0, stream.stream()>>>(alloc_mem1, notified);
 
   hipMemPoolAttr attr;
   attr = hipMemPoolAttrReleaseThreshold;

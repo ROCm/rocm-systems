@@ -124,7 +124,7 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
 
   int blocks = 16;
   hipMemPoolAttr attr;
-  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem, notified);
+  notifiedKernel<<<blocks, 32, 0, stream.stream()>>>(alloc_mem, notified);
 
   const auto element_count = allocation_size / sizeof(int);
   constexpr auto thread_count = 1024;
@@ -187,7 +187,7 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
 
   int blocks = 16;
   hipMemPoolAttr attr;
-  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, notified);
+  notifiedKernel<<<blocks, 32, 0, stream.stream()>>>(alloc_mem1, notified);
 
   const auto element_count = allocation_size / sizeof(int);
   constexpr auto thread_count = 1024;
@@ -267,7 +267,7 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
 
   int blocks = 2;
 
-  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, notified);
+  notifiedKernel<<<blocks, 32, 0, stream.stream()>>>(alloc_mem1, notified);
 
   hipMemPoolAttr attr;
   // Not a real free, since kernel isn't done
@@ -283,7 +283,7 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
   *notified = 0;
   // Second kernel launch with new memory
-  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem2, notified);
+  notifiedKernel<<<blocks, 32, 0, stream.stream()>>>(alloc_mem2, notified);
   *notified = 1;
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 
