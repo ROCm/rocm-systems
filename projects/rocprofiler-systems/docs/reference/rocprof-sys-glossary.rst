@@ -100,3 +100,87 @@ Overlapping functions
   impossible to determine the difference between multiple overlapping functions
   and a single function with multiple entry points. (By default, ``rocprof-sys-instrument``
   avoids instrumenting overlapping functions.)
+
+Performance Metrics
+===================
+
+Wall time (Wall clock time)
+  The actual elapsed time (real time) from the start to the end of a function or
+  program execution. This includes time spent waiting for I/O, synchronization,
+  and other blocking operations. Most useful for measuring end-to-end performance.
+
+CPU time
+  The amount of time the CPU spends actively executing a function or program,
+  excluding time spent waiting for I/O or blocked. Useful for identifying
+  CPU-bound operations.
+
+GPU time
+  The amount of time GPU kernels spend executing on the GPU hardware. This
+  excludes host-side API overhead and data transfer times. Useful for measuring
+  actual GPU compute performance.
+
+Hardware counters
+  Special registers in the CPU or GPU that count specific hardware events such as
+  instructions executed, cache hits/misses, memory accesses, etc. See
+  :doc:`hardware-counters-reference` for detailed information.
+
+PAPI (Performance Application Programming Interface)
+  A portable interface for accessing hardware performance counters on various
+  CPU architectures. ROCm Systems Profiler uses PAPI for collecting CPU hardware
+  counter data like instructions, cycles, cache misses, etc.
+
+ROCm hardware counters
+  GPU-specific performance counters for AMD GPUs accessible through the ROCm stack.
+  These include metrics like wave execution, memory bandwidth, compute unit
+  utilization, etc.
+
+Flat profile
+  A summary view showing the total time spent in each function, without call stack
+  information. Fast to generate and useful for quickly identifying hotspots.
+
+Call tree
+  A hierarchical view showing the call relationships between functions and the
+  time spent in each call path. Useful for understanding which callers contribute
+  most to a function's execution time.
+
+HIP (Heterogeneous-compute Interface for Portability)
+  AMD's GPU programming model for writing portable GPU applications. ROCm Systems
+  Profiler can trace HIP API calls and GPU kernel execution.
+
+Kernel
+  A function that executes on the GPU. In HIP/ROCm context, refers to GPU compute
+  kernels launched from host code.
+
+Memory transfer
+  Data movement between host (CPU) memory and device (GPU) memory, typically
+  via ``hipMemcpy`` or similar APIs. These transfers can be a significant
+  performance bottleneck.
+
+GPU utilization
+  The percentage of time the GPU is actively executing compute work. High
+  utilization (>80%) indicates the GPU is being used efficiently.
+
+Perfetto
+  An open-source trace visualization tool used by ROCm Systems Profiler to display
+  timeline traces. Perfetto traces show function execution, GPU kernels, and
+  system metrics over time.
+
+Trace
+  A detailed timeline recording of events during program execution, including
+  function calls, GPU kernels, memory operations, and system metrics. More
+  detailed than profiles but larger in size.
+
+Profile
+  A statistical summary of program execution showing where time is spent. Less
+  detailed than traces but more compact and easier to analyze for identifying
+  hotspots.
+
+Hotspot
+  A function or code region that consumes a large percentage of execution time.
+  Optimizing hotspots typically provides the greatest performance improvements.
+
+Overhead
+  The performance cost of profiling itself. ROCm Systems Profiler aims to minimize
+  overhead, typically 2-8% depending on the profiling mode used.
+
+For detailed metric definitions and interpretation guidance, see :doc:`metrics-glossary`.

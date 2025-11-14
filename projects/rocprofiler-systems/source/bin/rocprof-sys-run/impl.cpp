@@ -298,7 +298,30 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
 
     const auto* _desc = R"desc(
-    Command line interface to rocprof-sys configuration.
+Execute instrumented binaries with ROCm Systems Profiler configuration.
+
+EXAMPLES:
+  Run with quick preset:
+    rocprof-sys-run --quick -- ./myapp.inst
+
+  HPC workload (MPI/OpenMP with hardware counters):
+    rocprof-sys-run --trace-hpc -- ./hpc_app.inst
+    mpirun -n 4 rocprof-sys-run --trace-hpc -- ./mpi_app.inst
+
+  AI/ML workload (GPU tracing with large buffer):
+    rocprof-sys-run --trace-ai -- ./gpu_app.inst
+
+  Run instrumented binary with default settings:
+    rocprof-sys-run -- ./myapp.inst
+
+  Enable sampling alongside instrumentation:
+    rocprof-sys-run --sample -- ./myapp.inst
+
+  Custom buffer size:
+    rocprof-sys-run --trace-buffer-size=500000 -- ./myapp.inst
+
+  Custom output directory:
+    rocprof-sys-run -o ./results -- ./myapp.inst
     )desc";
 
     auto parser = parser_t{ basename(argv[0]), _desc };
@@ -321,6 +344,143 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
 
     rocprofsys::argparse::add_core_arguments(parser, _parser_data);
     rocprofsys::argparse::add_extended_arguments(parser, _parser_data);
+
+    parser.start_group("PRESET MODES",
+                       "Simplified profiling presets for common use cases");
+    parser
+        .add_argument({ "--quick" },
+                      "Quick profiling mode: enables tracing and sampling with default "
+                      "metrics for immediate insights")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("quick"))
+            {
+                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
+                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_SAMPLING");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_PROCESS_SAMPLING");
+                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
+                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_SAMPLING", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_PROCESS_SAMPLING", "ON", 0);
+                tim::set_env("ROCPROFSYS_SAMPLING_FREQ", "50", 0);
+            }
+        });
+    parser
+        .add_argument({ "--simple" },
+                      "Simple profiling mode: flat profile only with minimal overhead")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("simple"))
+            {
+                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
+                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
+                _parser_data.updated.emplace("ROCPROFSYS_FLAT_PROFILE");
+                tim::set_env("ROCPROFSYS_TRACE", "OFF", 0);
+                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
+                tim::set_env("ROCPROFSYS_FLAT_PROFILE", "ON", 0);
+            }
+        });
+    parser
+        .add_argument({ "--detailed" },
+                      "Detailed profiling mode: full trace, profile, and system metrics")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("detailed"))
+            {
+                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
+                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_SAMPLING");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_PROCESS_SAMPLING");
+                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
+                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_SAMPLING", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_PROCESS_SAMPLING", "ON", 0);
+                tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "all", 0);
+            }
+        });
+    parser
+        .add_argument({ "--trace-hpc" },
+                      "HPC workload preset: optimized for MPI, OpenMP, and compute-intensive "
+                      "applications with hardware counter collection")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("trace-hpc"))
+            {
+                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
+                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_SAMPLING");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_PROCESS_SAMPLING");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_OMPT");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_KOKKOSP");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_MPIP");
+                _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_CPUS");
+                _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
+                _parser_data.updated.emplace("ROCPROFSYS_AMD_SMI_METRICS");
+                _parser_data.updated.emplace("ROCPROFSYS_PAPI_EVENTS");
+                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
+                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_SAMPLING", "OFF", 0);
+                tim::set_env("ROCPROFSYS_SAMPLING_FREQ", "100", 0);
+                tim::set_env("ROCPROFSYS_USE_PROCESS_SAMPLING", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_OMPT", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_KOKKOSP", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_MPIP", "true", 0);
+                tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "none", 0);
+                tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
+                            "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory", 0);
+                tim::set_env("ROCPROFSYS_AMD_SMI_METRICS", "busy,temp,power,mem_usage", 0);
+                tim::set_env("ROCPROFSYS_PAPI_EVENTS",
+                            "PAPI_TOT_INS,PAPI_TOT_CYC,PAPI_L3_TCM", 0);
+            }
+        });
+    parser
+        .add_argument({ "--trace-ai" },
+                      "AI/ML workload preset: optimized for PyTorch, TensorFlow, JAX with "
+                      "GPU tracing and increased buffer size")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("trace-ai"))
+            {
+                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
+                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_SAMPLING");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_PROCESS_SAMPLING");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_MPIP");
+                _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_CPUS");
+                _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
+                _parser_data.updated.emplace("ROCPROFSYS_AMD_SMI_METRICS");
+                _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_GPUS");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_ROCTRACER");
+                _parser_data.updated.emplace("ROCPROFSYS_TRACE_HIP_API");
+                _parser_data.updated.emplace("ROCPROFSYS_TRACE_HIP_ACTIVITY");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_RCCL");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_ROCPD");
+                _parser_data.updated.emplace("ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB");
+                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
+                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_SAMPLING", "OFF", 0);
+                tim::set_env("ROCPROFSYS_SAMPLING_FREQ", "50", 0);
+                tim::set_env("ROCPROFSYS_USE_PROCESS_SAMPLING", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_MPIP", "true", 0);
+                tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "none", 0);
+                tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
+                            "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory", 0);
+                tim::set_env("ROCPROFSYS_AMD_SMI_METRICS", "busy,temp,power,mem_usage", 0);
+                tim::set_env("ROCPROFSYS_SAMPLING_GPUS", "$env:HIP_VISIBLE_DEVICES", 0);
+                tim::set_env("ROCPROFSYS_USE_ROCTRACER", "ON", 0);
+                tim::set_env("ROCPROFSYS_TRACE_HIP_API", "ON", 0);
+                tim::set_env("ROCPROFSYS_TRACE_HIP_ACTIVITY", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_RCCL", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_ROCPD", "ON", 0);
+                tim::set_env("ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB", "2048000", 0);
+            }
+        });
 
     parser.start_group("EXECUTION OPTIONS", "");
     parser.add_argument({ "--fork" }, "Execute via fork + execvpe instead of execvpe")

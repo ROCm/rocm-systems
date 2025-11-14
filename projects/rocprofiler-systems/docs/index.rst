@@ -55,6 +55,8 @@ profiling, how it supports performance analysis, and how to leverage its capabil
 
     * :doc:`Development guide <./reference/development-guide>`
     * :doc:`Glossary <./reference/rocprof-sys-glossary>`
+    * :doc:`Metrics glossary <./reference/metrics-glossary>`
+    * :doc:`Hardware counters reference <./reference/hardware-counters-reference>`
     * :doc:`API library <./doxygen/html/files>`
     * :doc:`Class member functions <./doxygen/html/functions>`
     * :doc:`Globals <./doxygen/html/globals>`
@@ -62,6 +64,8 @@ profiling, how it supports performance analysis, and how to leverage its capabil
 
   .. grid-item-card:: Tutorials
 
+    * :doc:`Quickstart guide <./tutorials/quickstart>`
+    * :doc:`Profiling HIP applications <./tutorials/profiling-hip-applications>`
     * `GitHub examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples>`_
     * :doc:`Video tutorials <./tutorials/video-tutorials>`
 

@@ -62,6 +62,7 @@ set(ROCPROFSYS_EXAMPLE_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 # defines function for creating causal profiling exes
 include(${CMAKE_CURRENT_LIST_DIR}/causal-helpers.cmake)
 
+add_subdirectory(hip-quickstart)
 add_subdirectory(transpose)
 add_subdirectory(parallel-overhead)
 add_subdirectory(code-coverage)

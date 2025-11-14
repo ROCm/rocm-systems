@@ -479,7 +479,36 @@ main(int argc, char** argv)
     // it is unrecognized, then set the errflag to report an error.  When we come to a
     // non '-' charcter, then we must be at the application name.
     using parser_t = tim::argparse::argument_parser;
-    parser_t parser("rocprof-sys-instrument");
+    
+    const auto* _desc = R"(
+Binary instrumentation tool for profiling and tracing applications.
+
+EXAMPLES:
+  Quick instrumentation preset (runtime with sensible defaults):
+    rocprof-sys-instrument --quick -- myapp
+
+  HPC workload preset (binary rewrite for MPI/OpenMP):
+    rocprof-sys-instrument --trace-hpc -o myapp.inst -- myapp
+    mpirun -n 4 rocprof-sys-run --trace-hpc -- ./myapp.inst
+
+  AI/ML workload preset (runtime for Python interop):
+    rocprof-sys-instrument --trace-ai -- python train.py
+
+  Binary rewrite with instrumentation:
+    rocprof-sys-instrument -o myapp.inst -- myapp
+    rocprof-sys-run -- ./myapp.inst
+
+  Runtime instrumentation (fork+exec):
+    rocprof-sys-instrument -- myapp
+
+  Instrument specific functions only:
+    rocprof-sys-instrument -R '^compute_' -o myapp.inst -- myapp
+
+  Exclude library functions:
+    rocprof-sys-instrument -ME '^(libhsa|libamdhip64)' -- myapp
+)";
+
+    parser_t parser("rocprof-sys-instrument", _desc);
     string_t extra_help = "-- <CMD> <ARGS>";
 
     parser.enable_help();
@@ -604,6 +633,79 @@ main(int argc, char** argv)
             "Print the instructions for each basic-block in the JSON/XML outputs")
         .max_count(1)
         .action([](parser_t& p) { instr_print = p.get<bool>("print-instructions"); });
+
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "[PRESET MODES]" }, "");
+    parser.add_argument({ "" }, "");
+    parser
+        .add_argument({ "--quick" },
+                      "Quick instrumentation preset: runtime instrumentation with sensible "
+                      "defaults for immediate profiling")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("quick"))
+            {
+                instr_mode = "trace";
+                // use_stubs  = false;
+                // Runtime instrumentation mode
+                binary_rewrite = false;
+            }
+        });
+    parser
+        .add_argument({ "--profile-only" },
+                      "Profile-only preset: binary rewrite optimized for profiling without "
+                      "detailed trace (lower overhead)")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("profile-only"))
+            {
+                instr_mode     = "trace";
+                binary_rewrite = true;
+                // use_stubs      = false;
+            }
+        });
+    parser
+        .add_argument({ "--trace-only" },
+                      "Trace-only preset: binary rewrite optimized for detailed tracing and "
+                      "analysis")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("trace-only"))
+            {
+                instr_mode     = "trace";
+                binary_rewrite = true;
+                // use_stubs      = false;
+            }
+        });
+    parser
+        .add_argument({ "--trace-hpc" },
+                      "HPC workload preset: optimized for MPI, OpenMP, and compute-intensive "
+                      "applications (enables binary rewrite)")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("trace-hpc"))
+            {
+                instr_mode     = "trace";
+                binary_rewrite = true;
+            }
+        });
+    parser
+        .add_argument({ "--trace-ai" },
+                      "AI/ML workload preset: optimized for PyTorch, TensorFlow, JAX "
+                      "(enables runtime instrumentation with GPU tracing)")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("trace-ai"))
+            {
+                instr_mode     = "trace";
+                binary_rewrite = false;  // Runtime instrumentation for Python interop
+            }
+        });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[MODE OPTIONS]" }, "");

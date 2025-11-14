@@ -104,9 +104,29 @@ def parse_args(args=None):
     parser = argparse.ArgumentParser(
         "rocprofsys",
         add_help=True,
+        description="""
+ROCm Systems Profiler for Python applications.
+
+EXAMPLES:
+  Profile Python script with default settings:
+    rocprof-sys-python -- ./script.py
+
+  Profile with custom configuration file:
+    rocprof-sys-python -c config.cfg -- ./script.py
+
+  Profile specific functions with @profile decorator:
+    rocprof-sys-python -b -- ./script.py
+
+  Exclude standard library functions:
+    rocprof-sys-python -ME '^/usr' -- ./script.py
+
+  Profile with specific Python version:
+    rocprof-sys-python-3.10 -- ./script.py
+""",
         epilog="usage: {} -m rocprofsys <ROCPROFSYS_ARGS> -- <SCRIPT> <SCRIPT_ARGS>".format(
             os.path.basename(sys.executable)
         ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "-v",
