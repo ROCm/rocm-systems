@@ -4713,8 +4713,9 @@ class AMDSMICommands():
                             profile_status = amdsmi_interface.amdsmi_get_gpu_power_profile_presets(args.gpu, 0)
                             available = self.helpers.parse_available_profiles(profile_status['available_profiles'])
                             available_str = ", ".join(available)
-                        except:
+                        except amdsmi_exception.AmdSmiLibraryException as e:
                             available_str = "Unable to fetch available profiles"
+                            logging.debug(f"Failed to fetch available profiles: {e.get_error_info()}")
                         
                         self.logger.store_output(args.gpu, 'profile', 
                                                 f"Invalid profile: {args.profile}\n\nAvailable profiles: {available_str}")
@@ -4736,8 +4737,9 @@ class AMDSMICommands():
                         profile_status = amdsmi_interface.amdsmi_get_gpu_power_profile_presets(args.gpu, 0)
                         available = self.helpers.parse_available_profiles(profile_status['available_profiles'])
                         available_str = ", ".join(available)
-                    except:
+                    except amdsmi_exception.AmdSmiLibraryException as get_error:
                         available_str = "Unable to fetch available profiles"
+                        logging.debug(f"Failed to fetch available profiles: {get_error.get_error_info()}")
                     
                     error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set power profile to {args.profile}"
                     self.logger.store_output(args.gpu, 'profile', error_msg)
