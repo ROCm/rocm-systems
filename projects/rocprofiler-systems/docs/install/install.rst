@@ -126,6 +126,22 @@ Optional third-party packages
   * AMD SMI Lib for GPU monitoring
   * ROCprofiler SDK for GPU hardware counters and ROCm tracing
 
+* `Building ROCm with Multiple Python Environments`_
+
+   * ``ROCPROFSYS_PYTHON_PREFIX`` specifies the root directory where Python environments are located
+   * ``ROCPROFSYS_PYTHON_ENVS`` specifies the list of Python environments to build bindings for
+
+   .. note::
+       By default, ROCm Systems Profiler builds with the system Python environment. To build
+       ROCm Systems Profiler with multiple Python environments, specify the prefix and
+       environment list during CMake configuration:
+
+       .. code-block:: shell
+
+            cmake -D ROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
+                     -D ROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
+                     ...
+
 * `PAPI <https://icl.utk.edu/papi/>`_
 * MPI
 
