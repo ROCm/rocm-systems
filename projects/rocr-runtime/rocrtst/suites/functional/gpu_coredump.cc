@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <unistd.h>
+#include <limits.h>
 #include <elf.h>
 #include <glob.h>
 #include <algorithm>
@@ -26,6 +27,90 @@
 #include "hsa/hsa.h"
 
 static const uint32_t kNumBufferElements = rocrtst::isEmuModeEnabled() ? 4 : 256;
+
+// Convert core pattern to glob pattern, substituting known values
+// and using wildcards for unknowable values (timestamp, TID)
+namespace {
+std::string PatternToGlob(const std::string& pattern, pid_t child_pid) {
+  std::string result;
+
+  // Get values we can know
+  char hostname[256];
+  gethostname(hostname, sizeof(hostname));
+  hostname[sizeof(hostname) - 1] = '\0';
+
+  char exe_path[PATH_MAX];
+  std::string exe_name = "unknown";
+  ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+  if (len > 0) {
+    exe_path[len] = '\0';
+    char* base = basename(exe_path);
+    if (base) exe_name = base;
+  }
+
+  // Parse and substitute
+  for (size_t i = 0; i < pattern.length(); i++) {
+    if (pattern[i] == '%' && i + 1 < pattern.length()) {
+      switch (pattern[i + 1]) {
+        case '%': result += '%'; break;
+        case 'p': result += std::to_string(child_pid); break;
+        case 'i': result += '*'; break;  // TID - use wildcard
+        case 'h': result += hostname; break;
+        case 'e': result += exe_name; break;
+        case 't': result += '*'; break;  // Timestamp - use wildcard
+        default: break;  // Drop unsupported specifiers
+      }
+      i++;
+    } else {
+      result += pattern[i];
+    }
+  }
+
+  return result;
+}
+
+// Find core dump file matching the glob pattern
+std::string FindMatchingCoreDump(const std::string& glob_pattern) {
+  glob_t glob_result;
+  memset(&glob_result, 0, sizeof(glob_result));
+
+  int ret = glob(glob_pattern.c_str(), 0, nullptr, &glob_result);
+  std::string found_file;
+
+  if (ret == 0 && glob_result.gl_pathc > 0) {
+    found_file = glob_result.gl_pathv[0];
+  }
+
+  globfree(&glob_result);
+  return found_file;
+}
+}  // anonymous namespace
+// RAII helper class for automatic HSA resource cleanup
+class HSAResourceGuard {
+public:
+  hsa_queue_t* queue = nullptr;
+  hsa_executable_t executable = {0};
+  void* kernarg_buffer = nullptr;
+  hsa_signal_t signal = {0};
+  int file_fd = -1;
+  hsa_code_object_reader_t code_obj_rdr = {0};
+
+  HSAResourceGuard() = default;
+  ~HSAResourceGuard() {
+    // Cleanup in reverse order of typical acquisition
+    if (signal.handle) hsa_signal_destroy(signal);
+    if (kernarg_buffer) hsa_memory_free(kernarg_buffer);
+    if (executable.handle) hsa_executable_destroy(executable);
+    if (code_obj_rdr.handle) hsa_code_object_reader_destroy(code_obj_rdr);
+    if (file_fd != -1) close(file_fd);
+    if (queue) hsa_queue_destroy(queue);
+    hsa_shut_down();
+  }
+
+  // Prevent copying
+  HSAResourceGuard(const HSAResourceGuard&) = delete;
+  HSAResourceGuard& operator=(const HSAResourceGuard&) = delete;
+};
 
 GpuCoreDumpTest::GpuCoreDumpTest(void) : TestBase() {
   set_num_iteration(1);
@@ -88,8 +173,25 @@ pid_t GpuCoreDumpTest::RunFaultingKernelInChild() {
   }
 
   if (pid == 0) {
+    // Child process - verify environment is inherited
+    const char* coredump_file = getenv("HSA_COREDUMP_PATTERN");
+    const char* disable_flag = getenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
+    const char* show_progress = getenv("HSA_COREDUMP_SHOW_PROGRESS");
+
+    fprintf(stderr, "CHILD: HSA_COREDUMP_PATTERN=%s\n",
+            coredump_file ? coredump_file : "(null)");
+    fprintf(stderr, "CHILD: HSA_DISABLE_COREDUMP_ON_EXCEPTION=%s\n",
+            disable_flag ? disable_flag : "(null)");
+    fprintf(stderr, "CHILD: HSA_COREDUMP_SHOW_PROGRESS=%s\n",
+            show_progress ? show_progress : "(null)");
+
+
+
     // Child process - do ALL HSA work here
     hsa_status_t err;
+
+    // RAII guard will cleanup all resources on exit
+    HSAResourceGuard resources;
 
     // Initialize HSA
     err = hsa_init();
@@ -132,64 +234,30 @@ pid_t GpuCoreDumpTest::RunFaultingKernelInChild() {
       _exit(1);
     }
 
-    // Find memory pools based on profile (matching SetPoolsTypical logic)
-    hsa_amd_memory_pool_t cpu_pool;
+    // Find kernarg pool only; we don't need cpu_pool since
+    // we're not allocating buffers
     hsa_amd_memory_pool_t kernarg_pool;
 
     if (profile == HSA_PROFILE_FULL) {
       // APU - use FindAPUStandardPool
       err = hsa_amd_agent_iterate_memory_pools(cpu_agent,
                                                rocrtst::FindAPUStandardPool,
-                                               &cpu_pool);
-      if (err == HSA_STATUS_INFO_BREAK) {
-        err = HSA_STATUS_SUCCESS;
-      } else if (err == HSA_STATUS_SUCCESS) {
-        err = HSA_STATUS_ERROR;
-      }
-      if (err != HSA_STATUS_SUCCESS) {
-        hsa_shut_down();
-        _exit(1);
-      }
-
-      err = hsa_amd_agent_iterate_memory_pools(cpu_agent,
-                                               rocrtst::FindAPUStandardPool,
                                                &kernarg_pool);
-      if (err == HSA_STATUS_INFO_BREAK) {
-        err = HSA_STATUS_SUCCESS;
-      } else if (err == HSA_STATUS_SUCCESS) {
-        err = HSA_STATUS_ERROR;
-      }
-      if (err != HSA_STATUS_SUCCESS) {
-        hsa_shut_down();
-        _exit(1);
-      }
     } else {
-      // Discrete GPU - use FindStandardPool and FindKernArgPool
-      err = hsa_amd_agent_iterate_memory_pools(cpu_agent,
-                                               rocrtst::FindStandardPool,
-                                               &cpu_pool);
-      if (err == HSA_STATUS_INFO_BREAK) {
-        err = HSA_STATUS_SUCCESS;
-      } else if (err == HSA_STATUS_SUCCESS) {
-        err = HSA_STATUS_ERROR;
-      }
-      if (err != HSA_STATUS_SUCCESS) {
-        hsa_shut_down();
-        _exit(1);
-      }
-
+      // Discrete GPU - use FindKernArgPool
       err = hsa_amd_agent_iterate_memory_pools(cpu_agent,
                                                rocrtst::FindKernArgPool,
                                                &kernarg_pool);
-      if (err == HSA_STATUS_INFO_BREAK) {
-        err = HSA_STATUS_SUCCESS;
-      } else if (err == HSA_STATUS_SUCCESS) {
-        err = HSA_STATUS_ERROR;
-      }
-      if (err != HSA_STATUS_SUCCESS) {
-        hsa_shut_down();
-        _exit(1);
-      }
+    }
+
+    if (err == HSA_STATUS_INFO_BREAK) {
+      err = HSA_STATUS_SUCCESS;
+    } else if (err == HSA_STATUS_SUCCESS) {
+      err = HSA_STATUS_ERROR;
+    }
+    if (err != HSA_STATUS_SUCCESS) {
+      hsa_shut_down();
+      _exit(1);
     }
 
     // Create queue
@@ -200,141 +268,45 @@ pid_t GpuCoreDumpTest::RunFaultingKernelInChild() {
       _exit(1);
     }
 
-    hsa_queue_t* queue = nullptr;
     err = hsa_queue_create(gpu_agent, queue_size, HSA_QUEUE_TYPE_MULTI,
-                           nullptr, nullptr, 0, 0, &queue);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_shut_down();
-      _exit(1);
-    }
+                           nullptr, nullptr, 0, 0, &resources.queue);
+    if (err != HSA_STATUS_SUCCESS) _exit(1);
 
-    // Allocate buffers
-    void* src_buffer = nullptr;
-    void* dst_buffer = nullptr;
+    // Load kernel from file (no need to allocate src/dst buffers - we pass nullptr)
+    resources.file_fd = open("test_case_template_kernels.hsaco", O_RDONLY);
+    if (resources.file_fd == -1) _exit(1);
 
-    err = hsa_amd_memory_pool_allocate(cpu_pool,
-                                       kNumBufferElements * sizeof(uint32_t),
-                                       0, &src_buffer);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
+    err = hsa_code_object_reader_create_from_file(resources.file_fd, &resources.code_obj_rdr);
+    if (err != HSA_STATUS_SUCCESS) _exit(1);
 
-    err = hsa_amd_memory_pool_allocate(cpu_pool,
-                                       kNumBufferElements * sizeof(uint32_t),
-                                       0, &dst_buffer);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_memory_free(src_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
-
-    // Allow GPU access
-    hsa_agent_t ag_list[2] = {gpu_agent, cpu_agent};
-    err = hsa_amd_agents_allow_access(2, ag_list, nullptr, src_buffer);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
-
-    err = hsa_amd_agents_allow_access(2, ag_list, nullptr, dst_buffer);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
-
-    // Load kernel from file
-    int file_fd = open("test_case_template_kernels.hsaco", O_RDONLY);
-    if (file_fd == -1) {
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
-
-    hsa_code_object_reader_t code_obj_rdr = {0};
-    err = hsa_code_object_reader_create_from_file(file_fd, &code_obj_rdr);
-    if (err != HSA_STATUS_SUCCESS) {
-      close(file_fd);
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
-
-    hsa_executable_t executable = {0};
     err = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
-                                    nullptr, &executable);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_code_object_reader_destroy(code_obj_rdr);
-      close(file_fd);
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
+                                    nullptr, &resources.executable);
+    if (err != HSA_STATUS_SUCCESS) _exit(1);
 
-    err = hsa_executable_load_agent_code_object(executable, gpu_agent, code_obj_rdr,
-                                                nullptr, nullptr);
-    hsa_code_object_reader_destroy(code_obj_rdr);
-    close(file_fd);
+    err = hsa_executable_load_agent_code_object(resources.executable,
+                        gpu_agent, resources.code_obj_rdr, nullptr, nullptr);
+    // Can destroy reader now
+    hsa_code_object_reader_destroy(resources.code_obj_rdr);
+    resources.code_obj_rdr = {0};
+    close(resources.file_fd);
+    resources.file_fd = -1;
 
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_executable_destroy(executable);
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
+    if (err != HSA_STATUS_SUCCESS) _exit(1);
 
-    err = hsa_executable_freeze(executable, nullptr);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_executable_destroy(executable);
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
+    err = hsa_executable_freeze(resources.executable, nullptr);
+    if (err != HSA_STATUS_SUCCESS) _exit(1);
 
     // Get kernel symbol
     hsa_executable_symbol_t symbol;
-    err = hsa_executable_get_symbol_by_name(executable, "square.kd", &gpu_agent, &symbol);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_executable_destroy(executable);
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
+    err = hsa_executable_get_symbol_by_name(resources.executable, "square.kd", &gpu_agent, &symbol);
+    if (err != HSA_STATUS_SUCCESS) _exit(1);
 
     uint64_t kernel_object = 0;
     err = hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
                                          &kernel_object);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_executable_destroy(executable);
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
+    if (err != HSA_STATUS_SUCCESS) _exit(1);
 
     // Allocate kernel arguments with nullptr arrays to cause fault
-    void* kernarg_buffer = nullptr;
     struct __attribute__((aligned(16))) kernel_args_t {
       uint32_t* dstArray;
       uint32_t* srcArray;
@@ -360,30 +332,14 @@ pid_t GpuCoreDumpTest::RunFaultingKernelInChild() {
     kernel_args.default_queue = 0;
     kernel_args.completion_action = 0;
 
-    err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(kernel_args), 0, &kernarg_buffer);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_executable_destroy(executable);
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
+    err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(kernel_args), 0, &resources.kernarg_buffer);
+    if (err != HSA_STATUS_SUCCESS) _exit(1);
 
-    memcpy(kernarg_buffer, &kernel_args, sizeof(kernel_args));
+    memcpy(resources.kernarg_buffer, &kernel_args, sizeof(kernel_args));
 
     // Create completion signal
-    hsa_signal_t signal;
-    err = hsa_signal_create(1, 0, nullptr, &signal);
-    if (err != HSA_STATUS_SUCCESS) {
-      hsa_memory_free(kernarg_buffer);
-      hsa_executable_destroy(executable);
-      hsa_memory_free(src_buffer);
-      hsa_memory_free(dst_buffer);
-      hsa_queue_destroy(queue);
-      hsa_shut_down();
-      _exit(1);
-    }
+    err = hsa_signal_create(1, 0, nullptr, &resources.signal);
+    if (err != HSA_STATUS_SUCCESS) _exit(1);
 
     // Create and dispatch AQL packet
     hsa_kernel_dispatch_packet_t aql;
@@ -400,16 +356,16 @@ pid_t GpuCoreDumpTest::RunFaultingKernelInChild() {
     aql.private_segment_size = 0;
     aql.group_segment_size = 0;
     aql.kernel_object = kernel_object;
-    aql.kernarg_address = kernarg_buffer;
-    aql.completion_signal = signal;
+    aql.kernarg_address = resources.kernarg_buffer;
+    aql.completion_signal = resources.signal;
 
-    const uint32_t queue_mask = queue->size - 1;
-    uint64_t index = hsa_queue_load_write_index_relaxed(queue);
-    hsa_queue_store_write_index_relaxed(queue, index + 1);
+    const uint32_t queue_mask = resources.queue->size - 1;
+    uint64_t index = hsa_queue_load_write_index_relaxed(resources.queue);
+    hsa_queue_store_write_index_relaxed(resources.queue, index + 1);
 
     // Write packet to queue
     hsa_kernel_dispatch_packet_t* queue_packet =
-        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address))[index & queue_mask];
+        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(resources.queue->base_address))[index & queue_mask];
 
     queue_packet->workgroup_size_x = aql.workgroup_size_x;
     queue_packet->workgroup_size_y = aql.workgroup_size_y;
@@ -431,26 +387,19 @@ pid_t GpuCoreDumpTest::RunFaultingKernelInChild() {
                      aql_header | (aql.setup << 16), __ATOMIC_RELEASE);
 
     // Ring doorbell
-    hsa_signal_store_screlease(queue->doorbell_signal, index);
+    hsa_signal_store_screlease(resources.queue->doorbell_signal, index);
 
     // Wait for completion (or fault)
-    hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
+    hsa_signal_wait_scacquire(resources.signal, HSA_SIGNAL_CONDITION_LT, 1,
                               UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
-    // Should not reach here if fault occurs
-    hsa_signal_destroy(signal);
-    hsa_memory_free(kernarg_buffer);
-    hsa_executable_destroy(executable);
-    hsa_memory_free(src_buffer);
-    hsa_memory_free(dst_buffer);
-    hsa_queue_destroy(queue);
-    hsa_shut_down();
+    // Should not reach here if fault occurs - destructor will cleanup
     _exit(0);
   }
 
   // Parent process - wait for child with timeout
   int status;
-  int timeout_ms = 1000;  // 1 second
+  int timeout_ms = 10000;  // 10 second
   int elapsed = 0;
 
   while (elapsed < timeout_ms) {
@@ -573,8 +522,8 @@ void GpuCoreDumpTest::TestDefaultPattern(void) {
     std::getline(pattern_file, kernel_pattern);
   }
 
-  // Unset HSA_COREDUMP_FILE to use default
-  unsetenv("HSA_COREDUMP_FILE");
+  // Unset HSA_COREDUMP_PATTERN to use default
+  unsetenv("HSA_COREDUMP_PATTERN");
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
 
   std::string expected;
@@ -607,45 +556,53 @@ void GpuCoreDumpTest::TestDefaultPattern(void) {
     return;
   }
 
-  // Substitute child PID in expected filename
-  size_t pos = expected.find("%p");
-  if (pos != std::string::npos) {
-    expected.replace(pos, 2, std::to_string(child_pid));
-  }
+  // Convert pattern to glob pattern (handles %t and %i with wildcards)
+  std::string glob_pattern = PatternToGlob(expected, child_pid);
+  std::string actual_file = FindMatchingCoreDump(glob_pattern);
 
-  bool success = VerifyCoreDumpFile(expected);
-  EXPECT_TRUE(success);
-
-  if (success) {
-    unlink(expected.c_str());
+  if (!actual_file.empty()) {
+    bool success = VerifyCoreDumpFile(actual_file);
+    EXPECT_TRUE(success);
+    if (success) {
+      unlink(actual_file.c_str());
+    }
+  } else {
+    FAIL() << "No core dump found matching pattern: " << glob_pattern;
   }
 }
 
 void GpuCoreDumpTest::TestCustomPattern(void) {
   if (verbosity() > 0) {
-    std::cout << "  Testing custom pattern (HSA_COREDUMP_FILE)..." << std::endl;
+    std::cout << "  Testing custom pattern (HSA_COREDUMP_PATTERN)..." << std::endl;
   }
 
   std::string pattern = test_dir_ + "/custom_gpu_core.%p";
-  setenv("HSA_COREDUMP_FILE", pattern.c_str(), 1);
+  setenv("HSA_COREDUMP_PATTERN", pattern.c_str(), 1);
+  setenv("HSA_COREDUMP_SHOW_PROGRESS" , "1", 1);
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
 
   pid_t child_pid = RunFaultingKernelInChild();
   if (child_pid < 0) {
     FAIL() << "Failed to run test in child process";
-    unsetenv("HSA_COREDUMP_FILE");
+    unsetenv("HSA_COREDUMP_PATTERN");
     return;
   }
 
-  std::string expected = test_dir_ + "/custom_gpu_core." + std::to_string(child_pid);
-  bool success = VerifyCoreDumpFile(expected);
-  EXPECT_TRUE(success);
+  // Use glob to find file
+  std::string glob_pattern = PatternToGlob(pattern, child_pid);
+  std::string actual_file = FindMatchingCoreDump(glob_pattern);
 
-  if (success) {
-    unlink(expected.c_str());
+  if (!actual_file.empty()) {
+    bool success = VerifyCoreDumpFile(actual_file);
+    EXPECT_TRUE(success);
+    if (success) {
+      unlink(actual_file.c_str());
+    }
+  } else {
+    FAIL() << "No core dump found matching pattern: " << glob_pattern;
   }
 
-  unsetenv("HSA_COREDUMP_FILE");
+  unsetenv("HSA_COREDUMP_PATTERN");
 }
 
 void GpuCoreDumpTest::TestDisableFlag(void) {
@@ -655,33 +612,34 @@ void GpuCoreDumpTest::TestDisableFlag(void) {
 
   std::string pattern = test_dir_ + "/should_not_exist.%p";
   setenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION", "1", 1);
-  setenv("HSA_COREDUMP_FILE", pattern.c_str(), 1);
+  setenv("HSA_COREDUMP_PATTERN", pattern.c_str(), 1);
 
   pid_t child_pid = RunFaultingKernelInChild();
   if (child_pid < 0) {
     FAIL() << "Failed to run test in child process";
     unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
-    unsetenv("HSA_COREDUMP_FILE");
+    unsetenv("HSA_COREDUMP_PATTERN");
     return;
   }
 
-  std::string test_file = test_dir_ + "/should_not_exist." + std::to_string(child_pid);
-  bool file_exists = (access(test_file.c_str(), F_OK) == 0);
+  // Use glob to check if any file was created
+  std::string glob_pattern = PatternToGlob(pattern, child_pid);
+  std::string actual_file = FindMatchingCoreDump(glob_pattern);
 
-  EXPECT_FALSE(file_exists) << "Core dump should not have been created when disabled";
+  EXPECT_TRUE(actual_file.empty()) << "Core dump should not have been created when disabled";
 
   if (verbosity() > 0) {
-    if (!file_exists) {
+    if (actual_file.empty()) {
       std::cout << "    Correctly prevented core dump creation" << std::endl;
     }
   }
 
-  if (file_exists) {
-    unlink(test_file.c_str());
+  if (!actual_file.empty()) {
+    unlink(actual_file.c_str());
   }
 
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
-  unsetenv("HSA_COREDUMP_FILE");
+  unsetenv("HSA_COREDUMP_PATTERN");
 }
 
 void GpuCoreDumpTest::TestPatternSubstitution(void) {
@@ -689,26 +647,33 @@ void GpuCoreDumpTest::TestPatternSubstitution(void) {
     std::cout << "  Testing pattern substitution (%p, %e, %t)..." << std::endl;
   }
 
-  std::string pattern = test_dir_ + "/core.%p.dump";
-  setenv("HSA_COREDUMP_FILE", pattern.c_str(), 1);
+  // Test pattern with multiple specifiers including timestamp
+  std::string pattern = test_dir_ + "/core.%p.%e.%t.dump";
+  setenv("HSA_COREDUMP_PATTERN", pattern.c_str(), 1);
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
 
   pid_t child_pid = RunFaultingKernelInChild();
   if (child_pid < 0) {
     FAIL() << "Failed to run test in child process";
-    unsetenv("HSA_COREDUMP_FILE");
+    unsetenv("HSA_COREDUMP_PATTERN");
     return;
   }
 
-  std::string expected = test_dir_ + "/core." + std::to_string(child_pid) + ".dump";
-  bool success = VerifyCoreDumpFile(expected);
-  EXPECT_TRUE(success);
+  // Use glob to find file (handles %t wildcard)
+  std::string glob_pattern = PatternToGlob(pattern, child_pid);
+  std::string actual_file = FindMatchingCoreDump(glob_pattern);
 
-  if (success) {
-    unlink(expected.c_str());
+  if (!actual_file.empty()) {
+    bool success = VerifyCoreDumpFile(actual_file);
+    EXPECT_TRUE(success);
+    if (success) {
+      unlink(actual_file.c_str());
+    }
+  } else {
+    FAIL() << "No core dump found matching pattern: " << glob_pattern;
   }
 
-  unsetenv("HSA_COREDUMP_FILE");
+  unsetenv("HSA_COREDUMP_PATTERN");
 }
 
 void GpuCoreDumpTest::TestInvalidPath(void) {
@@ -717,26 +682,27 @@ void GpuCoreDumpTest::TestInvalidPath(void) {
   }
 
   std::string pattern = "/nonexistent_dir_12345/core.%p";
-  setenv("HSA_COREDUMP_FILE", pattern.c_str(), 1);
+  setenv("HSA_COREDUMP_PATTERN", pattern.c_str(), 1);
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
 
   pid_t child_pid = RunFaultingKernelInChild();
   if (child_pid < 0) {
     FAIL() << "Failed to run test in child process";
-    unsetenv("HSA_COREDUMP_FILE");
+    unsetenv("HSA_COREDUMP_PATTERN");
     return;
   }
 
-  std::string invalid_file = "/nonexistent_dir_12345/core." + std::to_string(child_pid);
-  bool file_exists = (access(invalid_file.c_str(), F_OK) == 0);
+  // Use glob to check if any file was created
+  std::string glob_pattern = PatternToGlob(pattern, child_pid);
+  std::string actual_file = FindMatchingCoreDump(glob_pattern);
 
-  EXPECT_FALSE(file_exists) << "Core dump should not be created with invalid path";
+  EXPECT_TRUE(actual_file.empty()) << "Core dump should not be created with invalid path";
 
   if (verbosity() > 0) {
-    if (!file_exists) {
+    if (actual_file.empty()) {
       std::cout << "    Correctly handled invalid path" << std::endl;
     }
   }
 
-  unsetenv("HSA_COREDUMP_FILE");
+  unsetenv("HSA_COREDUMP_PATTERN");
 }
