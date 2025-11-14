@@ -218,14 +218,9 @@ enum class DepthClampMode : uint32
 {
     Viewport    = 0x0,  ///< Clamps to the viewport min/max depth bounds
     _None       = 0x1,  ///< Disables depth clamping
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 950
+#if PAL_BUILD_SUPPORT_DEPTHCLAMPMODE_ZERO_TO_ONE
     ZeroToOne   = 0x2,  ///< Clamps between 0.0 and 1.0.
-    UserDefined = 0x3,  ///< Clamps based on ViewportParams::userDepthClamp.
-#else
-    UserDefined = 0x2,  ///< Clamps based on ViewportParams::userDepthClamp.
 #endif
-
-    /// @note Do not add entries 0x4 or higher. DynamicGraphicsState::depthClampMode is a 2-bit field.
 
     // Unfortunately for Linux clients, X.h includes a "#define None 0" macro.  Clients have their choice of either
     // undefing None before including this header or using _None when dealing with PAL.
@@ -419,20 +414,12 @@ struct GraphicsPipelineCreateInfo
     size_t              pipelineBinarySize;    ///< Size of Pipeline ELF binary in bytes.
     const IShaderLibrary** ppShaderLibraries;  ///< An array of graphics @ref IShaderLibrary object. pPipelineBinary
                                                ///  and ppShaderLibraries can't be valid at the same time.
-                                               ///  If the client does not know whether the pipeline is complete,
-                                               ///  it can add the shader library for a "dummy partial pipeline" to
-                                               ///  the end of the array to ensure the pipeline is complete.
-                                               ///  In practice, "complete" means "has a PS on hardware that requires
-                                               ///  it", although that is an implementation detail that the client
-                                               ///  does not need to know.
     size_t              numShaderLibraries;    ///< Number of graphics shaderLibrary object in ppShaderLibraries.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 959
     bool                useLateAllocVsLimit;   ///< If set, use the specified lateAllocVsLimit instead of PAL internally
                                                ///  determining the limit.
     uint32              lateAllocVsLimit;      ///< The number of VS waves that can be in flight without having param
                                                ///  cache and position buffer space. If useLateAllocVsLimit flag is set,
                                                ///  PAL will use this limit instead of the PAL-specified limit.
-#endif
     bool                useLateAllocGsLimit;   ///< If set, use the specified lateAllocVsLimit instead of PAL internally
                                                ///  determining the limit.
     uint32              lateAllocGsLimit;      ///< Controls GS LateAlloc val (for pos/prim allocations NOT param cache)

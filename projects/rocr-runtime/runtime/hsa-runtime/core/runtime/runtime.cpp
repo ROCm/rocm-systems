@@ -3707,6 +3707,18 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
   }
 
   for (auto mappedHandleIt : mappedHandles) {
+    /* Need to remove the default CPU mapping that was added in MappedHandle constructor.
+    * We remove it before calling RemoveAccess(). Otherwise we would unnecessarily call mmap(..,PROT_NONE,..)
+    * and then later call munmap.
+    */
+    auto cpu_agent = static_cast<AMD::GpuAgent*>(mappedHandleIt.second->agentOwner())->GetNearestCpuAgent();
+    auto cpu_agent_it = mappedHandleIt.second->allowed_agents.find(cpu_agent);
+    if (cpu_agent_it != mappedHandleIt.second->allowed_agents.end()) {
+      if (munmap(cpu_agent_it->second.va, cpu_agent_it->second.size) != 0) {
+        return HSA_STATUS_ERROR;
+      }
+    }
+
     // Remove access from all agents that were allowed access
     for (auto agentPermsIt = mappedHandleIt.second->allowed_agents.begin();
               agentPermsIt != mappedHandleIt.second->allowed_agents.end();) {
