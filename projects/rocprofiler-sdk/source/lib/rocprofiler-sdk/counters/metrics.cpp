@@ -325,19 +325,14 @@ loadMetrics(bool reload, const std::optional<ArchMetric> add_metric)
 }
 
 std::unordered_map<uint64_t, int>
-getPerfCountersIdMap()
+getPerfCountersIdMap(const rocprofiler_agent_t* agent)
 {
-    std::unordered_map<uint64_t, int> map;
-    auto                              mets = loadMetrics();
-
-    for(const auto& [agent, list] : mets->arch_to_metric)
+    auto map = std::unordered_map<uint64_t, int>{};
+    for(const auto& metric : getMetricsForAgent(agent))
     {
-        if(agent.find("gfx9") == std::string::npos) continue;
-        for(const auto& metric : list)
-        {
-            if(metric.name().find("SQ_") == 0 && !metric.event().empty())
-                map.emplace(metric.id(), std::stoi(metric.event()));
-        }
+        // Only add basic SQ counters
+        if(metric.name().find("SQ_") == 0 && !metric.event().empty())
+            map.emplace(metric.id(), std::stoi(metric.event()));
     }
 
     return map;

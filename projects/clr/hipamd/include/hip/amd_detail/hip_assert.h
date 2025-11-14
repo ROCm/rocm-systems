@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #pragma once
 
-#if defined(__clang__) and defined(__HIP__)
+#if defined(__clang__) && defined(__HIP__)
 
 // abort
 extern "C" __device__ inline __attribute__((weak)) void abort() { __builtin_trap(); }

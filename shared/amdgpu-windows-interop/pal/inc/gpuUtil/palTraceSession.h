@@ -38,7 +38,6 @@
 #include "palHashMap.h"
 #include "palMutex.h"
 #include "palPipeline.h"
-#include "palQueue.h"
 #include "palSysMemory.h"
 #include "palGpuMemory.h"
 #include "palMemTrackerImpl.h"
@@ -57,7 +56,6 @@ class StructuredValue;
 namespace GpuUtil
 {
 
-class TraceSession;
 class ITraceController;
 class ITraceSource;
 
@@ -84,18 +82,17 @@ enum class TraceSessionState : Pal::uint32
     Ready             = 0, ///< New trace ready to begin
     Requested         = 1, ///< A trace has been requested and awaiting acceptance
     Preparing         = 2, ///< Trace has been accepted and is preparing resources before beginning
-    Beginning         = 3, ///< Commands are now being submitted to the GPU to begin tracing
-    Running           = 4, ///< Trace is in progress
+    Running           = 3, ///< Trace is in progress
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
-    Postamble         = 5, ///< The detailed frame trace has ended but its data has not yet been written
+    Postamble         = 4, ///< The detailed frame trace has ended but its data has not yet been written
                            ///  into the session. Some trace sources may still collect data during this time.
-    PostambleWaiting  = 6, ///< Waiting for Postamble to complete.
-    Completed         = 7, ///< Trace has fully completed. RDF trace data is ready to be pulled out by CollectTrace().
-    Count             = 8
-#else
-    Waiting           = 5, ///< Trace has ended, but data has not been written into the session
+    PostambleWaiting  = 5, ///< Waiting for Postamble to complete.
     Completed         = 6, ///< Trace has fully completed. RDF trace data is ready to be pulled out by CollectTrace().
     Count             = 7
+#else
+    Waiting           = 4, ///< Trace has ended, but data has not been written into the session
+    Completed         = 5, ///< Trace has fully completed. RDF trace data is ready to be pulled out by CollectTrace().
+    Count             = 6
 #endif
 };
 
@@ -117,12 +114,6 @@ struct TraceErrorHeader
 
 constexpr char ErrorChunkTextIdentifier[TextIdentifierSize]  = "TraceError";
 constexpr Pal::uint32 ErrorTraceChunkVersion                 = 1;
-
-/// Function type for TraceSession state change callback
-typedef void (PAL_STDCALL *TraceStateChangeCallback)(
-    const TraceSession& pTraceSession,
-    TraceSessionState   newState,
-    void*               pPrivateData);
 
 /**
 ***********************************************************************************************************************
@@ -252,24 +243,7 @@ public:
     virtual Pal::Result OnEndPostambleGpuWork(
         Pal::uint32       gpuIndex,
         Pal::ICmdBuffer** ppCmdBuf) = 0;
-
-    /// Called by the associated session to force a controller update and drive the session to completion when there
-    /// is an insufficient number of update events to accomplish that. This is primarily used in single frame/dispatch
-    /// captures, during which, the controller won't be automatically updated and we have to force it to return the
-    /// trace session to a clean state.
-    virtual void OnUpdated() = 0;
-
-    /// Returns the queue tracked in the active trace controller
-    ///
-    /// Returns the queue used for submitting begin and end-trace gpu-work. The queue is tracked by the active
-    /// controller
-    ///
-    /// @returns A valid queue pointer used for submitting gpu-work
-    ////         Or a nullptr if no such queue exists
-    virtual Pal::IQueue* GetTraceQueue() const = 0;
 };
-
-#define COMPRESSION_ARG_VERSION 949
 
 /**
 ***********************************************************************************************************************
@@ -284,23 +258,10 @@ public:
 class ITraceSource
 {
 public:
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= COMPRESSION_ARG_VERSION
-
-    /// Base class constructor
-    ITraceSource() : m_useCompression(false)
-    { }
-
-    /// Called by the associated session to update the current trace configuration. Will parse out common config options
-    /// then pass to OnConfigUpdated to allow derived classes to parse other options.
-    ///
-    /// @param [in] pJsonConfig  Configuration data formatted as json and stored as DevDriver's StructuredValue object
-    void OnConfigUpdated(DevDriver::StructuredValue* pJsonConfig);
-#else
     /// Called by the associated session to update the current trace configuration
     ///
     /// @param [in] pJsonConfig  Configuration data formatted as json and stored as DevDriver's StructuredValue object
     virtual void OnConfigUpdated(DevDriver::StructuredValue* pJsonConfig) = 0;
-#endif
 
     /// Returns a bitmask that represents which GPUs are relevant to this trace source
     ///
@@ -394,17 +355,6 @@ public:
     ///
     /// @returns true if multiple instances of this trace sources can co-exist in one session, false otherwise.
     virtual bool AllowMultipleInstances() const { return false; }
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= COMPRESSION_ARG_VERSION
-protected:
-    /// Called by OnConfigUpdated to allow derived classes to update the current trace configuration.
-    /// Default implementation is empty.
-    ///
-    /// @param [in] pJsonConfig  Configuration data formatted as json and stored as DevDriver's StructuredValue object
-    virtual void OnConfigUpdatedDerived(DevDriver::StructuredValue* pJsonConfig) { }
-
-    bool m_useCompression;
-#endif
 };
 
 /**
@@ -481,12 +431,6 @@ public:
     ///          + NotReady if the trace is not ready to be canceled.
     ///          + ErrorUnknown if an internal PAL error occurs.
     Pal::Result CancelTrace();
-
-    /// Cancels an invalid trace in progress.
-    ///
-    /// Cancels traces that have not been cleanly collected cleanly or actively canceled and returns the trace session
-    /// to a clean state. It forces a controller update, drives the session to completion and discards any trace data.
-    void CancelInvalidTrace();
 
     /// Cleans up the RDF chunk stream and makes it ready for a new trace again.
     ///
@@ -685,7 +629,10 @@ public:
     /// Sets the TraceSession state based on external operations
     ///
     /// @param [in] sessionState TraceSessionState value to be assigned as the current state
-    void SetTraceSessionState(TraceSessionState sessionState);
+    void SetTraceSessionState(TraceSessionState sessionState)
+    {
+        m_sessionState = sessionState;
+    }
 
     /// Returns the current active controller
     ///
@@ -743,28 +690,6 @@ public:
     /// @return true if a cancelation is in progress.
     bool IsCancelingTrace() const { return m_cancelingTrace; }
 
-    /// Register a function to be called when the Trace Session state changes.
-    ///
-    /// @param [in] pfnCallback  The function to be called
-    /// @param [in] pPrivateData A pointer to pass to the callback function when called
-    ///
-    /// @returns Success if the callback was successfully registered
-    ///          AlreadyExists if the given Callback+PrivateData has already been registered
-    ///          ErrorInvalidValue if the given callback is not valid
-    Pal::Result RegisterTraceStateChangeCallback(
-        TraceStateChangeCallback pfnCallback,
-        void*                    pPrivateData);
-
-    /// Unregister a previously registered Trace Session state change callback.
-    ///
-    /// @param [in] pfnCallback  The function which was previously registered as a callback
-    /// @param [in] pPrivateData The pointer which is associated with the callback to unregister
-    ///
-    /// @returns Success if the callback was successfully unregistered
-    ///          NotFound if the given pfnCallback+pPrivateData pair was not found
-    Pal::Result UnregisterTraceStateChangeCallback(
-        TraceStateChangeCallback pfnCallback,
-        void*                    pPrivateData);
 private:
     typedef Pal::IPlatform TraceAllocator;
 
@@ -808,22 +733,5 @@ private:
     size_t              m_configDataSize;    // Size of the cached trace config buffer
     bool                m_cancelingTrace;    // Indicates that a cancel signal has been received and trace cancelation
                                              // is in progress.
-
-    Util::Mutex         m_stateChangeCallbackLock; // RW lock for state change callbacks
-
-    // Default capacity for the Trace Session state change callback vector
-    static constexpr Pal::uint32 TraceStateChangeCallbacksVecDefaultCapacity = 4;
-
-    /// The data required to call a state change callback
-    struct TraceStateChangeCallbackInfo
-    {
-        TraceStateChangeCallback pfnCallback;
-        void*                    pPrivateData;
-    };
-
-    using TraceStateChangeCallbacksVec = Util::Vector<TraceStateChangeCallbackInfo,
-                                                      TraceStateChangeCallbacksVecDefaultCapacity,
-                                                      TraceAllocator>;
-    TraceStateChangeCallbacksVec m_traceStateChangeCallbacks; // Registered state change callbacks
 };
 } // GpuUtil
