@@ -194,8 +194,10 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.h")
 if(ENABLE_ASAN_PACKAGING)
   # ASAN Package requires only asan component with libraries and license file
   set(CPACK_COMPONENTS_ALL asan)
+  set( COMP_TYPE "asan" )
 else()
   set(CPACK_COMPONENTS_ALL dev tests)
+  set( COMP_TYPE "dev" )
 endif()
 
 # Enable Component Mode & Install Settings
@@ -280,15 +282,12 @@ install(EXPORT rocm_smiTargets
     COMPONENT dev)
 
 #License file
-set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 # install license file in share/doc/rocm-smi-lib-asan folder
 if( ENABLE_ASAN_PACKAGING )
-  set( COMP_TYPE "asan" )
   install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
 	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}-asan RENAME LICENSE.md
         COMPONENT asan)
-else()
-  set( COMP_TYPE "dev" )
 endif()
 install( FILES ${CPACK_RESOURCE_FILE_LICENSE}
 	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE} RENAME LICENSE.md
