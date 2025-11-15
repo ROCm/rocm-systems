@@ -120,6 +120,13 @@ extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_string_n(__hip_uint64
                                                                     __hip_uint64_t length,
                                                                     __hip_uint32_t is_last);
 
+// libc++ <ranges> uses __local as function name; include one file, before defining __local macro
+#if defined(__cplusplus) && defined(_LIBCPP_VERSION) && defined(__has_include)
+#  if __has_include (<__ranges/join_view.h>)
+#    include <__ranges/join_view.h>
+#  endif
+#endif
+
 // Introduce local address space
 #define __local __attribute__((address_space(3)))
 

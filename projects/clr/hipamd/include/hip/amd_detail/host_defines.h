@@ -250,6 +250,13 @@ typedef __hip_internal::int64_t __hip_int64_t;
 
 #define __global__
 
+// __config in libc++ fails on `__has_attribute(__noinline__)` if __noinline__ is emptied
+#if defined(__cplusplus) && defined(__has_include)
+#  if __has_include(<__config>)
+#    include <__config>
+#  endif
+#endif
+
 #define __noinline__
 #define __forceinline__ inline
 
