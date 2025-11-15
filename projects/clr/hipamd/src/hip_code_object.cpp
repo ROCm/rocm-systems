@@ -361,6 +361,58 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
   return hipSuccess;
 }
 
+hipError_t StatCO::removeAllFatBinaries() {
+  amd::ScopedLock lock(sclock_);
+  
+  module_to_hostModule_.clear();
+  module_to_hostFunctions_.clear();
+  module_to_hostVars_.clear();
+
+  for (auto const& [_, var] : vars_) {
+    delete var;
+  }
+  vars_.clear();
+
+  // Cleanup managed vars
+  for (auto& [_, managedVars] : managedVars_) {
+    for (auto& managedVar : managedVars) {
+      hipError_t err = hipSuccess;
+      for (auto dev : g_devices) {
+        DeviceVar* dvar = nullptr;
+        err = managedVar->getDeviceVarPtr(&dvar, dev->deviceId());
+        if (err == hipSuccess && dvar != nullptr) {
+          // free also deletes the device ptr
+          err = ihipFree(dvar->device_ptr());
+          assert(err == hipSuccess);
+        }
+      }
+      if (managedVar->getAllocFlag()) {  // check if it is a managed or host alloc
+        err = ihipFree(*(static_cast<void**>(managedVar->getManagedVarPtr())));
+        assert(err == hipSuccess);
+      } else {
+        void** pointer = static_cast<void**>(managedVar->getManagedVarPtr());
+        amd::Os::releaseMemory(*pointer, managedVar->getSize());
+      }
+      delete managedVar;
+    }
+    managedVars.clear();
+  }
+  managedVars_.clear();
+
+  for (auto const& [_, func] : functions_) {
+    delete func;
+  }
+  functions_.clear();
+
+  for (auto& [_, fb_info] : modules_) {
+    delete fb_info;
+    fb_info = nullptr;
+  }
+  modules_.clear();
+
+  return hipSuccess;
+}
+
 hipError_t StatCO::registerStatFunction(const void* hostFunction, Function* func) {
   amd::ScopedLock lock(sclock_);
 

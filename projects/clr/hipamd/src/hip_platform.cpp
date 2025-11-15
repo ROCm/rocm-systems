@@ -813,6 +813,11 @@ void PlatformState::init() {
   for (auto& it : statCO_.functions_) {
     it.second->resize_dFunc(g_devices.size());
   }
+  amd::RuntimeTearDown::RegisterTearDownCallback("PlatformState static fatbin cleanup", [this]() {
+    runtime_destroyed_.store(true, std::memory_order_release);
+    hipError_t err = statCO_.removeAllFatBinaries();
+    assert(err == hipSuccess);
+  });
 }
 
 hipError_t PlatformState::loadModule(hipModule_t* module, const char* fname, const void* image) {
@@ -989,6 +994,9 @@ hip::FatBinaryInfo** PlatformState::addFatBinary(const void* data, bool& success
 }
 
 hipError_t PlatformState::removeFatBinary(hip::FatBinaryInfo** module) {
+  if (runtime_destroyed_.load(std::memory_order_acquire)) {
+    return hipSuccess;
+  }
   return statCO_.removeFatBinary(module);
 }
 
