@@ -101,7 +101,7 @@ endfunction()  # CheckAcceptedArchs
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
-                   -I${HIP_INCLUDE_DIR}
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    -o tex_ref_get_module.code
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
 add_custom_target(tex_ref_get_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
