@@ -10,7 +10,11 @@ namespace {
 
 // Helper to create a valid agent info struct
 aqlprofile_agent_info_v1_t makeTestAgentInfo(const char* gfxip = "gfx900") {
+    // If assertion fails, handle new fields and create tests for new sizes
+    static_assert(sizeof(aqlprofile_agent_info_v1_t) == 40);
+
     aqlprofile_agent_info_v1_t info{};
+    info.size = sizeof(aqlprofile_agent_info_v1_t);
     info.agent_gfxip = strdup(gfxip);
     info.cu_num = 64;
     info.se_num = 4;

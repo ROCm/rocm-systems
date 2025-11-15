@@ -152,14 +152,13 @@ set_tests_properties(
 add_executable(pm4-factory-test)
 SET(AQLPROFILE_PM4_FACTORY_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/pm4_factory_tests.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory.cpp
 )
 target_sources(pm4-factory-test PRIVATE ${AQLPROFILE_PM4_FACTORY_SOURCES})
 target_include_directories(pm4-factory-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
 target_link_libraries(
     pm4-factory-test
     PRIVATE
-            aqlprofile::aqlprofile-lib
+            aqlprofile-object-library
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main
@@ -206,31 +205,13 @@ set_tests_properties(
 add_executable(aql-profile-v2-test)
 SET(AQLPROFILE_V2_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/aql_profile_v2_tests.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../counters.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../memorymanager.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../populate_aql.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../ip_offset_table_init.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../parse_ip_discovery.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../navi_reg_init.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../vega20_reg_init.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../spm_data.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx12_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx11_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx115x_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx10_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx940_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx908_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx90a_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx9_factory.cpp
-
 )
 target_sources(aql-profile-v2-test PRIVATE ${AQLPROFILE_V2_SOURCES})
 target_include_directories(aql-profile-v2-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
 target_link_libraries(
     aql-profile-v2-test
     PRIVATE
-            aqlprofile::aqlprofile-lib
+            aqlprofile-object-library
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main

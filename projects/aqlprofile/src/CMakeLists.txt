@@ -27,14 +27,27 @@ set ( LIB_SRC
   ${LIB_DIR}/util/hsa_rsrc_factory.cpp
 )
 
-add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
-add_library (aqlprofile::aqlprofile-lib ALIAS ${TARGET_LIB})
-target_include_directories ( ${TARGET_LIB}
+add_library(aqlprofile-object-library OBJECT)
+target_sources(aqlprofile-object-library PRIVATE ${LIB_SRC})
+set_target_properties(aqlprofile-object-library PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+target_include_directories (aqlprofile-object-library
   PRIVATE ${LIB_DIR}
           ${API_PATH}
           ${LIB_DIR}/core/include
 )
-target_link_libraries( ${TARGET_LIB}
+target_link_libraries(aqlprofile-object-library
+  PRIVATE
+    pthread
+    hsa-runtime64::hsa-runtime64
+  PUBLIC
+    aqlprofile::headers
+)
+
+add_library(${TARGET_LIB} SHARED)
+add_library(aqlprofile::aqlprofile-lib ALIAS ${TARGET_LIB})
+target_sources(${TARGET_LIB} PRIVATE $<TARGET_OBJECTS:aqlprofile-object-library>)
+target_link_libraries(${TARGET_LIB}
   PRIVATE
     pthread
     hsa-runtime64::hsa-runtime64
