@@ -17,7 +17,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code
                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc
                    -o simple_kernel.code
-                   -I${HIP_INCLUDE_DIR}
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc)
 
 add_custom_target(simple_kernel ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code)

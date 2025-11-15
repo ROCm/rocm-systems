@@ -184,7 +184,7 @@ endif()
 add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER}
   --cuda-device-only ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
   -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
-  -I${HIP_INCLUDE_DIR}
+  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 set_property(GLOBAL APPEND PROPERTY
              G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
@@ -199,7 +199,7 @@ if(HIP_PLATFORM MATCHES "amd")
     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
     -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/graph/hipMatMul.code
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/
-    -I${HIP_INCLUDE_DIR}
+    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   add_dependencies(build_tests hipMatMul)
   set_property(GLOBAL APPEND PROPERTY
