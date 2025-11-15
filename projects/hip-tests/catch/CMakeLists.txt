@@ -32,8 +32,11 @@ if(UNIX)
 else() # Win32
     find_program(LLVM_RC_EXEC llvm-rc)
 endif()
-
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
+# hip root dir is 3 levels down the hip-config.cmake file path
+set(HIP_PATH ${hip_DIR}/../../../)
+# used by clang to find hip
+set(HIP_PATH_OPT "--hip-path=${HIP_PATH}")
 
 if(TEST_CLOCK_CYCLE)
     add_definitions(-DTEST_CLOCK_CYCLE)
@@ -156,7 +159,10 @@ if (WIN32)
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
-    add_compile_options(-std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter) # -Werror)
+    if(WIN32)
+        set(win_disable_warnings -Wno-ignored-attributes -Wno-microsoft-cast)
+    endif()
+    add_compile_options(${HIP_PATH_OPT} -std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings}) # -Werror)
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
