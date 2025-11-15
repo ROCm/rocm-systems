@@ -2705,7 +2705,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated") {
+TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   void* hipMemcpy2D_ptr = nullptr;
@@ -6008,7 +6008,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer") {
+TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
 

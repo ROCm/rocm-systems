@@ -74,7 +74,7 @@ TEST_CASE("Unit_hipStreamGetDevice_Negative") {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamGetDevice_Usecase") {
+TEST_CASE("Unit_hipStreamGetDevice_Usecase", "[multigpu]") {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   REQUIRE(device_count != 0);
@@ -186,7 +186,7 @@ TEST_CASE("Unit_hipStreamGetDevice_MThread") { REQUIRE(true == test_hipStreamGet
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamGetDevice_SetDiffDevice") {
+TEST_CASE("Unit_hipStreamGetDevice_SetDiffDevice", "[multigpu]") {
   hipDevice_t device_from_stream;
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
@@ -225,7 +225,7 @@ TEST_CASE("Unit_hipStreamGetDevice_SetDiffDevice") {
  *      Test to be run only on AMD machine as it's failing in CUDA.
  */
 #if HT_AMD
-TEST_CASE("Unit_hipStreamGetDevice_NullStream") {
+TEST_CASE("Unit_hipStreamGetDevice_NullStream", "[multigpu]") {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   REQUIRE(device_count != 0);

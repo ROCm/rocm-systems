@@ -41,10 +41,14 @@
 /_build
 _toc.yml
 
+# Common Build folders
 /build*
+/rocprof-sys-build
+
 /.vscode
 /.cache
 /.clangd
+
 /compile_commands.json
 /rocprof-sys-install.py
 /scripts/rocprof-sys-install.py

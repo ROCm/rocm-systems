@@ -295,7 +295,7 @@ TEST_CASE("Unit_hipStreamLegacy_WithStreamPerThread") {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipStreamLegacy_MultiDevice") {
+TEST_CASE("Unit_hipStreamLegacy_MultiDevice", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -418,7 +418,7 @@ TEST_CASE("Unit_hipStreamLegacy_H2H_H2D_D2D_D2H_Default") {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipStreamLegacy_MultiDeviceMultiOperation") {
+TEST_CASE("Unit_hipStreamLegacy_MultiDeviceMultiOperation", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -594,7 +594,7 @@ TEST_CASE("Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation") {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation") {
+TEST_CASE("Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -679,7 +679,8 @@ static void operationsInDev1(int* devArrDev1, int* hostArrDst) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation") {
+TEST_CASE("Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation",
+          "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {

@@ -130,7 +130,7 @@ __global__ void test_gws(uint* buf, uint buf_size, long* tmp_buf, long* result) 
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Basic") {
+TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Basic", "[multigpu]") {
   constexpr uint num_kernel_args = 4;
 
   int device_num = 0;
