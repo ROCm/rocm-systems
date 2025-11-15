@@ -586,6 +586,14 @@ class Device : public NullDevice {
   // Returns the number of allocated normal queues on this device
   uint32_t NumNormalQueues() const { return num_normal_queues_.load(); }
 
+#if defined(_WIN32)
+  //! Interop for GL device
+  bool initGLInteropPrivateExt(void* GLplatformContext, void* GLdeviceContext) const;
+  bool glCanInterop(void* GLplatformContext, void* GLdeviceContext) const;
+  bool glAssociate(void* GLplatformContext, void* GLdeviceContext) const;
+  bool glDissociate(void* GLplatformContext, void* GLdeviceContext) const;
+#endif
+
  private:
   bool create();
 

@@ -71,6 +71,27 @@ static_assert(static_cast<uint32_t>(amd::Device::VmmAccess::kReadWrite) ==
                   static_cast<uint32_t>(HSA_ACCESS_PERMISSION_RW),
               "Vmm Access Flag Read Write mismatch with ROC-runtime!");
 
+#if defined(_WIN32)
+#include "GL/gl_interop.h"
+
+typedef PROC(WINAPI* PFNWGLGETPROCADDRESS)(LPCSTR name);
+typedef HGLRC(WINAPI* PFNWGLGETCURRENTCONTEXT)(void);
+typedef HGLRC(WINAPI* PFNWGLCREATECONTEXT)(HDC hdc);
+typedef BOOL(WINAPI* PFNWGLDELETECONTEXT)(HGLRC hglrc);
+typedef BOOL(WINAPI* PFNWGLMAKECURRENT)(HDC hdc, HGLRC hglrc);
+static PFNWGLGETPROCADDRESS pfnWglGetProcAddress = nullptr;
+static PFNWGLGETCURRENTCONTEXT pfnWglGetCurrentContext = nullptr;
+static PFNWGLCREATECONTEXT pfnWglCreateContext = nullptr;
+static PFNWGLDELETECONTEXT pfnWglDeleteContext = nullptr;
+static PFNWGLMAKECURRENT pfnWglMakeCurrent = nullptr;
+static PFNWGLBEGINCLINTEROPAMD wglBeginCLInteropAMD = nullptr;
+static PFNWGLENDCLINTEROPAMD wglEndCLInteropAMD = nullptr;
+static PFNWGLRESOURCEATTACHAMD wglResourceAttachAMD = nullptr;
+static PFNWGLRESOURCEDETACHAMD wglResourceAcquireAMD = nullptr;
+static PFNWGLRESOURCEDETACHAMD wglResourceReleaseAMD = nullptr;
+static PFNWGLRESOURCEDETACHAMD wglResourceDetachAMD = nullptr;
+static PFNWGLGETCONTEXTGPUINFOAMD wglGetContextGPUInfoAMD = nullptr;
+#endif
 
 namespace amd::device {
 extern const char* HipExtraSourceCode;
@@ -982,6 +1003,17 @@ bool Device::populateOCLDeviceConstants() {
       info_.uuid_[i] = unique_id[i + 4];
     }
   }
+
+#if defined(_WIN32)
+  LUID localUID = {0};
+  if (HSA_STATUS_SUCCESS ==
+      Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
+                         &localUID)) {
+    info_.luidLowPart_ = localUID.LowPart;
+    info_.luidHighPart_ = localUID.HighPart;
+  }
+#endif
+
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_,
                           (amd::IS_HIP)
@@ -1736,7 +1768,19 @@ bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t si
 bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                 bool validateOnly) {
 #if defined(_WIN32)
-  return false;
+  if (flags & amd::Context::GLDeviceKhr == 0) {
+    return false;
+  }
+
+  void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+  if (!glAssociate(gfxContext, glDevice)) {
+    if (!validateOnly) {
+      LogError("Failed glAssociate()");
+    }
+    return false;
+  }
+
+  return true;
 #else
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
@@ -1775,7 +1819,20 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
 bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                   bool validateOnly) {
 #if defined(_WIN32)
-  return false;
+  if ((flags & amd::Context::GLDeviceKhr) == 0) {
+    return true;
+  }
+
+  void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+  if (glDevice != nullptr) {
+    if (!glDissociate(gfxContext, glDevice)) {
+      if (validateOnly) {
+        LogWarning("Failed glDissociate()");
+      }
+      return false;
+    }
+  }
+  return true;
 #else
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
   return true;
@@ -3501,6 +3558,112 @@ void Device::RemoveKernel(Kernel& gpuKernel) const {
     }
   }
 }
+
+#if defined(_WIN32)
+// ================================================================================================
+bool Device::initGLInteropPrivateExt(void* GLplatformContext, void* GLdeviceContext) const {
+  static std::once_flag gGlFuncInit;
+  static bool gGlFuncLoaded = false;
+
+  std::call_once(gGlFuncInit, [GLdeviceContext]() {
+    HMODULE h = static_cast<HMODULE>(amd::Os::loadLibrary("opengl32.dll"));
+
+    if (!h) {
+      LogError("Couldn't load opengl32.dll");
+      return;
+    }
+
+    pfnWglGetProcAddress =
+        reinterpret_cast<PFNWGLGETPROCADDRESS>(GetProcAddress(h, "wglGetProcAddress"));
+    pfnWglGetCurrentContext =
+        reinterpret_cast<PFNWGLGETCURRENTCONTEXT>(GetProcAddress(h, "wglGetCurrentContext"));
+    pfnWglCreateContext =
+        reinterpret_cast<PFNWGLCREATECONTEXT>(GetProcAddress(h, "wglCreateContext"));
+    pfnWglDeleteContext =
+        reinterpret_cast<PFNWGLDELETECONTEXT>(GetProcAddress(h, "wglDeleteContext"));
+    pfnWglMakeCurrent = reinterpret_cast<PFNWGLMAKECURRENT>(GetProcAddress(h, "wglMakeCurrent"));
+
+    if (!pfnWglGetProcAddress || !pfnWglGetCurrentContext || !pfnWglCreateContext ||
+        !pfnWglDeleteContext || !pfnWglMakeCurrent) {
+      LogError("Couldn't obtain WGL context API");
+      return;
+    }
+
+    // Create a temporary GL context if none is current; WGL extension
+    // functions require some current GL context when loaded.
+    HGLRC fakeRC = nullptr;
+    if (!pfnWglGetCurrentContext()) {
+      fakeRC = pfnWglCreateContext((HDC)GLdeviceContext);
+      if (fakeRC == nullptr) {
+        LogError("Couldn't create temporary WGL context");
+        return;
+      }
+      pfnWglMakeCurrent((HDC)GLdeviceContext, fakeRC);
+    }
+
+    wglBeginCLInteropAMD =
+        (PFNWGLBEGINCLINTEROPAMD)pfnWglGetProcAddress("wglBeginCLInteroperabilityAMD");
+    wglEndCLInteropAMD = (PFNWGLENDCLINTEROPAMD)pfnWglGetProcAddress("wglEndCLInteroperabilityAMD");
+    wglResourceAttachAMD = (PFNWGLRESOURCEATTACHAMD)pfnWglGetProcAddress("wglResourceAttachAMD");
+    wglResourceAcquireAMD = (PFNWGLRESOURCEDETACHAMD)pfnWglGetProcAddress("wglResourceAcquireAMD");
+    wglResourceReleaseAMD = (PFNWGLRESOURCEDETACHAMD)pfnWglGetProcAddress("wglResourceReleaseAMD");
+    wglResourceDetachAMD = (PFNWGLRESOURCEDETACHAMD)pfnWglGetProcAddress("wglResourceDetachAMD");
+    wglGetContextGPUInfoAMD =
+        (PFNWGLGETCONTEXTGPUINFOAMD)pfnWglGetProcAddress("wglGetContextGPUInfoAMD");
+
+    if (fakeRC) {
+      pfnWglMakeCurrent(nullptr, nullptr);
+      pfnWglDeleteContext(fakeRC);
+    }
+
+    gGlFuncLoaded = wglBeginCLInteropAMD && wglEndCLInteropAMD && wglResourceAttachAMD &&
+                    wglResourceDetachAMD && wglGetContextGPUInfoAMD;
+  });
+
+  return gGlFuncLoaded;
+}
+
+// ================================================================================================
+bool Device::glCanInterop(void* GLplatformContext, void* GLdeviceContext) const {
+  bool canInteroperate = false;
+
+  LUID glAdapterLuid = {0, 0};
+  UINT glChainBitMask = 0;
+  HGLRC hRC = static_cast<HGLRC>(GLplatformContext);
+
+  // get GL context's LUID and chainBitMask from UGL
+  if (wglGetContextGPUInfoAMD(hRC, &glAdapterLuid, &glChainBitMask)) {
+    // match the adapter
+    canInteroperate = info_.luidLowPart_ == glAdapterLuid.LowPart &&
+                      info_.luidHighPart_ == glAdapterLuid.HighPart &&
+                      ((1 << index()) == glChainBitMask);
+  }
+
+  return canInteroperate;
+}
+
+// ================================================================================================
+bool Device::glAssociate(void* GLplatformContext, void* GLdeviceContext) const {
+  if (!initGLInteropPrivateExt(GLplatformContext, GLdeviceContext)) {
+    return false;
+  }
+
+  if (!glCanInterop(GLplatformContext, GLdeviceContext)) {
+    return false;
+  }
+
+  return wglBeginCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
+}
+
+// ================================================================================================
+bool Device::glDissociate(void* GLplatformContext, void* GLdeviceContext) const {
+  if (!initGLInteropPrivateExt(GLplatformContext, GLdeviceContext)) {
+    return false;
+  }
+
+  return wglEndCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
+}
+#endif
 
 // ================================================================================================
 ProfilingSignal::~ProfilingSignal() {
