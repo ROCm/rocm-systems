@@ -25,7 +25,20 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
-#include "version.h"
+#define AQLPROFILE_VERSION_MAJOR   1
+#define AQLPROFILE_VERSION_MINOR   0
+#define AQLPROFILE_VERSION_PATCH   0
+
+// clang-format on
+#define AQLPROFILE_COMPUTE_VERSION_VALUE(MAX_VERSION_VALUE, MAJOR, MINOR, PATCH)                   \
+    (((MAX_VERSION_VALUE * MAX_VERSION_VALUE) * MAJOR) + (MAX_VERSION_VALUE * MINOR) + (PATCH))
+
+#define AQLPROFILE_COMPUTE_VERSION(MAJOR, MINOR, PATCH)                                            \
+    AQLPROFILE_COMPUTE_VERSION_VALUE(100, MAJOR, MINOR, PATCH)
+
+#define AQLPROFILE_VERSION                                                                         \
+    AQLPROFILE_COMPUTE_VERSION(                                                                    \
+        AQLPROFILE_VERSION_MAJOR, AQLPROFILE_VERSION_MINOR, AQLPROFILE_VERSION_PATCH)
 
 #ifdef __cplusplus
 extern "C" {
