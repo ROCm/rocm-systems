@@ -597,6 +597,26 @@ typedef enum {
 } rsmi_temperature_type_t;
 
 /**
+ * @brief NPM status
+ *
+ */
+typedef enum  {
+  RSMI_NPM_STATUS_DISABLED,
+  RSMI_NPM_STATUS_ENABLED
+} rsmi_npm_status_t;
+
+/**
+ * @brief NPM info including status, limit.
+ *
+ */
+typedef struct
+{
+  rsmi_npm_status_t status; //!< NPM status (enabled/disabled).
+  uint64_t limit;  //!< Node-level power limit in Watts.
+  uint64_t reserved[6];
+} rsmi_npm_info_t;
+
+/**
  * @brief Activity (Utilization) Metrics.  This enum is used to identify
  * various activity metrics.
  *
@@ -666,6 +686,17 @@ typedef enum {
 } rsmi_power_profile_preset_masks_t;
 /// \cond Ignore in docs.
 typedef rsmi_power_profile_preset_masks_t rsmi_power_profile_preset_masks;
+/// \endcond
+
+/**
+ * @brief Power Cap Package Power Tracking (PPT) type
+ */
+typedef enum {
+    RSMI_POWER_CAP_TYPE_PPT0,       //!< PPT0 power cap; lower limit, filtered input
+    RSMI_POWER_CAP_TYPE_PPT1,       //!< PPT1 power cap; higher limit, raw input
+} rsmi_power_cap_type_t;
+/// \cond Ignore in docs.
+typedef rsmi_power_cap_type_t rsmi_power_cap_type;
 /// \endcond
 
 /**
@@ -2510,6 +2541,9 @@ rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap);
  *
  *  @param[in] dv_ind a device index
  *
+ *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
+ *  If a device has more than one sensor, it could be greater than 0.
+ *
  *  @param[inout] default_cap a pointer to a uint64_t that indicates the default
  *  power cap, in microwatts
  *  If this parameter is nullptr, this function will return
@@ -2523,7 +2557,7 @@ rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
 rsmi_status_t
-rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint64_t *default_cap);
+rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *default_cap);
 
 /**
  *  @brief Get the range of valid values for the power cap
@@ -2612,6 +2646,29 @@ rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
 rsmi_status_t
 rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t reserved,
                                    rsmi_power_profile_preset_masks_t profile);
+
+ /**
+ *  @brief Query the supported power cap sensors and their types for a device.
+ *
+ *  @ingroup tagPowerControl
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function returns the number of supported power cap sensors for the given device,
+ *  including their sensor indices and types (e.g., PPT0, PPT1).
+ *
+ *  @param[in]  dv_ind A device index.
+ *  @param[out] sensor_count Pointer to a uint32_t that will be set to the number of supported sensors.
+ *  @param[out] sensor_inds Pointer to an array of uint32_t to be filled with sensor indices.
+ *                          The array must be allocated by the caller with enough space.
+ *  @param[out] sensor_types Pointer to an array of rsmi_power_cap_type_t to be filled with sensor types.
+ *                          The array must be allocated by the caller with enough space.
+ *
+ *  @return ::rsmi_status_t | ::RSMI_STATUS_SUCCESS on success, non-zero on fail.
+ */
+rsmi_status_t 
+rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
+                                 uint32_t *sensor_inds, rsmi_power_cap_type_t *sensor_types);
 /** @} */  // end of PowerCont
 /*****************************************************************************/
 
@@ -2854,6 +2911,9 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind,
  */
 rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
                                     uint32_t sensor_ind, uint64_t *max_speed);
+
+rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind,
+                              uintptr_t node_handle, rsmi_npm_info_t *npm_info);
 
 /**
  *  @brief Get the temperature metric value for the specified metric, from the

@@ -90,6 +90,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Link with stdc++fs for filesystem support (only for GCC < 9.0)
+set(FILESYSTEM_LIB "")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+        set(FILESYSTEM_LIB stdc++fs)
+        message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION} detected, linking with stdc++fs for filesystem support")
+    endif()
+endif()
+
 include(GNUInstallDirs)
 
 option(BUILD_TESTS "Build test suite" OFF)
@@ -251,7 +260,8 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_logger.cc"
     "${SHR_MUTEX_DIR}/shared_mutex.cc"
     "${ROCM_SRC_DIR}/rocm_smi_binary_parser.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc")
+    "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_npm.cc")
 
 if(ENABLE_ESMI_LIB)
     list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi.c)
@@ -277,7 +287,8 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_logger.h"
     "${SHR_MUTEX_DIR}/shared_mutex.h"
     "${ROCM_INC_DIR}/rocm_smi_binary_parser.h"
-    "${ROCM_INC_DIR}/rocm_smi_board_temp.h")
+    "${ROCM_INC_DIR}/rocm_smi_board_temp.h"
+    "${ROCM_INC_DIR}/rocm_smi_npm.h")
 
 add_subdirectory("rocm_smi")
 add_subdirectory("src")
