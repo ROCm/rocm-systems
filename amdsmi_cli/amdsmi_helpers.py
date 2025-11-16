@@ -624,6 +624,41 @@ class AMDSMIHelpers():
             return False, args.core
 
 
+    # The below handle_nodes function is currently unused as only node 0 is supported.
+    # Marked as a private function until it is needed in the future.
+    def _handle_nodes(self, args, logger, subcommand):
+        """This function will run execute the subcommands based on the number
+            of nodes passed in via args.
+        params:
+            args - argparser args to pass to subcommand
+            current_platform_args (list) - GPU supported platform arguments
+            current_platform_values (list) - GPU supported values for the arguments
+            logger (AMDSMILogger) - Logger to print out output
+            subcommand (AMDSMICommands) - Function that can handle multiple gpus
+
+        return:
+            tuple(bool, device_handle) :
+                bool - True if executed subcommand for multiple devices
+                device_handle - Return the device_handle if the list of devices is a length of 1
+            (handled_multiple_nodes, device_handle)
+
+        """
+        if isinstance(args.node, list):
+            if len(args.node) > 1:
+                for node_handle in args.node:
+                    # Handle multiple_devices to print all output at once
+                    subcommand(args, multiple_devices=True, node=node_handle)
+                logger.print_output(multiple_device_enabled=True)
+                return True, args.node
+            elif len(args.node) == 1:
+                args.node = args.node[0]
+                return False, args.node
+            else:
+                logging.debug("args.node has an empty list")
+        else:
+            return False, args.node
+
+
     def handle_watch(self, args, subcommand, logger):
         """This function will run the subcommand multiple times based
             on the passed watch, watch_time, and iterations passed in.
@@ -781,9 +816,8 @@ class AMDSMIHelpers():
             logging.debug("AMDSMIHelpers.get_accelerator_choices_types_indices - Root, getting accelerator partition profiles")
         accelerator_partition_profiles = self.get_accelerator_partition_profile_config()
         if len(accelerator_partition_profiles['profile_types']) != 0:
-            compute_partitions_str = accelerator_partition_profiles['profile_types'] + accelerator_partition_profiles['profile_indices']
-            accelerator_choices = ", ".join(compute_partitions_str)
-            return_val = (accelerator_choices, accelerator_partition_profiles)
+            compute_partitions_list = accelerator_partition_profiles['profile_types'] + accelerator_partition_profiles['profile_indices']
+            return_val = (compute_partitions_list, accelerator_partition_profiles)
         return return_val
 
 
@@ -816,26 +850,50 @@ class AMDSMIHelpers():
 
     def get_power_caps(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
-        power_cap_min = amdsmi_interface.MaxUIntegerTypes.UINT64_T # start out at max and min and then find real min and max
-        power_cap_max = 0
+        power_limit_types = {
+            'ppt0': {
+                'power_cap_min': amdsmi_interface.MaxUIntegerTypes.UINT64_T,
+                'power_cap_max': 0
+            },
+            'ppt1': {
+                'power_cap_min': amdsmi_interface.MaxUIntegerTypes.UINT64_T,
+                'power_cap_max': 0
+            }
+        }
+
         for dev in device_handles:
             try:
-                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev)
-                if power_cap_info['max_power_cap'] > power_cap_max:
-                    power_cap_max = power_cap_info['max_power_cap']
-                if power_cap_info['min_power_cap'] < power_cap_max:
-                    power_cap_min = power_cap_info['min_power_cap']
-            except amdsmi_interface.AmdSmiLibraryException as e:
+                power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(dev)
+                for sensor in power_cap_types['sensor_inds']:
+                    power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev, sensor)
+                    if power_cap_info['max_power_cap'] > power_limit_types[f'ppt{sensor}']['power_cap_max']:
+                        power_limit_types[f'ppt{sensor}']['power_cap_max'] = power_cap_info['max_power_cap']
+                    if power_cap_info['min_power_cap'] < power_limit_types[f'ppt{sensor}']['power_cap_min']:
+                        power_limit_types[f'ppt{sensor}']['power_cap_min'] = power_cap_info['min_power_cap']
+            except (amdsmi_interface.AmdSmiLibraryException, KeyError) as e:
                 logging.debug(f"AMDSMIHelpers.get_power_caps - Unable to get power cap info for device {dev}: {str(e)}")
                 continue
 
         # If we never found a real min or max, set them to N/A
-        if power_cap_min == amdsmi_interface.MaxUIntegerTypes.UINT64_T:
-            power_cap_min = "N/A"
-        if power_cap_max == 0:
-            power_cap_max = "N/A"
+        for ppt_key in ['ppt0', 'ppt1']:
+            if power_limit_types[ppt_key]['power_cap_min'] == amdsmi_interface.MaxUIntegerTypes.UINT64_T:
+                power_limit_types[ppt_key]['power_cap_min'] = "N/A"
+            if power_limit_types[ppt_key]['power_cap_max'] == 0:
+                power_limit_types[ppt_key]['power_cap_max'] = "N/A"
 
-        return (power_cap_min, power_cap_max)
+        ppt0_power_cap_max = self.format_power_cap(power_limit_types['ppt0']['power_cap_max'])
+        ppt0_power_cap_min = self.format_power_cap(power_limit_types['ppt0']['power_cap_min'])
+        ppt1_power_cap_max = self.format_power_cap(power_limit_types['ppt1']['power_cap_max'])
+        ppt1_power_cap_min = self.format_power_cap(power_limit_types['ppt1']['power_cap_min'])
+
+        return (ppt0_power_cap_min, ppt0_power_cap_max, ppt1_power_cap_min, ppt1_power_cap_max)
+
+
+    def format_power_cap(self, value):
+        if value != "N/A":
+            converted = self.convert_SI_unit(value, AMDSMIHelpers.SI_Unit.MICRO)
+            return f"{converted} W"
+        return value
 
 
     def get_soc_pstates(self):

@@ -245,6 +245,13 @@ typedef enum {
 typedef void *amdsmi_processor_handle;
 typedef void *amdsmi_socket_handle;
 
+/**
+ * @brief opaque handler point to underlying implementation
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef void *amdsmi_node_handle;
+
 #ifdef ENABLE_ESMI_LIB
 
 /**
@@ -832,6 +839,16 @@ typedef struct {
     uint64_t max_power_cap;      //!< maximum power cap Units uW {@linux_bm} or W {@host}
     uint64_t reserved[3];
 } amdsmi_power_cap_info_t;
+
+/**
+ * @brief Power Cap Package Power Tracking (PPT) type
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+    AMDSMI_POWER_CAP_TYPE_PPT0,       //!< PPT0 power cap; lower limit, filtered input
+    AMDSMI_POWER_CAP_TYPE_PPT1,       //!< PPT1 power cap; higher limit, raw input
+} amdsmi_power_cap_type_t;
 
 /**
  * @brief VBios Information
@@ -2131,6 +2148,27 @@ typedef enum {
     AMDSMI_AFFINITY_SCOPE_SOCKET   //!< socket affinity
 } amdsmi_affinity_scope_t;
 
+/**
+ * @brief NPM status
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum  {
+    AMDSMI_NPM_STATUS_DISABLED,
+    AMDSMI_NPM_STATUS_ENABLED
+} amdsmi_npm_status_t;
+
+/**
+ * @brief NPM info
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    amdsmi_npm_status_t status; //!< NPM status (enabled/disabled).
+    uint64_t            limit;  //!< Node-level power limit in Watts.
+    uint64_t            reserved[6];
+} amdsmi_npm_info_t;
+
 #ifdef ENABLE_ESMI_LIB
 
 /**
@@ -2614,6 +2652,28 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
 amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
                                     uint32_t *processor_count,
                                     amdsmi_processor_handle* processor_handles);
+
+/**
+ *  @brief Get the node handle associated with processor handle. 
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function retrieves the node handle of a processor handler. The
+ *  @p processor_handle must be provided for the processor.
+ *  Currently, only AMD GPUs are supported.
+ *
+ *  @param[in] processor_handle A pointer to a ::amdsmi_processor_handle, this 
+ *  is required to be OAM ID 0 otherwise the API will fail. OAM ID is sourced
+ *  from amdsmi_get_gpu_asic_info API.
+ *
+ *  @param[out] amdsmi_node_handle* A pointer to a block of memory where amdsmi_node_handle
+ *  will be written.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle, amdsmi_node_handle *node_handle);
 
 
 #ifdef ENABLE_ESMI_LIB
@@ -3276,6 +3336,29 @@ amdsmi_status_t amdsmi_set_power_cap(amdsmi_processor_handle processor_handle,
 amdsmi_status_t
 amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_handle, uint32_t reserved,
                              amdsmi_power_profile_preset_masks_t profile);
+
+/**
+ *  @brief Query the supported power cap sensors and their types for a device.
+ *
+ *  @ingroup tagPowerControl
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function returns the list of supported power cap sensors for the given device,
+ *  including their sensor indices and types (e.g., PPT0, PPT1).
+ *
+ *  @param[in]  processor_handle A processor handle.
+ *  @param[out] sensor_count Pointer to a uint32_t that will be set to the number of supported sensors.
+ *  @param[out] sensor_inds Pointer to an array of uint32_t to be filled with sensor indices.
+ *                          The array must be allocated by the caller with enough space.
+ *  @param[out] sensor_types Pointer to an array of amdsmi_power_cap_type_t to be filled with sensor types.
+ *                          The array must be allocated by the caller with enough space.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ */
+amdsmi_status_t 
+amdsmi_get_supported_power_cap(amdsmi_processor_handle processor_handle, uint32_t *sensor_count,
+                                 uint32_t *sensor_inds, amdsmi_power_cap_type_t *sensor_types);
 
 /**
  *  @brief Get the socket power.
@@ -6187,6 +6270,25 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
 amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_handle,
                                            uint16_t *xcd_count);
 
+/**
+ * @brief Retrieves node power management (NPM) status and power limit for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details This function queries the NPM controller for the given node and returns whether NPM is enabled,
+ * along with the current node-level power limit in Watts. The NPM status and limit are set out-of-band
+ * and reported via this API.
+ *
+ * @param[in]  node_handle Handle to the Node to query.
+ * @param[out] info Pointer to amdsmi_npm_info_t structure to receive NPM status and limit.
+ *             Must be allocated by the user.
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure.
+ */
+amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t *info);
+
 /** @} End tagAsicBoardInfo */
 
 /*****************************************************************************/
@@ -6448,6 +6550,7 @@ amdsmi_status_t
 amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_proc_info_t *list);
 
 /** @} End tagProcessInfo */
+
 
 /*****************************************************************************/
 /** @defgroup tagDriverControl Driver control mechanisms

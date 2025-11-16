@@ -53,6 +53,7 @@ class AMDSMICommands():
         self.device_handles = []
         self.cpu_handles = []
         self.core_handles = []
+        self.node_handle = None
         self.stop = ''
         self.group_check_printed = False
 
@@ -74,6 +75,20 @@ class AMDSMICommands():
                 # No GPU's found post amdgpu driver initialization
                 logging.error('Unable to detect any GPU devices, check amdgpu version and module status (sudo modprobe amdgpu)')
                 exit_flag = True
+
+            # Resolve the node handle.
+            for dev in self.device_handles:
+                try:
+                    nh = amdsmi_interface.amdsmi_get_node_handle(dev)
+                    if nh is not None:
+                        self.node_handle = nh
+                        continue
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+                                      amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL):
+                        logging.debug("Unable to get node handle: %s", e.get_error_info())
+                    else:
+                        raise e
 
         if self.helpers.is_amd_hsmp_initialized():
             try:
@@ -581,9 +596,9 @@ class AMDSMICommands():
                     bus_info['pcie_levels'] = {}
                     for level in range(0, num_supported):
                         speed = str(self.helpers.convert_SI_unit(float(pcie_info['transfer_rate']['frequency'][level]), AMDSMIHelpers.SI_Unit.NANO)) + " GT/s"
-                        width = pcie_info['lanes'][level]
+                        width = str(pcie_info['lanes'][level])
                         level_values = (speed, width)
-                        bus_info['pcie_levels'].update({level: level_values})
+                        bus_info['pcie_levels'].update({str(level): level_values})
                 else:
                     bus_info['pcie_levels'] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -606,20 +621,38 @@ class AMDSMICommands():
         if 'limit' in current_platform_args:
             if args.limit:
                 # Power limits
+
+                power_limit_types = {}
+                for power_type in amdsmi_interface.AmdSmiPowerCapType:
+                    # Strip 'AMDSMI_POWER_CAP_TYPE_' prefix and convert to lowercase
+                    key = power_type.name.replace('AMDSMI_POWER_CAP_TYPE_', '').lower()
+                    power_limit_types[key] = {
+                        "max_power_limit" : "N/A",
+                        "min_power_limit" : "N/A",
+                        "socket_power_limit" : "N/A"
+                    }
+
                 try:
-                    power_limit_error = False
-                    power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
-                    max_power_limit = power_cap_info['max_power_cap']
-                    max_power_limit = self.helpers.convert_SI_unit(max_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
-                    min_power_limit = power_cap_info['min_power_cap']
-                    min_power_limit = self.helpers.convert_SI_unit(min_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
-                    socket_power_limit = power_cap_info['power_cap']
-                    socket_power_limit = self.helpers.convert_SI_unit(socket_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
+                    power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(args.gpu)
+                    for sensor in power_cap_types['sensor_inds']:
+                        power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu, sensor)
+                        max_power_limit = power_cap_info['max_power_cap']
+                        max_power_limit = self.helpers.convert_SI_unit(max_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
+                        min_power_limit = power_cap_info['min_power_cap']
+                        min_power_limit = self.helpers.convert_SI_unit(min_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
+                        socket_power_limit = power_cap_info['power_cap']
+                        socket_power_limit = self.helpers.convert_SI_unit(socket_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
+                        ppt = {
+                            "max_power_limit" : self.helpers.unit_format(self.logger, max_power_limit, 'W'),
+                            "min_power_limit" : self.helpers.unit_format(self.logger, min_power_limit, 'W'),
+                            "socket_power_limit" : self.helpers.unit_format(self.logger, socket_power_limit, 'W')
+                        }
+
+                        sensor_name = power_cap_types['sensor_types'][sensor]
+                        # Strip 'AMDSMI_POWER_CAP_TYPE_' prefix and convert to lowercase
+                        sensor_key = sensor_name.name.replace('AMDSMI_POWER_CAP_TYPE_', '').lower()
+                        power_limit_types[sensor_key] = ppt
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    power_limit_error = True
-                    max_power_limit = "N/A"
-                    min_power_limit = "N/A"
-                    socket_power_limit = "N/A"
                     logging.debug("Failed to get power cap info for gpu %s | %s", gpu_id, e.get_error_info())
 
                 # Edge temperature limits
@@ -693,16 +726,6 @@ class AMDSMICommands():
                 power_unit = 'W'
                 temp_unit_human_readable = '\N{DEGREE SIGN}C'
                 temp_unit_json = 'C'
-                if not power_limit_error:
-                    max_power_limit = self.helpers.unit_format(self.logger,
-                                                               max_power_limit,
-                                                               power_unit)
-                    min_power_limit = self.helpers.unit_format(self.logger,
-                                                               min_power_limit,
-                                                               power_unit)
-                    socket_power_limit = self.helpers.unit_format(self.logger,
-                                                                  socket_power_limit,
-                                                                  power_unit)
 
                 if self.logger.is_human_readable_format():
                     if not slowdown_temp_edge_limit_error:
@@ -740,9 +763,8 @@ class AMDSMICommands():
 
                 limit_info = {}
                 # Power limits
-                limit_info['max_power'] = max_power_limit
-                limit_info['min_power'] = min_power_limit
-                limit_info['socket_power'] = socket_power_limit
+                limit_info['ppt0'] = power_limit_types['ppt0']
+                limit_info['ppt1'] = power_limit_types['ppt1']
 
                 # Shutdown limits
                 limit_info['slowdown_edge_temperature'] = slowdown_temp_edge_limit
@@ -1106,8 +1128,49 @@ class AMDSMICommands():
         # Convert and store output by pid for csv format
         multiple_devices_csv_override = False
         if self.logger.is_csv_format():
+            # For NUMA data - flatten CPU affinity lists
+            if 'numa' in static_dict and isinstance(static_dict['numa'], dict):
+                numa_data = static_dict.pop('numa')
+                multiple_devices_csv_override = True
+
+                # Get data
+                node = numa_data.get('node', 'N/A')
+                affinity = numa_data.get('affinity', 'N/A')
+                cpu_affinity = numa_data.get('cpu_affinity', {})
+                socket_affinity = numa_data.get('socket_affinity', {})
+                # Create a flattened row for list entry
+                row_dict = static_dict.copy()
+
+                if cpu_affinity and isinstance(cpu_affinity, dict):
+                    for cpu_list_key in cpu_affinity.keys():
+                        cpu_entry = cpu_affinity[cpu_list_key]
+                        socket_entry = socket_affinity.get(cpu_list_key, {"bitmask": "N/A", "cpu_cores_affinity": "N/A"})
+                        row_dict.update({
+                            'node': node,
+                            'affinity': affinity,
+                            'cpu_list': cpu_list_key,
+                            'bitmask': cpu_entry.get('bitmask'),
+                            'cpu_cores_affinity': cpu_entry.get('cpu_cores_affinity'),
+                            'socket_bitmask': socket_entry.get('bitmask'),
+                            'socket_cpu_cores_affinity': socket_entry.get('cpu_cores_affinity')
+                        })
+                        self.logger.store_output(args.gpu, 'values', row_dict)
+                        self.logger.store_gpu_json_output.append(row_dict)
+                        self.logger.store_multiple_device_output()
+                else:
+                    row_dict.update({
+                        'node': node,
+                        'affinity': affinity,
+                        'cpu_list': 'N/A',
+                        'bitmask': 'N/A',
+                        'cpu_cores_affinity': 'N/A',
+                        'socket_bitmask': 'N/A',
+                        'socket_cpu_cores_affinity': 'N/A'
+                    })
+                    self.logger.store_output(args.gpu, 'values', row_dict)
+                    self.logger.store_gpu_json_output.append(row_dict)
             # expand if ras blocks are populated
-            if self.helpers.is_linux() and self.helpers.is_baremetal() and args.ras:
+            elif self.helpers.is_linux() and self.helpers.is_baremetal() and args.ras:
                 if isinstance(static_dict['ras']['ecc_block_state'], list):
                     ecc_block_dicts = static_dict['ras'].pop('ecc_block_state')
                     multiple_devices_csv_override = True
@@ -4909,9 +4972,13 @@ class AMDSMICommands():
                 self.logger.clear_multiple_devices_output()
                 return
         # Universal args
-        if isinstance(args.power_cap, int):
+        if isinstance(args.power_cap, tuple):
+            pwr_type = args.power_cap.pwr_type
+            pwr_type_as_int = (0 if pwr_type == "ppt0" else 1 if pwr_type == "ppt1" else None)
+            pwr_type = pwr_type.upper()
+            requested_power_cap = args.power_cap.watts
             try:
-                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
+                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu, pwr_type_as_int)
                 logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
                 min_power_cap = power_cap_info["min_power_cap"]
                 min_power_cap = self.helpers.convert_SI_unit(min_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
@@ -4923,29 +4990,29 @@ class AMDSMICommands():
                 min_power_cap = "N/A"
                 max_power_cap = "N/A"
                 current_power_cap = "N/A"
-                self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set power cap to {args.power_cap}W")
+                self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set {pwr_type} power cap to {requested_power_cap}W")
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
 
-            if args.power_cap == current_power_cap:
-                self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {args.power_cap}W")
+            if requested_power_cap == current_power_cap:
+                self.logger.store_output(args.gpu, 'powercap', f"{pwr_type} power cap is already set to {requested_power_cap}W")
             elif current_power_cap == 0:
-                self.logger.store_output(args.gpu, 'powercap', f"Unable to set power cap to {args.power_cap}W, current value is {current_power_cap}W")
-            elif args.power_cap >= min_power_cap and args.power_cap <= max_power_cap:
+                self.logger.store_output(args.gpu, 'powercap', f"Unable to set {pwr_type} power cap to {requested_power_cap}W, current value is {current_power_cap}W")
+            elif requested_power_cap >= min_power_cap and requested_power_cap <= max_power_cap and requested_power_cap > 0:
                 try:
-                    new_power_cap = self.helpers.convert_SI_unit(args.power_cap, AMDSMIHelpers.SI_Unit.BASE,
+                    new_power_cap = self.helpers.convert_SI_unit(requested_power_cap, AMDSMIHelpers.SI_Unit.BASE,
                                                                     AMDSMIHelpers.SI_Unit.MICRO)
-                    amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, new_power_cap)
+                    amdsmi_interface.amdsmi_set_power_cap(args.gpu, pwr_type_as_int, new_power_cap)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set power cap to {args.power_cap}W")
+                    self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set {pwr_type} power cap to {requested_power_cap}W")
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
 
-                self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {args.power_cap}W")
+                self.logger.store_output(args.gpu, 'powercap', f"Successfully set {pwr_type} power cap to {requested_power_cap}W")
             else:
                 # setting power cap to 0 will return the current power cap so the technical minimum value is 1
                 if min_power_cap == 0:
@@ -5469,32 +5536,35 @@ class AMDSMICommands():
                 self.logger.clear_multiple_devices_output()
                 return
             if args.power_cap:
-                try:
-                    power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
-                    logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
-                    default_power_cap_in_w = power_cap_info["default_power_cap"]
-                    default_power_cap_in_w = self.helpers.convert_SI_unit(default_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
-                    current_power_cap_in_w = power_cap_info["power_cap"]
-                    current_power_cap_in_w = self.helpers.convert_SI_unit(current_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to reset power cap to default")
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    return
+                final_output = {"ppt0": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap", "ppt1": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap"}
+                power_limit_types = {}
+                for power_type in amdsmi_interface.AmdSmiPowerCapType:
+                    # Strip 'AMDSMI_POWER_CAP_TYPE_' prefix and convert to lowercase
+                    key = power_type.name.replace('AMDSMI_POWER_CAP_TYPE_', '').lower()
+                    power_limit_types[key] = "N/A"
+                current_sensor_num = 0
 
-                if current_power_cap_in_w == default_power_cap_in_w:
-                    self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {default_power_cap_in_w}W")
-                else:
-                    try:
-                        default_power_cap_in_uw = self.helpers.convert_SI_unit(default_power_cap_in_w,
-                                                                               AMDSMIHelpers.SI_Unit.BASE,
-                                                                               AMDSMIHelpers.SI_Unit.MICRO)
-                        amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, default_power_cap_in_uw)
-                    except amdsmi_exception.AmdSmiLibraryException as e:
-                        if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                            raise PermissionError('Command requires elevation') from e
-                        raise ValueError(f"Unable to reset power cap to {default_power_cap_in_w} on GPU {gpu_id}") from e
-                    self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {default_power_cap_in_w}W")
+                try:
+                    power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(args.gpu)
+                    for sensor in power_cap_types['sensor_inds']:
+                        current_sensor_num = sensor
+                        power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu, sensor)
+                        logging.debug(f"Power cap info for gpu {gpu_id} ppt{sensor} | {power_cap_info}")
+                        default_power_cap_in_mw = power_cap_info["default_power_cap"]
+                        default_power_cap_in_w = self.helpers.convert_SI_unit(default_power_cap_in_mw, AMDSMIHelpers.SI_Unit.MICRO)
+                        current_power_cap_in_mw = power_cap_info["power_cap"]
+                        current_power_cap_in_w = self.helpers.convert_SI_unit(current_power_cap_in_mw, AMDSMIHelpers.SI_Unit.MICRO)
+                        sensor_name = power_cap_types['sensor_types'][sensor]
+                        # Strip 'AMDSMI_POWER_CAP_TYPE_' prefix and convert to lowercase
+                        sensor_key = sensor_name.name.replace('AMDSMI_POWER_CAP_TYPE_', '').lower()
+                        power_limit_types[sensor_key] = (default_power_cap_in_w, current_power_cap_in_w)
+                        amdsmi_interface.amdsmi_set_power_cap(args.gpu, sensor, default_power_cap_in_mw)
+                        final_output[f"ppt{current_sensor_num}"] = f"Successfully reset power cap to {default_power_cap_in_w}W"
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Command requires elevation') from e
+                    final_output[f"ppt{current_sensor_num}"] = f"[{e.get_error_info(detailed=False)}] Unable to reset cap to default power cap"
+                self.logger.store_output(args.gpu, 'powercap', final_output)
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
@@ -5822,7 +5892,8 @@ class AMDSMICommands():
         if args.power_usage and not args.default_output:
             # Get Current Power Cap
             try:
-                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
+                # assume that we're always asking for ppt0 for quick checks like this
+                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu, 0)
                 monitor_values['max_power'] = power_cap_info['power_cap']  # Get current power cap (`power_cap`) socket is set to
                                                                            # `max_power_cap`, is the maximum value it can be set to
                 monitor_values['max_power'] = self.helpers.convert_SI_unit(monitor_values['max_power'], AMDSMIHelpers.SI_Unit.MICRO)
@@ -7216,6 +7287,71 @@ class AMDSMICommands():
             time.sleep(1)
 
 
+    def node(self, args, multiple_devices=False, nodes=None, power_management=None):
+        """List node informations
+
+        Args:
+            args (Namespace): Namespace containing the parsed CLI args
+            multiple_devices (bool, optional): True if checking for multiple devices.
+                Defaults to False.
+
+        Returns:
+            None: Print output via AMDSMILogger to destination
+        """
+        # Set args.* to passed in arguments
+        if nodes:
+            args.nodes = nodes
+        if power_management:
+            args.power_management = power_management
+        if getattr(args, 'nodes', None) is None:
+            args.nodes = self.node_handle
+
+        if not self.group_check_printed:
+            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.group_check_printed = True
+
+        # Get NPM info
+        if args.nodes is not None:
+            try:
+                npm_info = amdsmi_interface.amdsmi_get_npm_info(args.nodes)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("amdsmi_get_npm_info failed: %s", e.get_error_info())
+                npm_info = "N/A"
+        else:
+            logging.debug('No node handle available to query NPM info')
+            npm_info = "N/A"
+
+        # Log outputs
+        npm_dict = {"limit": "N/A", "status": "N/A"}
+        power_unit ="W"
+
+        limit = "N/A"
+        if isinstance(npm_info, dict):
+            limit = npm_info.get('limit', "N/A")
+            status = npm_info.get('status', npm_info.get('current', "N/A"))
+
+            if limit !="N/A":
+                npm_dict['limit'] = limit
+            status = "DISABLED" if status == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED else "ENABLED"
+            npm_dict.update({"status": status})
+        if self.logger.is_human_readable_format() and self.logger.destination == 'stdout':
+            print(f"NODE:\n    POWER_MANAGEMENT:\n        LIMIT: {npm_dict.get('limit', 'N/A')} {power_unit}\n        STATUS: {npm_dict.get('status', 'N/A')}")
+        else:
+            if self.logger.is_csv_format():
+                csv_dict = {}
+                csv_dict['limit'] = npm_dict.get('limit', "N/A")
+                csv_dict['status'] = npm_dict.get('status', "N/A")
+                self.logger.output = csv_dict
+            else:
+                # For JSON and human readable format with file output
+                npm_dict["limit"] = self.helpers.unit_format(self.logger, limit, power_unit)
+                self.logger.output = {'node': {'power_management': npm_dict}}
+                if multiple_devices:
+                    self.logger.store_multiple_device_output()
+                    return
+            self.logger.print_output()
+
+
     def default(self, args):
         """Display the default amdsmi view when no args are given."""
 
@@ -7340,9 +7476,9 @@ class AMDSMICommands():
             gpu_info_dict.update({"temp": temperature})
 
 
-            # rest of power usage info
+            # rest of power usage info; Will assume we're always trying to get PPT0 for now
             try:
-                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(processor)
+                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(processor, 0)
                 socket_power_limit = self.helpers.convert_SI_unit(power_cap_info['power_cap'], AMDSMIHelpers.SI_Unit.MICRO)
                 power_usage = {"current_power": current_power, "power_limit": socket_power_limit}
             except amdsmi_exception.AmdSmiLibraryException as e:

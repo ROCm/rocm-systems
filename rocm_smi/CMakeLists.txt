@@ -49,6 +49,7 @@ target_link_libraries(${ROCM_SMI_TARGET} PRIVATE
     rt
     Threads::Threads
     ${CMAKE_DL_LIBS}
+    ${FILESYSTEM_LIB}
 )
 target_include_directories(${ROCM_SMI_TARGET} PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}

@@ -70,7 +70,8 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, default, sys_argv=None, helpers=None):
+                 xgmi, partition, ras, node, default, sys_argv=None,
+                 helpers=None):
 
         # Helper variables
         if helpers is None:
@@ -122,7 +123,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Store possible subcommands & aliases for later errors
         self.possible_commands = ['version', 'list', 'static', 'firmware', 'ucode', 'bad-pages',
                                   'metric', 'process', 'profile', 'event', 'topology', 'set',
-                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras', 'default']
+                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras',
+                                  'node', 'default']
 
         # Add all subparsers
         if sys_argv is not None:
@@ -143,6 +145,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_xgmi_parser(self.subparsers, xgmi)
                 self._add_partition_parser(self.subparsers, partition)
                 self._add_ras_parser(self.subparsers, ras)
+                self._add_node_parser(self.subparsers, node)
             elif any(arg in sys_argv for arg in ['version']):
                 self._add_version_parser(self.subparsers, version)
             elif any(arg in sys_argv for arg in ['list']):
@@ -175,6 +178,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_partition_parser(self.subparsers, partition)
             elif any(arg in sys_argv for arg in ['ras']):
                 self._add_ras_parser(self.subparsers, ras)
+            elif any(arg in sys_argv for arg in ['node']):
+                self._add_node_parser(self.subparsers, node)
             else:
                 # If no subcommand is given, add the default parser
                 self._add_default_parser(self.subparsers, default)
@@ -286,6 +291,30 @@ class AMDSMIParser(argparse.ArgumentParser):
                 clk_level_args = collections.namedtuple('clk_level_args', ['clk_type', 'perf_levels'])
                 setattr(namespace, self.dest, clk_level_args(clk_type, perf_levels))
         return AMDSMIFreqArgs
+
+
+    def _power_cap_options(self):
+        """Custom action for setting power cap options"""
+        output_format = self.helpers.get_output_format()
+
+        class AMDSMIPowerCapArgs(argparse.Action):
+            def __call__(self, parser: AMDSMIParser, namespace: argparse.Namespace,
+                         values: list, option_string: Optional[str] = None) -> None:
+                if len(values) != 2:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(sys.argv[1], values, output_format)
+
+                power_cap_type = values[0]
+                power_cap_value = values[1]
+
+                if power_cap_type not in ['ppt0', 'ppt1']:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(sys.argv[1], power_cap_type, output_format)
+
+                if not power_cap_value.isdigit():
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], power_cap_value, output_format)
+
+                power_cap_args = collections.namedtuple('power_cap_args', ['pwr_type', 'watts'])
+                setattr(namespace, self.dest, power_cap_args(power_cap_type, int(power_cap_value)))
+        return AMDSMIPowerCapArgs
 
 
     def _check_folder_path(self):
@@ -1227,21 +1256,16 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_perf_det_help = f"Set performance determinism and select one of the corresponding performance levels:\n\t{perf_det_choices_str}"
                 (accelerator_set_choices, _) = self.helpers.get_accelerator_choices_types_indices()
                 memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
-                set_compute_partition_help = f"Set one of the following the accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
+                accelerator_set_choices_str = ", ".join(accelerator_set_choices)
+                set_compute_partition_help = f"Set one of the following accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices_str}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
                 set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
                 soc_pstate_help_info = ", ".join(self.helpers.get_soc_pstates())
                 set_soc_pstate_help = f"Set the GPU soc pstate policy using policy id, an integer. Valid id's include:\n\t{soc_pstate_help_info}"
                 xgmi_plpd_help_info = ", ".join(self.helpers.get_xgmi_plpd_policies())
                 set_xgmi_plpd_help = f"Set the GPU XGMI per-link power down policy using policy id, an integer. Valid id's include:\n\t{xgmi_plpd_help_info}"
                 set_clock_freq_help = "Set one or more sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency levels.\n\tUse `amd-smi static --clock` to find acceptable levels.\n\tUse `amd-smi static --bus` to find acceptable pcie levels."
-            power_cap_min, power_cap_max = self.helpers.get_power_caps()
-            if power_cap_max != "N/A":
-                power_cap_max = self.helpers.convert_SI_unit(power_cap_max, AMDSMIHelpers.SI_Unit.MICRO)
-                power_cap_max = str(power_cap_max) + ' W'
-            if power_cap_min != "N/A":
-                power_cap_min = self.helpers.convert_SI_unit(power_cap_min, AMDSMIHelpers.SI_Unit.MICRO)
-                power_cap_min = str(power_cap_min) + ' W'
-            set_power_cap_help = f"Set power capacity limit:\n\tmin cap: {power_cap_min}, max cap: {power_cap_max}"
+            ppt0_power_cap_min, ppt0_power_cap_max, ppt1_power_cap_min, ppt1_power_cap_max = self.helpers.get_power_caps()
+            set_power_cap_help = f"Set either PPT0 or PPT1 power capacity limit:\n\tEx: `amd-smi set -o ppt0 1300`\n\tPPT0 min cap: {ppt0_power_cap_min}, PPT0 max cap: {ppt0_power_cap_max}\n\tPPT1 min cap: {ppt1_power_cap_min}, PPT1 max cap: {ppt1_power_cap_max}"
             set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk) (min | max) value"
             set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis:\n    0 for disable and 1 for enable.\n"
 
@@ -1280,7 +1304,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                                                        required=False, help=set_compute_partition_help, metavar=('TYPE/INDEX'))
                 set_value_exclusive_group.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
             # Power cap is enabled on guest, maintain order
-            set_value_exclusive_group.add_argument('-o', '--power-cap', action='store', type=lambda value: self._positive_int(value, '--power-cap'), required=False, help=set_power_cap_help, metavar='WATTS')
+            set_value_exclusive_group.add_argument('-o', '--power-cap', action=self._power_cap_options(), nargs=2, required=False, help=set_power_cap_help, metavar=('PWR_TYPE', 'WATTS'))
             if self.helpers.is_baremetal():
                 set_value_exclusive_group.add_argument('-p', '--soc-pstate', action='store', required=False, type=lambda value: self._not_negative_int(value, '--soc-pstate'), help=set_soc_pstate_help, metavar='POLICY_ID')
                 set_value_exclusive_group.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=lambda value: self._not_negative_int(value, '--xgmi-plpd'), help=set_xgmi_plpd_help, metavar='POLICY_ID')
@@ -1337,7 +1361,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_profile_help = "Reset power profile back to default"
         reset_xgmierr_help = "Reset XGMI error counts"
         reset_perf_det_help = "Disable performance determinism"
-        reset_power_cap_help = "Reset power capacity limit to max capable"
+        reset_power_cap_help = "Reset the PPT0 and PPT1 power capacity limit to max capable"
         reset_gpu_clean_local_data_help = "Clean up local data in LDS/GPRs on a per partition basis"
         reset_gpu_driver_help = "Reset (reload) AMD GPU driver"
 
@@ -1543,6 +1567,32 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add common modifiers and device selection arguments.
         self._add_device_arguments(ras_parser, required=False)
         self._add_command_modifiers(ras_parser)
+
+
+    def _add_node_parser(self, subparsers: argparse._SubParsersAction, func):
+        if self.helpers.is_virtual_os():
+            # This subparser is only available to Guest and Hypervisor systems
+            return
+
+        # Subparser help text
+        node_help = "Gets power information for the node"
+        node_subcommand_help = f"{self.description}\n\nReturns information for node 0 on the system.\
+                                \nIf no node argument is provided, all node information will be displayed."
+        node_optionals_title = "Node arguments"
+
+        # Help text for Node arguments
+        power_management_help = "Displays power management information"
+
+        node_parser = subparsers.add_parser("node", help=node_help, description=node_subcommand_help)
+        node_parser._optionals.title = node_optionals_title
+        node_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
+        node_parser.set_defaults(func=func)
+
+        # Optional Args
+        node_parser.add_argument('-p', '--power-management', action='store_true', required=False, help=power_management_help)
+
+        # Add Universal Arguments
+        self._add_command_modifiers(node_parser)
 
 
     def error(self, message):

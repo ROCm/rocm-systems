@@ -20,35 +20,20 @@
  * THE SOFTWARE.
  */
 
-#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_POWER_CAP_READ_WRITE_H_
-#define TESTS_AMD_SMI_TEST_FUNCTIONAL_POWER_CAP_READ_WRITE_H_
+#ifndef ROCM_SMI_INCLUDE_ROCM_SMI_ROCM_SMI_NPM_H_
+#define ROCM_SMI_INCLUDE_ROCM_SMI_ROCM_SMI_NPM_H_
 
-#include "../test_base.h"
+#include "rocm_smi/rocm_smi.h"
+#include <string>
 
-class TestPowerCapReadWrite : public TestBase {
- public:
-    TestPowerCapReadWrite();
 
-    void SetCheckPowerCap(std::string msg, uint32_t dv_ind, uint32_t sensor_ind, uint64_t &curr_cap,
-                          uint64_t &new_cap, amdsmi_status_t &ret);
+namespace amd::smi {
 
-  // @Brief: Destructor for test case of TestPowerCapReadWrite
-  virtual ~TestPowerCapReadWrite();
+rsmi_status_t get_npm_board_status(const std::string &board_path,
+                                        bool *enabled);
 
-  // @Brief: Setup the environment for measurement
-  virtual void SetUp();
+rsmi_status_t get_npm_board_limit(const std::string &board_path,
+                                                uint64_t *limit);
 
-  // @Brief: Core measurement execution
-  virtual void Run();
-
-  // @Brief: Clean up and retrive the resource
-  virtual void Close();
-
-  // @Brief: Display  results
-  virtual void DisplayResults() const;
-
-  // @Brief: Display information about what this test does
-  virtual void DisplayTestInfo(void);
-};
-
-#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_POWER_CAP_READ_WRITE_H_
+}
+#endif  // ROCM_SMI_INCLUDE_ROCM_SMI_ROCM_SMI_NPM_H_
