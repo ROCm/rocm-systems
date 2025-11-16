@@ -705,7 +705,12 @@ typedef enum hsa_amd_agent_info_s {
    * Queries the driver for clock counters of the agent.
    * The type of this attribute is hsa_amd_clock_counters_t.
    */
-  HSA_AMD_AGENT_INFO_CLOCK_COUNTERS = 0xA118
+  HSA_AMD_AGENT_INFO_CLOCK_COUNTERS = 0xA118,
+  /**
+   * Queries for the LUID that identifies a hardware node.
+   * The type of this attribute is LUID.
+   */
+  HSA_AMD_AGENT_INFO_LUID = 0xA119,
 } hsa_amd_agent_info_t;
 
 /**
