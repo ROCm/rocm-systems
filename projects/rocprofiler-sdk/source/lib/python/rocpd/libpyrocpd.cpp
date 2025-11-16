@@ -130,6 +130,53 @@ get_type_name(const py::object& obj)
     return obj.get_type().attr("__name__").cast<std::string>();
 }
 
+struct db_index
+{
+    using guid_t = std::string;
+    guid_t guid  = {};
+    pid_t  nid   = {};
+    pid_t  pid   = {};
+
+    bool operator==(const db_index& other) const
+    {
+        return guid == other.guid && nid == other.nid && pid == other.pid;
+    }
+
+    bool operator<(const db_index& other) const
+    {
+        return std::tie(guid, nid, pid) < std::tie(other.guid, other.nid, other.pid);
+    }
+};
+
+template <typename T>
+class sql_data_handler
+{
+public:
+    sql_data_handler(sqlite3*         conn,
+                     std::string_view table,
+                     std::string_view order_by   = {},
+                     int64_t          chunk_size = rocpd::sql_generator<T>::compute_chunk_size())
+    {
+        auto sqlgen_perf = rocprofiler::common::simple_timer{
+            fmt::format("Fetching data from table: \"{}\"", table)};
+        auto                    query = fmt::format("SELECT * FROM {}", table);
+        rocpd::sql_generator<T> generator(conn, query, order_by, chunk_size);
+        for(auto ditr : generator)
+        {
+            for(auto& itr : generator.get(ditr))
+            {
+                data_[{itr.guid, itr.nid, itr.pid}].push_back(std::move(itr));
+            }
+        }
+    }
+    ~sql_data_handler() = default;
+
+    const std::vector<T>& operator[](const db_index& index) { return data_[index]; }
+
+private:
+    std::map<db_index, std::vector<T>> data_;
+};
+
 struct RocpdImportData
 {
     RocpdImportData()  = default;
@@ -422,6 +469,30 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 auto* conn  = rocpd::interop::get_connection(std::move(obj));
                 auto  nodes = rocpd::read<rocpd::types::node>(conn);
 
+                auto _sqlgen_perft = common::simple_timer{"Perfetto generation from SQL (total)"};
+                rocpd::sql_data_handler<rocpd::types::kernel_dispatch> kernels(
+                    conn, "kernels", kernels_order_by);
+                rocpd::sql_data_handler<rocpd::types::memory_allocation> memory_allocations(
+                    conn, "memory_allocations");
+                rocpd::sql_data_handler<rocpd::types::memory_copies>  memory_copies(conn,
+                                                                                   "memory_copies");
+                rocpd::sql_data_handler<rocpd::types::scratch_memory> scratch_memory(
+                    conn, "scratch_memory");
+                rocpd::sql_data_handler<rocpd::types::counter> counters(conn,
+                                                                        "counters_collection");
+                rocpd::sql_data_handler<rocpd::types::region>  regions(
+                    conn, "regions", region_order_by);
+                rocpd::sql_data_handler<rocpd::types::sample> samples(
+                    conn, "samples", sample_order_by);
+                rocpd::sql_data_handler<rocpd::types::thread> threads(conn, "threads");
+
+                std::vector<rocpd::db_index> db_indexes;
+                std::map<
+                    rocpd::db_index,
+                    std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>>
+                                                                 db_agent_map;
+                std::map<rocpd::db_index, rocpd::types::process> db_process_map;
+
                 for(const auto& nitr : nodes)
                 {
                     auto agents = rocpd::read<rocpd::types::agent>(
@@ -438,42 +509,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                            pitr.guid,
                                            nitr.id,
                                            nitr.guid);
-                        auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl) {
-                            return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND nid "
-                                               "= {} AND pid = {}",
-                                               tbl,
-                                               pitr.guid,
-                                               nitr.id,
-                                               pitr.pid);
-                        };
-
-                        auto _sqlgen_perft = common::simple_timer{fmt::format(
-                            "Perfetto generation from SQL for process {} (total)", pitr.pid)};
-
-                        auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
-                            conn, select_guid_nid_pid("kernels"), kernels_order_by};
-
-                        auto memory_allocations =
-                            rocpd::sql_generator<rocpd::types::memory_allocation>{
-                                conn, select_guid_nid_pid("memory_allocations")};
-
-                        auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
-                            conn, select_guid_nid_pid("memory_copies")};
-
-                        auto scratch_memory = rocpd::sql_generator<rocpd::types::scratch_memory>{
-                            conn, select_guid_nid_pid("scratch_memory")};
-
-                        auto counters = rocpd::sql_generator<rocpd::types::counter>{
-                            conn, select_guid_nid_pid("counters_collection")};
-
-                        auto regions = rocpd::sql_generator<rocpd::types::region>{
-                            conn, select_guid_nid_pid("regions"), region_order_by};
-
-                        auto samples = rocpd::sql_generator<rocpd::types::sample>{
-                            conn, select_guid_nid_pid("samples"), sample_order_by};
-
-                        auto threads = rocpd::sql_generator<rocpd::types::thread>{
-                            conn, select_guid_nid_pid("threads")};
 
                         // absolute_index |-> (agent, agent_index)
                         auto agents_map =
@@ -488,20 +523,31 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
                         ROCP_TRACE << "Starting Perfetto generation from SQL for process "
                                    << pitr.pid;
-                        auto _sqlgen_perfw = common::simple_timer{fmt::format(
-                            "Perfetto generation from SQL for process {} (write)", pitr.pid)};
-                        rocpd::output::write_perfetto(perfetto_session,
-                                                      pitr,
-                                                      agents_map,
-                                                      threads,
-                                                      regions,
-                                                      samples,
-                                                      kernels,
-                                                      memory_copies,
-                                                      scratch_memory,
-                                                      memory_allocations,
-                                                      counters);
+
+                        rocpd::db_index index{pitr.guid, static_cast<pid_t>(nitr.id), pitr.pid};
+
+                        db_agent_map[index]   = std::move(agents_map);
+                        db_process_map[index] = std::move(pitr);
+                        db_indexes.push_back(std::move(index));
                     }
+                }
+
+                for(const rocpd::db_index& index : db_indexes)
+                {
+                    auto _sqlgen_perfw = common::simple_timer{fmt::format(
+                        "Perfetto generation from SQL for process {} (write)", index.pid)};
+
+                    rocpd::output::write_perfetto(perfetto_session,
+                                                  db_process_map[index],
+                                                  db_agent_map[index],
+                                                  threads[index],
+                                                  regions[index],
+                                                  samples[index],
+                                                  kernels[index],
+                                                  memory_copies[index],
+                                                  scratch_memory[index],
+                                                  memory_allocations[index],
+                                                  counters[index]);
                 }
             }
             return true;

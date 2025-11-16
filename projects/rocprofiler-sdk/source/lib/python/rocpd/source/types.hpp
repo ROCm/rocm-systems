@@ -127,6 +127,7 @@ struct thread : public base_class<common_node_info>
 {
     pid_t       ppid  = 0;
     pid_t       pid   = 0;
+    pid_t       nid   = 0;
     pid_t       tid   = 0;
     uint64_t    start = 0;
     uint64_t    end   = 0;
@@ -297,6 +298,7 @@ struct memory_allocation
 {
     uint64_t                id               = 0;
     guid_t                  guid             = {};
+    pid_t                   nid              = 0;
     pid_t                   pid              = 0;
     pid_t                   tid              = 0;
     rocprofiler_timestamp_t start            = 0;
@@ -324,6 +326,7 @@ struct memory_copies
 {
     uint64_t                id                   = 0;
     guid_t                  guid                 = {};
+    pid_t                   nid                  = 0;
     pid_t                   pid                  = 0;
     pid_t                   tid                  = 0;
     rocprofiler_timestamp_t start                = 0;
@@ -363,6 +366,7 @@ struct scratch_memory
     uint64_t                agent_type_index = 0;
     std::string             agent_type       = {};
     uint64_t                queue_id         = 0;
+    pid_t                   nid              = 0;
     pid_t                   pid              = 0;
     pid_t                   tid              = 0;
     std::string             alloc_flags      = {};
@@ -426,6 +430,7 @@ struct counter
     uint32_t                stack_id         = 0;
     uint64_t                correlation_id   = 0;
     uint64_t                event_id         = 0;
+    pid_t                   nid              = 0;
     pid_t                   pid              = 0;
     pid_t                   tid              = 0;
     uint32_t                agent_id         = 0;
@@ -539,6 +544,7 @@ load(ArchiveT& ar, rocpd::types::thread& data)
 
     LOAD_DATA_FIELD(ppid);
     LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(tid);
     LOAD_DATA_FIELD(start);
     LOAD_DATA_FIELD(end);
@@ -732,6 +738,7 @@ load(ArchiveT& ar, rocpd::types::memory_allocation& data)
 {
     LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(tid);
     LOAD_DATA_FIELD(start);
@@ -761,6 +768,7 @@ load(ArchiveT& ar, rocpd::types::memory_copies& data)
 {
     LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(tid);
     LOAD_DATA_FIELD(start);
@@ -801,6 +809,7 @@ load(ArchiveT& ar, rocpd::types::scratch_memory& data)
     LOAD_DATA_FIELD(agent_type_index);
     LOAD_DATA_FIELD(agent_type);
     LOAD_DATA_FIELD(queue_id);
+    LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(tid);
     LOAD_DATA_FIELD(alloc_flags);
@@ -873,6 +882,7 @@ load(ArchiveT& ar, rocpd::types::counter& data)
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(correlation_id);
     LOAD_DATA_FIELD(event_id);
+    LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(tid);
     LOAD_DATA_FIELD(agent_id);
