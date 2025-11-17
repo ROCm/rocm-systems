@@ -127,8 +127,10 @@ TEST_CASE("Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr") {
   hipDeviceptr_t global = 0;
   size_t global_size = 0;
 
+  CTX_CREATE();
   HIP_CHECK_ERROR(hipModuleGetGlobal(&global, &global_size, nullptr, "int_var"),
                   hipErrorInvalidResourceHandle);
+  CTX_DESTROY();
 }
 
 TEST_CASE("Unit_hipModuleGetGlobal_Negative_Name_Is_Empty_String") {
