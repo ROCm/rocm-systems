@@ -680,12 +680,24 @@ Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
 }
 
 void
-Queue::sync() const
+Queue::sync(bool is_detaching) const
 {
+#if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
+    constexpr auto timeout_sec = std::chrono::seconds{5};
+#else
+    // wait a maximum of thirty seconds
+    constexpr auto timeout_sec = std::chrono::seconds{30};
+#endif
+
+    constexpr auto timeout =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(timeout_sec).count();
     if(_active_kernels.handle != 0u)
     {
-        _core_api.hsa_signal_wait_relaxed_fn(
-            _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
+        _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
+                                             HSA_SIGNAL_CONDITION_EQ,
+                                             0,
+                                             is_detaching ? timeout : UINT64_MAX,
+                                             HSA_WAIT_STATE_ACTIVE);
     }
     // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
     // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()

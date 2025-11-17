@@ -693,7 +693,7 @@ invoke_client_detaches()
             context::stop_client_contexts(itr->internal_client_id);
 
             hsa::async_copy_sync();
-            hsa::queue_controller_sync();
+            hsa::queue_controller_sync(true);
             pc_sampling::service_sync();
 
             auto _fini_status = get_fini_status();

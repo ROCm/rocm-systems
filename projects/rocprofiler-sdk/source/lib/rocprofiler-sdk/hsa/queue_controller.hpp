@@ -135,7 +135,7 @@ void
 queue_controller_fini();
 
 void
-queue_controller_sync();
+queue_controller_sync(bool is_detaching = false);
 
 void
 queue_controller_init(RocAttachDispatchTable* table);

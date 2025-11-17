@@ -149,7 +149,7 @@ public:
     {
         return _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
     }
-    void sync() const;
+    void sync(bool is_detaching = false) const;
 
     void register_callback(ClientID id, queue_cb_t enqueue_cb, completed_cb_t complete_cb);
     void remove_callback(ClientID id);
