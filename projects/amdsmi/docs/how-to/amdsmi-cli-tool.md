@@ -563,8 +563,7 @@ Set Arguments:
                                                 AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
   -P, --profile PROFILE_LEVEL                 Set power profile level (#) or choose one of available profiles:
                                                 CUSTOM_MASK, VIDEO_MASK, POWER_SAVING_MASK, COMPUTE_MASK, VR_MASK, THREE_D_FULL_SCR_MASK, BOOTUP_DEFAULT
-  -d, --perf-determinism SCLKMAX              Set performance determinism and select one of the corresponding performance levels:
-                                                AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
+  -d, --perf-determinism SCLKMAX              Enable performance determinism mode and set GFXCLK softmax limit (in MHz)
   -C, --compute-partition TYPE/INDEX          Set one of the following the accelerator TYPE or profile INDEX:
                                                 N/A.
                                                 Use `sudo amd-smi partition --accelerator` to find acceptable values.

@@ -1252,8 +1252,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_perf_level_help = f"Set one of the following performance levels:\n\t{perf_level_help_choices_str}"
                 power_profile_choices_str = ", ".join(self.helpers.get_power_profiles()[0:-1])
                 set_profile_help = f"Set power profile level (#) or choose one of available profiles:\n\t{power_profile_choices_str}"
-                perf_det_choices_str = ", ".join(self.helpers.get_perf_det_levels())
-                set_perf_det_help = f"Set performance determinism and select one of the corresponding performance levels:\n\t{perf_det_choices_str}"
+                set_perf_det_help = "Enable performance determinism mode and set GFXCLK softmax limit (in MHz)"
                 (accelerator_set_choices, _) = self.helpers.get_accelerator_choices_types_indices()
                 memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
                 accelerator_set_choices_str = ", ".join(accelerator_set_choices)
