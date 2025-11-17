@@ -1310,12 +1310,8 @@ Input parameters:
 * `cursor`           the zero based index at which to start retrieving cper entries; default value is 0; for example, if there are 10 cper entries available, then with a cursor value of 8, it will retrieve the last two cper entries only
 
 Output: Dictionary with fields, updated cursor, and a dictionary of the cper_data, status_code
-    status_code: 
-        AMDSMI_STATUS_SUCCESS: If all entries were retrieved successfully
-        AMDSMI_STATUS_MORE_DATA: If some of the entries were retrieved and: 
-            * A subsequent call to the API with the updated cursor will result in the fetching the next batch of entries, or
-            * Increasing the input buffer_size will allow more entries to be fetched with the same cursor
 
+Output1: Dictionary with fields
 Field | Description
 ---|---
 `error_severity`   | The severity of the CPER error ex: `non_fatal_uncorrected`, `fatal`, `non_fatal_corrected`. |
@@ -1326,11 +1322,24 @@ Field | Description
 `signature_end`    | A marker value (typically `0xFFFFFFFF`) confirming the integrity of the signature. |
 `sec_cnt`          | The count of sections included in the CPER entry. |
 `record_length`    | The total length in bytes of the CPER entry. |
+`serial_number`    | The product serial number. Exists in raw entries in C++ API |
 `platform_id`      | A character array identifying the GPU or platform. |
 `creator_id`       | A character array indicating the creator of the CPER entry. |
 `record_id`        | A unique identifier for the CPER entry. |
 `flags`            | Reserved flags related to the CPER entry. |
 `persistence_info` | Reserved information related to persistence. |
+
+Output2: Updated cursor (int type)
+* Cursor is the index of the next cper entry in the GPU ring buffer. For example, if 10 entries were fetched successfully, the value of cursor will be 11 upon return from the API. Subsequent call to the API with cursor value of 11 should fetch the next entry
+
+Output3: A list of dictionaries, each dictionary containing the CPER record and its size:
+* {"bytes": <raw bytes>, "size": <number of bytes>}
+
+Output4: status_code
+    AMDSMI_STATUS_SUCCESS: If all entries were retrieved successfully
+    AMDSMI_STATUS_MORE_DATA: If some of the entries were retrieved and: 
+        * A subsequent call to the API with the updated cursor will result in the fetching the next batch of entries, or
+        * Increasing the input buffer_size will allow more entries to be fetched with the same cursor
 
 Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 

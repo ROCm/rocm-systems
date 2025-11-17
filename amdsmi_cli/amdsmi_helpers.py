@@ -239,11 +239,11 @@ class AMDSMIHelpers():
         except amdsmi_interface.AmdSmiLibraryException as e:
             if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                               amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.info('Unable to get device choices, driver not initialized (amd_hsmp not found in modules)')
+                logging.info('Unable to get device choices, driver not initialized (amd_hsmp  or hsmp_acpi not found in modules)')
             else:
                 raise e
         if len(cpu_handles) == 0:
-            logging.info('Unable to find any devices, check if driver is initialized (amd_hsmp not found in modules)')
+            logging.info('Unable to find any devices, check if driver is initialized (amd_hsmp or hsmp_acpi not found in modules)')
         else:
             # Handle spacing for the gpu_choices_str
             max_padding = int(math.log10(len(cpu_handles))) + 1
@@ -285,11 +285,11 @@ class AMDSMIHelpers():
         except amdsmi_interface.AmdSmiLibraryException as e:
             if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                               amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.info('Unable to get device choices, driver not initialized (amd_hsmp not found in modules)')
+                logging.info('Unable to get device choices, driver not initialized (amd_hsmp  or hsmp_acpi not found in modules)')
             else:
                 raise e
         if len(core_handles) == 0:
-            logging.info('Unable to find any devices, check if driver is initialized (amd_hsmp not found in modules)')
+            logging.info('Unable to find any devices, check if driver is initialized (amd_hsmp or hsmp_acpi  not found in modules)')
         else:
             # Handle spacing for the gpu_choices_str
             max_padding = int(math.log10(len(core_handles))) + 1

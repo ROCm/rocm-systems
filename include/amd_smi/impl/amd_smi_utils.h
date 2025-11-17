@@ -187,4 +187,15 @@ void fill_2d_array(A& arr, T value) {
     }
 }
 
+/**
+ *  @brief Get the product serial number given the processor handle.
+ *
+ *  @param[in] processor_handle a pointer to amdsmi_processor_handle
+ *  which the corresponding processor_handle will be stored
+ *
+ *  @retval ::The serial number
+ *          ::0 if it cannot be determined
+ */
+uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle);
+
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
