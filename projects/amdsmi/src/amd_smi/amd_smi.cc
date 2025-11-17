@@ -4414,10 +4414,10 @@ amdsmi_get_gpu_cper_entries(
     if (status != AMDSMI_STATUS_SUCCESS) {
         return status;
     }
+
     std::string path = std::string("/sys/kernel/debug/dri/") +
         std::to_string(gpu_device->get_card_id()) +
         "/amdgpu_ring_cper";
-
 
     return amdsmi_get_gpu_cper_entries_by_path(
         path.c_str(),
@@ -4426,7 +4426,9 @@ amdsmi_get_gpu_cper_entries(
         buf_size,
         cper_hdrs,
         entry_count,
-        cursor);
+        cursor,
+        get_product_serial_number(processor_handle)
+    );
 }
 
 amdsmi_status_t amdsmi_get_afids_from_cper(

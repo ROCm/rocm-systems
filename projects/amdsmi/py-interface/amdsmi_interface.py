@@ -2776,6 +2776,13 @@ def amdsmi_get_gpu_cper_entries(
             f"{entry_ptr.contents.timestamp.seconds:02d}"
         )
 
+        serial_number = ""
+        if isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+            try:
+                board_info = amdsmi_get_gpu_board_info(processor_handle)
+                serial_number = board_info.get('product_serial', "")
+            except Exception:
+                serial_number = ""
         # Create a dictionary for the CPER entry.
         cper_entry = {
             "error_severity": amdsmi_wrapper.amdsmi_cper_sev_t__enumvalues.get(
@@ -2788,6 +2795,7 @@ def amdsmi_get_gpu_cper_entries(
             "signature_end": hex(entry_ptr.contents.signature_end),
             "sec_cnt": entry_ptr.contents.sec_cnt,
             "record_length": entry_ptr.contents.record_length,
+            "serial_number": serial_number,
             "platform_id": entry_ptr.contents.platform_id,
             "creator_id": entry_ptr.contents.creator_id,
             "record_id": entry_ptr.contents.record_id,
