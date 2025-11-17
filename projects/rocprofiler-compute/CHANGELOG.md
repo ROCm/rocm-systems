@@ -19,9 +19,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
-  * If the ROCprofiler-SDK ``rocpd`` public library is not available, will fall back to ``csv`` format
-
 * `-b/--block` accepts block alias(es). See block aliases using command-line option `--list-blocks <arch>`.
 
 * Analysis configs YAMLs are now managed with the new config management workflow in `tools/config_management/`.
