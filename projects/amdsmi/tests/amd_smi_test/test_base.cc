@@ -98,12 +98,13 @@ void TestBase::SetUp(uint64_t init_flags) {
       }
     }
 
-    // Returns true if amd_hsmp is found in the list of initialized modules
-    bool found_amd_hsmp = CheckModule("/sys/module/amd_hsmp/initstate", "live");
+    // Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules
+    struct stat buffer;
+    bool found_amd_hsmp = (stat("/dev/hsmp", &buffer)==0);
     if (!found_amd_hsmp) {
       IF_VERB(STANDARD) {
         std::cerr << "ERROR: Unable to get devices, driver not initialized (amd_hsmp not found in modules)" << std::endl;
-        std::cerr << "ERROR: Unable to detect any CPU devices, check amd_hsmp version and module status (sudo modprobe amd_hsmp)" << std::endl;
+        std::cerr << "ERROR: Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)" << std::endl;
       }
     }
 

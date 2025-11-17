@@ -754,7 +754,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # help info
         gpu_version_help = "Display the current amdgpu driver version"
-        cpu_version_help = "Display the current amd_hsmp driver version"
+        cpu_version_help = "Display the current amd_hsmp or hsmp_acpi driver version"
 
         # Add GPU and CPU version Arguments
         version_parser.add_argument('-g', '--gpu_version', action='store_true', required=False, help=gpu_version_help, default=None)

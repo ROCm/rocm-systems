@@ -96,7 +96,7 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DRV):
-                    logging.info('Unable to detect any CPU devices, check amd_hsmp version and module status (sudo modprobe amd_hsmp)')
+                    logging.info('Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)')
                 else:
                     raise e
 
@@ -112,7 +112,7 @@ class AMDSMICommands():
 
             if len(self.cpu_handles) == 0 and len(self.core_handles) == 0:
                 # No CPU's found post amd_hsmp driver initialization
-                logging.error('Unable to detect any CPU devices, check amd_hsmp version and module status (sudo modprobe amd_hsmp)')
+                logging.error('Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)')
                 exit_flag = True
 
         self.convert_clock_type = {
@@ -200,7 +200,7 @@ class AMDSMICommands():
             if args.gpu_version:
                 human_readable_output = human_readable_output + f" | amdgpu version: {gpu_version_str}"
             if args.cpu_version:
-                human_readable_output = human_readable_output + f" | amd_hsmp version: {cpu_version_str}"
+                human_readable_output = human_readable_output + f" | hsmp version: {cpu_version_str}"
             # Custom human readable handling for version
             if self.logger.destination == 'stdout':
                 print(human_readable_output)
@@ -2988,7 +2988,7 @@ class AMDSMICommands():
             try:
                 bandwidth = amdsmi_interface.amdsmi_get_cpu_current_io_bandwidth(args.cpu,
                                                                                     int(args.cpu_io_bandwidth[0][0]),
-                                                                                    args.cpu_io_bandwidth[0][1])
+                                                                                    args.cpu_io_bandwidth[0][1].upper())
                 static_dict["io_bandwidth"]["band_width"] = bandwidth
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["io_bandwidth"]["band_width"] = "N/A"
@@ -2998,7 +2998,7 @@ class AMDSMICommands():
             try:
                 bandwidth = amdsmi_interface.amdsmi_get_cpu_current_xgmi_bw(args.cpu,
                                                                             int(args.cpu_xgmi_bandwidth[0][0]),
-                                                                            args.cpu_xgmi_bandwidth[0][1])
+                                                                            args.cpu_xgmi_bandwidth[0][1].upper())
                 static_dict["xgmi_bandwidth"]["band_width"] = bandwidth
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["xgmi_bandwidth"]["band_width"] = "N/A"
