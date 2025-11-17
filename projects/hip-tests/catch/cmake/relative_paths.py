@@ -80,8 +80,10 @@ def make_test_files_portable(filenames):
             #print(f"**Done parsing now writing into", install_path)
         except IOError as e:
             print(f"Error: '{e}'")
+            sys.exit({e})
         except Exception as e:
             print(f"An error occurred: {e}")
+            sys.exit({e})
 
 inccmake_files = glob.glob(build_folder + "/**/*"+inc_cmake_pattern, recursive=True)
 make_test_files_portable(inccmake_files)

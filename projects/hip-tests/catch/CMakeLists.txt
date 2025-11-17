@@ -331,22 +331,6 @@ endif()
 
 # packaging the tests
 add_subdirectory(packaging)
-if(UNIX)
-    add_custom_command(
-        TARGET build_tests
-        POST_BUILD
-        COMMAND rm -rf *.deb *.rpm *.tar.gz
-        COMMAND cpack
-        COMMENT "Generating hip-catch test packages"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-else()
-    add_custom_command(
-        TARGET build_tests
-        POST_BUILD
-        COMMAND cpack
-        COMMENT "Generating hip-catch test packages"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-endif()
 
 # Doxygen documentation
 # check if doxygen is installed
