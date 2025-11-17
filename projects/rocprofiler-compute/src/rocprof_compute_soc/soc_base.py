@@ -693,10 +693,9 @@ class OmniSoC_Base:
             # Validate roofline.csv before post-processing
             is_valid, error_msg = validate_roofline_csv(self.get_args().path)
             if not is_valid:
-                console_error(
+                console_warning(
                     "roofline",
                     f"Roofline post-processing skipped: {error_msg}",
-                    exit=False,
                 )
                 return
 

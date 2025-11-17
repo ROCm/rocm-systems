@@ -503,13 +503,27 @@ def show_all(
         # Handle roofline panel (400) with custom display logic, then skip normal
         # table processing to prevent duplicate printing.
         if panel_id == 400:
-            is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
-            continue
+            if is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols):
+                continue
 
         panel_content = ""  # store content of all data_source from one panel
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
+                # Skip roofline tables (401, 402) if roofline data is invalid
+                if table_config["id"] in [401, 402]:
+                    has_valid_roofline = any(
+                        hasattr(workload, "roofline_peaks")
+                        and not workload.roofline_peaks.empty
+                        for workload in runs.values()
+                    )
+                    if not has_valid_roofline:
+                        console_warning(
+                            f"Not showing Roofline table {table_config['id']} "
+                            "due to invalid roofline data."
+                        )
+                        continue
+
                 # Block-filter logic:
                 # - If analysis used --filter-metrics, ignore profiling block filters
                 # - If profiling had block filters, only show selected tables/panels

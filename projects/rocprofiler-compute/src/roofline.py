@@ -1208,7 +1208,7 @@ class Roofline:
             and workload.roofline_peaks.empty
         ):
             # CSV validation failed earlier, skip plot generation
-            console_debug("roofline", "Skipping plot generation")
+            console_warning("roofline", "Skipping plot generation")
             return None
 
         # if workload is detected, utilize Roofline yamls.

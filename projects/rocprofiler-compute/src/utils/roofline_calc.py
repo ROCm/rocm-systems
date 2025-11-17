@@ -246,7 +246,7 @@ def calc_ceilings(
             )
         except KeyError:
             console_warning(
-                f"Missing benchmark data for {dtype}{ops_flops} in roofline.csv. "
+                f"Missing benchmark data for {dtype}{ops_flops} in benchmark_results. "
                 "Skipping peak operations calculation. This may indicate incomplete or "
                 "corrupted benchmark data."
             )
@@ -259,7 +259,7 @@ def calc_ceilings(
             peak_bw = float(benchmark_data[curr_bw][roofline_parameters["device_id"]])
         except KeyError:
             console_warning(
-                f"Missing benchmark data for {curr_bw} in roofline.csv. "
+                f"Missing benchmark data for {curr_bw} in benchmark_results. "
                 f"Skipping {cache_level} cache level. This may indicate incomplete or "
                 "corrupted benchmark data."
             )
@@ -291,7 +291,7 @@ def calc_ceilings(
             except KeyError:
                 console_warning(
                     f"Missing benchmark data for "
-                    f"MFMA{target_precision}{ops_flops} in roofline.csv. "
+                    f"MFMA{target_precision}{ops_flops} in benchmark_results. "
                     f"Skipping MFMA calculations for {cache_level} cache level. "
                     "This may indicate incomplete or corrupted benchmark data."
                 )
@@ -832,12 +832,15 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
                 if row_count == 0:
                     num_headers = len(row) - 1
                     if num_headers == 0:
-                        return False, "Empty or invalid header row in roofline.csv"
+                        return (
+                            False,
+                            "Empty or invalid header row in benchmark_results ",
+                        )
                 else:
                     if len(row) - 1 != num_headers:
                         return (
                             False,
-                            f"Inconsistent row length in roofline.csv at "
+                            f"Inconsistent row length in benchmark_results at "
                             f"row {row_count + 1}. "
                             f"Expected {num_headers + 1} columns, "
                             f"found {len(row)}. "
@@ -848,12 +851,12 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
             if row_count < 2:
                 return (
                     False,
-                    f"Insufficient data in roofline.csv. "
+                    f"Insufficient data in benchmark_results. "
                     f"Found {row_count} rows (need at least 2)."
                     f" Roofline data appears corrupted or incomplete.",
                 )
     except Exception as e:
-        return False, f"Failed to read roofline.csv: {e}"
+        return False, f"Failed to read benchmark_results: {e}"
 
     return True, ""
 
@@ -862,43 +865,65 @@ def construct_roof(
     roofline_parameters: dict[str, Any], dtype: str, ai_data: Optional[dict] = None
 ) -> dict[str, list[Union[list[float], float, None]]]:
     workload_dir = roofline_parameters.get("workload_dir")
+
+    # Normalize workload_dir to always be a list
     if isinstance(workload_dir, list):
-        base_dir = (
-            workload_dir[0][0]
-            if isinstance(workload_dir[0], (list, tuple))
-            else workload_dir[0]
-        )
+        workload_dirs = [
+            (item[0] if isinstance(item, (list, tuple)) else item)
+            for item in workload_dir
+        ]
     else:
-        base_dir = workload_dir
+        workload_dirs = [workload_dir]
 
-    benchmark_results = Path(base_dir) / "roofline.csv"
-
-    # -----------------------------------------------------
-    # Initialize roofline data dictionary from roofline.csv
-    # -----------------------------------------------------
-    # TODO: consider changing this to an ordered dict for consistency over py versions
+    # Initialize combined benchmark data dictionary
     benchmark_data: dict[str, list[str]] = {}
     headers: list[str] = []
 
-    # Note: CSV validation is done earlier in validate_roofline_csv()
-    # before this function is called. This assumes CSV is already validated.
-    try:
-        with open(benchmark_results) as csvfile:
-            csv_reader = csv.reader(csvfile, delimiter=",")
-            row_count = 0
+    # Process each workload directory and merge data
+    for base_dir in workload_dirs:
+        benchmark_results = Path(base_dir) / "roofline.csv"
 
-            for row in csv_reader:
-                row.pop(0)  # remove devID
-                if row_count == 0:
-                    headers = row
-                    for header in headers:
-                        benchmark_data[header] = []
-                else:
-                    for i, key in enumerate(headers):
-                        benchmark_data[key].append(row[i])
-                row_count += 1
-    except Exception as e:
-        console_error("roofline", f"Failed to read benchmark results: {e}", exit=False)
+        # Note: CSV validation is done earlier in validate_roofline_csv()
+        # before this function is called. This assumes CSV is already validated.
+        try:
+            with open(benchmark_results) as csvfile:
+                csv_reader = csv.reader(csvfile, delimiter=",")
+                row_count = 0
+
+                for row in csv_reader:
+                    row.pop(0)  # Remove first column (Device ID)
+                    if row_count == 0:
+                        if not headers:
+                            headers = row
+                            for header in headers:
+                                benchmark_data[header] = []
+                        else:
+                            if row != headers:
+                                console_warning(
+                                    f"Header mismatch in {benchmark_results}. "
+                                    f"Expected {headers}, got {row}. "
+                                    "Skipping this file."
+                                )
+                                break
+                    else:
+                        for i, key in enumerate(headers):
+                            benchmark_data[key].append(row[i])
+                    row_count += 1
+        except Exception as e:
+            console_error(
+                "roofline",
+                f"Failed to read benchmark results from {base_dir}: {e}",
+                exit=False,
+            )
+            continue  # Skip this directory and continue with the next one
+
+    # If no data was collected, return empty graph points
+    if not benchmark_data:
+        console_error(
+            "roofline",
+            "No benchmark data collected from any workload directory",
+            exit=False,
+        )
         return GraphPoints.empty().__dict__
 
     # ------------------
