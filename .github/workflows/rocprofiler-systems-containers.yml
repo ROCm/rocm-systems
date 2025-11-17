@@ -72,7 +72,6 @@ jobs:
           
       - name: Build CI Container (PR - No Push)
         if: github.event_name == 'pull_request'
-        working-directory: projects/rocprofiler-systems/docker
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -80,6 +79,7 @@ jobs:
           timeout_minutes: 45
           max_attempts: 3
           command: |
+            cd projects/rocprofiler-systems/docker
             ./build-docker-ci.sh \
               --distro ${{ matrix.distro }} \
               --versions ${{ matrix.version }} \
@@ -90,7 +90,6 @@ jobs:
 
       - name: Build Base Container (Push)
         if: github.event_name != 'pull_request'
-        working-directory: projects/rocprofiler-systems/docker
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -98,6 +97,7 @@ jobs:
           timeout_minutes: 45
           max_attempts: 3
           command: |
+            cd projects/rocprofiler-systems/docker
             ./build-docker-ci.sh \
               --distro ${{ matrix.distro }} \
               --versions ${{ matrix.version }} \
@@ -153,7 +153,6 @@ jobs:
 
       - name: Build Base Container (PR - No Push)
         if: github.event_name == 'pull_request'
-        working-directory: projects/rocprofiler-systems/docker
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -161,6 +160,7 @@ jobs:
           timeout_minutes: 45
           max_attempts: 3
           command: |
+            cd projects/rocprofiler-systems/docker
             ./build-docker.sh \
               --distro ${{ matrix.os-distro }} \
               --versions ${{ matrix.os-version }} \
@@ -169,7 +169,6 @@ jobs:
       
       - name: Build Base Container (Push)
         if: github.event_name != 'pull_request'
-        working-directory: projects/rocprofiler-systems/docker
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -177,6 +176,7 @@ jobs:
           timeout_minutes: 45
           max_attempts: 3
           command: |
+            cd projects/rocprofiler-systems/docker
             ./build-docker.sh \
               --distro ${{ matrix.os-distro }} \
               --versions ${{ matrix.os-version }} \
