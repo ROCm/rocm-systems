@@ -126,7 +126,7 @@ Optional third-party packages
   * AMD SMI Lib for GPU monitoring
   * ROCprofiler SDK for GPU hardware counters and ROCm tracing
 
-* Building ROCm with multiple python environments
+* Building ROCm with multiple Python environments
 
   By default, ROCm Systems Profiler uses the system Python environment. To build
   with multiple or specific Python environments, specify the prefix during CMake configuration:
