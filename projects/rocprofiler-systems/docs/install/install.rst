@@ -137,7 +137,7 @@ Optional third-party packages
   .. code-block:: shell
 
      cmake -D ROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-              -D ROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" 
+              -D ROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"
 
 * `PAPI <https://icl.utk.edu/papi/>`_
 * MPI
