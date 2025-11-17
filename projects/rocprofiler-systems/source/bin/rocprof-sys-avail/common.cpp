@@ -310,10 +310,11 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     std::vector<std::function<void()>> _shorthand_patches{};
 
     // Helper to do case-insensitive string comparison
-    auto _tolower = [](const std::string& str) {
-        std::transform(str.begin(), str.end(), str.begin(),
+    auto _tolower = [](const std::string& in) {
+        std::string out = in;
+        std::transform(out.begin(), out.end(), out.begin(),
                        [](unsigned char c) { return std::tolower(c); });
-        return str;
+        return out;
     };
 
     // Helper to find case-insensitive match in category options
