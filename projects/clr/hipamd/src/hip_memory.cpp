@@ -49,7 +49,7 @@ T ReturnPtrValue(T* ptr) {
 template <typename Tp>
 class hipMemoryObject_impl {
  public:
-  hipMemoryObject_impl(Tp ptr, size_t sizeInBytes) : ptr_(ptr) {
+  hipMemoryObject_impl(Tp ptr, size_t sizeInBytes = 0) : ptr_(ptr) {
     memoryObj_ = amd::MemObjMap::FindMemObj(ptr_, &offset_);
     if (memoryObj_ == nullptr) {
       // If memObj not found, use arena_mem_obj. arena_mem_obj is null, if HMM is disabled.
@@ -87,7 +87,8 @@ class hipMemoryObject_impl {
     return (memoryObj_ != nullptr) ? (memoryObj_->getMemFlags() & CL_MEM_VA_RANGE_AMD) : false;
   }
   bool isFineGrainedBuffer() const {
-    return (memoryObj_ != nullptr) ? (memoryObj_->getMemFlags() & CL_MEM_SVM_FINE_GRAIN_BUFFER) : false;
+    return (memoryObj_ != nullptr) ? (memoryObj_->getMemFlags() & CL_MEM_SVM_FINE_GRAIN_BUFFER)
+                                   : false;
   }
   bool isUnpinnedHostMemory() const { return (memoryObj_ == nullptr); }
   amd::Device* getDevice() const {
@@ -105,12 +106,15 @@ class hipMemoryObject_impl {
   amd::Buffer* getBuffer() const {
     return (memoryObj_ != nullptr) ? memoryObj_->asBuffer() : nullptr;
   }
+  amd::Memory* getAMDMemory() const { return memoryObj_; }
   device::Memory* getDeviceMemory(const amd::Device& device, bool force_alloc = true) {
     return (memoryObj_ != nullptr) ? memoryObj_->getDeviceMemory(device, force_alloc) : nullptr;
   }
   device::Memory* getDeviceMemory(const amd::Device& device, bool force_alloc = true) const {
     return (memoryObj_ != nullptr) ? memoryObj_->getDeviceMemory(device, force_alloc) : nullptr;
   }
+  void* getSvmPtr() const { return (memoryObj_ != nullptr) ? memoryObj_->getSvmPtr() : nullptr; }
+  void* getHostMem() const { return (memoryObj_ != nullptr) ? memoryObj_->getHostMem() : nullptr; }
   amd::Memory* getMemoryObjectParent() const {
     return (memoryObj_ != nullptr) ? memoryObj_->parent() : nullptr;
   }
@@ -118,6 +122,8 @@ class hipMemoryObject_impl {
   bool validateMemAccess(const amd::Device& dev, bool read_write) const {
     return (memoryObj_ != nullptr) ? memoryObj_->ValidateMemAccess(dev, read_write) : false;
   }
+  uint32_t getUniqueId() const { return (memoryObj_ != nullptr) ? memoryObj_->getUniqueId() : 0; }
+
   Tp getPtr() const { return ptr_; }
   size_t getOffset() const { return offset_; }
 
@@ -137,20 +143,19 @@ hipError_t ihipFree(void* ptr) {
     return hipSuccess;
   }
 
-  hipMemoryObjectReadWrite memory(ptr, /*size*/ 0);
-  if (!memory.isUnpinnedHostMemory()) { /
-    amd::Buffer* buffer = memory.getBuffer();
+  hipMemoryObjectReadWrite memory(ptr);
+  if (!memory.isUnpinnedHostMemory()) {
     auto device_id = memory.getUserData().deviceId;
 
     // Find out if memory belongs to any memory pool
-    if (!g_devices[device_id]->FreeMemory(memory_object, nullptr)) {
+    if (!g_devices[device_id]->FreeMemory(memory.getAMDMemory(), nullptr)) {
       // Wait on the device, associated with the current memory object during allocation
       g_devices[device_id]->SyncAllStreams();
 
       // Non SVM memory free, such as external memory
-      if (buffer->getSvmPtr() == nullptr) {
+      if (memory.getSvmPtr() == nullptr) {
         amd::MemObjMap::RemoveMemObj(ptr);
-        buffer->release();
+        memory.getBuffer()->release();
       } else {
         amd::SvmBuffer::free(memory.getContext(), ptr);
       }
@@ -483,7 +488,8 @@ hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
 // ================================================================================================
 bool IsHtoHMemcpyValid(const hipMemoryObjectReadWrite& dstMemory,
                        const hipMemoryObjectReadOnly& srcMemory, hipMemcpyKind kind) {
-  if (srcMemory.isUnpinnedHostMemory() && dstMemory.isUnpinnedHostMemory()) {
+  if (srcMemory.getPtr() && dstMemory.getPtr() && srcMemory.isUnpinnedHostMemory() &&
+      dstMemory.isUnpinnedHostMemory()) {
     if (!g_devices[0]->devices()[0]->info().hmmCpuMemoryAccessible_ &&
         kind != hipMemcpyHostToHost && kind != hipMemcpyDefault) {
       return false;
@@ -667,8 +673,8 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, hipMemoryObjectReadWrite& d
 
 // TODO: optimize out creation of memcpy objects
 bool IsHtoHMemcpy(void* dst, const void* src) {
-  hipMemoryObjectReadOnly srcMemory(src, /*size*/ 0);
-  hipMemoryObjectReadWrite dstMemory(dst, /*size*/ 0);
+  hipMemoryObjectReadOnly srcMemory(src);
+  hipMemoryObjectReadWrite dstMemory(dst);
   return srcMemory.isUnpinnedHostMemory() && dstMemory.isUnpinnedHostMemory();
 }
 
@@ -690,6 +696,9 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   hipMemoryObjectReadOnly srcMemory(src, sizeBytes);
   hipMemoryObjectReadWrite dstMemory(dst, sizeBytes);
 
+  hipMemoryType srcMemoryType = srcMemory.getMemoryType();
+  hipMemoryType dstMemoryType = dstMemory.getMemoryType();
+
   status = ihipMemcpy_validate(dstMemory, srcMemory, sizeBytes, kind);
   if (status != hipSuccess) {
     return status;
@@ -698,14 +707,11 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
     return hipSuccess;
   }
 
-  hipMemoryType srcMemoryType = srcMemory.getMemoryType();
-  hipMemoryType dstMemoryType = dstMemory.getMemoryType();
-
-  if (srcMemoryType == hipMemoryTypeHost && dstMemoryType == hipMemoryTypeHost) {
+  if (srcMemory.isUnpinnedHostMemory() && dstMemory.isUnpinnedHostMemory()) {
     ihipHtoHMemcpy(dst, src, sizeBytes, stream);
     return hipSuccess;
-  } else if (((srcMemoryType == hipMemoryTypeHost) && (dstMemoryType != hipMemoryTypeHost)) ||
-             ((srcMemoryType != hipMemoryTypeHost) && (dstMemoryType == hipMemoryTypeHost))) {
+  } else if ((srcMemory.isUnpinnedHostMemory() && !dstMemory.isUnpinnedHostMemory()) ||
+             (!srcMemory.isUnpinnedHostMemory() && dstMemory.isUnpinnedHostMemory())) {
     // Unpinned copy wait behavior is enforced in the lower copy layers so skip
     // wait at top level except for MT path
     isHostAsync &= AMD_DIRECT_DISPATCH ? true : false;
@@ -730,7 +736,7 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   if (!isHostAsync) {
     command->queue()->finishCommand(command);
   } else if (!isGPUAsync) {
-    hip::Stream* pStream = hip::getNullStream(dstMemory->getDevice()->context());
+    hip::Stream* pStream = hip::getNullStream(dstMemory.getDevice()->context());
     amd::Command::EventWaitList waitList;
     waitList.push_back(command);
     amd::Command* depdentMarker = new amd::Marker(*pStream, false, waitList);
@@ -869,9 +875,9 @@ hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
     HIP_RETURN(hipSuccess);
   }
 
-  hipMemoryObjectReadWrite svmMem(ptr, /*size*/ 0);
+  hipMemoryObjectReadWrite svmMem(ptr);
 
-  if (svmMem == nullptr) {
+  if (svmMem.isUnpinnedHostMemory()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -883,10 +889,9 @@ hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
 hipError_t hipHostFree(void* ptr) {
   HIP_INIT_API(hipHostFree, ptr);
   CHECK_STREAM_CAPTURE_SUPPORTED();
-  size_t offset = 0;
-  amd::Memory* memory_object = getMemoryObject(ptr, offset);
-  if (memory_object != nullptr) {
-    if (memory_object->getSvmPtr() == nullptr) {
+  hipMemoryObjectReadWrite memory_object(ptr);
+  if (!memory_object.isUnpinnedHostMemory()) {
+    if (memory_object.getSvmPtr() == nullptr) {
       HIP_RETURN(hipErrorInvalidValue);
     }
   }
@@ -930,13 +935,12 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDevice
 
   // Since we are using SVM buffer DevicePtr and HostPtr is the same
   void* ptr = dptr;
-  size_t offset = 0;
-  amd::Memory* svmMem = getMemoryObject(ptr, offset);
-  if (svmMem == nullptr) {
+  hipMemoryObjectReadWrite svmMem(ptr);
+  if (svmMem.isUnpinnedHostMemory()) {
     HIP_RETURN(hipErrorNotFound);
   }
 
-  *pbase = svmMem.getBuffer()->getSvmPtr();
+  *pbase = svmMem.getSvmPtr();
   *psize = svmMem.getSize();
 
   HIP_RETURN(hipSuccess);
@@ -1078,7 +1082,8 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
   if (numMipLevels > 0) {
     size_t max_dim = std::max(std::max(imageWidth, imageHeight), imageDepth);
     size_t mip_levels = 0;
-    for (mip_levels = 0; max_dim > 0; max_dim >>= 1, mip_levels++);
+    for (mip_levels = 0; max_dim > 0; max_dim >>= 1, mip_levels++)
+      ;
     // empty for loop
 
     if (mip_levels < numMipLevels) {
@@ -1298,9 +1303,9 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hipMemoryObjectReadWrite svmMem(hostPtr, /*size*/ 0);
+  hipMemoryObjectReadWrite svmMem(hostPtr);
 
-  if (svmMem == nullptr) {
+  if (svmMem.isUnpinnedHostMemory()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1378,7 +1383,7 @@ hipError_t ihipHostUnregister(void* hostPtr) {
   if (hostPtr == nullptr) {
     return hipErrorInvalidValue;
   }
-  hipMemoryObjectReadWrite memory(hostPtr, /*size*/ 0);
+  hipMemoryObjectReadWrite memory(hostPtr);
 
   if (!memory.isUnpinnedHostMemory()) {
     amd::Buffer* mem = memory.getBuffer();
@@ -1698,7 +1703,7 @@ hipError_t ihipMemcpyAtoDCommand(amd::Command*& command, void* dstDevice, amd::C
                                  amd::Image* srcImage, amd::Coord3D srcOrigin,
                                  amd::Coord3D copyRegion, amd::BufferRect srcRect,
                                  amd::BufferRect dstRect, hip::Stream* stream) {
-  hipMemoryObjectReadWrite dstMemory(dstDevice, /*size*/ 0);
+  hipMemoryObjectReadWrite dstMemory(dstDevice);
 
   amd::CopyMemoryCommand* cpyMemCmd = new amd::CopyMemoryCommand(
       *stream, CL_COMMAND_COPY_IMAGE_TO_BUFFER, amd::Command::EventWaitList{}, *srcImage,
@@ -1720,11 +1725,11 @@ hipError_t ihipMemcpyDtoACommand(amd::Command*& command, amd::Image* dstImage,
                                  amd::Coord3D dstOrigin, void* srcDevice, amd::Coord3D srcOrigin,
                                  amd::Coord3D copyRegion, amd::BufferRect srcRect,
                                  amd::BufferRect dstRect, hip::Stream* stream) {
-  hipMemoryObjectReadWrite srcMemory(srcDevice, /*size*/ 0);
+  hipMemoryObjectReadWrite srcMemory(srcDevice);
 
   amd::CopyMemoryCommand* cpyMemCmd = new amd::CopyMemoryCommand(
-      *stream, CL_COMMAND_COPY_BUFFER_TO_IMAGE, amd::Command::EventWaitList{}, *srcMemory.getBuffer(),
-      *dstImage, srcOrigin, dstOrigin, copyRegion, srcRect, dstRect);
+      *stream, CL_COMMAND_COPY_BUFFER_TO_IMAGE, amd::Command::EventWaitList{},
+      *srcMemory.getBuffer(), *dstImage, srcOrigin, dstOrigin, copyRegion, srcRect, dstRect);
 
   if (cpyMemCmd == nullptr) {
     return hipErrorOutOfMemory;
@@ -1741,8 +1746,8 @@ hipError_t ihipMemcpyDtoACommand(amd::Command*& command, amd::Image* dstImage,
 hipError_t ihipMemcpyDtoDCommand(amd::Command*& command, void* dstDevice, void* srcDevice,
                                  amd::Coord3D copyRegion, amd::BufferRect srcRect,
                                  amd::BufferRect dstRect, hip::Stream* stream) {
-  hipMemoryObjectReadWrite srcMemory(srcDevice, /*size*/ 0);
-  hipMemoryObjectReadWrite dstMemory(dstDevice, /*size*/ 0);
+  hipMemoryObjectReadOnly srcMemory(srcDevice);
+  hipMemoryObjectReadWrite dstMemory(dstDevice);
   amd::Buffer* srcBuffer = srcMemory.getBuffer();
   amd::Buffer* dstBuffer = dstMemory.getBuffer();
   amd::Device* srcMemDevice = srcMemory.getDevice();
@@ -1758,9 +1763,8 @@ hipError_t ihipMemcpyDtoDCommand(amd::Command*& command, void* dstDevice, void* 
   // Check if the queue device doesn't match the device on any memory object.
   // And any of them are not host allocation.
   // Hence it's a P2P transfer, because the app has requested access to another GPU
-  if ((srcMemDevice != dstMemDevice) &&
-      ((srcMemory.getContext().devices().size() == 1) &&
-       (dstMemory.getContext().devices().size() == 1))) {
+  if ((srcMemDevice != dstMemDevice) && ((srcMemory.getContext().devices().size() == 1) &&
+                                         (dstMemory.getContext().devices().size() == 1))) {
     copyCommand =
         new amd::CopyMemoryP2PCommand(*stream, CL_COMMAND_COPY_BUFFER_RECT, waitList, *srcBuffer,
                                       *dstBuffer, srcStart, dstStart, copyRegion, srcRect, dstRect);
@@ -1816,8 +1820,8 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
                                  void* srcDevice, amd::Coord3D srcOrigin, amd::Coord3D copyRegion,
                                  amd::BufferRect srcRect, amd::BufferRect dstRect,
                                  hip::Stream* stream, bool isAsync = false) {
-  hipMemoryObjectReadWrite srcMemory(srcDevice, /*size*/ 0);
-  hipMemoryObjectReadWrite dstMemory(dstHost, /*size*/ 0);
+  hipMemoryObjectReadWrite srcMemory(srcDevice);
+  hipMemoryObjectReadWrite dstMemory(dstHost);
 
   amd::Coord3D srcStart(srcRect.start_, 0, 0);
   amd::CopyMetadata copyMetadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
@@ -1825,8 +1829,7 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
     amd::Buffer* dstBuffer = dstMemory.getBuffer();
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
         *stream, CL_COMMAND_COPY_BUFFER_RECT, amd::Command::EventWaitList{}, *srcMemory.getBuffer(),
-        *dstBuffer,
-        srcOrigin, dstOrigin, copyRegion, srcRect, dstRect, copyMetadata);
+        *dstBuffer, srcOrigin, dstOrigin, copyRegion, srcRect, dstRect, copyMetadata);
     if (copyCommand == nullptr) {
       return hipErrorOutOfMemory;
     }
@@ -1841,10 +1844,9 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
       }
     }
 
-    amd::ReadMemoryCommand* readCommand =
-        new amd::ReadMemoryCommand(*stream, CL_COMMAND_READ_BUFFER_RECT, waitList,
-                                   *srcMemory.getBuffer(),
-                                   srcStart, copyRegion, dstHost, srcRect, dstRect, copyMetadata);
+    amd::ReadMemoryCommand* readCommand = new amd::ReadMemoryCommand(
+        *stream, CL_COMMAND_READ_BUFFER_RECT, waitList, *srcMemory.getBuffer(), srcStart,
+        copyRegion, dstHost, srcRect, dstRect, copyMetadata);
     if (readCommand == nullptr) {
       return hipErrorOutOfMemory;
     }
@@ -1868,25 +1870,23 @@ hipError_t ihipMemcpyHtoDCommand(amd::Command*& command, void* dstDevice, amd::C
                                  amd::Coord3D copyRegion, amd::BufferRect srcRect,
                                  amd::BufferRect dstRect, hip::Stream* stream,
                                  bool isAsync = false) {
-  hipMemoryObjectReadWrite dstMemory(dstDevice, /*size*/ 0);
-  hipMemoryObjectReadOnly srcMemory(srcHost, /*size*/ 0);
+  hipMemoryObjectReadWrite dstMemory(dstDevice);
+  hipMemoryObjectReadOnly srcMemory(srcHost);
 
   amd::Coord3D dstStart(dstRect.start_, 0, 0);
   amd::CopyMetadata copyMetadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
   if (!srcMemory.isUnpinnedHostMemory()) {
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
         *stream, CL_COMMAND_COPY_BUFFER_RECT, amd::Command::EventWaitList{}, *srcMemory.getBuffer(),
-        *dstMemory.getBuffer(),
-        srcOrigin, dstOrigin, copyRegion, srcRect, dstRect, copyMetadata);
+        *dstMemory.getBuffer(), srcOrigin, dstOrigin, copyRegion, srcRect, dstRect, copyMetadata);
     if (copyCommand == nullptr) {
       return hipErrorOutOfMemory;
     }
     command = copyCommand;
   } else {
     amd::WriteMemoryCommand* writeCommand = new amd::WriteMemoryCommand(
-        *stream, CL_COMMAND_WRITE_BUFFER_RECT, amd::Command::EventWaitList{}, *dstMemory.getBuffer(),
-        dstStart,
-        copyRegion, srcHost, dstRect, srcRect, copyMetadata);
+        *stream, CL_COMMAND_WRITE_BUFFER_RECT, amd::Command::EventWaitList{},
+        *dstMemory.getBuffer(), dstStart, copyRegion, srcHost, dstRect, srcRect, copyMetadata);
     if (writeCommand == nullptr) {
       return hipErrorOutOfMemory;
     }
@@ -1956,15 +1956,15 @@ hipError_t ihipMemcpyHtoACommand(amd::Command*& command, amd::Image* dstImage,
                                  amd::Coord3D srcOrigin, amd::Coord3D copyRegion,
                                  size_t srcRowPitch, size_t srcSlicePitch, hip::Stream* stream,
                                  bool isAsync = false) {
-  hipMemoryObjectReadOnly srcMemory(srcHost, /*size*/ 0);
+  hipMemoryObjectReadOnly srcMemory(srcHost);
   size_t start = ihipGetbufferStart(static_cast<size_t*>(srcOrigin),
                                     static_cast<size_t*>(copyRegion), srcRowPitch, srcSlicePitch);
 
   amd::CopyMetadata copyMetadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
   if (!srcMemory.isUnpinnedHostMemory()) {
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
-        *stream, CL_COMMAND_COPY_BUFFER_TO_IMAGE, amd::Command::EventWaitList{}, *srcMemory.getBuffer(),
-        *dstImage, srcOrigin, dstOrigin, copyRegion, copyMetadata);
+        *stream, CL_COMMAND_COPY_BUFFER_TO_IMAGE, amd::Command::EventWaitList{},
+        *srcMemory.getBuffer(), *dstImage, srcOrigin, dstOrigin, copyRegion, copyMetadata);
     if (copyCommand == nullptr) {
       return hipErrorOutOfMemory;
     }
@@ -2006,7 +2006,7 @@ hipError_t ihipMemcpyAtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
                                  amd::Image* srcImage, amd::Coord3D srcOrigin,
                                  amd::Coord3D copyRegion, size_t dstRowPitch, size_t dstSlicePitch,
                                  hip::Stream* stream, bool isAsync = false) {
-  hipMemoryObjectReadWrite dstMemory(dstHost, /*size*/ 0);
+  hipMemoryObjectReadWrite dstMemory(dstHost);
   size_t start = ihipGetbufferStart(static_cast<size_t*>(dstOrigin),
                                     static_cast<size_t*>(copyRegion), dstRowPitch, dstSlicePitch);
 
@@ -2060,7 +2060,7 @@ void ihipCopyMemParamSet(const HIP_MEMCPY3D* pCopy, hipMemoryType& srcMemType,
   // base address of the source data and the bytes per row to apply. {src/dst}Array is ignored.
   hipMemoryType srcMemoryType = pCopy->srcMemoryType;
   if (srcMemoryType == hipMemoryTypeUnified) {
-    hipMemoryObjectReadWrite srcDeviceMemory(pCopy->srcDevice, /*size*/ 0);
+    hipMemoryObjectReadWrite srcDeviceMemory(pCopy->srcDevice);
     srcMemoryType = srcDeviceMemory.isUnpinnedHostMemory() ? hipMemoryTypeHost
                                                            : srcDeviceMemory.getMemoryType();
     if (srcDeviceMemory.isUnpinnedHostMemory()) {
@@ -2077,7 +2077,7 @@ void ihipCopyMemParamSet(const HIP_MEMCPY3D* pCopy, hipMemoryType& srcMemType,
   }
   hipMemoryType dstMemoryType = pCopy->dstMemoryType;
   if (dstMemoryType == hipMemoryTypeUnified) {
-    hipMemoryObjectReadWrite dstDeviceMemory(pCopy->dstDevice, /*size*/ 0);
+    hipMemoryObjectReadWrite dstDeviceMemory(pCopy->dstDevice);
     dstMemoryType = dstDeviceMemory.isUnpinnedHostMemory() ? hipMemoryTypeHost
                                                            : dstDeviceMemory.getMemoryType();
     if (dstDeviceMemory.isUnpinnedHostMemory()) {
@@ -2093,7 +2093,7 @@ void ihipCopyMemParamSet(const HIP_MEMCPY3D* pCopy, hipMemoryType& srcMemType,
   // If {src/dst}MemoryType is hipMemoryTypeHost, check if the memory was prepinned.
   // In that case upgrade the copy type to hipMemoryTypeDevice to avoid extra pinning.
   if (srcMemoryType == hipMemoryTypeHost) {
-    hipMemoryObjectReadOnly srcHostMemory(pCopy->srcHost, /*size*/ 0);
+    hipMemoryObjectReadOnly srcHostMemory(pCopy->srcHost);
     srcMemoryType = srcHostMemory.isUnpinnedHostMemory() ? hipMemoryTypeHost : hipMemoryTypeDevice;
 
     if (srcMemoryType == hipMemoryTypeDevice) {
@@ -2101,7 +2101,7 @@ void ihipCopyMemParamSet(const HIP_MEMCPY3D* pCopy, hipMemoryType& srcMemType,
     }
   }
   if (dstMemoryType == hipMemoryTypeHost) {
-    hipMemoryObjectReadWrite dstHostMemory(const_cast<void*>(pCopy->dstHost), /*size*/ 0);
+    hipMemoryObjectReadWrite dstHostMemory(const_cast<void*>(pCopy->dstHost));
     dstMemoryType = dstHostMemory.isUnpinnedHostMemory() ? hipMemoryTypeHost : hipMemoryTypeDevice;
 
     if (dstMemoryType == hipMemoryTypeDevice) {
@@ -2148,7 +2148,7 @@ hipError_t validateMemoryObject(const void* ptr, bool isDeviceMemory, amd::Coord
     return hipErrorInvalidValue;
   }
 
-  hipMemoryObjectReadOnly memory(ptr, /*size*/ 0);
+  hipMemoryObjectReadOnly memory(ptr);
   if (memory.isUnpinnedHostMemory() && isDeviceMemory) {
     return hipErrorInvalidValue;
   }
@@ -2693,6 +2693,9 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
     return hipErrorInvalidValue;
   }
 
+  hipMemoryObjectReadOnly srcPtrMemObj(p->srcPtr.ptr);
+  hipMemoryObjectReadWrite dstPtrMemObj(p->dstPtr.ptr);
+
   if (p->dstArray == nullptr && p->srcArray == nullptr) {
     if ((p->dstPtr.pitch != 0 && (p->extent.width + p->dstPos.x > p->dstPtr.pitch)) ||
         (p->srcPtr.pitch != 0 && (p->extent.width + p->srcPos.x > p->srcPtr.pitch))) {
@@ -2700,8 +2703,6 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
     }
     auto totalExtentBytes = p->extent.width * p->extent.height * p->extent.depth;
     // get memory obj of the PitchPtr
-    hipMemoryObjectReadWrite srcPtrMemObj(p->srcPtr.ptr, /*size*/ 0);
-    hipMemoryObjectReadWrite dstPtrMemObj(p->dstPtr.ptr, /*size*/ 0);
 
     if (!dstPtrMemObj.isUnpinnedHostMemory() && (p->dstPtr.xsize != 0 && p->dstPtr.ysize != 0)) {
       // Use the memoryObj to get 3d data
@@ -2741,7 +2742,7 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
     return hipErrorInvalidMemcpyDirection;
   }
   // If src and dst ptr are null then kind must be either h2h or def.
-  if (!IsHtoHMemcpyValid(p->dstPtr.ptr, p->srcPtr.ptr, p->kind)) {
+  if (!IsHtoHMemcpyValid(dstPtrMemObj, srcPtrMemObj, p->kind)) {
     return hipErrorInvalidValue;
   }
   return hipSuccess;
@@ -2945,7 +2946,7 @@ hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams) {
     return hipErrorInvalidValue;
   }
 
-  hipMemoryObjectReadWrite memObj(pNodeParams->dst, /*size*/ 0);
+  hipMemoryObjectReadWrite memObj(pNodeParams->dst);
   if (!memObj.isUnpinnedHostMemory()) {
     // Validate Mem Access in case of VMM Memory
     if (!memObj.validateMemAccess(*hip::getCurrentDevice()->devices()[0], true)) {
@@ -3003,8 +3004,8 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
         auto flags = memObj.getBuffer()->getMemFlags();
         size_t offset = memObj.getOffset();
         if ((memObj.getUserData().sync_mem_ops_) ||
-            (offset == 0 &&
-             !(flags & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS | CL_MEM_USE_HOST_PTR)))) {
+            (offset == 0 && !(flags & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS |
+                                       CL_MEM_USE_HOST_PTR)))) {
           isAsync = true;
         }
       }
@@ -3380,7 +3381,7 @@ hipError_t hipIpcOpenMemHandle(void** dev_ptr, hipIpcMemHandle_t handle, unsigne
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  /* Call the IPC Attach from Device class */
+  /* Call the IPC Attach fromgetSvmPtr Device class */
   device = hip::getCurrentDevice()->devices()[0];
   ihandle = reinterpret_cast<amd::MemObjMap::IpcMemHandle*>(&handle);
 
@@ -3408,7 +3409,7 @@ hipError_t hipIpcOpenMemHandle(void** dev_ptr, hipIpcMemHandle_t handle, unsigne
           ihandle->psize, ihandle->poffset, flags);
       HIP_RETURN(hipErrorInvalidDevicePointer);
     }
-    hipMemoryObjectReadWrite memObj(*dev_ptr, /*size*/ 0);
+    hipMemoryObjectReadWrite memObj(*dev_ptr);
     amd_mem_obj = memObj.getBuffer();
     amd::MemObjMap::AddIpcHandleMemObj(*ihandle, amd_mem_obj);
   } else {
@@ -3467,7 +3468,7 @@ hipError_t hipHostGetDevicePointer(void** devicePointer, void* hostPointer, unsi
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hipMemoryObjectReadWrite memObj(hostPointer, /*size*/ 0);
+  hipMemoryObjectReadWrite memObj(hostPointer);
   if (memObj.isUnpinnedHostMemory()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -3476,8 +3477,7 @@ hipError_t hipHostGetDevicePointer(void** devicePointer, void* hostPointer, unsi
   if (devMem == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  *devicePointer = reinterpret_cast<void*>(
-      devMem->virtualAddress() + offset);
+  *devicePointer = reinterpret_cast<void*>(devMem->virtualAddress() + offset);
 
   HIP_RETURN(hipSuccess, ReturnPtrValue(devicePointer));
 }
@@ -3489,25 +3489,24 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
   if (attributes == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  hipMemoryObjectReadOnly memory(ptr, /*size*/ 0);
+  hipMemoryObjectReadOnly memory(ptr);
   size_t offset = memory.getOffset();
-  amd::Memory* memObj = (!memory.isUnpinnedHostMemory()) ? memory.getBuffer() : nullptr;
   int device = 0;
   device::Memory* devMem = nullptr;
   memset(attributes, 0, sizeof(hipPointerAttribute_t));
 
-  if (memObj != nullptr) {
+  if (!memory.isUnpinnedHostMemory()) {
     attributes->type = memory.getMemoryType();
     if (attributes->type == hipMemoryTypeHost) {
-      if (memObj->getHostMem() != nullptr) {
-        attributes->hostPointer = static_cast<char*>(memObj->getHostMem()) + offset;
+      if (memory.getHostMem() != nullptr) {
+        attributes->hostPointer = static_cast<char*>(memory.getHostMem()) + offset;
       } else {
-        attributes->hostPointer = static_cast<char*>(memObj->getSvmPtr()) + offset;
+        attributes->hostPointer = static_cast<char*>(memory.getSvmPtr()) + offset;
       }
     }
     // the pointer that attribute is retrieved for might not be on the current device
     for (const auto& device : g_devices) {
-      if (device->deviceId() == memObj->getUserData().deviceId) {
+      if (device->deviceId() == memory.getUserData().deviceId) {
         devMem = memory.getDeviceMemory(*device->devices()[0]);
         break;
       }
@@ -3521,7 +3520,7 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     attributes->devicePointer = reinterpret_cast<char*>(devMem->virtualAddress() + offset);
     constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
     attributes->isManaged =
-        ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) ? true : false;
+        ((memory.getBuffer()->getMemFlags() & kManagedAlloc) == kManagedAlloc) ? true : false;
     attributes->allocationFlags = memory.getUserData().flags;
     attributes->device = memory.getUserData().deviceId;
     if (attributes->isManaged) {
@@ -3553,7 +3552,7 @@ hipError_t ihipPointerSetAttribute(const void* value, hipPointer_attribute attri
     return hipErrorInvalidValue;
   }
 
-  hipMemoryObjectReadWrite memObj(ptr, /*size*/ 0);
+  hipMemoryObjectReadWrite memObj(ptr);
   if (memObj.isUnpinnedHostMemory()) {
     return hipErrorInvalidDevicePointer;
   }
@@ -3566,7 +3565,7 @@ hipError_t ihipPointerSetAttribute(const void* value, hipPointer_attribute attri
 // ================================================================================================
 hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
                                     hipDeviceptr_t ptr) {
-  hipMemoryObjectReadWrite memory(ptr, /*size*/ 0);
+  hipMemoryObjectReadWrite memory(ptr);
   size_t offset = memory.getOffset();
   amd::Memory* memObj = memory.isUnpinnedHostMemory() ? nullptr : memory.getBuffer();
   amd::Memory* vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr);
@@ -3576,8 +3575,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
 
   switch (attribute) {
     case HIP_POINTER_ATTRIBUTE_CONTEXT: {
-      if (memObj) {
-        amd::Context& context = memObj->getContext();
+      if (!memory.isUnpinnedHostMemory()) {
+        amd::Context& context = memory.getContext();
         int devId = getDeviceID(context);
         if (devId >= 0) {
           *reinterpret_cast<hipCtx_t*>(data) = reinterpret_cast<hipCtx_t>(g_devices[devId]);
@@ -3590,11 +3589,10 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_MEMORY_TYPE: {
-      if (memObj) {  // checks for host type or device type
+      if (!memory.isUnpinnedHostMemory()) {  // checks for host type or device type
         *reinterpret_cast<uint32_t*>(data) = memory.getMemoryType();
       } else {  // checks for array type
-        // ptr must be a host allocation using malloc since memObj is null and is
-        // not found in hipArraySet.
+        // ptr must be a host allocation using malloc since not found in hipArraySet.
         if (hip::hipArraySet.find(static_cast<hipArray*>(ptr)) == hip::hipArraySet.end()) {
           *reinterpret_cast<uint32_t*>(data) = 0;
           return hipErrorInvalidValue;
@@ -3615,7 +3613,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_DEVICE_POINTER: {
-      if (memObj) {
+      if (!memory.isUnpinnedHostMemory()) {
         device::Memory* devMem = memory.getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
 
         // getDeviceMemory can fail, hence validate the sanity of the mem obtained
@@ -3632,14 +3630,14 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_HOST_POINTER: {
-      if (memObj) {
+      if (!memory.isUnpinnedHostMemory()) {
         if (memory.getMemoryType() == hipMemoryTypeHost) {
-          if (memObj->getHostMem() != nullptr) {
+          if (memory.getHostMem() != nullptr) {
             // Registered memory
-            *reinterpret_cast<char**>(data) = static_cast<char*>(memObj->getHostMem()) + offset;
+            *reinterpret_cast<char**>(data) = static_cast<char*>(memory.getHostMem()) + offset;
           } else {
             // Prepinned memory
-            *reinterpret_cast<char**>(data) = static_cast<char*>(memObj->getSvmPtr()) + offset;
+            *reinterpret_cast<char**>(data) = static_cast<char*>(memory.getSvmPtr()) + offset;
           }
         } else {
           *reinterpret_cast<char**>(data) = nullptr;
@@ -3657,7 +3655,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS: {
-      if (memObj) {
+      if (!memory.isUnpinnedHostMemory()) {
         *reinterpret_cast<bool*>(data) = memory.getUserData().sync_mem_ops_;
       } else {
         *reinterpret_cast<bool*>(data) = false;
@@ -3666,8 +3664,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_BUFFER_ID: {
-      if (memObj) {
-        *reinterpret_cast<uint32_t*>(data) = memObj->getUniqueId();
+      if (!memory.isUnpinnedHostMemory()) {
+        *reinterpret_cast<uint32_t*>(data) = memory.getUniqueId();
       } else {  // ptr passed must be allocated using HIP memory allocation API
         *reinterpret_cast<uint32_t*>(data) = 0;
         return hipErrorInvalidValue;
@@ -3675,9 +3673,9 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_IS_MANAGED: {
-      if (memObj) {
+      if (!memory.isUnpinnedHostMemory()) {
         *reinterpret_cast<bool*>(data) =
-            ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) ? true : false;
+            ((memory.getBuffer()->getMemFlags() & kManagedAlloc) == kManagedAlloc) ? true : false;
       } else {
         *reinterpret_cast<bool*>(data) = false;
         return hipErrorInvalidValue;
@@ -3685,7 +3683,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL: {
-      if (memObj) {
+      if (!memory.isUnpinnedHostMemory()) {
         *reinterpret_cast<int*>(data) = memory.getUserData().deviceId;
       } else {
         // for host memory, -2 is returned by default similar to cuda
@@ -3695,11 +3693,11 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE: {
-      if (memObj) {
+      if (!memory.isUnpinnedHostMemory()) {
         if (memory.getMemoryType() == hipMemoryTypeHost) {
           // host pointer, pinned or registered memory
           *reinterpret_cast<int*>(data) = 0;
-        } else if ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) {
+        } else if ((memory.getBuffer()->getMemFlags() & kManagedAlloc) == kManagedAlloc) {
           // managed allocation
           *reinterpret_cast<int*>(data) = 0;
         } else if (vaddr_mem_obj) {
@@ -3719,9 +3717,9 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR: {
-      if (memObj) {
-        if (memObj->getHostMem() != nullptr) {
-          *reinterpret_cast<hipDeviceptr_t*>(data) = static_cast<char*>(memObj->getHostMem());
+      if (!memory.isUnpinnedHostMemory()) {
+        if (memory.getHostMem() != nullptr) {
+          *reinterpret_cast<hipDeviceptr_t*>(data) = static_cast<char*>(memory.getHostMem());
         } else {
           device::Memory* devMem = memory.getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
 
@@ -3741,8 +3739,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_RANGE_SIZE: {
-      if (memObj) {
-        *reinterpret_cast<uint32_t*>(data) = memObj->getSize();
+      if (!memory.isUnpinnedHostMemory()) {
+        *reinterpret_cast<uint32_t*>(data) = memory.getSize();
       } else {
         *reinterpret_cast<uint32_t*>(data) = 0;
         status = hipErrorInvalidValue;
@@ -3750,7 +3748,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_MAPPED: {
-      if (memObj) {
+      if (!memory.isUnpinnedHostMemory()) {
         *reinterpret_cast<bool*>(data) = true;
       } else {
         *reinterpret_cast<bool*>(data) = false;
@@ -3771,8 +3769,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS: {
-      if (memObj) {
-        *reinterpret_cast<uint32_t*>(data) = memObj->getUserData().flags;
+      if (!memory.isUnpinnedHostMemory()) {
+        *reinterpret_cast<uint32_t*>(data) = memory.getUserData().flags;
       } else {
         *reinterpret_cast<uint32_t*>(data) = 0;
       }
@@ -4155,9 +4153,9 @@ hipError_t hipMallocHost(void** ptr, size_t size) {
 hipError_t hipFreeHost(void* ptr) {
   HIP_INIT_API(hipFreeHost, ptr);
   CHECK_STREAM_CAPTURE_SUPPORTED();
-  hipMemoryObjectReadWrite memory_object(ptr, /*size*/ 0);
+  hipMemoryObjectReadWrite memory_object(ptr);
   if (!memory_object.isUnpinnedHostMemory()) {
-    if (memory_object.getBuffer()->getSvmPtr() == nullptr) {
+    if (memory_object.getSvmPtr() == nullptr) {
       HIP_RETURN(hipErrorInvalidValue);
     }
   }
