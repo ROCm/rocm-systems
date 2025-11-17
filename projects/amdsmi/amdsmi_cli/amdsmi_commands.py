@@ -5607,8 +5607,9 @@ class AMDSMICommands():
 
     def monitor(self, args, multiple_devices=False, watching_output=False, gpu=None,
                     watch=None, watch_time=None, iterations=None, power_usage=None,
-                    temperature=None, gfx_util=None, mem_util=None, encoder=None,
-                    decoder=None, ecc=None, vram_usage=None, pcie=None, process=None,
+                    temperature=None, base_board_temps=None, gpu_board_temps=None,
+                    gfx_util=None, mem_util=None, encoder=None, decoder=None,
+                    ecc=None, vram_usage=None, pcie=None, process=None,
                     violation=None):
         """ Populate a table with each GPU as an index to rows of targeted data
 
@@ -5621,6 +5622,8 @@ class AMDSMICommands():
             iterations (int, optional): Value override for args.iterations. Defaults to None.
             power_usage (bool, optional): Value override for args.power_usage. Defaults to None.
             temperature (bool, optional): Value override for args.temperature. Defaults to None.
+            base_board_temps (bool, optional): Value override for args.base_board_temps. Defaults to None.
+            gpu_board_temps (bool, optional): Value override for args.gpu_board_temps. Defaults to None.
             gfx (bool, optional): Value override for args.gfx. Defaults to None.
             mem_util (bool, optional): Value override for args.mem. Defaults to None.
             encoder (bool, optional): Value override for args.encoder. Defaults to None.
@@ -5653,6 +5656,10 @@ class AMDSMICommands():
             args.power_usage = power_usage
         if temperature:
             args.temperature = temperature
+        if base_board_temps:
+            args.base_board_temps = base_board_temps
+        if gpu_board_temps:
+            args.gpu_board_temps = gpu_board_temps
         if gfx_util:
             args.gfx = gfx_util
         if mem_util:
@@ -5685,9 +5692,10 @@ class AMDSMICommands():
 
         # If all arguments are False, the print all values
         # Don't include process in this logic as it's an optional edge case
-        if not any([args.power_usage, args.temperature, args.gfx, args.mem,
-                    args.encoder, args.decoder, args.ecc, args.vram_usage,
-                    args.pcie, args.violation]):
+        if not any([args.power_usage, args.temperature, args.base_board_temps,
+                    args.gpu_board_temps, args.gfx, args.mem, args.encoder,
+                    args.decoder, args.ecc, args.vram_usage, args.pcie,
+                    args.violation]):
             args.power_usage = args.temperature = args.gfx = args.mem = \
                 args.encoder = args.decoder = args.vram_usage = True
             # set extra args for default output filtering
@@ -5868,6 +5876,41 @@ class AMDSMICommands():
 
             self.logger.table_header += 'GPU_T'.rjust(8)
             self.logger.table_header += 'MEM_T'.rjust(8)
+
+
+        if args.gpu_board_temps:
+            try:
+                gpu_board_temp_dict = self.helpers.get_gpu_board_temperatures(args.gpu, gpu_id, self.logger)
+
+                temp_unit_json = 'C'
+                # Add GPU board sensor headers
+                if gpu_board_temp_dict:
+                    for temp_sensor in sorted(gpu_board_temp_dict.keys()):
+                        self.logger.table_header += f"{temp_sensor}".rjust(max(len(temp_sensor)+2, 7))
+                    for temp_type, temp_value in gpu_board_temp_dict.items():
+                        if self.logger.is_json_format() and isinstance(temp_value, dict):
+                            temp_value['unit'] = temp_unit_json
+                        monitor_values[temp_type] = temp_value
+            except Exception as e:
+                logging.debug("Failed to get GPU board temperatures on gpu %s | %s", gpu_id, e)
+
+
+        if args.base_board_temps:
+            try:
+                base_board_temp_dict = self.helpers.get_base_board_temperatures(args.gpu, gpu_id, self.logger)
+
+                temp_unit_json = 'C'
+                # Add base board sensor headers
+                if base_board_temp_dict:
+                    for temp_sensor in sorted(base_board_temp_dict.keys()):
+                        self.logger.table_header += f"{temp_sensor}".rjust(max(len(temp_sensor)+2, 7))
+                    for temp_type, temp_value in base_board_temp_dict.items():
+                        if self.logger.is_json_format() and isinstance(temp_value, dict):
+                            temp_value['unit'] = temp_unit_json
+                        monitor_values[temp_type] = temp_value
+            except Exception as e:
+                logging.debug("Failed to get base board temperatures on gpu %s | %s", gpu_id, e)
+
 
         if args.gfx:
             try:
