@@ -19,10 +19,6 @@ verbose-run()
 {
     echo -e "\n### Executing \"${@}\"... ###\n"
     eval $@
-    if [ $? -ne 0 ]; then
-        echo "Error: executing command failed." >&2
-        exit 1
-    fi
 }
 
 tolower()
