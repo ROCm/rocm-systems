@@ -64,7 +64,7 @@ correlation_id::add_ref_count()
 {
     auto _ret = m_ref_count.fetch_add(1);
 
-    ROCP_CI_LOG_IF(WARNING, _ret == 0)
+    ROCP_WARNING_IF(_ret == 0)
         << fmt::format("correlation id {} already retired", internal);
 
     return _ret;
@@ -85,7 +85,7 @@ correlation_id::sub_ref_count()
 
     if(registration::get_fini_status() > 0) return 0;
 
-    ROCP_CI_LOG_IF(WARNING, _ret == 0) << fmt::format("correlation id underflow on {}", internal);
+    ROCP_WARNING_IF(_ret == 0) << fmt::format("correlation id underflow on {}", internal);
 
     if(_ret == 1)
     {
@@ -113,7 +113,7 @@ correlation_id::sub_ref_count()
                     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
                     record);
 
-                ROCP_CI_LOG_IF(WARNING, !success)
+                ROCP_WARNING_IF(!success)
                     << fmt::format("failed to emplace correlation id retirement for {}", internal);
             }
         }
