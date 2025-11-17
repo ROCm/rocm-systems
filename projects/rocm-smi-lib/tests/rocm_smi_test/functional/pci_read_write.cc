@@ -159,8 +159,8 @@ void TestPciReadWrite::Run(void) {
     }
     // Verify api support checking functionality is working
     ret = rsmi_dev_pci_bandwidth_get(dv_ind, nullptr);
-    ASSERT_TRUE(ret == RSMI_STATUS_INVALID_ARGS || ret == RSMI_STATUS_NOT_SUPPORTED)
-    << "Expected INVALID_ARGS or NOT_SUPPORTED when passing nullptr to rsmi_dev_pci_bandwidth_get; got: " << ret;
+    ASSERT_TRUE(ret == RSMI_STATUS_INVALID_ARGS || ret == RSMI_STATUS_NOT_SUPPORTED);
+    std::cout << "Expected INVALID_ARGS or NOT_SUPPORTED when passing nullptr to rsmi_dev_pci_bandwidth_get; got: " << ret;
 
     // First set the bitmask to all supported bandwidths
     freq_bitmask = ~(~0u << bw.transfer_rate.num_supported);
@@ -181,10 +181,6 @@ void TestPciReadWrite::Run(void) {
     ret = rsmi_dev_pci_bandwidth_set(dv_ind, freq_bitmask);
     if (ret != RSMI_STATUS_NOT_SUPPORTED) {
       CHK_ERR_ASRT(ret);
-    } else {
-      const char* s = nullptr;
-      rsmi_status_string(ret, &s);
-      std::cout << "\t\t** rsmi_dev_pci_bandwidth_set(): " << (s ? s : "NOT_SUPPORTED") << "\n";
     }
 
     ret = rsmi_dev_pci_bandwidth_get(dv_ind, &bw);
@@ -198,10 +194,6 @@ void TestPciReadWrite::Run(void) {
     ret = rsmi_dev_pci_bandwidth_set(dv_ind, 0xFFFFFFFF);
     if (ret != RSMI_STATUS_NOT_SUPPORTED) {
       CHK_ERR_ASRT(ret);
-    } else {
-      const char* s = nullptr;
-      rsmi_status_string(ret, &s);
-      std::cout << "\t\t** rsmi_dev_pci_bandwidth_set(): " << (s ? s : "NOT_SUPPORTED") << "\n";
     }
 
     ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
