@@ -45,7 +45,7 @@
 #define AMDGPU_INITSTATE_FILE  "/sys/module/amdgpu/initstate"
 
 #define AMDHSMP_DRIVER_NAME    "AMDHSMPDriver"
-#define AMDHSMP_INITSTATE_FILE "/sys/module/amd_hsmp/initstate"
+#define AMDHSMP_INITSTATE_FILE "/dev/hsmp"
 
 static uint32_t num_apuSockets              = GOAMDSMI_VALUE_0;
 static uint32_t num_cpuSockets              = GOAMDSMI_VALUE_0;

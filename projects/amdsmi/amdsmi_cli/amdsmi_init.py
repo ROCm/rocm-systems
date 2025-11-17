@@ -62,10 +62,9 @@ def check_amdgpu_driver():
 
 
 def check_amd_hsmp_driver():
-    """ Returns true if amd_hsmp is found in the list of initialized modules """
-    amd_cpu_status_file = Path("/sys/module/amd_hsmp/initstate")
+    """ Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules """
+    amd_cpu_status_file = Path("/dev/hsmp")
     if amd_cpu_status_file.exists():
-        if amd_cpu_status_file.read_text(encoding="ascii").strip() == "live":
             return True
     return False
 
@@ -73,7 +72,7 @@ def check_amd_hsmp_driver():
 def amdsmi_cli_init():
     """ Initializes AMDSMI Library for the CLI
 
-    Checks for the presence of the amdgpu and amd_hsmp drivers and initializes the
+    Checks for the presence of the amdgpu, amd_hsmp or hsmp_acpi drivers and initializes the
     AMD SMI library based on the live drivers found.
 
     Return:
@@ -85,13 +84,13 @@ def amdsmi_cli_init():
     init_flag = amdsmi_interface.AmdSmiInitFlags.INIT_ALL_PROCESSORS
     if check_amdgpu_driver() and check_amd_hsmp_driver():
         init_flag = amdsmi_interface.AmdSmiInitFlags.INIT_AMD_APUS
-        logging.debug("Both amdgpu and amd_hsmp driver's initstate is live")
+        logging.debug("Both amdgpu , amd_hsmp or hsmp_acpi  driver's initstate is live")
         try:
             amdsmi_interface.amdsmi_init(init_flag)
         except (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException) as e:
             if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                               amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.error("Drivers not loaded (amdgpu and amd_hsmp drivers not found in modules)")
+                logging.error("Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)")
                 sys.exit(-1)
             else:
                 raise e
@@ -107,20 +106,20 @@ def amdsmi_cli_init():
                 sys.exit(-1)
             else:
                 raise e
-        logging.debug("amdgpu driver initialized successfully, but amd_hsmp initstate was not live")
+        logging.debug("amdgpu driver initialized successfully, but amd_hsmp or hsmp_acpi initstate was not live")
     elif check_amd_hsmp_driver():
         init_flag = amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
-        logging.debug("amd_hsmp driver initstate is live")
+        logging.debug("amd_hsmp or hsmp_acpi driver initstate is live")
         try:
             amdsmi_interface.amdsmi_init(init_flag)
         except (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException) as e:
             if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                               amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.error("Driver not loaded (amd_hsmp not found in modules)")
+                logging.error("Driver not loaded (amd_hsmp or hsmp_acpi not found in modules)")
                 sys.exit(-1)
             else:
                 raise e
-        logging.debug("amd_hsmp driver initialized successfully, but amdgpu initstate was not live")
+        logging.debug("amd_hsmp or hsmp_acpi driver initialized successfully, but amdgpu initstate was not live")
 
     logging.debug(f"AMDSMI initialized with atleast one driver successfully | init flag: {init_flag}")
 

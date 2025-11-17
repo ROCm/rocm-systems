@@ -1004,3 +1004,41 @@ struct CperFileCtx {
     std::unique_ptr<char[]> buffer;
     long file_size = 0;
 };
+
+
+uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
+    uint64_t serial_number = 0;
+    amdsmi_board_info_t board_info = {};
+    amdsmi_status_t status = amdsmi_get_gpu_board_info(processor_handle, &board_info);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << 
+            "Failed to retrieve product serial number! error: " << 
+            static_cast<int>(status);
+        LOG_DEBUG(ss);
+        return serial_number;
+    }
+    if (!board_info.product_serial || !*board_info.product_serial) {
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
+            " Product serial string is empty.";
+        LOG_DEBUG(ss);
+        return serial_number;
+    }
+    try {
+        serial_number = std::stoull(board_info.product_serial, nullptr, 10);
+    } catch (const std::invalid_argument& e) {
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
+            " Invalid product serial string. Exception: " << e.what();
+        LOG_DEBUG(ss);
+        serial_number = 0;
+    } catch (const std::out_of_range& e) {
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
+            " Product serial out of range, Exception: " << e.what();
+        LOG_DEBUG(ss);
+        serial_number = 0;
+    }
+    return serial_number;
+}

@@ -67,16 +67,29 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
-- **`amd-smi set --power-cap` now requires specification of the power cap type**.  
-  - Command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`. Acceptable power cap types are "ppt0" and "ppt1".  
-  Ex.
+- **The `amd-smi` command now shows hsmp rather than amd_hsmp**.  
+  - The hsmp driver version can be shown without the amdgpu version using `amd-smi version -c`
 
-    ```console
-    $ sudo amd-smi set --power-cap ppt1 1150
-    GPU: 0
-      POWERCAP: Successfully set PPT1 power cap to 1150W
-      ...
-    ```  
+  ```console
+   $ amd-smi version
+   AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.10.10 | hsmp version: 2.2
+
+   $ amd-smi version -c
+   AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | hsmp version: 2.2
+   ...
+  ```
+
+- **`amd-smi set --power-cap` now requires sepcification of the power cap type**.  
+  - Command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`
+  - Acceptable power cap types are "ppt0" and "ppt1"
+
+  ```console
+  $ sudo amd-smi set --power-cap ppt1 1150
+  GPU: 0
+    POWERCAP: Successfully set ppt1 power cap to 1150W
+    ...
+  ```
+
 - **`amd-smi reset --power-cap` will attempt to reset both power caps**.  
   - When using the reset command, both PPT0 and PPT1 power caps will be reset to their default values. If a device only has PPT0, then only PPT0 will be reset.  
     Ex.
@@ -1402,7 +1415,7 @@ Functions affected by struct change are:
 - **Corrected CLI CPU argument name**.  
   - `--cpu-pwr-svi-telemtry-rails` to `--cpu-pwr-svi-telemetry-rails`
 
-- **Added amdgpu driver version and amd_hsmp driver version to `amd-smi version` command**.  
+- **Added amdgpu driver version and amd_hsmp driver version to `amd-smi version` command**.
   - The `amd-smi version` command can now also display the amdgpu driver version using the `-g` flag.
   - The amd_hsmp driver version can also be displayed using the `-c` flag.
   - The new default for the `version` command is to display all the version information, including both amdgpu and amd_hsmp driver versions.
