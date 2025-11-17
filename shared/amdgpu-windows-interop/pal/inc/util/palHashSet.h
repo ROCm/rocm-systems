@@ -56,8 +56,7 @@ struct HashSetEntry
  *
  * HashFunc is a functor for hashing keys.  Built-in choices for HashFunc are:
  *
- * - DefaultHashFunc: Default hash function, selects best hash function based on type of key.
- * - PointerHashFunc: Good choice when the key is a pointer.
+ * - DefaultHashFunc: Good choice when the key is a pointer.
  * - JenkinsHashFunc: Good choice when the key is arbitrary binary data.
  * - StringJenkinsHashFunc: Good choice when the key is a C-style string.
  *
@@ -97,7 +96,7 @@ public:
     ///                        take (buckets * GroupSize) bytes.
     /// @param [in] pAllocator Pointer to an allocator that will create system memory requested by this hash container.
     explicit HashSet(uint32 numBuckets, Allocator*const pAllocator) : Base::HashBase(numBuckets, pAllocator) {}
-    ~HashSet() { }
+    virtual ~HashSet() { }
 
     /// Finds a given entry; if no entry was found, allocate it.
     ///
@@ -109,6 +108,13 @@ public:
     ///          @ref ErrorOutOfMemory if the operation failed because an internal memory allocation failed.
     Result FindAllocate(Key** ppKey, bool* pExisted);
 
+    /// Returns true if the specified key exists in the set.
+    ///
+    /// @param [in] key Key to search for.
+    ///
+    /// @returns True if the specified key exists in the set.
+    bool Contains(const Key& key) const;
+
     /// Inserts an entry.
     ///
     /// No action will be taken if an entry matching this key already exists in the set.
@@ -118,6 +124,13 @@ public:
     /// @returns @ref Success if the operation completed successfully, or @ref ErrorOutOfMemory if the operation failed
     ///          because an internal memory allocation failed.
     Result Insert(const Key& key);
+
+    /// Removes an entry that matches the specified key.
+    ///
+    /// @param [in] key Key of the entry to erase.
+    ///
+    /// @returns True if the erase completed successfully, false if an entry for this key did not exist.
+    bool Erase(const Key& key);
 
 private:
     // Typedef for the specialized 'HashBase' object we're inheriting from so we can use properly qualified names when
