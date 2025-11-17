@@ -156,6 +156,8 @@ static auto amdsmi_read_cper_file(const std::string &filepath) -> CperFileCtx {
     GUID_INIT(0xDC3EA0B0, 0xA144, 0x4797, 0xB9, 0x5B, 0x53, 0xFA,   \
           0x24, 0x2B, 0x6E, 0x1D)
 
+static amdsmi_cper_guid_t mce = CPER_NOTIFY_MCE;
+static amdsmi_cper_guid_t cmc = CPER_NOTIFY_CMC;
 static amdsmi_cper_guid_t bt = BOOT_TYPE;
 static amdsmi_cper_guid_t cr = AMD_OOB_CRASHDUMP;
 static amdsmi_cper_guid_t nonstd = AMD_GPU_NONSTANDARD_ERROR;

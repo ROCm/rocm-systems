@@ -125,26 +125,34 @@ Exceptions that can be thrown by AMD SMI are:
   When this exception is thrown, `err_code` and `err_info` are set. `err_code` is an integer that corresponds to errors that can occur
   in amdsmi-lib and `err_info` is a string that explains the error that occurred.
 
-   For example:
-
    ```python
    try:
        num_of_GPUs = len(amdsmi_get_processor_handles())
-       if num_of_GPUs == 0:
-           print("No GPUs on machine")
-   except AmdSmiException as e:
-       print("Error code: {}".format(e.err_code))
-       if e.err_code == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
-           print("Error info: {}".format(e.err_info))
+   except amdsmi_exception.AmdSmiLibraryException as e:
+       print("Unable to get processor handles, error: {} {}".format(str(e.get_error_code()), e.err_info))
    ```
 
-* `AmdSmiRetryException` : Derives `AmdSmiLibraryException` class and signals
-  device is busy and call should be retried.
-* `AmdSmiTimeoutException` : Derives `AmdSmiLibraryException` class and
-  represents that call had timed out.
+
 * `AmdSmiParameterException`: Derives base `AmdSmiException` class and
   represents errors related to invaild parameters passed to functions. When this
   exception is thrown, `err_msg` is set and it explains what is the actual and
   expected type of the parameters.
-* `AmdSmiBdfFormatException`: Derives base `AmdSmiException` class and
-  represents invalid bdf format.
+
+   For example:
+
+   ```python
+   try:
+       processor_handles = amdsmi_get_cpusocket_handles()
+       if len(processor_handles) == 0:
+           print("No CPU sockets on machine")
+       else:
+           for processor in processor_handles:
+               temperature = amdsmi_get_cpu_socket_temperature(processor)
+               print(temperature)
+   except amdsmi_exception.AmdSmiParameterException as e:
+       print("Invalid parameter error: {} {}".format(str(e.get_error_code()), e.err_msg))
+   except amdsmi_exception.AmdSmiLibraryException as e:
+       print("Unable to get processor handles, error: {} {}".format(str(e.get_error_code()), e.err_info))
+   ```
+
+
