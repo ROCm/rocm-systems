@@ -707,8 +707,8 @@ typedef enum hsa_amd_agent_info_s {
    */
   HSA_AMD_AGENT_INFO_CLOCK_COUNTERS = 0xA118,
   /**
-   * Queries for the LUID that identifies a hardware node.
-   * The type of this attribute is LUID.
+   * Queries for the LUID that identifies a hardware node. The LUID is only
+   * valid on Windows. The type of this attribute is LUID.
    */
   HSA_AMD_AGENT_INFO_LUID = 0xA119,
 } hsa_amd_agent_info_t;

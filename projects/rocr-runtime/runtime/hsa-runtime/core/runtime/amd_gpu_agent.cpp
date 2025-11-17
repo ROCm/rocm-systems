@@ -1710,9 +1710,12 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       }
       return HSA_STATUS_ERROR;
     }
+#if defined(_WIN64) || defined(_WINDOWS) || defined(_WIN32)
     case HSA_AMD_AGENT_INFO_LUID:
-      std::memcpy(value, &properties_.LocalUID, sizeof(properties_.LocalUID));
+      static_cast<LUID*>(value)->LowPart = properties_.LuidLowPart;
+      static_cast<LUID*>(value)->HighPart = properties_.LuidHighPart;
       break;
+#endif
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
