@@ -72,6 +72,7 @@ jobs:
           
       - name: Build CI Container (PR - No Push)
         if: github.event_name == 'pull_request'
+        working-directory: projects/rocprofiler-systems/docker
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -79,7 +80,6 @@ jobs:
           timeout_minutes: 45
           max_attempts: 3
           command: |
-            pushd projects/rocprofiler-systems/docker
             ./build-docker-ci.sh \
               --distro ${{ matrix.distro }} \
               --versions ${{ matrix.version }} \
@@ -87,10 +87,10 @@ jobs:
               --jobs 2 \
               --elfutils-version 0.188 \
               --boost-version 1.79.0
-            popd
 
       - name: Build Base Container (Push)
         if: github.event_name != 'pull_request'
+        working-directory: projects/rocprofiler-systems/docker
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -98,7 +98,6 @@ jobs:
           timeout_minutes: 45
           max_attempts: 3
           command: |
-            pushd projects/rocprofiler-systems/docker
             ./build-docker-ci.sh \
               --distro ${{ matrix.distro }} \
               --versions ${{ matrix.version }} \
@@ -107,7 +106,6 @@ jobs:
               --elfutils-version 0.188 \
               --boost-version 1.79.0 \
               --push
-            popd
 
   prepare_matrix_release:
     if: github.repository == 'ROCm/rocm-systems'
@@ -155,6 +153,7 @@ jobs:
 
       - name: Build Base Container (PR - No Push)
         if: github.event_name == 'pull_request'
+        working-directory: projects/rocprofiler-systems/docker
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -162,16 +161,15 @@ jobs:
           timeout_minutes: 45
           max_attempts: 3
           command: |
-            pushd projects/rocprofiler-systems/docker
             ./build-docker.sh \
               --distro ${{ matrix.os-distro }} \
               --versions ${{ matrix.os-version }} \
               --rocm-versions ${{ matrix.rocm-version }} \
               --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
-            popd
       
       - name: Build Base Container (Push)
         if: github.event_name != 'pull_request'
+        working-directory: projects/rocprofiler-systems/docker
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -179,11 +177,9 @@ jobs:
           timeout_minutes: 45
           max_attempts: 3
           command: |
-            pushd projects/rocprofiler-systems/docker
             ./build-docker.sh \
               --distro ${{ matrix.os-distro }} \
               --versions ${{ matrix.os-version }} \
               --rocm-versions ${{ matrix.rocm-version }} \
               --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
               --push
-            popd
