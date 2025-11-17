@@ -197,6 +197,9 @@ install(DIRECTORY
 # So had to be written in a config file for each generator to replace and execute
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/catch_package.cmake.in
                ${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake @ONLY)
+# called during cpack
 set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake")
+# called during install and cpack. But skipped in cpack step
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake")
 
 include(CPack)
