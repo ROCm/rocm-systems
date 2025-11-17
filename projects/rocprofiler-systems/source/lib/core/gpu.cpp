@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "agent.hpp"
+#include "agent_info.hpp"
 #define ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN                                           \
     namespace tim                                                                        \
     {                                                                                    \
@@ -138,6 +139,9 @@ query_rocm_agents()
             cur_agent.model_name           = std::string(_agent->model_name);
             cur_agent.vendor_name          = std::string(_agent->vendor_name);
             cur_agent.product_name         = std::string(_agent->product_name);
+
+            cur_agent.agent_info = agent_info::to_json_string(*_agent);
+
             _agent_manager.insert_agent(cur_agent);
         }
         return ROCPROFILER_STATUS_SUCCESS;
