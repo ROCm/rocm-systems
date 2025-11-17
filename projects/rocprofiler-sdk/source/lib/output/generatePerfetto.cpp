@@ -268,6 +268,7 @@ write_perfetto(
 
     for(const auto& aitr : agent_queue_ids)
     {
+        uint32_t nqueue = 0;
         for(auto qitr : aitr.second)
         {
             const auto* _agent = _get_agent(aitr.first);
@@ -276,7 +277,7 @@ write_perfetto(
             auto agent_index_info =
                 tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
             _namess << "COMPUTE " << agent_index_info.label << " [" << agent_index_info.index
-                    << "] QUEUE [" << qitr.handle - 1 << "] ";
+                    << "] QUEUE [" << nqueue++ << "] ";
             _namess << agent_index_info.type;
 
             auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
