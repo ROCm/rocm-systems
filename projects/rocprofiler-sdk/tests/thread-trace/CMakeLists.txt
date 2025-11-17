@@ -57,16 +57,9 @@ add_test(NAME thread-trace-api-single-test
 
 set_tests_properties(
     thread-trace-api-single-test
-    PROPERTIES TIMEOUT
-               10
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    PROPERTIES TIMEOUT 10 LABELS "integration-tests" ENVIRONMENT
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # Multi dispatch test
 add_executable(thread-trace-api-multi-test)
@@ -83,16 +76,9 @@ add_test(NAME thread-trace-api-multi-test
 
 set_tests_properties(
     thread-trace-api-multi-test
-    PROPERTIES TIMEOUT
-               10
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    PROPERTIES TIMEOUT 10 LABELS "integration-tests" ENVIRONMENT
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # Agent profiling test
 add_executable(thread-trace-api-agent-test)
@@ -108,16 +94,9 @@ add_test(NAME thread-trace-api-agent-test
 
 set_tests_properties(
     thread-trace-api-agent-test
-    PROPERTIES TIMEOUT
-               10
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    PROPERTIES TIMEOUT 10 LABELS "integration-tests" ENVIRONMENT
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # Test large buffer sizes. 5120 == 5GB
 add_test(NAME thread-trace-api-large-buffer-test
