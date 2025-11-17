@@ -3808,11 +3808,17 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+<<<<<<< HEAD
     if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
       if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
                              reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
         return HSA_STATUS_ERROR;
       }
+=======
+    if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
+                                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
+      return HSA_STATUS_ERROR;
+>>>>>>> ea2c50bcbb5e (Update os specific map/unmap memory calls)
     }
   } else {
     hsa_status_t status = targetAgent->driver().Map(
@@ -3827,6 +3833,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
+<<<<<<< HEAD
 #if defined(__linux__)
       if (munmap(va, size) != 0) return HSA_STATUS_ERROR;
 
@@ -3842,6 +3849,17 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
       }
 #endif
       permissions = HSA_ACCESS_PERMISSION_NONE;
+=======
+      hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
+      if (!rocr::os::UnmapMemory(va, size)) {
+        return HSA_STATUS_ERROR;
+      }
+      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
+                                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
+        return HSA_STATUS_ERROR;
+      }
+      permissions = perms;
+>>>>>>> ea2c50bcbb5e (Update os specific map/unmap memory calls)
     }
   } else {
     return targetAgent->driver().Unmap(
@@ -3859,6 +3877,10 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
 {
   /* Create a CPU mapping with PROT_NONE */
   auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
+<<<<<<< HEAD
+=======
+
+>>>>>>> ea2c50bcbb5e (Update os specific map/unmap memory calls)
   auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
                        std::forward_as_tuple(cpu_agent),
                        std::forward_as_tuple(this, cpu_agent, va,
@@ -3868,6 +3890,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
   auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
   if (ret != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
+  #endif
 }
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held
