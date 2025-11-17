@@ -527,7 +527,7 @@ struct amd_smi_sample : cacheable_t
     amd_smi_sample(uint64_t _settings, uint32_t _device_id, size_t _timestamp,
                    uint32_t _gfx_activity, uint32_t _umc_activity, uint32_t _mm_activity,
                    uint32_t _power, int64_t _temperature, size_t _mem_usage,
-                   std::vector<uint8_t> _xcp_activity)
+                   std::vector<uint8_t> _gpu_activity)
     : settings(_settings)
     , device_id(_device_id)
     , timestamp(_timestamp)
@@ -537,7 +537,7 @@ struct amd_smi_sample : cacheable_t
     , power(_power)
     , temperature(_temperature)
     , mem_usage(_mem_usage)
-    , xcp_activity(std::move(_xcp_activity))
+    , gpu_activity(std::move(_gpu_activity))
     {}
 
     enum class settings_positions : uint8_t
@@ -571,7 +571,7 @@ serialize(uint8_t* buffer, const amd_smi_sample& item)
     utility::store_value(buffer, item.settings, item.device_id, (uint64_t) item.timestamp,
                          item.gfx_activity, item.umc_activity, item.mm_activity,
                          item.power, item.temperature, (uint64_t) item.mem_usage,
-                         item.xcp_activity);
+                         item.gpu_activity);
 }
 
 template <>
@@ -582,7 +582,7 @@ deserialize(uint8_t*& buffer)
     uint64_t       timestamp, mem_usage;
     utility::parse_value(buffer, item.settings, item.device_id, timestamp,
                          item.gfx_activity, item.umc_activity, item.mm_activity,
-                         item.power, item.temperature, mem_usage, item.xcp_activity);
+                         item.power, item.temperature, mem_usage, item.gpu_activity);
     item.timestamp = timestamp;
     item.mem_usage = mem_usage;
     return item;
@@ -595,7 +595,7 @@ get_size(const amd_smi_sample& item)
     return utility::get_size(item.settings, item.device_id, (uint64_t) item.timestamp,
                              item.gfx_activity, item.umc_activity, item.mm_activity,
                              item.power, item.temperature, (uint64_t) item.mem_usage,
-                             item.xcp_activity);
+                             item.gpu_activity);
 }
 
 struct cpu_freq_sample : cacheable_t
