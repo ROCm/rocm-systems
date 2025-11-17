@@ -148,7 +148,7 @@ TEST_CASE("Unit_hipModuleGetGlobal_Negative_Dptr_And_Bytes_Are_Nullptr") {
 
 // Test description: Loading device ptr from different device than the one on which the module
 // is loaded
-TEST_CASE("Unit_hipModuleGetGlobal_DiffDevice") {
+TEST_CASE("Unit_hipModuleGetGlobal_DiffDevice", "[multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {

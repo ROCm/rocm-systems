@@ -298,20 +298,11 @@ enum ImageLayoutUsageFlags : uint32
                                                  ///  display engine.
     LayoutUncompressed            = 0x00001000,  ///< Metadata fully decompressed/expanded layout
     LayoutSampleRate              = 0x00002000,  ///< CmdBindSampleRateImage() source.
-    LayoutVideoEncodeRead         = 0x00004000,  ///< Video encoder input image layout, output is buffer so no layout.
-    LayoutVideoDecodeWrite        = 0x00008000,  ///< Video decoder output image layout, input is buffer so no layout.
-    LayoutAllUsages               = 0x0000FFFF,
+    LayoutAllUsages               = 0x00003FFF
 };
 
 /// Bitmask values that can be ORed together to specify all potential engines an image might be used on.  Such a
 /// mask should be specified in the engines field of ImageLayout.
-///
-/// Generally speaking, image transition inside the all video queues doesn't require barrier including stall, cache
-/// sync and layout transition. For transition across queues, we rely inter-queue sync to guarantee the stall
-/// and cache sync. However, it's possible the layout transition is incompatible and we need handle it. Clients can
-/// call @ref IImage::IsLayoutTransitionCompatible() to check if the transition is compatible or not; if not,
-/// must issue a barrier to do the layout transition. Note that Layout transitions must always be executed on Universal
-/// or Compute queues; and DMA queue only supports metadata initialization transition.
 ///
 /// If the client API is unable to determine which engines might be used, it should specify all possible engines
 /// corresponding to the usage flags.
@@ -370,35 +361,25 @@ enum CacheCoherencyUsageFlags : uint32
 /// Bitmask values for the flags parameter of ICmdBuffer::CmdClearColorImage().
 enum ClearColorImageFlags : uint32
 {
-    ColorClearAutoSync     = 0x01, ///< PAL will automatically insert required barrier synchronization before
-                                   ///  and after the clear assuming all subresources to be cleared are currently
-                                   ///  ready for rendering as a color target (as is required by API convention in
-                                   ///  DX12).  Allows reduced sync costs in some situations since PAL knows
-                                   ///  the details of how the clear will be performed.
-    ColorClearForceSlow    = 0x02, ///< Force these to use slow clears.
-    ColorClearSkipIfSlow   = 0x04, ///< Only issue the clear if it is a fast clear.
-    ColorClearInitMetaData = 0x08, ///< PAL will make sure initialize all metadata (including internal metadata state
-                                   ///  data) for this image to be cleared. This is typically used for placed resource
-                                   ///  initialization (as required by API convention in DX12); should only be used
-                                   ///  when this is a full box clear.
-    ColorClearAllFlags     = 0x0F  ///< Clients should NOT use it, for internal static_assert purpose only.
+    ColorClearAutoSync   = 0x00000001, ///< PAL will automatically insert required barrier synchronization before
+                                       ///  and after the clear assuming all subresources to be cleared are currently
+                                       ///  ready for rendering as a color target (as is required by API convention in
+                                       ///  DX12).  Allows reduced sync costs in some situations since PAL knows
+                                       ///  the details of how the clear will be performed.
+    ColorClearForceSlow  = 0x00000002, ///< Force these to use slow clears.
+    ColorClearSkipIfSlow = 0x00000004, ///< Only issue the clear if it is a fast clear.
+    ColorClearAllFlags   = 0x00000007  ///< Clients should NOT use it, for internal static_assert purpose only.
 };
 
 /// Bitmask values for the flags parameter of ICmdBuffer::CmdClearDepthStencil().
 enum ClearDepthStencilFlags : uint32
 {
-    DsClearAutoSync     = 0x01,   ///< PAL will automatically insert required barrier synchronization before
-                                  ///  and after the clear assuming all subresources to be cleared are currently
-                                  ///  ready for rendering as a depth/stencil target (as is required by API convention
-                                  ///  in DX12).  Allows reduced sync costs in some situations since PAL knows the
-                                  ///  details of how the clear will be performed.
-    DsClearInitMetaData = 0x02,   ///< PAL will make sure initialize all metadata (including internal metadata state
-                                  ///  data) for this image to be cleared. This is typically used for placed resource
-                                  ///  initialization (as is required by API convention in DX12); should only be used
-                                  ///  when this is a full box clear. Note that if clients call @ref
-                                  ///  CmdClearDepthStencil() with this flag, MUST call @ref CmdUpdateHiSPretests()
-                                  ///  after clear call otherwise HiSPretests will be overridden to initialized state.
-    DsClearAllFlags     = 0x03    ///< Clients should NOT use it, for internal static_assert purpose only.
+    DsClearAutoSync = 0x00000001,   ///< PAL will automatically insert required barrier synchronization before
+                                    ///  and after the clear assuming all subresources to be cleared are currently
+                                    ///  ready for rendering as a depth/stencil target (as is required by API convention
+                                    ///  in DX12).  Allows reduced sync costs in some situations since PAL knows the
+                                    ///  details of how the clear will be performed.
+    DsClearAllFlags = 0x00000001    ///< Clients should NOT use it, for internal static_assert purpose only.
 };
 
 /// Bitmask values for the flags parameter of ICmdBuffer::CmdResolveImage().
@@ -559,12 +540,7 @@ union CmdBufferBuildFlags
         /// non-TMZ memory, the results are undefined. Only valid for graphics and compute.
         uint32  enableTmz                      :  1;
 
-        /// @internal
-        /// Build this command buffer in system memory
-        ///
-        /// @warning This is an internal flag and its existence, its signature and its semantics are not guaranteed
-        ///          across different PAL versions.
-        uint32 buildInSysMem                   :  1;
+        uint32 placeholder3                    :  1;
 
         /// If set, internal operations such as blits, copies, etc. will not affect active Query results.
         /// Otherwise they may affect the results.
@@ -1309,34 +1285,15 @@ extern const ColorSpaceConversionTable DefaultCscTableYuvToRgb;
 /// to perform a RGB to YUV color space conversion.  Represents the BT.601 standard (standard-definition TV).
 extern const ColorSpaceConversionTable DefaultCscTableRgbToYuv;
 
-/// Specifies flags controlling GPU copy behavior in @ref CmdCopyImage.  Format related flags are ignored by DMA queues.
-enum CopyImageControlFlags : uint32
-{
-    CopyImageFormatConversion  = 0x1, ///< Requests that the copy convert between two compatible formats. This is
-                                      ///  ignored unless both formats support @ref FormatFeatureFormatConversion.
-    CopyImageRawSwizzle        = 0x2, ///< If possible, raw copies will swizzle from the source channel format into the
-                                      ///  destination channel format (e.g., RGBA to BGRA).
-    CopyImageEnableScissorTest = 0x4, ///< If set, do scissor test using the specified scissor rectangle.
-    CopyImageInitDstMetadata   = 0x8, ///< Requests copy initializes dst image's metadata; requires full box copy.
-    CopyImageControlAllFlags   = 0xF  ///< Clients should NOT use it, for internal static_assert purpose only.
-};
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 955
+/// Specifies flags controlling GPU copy behavior.  Format related flags are ignored by DMA queues.
 enum CopyControlFlags : uint32
 {
-    CopyFormatConversion  = CopyImageFormatConversion,
-    CopyRawSwizzle        = CopyImageRawSwizzle,
-    CopyEnableScissorTest = CopyImageEnableScissorTest,
+    CopyFormatConversion  = 0x1, ///< Requests that the copy convert between two compatible formats. This is ignored
+                                 ///  unless both formats support @ref FormatFeatureFormatConversion.
+    CopyRawSwizzle        = 0x2, ///< If possible, raw copies will swizzle from the source channel format into the
+                                 ///  destination channel format (e.g., RGBA to BGRA).
+    CopyEnableScissorTest = 0x4, ///< If set, do scissor test using the specified scissor rectangle.
     CopyControlAllFlags   = 0x7  ///< Clients should NOT use it, for internal static_assert purpose only.
-};
-#endif
-
-/// Specifies flags controlling GPU copy behavior in @ref CmdCopyMemoryToImage.
-/// Format related flags are ignored by DMA queues.
-enum CopyMemoryToImageControlFlags : uint32
-{
-    CopyMemoryToImageInitDstMetadata = 0x1, ///< Requests copy initializes dst image's metadata; requires full box copy.
-    CopyMemoryToImageControlAllFlags = 0x1  ///< Clients should NOT use it, for internal static_assert purpose only.
 };
 
 /// Specifies parameters for a resolve of one region in an MSAA source image to a region of the same size in a single
@@ -1752,19 +1709,12 @@ struct DispatchAqlParams
 
 };
 
-/// This structure holds the parameters used during kernel dispatch.
-struct DispatchAqlFeedback
-{
-    uint32  tmpRingSize;    ///< Content of the compute_tmpring_size register.
-};
-
 /// @internal Function pointer type definition for issuing AQL dispatches.
 ///
 /// @see ICmdBuffer::CmdDispatchAql().
 typedef void (PAL_STDCALL *CmdDispatchAqlFunc)(
     ICmdBuffer*                 pCmdBuffer,
-    const DispatchAqlParams&    dispatchInfo,
-    DispatchAqlFeedback*        pFeedback);
+    const DispatchAqlParams&    dispatchInfo);
 
 /// Specifies input assembler state for draws.
 /// @see ICmdBuffer::CmdSetInputAssemblyState
@@ -1978,13 +1928,6 @@ struct Viewport
     PointOrigin origin;    ///< Origin of the viewport relative to NDC. UpperLeft or LowerLeft.
 };
 
-/// Specifies the range for user-defined depth clamp.
-struct DepthClamp
-{
-    float minDepth; ///< Minimum depth value after viewport transform.
-    float maxDepth; ///< Maximum depth value after viewport transform.
-};
-
 /// Specifies the viewport transform parameters for setting a single viewport.
 /// @see ICmdBuffer::CmdSetViewport
 struct ViewportParams
@@ -1998,7 +1941,6 @@ struct ViewportParams
     float      horzClipRatio;           ///< The ratio between guardband clip rect width and viewport width.
     float      vertClipRatio;           ///< The ratio between guardband clip rect height and viewport height.
     DepthRange depthRange;              ///< Specifies the target range of Z values
-    DepthClamp userDepthClamp;          ///< Specifies the clamp range of Z values for DepthClampMode::UserDefined.
     // Define viewports array at the end of the structure as it is common to only access the first N from the CPU.
     Viewport   viewports[MaxViewports]; ///< Array of desciptors for each viewport.
 };
@@ -2147,9 +2089,7 @@ struct CmdBufInfo
             uint32 captureCamera           : 1;  ///< Has Direct Capture camera matrix capture
             uint32 hudLessImagePropChanged : 1;  ///< Indicates whether HUD less image properties changed
             uint32 captureHudLessImage     : 1;  ///< Has Direct Capture HUD less image capture
-            uint32 llmDecodeStart          : 1;  ///< Has LLM decode Start Enabled in the CmdBufInfo packet
-            uint32 llmDecodeStop           : 1;  ///< Has LLM decode Stop Enabled in the CmdBufInfo packet
-            uint32 reserved                : 1;  ///< Reserved for future usage.
+            uint32 reserved                : 3;  ///< Reserved for future usage.
         };
         uint32 u32All;                           ///< Flags packed as uint32.
     };
@@ -3352,27 +3292,12 @@ public:
     /// @param [in] regionCount    Number of regions to copy; size of the pRegions array.
     /// @param [in] pRegions       Array of copy regions, each entry specifying a source offset, a destination
     ///                            subresource, destination x/y/z offset, and copy size in the x/y/z dimensions.
-    /// @param [in] flags          A mask of ORed @ref CopyMemoryToImageControlFlags that can be used to control copy
-    ///                            behavior.
     virtual void CmdCopyMemoryToImage(
         const IGpuMemory&            srcGpuMemory,
         const IImage&                dstImage,
         ImageLayout                  dstImageLayout,
         uint32                       regionCount,
-        const MemoryImageCopyRegion* pRegions,
-        uint32                       flags) = 0;
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 955
-    void CmdCopyMemoryToImage(
-        const IGpuMemory&            srcGpuMemory,
-        const IImage&                dstImage,
-        ImageLayout                  dstImageLayout,
-        uint32                       regionCount,
-        const MemoryImageCopyRegion* pRegions)
-    {
-        CmdCopyMemoryToImage(srcGpuMemory, dstImage, dstImageLayout, regionCount, pRegions, 0);
-    }
-#endif
+        const MemoryImageCopyRegion* pRegions) = 0;
 
     /// Copies data directly (without format conversion) from an image to a GPU memory object.
     ///
@@ -4894,25 +4819,14 @@ public:
     /// Emulates AQL dispatch with PM4 commands.
     /// NOTE: Available for compute queues when created with aqlQueue set in the QueueCreateInfo.
     ///
-    /// @param [in]  dispatchInfo    Pointer to kernel dispatch info
-    /// @param [out] pFeedback       Pointer to the structure where information about the
-    ///                              dispatch can be stored if != nullptr.
+    /// @param [in] dispatchInfo    Pointer to kernel dispatch info
     ///
     /// @note This function is to support OpenCL AQL submissions.
     void CmdDispatchAql(
-        const DispatchAqlParams& dispatchInfo,
-        DispatchAqlFeedback*     pFeedback)
-    {
-        m_funcTable.pfnCmdDispatchAql(this, dispatchInfo, pFeedback);
-    }
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 954
-    inline void CmdDispatchAql(
         const DispatchAqlParams& dispatchInfo)
     {
-        CmdDispatchAql(dispatchInfo, nullptr);
+        m_funcTable.pfnCmdDispatchAql(this, dispatchInfo);
     }
-#endif
 
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 888
     /// XDMA was retired starting in gfx10 so this function has no use anymore.

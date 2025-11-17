@@ -254,7 +254,7 @@ static void hipGraphLaunch_test() {
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 }
 
-TEST_CASE("Unit_hipGraphLaunch_Functional_multidevice_test") {
+TEST_CASE("Unit_hipGraphLaunch_Functional_multidevice_test", "[multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

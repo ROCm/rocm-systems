@@ -243,7 +243,7 @@ TEST_CASE("Unit_hipMemAdvise_NegtveTsts") {
 
 // The following function tests various scenarios around the flag
 // 'hipMemAdviseSetPreferredLocation' using HMM memory and hipMemAdvise() api
-TEST_CASE("Unit_hipMemAdvise_PrefrdLoc") {
+TEST_CASE("Unit_hipMemAdvise_PrefrdLoc", "[multigpu]") {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     // Check that when a page fault occurs for the memory region set to devPtr,
@@ -428,7 +428,7 @@ TEST_CASE("Unit_hipMemAdvise_TstFlgOverrideEffect") {
 // The following function tests if peers can set hipMemAdviseSetAccessedBy flag
 // on HMM memory prefetched on each of the other gpus
 #if HT_AMD
-TEST_CASE("Unit_hipMemAdvise_TstAccessedByPeer") {
+TEST_CASE("Unit_hipMemAdvise_TstAccessedByPeer", "[multigpu]") {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -732,7 +732,7 @@ TEST_CASE("Unit_hipMemAdvise_TstMemAdvisePrefrdLoc") {
    to device1, probe for hipMemRangeAttributeLastPrefetchLocation using
    hipMemRangeGetAttribute(), we should get 1*/
 
-TEST_CASE("Unit_hipMemAdvise_TstMemAdviseLstPreftchLoc") {
+TEST_CASE("Unit_hipMemAdvise_TstMemAdviseLstPreftchLoc", "[multigpu]") {
   int NumDevs = 0;
   HIP_CHECK(hipGetDeviceCount(&NumDevs));
   if (NumDevs >= 2) {
@@ -802,7 +802,7 @@ TEST_CASE("Unit_hipMemAdvise_TstMemAdviseMultiFlag") {
   access denial case arising due to setting ReadMostly only to a particular
   gpu*/
 
-TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst") {
+TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst", "[multigpu]") {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0;

@@ -321,6 +321,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_ParamValidation") {
     HIP_CHECK(hipGraphCreate(&emptyGraph, 0));
     HIP_CHECK(hipGraphGetRootNodes(emptyGraph, nullptr, &numRootNodes));
     REQUIRE(numRootNodes == 0);
+    HIP_CHECK(hipGraphDestroy(emptyGraph));
   }
 
   SECTION("numRootNodes less than actual number of nodes") {
@@ -394,7 +395,6 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Complx_NumRootNodes_ClonedGrph") {
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphCreate(&clonedgraph, 0));
   // Create graph with no dependencies
   for (int i = 0; i < NUM_OF_DUMMY_NODES; i++) {
     void* kernelArgs[] = {nullptr};
