@@ -41,6 +41,7 @@ profiling, how it supports performance analysis, and how to leverage its capabil
       * :doc:`Profiling Python scripts <./how-to/profiling-python-scripts>`
       * :doc:`Network performance profiling <./how-to/nic-profiling>`
       * :doc:`VCN and JPEG sampling and tracing <./how-to/vcn-jpeg-sampling>`
+      * :doc:`XGMI and PCIe metrics monitoring <./how-to/xgmi-pcie-sampling>`
 
     * :doc:`Understanding the output <./how-to/understanding-rocprof-sys-output>`
     * :doc:`Using the ROCm Systems Profiler API <./how-to/using-rocprof-sys-api>`
