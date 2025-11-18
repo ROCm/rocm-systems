@@ -1320,27 +1320,27 @@ def search_pc_sampling_record(
         return None
 
     # Convert to sorted list of tuples:
-    # (code_object_id, inst_index, code_object_offset, count, count_issued,
-    # count_stalled, stall_reason)
     sorted_counts = sorted(
         [
             (
                 code_object_id,
-                info[3],  # inst_index
-                offset,
-                info[0],  # count
+                code_object_offset,
+                inst_index,
+                info[0],  # total_count
                 info[1],  # count_issued
                 info[2],  # count_stalled
-                # For info[4] (stall_reason dict), remove the zero entries,
-                # sorting the remaining items by their values in descending order
                 sorted(
-                    ((k, v) for k, v in info[4].items() if v > 0),
+                    ((k, v) for k, v in info[3].items() if v > 0),
                     key=lambda item: item[1],
                     reverse=True,
                 ),  # sorted stall reasons
                 sorted(info[4]),  # sorted dispatch_ids list
             )
-            for (code_object_id, offset), info in grouped_data.items()
+            for (
+                code_object_id,
+                code_object_offset,
+                inst_index,
+            ), info in grouped_data.items()
         ],
         key=lambda x: (x[0], x[1], x[2]),
     )
