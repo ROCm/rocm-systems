@@ -108,7 +108,7 @@ TEST_CASE("Unit_hipEventElapsedTime_DisableTiming") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventElapsedTime_DifferentDevices") {
+TEST_CASE("Unit_hipEventElapsedTime_DifferentDevices", "[multigpu]") {
   int devCount = 0;
   HIP_CHECK(hipGetDeviceCount(&devCount));
   if (devCount > 1) {

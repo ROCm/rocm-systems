@@ -207,7 +207,7 @@ TEST_CASE("Unit_hipGetFuncBySymbol_InChildProcess") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetFuncBySymbol_MultiDev") {
+TEST_CASE("Unit_hipGetFuncBySymbol_MultiDev", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -323,7 +323,7 @@ void MultiThreadMultiDevFunc(int DevId) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetFuncBySymbol_MultiDevMultiThread") {
+TEST_CASE("Unit_hipGetFuncBySymbol_MultiDevMultiThread", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {

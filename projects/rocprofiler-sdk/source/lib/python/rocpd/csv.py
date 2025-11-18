@@ -28,7 +28,6 @@ import re
 
 from .importer import RocpdImportData
 from .query import export_sqlite_query
-from .time_window import apply_time_window
 from . import output_config
 from . import libpyrocpd
 
@@ -413,11 +412,9 @@ def write_csv(importData, config):
     write_scratch_memory_csv(importData, config)
 
 
-def execute(input, config=None, window_args=None, **kwargs):
+def execute(input, config=None, **kwargs):
 
     importData = RocpdImportData(input)
-
-    apply_time_window(importData, **window_args)
 
     config = (
         output_config.output_config(**kwargs)
@@ -431,21 +428,17 @@ def execute(input, config=None, window_args=None, **kwargs):
 def add_args(parser):
     """Add csv arguments."""
 
-    return []
+    def process_args(input, args):
+        ret = {}
+        return ret
 
-
-def process_args(args, valid_args):
-    ret = {}
-    return ret
+    return process_args
 
 
 def main(argv=None):
     import argparse
-    from .time_window import add_args as add_args_time_window
-    from .time_window import process_args as process_args_time_window
-    from .output_config import add_args as add_args_output_config
-    from .output_config import process_args as process_args_output_config
-    from .output_config import add_generic_args, process_generic_args
+    from . import time_window
+    from . import output_config
 
     parser = argparse.ArgumentParser(
         description="Convert rocPD to CSV files",
@@ -464,17 +457,19 @@ def main(argv=None):
         help="Input path and filename to one or more database(s), separated by spaces",
     )
 
-    valid_out_config_args = add_args_output_config(parser)
-    valid_generic_args = add_generic_args(parser)
-    valid_time_window_args = add_args_time_window(parser)
-    valid_csv_args = add_args(parser)
+    process_out_config_args = output_config.add_args(parser)
+    process_generic_args = output_config.add_generic_args(parser)
+    process_time_window_args = time_window.add_args(parser)
+    process_csv_args = add_args(parser)
 
     args = parser.parse_args(argv)
 
-    out_cfg_args = process_args_output_config(args, valid_out_config_args)
-    generic_out_cfg_args = process_generic_args(args, valid_generic_args)
-    window_args = process_args_time_window(args, valid_time_window_args)
-    csv_args = process_args(args, valid_csv_args)
+    input = RocpdImportData(args.input)
+
+    out_cfg_args = process_out_config_args(input, args)
+    generic_out_cfg_args = process_generic_args(input, args)
+    csv_args = process_csv_args(input, args)
+    process_time_window_args(input, args)
 
     all_args = {
         **out_cfg_args,
@@ -482,7 +477,7 @@ def main(argv=None):
         **csv_args,
     }
 
-    execute(args.input, window_args=window_args, **all_args)
+    execute(input, **all_args)
 
 
 if __name__ == "__main__":

@@ -32,7 +32,11 @@ TEST_CASE("Unit_hipModuleUnload_Negative_Double_Unload") {
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoad(&module, "empty_module.code"));
   HIP_CHECK(hipModuleUnload(module));
+#if HT_AMD
   HIP_CHECK_ERROR(hipModuleUnload(module), hipErrorNotFound);
+#else
+  HIP_CHECK_ERROR(hipModuleUnload(module), hipErrorInvalidResourceHandle);
+#endif
 }
 /**
  * @addtogroup hipModuleUnload
@@ -54,9 +58,11 @@ TEST_CASE("Unit_hipModuleUnload_Negative_Double_Unload") {
  * - HIP_VERSION >= 5.6
  */
 TEST_CASE("Unit_hipModuleLoad_basic") {
+  CTX_CREATE();
   constexpr auto fileName = "vcpy_kernel.code";
   hipModule_t module;
   HIP_CHECK(hipModuleLoad(&module, fileName));
   REQUIRE(module != nullptr);
   HIP_CHECK(hipModuleUnload(module));
+  CTX_DESTROY();
 }

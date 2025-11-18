@@ -252,7 +252,7 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage
 
-Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``.
+Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``, ``xgmi``, ``pcie``.
 
 API tracing is configured with the ``ROCPROFSYS_ROCM_DOMAINS`` setting. The domains are used to filter the events that are captured during profiling.
 Supported values for this setting are those supported by ROCprofiler-SDK, which are returned by the API ``get_callback_tracing_names()`` and ``get_buffer_tracing_names()``. See the `ROCprofiler-SDK developer API documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/_doxygen/rocprofiler-sdk/html/>`_ to learn more about ROCprofiler-SDK APIs.
