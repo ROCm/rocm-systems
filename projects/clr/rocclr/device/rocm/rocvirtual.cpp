@@ -1980,78 +1980,83 @@ void VirtualGPU::profilingEnd(bool clearHwEvent) {
 
 // ================================================================================================
 void VirtualGPU::updateCommandsState(amd::Command* list) const {
-  Timestamp* ts = nullptr;
-
-  amd::Command* current = list;
-  amd::Command* next = nullptr;
-
-  if (current == nullptr) {
+  if (list == nullptr) {
     return;
   }
 
-  uint64_t endTimeStamp = 0;
-  uint64_t startTimeStamp = endTimeStamp;
+  // Early exit if profiling is not enabled
+  if (!list->profilingInfo().enabled_) {
+    // Fast path: no profiling, just update status and release commands
+    amd::Command* current = list;
+    while (current != nullptr) {
+      const int32_t cmdStatus = current->status();
+      if (cmdStatus == CL_SUBMITTED) {
+        current->setStatus(CL_RUNNING, 0);
+        current->setStatus(CL_COMPLETE, 0);
+      } else if (cmdStatus != CL_COMPLETE) {
+        LogPrintfError("Unexpected command status - %d.", cmdStatus);
+      }
+      amd::Command* next = current->getNext();
+      current->release();
+      current = next;
+    }
+    return;
+  }
 
-  if (current->profilingInfo().enabled_) {
+  // Profiling enabled: find first valid timestamp efficiently
+  Timestamp* ts = nullptr;
+  uint64_t endTimeStamp = 0;
+  uint64_t startTimeStamp = 0;
+  amd::Command* firstTsCmd = list;
+  
+  // Find first command with timestamp (single pass, stop when found)
+  while (firstTsCmd != nullptr) {
+    if (!firstTsCmd->data().empty()) {
+      ts = reinterpret_cast<Timestamp*>(firstTsCmd->data().back());
+      ts->getTime(&startTimeStamp, &endTimeStamp);
+      break;
+    }
+    firstTsCmd = firstTsCmd->getNext();
+  }
+  
+  if (endTimeStamp == 0) {
     // TODO: use GPU timestamp when available.
     endTimeStamp = amd::Os::timeNanos();
     startTimeStamp = endTimeStamp;
-
-    // This block gets the first valid timestamp from the first command
-    // that has one. This timestamp is used below to mark any command that
-    // came before it to start and end with this first valid start time.
-    current = list;
-    while (current != nullptr) {
-      if (!current->data().empty()) {
-        ts = reinterpret_cast<Timestamp*>(current->data().back());
-        ts->getTime(&startTimeStamp, &endTimeStamp);
-        break;
-      }
-      current = current->getNext();
-    }
   }
 
-  // Iterate through the list of commands, and set timestamps as appropriate
-  // Note, if a command does not have a timestamp, it does one of two things:
-  // - if the command (without a timestamp), A, precedes another command, C,
-  // that _does_ contain a valid timestamp, command A will set RUNNING and
-  // COMPLETE with the RUNNING (start) timestamp from command C. This would
-  // also be true for command B, which is between A and C. These timestamps
-  // are actually retrieved in the block above (startTimeStamp, endTimeStamp).
-  // - if the command (without a timestamp), C, follows another command, A,
-  // that has a valid timestamp, command C will be set RUNNING and COMPLETE
-  // with the COMPLETE (end) timestamp of the previous command, A. This is
-  // also true for any command B, which falls between A and C.
-  current = list;
+  // Process all commands in single pass with cached values
+  amd::Command* current = list;
   while (current != nullptr) {
+    const int32_t cmdStatus = current->status();
+
     if (current->profilingInfo().enabled_) {
-      if (!current->data().empty()) {
-        for (auto i = 0; i < current->data().size(); i++) {
-          // Since this is a valid command to get a timestamp, we use the
-          // timestamp provided by the runtime (saved in the data())
-          ts = reinterpret_cast<Timestamp*>(current->data()[i]);
-          ts->getTime(&startTimeStamp, &endTimeStamp);
+      auto& cmdData = current->data();
+      if (!cmdData.empty()) {
+        // Only call getTime on the last element since it's expensive
+        ts = reinterpret_cast<Timestamp*>(cmdData.back());
+        ts->getTime(&startTimeStamp, &endTimeStamp);
+        // Release all timestamps
+        for (auto& dataItem : cmdData) {
+          ts = reinterpret_cast<Timestamp*>(dataItem);
           ts->release();
         }
-        current->data().clear();
+        cmdData.clear();
       } else {
-        // If we don't have a command that contains a valid timestamp,
-        // we simply use the end timestamp of the previous command.
-        // Note, if this is a command before the first valid timestamp,
-        // this will be equal to the start timestamp of the first valid
-        // timestamp at this point.
+        // Use end timestamp of previous command (or first timestamp if before
+        // first valid timestamp)
         startTimeStamp = endTimeStamp;
       }
     }
 
-    if (current->status() == CL_SUBMITTED) {
+    if (cmdStatus == CL_SUBMITTED) {
       current->setStatus(CL_RUNNING, startTimeStamp);
       current->setStatus(CL_COMPLETE, endTimeStamp);
-    } else if (current->status() != CL_COMPLETE) {
-      LogPrintfError("Unexpected command status - %d.", current->status());
+    } else if (cmdStatus != CL_COMPLETE) {
+      LogPrintfError("Unexpected command status - %d.", cmdStatus);
     }
 
-    next = current->getNext();
+    amd::Command* next = current->getNext();
     current->release();
     current = next;
   }
