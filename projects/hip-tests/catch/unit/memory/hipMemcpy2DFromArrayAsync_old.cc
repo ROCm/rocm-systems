@@ -195,7 +195,8 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_PinnedHostMemSameGpu") {
            then A_d-->E_h  in GPU1
  * OUTPUT: validating the result by comparing A_h and E_h
  */
-TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem") {
+TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem",
+          "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -254,7 +255,8 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem") {
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange") {
+TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange",
+          "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;

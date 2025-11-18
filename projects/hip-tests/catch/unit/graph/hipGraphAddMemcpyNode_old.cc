@@ -484,7 +484,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_BasicFunctional") {
  * are performed from device(1).
  * Tests also verify memcpy node addition with 1D, 2D and 3D objects.
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode_PeerAccessFunctional") {
+TEST_CASE("Unit_hipGraphAddMemcpyNode_PeerAccessFunctional", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices{}, peerAccess{};

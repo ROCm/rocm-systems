@@ -113,7 +113,7 @@
 #include "amd_hip_vector_types.h"  // float2 etc
 #include "device_library_decls.h"  // ocml conversion functions
 #include "math_fwd.h"              // ocml device functions
-#if defined(__clang__) and defined(__HIP__)
+#if defined(__clang__) && defined(__HIP__)
 #include <hip/amd_detail/amd_warp_functions.h>       // define warpSize
 #include <hip/amd_detail/amd_warp_sync_functions.h>  // Sync functions
 #endif
@@ -1748,7 +1748,9 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hsin(const __hip_bfloat16 h) {
  * \brief Calculate sqrt of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hsqrt(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_sqrt_f32(__bfloat162float(h)));
+  // FIXME: Just directly use elementwise sqrt on the bfloat value
+  // and don't promote
+  return __float2bfloat16(__builtin_elementwise_sqrt(__bfloat162float(h)));
 }
 
 /**

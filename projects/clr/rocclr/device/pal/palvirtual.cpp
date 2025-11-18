@@ -3590,7 +3590,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
     }
     // get svm non arugment information
     void* const* svmPtrArray =
-        reinterpret_cast<void* const*>(params + kernelParams.getExecInfoOffset());
+        reinterpret_cast<void* const*>(params + kernelParams.getTotalSize());
     for (size_t i = 0; i < count; i++) {
       amd::Memory* memory = amd::MemObjMap::FindMemObj(svmPtrArray[i]);
       if (nullptr == memory) {

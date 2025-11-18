@@ -366,8 +366,6 @@
         "Unit___syncthreads_count_Positive_Basic",
         "Unit___syncthreads_and_Positive_Basic",
         "Unit___syncthreads_or_Positive_Basic",
-        "Note: Test disabled due to defect - EXSWHTEC-151",
-        "Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module",
         "Note: Test disabled due to defect - EXSWHTEC-152",
         "Unit_hipModuleUnload_Negative_Module_Is_Nullptr",
         "Note: Following two tests disabled due to defect - EXSWHTEC-153",

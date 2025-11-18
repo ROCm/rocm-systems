@@ -70,11 +70,13 @@ config_settings(const std::shared_ptr<settings>& _config)
     // No distinction between busy and activity shown in description
     std::string jpeg_activity_support = "";
     std::string vcn_activity_support  = "";
+    std::string xgmi_support          = "";
+    std::string pcie_support          = "";
 
     size_t device_count = gpu::get_processor_count();
     for(size_t i = 0; i < device_count; i++)
     {
-        if(gpu::is_vcn_activity_supported(i) || gpu::is_vcn_busy_supported(i))
+        if(gpu::vcn_is_device_level_only(i) || gpu::is_vcn_busy_supported(i))
         {
             vcn_activity_support += ", vcn_activity";
             break;
@@ -82,9 +84,25 @@ config_settings(const std::shared_ptr<settings>& _config)
     }
     for(size_t i = 0; i < device_count; i++)
     {
-        if(gpu::is_jpeg_activity_supported(i) || gpu::is_jpeg_busy_supported(i))
+        if(gpu::jpeg_is_device_level_only(i) || gpu::is_jpeg_busy_supported(i))
         {
             jpeg_activity_support += ", jpeg_activity";
+            break;
+        }
+    }
+    for(size_t i = 0; i < device_count; i++)
+    {
+        if(gpu::is_xgmi_supported(i))
+        {
+            xgmi_support += ", xgmi";
+            break;
+        }
+    }
+    for(size_t i = 0; i < device_count; i++)
+    {
+        if(gpu::is_pcie_supported(i))
+        {
+            pcie_support += ", pcie";
             break;
         }
     }
@@ -92,7 +110,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_AMD_SMI_METRICS",
         "amd-smi metrics to collect: " + default_metrics + jpeg_activity_support +
-            vcn_activity_support + ". " +
+            vcn_activity_support + xgmi_support + pcie_support + ". " +
             "An empty value implies 'all' and 'none' suppresses all.",
         "busy, temp, power, mem_usage", "backend", "amd_smi", "rocm", "process_sampling");
 }
