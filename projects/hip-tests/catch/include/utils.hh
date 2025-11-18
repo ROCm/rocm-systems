@@ -170,8 +170,8 @@ inline void LaunchDelayKernel(const std::chrono::milliseconds interval, const hi
   #if HT_AMD
   HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
   if (ticks_per_ms == 0) {
-    std::cout << "clkFrequency = 0, set it to 1000000\n";
-    ticks_per_ms = 1000000;
+    std::cout << "clkFrequency = 0, set it to 1000KHz\n";
+    ticks_per_ms = 1000;
   }
   #endif
   #if HT_NVIDIA
