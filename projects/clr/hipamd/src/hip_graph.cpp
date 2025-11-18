@@ -1521,6 +1521,7 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
     delete *pGraphExec;
     return hipErrorInvalidValue;
   }
+  graph->SetGraphInstantiated(true);
   if (DEBUG_HIP_GRAPH_DOT_PRINT) {
     static int i = 1;
     std::string filename =
