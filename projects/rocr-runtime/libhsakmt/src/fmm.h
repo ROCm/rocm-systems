@@ -96,6 +96,16 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(const HsaSharedMemoryHandle *Sha
 					 uint32_t gpu_id_array_size);
 HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(void *address, uint64_t size,
 		uint32_t *nodes_to_map, uint64_t num_of_nodes, uint64_t *gpuvm_address);
+HSAKMT_STATUS hsakmt_fmm_register_ranges(void* address, uint64_t size_in_bytes,
+                                         struct kfd_ioctl_svm_range* ranges,
+                                         uint64_t nranges,
+                                         bool coarse_grain, bool ext_coherent);
+HSAKMT_STATUS fmm_register_mem_ranges_svm_api(void* address, uint64_t size,
+								struct kfd_ioctl_svm_range* ranges,
+								uint64_t nranges,
+								bool coarse_grain,
+								bool ext_coherent);
+
 
 int hsakmt_open_drm_render_device(int minor);
 void *hsakmt_mmap_allocate_aligned(int prot, int flags, uint64_t size, uint64_t align,

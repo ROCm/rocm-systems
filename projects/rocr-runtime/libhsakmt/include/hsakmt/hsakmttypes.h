@@ -1417,7 +1417,8 @@ typedef enum _HSA_SVM_ATTR_TYPE {
                                      // by the attribute value
 	HSA_SVM_ATTR_SET_FLAGS,      // bitmask of flags to set (see HSA_SVM_FLAGS)
 	HSA_SVM_ATTR_CLR_FLAGS,      // bitmask of flags to clear
-	HSA_SVM_ATTR_GRANULARITY     // migration granularity (log2 num pages)
+	HSA_SVM_ATTR_GRANULARITY,    // migration granularity (log2 num pages)
+	HSA_SVM_ATTR_MAPPED
 } HSA_SVM_ATTR_TYPE;
 
 typedef struct _HSA_SVM_ATTRIBUTE {

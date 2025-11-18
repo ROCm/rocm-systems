@@ -41,3 +41,4 @@ int hsakmt_page_shift;
 bool hsakmt_is_svm_api_supported;
 /* zfb is mainly used during emulation */
 int hsakmt_zfb_support;
+bool hsakmt_allow_mapped_userptr;

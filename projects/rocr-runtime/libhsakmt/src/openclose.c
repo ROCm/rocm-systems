@@ -129,6 +129,8 @@ static HSAKMT_STATUS init_vars_from_env(void)
 	char *envvar;
 	int debug_level;
 
+	hsakmt_allow_mapped_userptr = 1; /* default to allow mapped userptr */
+
 	/* Normally libraries don't print messages. For debugging purpose, we'll
 	 * print messages if an environment variable, HSAKMT_DEBUG_LEVEL, is set.
 	 */
@@ -146,6 +148,10 @@ static HSAKMT_STATUS init_vars_from_env(void)
 	envvar = getenv("HSA_ZFB");
 	if (envvar)
 		hsakmt_zfb_support = atoi(envvar);
+
+	envvar = getenv("HSA_ALLOW_MAPPED_USERPTR");
+	if (envvar)
+		hsakmt_allow_mapped_userptr = atoi(envvar) != 0;
 
 	return HSAKMT_STATUS_SUCCESS;
 }

@@ -1516,6 +1516,47 @@ struct kfd_ioctl_svm_args {
 };
 
 /**
+ * kfd_ioctl_svm_range - SVM range descriptor
+ *
+ * @addr: starting virtual address of the SVM range
+ * @size: size of the SVM range in bytes
+ *
+ */
+struct kfd_ioctl_svm_range {
+	__u64 addr;
+	__u64 size;
+};
+
+/**
+ * kfd_ioctl_svm_ranges_args - Arguments for SVM register ranges ioctl
+ *
+ * @nranges: number of ranges in the @ranges array
+ * @op: operation to perform (see enum @kfd_ioctl_svm_op)
+ * @nattr: number of attributes in the @attrs array
+ * @ranges: variable length array of ranges
+ * @attrs: variable length array of attributes
+ *
+ * This ioctl allows registering multiple SVM ranges with the same
+ * set of attributes. This is more efficient than calling the SVM
+ * ioctl multiple times for each range.
+ *
+ * The semantics of the operations and attributes are the same as
+ * for kfd_ioctl_svm_args.
+ */
+struct kfd_ioctl_svm_ranges_args {
+	__u64 start_addr;
+	__u64 size;
+	__u32 op;
+	__u32 nattr;
+	/* Variable length array of attributes */
+	__u64 attrs_ptr;
+	__u32 nranges;
+	__u32 pad;
+	/* Variable length array of ranges */
+	__u64 ranges_ptr;
+};
+
+/**
  * kfd_ioctl_set_xnack_mode_args - Arguments for set_xnack_mode
  *
  * @xnack_enabled:       [in/out] Whether to enable XNACK mode for this process
@@ -1811,8 +1852,11 @@ struct kfd_ioctl_ais_args {
 #define AMDKFD_IOC_DBG_TRAP			\
 		AMDKFD_IOWR(0x26, struct kfd_ioctl_dbg_trap_args)
 
+#define AMDKFD_IOC_SVM_RANGES		\
+		AMDKFD_IOWR(0x27, struct kfd_ioctl_svm_ranges_args)
+
 #define AMDKFD_COMMAND_START		0x01
-#define AMDKFD_COMMAND_END		0x27
+#define AMDKFD_COMMAND_END		0x28
 
 /* non-upstream ioctls */
 #define AMDKFD_IOC_IPC_IMPORT_HANDLE                                    \
