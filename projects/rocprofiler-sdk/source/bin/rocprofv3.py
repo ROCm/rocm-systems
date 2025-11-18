@@ -1148,7 +1148,7 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
-    ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-attach.so"
+    ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk-rocattach.so"
 
     ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
     ROCPROF_SDK_LIBRARY = resolve_library_path(ROCPROF_SDK_LIBRARY, args)
@@ -1517,7 +1517,7 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_ATTACH_PID", args.pid)
         if args.attach_duration_msec is not None:
             update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
-        path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-attach")
+        path = os.path.join(f"{ROCM_DIR}", "bin/rocprof-attach")
         if app_args:
             exit_code = subprocess.check_call([sys.executable, path], env=app_env)
         else:
