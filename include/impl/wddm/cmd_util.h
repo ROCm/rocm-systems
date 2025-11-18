@@ -33,7 +33,7 @@ public:
   CmdUtil() {};
   ~CmdUtil() {};
 
-  size_t BuildCopyData(
+  static size_t BuildCopyData(
     uint64_t  *pDstAddr,
     void      *pBuffer,
     uint32_t  dstSel = dst_sel__mec_copy_data__tc_l2,
@@ -43,32 +43,32 @@ public:
     uint32_t  countSel = count_sel__mec_copy_data__64_bits_of_data,
     uint32_t  wrConfirm = wr_confirm__mec_copy_data__wait_for_confirmation);
 
-  size_t BuildBarrier(
+  static size_t BuildBarrier(
     void      *pBuffer,
     uint32_t  eventIndex = event_index__mec_event_write__cs_partial_flush,
     uint32_t  eventType = CS_PARTIAL_FLUSH);
 
-  size_t BuildWriteData64Command(
+  static size_t BuildWriteData64Command(
     void      *pBuffer,
     uint64_t* write_addr,
     uint64_t write_value);
 
-  size_t BuildAcquireMem(
+  static size_t BuildAcquireMem(
     uint8_t major,
     void    *pBuffer);
 
-  size_t BuildScratch(
+  static size_t BuildScratch(
     void  *pScratchBase,
     void  *pBuffer);
 
-  size_t BuildComputeShaderParams(
+  static size_t BuildComputeShaderParams(
     void  *pBuffer);
 
-  size_t BuildDispatch(
+  static size_t BuildDispatch(
     struct DispatchInfo *pInfo,
     void                *pBuffer);
 
-  size_t BuildAtomicMem(
+  static size_t BuildAtomicMem(
     uint64_t  *pAddr,
     uint32_t  atomic,
     void      *pBuffer,
