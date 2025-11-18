@@ -111,6 +111,7 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
 
    "Dyninst", "13.0", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_DYNINST`` (default: OFF)"
    "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
+   "Nlohmann/JSON", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_NLOHMANN_JSON`` (default: ON)"
    "SQLite", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SQLITE`` (default: OFF)"
    "TBB", "2018.6", "Dyninst", "``ROCPROFSYS_BUILD_TBB`` (default: OFF)"
    "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
@@ -126,18 +127,9 @@ Optional third-party packages
   * AMD SMI Lib for GPU monitoring
   * ROCprofiler SDK for GPU hardware counters and ROCm tracing
 
-* Building ROCm with multiple Python environments
+* Python
 
-  By default, ROCm Systems Profiler uses the system Python environment. To build
-  with multiple or specific Python environments, specify the prefix during CMake configuration:
-
-  * ``ROCPROFSYS_PYTHON_PREFIX`` specifies the root directory where Python environments are located.
-  * ``ROCPROFSYS_PYTHON_ENVS`` specifies the list of Python environments to build bindings for.
-
-  .. code-block:: shell
-
-     cmake -D ROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-              -D ROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"
+  * ``ROCPROFSYS_USE_PYTHON`` enables Python support.
 
 * `PAPI <https://icl.utk.edu/papi/>`_
 * MPI
@@ -295,6 +287,23 @@ and the MPICH headers and then using
 ROCm Systems Profiler on an application built against OpenMPI causes a segmentation fault.
 This happens because the value of the ``MPI_COMM_WORLD`` is truncated
 during the function wrapping before being passed along to the underlying MPI function.
+
+Python support within ROCm Systems Profiler
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler supports profiling Python code via the ``ROCPROFSYS_USE_PYTHON`` CMake option.
+Python support is enabled via the ``ROCPROFSYS_USE_PYTHON`` and the
+``ROCPROFSYS_PYTHON_VERSIONS="<MAJOR>.<MINOR>`` CMake options.
+Alternatively, to build multiple Python versions, use
+``ROCPROFSYS_PYTHON_VERSIONS="<MAJOR>.<MINOR>;[<MAJOR>.<MINOR>]"``,
+and ``ROCPROFSYS_PYTHON_ROOT_DIRS="/path/to/version;[/path/to/version]"`` instead of just ``ROCPROFSYS_PYTHON_VERSIONS``.
+When building multiple Python versions, the length of the ``ROCPROFSYS_PYTHON_VERSIONS``
+and ``ROCPROFSYS_PYTHON_ROOT_DIRS`` lists must
+be the same size.
+
+.. code-block:: shell
+   cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
+
 
 ROCm Systems Profiler without ROCm
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
