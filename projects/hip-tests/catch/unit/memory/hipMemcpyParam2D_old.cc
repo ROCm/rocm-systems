@@ -39,8 +39,9 @@ static constexpr size_t NUM_H{10};
  * it with the initalized data "C_h".
  *
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2D_multiDevice-D2D", "[hipMemcpyParam2D]", char, float, int,
-                   double, long double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2D_multiDevice-D2D",
+                   "[hipMemcpyParam2D][multigpu]", char, float, int, double,
+                   long double) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;

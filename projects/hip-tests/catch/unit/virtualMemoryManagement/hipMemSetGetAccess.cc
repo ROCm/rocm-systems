@@ -340,7 +340,7 @@ TEST_CASE("Unit_hipMemGetAccess_NegTst") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_FuncTstOnMultDev") {
+TEST_CASE("Unit_hipMemSetAccess_FuncTstOnMultDev", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -638,7 +638,7 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2DevMemCpy") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerDevMemCpy") {
+TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerDevMemCpy", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -729,7 +729,7 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerDevMemCpy") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy") {
+TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -891,7 +891,7 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2VMMMemCpy") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy") {
+TEST_CASE("Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
