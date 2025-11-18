@@ -23,13 +23,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(rocm-systems REQUIRED COMPONENTS
     rocm-core
     rocr-runtime
+    rocprofiler-sdk
 )
-
-# Option 2: Find optional components
-#find_package(rocm-systems COMPONENTS
-#    roctracer
-#    rocprofiler-sdk
-#)
 
 ################################################################################
 # Display Found Information
@@ -50,7 +45,6 @@ message(STATUS "")
 message(STATUS "Component Status:")
 message(STATUS "  rocm-core:          ${rocm-systems_rocm-core_FOUND}")
 message(STATUS "  rocr-runtime:       ${rocm-systems_rocr-runtime_FOUND}")
-message(STATUS "  roctracer:          ${rocm-systems_roctracer_FOUND}")
 message(STATUS "  rocprofiler-sdk:    ${rocm-systems_rocprofiler-sdk_FOUND}")
 message(STATUS "========================================")
 
@@ -101,58 +95,6 @@ else()
 endif()
 
 ################################################################################
-# Example 3: Optional Tracer Test
-################################################################################
-
-if(rocm-systems_roctracer_FOUND)
-    add_executable(tracer_test tracer_test.cpp)
-    
-    target_include_directories(tracer_test PRIVATE 
-        ${ROCM_SYSTEMS_INCLUDE_DIRS}
-        ${ROCM_SYSTEMS_PREFIX}/include/roctracer
-    )
-    
-    # Define macro to enable tracer code
-    target_compile_definitions(tracer_test PRIVATE HAVE_ROCTRACER)
-    
-    # Link against roctracer
-    find_library(ROCTRACER_LIB roctracer64
-        PATHS ${ROCM_SYSTEMS_LIB_DIR}
-        PATH_SUFFIXES roctracer
-        NO_DEFAULT_PATH
-    )
-    
-    if(ROCTRACER_LIB)
-        target_link_libraries(tracer_test PRIVATE ${ROCTRACER_LIB})
-        message(STATUS "Building tracer_test with roctracer")
-    else()
-        message(WARNING "roctracer library not found, tracer_test may not link")
-    endif()
-else()
-    message(STATUS "Skipping tracer_test (roctracer not found)")
-endif()
-
-################################################################################
-# Installation
-################################################################################
-
-install(TARGETS rocm_info_test
-    RUNTIME DESTINATION bin
-)
-
-if(TARGET hsa_runtime_test)
-    install(TARGETS hsa_runtime_test
-        RUNTIME DESTINATION bin
-    )
-endif()
-
-if(TARGET tracer_test)
-    install(TARGETS tracer_test
-        RUNTIME DESTINATION bin
-    )
-endif()
-
-################################################################################
 # Summary
 ################################################################################
 
@@ -164,9 +106,6 @@ message(STATUS "To run tests after building:")
 message(STATUS "  ./rocm_info_test")
 if(TARGET hsa_runtime_test)
     message(STATUS "  ./hsa_runtime_test")
-endif()
-if(TARGET tracer_test)
-    message(STATUS "  ./tracer_test")
 endif()
 message(STATUS "")
 

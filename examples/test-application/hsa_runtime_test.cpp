@@ -116,7 +116,7 @@ int test_hsa_runtime() {
     print_separator("HSA Runtime Test");
     std::cout << "✗ HSA Runtime headers not available\n";
     std::cout << "\nTo enable HSA Runtime support:\n";
-    std::cout << "  1. Build rocm-systems with -DBUILD_ROCR_RUNTIME=ON\n";
+    std::cout << "  1. Configure rocm-systems CMAKE config\n";
     std::cout << "  2. Install rocm-systems\n";
     std::cout << "  3. Rebuild this test application\n";
     return 1;

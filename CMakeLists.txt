@@ -1,5 +1,5 @@
 ################################################################################
-# ROCm Systems Super-Repository Build Configuration
+# ROCm Systems CMAKE Configuration
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 ################################################################################
@@ -8,13 +8,13 @@ cmake_minimum_required(VERSION 3.18.0)
 
 project(rocm-systems 
     VERSION 7.1.0
-    DESCRIPTION "ROCm Systems Super-Repository"
+    DESCRIPTION "ROCm Systems CMAKE Config"
     LANGUAGES C CXX)
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING
-        "Choose the type of build: None Debug Release RelWithDebInfo MinSizeRel."
+        "Choose the type of build: None Debug Release RelWithDebInfo."
         FORCE)
 endif()
 
@@ -26,20 +26,6 @@ if(NOT DEFINED ROCM_PATH)
     set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory")
 endif()
 
-# Set default ROCM_VERSION if not defined
-if(NOT DEFINED ROCM_VERSION)
-    set(ROCM_VERSION "7.1.0" CACHE STRING "ROCm version")
-endif()
-
-# Set policy for RPATH
-if(POLICY CMP0042)
-    cmake_policy(SET CMP0042 NEW)
-endif()
-
-if(POLICY CMP0074)
-    cmake_policy(SET CMP0074 NEW)
-endif()
-
 # Print build configuration
 message(STATUS "")
 message(STATUS "================================")
@@ -47,7 +33,6 @@ message(STATUS "ROCm Systems Build Configuration")
 message(STATUS "================================")
 message(STATUS "CMake Version:        ${CMAKE_VERSION}")
 message(STATUS "Build Type:           ${CMAKE_BUILD_TYPE}")
-message(STATUS "ROCm Version:         ${ROCM_VERSION}")
 message(STATUS "ROCm Path:            ${ROCM_PATH}")
 message(STATUS "Install Prefix:       ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "Source Directory:     ${CMAKE_SOURCE_DIR}")
@@ -58,8 +43,6 @@ message(STATUS "")
 add_custom_target(rocm-systems-help
     COMMAND ${CMAKE_COMMAND} -E echo ""
     COMMAND ${CMAKE_COMMAND} -E echo "Configuration Options:"
-    COMMAND ${CMAKE_COMMAND} -E echo "  -DBUILD_ALL_PROJECTS=ON/OFF         - Build all projects (default: ON)"
-    COMMAND ${CMAKE_COMMAND} -E echo "  -DBUILD_<PROJECT_NAME>=ON/OFF       - Build specific project"
     COMMAND ${CMAKE_COMMAND} -E echo "  -DROCM_PATH=/path/to/rocm           - Set ROCm installation path"
     COMMAND ${CMAKE_COMMAND} -E echo "  -DCMAKE_INSTALL_PREFIX=/install/dir - Set installation directory"
     COMMAND ${CMAKE_COMMAND} -E echo "  -DCMAKE_BUILD_TYPE=Release|Debug    - Set build type"
@@ -81,30 +64,14 @@ set(ROCM_SYSTEMS_CONFIG_INSTALL_DIR
 set(ROCM_SYSTEMS_AVAILABLE_COMPONENTS "")
 
 
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "aqlprofile")
-
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "clr")
-
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rdc")
-
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocm-core")
-
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocm-smi-lib")
-
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocminfo")
-
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocprofiler")
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocprofiler-compute")
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocprofiler-register")
-
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocprofiler-sdk")
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocprofiler-systems")
-
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocr-runtime")
-
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "roctracer")
-
-    list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "hip-tests")
+list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rdc")
+list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocm-core")
+list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocm_smi")
+list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocprofiler-register")
+list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocprofiler-sdk")
+list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocprofiler-systems")
+list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "rocr-runtime")
+list(APPEND ROCM_SYSTEMS_AVAILABLE_COMPONENTS "hip")
 
 # Configure the package config file template
 configure_package_config_file(

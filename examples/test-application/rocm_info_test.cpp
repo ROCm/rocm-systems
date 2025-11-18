@@ -2,7 +2,7 @@
 // ROCm Info Test Application
 // 
 // Example application demonstrating how to use rocm-core to query ROCm version
-// and installation information.
+// and installation information using find_package(rocm-systems).
 //
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
