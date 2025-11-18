@@ -1,0 +1,189 @@
+################################################################################
+# ROCm Systems Package Configuration File
+# 
+# This file is used by CMake's find_package() command to locate the ROCm Systems
+# installation and configure the necessary paths and components.
+#
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+################################################################################
+
+@PACKAGE_INIT@
+
+# Package version information
+set(ROCM_SYSTEMS_VERSION "@PROJECT_VERSION@")
+set(ROCM_SYSTEMS_VERSION_MAJOR "@PROJECT_VERSION_MAJOR@")
+set(ROCM_SYSTEMS_VERSION_MINOR "@PROJECT_VERSION_MINOR@")
+set(ROCM_SYSTEMS_VERSION_PATCH "@PROJECT_VERSION_PATCH@")
+
+# Installation paths
+set_and_check(ROCM_SYSTEMS_PREFIX "@PACKAGE_CMAKE_INSTALL_PREFIX@")
+set_and_check(ROCM_SYSTEMS_LIB_DIR "@PACKAGE_CMAKE_INSTALL_LIBDIR@")
+set_and_check(ROCM_SYSTEMS_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set_and_check(ROCM_SYSTEMS_BIN_DIR "@PACKAGE_CMAKE_INSTALL_BINDIR@")
+
+# ROCm path (if set during build)
+set(ROCM_SYSTEMS_ROCM_PATH "@ROCM_PATH@")
+
+# List of available components that were built
+set(ROCM_SYSTEMS_AVAILABLE_COMPONENTS "@ROCM_SYSTEMS_AVAILABLE_COMPONENTS@")
+
+# Convert to list
+string(REPLACE " " ";" ROCM_SYSTEMS_AVAILABLE_COMPONENTS_LIST "${ROCM_SYSTEMS_AVAILABLE_COMPONENTS}")
+
+################################################################################
+# Component-specific find_package calls
+################################################################################
+
+# This function attempts to find individual ROCm component packages
+function(rocm_systems_find_component component)
+    # Map component names to their package names
+    set(package_name "${component}")
+    
+    # Some components have different package names
+    if(component STREQUAL "rocr-runtime")
+        set(package_name "hsa-runtime64")
+    elseif(component STREQUAL "clr")
+        set(package_name "hip")
+    endif()
+    
+    # Try to find the component package
+    find_package(${package_name} QUIET CONFIG
+        PATHS 
+            "${ROCM_SYSTEMS_PREFIX}"
+            "${ROCM_SYSTEMS_LIB_DIR}/cmake/${package_name}"
+            "${ROCM_SYSTEMS_LIB_DIR}/cmake/${component}"
+            "${ROCM_SYSTEMS_ROCM_PATH}"
+            "${ROCM_SYSTEMS_ROCM_PATH}/lib/cmake/${package_name}"
+            "${ROCM_SYSTEMS_ROCM_PATH}/lib/cmake/${component}"
+        NO_DEFAULT_PATH
+    )
+    
+    if(${package_name}_FOUND)
+        set(rocm-systems_${component}_FOUND TRUE PARENT_SCOPE)
+        message(STATUS "ROCm Systems: Found component ${component} (${package_name})")
+    else()
+        # Try with standard find_package
+        find_package(${package_name} QUIET CONFIG)
+        if(${package_name}_FOUND)
+            set(rocm-systems_${component}_FOUND TRUE PARENT_SCOPE)
+            message(STATUS "ROCm Systems: Found component ${component} (${package_name})")
+        else()
+            set(rocm-systems_${component}_FOUND FALSE PARENT_SCOPE)
+            if(rocm-systems_FIND_REQUIRED_${component})
+                message(WARNING "ROCm Systems: Required component ${component} not found")
+            endif()
+        endif()
+    endif()
+endfunction()
+
+################################################################################
+# Process requested components
+################################################################################
+
+# If no components were requested, assume all available components
+if(NOT rocm-systems_FIND_COMPONENTS)
+    set(rocm-systems_FIND_COMPONENTS ${ROCM_SYSTEMS_AVAILABLE_COMPONENTS_LIST})
+endif()
+
+# Find each requested component
+set(rocm-systems_FOUND_COMPONENTS "")
+set(rocm-systems_NOT_FOUND_COMPONENTS "")
+
+foreach(component ${rocm-systems_FIND_COMPONENTS})
+    # Check if component is available
+    list(FIND ROCM_SYSTEMS_AVAILABLE_COMPONENTS_LIST "${component}" component_index)
+    if(component_index EQUAL -1)
+        list(APPEND rocm-systems_NOT_FOUND_COMPONENTS "${component}")
+        set(rocm-systems_${component}_FOUND FALSE)
+        if(rocm-systems_FIND_REQUIRED_${component})
+            message(FATAL_ERROR "ROCm Systems: Required component '${component}' was not built. Available components: ${ROCM_SYSTEMS_AVAILABLE_COMPONENTS}")
+        else()
+            message(STATUS "ROCm Systems: Optional component '${component}' was not built")
+        endif()
+    else()
+        # Try to find the component
+        rocm_systems_find_component(${component})
+        if(rocm-systems_${component}_FOUND)
+            list(APPEND rocm-systems_FOUND_COMPONENTS "${component}")
+        else()
+            list(APPEND rocm-systems_NOT_FOUND_COMPONENTS "${component}")
+        endif()
+    endif()
+endforeach()
+
+################################################################################
+# Summary and status
+################################################################################
+
+# Check if all required components were found
+set(rocm-systems_FOUND TRUE)
+foreach(component ${rocm-systems_FIND_COMPONENTS})
+    if(rocm-systems_FIND_REQUIRED_${component} AND NOT rocm-systems_${component}_FOUND)
+        set(rocm-systems_FOUND FALSE)
+        break()
+    endif()
+endforeach()
+
+# Report what was found
+if(rocm-systems_FOUND)
+    message(STATUS "ROCm Systems found: ${ROCM_SYSTEMS_VERSION}")
+    message(STATUS "  Installation prefix: ${ROCM_SYSTEMS_PREFIX}")
+    message(STATUS "  Found components: ${rocm-systems_FOUND_COMPONENTS}")
+    if(rocm-systems_NOT_FOUND_COMPONENTS)
+        message(STATUS "  Not found (optional): ${rocm-systems_NOT_FOUND_COMPONENTS}")
+    endif()
+endif()
+
+################################################################################
+# Provide helper variables for test applications
+################################################################################
+
+# Set common variables that test applications might need
+set(ROCM_SYSTEMS_LIBRARIES "")
+set(ROCM_SYSTEMS_INCLUDE_DIRS "${ROCM_SYSTEMS_INCLUDE_DIR}")
+
+# Add component-specific libraries if they were found
+foreach(component ${rocm-systems_FOUND_COMPONENTS})
+    # Construct potential library names
+    set(lib_name "${component}")
+    
+    # Add to libraries list if target exists
+    if(TARGET ${lib_name})
+        list(APPEND ROCM_SYSTEMS_LIBRARIES ${lib_name})
+    elseif(TARGET ${lib_name}64)
+        list(APPEND ROCM_SYSTEMS_LIBRARIES ${lib_name}64)
+    endif()
+endforeach()
+
+# Remove duplicates
+list(REMOVE_DUPLICATES ROCM_SYSTEMS_INCLUDE_DIRS)
+if(ROCM_SYSTEMS_LIBRARIES)
+    list(REMOVE_DUPLICATES ROCM_SYSTEMS_LIBRARIES)
+endif()
+
+################################################################################
+# Compatibility check
+################################################################################
+
+check_required_components(rocm-systems)
+
+################################################################################
+# Usage information (printed only in verbose mode)
+################################################################################
+
+if(rocm-systems_FIND_VERBOSE OR ROCM_SYSTEMS_VERBOSE)
+    message(STATUS "")
+    message(STATUS "ROCm Systems Configuration Summary:")
+    message(STATUS "  Version:              ${ROCM_SYSTEMS_VERSION}")
+    message(STATUS "  Installation prefix:  ${ROCM_SYSTEMS_PREFIX}")
+    message(STATUS "  Library directory:    ${ROCM_SYSTEMS_LIB_DIR}")
+    message(STATUS "  Include directory:    ${ROCM_SYSTEMS_INCLUDE_DIR}")
+    message(STATUS "  Binary directory:     ${ROCM_SYSTEMS_BIN_DIR}")
+    message(STATUS "  ROCm path:            ${ROCM_SYSTEMS_ROCM_PATH}")
+    message(STATUS "  Available components: ${ROCM_SYSTEMS_AVAILABLE_COMPONENTS}")
+    message(STATUS "  Found components:     ${rocm-systems_FOUND_COMPONENTS}")
+    message(STATUS "")
+endif()
+
+
