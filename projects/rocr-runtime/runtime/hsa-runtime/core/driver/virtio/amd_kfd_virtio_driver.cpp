@@ -63,6 +63,7 @@ hsa_status_t KfdVirtioDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driv
 
   if (tmp_driver->Open() == HSA_STATUS_SUCCESS) {
     driver = std::move(tmp_driver);
+    printf("*** KFD VIRTIO DRIVER ENABLED ***]\n");
     return HSA_STATUS_SUCCESS;
   }
 
