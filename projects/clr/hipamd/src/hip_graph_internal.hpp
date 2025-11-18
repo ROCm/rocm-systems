@@ -764,6 +764,7 @@ class Graph {
   void FreeAllMemory(hip::Stream* stream) { mem_pool_->FreeAllMemory(stream); }
 
   bool IsGraphInstantiated() const { return graphInstantiated_; }
+
   void SetGraphInstantiated(bool graphInstantiate) { graphInstantiated_ = graphInstantiate; }
 
   //! returns count of unreleased memalloc nodes
