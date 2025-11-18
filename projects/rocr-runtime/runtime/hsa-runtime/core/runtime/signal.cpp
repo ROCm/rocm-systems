@@ -157,11 +157,21 @@ void SharedSignalPool_t::free(SharedSignal* ptr) {
   free_list_.push_back(ptr);
 }
 
+__forceinline void PcieWcFlush(volatile void *ptr, size_t size){
+  _mm_sfence();
+  *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
+  _mm_mfence();
+  auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
+  UNUSED(readback);
+}
+
 LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable, int agent_node_id)
     : local_signal_(agent_node_id,
                     exportable ? nullptr : core::Runtime::runtime_singleton_->GetSharedSignalPool(agent_node_id ? true : false),
                     agent_node_id ? core::MemoryRegion::AllocateSignal : exportable ? core::MemoryRegion::AllocateIPC : 0) {
   local_signal_.shared_object()->amd_signal.value = initial_value;
+  PcieWcFlush(&local_signal_.shared_object()->amd_signal.value, sizeof(uint64_t));
+
 }
 
 LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable)

@@ -50,6 +50,14 @@
 namespace rocr {
 namespace core {
 
+__forceinline void PcieWcFlush(volatile void *ptr, size_t size){
+  _mm_sfence();
+  *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
+  _mm_mfence();
+  auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
+  UNUSED(readback);
+}
+
 BusyWaitSignal::BusyWaitSignal(SharedSignal* abi_block, bool enableIPC)
     : Signal(abi_block, enableIPC) {
   signal_.kind = AMD_SIGNAL_KIND_USER;
@@ -68,10 +76,18 @@ hsa_signal_value_t BusyWaitSignal::LoadAcquire() {
 
 void BusyWaitSignal::StoreRelaxed(hsa_signal_value_t value) {
   atomic::Store(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  #if 1
+  signal_.value = uint64_t(value);
+  PcieWcFlush(&signal_.value, sizeof(uint64_t));
+  #endif
 }
 
 void BusyWaitSignal::StoreRelease(hsa_signal_value_t value) {
   atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
+  #if 1
+  signal_.value = uint64_t(value);
+  PcieWcFlush(&signal_.value, sizeof(uint64_t));
+  #endif
 }
 
 hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,

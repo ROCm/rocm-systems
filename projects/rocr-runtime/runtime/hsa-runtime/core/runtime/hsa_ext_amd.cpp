@@ -566,6 +566,12 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
     agent_node_id = core::Runtime::runtime_singleton_->gpu_agents()[0]->node_id();
   }
 
+  if (attributes & HSA_AMD_SIGNAL_AMD_GPU_ONLY) {
+    // Force allocate on first GPU
+    agent_node_id = core::Runtime::runtime_singleton_->gpu_agents()[0]->node_id();
+  }
+
+
   if (use_default) {
     ret = new core::DefaultSignal(initial_value, enable_ipc, agent_node_id);
   } else {
