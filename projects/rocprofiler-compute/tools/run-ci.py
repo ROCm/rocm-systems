@@ -300,9 +300,11 @@ def main():
         default=4,
         help="Number of parallel processes for pytest",
     )
-
     parser.add_argument(
-        "--code-coverage", type=str, default="OFF", help="Enable/disable code coverage"
+        "--code-coverage",
+        type=str,
+        default="OFF",
+        help="Enable/disable code coverage",
     )
 
     args, unknown = parser.parse_known_args()
