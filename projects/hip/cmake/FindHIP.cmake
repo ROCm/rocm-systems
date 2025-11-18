@@ -175,7 +175,7 @@ if(NOT APPLE)
             find_program(HIP_HIPCC_CMAKE_LINKER_HELPER hipcc_cmake_linker_helper)
         endif()
     else()
-        set(HIP_HIPCC_CMAKE_LINKER_HELPER "hipcc")
+        set(HIP_HIPCC_CMAKE_LINKER_HELPER "${HIP_HIPCC_EXECUTABLE}")
     endif()
     mark_as_advanced(HIP_HIPCC_CMAKE_LINKER_HELPER)
 
