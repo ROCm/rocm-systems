@@ -524,7 +524,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_ExtentValidation") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3D_H2DDeviceContextChange") {
+TEST_CASE("Unit_hipDrvMemcpy3D_H2DDeviceContextChange", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -549,7 +549,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_H2DDeviceContextChange") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange") {
+TEST_CASE("Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -577,7 +577,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3D_multiDevice_Basic_Size_Test") {
+TEST_CASE("Unit_hipDrvMemcpy3D_multiDevice_Basic_Size_Test", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;

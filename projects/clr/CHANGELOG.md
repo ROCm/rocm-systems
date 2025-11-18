@@ -7,21 +7,37 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
-    - `hipLibraryEnumerateKernels` Return Kernel handles within a library
-    - `hipKernelGetLibrary` Return Library handle for a hipKernel_t handle
-    - `hipKernelGetName` Return function name for a hipKernel_t handle
+    - `hipLibraryEnumerateKernels` returns Kernel handles within a library
+    - `hipKernelGetLibrary` returns Library handle for a hipKernel_t handle
+    - `hipKernelGetName` returns function name for a hipKernel_t handle
     - `hipLibraryLoadData`      creates library object from code
     - `hipLibraryLoadFromFile`  creates library object from file
     - `hipLibraryUnload`        unloads library
     - `hipLibraryGetKernel`     gets a kernel from library
     - `hipLibraryGetKernelCount` gets kernel count in library
     - `hipStreamCopyAttributes` copies attributes from source stream to destination stream
-    - `hipOccupancyAvailableDynamicSMemPerBlock` Returns dynamic shared memory available per block when launching numBlocks blocks on CU.
+    - `hipOccupancyAvailableDynamicSMemPerBlock` returns dynamic shared memory available per block when launching numBlocks blocks on CU.
     - `hipKernelGetParamInfo`   returns the offset and size of a kernel parameter
-* Support for the following flags in `hipGetProcAddress`, enabling searching for the per-thread version symbols.
-    - `HIP_GET_PROC_ADDRESS_DEFAULT`
-    - `HIP_GET_PROC_ADDRESS_LEGACY_STREAM`
-    - `HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM`
+* New HIP flags  
+    - `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory. 
+    - `hipHostRegisterIoMemory` is supported in `hipHostRegister`, used to register I/O memory with HIP runtime so it can be accessed by the GPU.
+    - Support for flags in `hipGetProcAddress`, enables searching for the per-thread version symbols.
+      - `HIP_GET_PROC_ADDRESS_DEFAULT`
+      - `HIP_GET_PROC_ADDRESS_LEGACY_STREAM`
+      - `HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM`
+
+## HIP 7.1.1 for ROCm 7.1.1
+
+### Added
+
+* Support for the flag `hipHostRegisterIoMemory` in `hipHostRegister`, used to register I/O memory with HIP runtime so it can be accessed by the GPU.
+
+### Resolved issues
+
+* Incorrect Compute Unit (CU) mask in logging. HIP runtime now correctly sets the field width for the output print operation. When logging is enabled via the environment variable `AMD_LOG_LEVEL`, the runtime logs the accurate CU mask.
+* A segmentation fault occurred when dynamic queue management mechanism was enabled. HIP runtime now ensures GPU queues aren't NULL during marker submission, preventing crashes and improving robustness.
+* An error encountered on hip tear-down after device reset in certain applications due to accessing stale memory objects. HIP runtime now properly releases memory associated with host calls, ensuring reliable device resets.
+* A race condition occurred in certain graph-related applications when pending asynchronous signal handlers referenced device memory that had already been released, leading to memory corruption. HIP runtime now uses a reference counting strategy to manage access to device objects in asynchronous event handlers, ensuring safe and reliable memory usage.
 
 ## HIP 7.1 for ROCm 7.1
 
@@ -48,17 +64,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
     - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
     - `hipStreamGetId`          queries the id of a stream
-    - `hipLibraryLoadData`      Create library object from code
-    - `hipLibraryLoadFromFile`  Create library object from file
-    - `hipLibraryUnload`        Unload library
-    - `hipLibraryGetKernel`     Get a kernel from library
-    - `hipLibraryGetKernelCount` Get kernel count in library
-* Changed HIP APIs
-    - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
-    - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from
-      hipMemAllocationType and allocates uncached memory if so
-    - `hipHostRegister` now supports hipHostRegisterIoMemory flag
-* Support for the flag `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory.
 * Support for nested tile partitioning within cooperative groups, matching NVIDIA CUDA functionality.
 
 ### Resolved issues
@@ -71,10 +76,14 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * Improved hip module loading latency.
 * Optimized kernel metadata retrieval during module post load.
-* Optimized doorbell ring in HIP runtime, advantages the following for performance improvement,
+* Optimized doorbell ring in HIP runtime for the following performance improvements:
     - Makes efficient packet batching for HIP graph launch,
     - Dynamic packet copying based on defined maximum threshold or power-of-2 staggered copy pattern,
     - If timestamps are not collected for a signal for reuse, creates a new signal. This can potentially increase signal footprint if the handler doesn't run fast enough.
+
+### Known issues
+
+* SPIR-V-enabled applications may encounter an issue of segmentation fault. The problem disappears when SPIR-V is disabled. The issue will be fixed in the next ROCm release.
 
 ## HIP 7.0.2 for ROCm 7.0.2
 

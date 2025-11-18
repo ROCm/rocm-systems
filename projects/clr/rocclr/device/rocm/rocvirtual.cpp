@@ -710,7 +710,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
   }
 
   size_t count = kernelParams.getNumberOfSvmPtr();
-  size_t execInfoOffset = kernelParams.getExecInfoOffset();
+  size_t execInfoOffset = kernelParams.getTotalSize();
   bool sync = true;
 
   amd::Memory* memory = nullptr;

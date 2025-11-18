@@ -148,7 +148,7 @@ static void validateDeviceMacro(int* archProp_h, hipDeviceProp_t* prop) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetDeviceProperties_ArchPropertiesTst") {
+TEST_CASE("Unit_hipGetDeviceProperties_ArchPropertiesTst", "[multigpu]") {
   int *archProp_h, *archProp_d;
   archProp_h = new int[NUM_OF_ARCHPROP];
   hipDeviceProp_t prop;
