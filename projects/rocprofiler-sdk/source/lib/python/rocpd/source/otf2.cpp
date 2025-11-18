@@ -504,6 +504,9 @@ write_otf2(const OTF2Session&                                  otf2_session,
     for(auto ditr : api_gen)
         for(const auto& itr : api_gen.get(ditr))
         {
+            // filter out instantaneous regions
+            if(itr.start == itr.end) continue;
+
             std::string _name = itr.name;
             _hash_data.emplace(get_hash_id(_name),
                                region_info{_name, OTF2_REGION_ROLE_FUNCTION, OTF2_PARADIGM_HIP});
