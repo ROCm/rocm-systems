@@ -24,9 +24,6 @@ ROCm Systems Profiler API, such as ``rocprofsys_user_push_region`` and
    is disabled at start up, which means ``rocprofsys_user_stop_trace()`` is not
    required at the beginning of ``main``. This behavior
    can be manually controlled by using the ``ROCPROFSYS_INIT_ENABLED`` environment variable.
-   User-defined regions are always
-   recorded, regardless of whether ``rocprofsys_user_start_*`` or
-   ``rocprofsys_user_stop_*`` has been called.
 
 .. code-block:: shell
 
