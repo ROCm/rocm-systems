@@ -34,6 +34,7 @@ import errno
 import pwd
 import stat
 from typing import Tuple, Optional, Union
+import tempfile
 
 from enum import Enum
 from pathlib import Path
@@ -1471,7 +1472,9 @@ class AMDSMIHelpers():
         for entry_index, entry in enumerate(entries.values()):
             # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
             timestamp = entry.get("timestamp", "unknown")
-            gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+            gpu_id = '-'
+            if not isinstance(device_handle, Path):
+                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
             prefix = self._severity_as_string(entry.get("error_severity", "Unknown"),
                                               entry.get("notify_type", "Unknown"),
                                               False)
@@ -1481,7 +1484,7 @@ class AMDSMIHelpers():
                                                 entry.get("notify_type", "Unknown"),
                                                 True)
                 cper_data_file = f"{prefix}_{self.get_cper_count() + 1}.cper"
-                afids = self.pvtDumpAfids(cper_data_file)
+                afids = self.cper_dump_afids(cper_data_file)
                 afids_str = ' '.join(map(str, afids))
                 output += f" {cper_data_file:<17} {afids_str}"
 
@@ -1494,7 +1497,8 @@ class AMDSMIHelpers():
             print(f" {'file_name':<17} {'list of afids'}", end="")
         print("")
 
-    def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None):
+
+    def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None, cper_file=None):
         """
         Dump CPER entries to files in the specified folder. Handles batch deletion if file limit is exceeded.
 
@@ -1504,6 +1508,7 @@ class AMDSMIHelpers():
         cper_data (list): List of CPER data objects with 'bytes' and 'size' keys.
         device_handle: Device handle for GPU identification.
         file_limit (int, optional): Maximum number of files to retain in the folder.
+        cper_file (str, optional): cper file name to use when saving to folder
         """
         # Initialize header display
         if not getattr(self, "_cper_display_initialized", False):
@@ -1524,7 +1529,10 @@ class AMDSMIHelpers():
             
                 # Generate filenames
                 count = self.get_cper_count() + 1
-                cper_name = f"{prefix}-{count}.cper"
+                if cper_file:
+                    cper_name = cper_file
+                else:
+                   cper_name = f"{prefix}-{count}.cper"
                 json_name = f"{prefix}-{count}.json"
                 cper_path = folder / cper_name
                 json_path = folder / json_name
@@ -1553,7 +1561,9 @@ class AMDSMIHelpers():
             
                 # Collect data for printing
                 timestamp = entry.get("timestamp", "unknown")
-                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                gpu_id = '-'
+                if not isinstance(device_handle, Path):
+                    gpu_id = self.get_gpu_id_from_device_handle(device_handle)
                 severity = self._severity_as_string(error_severity, notify_type, False)
                 output_rows[cper_path] = [timestamp, gpu_id, severity, cper_name]
                 self.increment_cper_count()
@@ -1576,7 +1586,7 @@ class AMDSMIHelpers():
             for cper_path, row in output_rows.items():
                 timestamp, gpu_id, severity, fname = row
                 try:
-                    afids = self.pvtDumpAfids(cper_path)
+                    afids = self.cper_dump_afids(cper_path)
                     afids_str = ' '.join(map(str, afids))
                 except Exception as e:
                     afids_str = "Error fetching AFIDs"
@@ -1593,6 +1603,26 @@ class AMDSMIHelpers():
                 ))
             except Exception as e:
                 logging.debug(f"Failed to dump entries as JSON: {e}")
+    
+    def dump_cper_entries_as_json(self, entries, _cper_data, _device_handle):
+        """
+        Return the CPER entries as a formatted JSON string and print it.
+        Parameters largely mirror dump_cper_entries so that callers can reuse the same argument list.
+        Unused arguments (_cper_data, _device_handle) are retained for API symmetry.
+        Returns:
+        str: The JSON representation of the CPER entries, or an empty string on failure.
+        """
+        try:
+            entries_json = json.dumps(
+                entries,
+                indent=2,
+                default=lambda o: o.decode("utf-8") if isinstance(o, bytes) else o,
+            )
+            print(entries_json)
+            return entries_json
+        except Exception as e:
+            logging.debug(f"Failed to serialize CPER entries as JSON: {e}")
+            return ""
 
     def write_binary(self, data, size, filepath):
         """
@@ -1652,7 +1682,7 @@ class AMDSMIHelpers():
 
         return "\n".join(lines)
 
-    def pvtDumpAfids(self, cper_file):
+    def cper_dump_afids(self, cper_file):
         # 1) Fetch the CPER “file” and ensure we have raw bytes
         raw_data = cper_file
         if hasattr(raw_data, "read"):
@@ -1743,14 +1773,16 @@ class AMDSMIHelpers():
 
         buffer_size = 1048576
 
-        gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-        if args.follow and not getattr(self, "_cper_follow_prompted", False):
-            print("Press CTRL + C to stop.")
-            self._cper_follow_prompted = True
-
-        primary_partition = self.is_primary_partition(device_handle, gpu_id)
-        if not primary_partition:
-            return
+        if args.decode and args.cper_file:
+            device_handle = args.cper_file
+        else:
+            gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+            if args.follow and not getattr(self, "_cper_follow_prompted", False):
+                print("Press CTRL + C to stop.")
+                self._cper_follow_prompted = True
+            primary_partition = self.is_primary_partition(device_handle, gpu_id)
+            if not primary_partition:
+                return
 
         if args.folder and not getattr(self, "_cper_folder_prompted", False):
             self._cper_folder_prompted = True
@@ -1759,6 +1791,7 @@ class AMDSMIHelpers():
         self.stop = False
 
         num_entries = 0
+        entries = {}
         while True:
             try:
                 entries, new_cursor, cper_data, status_code = amdsmi_interface.amdsmi_get_gpu_cper_entries(
@@ -1779,7 +1812,15 @@ class AMDSMIHelpers():
             args.cursor[gpu_idx] = new_cursor
             if len(entries) == 0:
                 break
-            if args.folder:
+            if args.decode and args.cper_file:
+                if args.json:
+                    self.dump_cper_entries_as_json(entries, cper_data, device_handle)
+                elif args.folder:
+                    self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
+                else:
+                     with tempfile.TemporaryDirectory() as tmp_dir:
+                        self.dump_cper_entries(tmp_dir, entries, cper_data, device_handle, args.file_limit, os.path.basename(args.cper_file))
+            elif args.folder:
                 self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
             else:
                 self.display_cper_files_generated(entries, device_handle, args.folder)
