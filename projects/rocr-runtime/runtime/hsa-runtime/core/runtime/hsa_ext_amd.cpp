@@ -542,7 +542,7 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
 
   bool enable_ipc = attributes & HSA_AMD_SIGNAL_IPC;
   bool use_default =
-      enable_ipc || (attributes & HSA_AMD_SIGNAL_AMD_GPU_ONLY) || (!core::g_use_interrupt_wait);
+      enable_ipc || (attributes & HSA_AMD_SIGNAL_AMD_GPU_ONLY) || (!core::g_use_interrupt_wait) || (attributes & HSA_AMD_SIGNAL_ON_DEVICE);
 
   if ((!use_default) && (num_consumers != 0)) {
     IS_BAD_PTR(consumers);
@@ -559,8 +559,15 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
     }
   }
 
+  int agent_node_id = 0;
+
+  if (attributes & HSA_AMD_SIGNAL_ON_DEVICE) {
+    // Force allocate on first GPU
+    agent_node_id = core::Runtime::runtime_singleton_->gpu_agents()[0]->node_id();
+  }
+
   if (use_default) {
-    ret = new core::DefaultSignal(initial_value, enable_ipc);
+    ret = new core::DefaultSignal(initial_value, enable_ipc, agent_node_id);
   } else {
     ret = new core::InterruptSignal(initial_value);
   }

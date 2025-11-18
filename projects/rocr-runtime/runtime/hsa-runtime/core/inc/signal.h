@@ -223,6 +223,7 @@ class SharedSignalPool_t : private BaseShared {
   ~SharedSignalPool_t() { clear(); }
 
   SharedSignal* alloc();
+  SharedSignal* alloc(int agent_node_id, int flags);
   void free(SharedSignal* ptr);
   void clear();
 
@@ -241,6 +242,7 @@ class LocalSignal {
     local_signal_.shared_object()->amd_signal.value = initial_value;
   }
   LocalSignal(hsa_signal_value_t initial_value, bool exportable);
+  LocalSignal(hsa_signal_value_t initial_value, bool exportable, int agent_node_id);
 
   SharedSignal* signal() const { return local_signal_.shared_object(); }
 

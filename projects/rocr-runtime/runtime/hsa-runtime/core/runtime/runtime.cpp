@@ -2466,6 +2466,7 @@ void Runtime::Unload() {
   hw_exception_event_ = nullptr;
 
   SharedSignalPool.clear();
+  SharedSignalPoolDevice.clear();
 
   EventPool.clear();
 

@@ -135,10 +135,11 @@ class Shared final : private BaseShared {
     assert(allocate_() != nullptr && free_() != nullptr &&
            "Shared object allocator is not set");
 
-    if (pool_)
-      shared_object_ = pool_->alloc();
-    else
+    if (pool_) {
+      shared_object_ = pool_->alloc(agent_node_id, flags);
+    } else {
       shared_object_ = PageAllocator<T>::alloc(agent_node_id, flags);
+    }
   }
 
   ~Shared() {

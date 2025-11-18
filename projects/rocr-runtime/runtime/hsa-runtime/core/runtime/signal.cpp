@@ -105,6 +105,37 @@ SharedSignal* SharedSignalPool_t::alloc() {
   return ret;
 }
 
+SharedSignal* SharedSignalPool_t::alloc(int agent_node_id, int flags) {
+  ScopedAcquire<HybridMutex> lock(&lock_);
+  if (free_list_.empty()) {
+    SharedSignal* block = reinterpret_cast<SharedSignal*>(
+        allocate_()(block_size_ * sizeof(SharedSignal), __alignof(SharedSignal), core::MemoryRegion::AllocateSignal, agent_node_id));
+    if (block == nullptr) {
+      block_size_ = minblock_;
+      block = reinterpret_cast<SharedSignal*>(
+          allocate_()(block_size_ * sizeof(SharedSignal), __alignof(SharedSignal), core::MemoryRegion::AllocateSignal, agent_node_id));
+      if (block == nullptr) throw std::bad_alloc();
+    }
+
+    MAKE_NAMED_SCOPE_GUARD(throwGuard, [&]() { free_()(block); });
+    block_list_.push_back(std::make_pair(block, block_size_));
+    throwGuard.Dismiss();
+
+
+    for (int i = 0; i < block_size_; i++) {
+      free_list_.push_back(&block[i]);
+    }
+
+    block_size_ *= 2;
+  }
+
+  SharedSignal* ret = free_list_.back();
+  new (ret) SharedSignal();
+  free_list_.pop_back();
+  return ret;
+}
+
+
 void SharedSignalPool_t::free(SharedSignal* ptr) {
   if (ptr == nullptr) return;
 
@@ -126,9 +157,16 @@ void SharedSignalPool_t::free(SharedSignal* ptr) {
   free_list_.push_back(ptr);
 }
 
+LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable, int agent_node_id)
+    : local_signal_(agent_node_id,
+                    exportable ? nullptr : core::Runtime::runtime_singleton_->GetSharedSignalPool(agent_node_id ? true : false),
+                    agent_node_id ? core::MemoryRegion::AllocateSignal : exportable ? core::MemoryRegion::AllocateIPC : 0) {
+  local_signal_.shared_object()->amd_signal.value = initial_value;
+}
+
 LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable)
     : local_signal_(exportable ? nullptr
-                               : core::Runtime::runtime_singleton_->GetSharedSignalPool(),
+                               : core::Runtime::runtime_singleton_->GetSharedSignalPool(false),
                     exportable ? core::MemoryRegion::AllocateIPC : 0) {
   local_signal_.shared_object()->amd_signal.value = initial_value;
 }

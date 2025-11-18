@@ -293,10 +293,17 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     }
   }
 
-  const uint32_t node_id =
-      (alloc_flags & core::MemoryRegion::AllocateGTTAccess)
-          ? agent_node_id
-          : m_region.owner()->node_id();
+  uint32_t node_id = m_region.owner()->node_id();
+  if (alloc_flags & core::MemoryRegion::AllocateGTTAccess) {
+    node_id  = agent_node_id;
+  }
+
+  if (alloc_flags & core::MemoryRegion::AllocateSignal) {
+    node_id = agent_node_id;
+    kmt_alloc_flags.ui32.Uncached = 1;
+    kmt_alloc_flags.ui32.CoarseGrain = 0;
+    kmt_alloc_flags.ui32.ExtendedCoherent = 0;
+  }
 
   //// Allocate memory.
   //// If it fails attempt to release memory from the block allocator and retry.

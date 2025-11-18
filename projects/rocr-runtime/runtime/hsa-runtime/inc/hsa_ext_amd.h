@@ -1024,6 +1024,11 @@ typedef enum {
    * another process is undefined.
    */
   HSA_AMD_SIGNAL_IPC = 2,
+
+  /**
+   * TEMPORARY force signal allocation on first GPU
+   */
+  HSA_AMD_SIGNAL_ON_DEVICE = 4,
 } hsa_amd_signal_attribute_t;
 
 /**

@@ -173,8 +173,8 @@ class DefaultSignal : private LocalSignal, public BusyWaitSignal {
   static __forceinline bool IsType(Signal* ptr) { return ptr->IsType(&rtti_id()); }
 
   /// @brief See base class Signal.
-  explicit DefaultSignal(hsa_signal_value_t initial_value, bool enableIPC = false)
-      : LocalSignal(initial_value, enableIPC), BusyWaitSignal(signal(), enableIPC) {}
+  explicit DefaultSignal(hsa_signal_value_t initial_value, bool enableIPC = false, int agent_node_id = 0)
+      : LocalSignal(initial_value, enableIPC, agent_node_id), BusyWaitSignal(signal(), enableIPC) {}
 
  protected:
   bool _IsA(rtti_t id) const {
