@@ -1,6 +1,7 @@
 
 #include "cuid_gpu.h"
 #include "cuid_util.h"
+#include "pci_util.h"
 #include <dirent.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -58,22 +59,39 @@ amdcuid_status_t AmdCuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) con
     std::string unique_id_path = m_info.render_node + "/device/unique_id";
     std::ifstream fin(unique_id_path);
     if (!fin.is_open()) {
-        fingerprint = 0;
-        return AMDCUID_STATUS_FILE_NOT_FOUND;
+        // attempt to get fingerprint through PCI Config Space
+        uint16_t offset = 0;
+        amdcuid_status_t status = PciUtil::get_pci_cap_offset(m_info.bdf, 0x03, offset);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            return status;
+        }
+
+        uint8_t fingerprint_size = 8;
+        uint8_t* fingerprint_buffer = new uint8_t[fingerprint_size];
+        status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_buffer, fingerprint_size, offset);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            fingerprint = 0;
+            return status;
+        }
+        // pcie config file is little endian, so need to convert to big endian
+        fingerprint = PciUtil::le64_to_be64(*reinterpret_cast<uint64_t*>(fingerprint_buffer));
+        delete[] fingerprint_buffer;
     }
-    std::string hex_str;
-    std::getline(fin, hex_str);
-    fin.close();
-    if (hex_str.empty()) {
-        fingerprint = 0;
-        return AMDCUID_STATUS_FILE_NOT_FOUND;
-    }
-    // Parse as 64-bit hex value (if possible)
-    try {
-        fingerprint = std::stoull(hex_str, nullptr, 16);
-    } catch (...) {
-        fingerprint = 0;
-        return AMDCUID_STATUS_UNSUPPORTED;
+    else {
+        std::string hex_str;
+        std::getline(fin, hex_str);
+        fin.close();
+        if (hex_str.empty()) {
+            fingerprint = 0;
+            return AMDCUID_STATUS_FILE_NOT_FOUND;
+        }
+        // Parse as 64-bit hex value (if possible)
+        try {
+            fingerprint = std::stoull(hex_str, nullptr, 16);
+        } catch (...) {
+            fingerprint = 0;
+            return AMDCUID_STATUS_UNSUPPORTED;
+        }
     }
     return AMDCUID_STATUS_SUCCESS;
 }
