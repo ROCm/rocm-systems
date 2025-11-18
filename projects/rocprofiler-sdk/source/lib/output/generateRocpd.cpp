@@ -1665,6 +1665,9 @@ write_rocpd(
                     create_event(conn,
                                  {
                                      insert_value("category_id", string_entries.at(category)),
+                                     insert_value("stack_id", 0),
+                                     insert_value("parent_stack_id", 0),
+                                     insert_value("correlation_id", 0),
                                      insert_value("extdata", data.json_data),
                                  });
 
