@@ -54,6 +54,32 @@ facilitate root cause analysis. Each AFID is associated with category, type, and
 [AFID Event List](https://docs.amd.com/r/en-US/AMD_Field_ID_70122_v1.0/AFID-Event-List) for more
 information.
 
+## Multiple Initialization Performance Optimization
+
+A static metrics cache was implemented in the amd-smi object which will persists over multiple instances.
+Upon creation of the first amd-smi instance, a Singleton object that contains the metrics cache is instanciated.
+Any amd-smi instances created thereafter will inherit the Singleton object metrics cache data.
+Each amd-smi creation increases the usage counter in the Singleton object.
+And each amd-smi destruction decreases the usage counter.
+When the Singleton counter reaches zero, the metrics cache is destroyed along with the Singleton object.
+This principle follows the Singlton Design Principal of sharing cached data across multiple objects.
+
+```mermaid
+graph LR
+    subgraph "Singleton Object"
+    data_cache["Metrics data cache<br>instances 3"]
+    end
+    subgraph "amd-smi 1"
+    data1[data] ----> data_cache
+    end
+    subgraph "amd-smi 2"
+    data2[data] ----> data_cache
+    end
+    subgraph "amd-smi 3"
+    data3[data] ----> data_cache
+    end
+```
+
 ## From concept to action
 
 AMD SMI provides tools to programmatically monitor and manage these RAS features.
