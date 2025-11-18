@@ -523,9 +523,9 @@ class MemcpyCommandHelper {
   MemcpyCommandHelper(const MemcpyCommandHelper&) = delete;
   MemcpyCommandHelper& operator=(const MemcpyCommandHelper&) = delete;
 
-  amd::Command::EventWaitList& waitList() const { return waitList_; }
-  amd::CopyMetadata& copyMetadata() const { return copyMetadata_; }
-  hip::Stream*& pStream() const { return pStream_; }
+  amd::Command::EventWaitList& waitList() { return waitList_; }
+  amd::CopyMetadata& copyMetadata() { return copyMetadata_; }
+  hip::Stream*& pStream() { return pStream_; }
   amd::Device* queueDevice() const { return queueDevice_; }
 
   // Helper to add wait command from stream
