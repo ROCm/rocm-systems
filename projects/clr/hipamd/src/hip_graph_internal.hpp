@@ -552,7 +552,6 @@ class Graph {
     amd::ScopedLock lock(graphSetLock_);
     graphSet_.insert(this);
     mem_pool_ = device->GetGraphMemoryPool();
-    graphInstantiated_ = false;
     roots_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
     leafs_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
     wait_order_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
@@ -591,6 +590,9 @@ class Graph {
     }
     graphUserObj_.clear();
     memAllocNodePtrs_.clear();
+    if (instantiateDeviceId_ != -1) {
+      static_cast<amd::ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->release();
+    }
   }
 
   void AddManualNodeDuringCapture(GraphNode* node) { capturedNodes_.insert(node); }
@@ -632,6 +634,7 @@ class Graph {
   const std::vector<Node>& GetNodes() const { return vertices_; }
   /// returns all the edges in the graph
   std::vector<std::pair<Node, Node>> GetEdges() const;
+  int instantiateDeviceId_ = -1;
   // returns the original graph ptr if cloned
   const Graph* getOriginalGraph() const { return pOriginalGraph_; }
   // Add user obj resource to graph
@@ -760,9 +763,7 @@ class Graph {
 
   void FreeAllMemory(hip::Stream* stream) { mem_pool_->FreeAllMemory(stream); }
 
-  bool IsGraphInstantiated() const { return graphInstantiated_; }
-
-  void SetGraphInstantiated(bool graphInstantiate) { graphInstantiated_ = graphInstantiate; }
+  bool IsGraphInstantiated() const { return instantiateDeviceId_ >= 0; }
 
   //! returns count of unreleased memalloc nodes
   uint32_t GetMemAllocNodeCount() const { return memalloc_nodes_; }
@@ -799,7 +800,6 @@ class Graph {
   hip::Device* device_;                //!< HIP device object
   hip::MemoryPool* mem_pool_;          //!< Memory pool, associated with this graph
   std::unordered_set<GraphNode*> capturedNodes_;
-  bool graphInstantiated_;
   std::unordered_map<Node, Node> clonedNodes_;
   //! Map of device ID to vector of streams allocated for that device during graph execution.
   //! Each device may require multiple streams to handle parallel execution of graph nodes.
@@ -835,9 +835,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
       if (kernArgManager_ != nullptr) {
         kernArgManager_->release();
       }
-    }
-    if (instantiateDeviceId_ != -1) {
-      static_cast<ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->release();
     }
 
     packetBatches_.clear();
@@ -899,7 +896,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   uint64_t flags_ = 0;
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
-  int instantiateDeviceId_ = -1;
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   bool repeatLaunch_ = false;
 
