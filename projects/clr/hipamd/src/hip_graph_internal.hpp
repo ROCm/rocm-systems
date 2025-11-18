@@ -552,6 +552,7 @@ class Graph {
     amd::ScopedLock lock(graphSetLock_);
     graphSet_.insert(this);
     mem_pool_ = device->GetGraphMemoryPool();
+    graphInstantiated_ = false;
     roots_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
     leafs_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
     wait_order_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
@@ -762,7 +763,8 @@ class Graph {
 
   void FreeAllMemory(hip::Stream* stream) { mem_pool_->FreeAllMemory(stream); }
 
-  bool IsGraphInstantiated() const { return instantiateDeviceId_ >= 0; }
+  bool IsGraphInstantiated() const { return graphInstantiated_; }
+  void SetGraphInstantiated(bool graphInstantiate) { graphInstantiated_ = graphInstantiate; }
 
   //! returns count of unreleased memalloc nodes
   uint32_t GetMemAllocNodeCount() const { return memalloc_nodes_; }
@@ -800,6 +802,7 @@ class Graph {
   hip::Device* device_;                //!< HIP device object
   hip::MemoryPool* mem_pool_;          //!< Memory pool, associated with this graph
   std::unordered_set<GraphNode*> capturedNodes_;
+  bool graphInstantiated_;
   std::unordered_map<Node, Node> clonedNodes_;
   //! Map of device ID to vector of streams allocated for that device during graph execution.
   //! Each device may require multiple streams to handle parallel execution of graph nodes.
