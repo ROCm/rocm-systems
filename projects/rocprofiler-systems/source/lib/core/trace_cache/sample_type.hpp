@@ -188,7 +188,9 @@ struct amd_smi_sample : storage_parsed_type_base
         power,
         mem_usage,
         vcn_activity,
-        jpeg_activity
+        jpeg_activity,
+        xgmi,
+        pcie
     };
 
     uint64_t             settings;  // bitfield
@@ -200,7 +202,7 @@ struct amd_smi_sample : storage_parsed_type_base
     uint32_t             power;
     int64_t              temperature;
     size_t               mem_usage;
-    std::vector<uint8_t> xcp_activity;
+    std::vector<uint8_t> gpu_activity;
 };
 
 struct cpu_freq_sample : storage_parsed_type_base

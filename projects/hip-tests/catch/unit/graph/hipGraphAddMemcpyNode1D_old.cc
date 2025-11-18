@@ -115,7 +115,7 @@ static void validateMemcpyNode1DArray(bool peerAccess,
  * For Peer device test: Memory allocations happen on device(0) and memcpy operations
  * are performed from device(1).
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Functional") {
+TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Functional", "[multigpu]") {
   SECTION("Memcpy with 1D array on default device") { validateMemcpyNode1DArray(false); }
   SECTION("Memcpy with 1D array using DeviceToDeviceNoCU") {
     validateMemcpyNode1DArray(false, hipMemcpyDeviceToDeviceNoCU);

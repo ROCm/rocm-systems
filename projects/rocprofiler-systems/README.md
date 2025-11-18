@@ -64,9 +64,11 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
   - Utilization
   - VCN Utilization
   - JPEG Utilization
+  - XGMI interconnect metrics (link width, link speed, read/write data)
+  - PCIe metrics (link width, link speed, bandwidth)
 
 > [!NOTE]
-> The availability of VCN and JPEG engine utilization depends on device support for different ASICs. If unsupported, all values for VCN_ACTIVITY and JPEG_ACTIVITY will be reported as N/A in the output of `amd-smi metric --usage`.
+> The availability of VCN, JPEG, XGMI, and PCIe metrics depends on device support, system topology, and GPU architecture. If unsupported, all values will be reported as N/A in the output of `amd-smi metric --usage`.
 
 ### CPU metrics
 

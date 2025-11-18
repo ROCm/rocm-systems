@@ -60,7 +60,7 @@ __global__ void ReadKernel(int* out, int* in) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___threadfence_system_Positive_Basic_Peer") {
+TEST_CASE("Unit___threadfence_system_Positive_Basic_Peer", "[multigpu]") {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("At least 2 devices are required");

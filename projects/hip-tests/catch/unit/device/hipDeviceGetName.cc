@@ -210,7 +210,8 @@ static inline std::vector<int> parseVisibleDevices() {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator") {
+TEST_CASE("Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator",
+          "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount <= 0) {

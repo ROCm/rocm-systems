@@ -92,11 +92,9 @@ struct ShaderLibraryCreateInfo
 /// Reports properties of a compiled library.
 struct LibraryInfo
 {
-    PipelineHash internalLibraryHash;    ///< 128-bit identifier extracted from this library's ELF binary, composed of
-                                         ///  the state the compiler decided was appropriate to identify the compiled
-                                         ///  library.  The lower 64 bits are "stable"; the upper 64 bits are "unique".
-    Util::StringView<char> colorExports; ///< For a Graphics Partial Pipeline pixel shader, an opaque
-                                         ///  string to pass to the compiler to build the color export shader.
+    PipelineHash internalLibraryHash;  ///< 128-bit identifier extracted from this library's ELF binary, composed of
+                                       ///  the state the compiler decided was appropriate to identify the compiled
+                                       ///  library.  The lower 64 bits are "stable"; the upper 64 bits are "unique".
 };
 
 /// Reports shader stats. Multiple bits set in the shader stage mask indicates that multiple shaders have been combined

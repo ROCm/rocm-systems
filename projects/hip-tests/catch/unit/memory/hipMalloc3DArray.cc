@@ -78,7 +78,7 @@ This testcase verifies the hipMalloc3DArray API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipMalloc3DArray API with small and big chunks data
 */
-TEST_CASE("Unit_hipMalloc3DArray_MultiThread") {
+TEST_CASE("Unit_hipMalloc3DArray_MultiThread", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;

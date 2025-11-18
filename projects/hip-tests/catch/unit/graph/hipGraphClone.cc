@@ -229,7 +229,7 @@ This testcase verifies following scenarios
    validate the result of the cloned graph
 3. Device context change for cloned graph
 */
-TEST_CASE("Unit_hipGraphClone_Functional") {
+TEST_CASE("Unit_hipGraphClone_Functional", "[multigpu]") {
   SECTION("hipGraphClone Basic Functionality") { hipGraphClone_Func(); }
   SECTION("hipGraphClone Modify Original graph") { hipGraphClone_Func(true); }
 

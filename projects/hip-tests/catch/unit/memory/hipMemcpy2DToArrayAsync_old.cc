@@ -194,7 +194,8 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_PinnedHostMemSameGpu") {
  *         --> A_h host variable
  *         and verifying A_h with E_h[0]+i(i.e., 10+i)
  */
-TEST_CASE("Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem") {
+TEST_CASE("Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem",
+          "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -254,7 +255,8 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem") {
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE("Unit_hipMemcpy2DToArrayAsync_multiDeviceDeviceContextChange") {
+TEST_CASE("Unit_hipMemcpy2DToArrayAsync_multiDeviceDeviceContextChange",
+          "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
