@@ -41,7 +41,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 HIP runtime implements optimized doorbell ring mechanism for certain topologies of graph execution. It enables efficient batching of graph nodes. This enhancement provides better alignment with CUDA Graph optimizations. 
 HIP also adds a new performance test for HIP graphs with programmable topologies to measure graph performance across different structures. The test evaluates graph instantiation time, first launch time, repeat launch times, and end-to-end execution for various graph topologies. The test implements comprehensive timing measurements including CPU overhead and device execution time.
 * Back memory set (`memset`) optimization:
-HIP runtime now implements a back memory set (memset) optimization to improve how memset nodes are processed during graph execution. This enhancement specifically addresses cases where `setParam` modifies node parameters in a way that changes the number of AQL (Architected Queue Language) packets, for performance improvement.
+HIP runtime now implements a back memory set (memset) optimization to improve how `memset` nodes are processed during graph execution. This enhancement specifically handles varying number of AQL (Architected Queue Language) packets for `memset` graph node due to graph node set params for AQL batch submission approach.
 * Async handler performance improvement:
 HIP runtime has removed the lock contention in async handler enqueue path. This enhancement reduces runtime overhead and maximizes GPU throughput, for asynchronous kernel execution, especially in multi-threaded applications.
 
