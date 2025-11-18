@@ -32,14 +32,10 @@ sys.path.append("/opt/rocm/share/amd_smi/")
 try:
     import amdsmi
 except ImportError as exc:
-    print(f"Warning: Could not import amdsmi: {exc}")
-    # Create a minimal mock for testing
-    class MockAmdsmi:
-        def __init__(self):
-            pass
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: None
-    amdsmi = MockAmdsmi()
+    print(f"ERROR: Could not import amdsmi module: {exc}")
+    print("The amdsmi module is required to run performance tests.")
+    print("Please ensure amdsmi is installed and available in your Python path.")
+    sys.exit(1)
 
 # Error map dictionary
 error_map = \
@@ -141,44 +137,15 @@ class TestAmdSmiPythonPerformance(unittest.TestCase):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        global has_info_printed
-        if verbose and has_info_printed is False:
-            # Execute the following to print the asic and board info once
-            # per test run
-            has_info_printed = True
-            self.setUp()
-            for i, gpu in enumerate(self.processors):
-                try:
-                    # Print asic info
-                    msg = f'asic info(gpu={i})'
-                    ret = amdsmi.amdsmi_get_gpu_asic_info(gpu)
-                    self._print(msg, ret)
-                except amdsmi.AmdSmiLibraryException as e:
-                    raise e
-            for i, gpu in enumerate(self.processors):
-                try:
-                    # Print board info
-                    msg = f'board info(gpu={i})'
-                    ret = amdsmi.amdsmi_get_gpu_board_info(gpu)
-                    self._print(msg, ret)
-                except amdsmi.AmdSmiLibraryException as e:
-                    raise e
-            self.tearDown()
-        # Performance test configuration
+
+        # Performance test configuration - initialized once
         self.perf_iterations = 11  # Number of iterations for each performance test
         self.perf_warmup_iterations = 3  # Number of warmup iterations
         self.perf_results = {}  # Store performance results
         
-    def setUp(self):
-        """Setup for performance tests - minimal setup just for performance testing."""
-        self.time = time
-        self.statistics = statistics
-        
-        # Add skip flags for consistency with original tests
+        # Constants - set once instead of in setUp()
         self.TODO_SKIP_FAIL = False
         self.TODO_SKIP_NOT_COMPLETE = False
-        
-        # Use global constants matching original test file
         self.PASS = PASS
         self.FAIL = FAIL
         
@@ -206,16 +173,46 @@ class TestAmdSmiPythonPerformance(unittest.TestCase):
         # Try to populate with actual amdsmi attributes if available
         self._populate_amdsmi_attributes()
         
-        # Initialize AMDSMI if available
+        # Initialize AMDSMI
+        self.processors = []
         try:
-            if hasattr(amdsmi, 'amdsmi_init'):
-                amdsmi.amdsmi_init()
-                self.processors = amdsmi.amdsmi_get_processor_handles() if hasattr(amdsmi, 'amdsmi_get_processor_handles') else []
-            else:
-                self.processors = []
+            amdsmi.amdsmi_init()
+            self.processors = amdsmi.amdsmi_get_processor_handles()
         except Exception as e:
-            print(f"Warning: Failed to initialize AMDSMI: {e}")
-            self.processors = []
+            print(f"ERROR: Failed to initialize AMDSMI: {e}")
+            raise
+ 
+    def setUp(self):
+        """Setup for performance tests - re-initialize AMDSMI before each test."""
+        # Print device info once per test run if verbose
+        global has_info_printed
+        if verbose and has_info_printed is False:
+            has_info_printed = True
+            for i, gpu in enumerate(self.processors):
+                try:
+                    # Print asic info
+                    msg = f'asic info(gpu={i})'
+                    ret = amdsmi.amdsmi_get_gpu_asic_info(gpu)
+                    self._print(msg, ret)
+                except amdsmi.AmdSmiLibraryException as e:
+                    raise e
+            for i, gpu in enumerate(self.processors):
+                try:
+                    # Print board info
+                    msg = f'board info(gpu={i})'
+                    ret = amdsmi.amdsmi_get_gpu_board_info(gpu)
+                    self._print(msg, ret)
+                except amdsmi.AmdSmiLibraryException as e:
+                    raise e
+
+        # Re-initialize AMDSMI for each test
+        try:
+            amdsmi.amdsmi_init()
+            if not self.processors:  # Only get processors if not already set
+                self.processors = amdsmi.amdsmi_get_processor_handles()
+        except Exception as e:
+            print(f"ERROR: Failed to initialize AMDSMI in setUp: {e}")
+            raise
             
     def _populate_amdsmi_attributes(self):
         """Try to populate attribute lists with amdsmi enums if available."""
@@ -239,8 +236,7 @@ class TestAmdSmiPythonPerformance(unittest.TestCase):
     def tearDown(self):
         """Cleanup after performance tests."""
         try:
-            if hasattr(amdsmi, 'amdsmi_shut_down'):
-                amdsmi.amdsmi_shut_down()
+            amdsmi.amdsmi_shut_down()
         except Exception:
             pass  # Ignore cleanup errors
             
@@ -344,7 +340,6 @@ class TestAmdSmiPythonPerformance(unittest.TestCase):
         """
         times = []
         errors = []
-        error_count = 0
         
         # Warmup iterations
         for _ in range(self.perf_warmup_iterations):
@@ -353,49 +348,45 @@ class TestAmdSmiPythonPerformance(unittest.TestCase):
             except Exception:
                 pass  # Ignore warmup errors
         
-        # Measurement iterations
+        # Bulk measurement - measure total time with counters outside the loop
+        bulk_start_time = time.perf_counter()
         for i in range(self.perf_iterations):
-            start_time = self.time.perf_counter()
             try:
                 result = api_func(*args, **kwargs)
             except Exception as e:
-                error_count += 1
                 errors.append({'iteration': i, 'error_info': str(e)})
-            end_time = self.time.perf_counter()
-            execution_time = (end_time - start_time) * 1000  # Convert to milliseconds
-            times.append(execution_time)
+        bulk_end_time = time.perf_counter()
+
+        # Calculate timing from bulk measurement
+        bulk_total_time_ms = (bulk_end_time - bulk_start_time) * 1000
+        bulk_avg_time_ms = bulk_total_time_ms / self.perf_iterations
+        error_count = len(errors)
         
         # Calculate statistics
-        if times:
-            successful_runs = len(times) - error_count
-            stats = {
-                'api_name': api_name,
-                'iterations': len(times),
-                'errors': errors,
-                'error_count': error_count,
-                'successful_runs': successful_runs,
-                'min_time_ms': min(times),
-                'max_time_ms': max(times),
-                'mean_time_ms': self.statistics.mean(times),
-                'median_time_ms': self.statistics.median(times),
-                'times_ms': times
-            }
-            
-            if len(times) > 1:
-                stats['stdev_ms'] = self.statistics.stdev(times)
-            
-            # Store results
-            self.perf_results[api_name] = stats
-            
-            # Print results if verbose
-            if verbose:
-                print(f"Performance {api_name}: {stats['mean_time_ms']:.3f}ms avg, "
-                      f"{stats['min_time_ms']:.3f}ms min, {stats['max_time_ms']:.3f}ms max, "
-                      f"{error_count} errors")
-            
-            return stats
-        else:
-            return {'api_name': api_name, 'error': 'No successful measurements'}
+        successful_runs = self.perf_iterations - error_count
+        stats = {
+            'api_name': api_name,
+            'iterations': self.perf_iterations,
+            'errors': errors,
+            'error_count': error_count,
+            'successful_runs': successful_runs,
+            'total_time_ms': bulk_total_time_ms,
+            'avg_time_ms': bulk_avg_time_ms,
+            'min_time_ms': bulk_avg_time_ms,  # Single measurement, so min=max=avg
+            'max_time_ms': bulk_avg_time_ms,
+            'mean_time_ms': bulk_avg_time_ms,
+            'median_time_ms': bulk_avg_time_ms
+        }
+
+        # Store results
+        self.perf_results[api_name] = stats
+
+        # Print results if verbose
+        if verbose:
+            print(f"Performance {api_name}: {bulk_avg_time_ms:.3f}ms avg, "
+                  f"{error_count} errors")
+
+        return stats
 
     def test_performance_clean_gpu_local_data(self):
         self._print_func_name('Starting performance test for amdsmi_clean_gpu_local_data')
