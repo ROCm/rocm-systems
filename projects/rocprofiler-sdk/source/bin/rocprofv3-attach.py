@@ -38,6 +38,7 @@ def main(
     attach_library=os.environ.get(
         "ROCPROF_ATTACH_TOOL_LIBRARY", ROCPROF_ATTACH_TOOL_LIBRARY
     ),
+    duration_cmd_line=os.environ.pop("ROCPROF_ATTACH_DURATION_CMD_LINE", None),
     duration=os.environ.get("ROCPROF_ATTACH_DURATION", None),
 ):
     if pid is None:
@@ -83,6 +84,9 @@ def main(
 
     signal.signal(signal.SIGINT, signal_handler)
 
+    # Override ROCPROF_ATTACH_DURATION env variable if cmd line arg was set
+    if duration_cmd_line is not None:
+        duration = duration_cmd_line
     if duration is None:
         sys.stdout.write("Press Enter to detach...")
         sys.stdout.flush()  # Force the prompt to appear immediately

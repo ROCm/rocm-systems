@@ -1516,7 +1516,7 @@ def run(app_args, args, **kwargs):
     elif args.pid:
         update_env("ROCPROF_ATTACH_PID", args.pid)
         if args.attach_duration_msec is not None:
-            update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
+            update_env("ROCPROF_ATTACH_DURATION_CMD_LINE", f"{args.attach_duration_msec}")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-attach")
         if app_args:
             exit_code = subprocess.check_call([sys.executable, path], env=app_env)
