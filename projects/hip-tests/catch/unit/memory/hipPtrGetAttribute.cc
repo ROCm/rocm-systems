@@ -29,7 +29,7 @@ THE SOFTWARE.
 #include <string>
 
 // Run few simple cases including  host pointer arithmetic:
-TEST_CASE("Unit_hipPtrGetAttribute_Simple") {
+TEST_CASE("Unit_hipPtrGetAttribute_Simple", "[multigpu]") {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   constexpr size_t N{1000000};
@@ -147,4 +147,8 @@ TEST_CASE("Unit_hipPtrGetAttribute_Simple") {
   HIP_CHECK(hipPointerGetAttribute(&bufId2, HIP_POINTER_ATTRIBUTE_BUFFER_ID,
                                    reinterpret_cast<hipDeviceptr_t>(A_Pinned_h)));
   REQUIRE(bufId1 != bufId2);
+
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipHostFree(A_Pinned_h));
+  HIP_CHECK(hipFree(A_Hmm));
 }

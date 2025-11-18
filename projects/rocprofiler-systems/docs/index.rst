@@ -11,7 +11,7 @@ of applications running on the CPU or the CPU and GPU. It supports dynamic binar
 instrumentation, call-stack sampling, and various other features for determining
 which function and line number are currently executing. To learn more, see :doc:`what-is-rocprof-sys`
 
-ROCm Systems Profiler is open source and hosted at `<https://github.com/ROCm/rocprofiler-systems>`__.
+ROCm Systems Profiler is open source and hosted at `<https://github.com/ROCm/rocm-systems>`__.
 It is the successor to `<https://github.com/ROCm/omnitrace>`__.
 
 .. grid:: 2
@@ -19,7 +19,6 @@ It is the successor to `<https://github.com/ROCm/omnitrace>`__.
 
   .. grid-item-card:: Install
 
-    * :doc:`Quick start <./install/quick-start>`
     * :doc:`ROCm Systems Profiler installation <./install/install>`
 
 Use the following topics to learn more about the advantages of ROCm Systems Profiler in application
@@ -42,6 +41,7 @@ profiling, how it supports performance analysis, and how to leverage its capabil
       * :doc:`Profiling Python scripts <./how-to/profiling-python-scripts>`
       * :doc:`Network performance profiling <./how-to/nic-profiling>`
       * :doc:`VCN and JPEG sampling and tracing <./how-to/vcn-jpeg-sampling>`
+      * :doc:`XGMI and PCIe metrics monitoring <./how-to/xgmi-pcie-sampling>`
 
     * :doc:`Understanding the output <./how-to/understanding-rocprof-sys-output>`
     * :doc:`Using the ROCm Systems Profiler API <./how-to/using-rocprof-sys-api>`
@@ -62,7 +62,7 @@ profiling, how it supports performance analysis, and how to leverage its capabil
 
   .. grid-item-card:: Tutorials
 
-    * `GitHub examples <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/examples>`_
+    * `GitHub examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples>`_
     * :doc:`Video tutorials <./tutorials/video-tutorials>`
 
 To contribute to the documentation, refer to

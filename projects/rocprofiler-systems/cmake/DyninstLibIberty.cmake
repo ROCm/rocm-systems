@@ -39,7 +39,7 @@ set(LibIberty_LIBRARYDIR
 
 # -------------- PACKAGES -----------------------------------------------------
 
-if(NOT BUILD_LIBIBERTY)
+if(NOT ROCPROFSYS_BUILD_LIBIBERTY)
     find_package(LibIberty)
 endif()
 
@@ -55,10 +55,10 @@ elseif(STERILE_BUILD)
         FATAL_ERROR
         "LibIberty not found and cannot be downloaded because build is sterile."
     )
-elseif(NOT BUILD_LIBIBERTY)
+elseif(NOT ROCPROFSYS_BUILD_LIBIBERTY)
     rocprofiler_systems_message(
         FATAL_ERROR
-        "LibIberty was not found. Either configure cmake to find TBB properly or set BUILD_LIBIBERTY=ON to download and build"
+        "LibIberty was not found. Either configure cmake to find LibIberty properly or set ROCPROFSYS_BUILD_LIBIBERTY=ON to download and build"
     )
 else()
     rocprofiler_systems_message(STATUS "${LibIberty_ERROR_REASON}")
@@ -85,8 +85,8 @@ else()
         PREFIX ${_li_root}
         URL
             ${DYNINST_BINUTILS_DOWNLOAD_URL}
-            http://ftpmirror.gnu.org/gnu/binutils/binutils-2.42.tar.gz
-            http://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.42.tar.gz
+            http://ftpmirror.gnu.org/gnu/binutils/binutils-2.45.tar.gz
+            http://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.45.tar.gz
         BUILD_IN_SOURCE 1
         CONFIGURE_COMMAND
             ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3

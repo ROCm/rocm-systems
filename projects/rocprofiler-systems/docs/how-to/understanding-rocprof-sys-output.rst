@@ -1,12 +1,12 @@
 .. meta::
    :description: ROCm Systems Profiler system output documentation and reference
-   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, system output, tracking, visualization, tool, Instinct, accelerator, AMD
+   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, system output, tracking, visualization, tool, Instinct, accelerator, AMD, rocpd, perfetto, timemory
 
 ****************************************************
 Understanding the Systems Profiler output
 ****************************************************
 
-The general output form of `ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ is
+The general output form of `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ is
 ``<OUTPUT_PATH>[/<TIMESTAMP>]/[<PREFIX>]<DATA_NAME>[-<OUTPUT_SUFFIX>].<EXT>``.
 
 For example, starting with the following base configuration:
@@ -74,9 +74,12 @@ about the system and the run, as follows:
 Metadata JSON Sample
 -----------------------------------------------------------------------
 
-.. code-block:: json
+.. dropdown:: Sample JSON
 
-   {
+   .. code-block:: json
+      :linenos:
+      
+      {
       "rocprofiler-systems": {
          "metadata": {
             "info": {
@@ -104,14 +107,8 @@ Metadata JSON Sample
             "USER": "rocm-dev",
             "CPU_FREQUENCY": 1972,
             "CPU_FEATURES": [
-               "fpu",
-               "vme",
-               "de",
-               "pse",
-               "tsc",
-               "msr",
-               "pae",
-               "... etc. ..."
+               "fpu", "vme", "de", "pse", "tsc", "msr", "pae"
+               // ... more features
             ],
             "HW_CONCURRENCY": 12,
             "HW_PHYSICAL_CPU": 6,
@@ -126,17 +123,9 @@ Metadata JSON Sample
             "ROCPROFSYS_ROCM_VERSION_PATCH": 1,
             "memory_maps_files": [
                "/opt/rocm-6.3.1/lib/libhsa-amd-aqlprofile64.so.1.0.60301",
-               "/opt/rocm-6.3.1/lib/libhsa-runtime64.so.1.14.60301",
-               "/opt/rocm-6.3.1/lib/librocm_smi64.so.7.4.60301",
-               "/opt/rocm-6.3.1/lib/librocprofiler-register.so.0.4.0",
-               "/opt/rocm-6.3.1/lib/librocprofiler-sdk.so.0.5.0",
-               "/opt/rocm/lib/libhsa-amd-aqlprofile64.so.1",
-               "/opt/rocm/lib/libhsa-runtime64.so.1",
-               "/opt/rocm/lib/librocm_smi64.so.7",
-               "/opt/rocm/lib/librocprofiler-register.so.0",
-               "/opt/rocm/lib/librocprofiler-sdk.so.0",
-               "... etc. ..."
-               ],
+               "/opt/rocm-6.3.1/lib/libhsa-runtime64.so.1.14.60301"
+               // ... more files
+            ],
             "memory_maps": [
                {
                   "cereal_class_version": 0,
@@ -156,39 +145,11 @@ Metadata JSON Sample
                   "device": "",
                   "inode": 0,
                   "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
-               },
-               {
-                  "load_address": "76005b935000",
-                  "last_address": "76005b9aeab8",
-                  "permissions": "r---",
-                  "offset": "135000",
-                  "device": "",
-                  "inode": 0,
-                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
-               },
-               {
-                  "load_address": "76005b9b0638",
-                  "last_address": "76005bb2d598",
-                  "permissions": "rw--",
-                  "offset": "1af638",
-                  "device": "",
-                  "inode": 0,
-                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
-               },
-               {
-                  "load_address": "76005bc00000",
-                  "last_address": "76005bc26140",
-                  "permissions": "r---",
-                  "offset": "0",
-                  "device": "",
-                  "inode": 0,
-                  "pathname": "/opt/rocm/lib/librocprofiler-sdk.so.0"
-               },
-               {
-                  "... etc. ..."
                }
-            ],
-         "settings": {
+               // ... more mappings
+            ]
+            },
+            "settings": {
             "cereal_class_version": 2,
             "ROCPROFSYS_OUTPUT_PREFIX": {
                "name": "output_prefix",
@@ -196,15 +157,9 @@ Metadata JSON Sample
                "description": "Explicitly specify a prefix for all output files",
                "count": 1,
                "max_count": -1,
-               "cmdline": [
-                  "--rocprofiler-systems-output-prefix"
-               ],
+               "cmdline": ["--rocprofiler-systems-output-prefix"],
                "categories": [
-                  "filename",
-                  "io",
-                  "librocprof-sys",
-                  "native",
-                  "rocprofsys"
+                  "filename", "io", "librocprof-sys", "native", "rocprofsys"
                ],
                "data_type": "string",
                "initial": "parallel-overhead-binary-rewrite/",
@@ -212,33 +167,16 @@ Metadata JSON Sample
                "updated": "config",
                "enabled": true
             },
-            {
-               ... etc. ...
-            },
+            // Additional settings can be added here
             "command_line": [
                "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/parallel-overhead.inst",
-               "--",
-               "10",
-               "12",
-               "1000"
+               "--", "10", "12", "1000"
             ],
             "environment": [
-                  ... etc . ...
+               // Environment variables go here
             ]
-         },
-         "environment": [
-            {
-               "key": "GOTCHA_DEBUG",
-               "value": "0"
             },
-            {
-               "key": "HIP_VISIBLE_DEVICES",
-               "value": ""
-            },
-            {
-               "key": "HOME",
-               "value": "/home/rocm-dev"
-            },
+            "environment": [
             {
                "key": "LD_LIBRARY_PATH",
                "value": "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib:/opt/rocm/lib"
@@ -246,17 +184,15 @@ Metadata JSON Sample
             {
                "key": "LIBRARY_PATH",
                "value": ""
-            },
-            {
-               etc ...
             }
-         ]
-         "output": {
+            // ... more environment variables
+            ],
+            "output": {
             "json": [
                {
                   "key": "wall_clock",
                   "value": [
-                    "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.json"
+                  "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.json"
                   ]
                }
             ],
@@ -264,7 +200,7 @@ Metadata JSON Sample
                {
                   "key": "perfetto",
                   "value": [
-                   "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/perfetto-trace.proto"
+                  "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/perfetto-trace.proto"
                   ]
                }
             ],
@@ -272,13 +208,14 @@ Metadata JSON Sample
                {
                   "key": "wall_clock",
                   "value": [
-                     "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.txt"
+                  "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.txt"
                   ]
                }
             ]
-         },
-      },
-   }
+            }
+         }
+      }
+      }
 
 Configuring the ROCm Systems Profiler output
 ============================================
@@ -358,7 +295,52 @@ set ``ROCPROFSYS_OUTPUT_PREFIX="%argt%-"``, and let ROCm Systems Profiler cleanl
    an ``%arg0%`` of ``/usr/bin/foo`` translates to ``usr_bin_foo``. Additionally, any ``%arg<N>%`` keys which
    do not have a command line argument at position ``<N>`` are ignored.
 
-Perfetto output
+.. _rocprof_sys_rocpd_output:
+
+ROCm Profiling Data (rocpd) output
+=========================================
+
+Use the ``ROCPROFSYS_USE_ROCPD`` setting to trigger the ROCm Systems Profiler to output a
+SQLite3 database. The ROCm Profiling Data (or ``rocpd``) database will soon be the default output
+format. To output in ``rocpd`` format, ROCProfiler-SDK version 1.0.0 or later is required (introduced in ROCm 7.0.0).
+
+Features
+--------------
+
+The features of ``rocpd`` output format are:
+
+* **Comprehensive Data Model**: Consolidates all profiling artifacts including execution traces, performance counters, hardware metrics, and contextual metadata within a single SQLite3 database file (`.db` extension).
+
+* **Standards-Compliant Access**: Supports querying through industry-standard SQL interfaces including command-line tools (``sqlite3`` CLI), programming language bindings (Python ``sqlite3`` module, C/C++ SQLite API), and database management applications.
+
+* **Advanced Analytics Integration**: Facilitates sophisticated post-processing workflows through custom analytical scripts, automated reporting systems, and integration with third-party visualization and analysis frameworks that provide SQLite3 connectivity.
+
+Generating rocpd output
+-------------------------
+
+To generate profiling data in the rocpd format, add ``ROCPROFSYS_USE_ROCPD=ON`` to your profiling configuration.
+
+.. code-block:: shell
+
+   export ROCPROFSYS_USE_ROCPD=ON
+   export ROCPROFSYS_USE_TRACE=OFF # disabling default Perfetto output
+   rocprof-sys-sample -- ./your_application
+
+See :doc:`configuring runtime options <./configuring-runtime-options>` for additional
+details on setting up the profiling configuration options.
+
+Converting rocpd to alternative formats
+------------------------------------------
+
+ROCm provides a Python module to convert the ``rocpd`` database to alternative
+output formats for specialized analysis and visualization workflows. For example,
+(Open Trace Format 2) OTF2, Perfetto Protocol Buffers (PFTrace), and
+Comma-Separated Values (CSV) tables.
+
+See :doc:`Using rocpd output format <rocprofiler-sdk:how-to/using-rocpd-output-format>` in ROCProfiler-SDK documentation,
+for additional information on these conversion tools.
+
+Native Perfetto output
 ========================================
 
 Use the ``ROCPROFSYS_OUTPUT_FILE`` to specify a specific location. If this is an

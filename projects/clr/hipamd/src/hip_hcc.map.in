@@ -630,3 +630,21 @@ global:
 local:
     *;
 } hip_6.5;
+
+hip_7.2 {
+global:
+    hipLibraryLoadData;
+    hipLibraryLoadFromFile;
+    hipLibraryUnload;
+    hipLibraryGetKernel;
+    hipLibraryGetKernelCount;
+    hipStreamCopyAttributes;
+    hipLibraryEnumerateKernels;
+    hipKernelGetLibrary;
+    hipKernelGetName;
+    hipOccupancyAvailableDynamicSMemPerBlock;
+    hipGetProcAddress_spt;
+    hipKernelGetParamInfo;
+local:
+    *;
+} hip_7.1;

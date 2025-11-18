@@ -27,6 +27,15 @@
 #include "os/alloc.hpp"
 #include "thread/monitor.hpp"
 #include "utils/util.hpp"
+#ifdef _WIN32
+#include <windows.h>
+#include <d3d9.h>
+#include <d3d10_1.h>
+#include <CL/cl_d3d10.h>
+#include <CL/cl_d3d11.h>
+#include <CL/cl_dx9_media_sharing.h>
+#endif
+#include <CL/cl_icd.h>
 
 
 #define KHR_CL_TYPES_DO(F)                                                                         \
@@ -124,7 +133,11 @@ CL_TYPES_DO(DEFINE_CL_TRAITS);
 //! \endcond
 
 struct ICDDispatchedObject {
+#ifdef __HIP_PLATFORM_AMD__
+  static inline cl_icd_dispatch icdVendorDispatch_[] = {0};
+#else
   static cl_icd_dispatch icdVendorDispatch_[];
+#endif
   const cl_icd_dispatch* const dispatch_;
 
  protected:

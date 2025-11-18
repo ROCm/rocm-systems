@@ -1,0 +1,6 @@
+* @maisarif_amdeng @shuzhliu_amdeng @dgalants_amdeng @charpoag_amdeng @daolivei_amdeng @marifamd @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan @gabrpham_amdeng
+
+docs/* @ROCm/rocm-documentation
+*.md @ROCm/rocm-documentation
+*.rst @ROCm/rocm-documentation
+

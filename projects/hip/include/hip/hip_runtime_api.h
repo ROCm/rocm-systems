@@ -557,6 +557,8 @@ typedef enum hipDeviceAttribute_t {
                                             ///< hipHostRegister
   hipDeviceAttributeMemoryPoolSupportedHandleTypes,  ///< Supported handle mask for HIP Stream
                                                      ///< Ordered Memory Allocator
+  hipDeviceAttributeHostNumaId,             ///< NUMA ID of the cpu node closest to the device,
+                                            ///< or -1 when NUMA isn't supported
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -601,6 +603,19 @@ typedef enum hipDeviceAttribute_t {
   hipDeviceAttributeVendorSpecificBegin = 20000,
   // Extended attributes for vendors
 } hipDeviceAttribute_t;
+
+// Flags that can be used with hipGetProcAddress.
+/** Default flag. Equivalent to HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM if compiled with
+ *  -fgpu-default-stream=per-thread flag or HIP_API_PER_THREAD_DEFAULT_STREAM macro is
+ * defined.*/
+#define HIP_GET_PROC_ADDRESS_DEFAULT 0x0
+
+/** Search for all symbols except the corresponding per-thread versions.*/
+#define HIP_GET_PROC_ADDRESS_LEGACY_STREAM 0x1
+
+/** Search for all symbols including the per-thread versions. If a per-thread version cannot be
+ * found, returns the legacy version.*/
+#define HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM 0x2
 
 typedef enum hipDriverProcAddressQueryResult {
   HIP_GET_PROC_ADDRESS_SUCCESS = 0,
@@ -692,6 +707,8 @@ typedef struct hipIpcEventHandle_st {
 typedef struct ihipModule_t* hipModule_t;
 typedef struct ihipModuleSymbol_t* hipFunction_t;
 typedef struct ihipLinkState_t* hipLinkState_t;
+typedef struct ihipLibrary_t* hipLibrary_t;
+typedef struct ihipKernel_t* hipKernel_t;
 /**
  * HIP memory pool
  */
@@ -846,7 +863,7 @@ enum hipLimit_t {
 /**
  * Host memory will be forcedly allocated on extended fine grained system memory
  * pool which is with MTYPE_UC.
- * @note  This allocation flag is applicable on AMD devices in Linux only.
+ * @note  This allocation flag is applicable on AMD devices, except for Navi4X, in Linux only.
  */
 #define hipHostMallocUncached 0x10000000
 #define hipHostAllocUncached hipHostMallocUncached
@@ -897,7 +914,10 @@ enum hipLimit_t {
  * can be obtained with #hipHostGetDevicePointer.*/
 #define hipHostRegisterMapped 0x2
 
-/** Not supported.*/
+/** The passed memory pointer is treated as pointing to some memory-mapped I/O space, e.g.
+ * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and 
+ * contiguous.
+ * */
 #define hipHostRegisterIoMemory 0x4
 
 /** This flag is ignored On AMD devices.*/
@@ -907,7 +927,7 @@ enum hipLimit_t {
 #define hipExtHostRegisterCoarseGrained 0x8
 
 /** Map host memory onto extended fine grained access host memory pool when enabled.
- * It is applicable on AMD devices in Linux only
+ * It is applicable on AMD devices, except for Navi4X, in Linux only.
  */
 #define hipExtHostRegisterUncached 0x80000000
 
@@ -1577,7 +1597,7 @@ typedef enum hipLaunchAttributeID {
 typedef union hipLaunchAttributeValue {
   char pad[64];  ///< 64 byte padding
   hipAccessPolicyWindow
-      accessPolicyWindow;  ///< Value of launch attribute ::hipLaunchAttributePolicyWindow.
+      accessPolicyWindow;  ///< Value of launch attribute ::hipLaunchAttributeAccessPolicyWindow.
   int cooperative;         ///< Value of launch attribute ::hipLaunchAttributeCooperative. Indicates
                            ///< whether the kernel is cooperative.
   int priority;  ///< Value of launch attribute :: hipLaunchAttributePriority. Execution priority of
@@ -3045,6 +3065,14 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
  */
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
                                  hipStreamAttrValue* value_out);
+
+/**
+ *@brief Copies attributes from source stream to destination stream.
+ * @param[in] dst - Destination stream
+ * @param[in] src - Source stream
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src);
 
 // end doxygen Stream
 /**
@@ -6347,6 +6375,111 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
 
 /**
+ * @brief Load hip Library from inmemory object
+ *
+ * @param [out] library Output Library
+ * @param [in] code In memory object
+ * @param [in] jitOptions JIT options, CUDA only
+ * @param [in] jitOptionsValues JIT options values, CUDA only
+ * @param [in] numJitOptions Number of JIT options
+ * @param [in] libraryOptions Library options
+ * @param [in] libraryOptionValues Library options values
+ * @param [in] numLibraryOptions Number of library options
+ * @return #hipSuccess, #hipErrorInvalidValue,
+ */
+hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption* jitOptions,
+                              void** jitOptionsValues, unsigned int numJitOptions,
+                              hipLibraryOption* libraryOptions, void** libraryOptionValues,
+                              unsigned int numLibraryOptions);
+
+/**
+ * @brief Load hip Library from file
+ *
+ * @param [out] library Output Library
+ * @param [in] fileName file which contains code object
+ * @param [in] jitOptions JIT options, CUDA only
+ * @param [in] jitOptionsValues JIT options values, CUDA only
+ * @param [in] numJitOptions Number of JIT options
+ * @param [in] libraryOptions Library options
+ * @param [in] libraryOptionValues Library options values
+ * @param [in] numLibraryOptions Number of library options
+ * @return #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
+                                  hipJitOption* jitOptions, void** jitOptionsValues,
+                                  unsigned int numJitOptions, hipLibraryOption* libraryOptions,
+                                  void** libraryOptionValues, unsigned int numLibraryOptions);
+
+/**
+ * @brief Unload HIP Library
+ *
+ * @param [in] library Input created hip library
+ * @return #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipLibraryUnload(hipLibrary_t library);
+
+/**
+ * @brief Get Kernel object from library
+ *
+ * @param [out] pKernel Output kernel object
+ * @param [in] library Input hip library
+ * @param [in] name kernel name to be searched for
+ * @return #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name);
+
+/**
+ * @brief Get Kernel count in library
+ *
+ * @param [out] count Count of kernels in library
+ * @param [in] library Input created hip library
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
+
+/**
+ * @brief Retrieve kernel handles within a library
+ *
+ * @param [out] kernels Buffer for kernel handles
+ * @param [in] numKernels Maximum number of kernel handles to return to buffer
+ * @oaram [in] library Library handle to query from
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library);
+
+/**
+ * @brief Returns a Library Handle
+ *
+ * @param [out] library Returned Library handle
+ * @param [in] kernel Kernel to retrieve library Handle
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
+
+/**
+ * @brief Returns a Kernel Name
+ *
+ * @param [out] name Returned Kernel Name
+ * @param [in] kernel Kernel handle to retrieve name
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
+
+/**
+ * @brief Returns the offset and size of a kernel parameter
+ *
+ * @param [in] kernel       Kernel handle to retrieve parameter info
+ * @param [in] paramIndex   Index of the parameter
+ * @param [out] paramOffset returns the offset of the parameter
+ * @param [out] paramSize   Optionally returns the size of the parameter
+ *
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                 size_t* paramSize);
+
+/**
  * @brief Find out attributes for a given function.
  * @ingroup Execution
  * @param [out] attr  Attributes of funtion
@@ -6399,8 +6532,22 @@ hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned l
  */
 hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const char* name);
 /**
- * @brief builds module from code object which resides in host memory. Image is pointer to that
- * location.
+ * @brief builds module from code object data which resides in host memory.
+ *
+ * The "image" is a pointer to the location of code object data. This data can be either
+ * a single code object or a fat binary (fatbin), which serves as the entry point for loading and
+ * launching device-specific kernel executions.
+ *
+ * By default, the following command generates a fatbin:
+ *
+ * "amdclang++ -O3 -c --offload-device-only --offload-arch=<GPU_ARCH> <input_file> -o <output_file>"
+ *
+ * For more details, refer to:
+ * <a
+ * href= "https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/kernel_language_cpp_support.html#kernel-compilation">
+ * Kernel Compilation</a> in the HIP kernel language C++ support, or
+ * <a
+ * href="https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html">HIP runtime compilation (HIP RTC)</a>.
  *
  * @param [in] image  The pointer to the location of data
  * @param [out] module  Retuned module
@@ -6482,7 +6629,7 @@ hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeO
 /**
  * @brief Creates a linker instance with options.
  * @param [in] numOptions  Number of options
- * @param [in] option  Array of options
+ * @param [in] options  Array of options
  * @param [in] optionValues  Array of option values cast to void*
  * @param [out] stateOut  hip link state created upon success
  *
@@ -6800,6 +6947,23 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
  */
 hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, const void* f,
                                              size_t dynSharedMemPerBlk, int blockSizeLimit);
+/**
+ * @brief Returns dynamic shared memory available per block when launching numBlocks blocks on SM.
+ *
+ * @ingroup Occupancy
+ * Returns in \p *dynamicSmemSize the maximum size of dynamic shared memory /
+ * to allow numBlocks blocks per SM.
+ *
+ * @param [out] dynamicSmemSize Returned maximum dynamic shared memory.
+ * @param [in]  f               Kernel function for which occupancy is calculated.
+ * @param [in]  numBlocks       Number of blocks to fit on SM
+ * @param [in]  blockSize       Size of the block
+ *
+ * @return #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue,
+ * #hipErrorUnknown
+ */
+hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
+                                                    int numBlocks, int blockSize);
 // doxygen end Occupancy
 /**
  * @}
@@ -9739,6 +9903,28 @@ template <typename F> inline hipError_t hipOccupancyMaxPotentialBlockSize(int* g
                                                                           uint32_t blockSizeLimit) {
   return hipOccupancyMaxPotentialBlockSize(gridSize, blockSize, (hipFunction_t)kernel,
                                            dynSharedMemPerBlk, blockSizeLimit);
+}
+
+/**
+ * @brief Returns dynamic shared memory available per block when launching numBlocks blocks on SM.
+ *
+ * @ingroup Occupancy
+ * Returns in \p *dynamicSmemSize the maximum size of dynamic shared memory /
+ * to allow numBlocks blocks per SM.
+ *
+ * @param [out] dynamicSmemSize Returned maximum dynamic shared memory.
+ * @param [in]  f               Kernel function for which occupancy is calculated.
+ * @param [in]  numBlocks       Number of blocks to fit on SM
+ * @param [in]  blockSize       Size of the block
+ *
+ * @return #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue,
+ * #hipErrorUnknown
+ */
+template <typename F>
+inline hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, F f,
+                                                           int numBlocks, int blockSize) {
+    return hipOccupancyAvailableDynamicSMemPerBlock(dynamicSmemSize, reinterpret_cast<const void*>(f),
+                                                    numBlocks, blockSize);
 }
 /**
  * @brief Launches a device function

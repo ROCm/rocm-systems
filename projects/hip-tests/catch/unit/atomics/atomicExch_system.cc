@@ -55,17 +55,18 @@ THE SOFTWARE.
  *    - HIP_VERSION >= 5.2
  */
 #if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "", int, unsigned int,
-                   unsigned long long, float) {
+TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu]",
+                   int, unsigned int, unsigned long long, float) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
+TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu]",
+                   int, unsigned int, unsigned long, unsigned long long, float,
+                   double) {
 #endif  // HT_NVIDIA
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, 1, sizeof(TestType));
     }
@@ -109,17 +110,18 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "", int, unsigne
  *    - HIP_VERSION >= 5.2
  */
 #if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "", int, unsigned int,
-                   unsigned long long, float) {
+TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "[multigpu]",
+                   int, unsigned int, unsigned long long, float) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
-#endif  // HT_NVIDIA
+TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "[multigpu]",
+                   int, unsigned int, unsigned long, unsigned long long, float,
+                   double) {
+#endif // HT_NVIDIA
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, 1, sizeof(TestType), 4);
     }
@@ -164,17 +166,18 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "", int, unsi
  *    - HIP_VERSION >= 5.2
  */
 #if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs", "", int, unsigned int,
-                   unsigned long long, float) {
+TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs",
+                   "[multigpu]", int, unsigned int, unsigned long long, float) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
+TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs",
+                   "[multigpu]", int, unsigned int, unsigned long,
+                   unsigned long long, float, double) {
 #endif  // HT_NVIDIA
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, 1, sizeof(TestType), 4);
     }

@@ -114,6 +114,26 @@ TEST_CASE("Unit_hipDeviceGetUuid_Negative") {
 }
 #ifdef __linux__
 #if HT_AMD
+
+static inline std::vector<int> parseVisibleDevices() {
+  std::vector<int> res;
+  auto env_res = std::getenv("HIP_VISIBLE_DEVICES");
+  if (env_res == nullptr) {
+    env_res = std::getenv("ROCR_VISIBLE_DEVICES");
+    if (env_res == nullptr) {
+      return res;
+    }
+  }
+
+  std::stringstream ss(std::string{env_res});
+  std::string item;
+  while (std::getline(ss, item, ',')) {
+    res.push_back(std::stoi(item));
+  }
+
+  return res;
+}
+
 /**
  * Test Description
  * ------------------------
@@ -125,7 +145,7 @@ TEST_CASE("Unit_hipDeviceGetUuid_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo") {
+TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   assert(deviceCount > 0);
@@ -161,6 +181,17 @@ TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo") {
     j++;
   }
 
+  auto visible_devices = parseVisibleDevices();
+  if (visible_devices.size() > 0) {
+    // We have visible devices set, basically parse the visible devices and remove the entries
+    size_t start = 0;  // The devices will be reported from 0..
+    std::map<int, std::vector<char>> uuid_map_copy;
+    for (auto device : visible_devices) {
+      uuid_map_copy[start] = uuid_map[device];
+    }
+    uuid_map = uuid_map_copy;
+  }
+
   for (const auto& i : uuid_map) {
     if (i.second.size() == 0) {
       continue;
@@ -188,7 +219,8 @@ TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo") {
  */
 // Guarding it against NVIDIA as this test is faling on it.
 #if HT_AMD
-TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties") {
+TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties",
+          "[multigpu]") {
   int deviceCount = 0;
   hipDevice_t device;
   hipDeviceProp_t prop;

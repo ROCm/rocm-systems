@@ -35,7 +35,6 @@ THE SOFTWARE.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <iomanip>
 #include <stdexcept>
 #include <vector>
 
@@ -45,7 +44,6 @@ THE SOFTWARE.
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
 #include "rdc_lib/impl/SmiUtils.h"
-#include "rdc_lib/rdc_common.h"
 #include "rdc_modules/rdc_rocp/RdcRocpCounterSampler.h"
 
 namespace amd {
@@ -157,6 +155,7 @@ const char* RdcRocpBase::get_field_id_from_name(rdc_field_t field) {
 
 const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
   std::vector<rdc_field_t> field_ids;
+  field_ids.reserve(field_to_metric.size());
   for (auto& [k, v] : field_to_metric) {
     field_ids.push_back(k);
   }
@@ -297,6 +296,7 @@ void RdcRocpBase::init_rocp_if_not() {
   }
 
   // populate fields
+  all_fields.reserve(temp_field_map_k.size());
   for (const auto& [k, v] : temp_field_map_k) {
     all_fields.emplace_back(v);
   }
@@ -364,7 +364,7 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
       // RDC_FI_PROF_GPU_UTIL_PERCENT is mapped to GPU_UTIL
       // GPU_UTIL metric is available on more GPUs than ENGINE_ACTIVE.
       // ENGINE_ACTIVE = GPU_UTIL/100, so do the math ourselves
-      data->dbl = read_dbl / 100.0F;
+      data->dbl = read_dbl / 100.0;
       break;
     case RDC_FI_PROF_OCC_ELAPSED: {
       // RDC_FI_PROF_OCC_ELAPSED is mapped to GRBM_GUI_ACTIVE, the read happens earlier in this
@@ -389,9 +389,9 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
       const bool isMI200 = (target_version.find("gfx90a") != std::string::npos);
       // FLOPS/clock/CU
       if (isMI200) {
-        data->dbl = divided_dbl / (1024.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+        data->dbl = divided_dbl / (1024.0 / static_cast<double>(agents[agent_index].simd_per_cu));
       } else {  // Assume mi300
-        data->dbl = divided_dbl / (2048.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+        data->dbl = divided_dbl / (2048.0 / static_cast<double>(agents[agent_index].simd_per_cu));
       }
     } break;
     case RDC_FI_PROF_EVAL_FLOPS_32_PERCENT:
@@ -401,7 +401,7 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
         return RDC_ST_BAD_PARAMETER;
       }
       // FLOPS/clock/CU
-      data->dbl = divided_dbl / (256.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+      data->dbl = divided_dbl / (256.0 / static_cast<double>(agents[agent_index].simd_per_cu));
       break;
     case RDC_FI_PROF_KFD_ID: {
       // do not care what it is mapped to. read value from agents

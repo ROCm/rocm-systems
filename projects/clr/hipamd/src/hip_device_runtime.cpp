@@ -454,6 +454,9 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
     case hipDeviceAttributeMaxAvailableVgprsPerThread:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().availableVGPRs_);
       break;
+    case hipDeviceAttributeHostNumaId:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->getPreferredNumaNode());
+      break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
   }

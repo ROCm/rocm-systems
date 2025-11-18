@@ -26,7 +26,6 @@
 #include <string>
 #include <unistd.h>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #if ROCPROFSYS_USE_ROCM > 0
@@ -131,13 +130,12 @@ struct memory_allocate_sample : storage_parsed_type_base
 struct region_sample : storage_parsed_type_base
 {
     region_sample() = default;
-    region_sample(uint64_t _thread_id, int32_t _kind, int32_t _operation,
+    region_sample(uint64_t _thread_id, std::string _name,
                   uint64_t _correlation_id_internal, uint64_t _correlation_id_ancestor,
                   uint64_t _start_timestamp, uint64_t _end_timestamp,
                   std::string _call_stack, std::string _args_str, std::string _category)
     : thread_id(_thread_id)
-    , kind(_kind)
-    , operation(_operation)
+    , name(std::move(_name))
     , correlation_id_internal(_correlation_id_internal)
     , correlation_id_ancestor(_correlation_id_ancestor)
     , start_timestamp(_start_timestamp)
@@ -147,20 +145,15 @@ struct region_sample : storage_parsed_type_base
     , category(std::move(_category))
     {}
 
-    // Identification fields
-    uint64_t thread_id;
-    int32_t  kind;
-    int32_t  operation;
+    uint64_t    thread_id;
+    std::string name;
 
-    // Correlation fields
     uint64_t correlation_id_internal;
     uint64_t correlation_id_ancestor;
 
-    // Timing fields
     uint64_t start_timestamp;
     uint64_t end_timestamp;
 
-    // Additional fields
     std::string call_stack;
     std::string args_str;
     std::string category;
@@ -180,9 +173,10 @@ struct in_time_sample : storage_parsed_type_base
 
 struct pmc_event_with_sample : in_time_sample
 {
-    size_t      agent_handle;
+    uint32_t    device_id;
+    uint8_t     device_type;
     std::string pmc_info_name;
-    size_t      value;
+    double      value;
 };
 
 struct amd_smi_sample : storage_parsed_type_base
@@ -194,7 +188,9 @@ struct amd_smi_sample : storage_parsed_type_base
         power,
         mem_usage,
         vcn_activity,
-        jpeg_activity
+        jpeg_activity,
+        xgmi,
+        pcie
     };
 
     uint64_t             settings;  // bitfield
@@ -206,7 +202,7 @@ struct amd_smi_sample : storage_parsed_type_base
     uint32_t             power;
     int64_t              temperature;
     size_t               mem_usage;
-    std::vector<uint8_t> xcp_activity;
+    std::vector<uint8_t> gpu_activity;
 };
 
 struct cpu_freq_sample : storage_parsed_type_base
@@ -222,6 +218,40 @@ struct cpu_freq_sample : storage_parsed_type_base
     std::vector<uint8_t> freqs;
 };
 
+struct backtrace_region_sample : storage_parsed_type_base
+{
+    backtrace_region_sample() = default;
+    backtrace_region_sample(uint32_t _type, uint64_t _thread_id, std::string _track_name,
+                            std::string _name, uint64_t _start_timestamp,
+                            uint64_t _end_timestamp, std::string _category,
+                            std::string _call_stack, std::string _line_info,
+                            std::string _extdata)
+    : type(_type)
+    , thread_id(_thread_id)
+    , track_name(std::move(_track_name))
+    , name(std::move(_name))
+    , start_timestamp(_start_timestamp)
+    , end_timestamp(_end_timestamp)
+    , category(std::move(_category))
+    , call_stack(std::move(_call_stack))
+    , line_info(std::move(_line_info))
+    , extdata(std::move(_extdata))
+    {}
+
+    uint32_t    type;
+    uint64_t    thread_id;
+    std::string track_name;
+    std::string name;
+
+    uint64_t start_timestamp;
+    uint64_t end_timestamp;
+
+    std::string category;
+    std::string call_stack;
+    std::string line_info;
+    std::string extdata;
+};
+
 enum class entry_type : uint32_t
 {
     in_time_sample        = 0x0000,
@@ -232,9 +262,10 @@ enum class entry_type : uint32_t
 #if(ROCPROFSYS_USE_ROCM && ROCPROFILER_VERSION >= 600)
     memory_alloc = 0x0005,
 #endif
-    amd_smi_sample   = 0x0006,
-    cpu_freq_sample  = 0x0007,
-    fragmented_space = 0xFFFF
+    amd_smi_sample          = 0x0006,
+    cpu_freq_sample         = 0x0007,
+    backtrace_region_sample = 0x0008,
+    fragmented_space        = 0xFFFF
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

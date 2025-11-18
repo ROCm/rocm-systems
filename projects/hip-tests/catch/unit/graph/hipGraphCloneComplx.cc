@@ -642,6 +642,7 @@ static void hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec() {
     HIP_CHECK(hipGraphExecDestroy(clonedGraphExec_2));
   }
   HIP_CHECK(hipGraphDestroy(clonedGraph));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
 TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec") {
@@ -735,6 +736,7 @@ static void hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec() {
     HIP_CHECK(hipGraphExecDestroy(clonedGraphExec_2));
   }
   HIP_CHECK(hipGraphDestroy(clonedGraph));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
 TEST_CASE("Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec") {
@@ -827,6 +829,7 @@ static void hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec() {
     HIP_CHECK(hipGraphExecDestroy(clonedGraphExec_2));
   }
   HIP_CHECK(hipGraphDestroy(clonedGraph));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
 TEST_CASE("Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec") {
@@ -938,6 +941,7 @@ static void hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec() {
     HIP_CHECK(hipGraphExecDestroy(clonedGraphExec_2));
   }
   HIP_CHECK(hipGraphDestroy(clonedGraph));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
 TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec") {
@@ -1295,6 +1299,8 @@ static void hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec() {
   }
 
   HIP_CHECK(hipGraphDestroy(clonedGraph));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_3));
+  HIP_CHECK(hipGraphDestroy(clonedGraph_4));
   HIP_CHECK(hipGraphDestroy(childgraph));
   HIP_CHECK(hipEventDestroy(event_start));
   HIP_CHECK(hipEventDestroy(event_end));
@@ -1484,7 +1490,7 @@ TEST_CASE("Unit_hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec") {
  Execute both original graph and cloned graph in loop: with multiple device.
  Loop: Update input data -> Launch Graph -> Validate output data -> Goto Loop */
 
-TEST_CASE("Unit_hipGraphClone_address_change_in_loop") {
+TEST_CASE("Unit_hipGraphClone_address_change_in_loop", "[multigpu]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -1638,7 +1644,7 @@ static void hipGraphClone_address_change_in_thread(hipGraph_t* graph, hipGraphNo
  memory addresses in each Node and create executable graphs.
  Launch the graphs in their respective GPUs. Validate the outputs. */
 
-TEST_CASE("Unit_hipGraphClone_address_change_in_thread") {
+TEST_CASE("Unit_hipGraphClone_address_change_in_thread", "[multigpu]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -1729,7 +1735,7 @@ static void hipGraphClone_Test_All_API(int dev) {
  Create a graph with Memcpy and Kernel nodes. and its cloned graph.
  Run all the above writen test cases for multiple GPU scenarios */
 
-TEST_CASE("Unit_hipGraphClone_multi_GPU_test") {
+TEST_CASE("Unit_hipGraphClone_multi_GPU_test", "[multigpu]") {
   // FIXME: This test tests 3D as well, decouple it
   CHECK_IMAGE_SUPPORT
 

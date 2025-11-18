@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -25,11 +25,7 @@
 #include "rocdevice.hpp"
 #include "utils/flags.hpp"
 #include "utils/util.hpp"
-#include "hsa/hsa.h"
-#include "hsa/hsa_ext_image.h"
-#include "hsa/hsa_ext_amd.h"
 #include "rocprintf.hpp"
-#include "hsa/hsa_ven_amd_aqlprofile.h"
 #include "rocsched.hpp"
 #include "device/device.hpp"
 #include "os/os.hpp"
@@ -56,13 +52,13 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
     wait_state = HSA_WAIT_STATE_ACTIVE;
   }
 
-  if (hsa_signal_load_relaxed(signal) > 0) {
+  if (Hsa::signal_load_relaxed(signal) > 0) {
     // When it is blocked wait, we wait in active state for 100 us before proceeding to wait in
     // blocked state indefinitely.
     if (!active_wait) {
       ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Host active wait for Signal = (0x%lx) for %d ns",
               signal.handle, kTimeout100us);
-      if (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
+      if (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                     kTimeout100us, HSA_WAIT_STATE_ACTIVE) != 0) {
         if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
           ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
@@ -76,7 +72,7 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
 
     // This is unlimited wait, but we wait for 4 secs and check if the device is
     // unstable, if so we return, otherwise we continue to wait in the while loop.
-    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
+    while (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                      kTimeout4Secs, wait_state) != 0) {
       if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
         ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
@@ -98,7 +94,7 @@ inline void fetchSignalTime(hsa_signal_t signal, hsa_agent_t gpu_device, uint64_
                             uint64_t* end) {
   if (start != nullptr && end != nullptr) {
     hsa_amd_profiling_dispatch_time_t time = {};
-    hsa_amd_profiling_get_dispatch_time(gpu_device, signal, &time);
+    Hsa::profiling_get_dispatch_time(gpu_device, signal, &time);
     *start = time.start;
     *end = time.end;
   }
@@ -200,7 +196,7 @@ class VirtualGPU : public device::VirtualDevice {
   class ManagedBuffer : public amd::EmbeddedObject {
    public:
     //! The number of chunks the arg pool will be divided
-    static constexpr uint32_t kPoolNumSignals = 4;
+    static constexpr uint32_t kPoolNumSignals = 16;
     ManagedBuffer(VirtualGPU& gpu, uint32_t pool_size)
         : gpu_(gpu), pool_size_(pool_size), pool_signal_(kPoolNumSignals) {}
     ~ManagedBuffer();
@@ -307,7 +303,7 @@ class VirtualGPU : public device::VirtualDevice {
     bool GetSDMAProfiling() { return sdma_profiling_; }
     void SetSDMAProfiling(bool profile) {
       sdma_profiling_ = profile;
-      hsa_amd_profiling_async_copy_enable(profile);
+      Hsa::profiling_async_copy_enable(profile);
     }
 
    private:
@@ -415,7 +411,7 @@ class VirtualGPU : public device::VirtualDevice {
   //! Returns memory dependency class
   MemoryDependency& memoryDependency() { return memoryDependency_; }
 
-  //! Detects memory dependency for HSAIL kernels and uses appropriate AQL header
+  //! Detects memory dependency for HSA kernels and uses appropriate AQL header
   bool processMemObjects(const amd::Kernel& kernel,  //!< AMD kernel object for execution
                          const_address params,       //!< Pointer to the param's store
                          size_t& ldsAddress,         //!< LDS usage
@@ -457,8 +453,6 @@ class VirtualGPU : public device::VirtualDevice {
   void WaitCompleteSignal(hsa_signal_t signal);
 
   void HiddenHeapInit();
-  void setLastUsedSdmaEngine(uint32_t mask) { lastUsedSdmaEngineMask_ = mask; }
-  uint32_t getLastUsedSdmaEngine() const { return lastUsedSdmaEngineMask_.load(); }
   uint64_t getQueueID();
 
   //! Analyzes a crashed AQL queue to find a broken AQL packet
@@ -468,16 +462,23 @@ class VirtualGPU : public device::VirtualDevice {
   //! Dispatches a barrier with blocking HSA signals
   void dispatchBlockingWait();
 
-  inline bool dispatchAqlPacket(uint8_t* aqlpacket, const std::string& kernelName,
-                                amd::AccumulateCommand* vcmd = nullptr);
   bool dispatchAqlPacket(hsa_kernel_dispatch_packet_t* packet, uint16_t header, uint16_t rest,
                          bool blocking = true, bool capturing = false,
                          const uint8_t* aqlPacket = nullptr, bool attach_signal = false);
   bool dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t header, uint16_t rest,
                          bool blocking = true, bool attach_signal = false);
+
+  //! Dispatches multiple AQL packets in a single batch operation
+  bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
+                              const std::vector<std::string>& kernelNames,
+                              amd::AccumulateCommand* vcmd = nullptr);
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
                                                               bool attach_signal = false);
+  //! Dispatches multiple AQL packets with a single doorbell ring
+  template <typename AqlPacket> bool dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& packets,
+                                                                   bool blocking, bool attach_signal = false,
+                                                                   const std::vector<std::string>* kernelNames = nullptr);
 
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);
@@ -551,7 +552,7 @@ class VirtualGPU : public device::VirtualDevice {
       if ((last_write_index_ == 0) && (last_completion_signal_.handle == 0)) {
         result = true;
       } else {
-        result = (hsa_signal_load_relaxed(last_completion_signal_) == 0);
+        result = (Hsa::signal_load_relaxed(last_completion_signal_) == 0);
       }
     }
     return result;
@@ -576,8 +577,8 @@ class VirtualGPU : public device::VirtualDevice {
   amd::Command* command_;   //!< Current command
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;  //!< Active queue associated with a vgpu
-  hsa_barrier_and_packet_t barrier_packet_;
-  hsa_amd_barrier_value_packet_t barrier_value_packet_;
+  hsa_barrier_and_packet_t barrier_packet_ {};
+  hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 
   uint32_t dispatch_id_;  //!< This variable must be updated atomically.
   Device& roc_device_;    //!< roc device object
@@ -618,9 +619,8 @@ class VirtualGPU : public device::VirtualDevice {
                                        //!< but ROC profiler expects D2H or H2D detection
   int fence_state_;                    //!< Fence scope
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
-  bool fence_dirty_;                   //!< Fence modified flag
+  std::atomic<bool> fence_dirty_;      //!< Fence modified flag
 
-  std::atomic<uint> lastUsedSdmaEngineMask_;  //!< Last Used SDMA Engine mask
   uint64_t last_write_index_ = 0;             //!< The last HW queue write index for any packet
   uint64_t last_barrier_index_ = 0;           //!< The last HW queue write index for a packet
                                               //!< with a complition signal

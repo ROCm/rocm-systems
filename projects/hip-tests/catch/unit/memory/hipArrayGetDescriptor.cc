@@ -233,7 +233,7 @@ float* funcToChkArray(hipArray_t array) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk") {
+TEST_CASE("Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -318,7 +318,8 @@ TEST_CASE("Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk") {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array") {
+TEST_CASE("Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array",
+          "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -368,7 +369,7 @@ TEST_CASE("Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array") {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipArrayGetDescriptor_Host2Array_Array2Host") {
+TEST_CASE("Unit_hipArrayGetDescriptor_Host2Array_Array2Host", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;

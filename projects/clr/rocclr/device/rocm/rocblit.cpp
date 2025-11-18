@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -317,8 +317,8 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
               active.handle);
 
       hsa_status_t status =
-          hsa_amd_memory_async_copy_rect(&dstMem, &offset, &srcMem, &offset, &dim, agent, direction,
-                                         wait_events.size(), wait_events.data(), active);
+          Hsa::memory_async_copy_rect(&dstMem, &offset, &srcMem, &offset, &dim, agent, direction,
+                                      wait_events.size(), wait_events.data(), active);
       if (status != HSA_STATUS_SUCCESS) {
         gpu().Barriers().ResetCurrentSignal();
         LogPrintfError("DMA buffer failed with code %d", status);
@@ -338,10 +338,10 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
           ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
                   "HSA Async Copy wait_event=0x%zx, completion_signal=0x%zx",
                   (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
-          hsa_status_t status = hsa_amd_memory_async_copy(
-              (reinterpret_cast<address>(dst) + dstOffset), dstAgent,
-              (reinterpret_cast<const_address>(src) + srcOffset), srcAgent, size[0],
-              wait_events.size(), wait_events.data(), active);
+          hsa_status_t status =
+              Hsa::memory_async_copy((reinterpret_cast<address>(dst) + dstOffset), dstAgent,
+                                     (reinterpret_cast<const_address>(src) + srcOffset), srcAgent,
+                                     size[0], wait_events.size(), wait_events.data(), active);
           if (status != HSA_STATUS_SUCCESS) {
             gpu().Barriers().ResetCurrentSignal();
             LogPrintfError("DMA buffer failed with code %d", status);
@@ -385,8 +385,8 @@ bool DmaBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Memory
     image_region.range.y = size[1];
     image_region.range.z = size[2];
 
-    hsa_status_t status = hsa_ext_image_export(gpu().gpu_device(), srcImage.getHsaImageObject(),
-                                               dstHost, rowPitch, slicePitch, &image_region);
+    hsa_status_t status = Hsa::image_export(gpu().gpu_device(), srcImage.getHsaImageObject(),
+                                            dstHost, rowPitch, slicePitch, &image_region);
     result = (status == HSA_STATUS_SUCCESS) ? true : false;
 
     // hsa_ext_image_export need a system scope fence
@@ -431,8 +431,8 @@ bool DmaBlitManager::copyBufferToImage(device::Memory& srcMemory, device::Memory
     image_region.range.y = size[1];
     image_region.range.z = size[2];
 
-    hsa_status_t status = hsa_ext_image_import(gpu().gpu_device(), srcHost, rowPitch, slicePitch,
-                                               dstImage.getHsaImageObject(), &image_region);
+    hsa_status_t status = Hsa::image_import(gpu().gpu_device(), srcHost, rowPitch, slicePitch,
+                                            dstImage.getHsaImageObject(), &image_region);
     result = (status == HSA_STATUS_SUCCESS) ? true : false;
 
     // hsa_ext_image_import need a system scope fence
@@ -468,6 +468,21 @@ bool DmaBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dstMem
   }
 
   return result;
+}
+
+// Select an SDMA engine using priority-based scheduling
+// Prefers engines in preferredMask (high-bandwidth engines), otherwise any free engine
+static inline uint32_t selectSdmaEngine(uint32_t freeMask, uint32_t preferredMask) {
+  if (freeMask == 0) return 0;
+
+  // Try preferred engines first (high-bandwidth engines)
+  uint32_t preferredFree = freeMask & preferredMask;
+  if (preferredFree != 0) {
+    return preferredFree & (~preferredFree + 1);  // Extract lowest preferred engine
+  }
+
+  // Fall back to non-preferred engines (slower engines)
+  return freeMask & (~freeMask + 1);  // Extract lowest available engine
 }
 
 // ================================================================================================
@@ -508,36 +523,45 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   hsa_signal_t active = gpu().Barriers().ActiveSignal(kInitSignalValueOne, gpu().timestamp());
 
   if (!kUseRegularCopyApi && engine != HwQueueEngine::Unknown) {
-    copyMask = gpu().getLastUsedSdmaEngine();
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "Last copy mask 0x%x", copyMask);
-    copyMask &= (engine == HwQueueEngine::SdmaRead ? sdmaEngineReadMask_ : sdmaEngineWriteMask_);
-    if (copyMask == 0) {
-      // Check SDMA engine status
-      status = hsa_amd_memory_copy_engine_status(dstAgent, srcAgent, &freeEngineMask);
+    // Get the mask of valid engines for this operation (read or write)
+    uint32_t validEngineMask =
+        (engine == HwQueueEngine::SdmaRead ? sdmaEngineReadMask_ : sdmaEngineWriteMask_);
 
-      if (status == HSA_STATUS_SUCCESS) {
-        status = hsa_amd_memory_get_preferred_copy_engine(dstAgent, srcAgent, &recIdMask);
-      }
+    // Check SDMA engine status to get currently free engines
+    status = Hsa::memory_copy_engine_status(dstAgent, srcAgent, &freeEngineMask);
+
+    if (status == HSA_STATUS_SUCCESS) {
+      status = Hsa::memory_get_preferred_copy_engine(dstAgent, srcAgent, &recIdMask);
+    }
+
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+            "Query copy engine status %x, srcAgent %p, "
+            "dstAgent %p, free_engine_mask 0x%x, rec_engine_mask 0x%x",
+            status, srcAgent.handle, dstAgent.handle, freeEngineMask, recIdMask);
+
+    // Constrain to valid engines for this operation
+    freeEngineMask &= validEngineMask;
+    recIdMask &= validEngineMask;
+
+    if (freeEngineMask != 0) {
+      // Use priority-based scheduling: prefer high-bandwidth engines (recIdMask)
+      copyMask = selectSdmaEngine(freeEngineMask, recIdMask);
 
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
-              "Query copy engine status %x, srcAgent %p, "
-              "dstAgent %p, free_engine_mask 0x%x, rec_engine_mask 0x%x",
-              status, srcAgent.handle, dstAgent.handle, freeEngineMask, recIdMask);
-
-      // If requested engine is valid and available, use it
-      if (recIdMask != 0 && (freeEngineMask & recIdMask) != 0) {
-        copyMask = recIdMask - (recIdMask & (recIdMask - 1));
-      } else {
-        // Otherwise use first available engine
-        copyMask = freeEngineMask - (freeEngineMask & (freeEngineMask - 1));
-      }
-
-      gpu().setLastUsedSdmaEngine(copyMask);
+              "Selected SDMA engine: free_mask=0x%x, preferred_mask=0x%x, selected_mask=0x%x",
+              freeEngineMask, recIdMask, copyMask);
     }
 
     if (copyMask != 0 && status == HSA_STATUS_SUCCESS) {
       // Copy on the first available free engine if ROCr returns a valid mask
       hsa_amd_sdma_engine_id_t copyEngine = static_cast<hsa_amd_sdma_engine_id_t>(copyMask);
+
+      // Check if engine type is SdmaInter and adjust agents accordingly
+      // ROCr copy api would always choose SDMA engine of the srcAgent if its a GPU
+      if (engine == HwQueueEngine::SdmaInter) {
+        srcAgent = dev().getBackendDevice();
+        forceSDMA = true;
+      }
 
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
               "HSA Copy copy_engine=0x%x, dst=0x%zx, src=0x%zx, "
@@ -545,9 +569,9 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
               copyEngine, dst, src, size, forceSDMA, engine,
               (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
 
-      status = hsa_amd_memory_async_copy_on_engine(dst, dstAgent, src, srcAgent, size,
-                                                   wait_events.size(), wait_events.data(), active,
-                                                   copyEngine, forceSDMA);
+      status =
+          Hsa::memory_async_copy_on_engine(dst, dstAgent, src, srcAgent, size, wait_events.size(),
+                                           wait_events.data(), active, copyEngine, forceSDMA);
     } else {
       kUseRegularCopyApi = true;
     }
@@ -560,8 +584,8 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
             dst, src, size, (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle,
             engine);
 
-    status = hsa_amd_memory_async_copy(dst, dstAgent, src, srcAgent, size, wait_events.size(),
-                                       wait_events.data(), active);
+    status = Hsa::memory_async_copy(dst, dstAgent, src, srcAgent, size, wait_events.size(),
+                                    wait_events.data(), active);
   }
 
   if (status == HSA_STATUS_SUCCESS) {
@@ -602,14 +626,14 @@ bool DmaBlitManager::hsaCopy(const Memory& srcMemory, const Memory& dstMemory,
     if (static_cast<const amd::Memory*>(srcMemory.owner())->ipcShared()) {
       hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
       if (HSA_STATUS_SUCCESS ==
-          hsa_amd_pointer_info(const_cast<address>(src), &info, nullptr, nullptr, nullptr)) {
+          Hsa::pointer_info(const_cast<address>(src), &info, nullptr, nullptr, nullptr)) {
         srcAgent = info.agentOwner;
       }
     }
 
     if (static_cast<const amd::Memory*>(dstMemory.owner())->ipcShared()) {
       hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
-      if (HSA_STATUS_SUCCESS == hsa_amd_pointer_info(dst, &info, nullptr, nullptr, nullptr)) {
+      if (HSA_STATUS_SUCCESS == Hsa::pointer_info(dst, &info, nullptr, nullptr, nullptr)) {
         dstAgent = info.agentOwner;
       }
     }
@@ -722,6 +746,8 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
       address dst = hostDst + copyOffset;
       status = rocrCopyBuffer(dst, dstAgent, stagingBuffer, srcAgent, copysize, copyMetadata);
       if (!status) {
+        // Release Pinned Memory back to pool if any
+        releaseBuffer(outBuffer);
         break;
       }
     } else {  // D2H Path
@@ -738,6 +764,8 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
           memcpy(hostDst + copyOffset, stagingBuffer, copysize);
         }
       } else {
+        // Release Pinned Memory back to pool if any
+        releaseBuffer(outBuffer);
         break;
       }
     }
@@ -2037,7 +2065,11 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
       size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, kfill_size);
       globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
 
-      auto constBuf = gpu().allocKernArg(kCBSize, kCBAlignment);
+      bool isGraphPktCapturing =
+          gpu().command() != nullptr && gpu().command()->getPktCapturingState();
+      auto constBuf = isGraphPktCapturing
+                          ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
+                          : gpu().allocKernArg(kCBSize, kCBAlignment);
 
       // If pattern has been expanded, use the expanded pattern, otherwise use the default pattern.
       if (packed_obj.pattern_expanded_) {
@@ -2129,7 +2161,11 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
     }
 
     // Get constant buffer to allow multipel fills
-    auto constBuf = gpu().allocKernArg(kCBSize, kCBAlignment);
+    bool isGraphPktCapturing =
+        gpu().command() != nullptr && gpu().command()->getPktCapturingState();
+    auto constBuf = isGraphPktCapturing
+                        ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
+                        : gpu().allocKernArg(kCBSize, kCBAlignment);
     memcpy(constBuf, pattern, patternSize);
 
     constexpr bool kDirectVa = true;
@@ -2240,16 +2276,16 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
                                    amd::CopyMetadata copyMetadata) const {
   amd::ScopedLock k(lockXferOps_);
   bool result = false;
-  bool p2p = false;
   uint32_t blitWg = dev().settings().limit_blit_wg_;
 
-  if (&gpuMem(srcMemory).dev() != &gpuMem(dstMemory).dev()) {
-    if (sizeIn[0] > dev().settings().sdma_p2p_threshold_) {
-      p2p = true;
-    } else {
-      constexpr uint32_t kLimitWgForKernelP2p = 16;
-      blitWg = kLimitWgForKernelP2p;
-    }
+  bool isP2pOrIpc = (&gpuMem(srcMemory).dev() != &gpuMem(dstMemory).dev()) ||
+                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
+
+  // Use SDMA for large P2P/IPC transfers, shader for small ones
+  if (isP2pOrIpc && sizeIn[0] <= dev().settings().sdma_p2p_threshold_) {
+    constexpr uint32_t kLimitWgForKernelP2p = 16;
+    blitWg = kLimitWgForKernelP2p;
+    isP2pOrIpc = false;
   }
 
   // Determine if we should use shader copy path based on various conditions
@@ -2262,7 +2298,6 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
       copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
 
   // Check memory access patterns
-  bool isP2pOrIpc = p2p || srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
   bool neitherMemoryIsHostDirectAccess =
       !srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess();
 
@@ -2730,7 +2765,7 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
 
   if (!dev().info().pcie_atomics_) {
     // Use a device side global atomics to workaround the reliance of PCIe 3 atomics
-    sp->write_index = hsa_queue_load_write_index_relaxed(schedulerQueue);
+    sp->write_index = Hsa::queue_load_write_index_relaxed(schedulerQueue);
   } else {
     sp->write_index = static_cast<uint64_t>(-1ULL);
   }

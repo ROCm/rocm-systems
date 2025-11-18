@@ -67,7 +67,7 @@ create_queue(hsa_agent_t        agent,
                 serializer.add_queue(queue, *new_queue);
             });
             controller->add_queue(*queue, std::move(new_queue));
-
+            ROCP_INFO << "created queue for HSA agent handle " << agent.handle;
             return HSA_STATUS_SUCCESS;
         }
     }
@@ -143,6 +143,61 @@ constexpr rocprofiler_agent_t default_agent =
                         .logical_node_type_id       = 0,
                         .runtime_visibility         = {0, 0, 0, 0, 0},
                         .uuid = static_cast<rocprofiler_uuid_t>(agent::uuid_view_t{})};
+
+RocAttachDispatchTable**
+get_attach_table()
+{
+    static auto* table = common::static_object<RocAttachDispatchTable*>::construct();
+    return table;
+}
+
+void
+queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, void*)
+{
+    auto* qc                    = CHECK_NOTNULL(get_queue_controller());
+    bool  registration_consumed = false;
+
+    auto set_write_interceptor = [&queue](write_interceptor_t wi, void* data) {
+        CHECK_NOTNULL(*(get_attach_table()))
+            ->rocprofiler_attach_set_write_interceptor(queue, wi, data);
+    };
+
+    for(const auto& [_, agent_info] : qc->get_supported_agents())
+    {
+        if(agent_info.get_hsa_agent().handle == agent.handle)
+        {
+            auto new_queue = std::make_unique<rocprofiler::hsa::Queue>(agent_info,
+                                                                       qc->get_core_table(),
+                                                                       qc->get_ext_table(),
+                                                                       queue,
+                                                                       set_write_interceptor);
+
+            qc->serializer(new_queue.get()).wlock([&](auto& serializer) {
+                serializer.add_queue(&queue, *new_queue);
+            });
+            qc->add_queue(queue, std::move(new_queue));
+            registration_consumed = true;
+            ROCP_INFO << "Adding queue from queue registration for HSA agent handle "
+                      << agent.handle;
+            break;
+        }
+    }
+    if(!registration_consumed)
+    {
+        ROCP_FATAL << "Could not find agent " << agent.handle << " for queue registration";
+    }
+}
+
+void
+queue_controller_load_attach_queues()
+{
+    auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
+
+    attach_table->rocprofiler_attach_iterate_all_queues(queue_controller_iterate_attach_queue,
+                                                        nullptr);
+    attach_table->rocprofiler_attach_notify_new_queue = queue_controller_iterate_attach_queue;
+}
+
 }  // namespace
 
 void
@@ -260,8 +315,18 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
 
     if(enable_queue_intercept())
     {
-        core_table.hsa_queue_create_fn  = hsa::create_queue;
-        core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
+        if(*(get_attach_table()))
+        {
+            // Attach table was previously registered, so we need to
+            // - Load and instrument queues that the attach library captured
+            // - NOT instrument the HSA API as the attach library has already done so
+            queue_controller_load_attach_queues();
+        }
+        else
+        {
+            core_table.hsa_queue_create_fn  = hsa::create_queue;
+            core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
+        }
     }
 }
 
@@ -480,5 +545,21 @@ queue_controller_fini()
     if(get_queue_controller())
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 }
+
+void
+queue_controller_init(RocAttachDispatchTable* attach_table)
+{
+    // We need to save the attach table for later, when the queue controller receives the HSA table
+    // and is initialized. We must get the attach table before HSA for correct behavior. This is
+    // guaranteed by rocprofiler-register.
+    if(get_queue_controller())
+    {
+        ROCP_ERROR_IF(get_queue_controller()->get_core_table().version.major_id != 0)
+            << "Queue controller was initialized before attach table was provided. Future queues "
+               "may not be instrumented correctly.";
+    }
+    *(get_attach_table()) = attach_table;
+}
+
 }  // namespace hsa
 }  // namespace rocprofiler

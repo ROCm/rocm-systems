@@ -26,6 +26,9 @@
 import csv
 import sqlite3
 from contextlib import closing
+from typing import Any
+
+import pandas as pd
 
 from utils.logger import console_error
 
@@ -70,19 +73,22 @@ def convert_db_to_csv(
                     ])
                     for row in cursor:
                         writer.writerow(row)
-    except (sqlite3.DatabaseError, IOError) as e:
-        console_error(f"Error converting database to CSV: {e}")
+    except OSError as e:
+        console_error(f"Database error while converting to CSV: {e}")
+    except Exception as e:
+        console_error(f"Unexpected error converting database to CSV: {e}")
 
 
-def process_rocpd_csv(df):
+def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     """
     Merge counters across unique dispatches from the
     input dataframe and return processed dataframe.
     """
-    # Only import pandas if needed
-    import pandas as pd
+    if df.empty:
+        return df
 
-    data = list()
+    data: list[dict[str, Any]] = []
+
     # Group by unique kernel and merge into a single row
     for _, group_df in df.groupby([
         "Dispatch_ID",
@@ -102,15 +108,11 @@ def process_rocpd_csv(df):
             "SGPR": group_df["SGPR"].iloc[0],
             "Kernel_Name": group_df["Kernel_Name"].iloc[0],
             "Kernel_ID": group_df["Kernel_ID"].iloc[0],
+            "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
+            "End_Timestamp": group_df["End_Timestamp"].iloc[0],
         }
         # Each counter will become its own column
         row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
-        # Replace end timestamp with median of durations of group,
-        # start timestamp is set to 0
-        row["End_Timestamp"] = (
-            group_df["End_Timestamp"] - group_df["Start_Timestamp"]
-        ).median()
-        row["Start_Timestamp"] = 0.0
         data.append(row)
     df = pd.DataFrame(data)
     # Rank GPU IDs, map lowest number to 0, next to 1, etc.

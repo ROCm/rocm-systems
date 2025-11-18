@@ -7,7 +7,7 @@ Configuring runtime options
 ****************************************************
 
 The ``rocprof-sys.cfg`` file maintains a list of the
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ runtime
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ runtime
 options. To create this configuration
 file and view the current runtime options, use the ``rocprof-sys-avail`` executable.
 
@@ -81,12 +81,7 @@ data and resources. By default, with ``ROCPROFSYS_PROFILE=ON``, ROCm Systems Pro
 timing values. However, by modifying the ``ROCPROFSYS_TIMEMORY_COMPONENTS`` setting,
 ROCm Systems Profiler can be configured to
 collect hardware counters, CPU-clock timers, memory usage, context switches, page faults, network statistics,
-and much more. ROCm Systems Profiler can even be used as a dynamic instrumentation vehicle
-for other third-party profiling
-APIs such as `Caliper <https://github.com/LLNL/Caliper>`_ and `LIKWID <https://github.com/RRZE-HPC/likwid>`_.
-To leverage this capability, build ROCm Systems Profiler from source with the CMake
-options ``TIMEMORY_USE_CALIPER=ON`` or ``TIMEMORY_USE_LIKWID=ON`` and then add
-``caliper_marker``, ``likwid_marker``, or both to ``ROCPROFSYS_TIMEMORY_COMPONENTS``.
+and much more.
 
 To view all possible components and their descriptions:
 
@@ -257,7 +252,7 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage
 
-Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``.
+Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``, ``xgmi``, ``pcie``.
 
 API tracing is configured with the ``ROCPROFSYS_ROCM_DOMAINS`` setting. The domains are used to filter the events that are captured during profiling.
 Supported values for this setting are those supported by ROCprofiler-SDK, which are returned by the API ``get_callback_tracing_names()`` and ``get_buffer_tracing_names()``. See the `ROCprofiler-SDK developer API documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/_doxygen/rocprofiler-sdk/html/>`_ to learn more about ROCprofiler-SDK APIs.
@@ -269,9 +264,11 @@ Use the following command to view the available domains:
 
 .. note::
 
-Some  settings can enable tracing for multiple domains, such as ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
-And ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, ``hsa_finalize_ext_api``.
-The setting ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
+   Some settings can enable tracing for multiple domains, such as: 
+   
+   * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
+   * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
+   * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
 
 For example, the following is a valid configuration:
 

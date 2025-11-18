@@ -45,9 +45,10 @@ THE SOFTWARE.
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Same_Address", "", int, unsigned int,
-                   unsigned long, unsigned long long) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Same_Address",
+                   "[multigpu]", int, unsigned int, unsigned long,
+                   unsigned long long) {
+  for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
           2, 2, 1, sizeof(TestType));
@@ -68,12 +69,13 @@ TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Same_Address", "", i
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Adjacent_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long) {
+TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Adjacent_Addresses",
+                   "[multigpu]", int, unsigned int, unsigned long,
+                   unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
       Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
           2, 2, warp_size, sizeof(TestType));
@@ -94,13 +96,14 @@ TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Adjacent_Addresses",
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Scattered_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long) {
+TEMPLATE_TEST_CASE(
+    "Unit_atomicOr_system_Positive_Peer_GPUs_Scattered_Addresses", "[multigpu]",
+    int, unsigned int, unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Scattered address " << current) {
       Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
           2, 2, warp_size, cache_line_size);

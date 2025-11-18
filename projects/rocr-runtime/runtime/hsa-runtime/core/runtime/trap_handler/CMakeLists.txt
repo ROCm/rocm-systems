@@ -3,7 +3,7 @@
 ## The University of Illinois/NCSA
 ## Open Source License (NCSA)
 ##
-## Copyright (c) 2022, Advanced Micro Devices, Inc. All rights reserved.
+## Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 ##
 ## Developed by:
 ##
@@ -139,10 +139,21 @@ function(generate_bytecodeStrm HeaderFILE)
 
   ## Add a custom command that generates amd_trap_handler_v2.h
   ## This depends on all the generated code object files and the C++ generator script.
+
+if (UNIX)
   add_custom_command(OUTPUT ${HeaderFILE}.h
                      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/create_trap_handler_header.sh ${ARG_LIST}
                      COMMENT "Collating trap handlers..."
                      DEPENDS ${HSACO_TARG_LIST} create_trap_handler_header.sh )
+else()
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_custom_command(
+    OUTPUT ${HeaderFILE}.h
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/create_trap_handler_header.py ${ARG_LIST}
+    COMMENT "Collating blit shaders..."
+    DEPENDS ${HSACO_TARG_LIST} create_trap_handler_header.py)
+endif()
+
 
   ## Export a target that builds (and depends on) amd_trap_handler_v2.h
   add_custom_target( ${HeaderFILE} DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${HeaderFILE}.h )

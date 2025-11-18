@@ -57,7 +57,7 @@ def test_valid_path(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -71,7 +71,7 @@ def test_list_kernels(binary_handler_analyze_rocprof_compute):
             "--list-stats",
         ])
         assert code == 0
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
@@ -94,7 +94,7 @@ def test_list_metrics_gfx90a(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
@@ -117,7 +117,7 @@ def test_list_metrics_gfx908(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
@@ -213,7 +213,7 @@ def test_filter_block_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
@@ -229,7 +229,7 @@ def test_filter_block_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
@@ -245,7 +245,7 @@ def test_filter_block_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
@@ -261,7 +261,7 @@ def test_filter_block_4(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
@@ -277,7 +277,7 @@ def test_filter_block_5(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
@@ -293,7 +293,7 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
@@ -309,7 +309,7 @@ def test_filter_kernel_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
@@ -325,7 +325,7 @@ def test_filter_kernel_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 1
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
@@ -342,7 +342,7 @@ def test_filter_kernel_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 1
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
@@ -358,7 +358,7 @@ def test_dispatch_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
@@ -374,7 +374,7 @@ def test_dispatch_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
@@ -390,7 +390,7 @@ def test_dispatch_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
@@ -407,7 +407,7 @@ def test_dispatch_4(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 1
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
@@ -424,7 +424,7 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 1
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -444,7 +444,7 @@ def test_gpu_ids(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
@@ -460,7 +460,7 @@ def test_normal_unit_per_wave(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
@@ -476,7 +476,7 @@ def test_normal_unit_per_cycle(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
@@ -492,7 +492,7 @@ def test_normal_unit_per_second(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
@@ -508,7 +508,7 @@ def test_normal_unit_per_kernel(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
@@ -524,7 +524,7 @@ def test_max_stat_num_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
@@ -540,7 +540,7 @@ def test_max_stat_num_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
@@ -556,7 +556,7 @@ def test_max_stat_num_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
@@ -572,7 +572,7 @@ def test_max_stat_num_4(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
@@ -588,7 +588,7 @@ def test_time_unit_s(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
@@ -604,7 +604,7 @@ def test_time_unit_ms(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
@@ -620,7 +620,7 @@ def test_time_unit_us(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
@@ -636,7 +636,7 @@ def test_time_unit_ns(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.decimal
@@ -652,7 +652,7 @@ def test_decimal_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.decimal
@@ -668,7 +668,7 @@ def test_decimal_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.decimal
@@ -684,7 +684,7 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -709,7 +709,7 @@ def test_save_dfs(binary_handler_analyze_rocprof_compute):
             assert len(df.index) >= 1
 
         shutil.rmtree(output_path)
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
     test_utils.clean_output_dir(config["cleanup"], output_path)
 
 
@@ -726,7 +726,7 @@ def test_col_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.col
@@ -744,7 +744,7 @@ def test_col_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.col
@@ -761,7 +761,7 @@ def test_col_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -776,7 +776,7 @@ def test_g(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
@@ -792,7 +792,7 @@ def test_kernel_verbose_0(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
@@ -808,7 +808,7 @@ def test_kernel_verbose_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
@@ -824,7 +824,7 @@ def test_kernel_verbose_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
@@ -840,7 +840,7 @@ def test_kernel_verbose_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
@@ -856,7 +856,7 @@ def test_kernel_verbose_4(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
@@ -872,7 +872,7 @@ def test_kernel_verbose_5(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
@@ -1055,7 +1055,11 @@ def test_parser_error_handling():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import build_eval_string, calc_builtin_var, update_denom_string
+    from utils.parser import (
+        build_eval_string,
+        calc_builtin_var,
+        update_denominator_string,
+    )
 
     try:
         build_eval_string("AVG(SQ_WAVES)", None, config={})
@@ -1064,7 +1068,7 @@ def test_parser_error_handling():
         assert "coll_level can not be None" in str(e)
 
     assert build_eval_string("", "pmc_perf", config={}) == ""
-    assert update_denom_string("", "per_wave") == ""
+    assert update_denominator_string("", "per_wave") == ""
 
     class MockSysInfo:
         total_l2_chan = 32
@@ -1115,14 +1119,14 @@ def test_ast_transformer_edge_cases():
             f"Expected 'Unknown call' in error, got: {str(e)}"
         )
 
-    supported_call = ast.Call(
+    SUPPORTED_CALL = ast.Call(
         func=ast.Name(id="MIN", ctx=ast.Load()),
         args=[ast.Constant(value=5) if hasattr(ast, "Constant") else ast.Num(n=5)],
         keywords=[],
     )
 
     try:
-        result = transformer.visit_Call(supported_call)
+        result = transformer.visit_Call(SUPPORTED_CALL)
         assert result.func.id == "to_min", f"Expected 'to_min', got: {result.func.id}"
     except Exception as e:
         assert False, f"Supported function call should not raise exception: {e}"
@@ -1280,7 +1284,7 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
                     if os.path.exists(csv_path):
                         os.remove(csv_path)
 
-                code = binary_handler_analyze_rocprof_compute([  # noqa: F841
+                binary_handler_analyze_rocprof_compute([
                     "analyze",
                     "--path",
                     workload_dir,
@@ -1350,27 +1354,27 @@ def test_build_dfs_edge_cases():
 
 @pytest.mark.misc
 def test_update_functions_coverage():
-    """Test update_denom_string and update_normUnit_string branches"""
+    """Test update_denominator_string and update_norm_unit_string branches"""
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import update_denom_string, update_normUnit_string
+    from utils.parser import update_denominator_string, update_normal_unit_string
 
-    result = update_denom_string("AVG(SQ_WAVES / $denom)", "per_wave")
+    result = update_denominator_string("AVG(SQ_WAVES / $denom)", "per_wave")
     assert "$denom" not in result
     assert "SQ_WAVES" in result
 
-    result = update_denom_string("AVG(DATA / $denom)", "per_cycle")
+    result = update_denominator_string("AVG(DATA / $denom)", "per_cycle")
     assert "$GRBM_GUI_ACTIVE_PER_XCD" in result
 
-    result = update_denom_string("AVG(DATA / $denom)", "per_second")
+    result = update_denominator_string("AVG(DATA / $denom)", "per_second")
     assert "End_Timestamp - Start_Timestamp" in result
 
-    result = update_denom_string("AVG(DATA / $denom)", "unsupported_unit")
+    result = update_denominator_string("AVG(DATA / $denom)", "unsupported_unit")
     assert "$denom" in result
 
-    result = update_normUnit_string("(Prefix + $normUnit)", "per_wave")
+    result = update_normal_unit_string("(Prefix + $normUnit)", "per_wave")
     assert "per wave" in result.lower()
     assert result[0].isupper()
 

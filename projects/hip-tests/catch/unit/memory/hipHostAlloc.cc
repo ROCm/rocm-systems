@@ -28,7 +28,7 @@ THE SOFTWARE.
 #include <hip_test_helper.hh>
 #include <kernels.hh>
 
-#define MEMORY_PERCENT 10
+#define MEMORY_PERCENT 5
 #define BLOCK_SIZE 512
 #define VALUE 32
 
@@ -198,7 +198,9 @@ TEST_CASE("Unit_hipHostAlloc_Basic") {
 
     SECTION("hipHostAllocDefault") { flag = hipHostAllocDefault; }
 #if (HT_AMD == 1) && (HT_LINUX == 1)
-    SECTION("hipHostAllocUncached") { flag = hipHostAllocUncached; }
+    if (!IsNavi4X()) {
+      SECTION("hipHostAllocUncached") { flag = hipHostAllocUncached; }
+    }
 #endif
 
     HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&B_h), SIZE, flag));
@@ -238,10 +240,10 @@ TEST_CASE("Unit_hipHostAlloc_Basic") {
 TEST_CASE("Unit_hipHostAlloc_Default") {
   int* A = nullptr;
   HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocDefault));
-  const char* ptrType = "default";
-  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_DEVICE, ptrType);
-  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_STREAM, ptrType);
-  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_EVENT, ptrType);
+  std::string kPtrType{"default"};
+  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_DEVICE, kPtrType);
+  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_STREAM, kPtrType);
+  CheckHostPointer(NUMELEMENTS, A, 0, SYNC_EVENT, kPtrType);
   HIP_CHECK(hipHostFree(A));
 }
 

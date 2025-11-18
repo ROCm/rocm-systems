@@ -50,7 +50,7 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
 
   size_t granularity = 0;
 
-  hipMemAllocationProp memAllocationProp;
+  hipMemAllocationProp memAllocationProp{};
   memAllocationProp.type = hipMemAllocationTypePinned;
   memAllocationProp.location.id = 0;
   memAllocationProp.location.type = hipMemLocationTypeDevice;
@@ -110,7 +110,7 @@ TEST_CASE("Unit_hipMemVmm_Uncached") {
 
   size_t granularity = 0;
 
-  hipMemAllocationProp memAllocationProp;
+  hipMemAllocationProp memAllocationProp{};
   memAllocationProp.type = hipMemAllocationTypeUncached;
   memAllocationProp.location.id = 0;
   memAllocationProp.location.type = hipMemLocationTypeDevice;
@@ -118,9 +118,9 @@ TEST_CASE("Unit_hipMemVmm_Uncached") {
   HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &memAllocationProp,
                                            hipMemAllocationGranularityRecommended));
 
-  size_t size = 4 * 1024;
+  size_t size = granularity * 4;
   void* reservedAddress{nullptr};
-  HIP_CHECK(hipMemAddressReserve(&reservedAddress, size, granularity, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(&reservedAddress, size, 0, nullptr, 0));
 
   hipMemGenericAllocationHandle_t gaHandle{nullptr};
   HIP_CHECK(hipMemCreate(&gaHandle, size, &memAllocationProp, 0));

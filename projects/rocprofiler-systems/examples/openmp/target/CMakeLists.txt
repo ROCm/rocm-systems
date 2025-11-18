@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 if(NOT OMP_TARGET_COMPILER)
@@ -30,24 +33,6 @@ project(rocprofiler-systems-example-openmp-target-lib LANGUAGES CXX)
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 
-set(DEFAULT_GPU_TARGETS
-    "gfx900"
-    "gfx906"
-    "gfx908"
-    "gfx90a"
-    "gfx940"
-    "gfx941"
-    "gfx942"
-    "gfx950"
-    "gfx1030"
-    "gfx1010"
-    "gfx1100"
-    "gfx1101"
-    "gfx1102"
-)
-
-set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "GPU targets to compile for")
-
 find_package(Threads REQUIRED)
 
 function(add_offload_flags tgt)
@@ -66,6 +51,8 @@ message(STATUS "ROCm root inferred from compiler: ${ROCM_ROOT_DIR}")
 
 # Candidate lib directories for libomptarget across ROCm layouts
 set(_LLVM_LIB_HINTS
+    "${ROCmVersion_DIR}/llvm/lib"
+    "${ROCmVersion_DIR}/lib"
     "${ROCM_ROOT_DIR}/lib"
     "${ROCM_ROOT_DIR}/llvm/lib"
     "$ENV{ROCM_PATH}/llvm/lib"
@@ -84,7 +71,10 @@ endif()
 # Use the directory that actually contains the library we found
 get_filename_component(_rocm_llvm_lib "${LIBOMPTARGET_SO}" DIRECTORY)
 set(_rocm_clang_lib "${ROCM_ROOT_DIR}/lib")
-set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib}")
+set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib};$ORIGIN")
+if(ROCmVersion_DIR)
+    list(APPEND _COMMON_RPATH "${ROCmVersion_DIR}/llvm/lib")
+endif()
 list(REMOVE_DUPLICATES _COMMON_RPATH)
 
 message(STATUS "libomptarget found at: ${LIBOMPTARGET_SO}")
@@ -121,6 +111,7 @@ foreach(tgt openmp-target-lib openmp-target)
     target_link_options(
         ${tgt}
         PUBLIC
+            "-Wl,--enable-new-dtags"
             "-L${_rocm_llvm_lib}"
             "-Wl,-rpath,${_rocm_llvm_lib}"
             "-Wl,-rpath,${_rocm_clang_lib}"

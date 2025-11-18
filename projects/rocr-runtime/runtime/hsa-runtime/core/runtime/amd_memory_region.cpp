@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -40,6 +40,11 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#if defined(__linux__)
+#include <unistd.h>
+#else
+#include <cstdint>
+#endif
 #include "core/inc/amd_memory_region.h"
 
 #include <algorithm>
@@ -48,15 +53,15 @@
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/util/utils.h"
+#include "core/util/os.h"
 #include "core/inc/exceptions.h"
-#include <unistd.h>
 
 namespace rocr {
 namespace AMD {
 
 // Tracks aggregate size of system memory available on platform
 size_t MemoryRegion::max_sysmem_alloc_size_ = 0;
-const size_t MemoryRegion::kPageSize_ = sysconf(_SC_PAGESIZE);
+const size_t MemoryRegion::kPageSize_ = os::PageSize();
 
 MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
                            bool extended_scope_fine_grain, bool user_visible, core::Agent* owner,
@@ -533,7 +538,7 @@ hsa_status_t MemoryRegion::Migrate(uint32_t flag, const void* ptr) const {
 }
 
 hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
-                                void* host_ptr, size_t size,
+                                void* host_ptr, size_t size, uint32_t flags,
                                 void** agent_ptr) const {
   if (!IsSystem()) {
     return HSA_STATUS_ERROR;
@@ -576,9 +581,15 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
     *agent_ptr = host_ptr;
     return HSA_STATUS_SUCCESS;
   }
+  HsaMemFlags local_mem_flag = mem_flag_;
+  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG) {
+    local_mem_flag.ui32.Uncached = 1;
+    local_mem_flag.ui32.CoarseGrain = 0;
+    local_mem_flag.ui32.ExtendedCoherent = 0;
+  }
 
   // Call kernel driver to register and pin the memory.
-  if (owner()->driver().RegisterMemory(host_ptr, size, const_cast<HsaMemFlags&>(mem_flag_)) ==
+  if (owner()->driver().RegisterMemory(host_ptr, size, local_mem_flag) ==
       HSA_STATUS_SUCCESS) {
     uint64_t alternate_va = 0;
     if (owner()->driver().MakeMemoryResident(host_ptr, size, &alternate_va, &map_flag_,

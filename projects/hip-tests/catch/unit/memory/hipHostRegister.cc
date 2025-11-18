@@ -107,7 +107,8 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset", "", int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset",
+                   "[multigpu]", int, float, double) {
   size_t sizeBytes{LEN * sizeof(TestType)};
   TestType *A, **Ad;
   int num_devices = 0;
@@ -118,13 +119,17 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset", "", i
     HIP_CHECK(hipHostRegister(A, sizeBytes, hipHostRegisterDefault));
   }
 #if (HT_AMD == 1) && (HT_LINUX == 1)
-  SECTION("hipExtHostRegisterUncached") {
-    HIP_CHECK(hipHostRegister(A, sizeBytes, hipExtHostRegisterUncached));
-  }
-  SECTION("hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached") {
-    HIP_CHECK(hipHostRegister(
-        A, sizeBytes,
-        hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached));
+  if (!IsNavi4X()) {
+    SECTION("hipExtHostRegisterUncached") {
+      HIP_CHECK(hipHostRegister(A, sizeBytes, hipExtHostRegisterUncached));
+    }
+    SECTION("hipHostRegisterPortable | hipHostRegisterMapped | "
+            "hipExtHostRegisterUncached | hipHostRegisterIoMemory") {
+      HIP_CHECK(hipHostRegister(
+          A, sizeBytes,
+          hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached | 
+          hipHostRegisterIoMemory));
+    }
   }
 #endif
   for (int i = 0; i < LEN; i++) {
@@ -210,7 +215,8 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel", "", int, fl
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "", int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "[multigpu]",
+                   int, float, double) {
   // 1 refers to doing hipHostRegister once for all devices
   // 0 refers to doing hipHostRegister for each device
   auto register_once = GENERATE(0, 1);
@@ -923,11 +929,17 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
       FlagType{0x08, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | 0x08, true},
 #if (HT_AMD == 1) && (HT_LINUX == 1)
+      FlagType{hipHostRegisterIoMemory, true},
       FlagType{hipExtHostRegisterUncached, true},
       FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached, true},
 #endif
       FlagType{0xF0, false}, FlagType{0xFFF2, false}, FlagType{0xFFFFFFFF, false});
 
+#if (HT_AMD == 1) && (HT_LINUX == 1)
+  if (IsNavi4X() && (flags.value & hipExtHostRegisterUncached)) {
+    return;
+  }
+#endif
   INFO("Testing hipHostRegister flag: " << flags.value);
   if (flags.valid) {
     HIP_CHECK(hipHostRegister(hostPtr, sizeBytes, flags.value));
@@ -937,7 +949,6 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
   }
   free(hostPtr);
 }
-
 /**
  * Test Description
  * ------------------------

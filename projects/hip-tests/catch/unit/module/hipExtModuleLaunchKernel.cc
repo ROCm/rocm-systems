@@ -253,7 +253,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_UniformWorkGroup") {
 
 TEST_CASE("Unit_hipExtModuleLaunchKernel_Positive_Parameters") {
   ModuleLaunchKernelPositiveParameters<hipExtModuleLaunchKernel>();
-
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   SECTION("Pass only start event") {
     hipEvent_t start_event = nullptr;
     HIP_CHECK(hipEventCreate(&start_event));
@@ -277,7 +277,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_Positive_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipExtModuleLaunchKernel_Negative_Parameters") {
+TEST_CASE("Unit_hipExtModuleLaunchKernel_Negative_Parameters", "[multigpu]") {
   ModuleLaunchKernelNegativeParameters<hipExtModuleLaunchKernel>(true);
 }
 /**

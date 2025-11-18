@@ -70,6 +70,13 @@ to view the metrics for current system architecture:
    $ rocprof-compute --list-metrics <sys_arch>
    $ rocprof-compute profile --list-available-metrics
 
+To view available aliases by hardware block, use the ``--list-blocks``
+option with a system architecture argument
+
+.. code-block:: shell
+
+   $ rocprof-compute --list-blocks <sys_arch>
+
 .. _basic-analyze-cli:
 
 Analyze in the command line
@@ -91,25 +98,6 @@ workload path.
    Enables you to analyze existing profiling data in the ROCm Compute Profiler CLI.
 
 See :doc:`analyze/cli` for more detailed information.
-
-.. _basic-analyze-grafana:
-
-Analyze in the Grafana GUI
---------------------------
-
-To conduct a more in-depth analysis of profiling results, it's suggested to use
-a Grafana GUI with ROCm Compute Profiler. To interact with profiling results, import your
-data to the MongoDB instance included in the ROCm Compute Profiler Dockerfile. See
-:doc:`/install/grafana-setup`.
-
-To interact with Grafana data, stored in the ROCm Compute Profiler database, enter
-``database`` :ref:`mode <modes-database>`; for example:
-
-.. code-block:: shell
-
-   $ rocprof-compute database --import [CONNECTION OPTIONS]
-
-See :doc:`/how-to/analyze/grafana-gui` for more detailed information.
 
 .. _modes:
 
@@ -153,10 +141,6 @@ Analyze mode
    To generate a lightweight GUI interface, you can add the ``--gui`` flag to your
    analysis command.
 
-   This mode is a middle ground to the highly detailed ROCm Compute Profiler Grafana GUI and
-   is great if you want immediate access to a hardware component you’re already
-   familiar with.
-
    .. code-block:: shell
 
       $ rocprof-compute analyze --help
@@ -171,26 +155,6 @@ Analyze mode
 
 See :doc:`analyze/mode` to learn about these modes in depth and to get started
 with analysis using ROCm Compute Profiler.
-
-.. _modes-database:
-
-Database mode
--------------
-
-``database``
-   The Grafana analyzer GUI is built on a MongoDB database. ``--import``
-   profiling results to the DB to interact with the workload in Grafana or
-   ``--remove`` the workload from the DB.
-
-   Connection options need to be specified. See :doc:`/how-to/analyze/grafana-gui` for
-   more details.
-
-   .. code-block:: shell
-
-      $ rocprof-compute database --help
-
-See :doc:`/install/grafana-setup` to learn about setting up a Grafana server and
-database instance to make your profiling data more digestible and shareable.
 
 .. _global-options:
 
@@ -241,14 +205,6 @@ The following table lists ROCm Compute Profiler's basic operations, their
    * - :ref:`Standalone roofline analysis <standalone-roofline>`
      - ``profile``
      - ``--name``, ``--roof-only``, ``--roofline-data-type <data_type>``, ``-- <profile_cmd>``
-
-   * - :ref:`Import a workload to database <grafana-gui-import>`
-     - ``database``
-     - ``--import``, ``--host``, ``--username``, ``--workload``, ``--team``
-
-   * - :ref:`Remove a workload from database <grafana-gui-remove>`
-     - ``database``
-     - ``--remove``, ``--host``, ``--username``, ``--workload``, ``--team``
 
    * - :doc:`Launch standalone GUI from CLI </how-to/analyze/standalone-gui>`
      - ``analyze``

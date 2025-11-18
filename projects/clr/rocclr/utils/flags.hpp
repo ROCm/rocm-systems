@@ -1,4 +1,4 @@
-/* Copyright (c) 2009 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -108,7 +108,7 @@ release(uint, OPENCL_VERSION, 200,                                            \
         "Force GPU opencl version")                                           \
 release(bool, HSA_LOCAL_MEMORY_ENABLE, true,                                  \
         "Enable HSA device local memory usage")                               \
-release(uint, HSA_KERNARG_POOL_SIZE, 1024 * 1024,                             \
+release(uint, HSA_KERNARG_POOL_SIZE, 4 * 1024 * 1024,                         \
         "Kernarg pool size")                                                  \
 release(bool, GPU_MIPMAP, true,                                               \
         "Enables GPU mipmap extension")                                       \
@@ -141,8 +141,6 @@ release(uint, PAL_MALL_POLICY, 0,                                             \
         "2 = Allocations will always be put through the MALL")                \
 release(bool, GPU_ENABLE_WAVE32_MODE, true,                                   \
         "Enables Wave32 compilation in HW if available")                      \
-release(bool, GPU_ENABLE_LC, true,                                            \
-        "Enables LC path")                                                    \
 release(bool, GPU_ENABLE_HW_P2P, false,                                       \
         "Enables HW P2P path")                                                \
 release(bool, GPU_ENABLE_COOP_GROUPS, true,                                   \
@@ -255,6 +253,8 @@ release(bool, DEBUG_HIP_FORCE_ASYNC_QUEUE, false,                             \
         "Forces grpahs into async queue mode. DEBUG_HIP_FORCE_GRAPH_QUEUES must be 1") \
 release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \
         "Forces the number of streams for the graph parallel execution")      \
+release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
+        "Number of graph nodes to batch at a time")                           \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \

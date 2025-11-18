@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 import os,time
 from rdc_bootstrap import *
 from RdcUtil import RdcUtil

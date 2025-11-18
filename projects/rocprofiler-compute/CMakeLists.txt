@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR AND CMAKE_CURRENT_SOURCE_DIR STREQUAL
-                                                  CMAKE_SOURCE_DIR)
+if(
+    CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
+    AND CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
+)
     set(MSG "")
     message(STATUS "Warning! Building from the source directory is not recommended")
     message(STATUS "If unintended, please remove 'CMakeCache.txt' and 'CMakeFiles'")
@@ -17,8 +19,13 @@ message(STATUS "Hostname: ${LOCALHOST}")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 1)
 string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
 set(ROCPROFCOMPUTE_FULL_VERSION "${FULL_VERSION_STRING}")
-string(REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)" "\\1.\\2.\\3"
-                     ROCPROFCOMPUTE_VERSION "${FULL_VERSION_STRING}")
+string(
+    REGEX REPLACE
+    "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
+    "\\1.\\2.\\3"
+    ROCPROFCOMPUTE_VERSION
+    "${FULL_VERSION_STRING}"
+)
 
 # string(REGEX REPLACE "(${ROCPROFCOMPUTE_VERSION})(.*)" "\\2"
 # ROCPROFCOMPUTE_VERSION_TWEAK
@@ -32,7 +39,9 @@ project(
     LANGUAGES C
     DESCRIPTION
         "A kernel-level profiling tool for machine learning/HPC workloads running on AMD MI GPUs"
-    HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-compute")
+    HOMEPAGE_URL
+        "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute"
+)
 
 set(PACKAGE_NAME "rocprofiler-compute")
 set(PACKAGE_NAME_UNDERSCORE "rocprofiler_compute")
@@ -45,16 +54,18 @@ include(GNUInstallDirs)
 execute_process(
     COMMAND git log --pretty=format:%h -n 1
     OUTPUT_VARIABLE ROCPROFCOMPUTE_GIT_REV
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 message(STATUS "Git revision: ${ROCPROFCOMPUTE_GIT_REV}")
-configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
-               ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
+    ${PROJECT_SOURCE_DIR}/VERSION.sha
+    @ONLY
+)
 
 set(CMAKE_BUILD_TYPE "Release")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX
-        "/opt/rocm"
-        CACHE PATH "default install path" FORCE)
+    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "default install path" FORCE)
 endif()
 message(STATUS "Installation path: ${CMAKE_INSTALL_PREFIX}")
 
@@ -62,10 +73,7 @@ option(CHECK_PYTHON_DEPS "Verify necessary python dependencies" ON)
 if(CHECK_PYTHON_DEPS)
     # Python 3 is required
     message(STATUS "Detecting Python interpreter...")
-    find_package(
-        Python3 3.8
-        COMPONENTS Interpreter
-        REQUIRED)
+    find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
     # Allow user-provided python search path
     if(DEFINED PYTHON_DEPS)
@@ -88,15 +96,12 @@ if(CHECK_PYTHON_DEPS)
         if(${ARGV0} STREQUAL "pyyaml")
             set(PACKAGE "yaml")
         endif()
-        # Skip check for textual_fspicker
-        if(${package} STREQUAL "textual_fspicker")
-            message(STATUS "Skipping check for textual_fspicker")
-            return()
-        endif()
         execute_process(
             COMMAND ${Python3_EXECUTABLE} -c "import ${PACKAGE}"
-            OUTPUT_QUIET ERROR_QUIET
-            RESULT_VARIABLE EXIT_CODE)
+            OUTPUT_QUIET
+            ERROR_QUIET
+            RESULT_VARIABLE EXIT_CODE
+        )
         if(${EXIT_CODE} EQUAL 0)
             message(STATUS "${ARGV0} = yes")
         else()
@@ -120,15 +125,16 @@ if(CHECK_PYTHON_DEPS)
     else()
         message(
             FATAL_ERROR
-                "\nNecessary Python package dependencies not found. Please install required dependencies "
-                "above using your favorite package manager. If using pip, consider running:\n"
-                "python3 -m pip install -r requirements.txt\n"
-                "at the top-level of this repository. If preparing a shared installation for "
-                "multiple users, consider adding the -t <target-dir> option to install necessary dependencies "
-                "into a shared directory, e.g.\n"
-                "python3 -m pip install -t <shared-install-path> -r requirements.txt\n"
-                "Note that the -DPYTHON_DEPS=<shared-install-path> can be used to provide an "
-                "additional search path to cmake for python packages.")
+            "\nNecessary Python package dependencies not found. Please install required dependencies "
+            "above using your favorite package manager. If using pip, consider running:\n"
+            "python3 -m pip install -r requirements.txt\n"
+            "at the top-level of this repository. If preparing a shared installation for "
+            "multiple users, consider adding the -t <target-dir> option to install necessary dependencies "
+            "into a shared directory, e.g.\n"
+            "python3 -m pip install -t <shared-install-path> -r requirements.txt\n"
+            "Note that the -DPYTHON_DEPS=<shared-install-path> can be used to provide an "
+            "additional search path to cmake for python packages."
+        )
     endif()
 endif()
 
@@ -138,23 +144,29 @@ endif()
 
 set(MOD_INSTALL_PATH
     "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/modulefiles/${PROJECT_NAME}"
-    CACHE STRING "Install path for modulefile")
+    CACHE STRING
+    "Install path for modulefile"
+)
 message(STATUS "Modulefile install path: ${MOD_INSTALL_PATH}")
 
 set(moduleFileTemplate "rocprofcompute.lua.in")
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/${moduleFileTemplate}
-    ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua @ONLY)
+    ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+    @ONLY
+)
 
 # Thera mods
 if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     list(APPEND CMAKE_MESSAGE_INDENT "  ")
     message(STATUS "Using thera-specific modulefile modification")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
-    file(APPEND
-         ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
-         ${mod_additions})
+    file(
+        APPEND
+            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+        ${mod_additions}
+    )
     list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
 
@@ -165,7 +177,6 @@ set(CMAKE_HIP_FLAGS_RELEASE "-O2")
 if(${ENABLE_TESTS})
     enable_language("C" "HIP")
     add_subdirectory(tests)
-
 endif()
 message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
 
@@ -175,25 +186,38 @@ include(CTest)
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 set(COV_OPTION "")
 if(${ENABLE_COVERAGE})
-    set(COV_OPTION "--cov=src" "--cov-append" "--cov-report=term-missing"
-                   "--cov-report=lcov:tests/coverage.info")
+    set(COV_OPTION
+        "--cov=src"
+        "--cov-append"
+        "--cov-report=term-missing"
+        "--cov-report=lcov:tests/coverage.info"
+    )
 
     set(CTEST_COVERAGE_COMMAND "python3")
-    set(CTEST_COVERAGE_EXTRA_FLAGS "-m" "coverage" "xml" "-o"
-                                   "${CMAKE_BINARY_DIR}/coverage.xml")
+    set(CTEST_COVERAGE_EXTRA_FLAGS
+        "-m"
+        "coverage"
+        "xml"
+        "-o"
+        "${CMAKE_BINARY_DIR}/coverage.xml"
+    )
 endif()
 message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
 # CPU threads available for testing
 set(PYTEST_NUMPROCS
     "1"
-    CACHE STRING "Number of parallel threads to use with CPU-oriented tests")
+    CACHE STRING
+    "Number of parallel threads to use with CPU-oriented tests"
+)
 message(STATUS "Pytest CPU threadcount: ${PYTEST_NUMPROCS}")
 
 # 2 CPU threads available for testing(test-analyze-commands)
 set(PYTEST_NUMPROCS_ANALYSIS
     "4"
-    CACHE STRING "Number of parallel threads to use with CPU-oriented tests")
+    CACHE STRING
+    "Number of parallel threads to use with CPU-oriented tests"
+)
 message(STATUS "Pytest CPU threadcount: ${PYTEST_NUMPROCS_ANALYSIS}")
 
 # ---------------------------
@@ -206,7 +230,8 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -m kernel_execution
         --junitxml=tests/test_profile_kernel_execution.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 add_test(
     NAME test_profile_dispatch
@@ -214,31 +239,57 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -m dispatch
         --junitxml=tests/test_profile_dispatch.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 add_test(
     NAME test_profile_mem
-    COMMAND ${Python3_EXECUTABLE} -m pytest -m mem --junitxml=tests/test_profile_mem.xml
-            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -m mem --junitxml=tests/test_profile_mem.xml
+        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 add_test(
     NAME test_profile_join
-    COMMAND ${Python3_EXECUTABLE} -m pytest -m join --junitxml=tests/test_profile_join.xml
-            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -m join --junitxml=tests/test_profile_join.xml
+        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 add_test(
     NAME test_profile_sort
-    COMMAND ${Python3_EXECUTABLE} -m pytest -m sort --junitxml=tests/test_profile_sort.xml
-            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -m sort --junitxml=tests/test_profile_sort.xml
+        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 add_test(
     NAME test_profile_misc
-    COMMAND ${Python3_EXECUTABLE} -m pytest -m misc --junitxml=tests/test_profile_misc.xml
-            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -m misc --junitxml=tests/test_profile_misc.xml
+        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
+add_test(
+    NAME test_profile_path
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -m path --junitxml=tests/test_profile_path.xml
+        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
+add_test(
+    NAME test_profile_roofline
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -m roofline
+        --junitxml=tests/test_profile_roofline.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 add_test(
     NAME test_profile_section
@@ -246,7 +297,8 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -m section
         --junitxml=tests/test_profile_section.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 add_test(
     NAME test_profile_pc_sampling
@@ -254,7 +306,8 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -s -m pc_sampling
         --junitxml=tests/test_profile_pc_sampling.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 add_test(
     NAME test_profile_sets_func
@@ -262,12 +315,33 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -m sets_func
         --junitxml=tests/test_profile_sets_func.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
+add_test(
+    NAME test_profile_live_attach_detach
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -s -m live_attach_detach
+        --junitxml=tests/test_profile_live_attach_detach.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 set_tests_properties(
-    test_profile_kernel_execution test_profile_dispatch test_profile_mem test_profile_join
-    test_profile_sort test_profile_misc PROPERTIES LABELS "profile" RESOURCE_GROUPS
-                                                   gpus:1)
+    test_profile_kernel_execution
+    test_profile_dispatch
+    test_profile_mem
+    test_profile_join
+    test_profile_sort
+    test_profile_misc
+    test_profile_path
+    test_profile_roofline
+    test_profile_section
+    test_profile_pc_sampling
+    test_profile_sets_func
+    test_profile_live_attach_detach
+    PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
+)
 
 # ---------------------------
 # analysis command tests
@@ -279,7 +353,8 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -n ${PYTEST_NUMPROCS_ANALYSIS} --verbose
         --junitxml=tests/test_analyze_commands.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 # ---------------------------
 # analyze workloads tests
@@ -291,7 +366,8 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -n ${PYTEST_NUMPROCS}
         --junitxml=tests/test_analyze_workloads.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_analyze_workloads.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 # ---------------------------
 # TCP counter tests
@@ -303,7 +379,8 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -m L1_cache
         --junitxml=tests/test_L1_cache_counters.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_TCP_counters.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 # ---------------------------
 # Spec tests
@@ -315,7 +392,8 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -m num_xcds_spec_class
         --junitxml=tests/test_num_xcds_spec_class.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_gpu_specs.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 add_test(
     NAME test_num_xcds_cli_output
@@ -323,17 +401,8 @@ add_test(
         ${Python3_EXECUTABLE} -m pytest -m num_xcds_cli_output
         --junitxml=tests/test_num_xcds_cli_output.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_gpu_specs.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-
-# ---------------------------
-# DB Connector tests
-# ---------------------------
-
-add_test(
-    NAME test_db_connector
-    COMMAND ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_db_connector.xml
-            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_db_connector.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 # ---------------------------
 # Utils tests
@@ -341,9 +410,11 @@ add_test(
 
 add_test(
     NAME test_utils
-    COMMAND ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_utils.xml ${COV_OPTION}
-            ${PROJECT_SOURCE_DIR}/tests/test_utils.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_utils.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_utils.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 # -----------------------------------
 # Autogenerated configuration tests
@@ -351,9 +422,11 @@ add_test(
 
 add_test(
     NAME test_autogen_config
-    COMMAND ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_autogen_config.xml
-            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_autogen_config.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_autogen_config.xml
+        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_autogen_config.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
 
 # -----------------------------------
 # Generate coverage tests
@@ -367,6 +440,8 @@ if(${ENABLE_COVERAGE})
         test_profile_join
         test_profile_sort
         test_profile_misc
+        test_profile_path
+        test_profile_roofline
         test_profile_section
         test_profile_sets_func
         test_analyze_commands
@@ -374,21 +449,26 @@ if(${ENABLE_COVERAGE})
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
-        test_db_connector
         test_utils
-        test_autogen_config)
+        test_autogen_config
+    )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
 
     add_test(
         NAME generate_coverage_report
         COMMAND ${Python3_EXECUTABLE} -m coverage xml -o ${CMAKE_BINARY_DIR}/coverage.xml
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    )
 
     set_tests_properties(
         generate_coverage_report
-        PROPERTIES DEPENDS "${ALL_TESTS_STRING}" LABELS "coverage" ENVIRONMENT
-                   "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage")
+        PROPERTIES
+            DEPENDS "${ALL_TESTS_STRING}"
+            LABELS "coverage"
+            ENVIRONMENT "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage"
+            TIMEOUT 600
+    )
 endif()
 
 # ---------
@@ -399,61 +479,72 @@ endif()
 install(
     PROGRAMS src/${EXECUTABLE_NAME}
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main)
+    COMPONENT main
+)
 # python dependency requirements
 install(
     FILES requirements.txt
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main)
+    COMPONENT main
+)
 # support files and version info
 install(
-    FILES src/argparser.py src/config.py src/rocprof_compute_base.py src/roofline.py
-          VERSION VERSION.sha
+    FILES
+        src/argparser.py
+        src/config.py
+        src/rocprof_compute_base.py
+        src/roofline.py
+        VERSION VERSION.sha
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main)
+    COMPONENT main
+)
 # src/rocprof_compute_analyze
 install(
     DIRECTORY src/rocprof_compute_analyze
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN src/rocprof_compute_analyze/tests EXCLUDE
-    PATTERN "__pycache__" EXCLUDE)
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/utils
 install(
     DIRECTORY src/utils
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "rooflines*" EXCLUDE
-    PATTERN "__pycache__" EXCLUDE)
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/utils/rooflines
 file(GLOB rooflinebins src/utils/rooflines/roofline-*)
-install(
-    PROGRAMS ${rooflinebins}
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT main)
+install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT main)
 # src/rocprof_compute_soc
 install(
     DIRECTORY src/rocprof_compute_soc
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
-    PATTERN "__pycache__" EXCLUDE)
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/rocprof_compute_profile
 install(
     DIRECTORY src/rocprof_compute_profile
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
-    PATTERN "__pycache__" EXCLUDE)
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/rocprof_compute_tui
 install(
     DIRECTORY src/rocprof_compute_tui
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
-    PATTERN "__pycache__" EXCLUDE)
-# grafana assets
+    PATTERN "__pycache__" EXCLUDE
+)
+# tools/config_management
 install(
-    DIRECTORY grafana
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
-    COMPONENT main)
+    DIRECTORY tools/config_management
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
 # samples
 install(
     DIRECTORY sample
@@ -463,33 +554,37 @@ install(
     PATTERN "*.hip"
     PATTERN "*.h"
     PATTERN "*.cpp"
-    PATTERN "workloads" EXCLUDE)
+    PATTERN "workloads" EXCLUDE
+)
 # modulefile
 install(
     FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
     DESTINATION ${MOD_INSTALL_PATH}
-    COMPONENT main)
+    COMPONENT main
+)
 
 # top-level symlink for bin/rocprof-compute
 install(
-    CODE "execute_process(
+    CODE
+        "execute_process(
     COMMAND bash -c \"set -e
     cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
     ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
     \")"
-    COMPONENT main)
+    COMPONENT main
+)
 
 # License header update(s)
 add_custom_target(
     license
     COMMAND
-        ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}/src
         --license ${PROJECT_SOURCE_DIR}/LICENSE.md --extension '.py'
     COMMAND
-        ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}
         --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
-    )
+)
 
 # Standalone binary creation
 add_custom_target(
@@ -503,7 +598,8 @@ add_custom_target(
     # Create VERSION.sha file
     COMMAND git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD > VERSION.sha
     # Build standalone binary
-    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution and fork
+    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution
+    # and fork
     # bombs as explained in
     # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
     COMMAND
@@ -515,18 +611,22 @@ add_custom_target(
         --include-package-data=plotly --include-package=kaleido
         --include-package-data=kaleido --include-package=rocprof_compute_analyze
         --include-package-data=rocprof_compute_analyze
+        --include-package=rocprof_compute_profile
+        --include-package-data=rocprof_compute_profile
         --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
         --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
         --include-package=utils --include-package-data=utils rocprof-compute
     # Remove library rpath from executable
     COMMAND patchelf --remove-rpath rocprof-compute.bin
     # Move to build directory
-    COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR})
+    COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR}
+)
 
 install(
     FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
-    COMPONENT main)
+    COMPONENT main
+)
 
 # TEST collateral
 option(INSTALL_TESTS "Build test suite" OFF)
@@ -537,15 +637,18 @@ if(INSTALL_TESTS)
         COMPONENT tests
         FILES_MATCHING
         PATTERN "*.py"
-        PATTERN "__pycache__" EXCLUDE)
+        PATTERN "__pycache__" EXCLUDE
+    )
     install(
         FILES requirements-test.txt
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT tests)
+        COMPONENT tests
+    )
     install(
         FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
         COMPONENT tests
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    )
 endif()
 message(STATUS "Install tests: ${INSTALL_TESTS}")
 
@@ -554,18 +657,18 @@ message(STATUS "Install tests: ${INSTALL_TESTS}")
 # ----------
 
 message(STATUS "Packaging config...")
-set(CPACK_GENERATOR
-    "DEB" "RPM"
-    CACHE STRING "")
-set(CPACK_PACKAGE_NAME
-    "${PROJECT_NAME}"
-    CACHE STRING "")
-set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/rocprofiler-compute")
+set(CPACK_GENERATOR "DEB" "RPM" CACHE STRING "")
+set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
+set(CPACK_PACKAGE_CONTACT
+    "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute"
+)
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "ROCm Compute Profiler: tool for GPU performance profiling")
+    "ROCm Compute Profiler: tool for GPU performance profiling"
+)
 set(CPACK_RPM_PACKAGE_DESCRIPTION
     "ROCm Compute Profiler is a performance analysis tool for profiling
-machine learning/HPC workloads running on AMD GPUs.")
+machine learning/HPC workloads running on AMD GPUs."
+)
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 
 # Package versioning
@@ -574,7 +677,7 @@ set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 set(CPACK_PACKAGE_VERSION
     "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}"
-    )
+)
 
 # RPM package specific variables
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
@@ -593,9 +696,7 @@ set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 # Dependencies
-set(PACKAGE_REQUIRES
-    "rocprofiler"
-    CACHE STRING "Package dependencies")
+set(PACKAGE_REQUIRES "rocprofiler" CACHE STRING "Package dependencies")
 set(CPACK_RPM_PACKAGE_REQUIRES ${PACKAGE_REQUIRES})
 set(CPACK_DEBIAN_PACKAGE_DEPENDS ${PACKAGE_REQUIRES})
 
@@ -656,6 +757,7 @@ set(CPACK_SOURCE_IGNORE_FILES
     \.gitmodules
     \.gitignore
     /tests
-    /build)
+    /build
+)
 
 include(CPack)

@@ -53,7 +53,7 @@ __global__ void vector_square(float* C_d, float* A_d, size_t N) {
   }
 }
 
-TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional") {
+TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional", "[multigpu]") {
   constexpr int MAX_GPUS = 8;
   float *A_d[MAX_GPUS], *C_d[MAX_GPUS];
   float *A_h, *C_h;
@@ -119,6 +119,7 @@ TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional") {
 
   for (int j = 0; j < nGpu; j++) {
     HIP_CHECK(hipStreamSynchronize(stream[j]));
+    HIP_CHECK(hipStreamDestroy(stream[j]));
 
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, j));
@@ -130,5 +131,12 @@ TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional") {
     for (size_t i = 0; i < N; i++) {
       REQUIRE(fabs(C_h[i] - (A_h[i] * A_h[i])) < 0.00000000001);
     }
+
+    HIP_CHECK(hipFree(A_d[j]));
+    HIP_CHECK(hipFree(C_d[j]));
   }
+
+  free(A_h);
+  free(C_h);
+  free(launchParamsList);
 }

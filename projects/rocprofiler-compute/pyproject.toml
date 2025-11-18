@@ -1,6 +1,6 @@
 [project]
 name = "rocprof_compute"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 [project.optional-dependencies]
 developer = [
@@ -21,14 +21,27 @@ extend-exclude = [
     ".misc",
     "external",
     "build-rocprof_compute",
+    "src/rocprof_compute_analyze/analysis_db.py",
+    "src/rocprof_compute_tui/widgets/splitter.py"
 ]
 
 [tool.ruff.lint]
-# Enable Pyflakes (F), pycodestyle (E, W for PEP8), and isort (I) rules.
-select = ["E", "W", "F", "I"]
-ignore = ["E713", "E711"]
+# Enable Pyflakes (F), pycodestyle (E, W for PEP8), aisort (I),
+# type annotation (ANN), and f-string (UP) rules.
+select = ["E", "W", "F", "I", "ANN", "UP", "PTH"]
+ignore = ["E713", "E711", "UP045", "PTH123", "PTH207"]
 fixable = ["ALL"]
 unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+# Ignore ANN and UP rules for all files except those in src/
+"!src/**" = ["ANN", "UP", "PTH"]
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = true  #allow Any for *args
+ignore-fully-untyped = false  #require type annotations
+suppress-dummy-args = true  #don't require annotation for "_" arguments
+suppress-none-returning = false  #require explicit None return types
 
 [tool.ruff.format]
 preview = true
@@ -89,4 +102,8 @@ markers = [
     "sets_func",
     "sets_perf",
     "pc_sampling",
+    "live_attach_detach",
+    "roofline",
+    "path",
+    "sci_notion",
 ]

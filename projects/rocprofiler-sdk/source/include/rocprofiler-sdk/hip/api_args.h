@@ -3285,6 +3285,98 @@ typedef union rocprofiler_hip_api_args_t
         unsigned long long* streamId;
     } hipStreamGetId;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 15
+    struct
+    {
+        hipLibrary_t*     library;
+        const void*       code;
+        hipJitOption*     jitOptions;
+        void**            jitOptionsValues;
+        unsigned int      numJitOptions;
+        hipLibraryOption* libraryOptions;
+        void**            libraryOptionValues;
+        unsigned int      numLibraryOptions;
+    } hipLibraryLoadData;
+    struct
+    {
+        hipLibrary_t*     library;
+        const char*       fileName;
+        hipJitOption*     jitOptions;
+        void**            jitOptionsValues;
+        unsigned int      numJitOptions;
+        hipLibraryOption* libraryOptions;
+        void**            libraryOptionValues;
+        unsigned int      numLibraryOptions;
+    } hipLibraryLoadFromFile;
+    struct
+    {
+        hipLibrary_t library;
+    } hipLibraryUnload;
+    struct
+    {
+        hipKernel_t* pKernel;
+        hipLibrary_t library;
+        const char*  name;
+    } hipLibraryGetKernel;
+    struct
+    {
+        unsigned int* count;
+        hipLibrary_t  library;
+    } hipLibraryGetKernelCount;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 16
+    struct
+    {
+        hipStream_t dst;
+        hipStream_t src;
+    } hipStreamCopyAttributes;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 17
+    struct
+    {
+        hipKernel_t* kernels;
+        unsigned int numKernels;
+        hipLibrary_t library;
+    } hipLibraryEnumerateKernels;
+    struct
+    {
+        hipLibrary_t* library;
+        hipKernel_t   kernel;
+    } hipKernelGetLibrary;
+    struct
+    {
+        const char** name;
+        hipKernel_t  kernel;
+    } hipKernelGetName;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 18
+    struct
+    {
+        size_t*     dynamicSmemSize;
+        const void* f;
+        int         numBlocks;
+        int         blockSize;
+    } hipOccupancyAvailableDynamicSMemPerBlock;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 19
+    struct
+    {
+        const char*                      symbol;
+        void**                           pfn;
+        int                              hipVersion;
+        uint64_t                         flags;
+        hipDriverProcAddressQueryResult* symbolStatus;
+    } hipGetProcAddress_spt;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 20
+    struct
+    {
+        hipKernel_t kernel;
+        size_t      paramIndex;
+        size_t*     paramOffset;
+        size_t*     paramSize;
+    } hipKernelGetParamInfo;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

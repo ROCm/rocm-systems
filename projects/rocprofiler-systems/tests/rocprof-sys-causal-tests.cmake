@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -113,7 +94,7 @@ rocprofiler_systems_add_causal_test(
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
 )
 
-# set(_causal_e2e_exe_args 80 100 432525 100000000) set(_causal_e2e_exe_args 80 12 432525
+# set(_causal_e2e_exe_args 80 103 432525 100000000) set(_causal_e2e_exe_args 80 12 432525
 # 500000000)
 set(_causal_e2e_exe_args 80 50 432525 100000000)
 set(_causal_common_args
@@ -148,8 +129,8 @@ causal_e2e_args_and_validation(_causal_slow_func slow-func "-F" "cpu_slow_func" 
                                5
 )
 causal_e2e_args_and_validation(_causal_fast_func fast-func "-F" "cpu_fast_func" 0 0 0 5)
-causal_e2e_args_and_validation(_causal_line_100 line-100 "-S" "causal.cpp:100" 10 20 20 5)
-causal_e2e_args_and_validation(_causal_line_110 line-110 "-S" "causal.cpp:110" 0 0 0 5)
+causal_e2e_args_and_validation(_causal_line_103 line-103 "-S" "causal.cpp:103" 10 20 20 5)
+causal_e2e_args_and_validation(_causal_line_113 line-113 "-S" "causal.cpp:113" 0 0 0 5)
 
 if(ROCPROFSYS_BUILD_NUMBER GREATER 1)
     set(_causal_e2e_environment)
@@ -189,13 +170,13 @@ rocprofiler_systems_add_causal_test(
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
-    NAME cpu-rocprofsys-line-100-e2e
+    NAME cpu-rocprofsys-line-103-e2e
     TARGET causal-cpu-rocprofsys
     LABELS "causal-e2e"
     RUN_ARGS ${_causal_e2e_exe_args}
     CAUSAL_MODE "line"
-    CAUSAL_ARGS ${_causal_line_100_args}
-    CAUSAL_VALIDATE_ARGS ${_causal_line_100_valid}
+    CAUSAL_ARGS ${_causal_line_103_args}
+    CAUSAL_VALIDATE_ARGS ${_causal_line_103_valid}
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
     ENVIRONMENT "${_causal_e2e_environment}"
@@ -204,13 +185,13 @@ rocprofiler_systems_add_causal_test(
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
-    NAME cpu-rocprofsys-line-110-e2e
+    NAME cpu-rocprofsys-line-113-e2e
     TARGET causal-cpu-rocprofsys
     LABELS "causal-e2e"
     RUN_ARGS ${_causal_e2e_exe_args}
     CAUSAL_MODE "line"
-    CAUSAL_ARGS ${_causal_line_110_args}
-    CAUSAL_VALIDATE_ARGS ${_causal_line_110_valid}
+    CAUSAL_ARGS ${_causal_line_113_args}
+    CAUSAL_VALIDATE_ARGS ${_causal_line_113_valid}
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
     ENVIRONMENT "${_causal_e2e_environment}"
