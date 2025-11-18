@@ -118,6 +118,7 @@ jobs:
             --mode "Nightly" \
             --build-jobs 16 \
             --pytest-numprocs 8 \
+            --code-coverage "ON" \
             --install
 
       - name: Check Coverage Configuration
