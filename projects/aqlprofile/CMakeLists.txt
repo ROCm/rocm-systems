@@ -21,7 +21,7 @@ include (env)
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
 ## Setup the package version.
-get_version ( "1.0.0" )
+get_version ( "1.1.0" )
 message ( "-- BUILD-VERSION: ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}" )
 
 set ( BUILD_VERSION_MAJOR ${VERSION_MAJOR} )
