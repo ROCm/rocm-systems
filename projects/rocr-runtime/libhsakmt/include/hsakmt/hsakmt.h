@@ -1269,6 +1269,90 @@ hsaKmtModelEnabled(
     bool* enable // OUT
 );
 
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryImport(
+    const HsaExternalHandleDesc* ImportDesc,
+    HsaMemoryImportResult* ImportResult
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryExport(
+    const HsaExternalHandleDesc* ExportDesc,
+    HsaMemoryExportResult* ExportResult
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryVaMap(
+    HsaMemoryObjectHandle Handle,
+    HSAuint64 offset,
+    HSAuint64 size,
+    HSAuint64 addr,
+    HsaMemoryMapFlags flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryVaUnmap(
+    HsaMemoryObjectHandle Handle,
+    HSAuint64 offset,
+    HSAuint64 size,
+    HSAuint64 addr
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryCpuMap(
+    HsaMemoryObjectHandle Handle,
+    void** out_cpu_ptr
+);
+
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryCpuUnmap(
+    HsaMemoryObjectHandle Handle
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemHandleFree(
+    HsaMemoryObjectHandle Handle
+);
+
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryGetCpuAddress(
+  HsaAMDGPUDeviceHandle DeviceHandle,
+  HsaMemoryObjectHandle MemoryHandle,
+  HSAint32* fd, // OUT
+  HSAuint64* cpu_addr // OUT
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryGetInfo(
+    HsaMemoryObjectHandle MemoryHandle, //IN 
+    HsaMemoryInfo* Info // OUT 
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemorySetMetadata(
+    HsaMemoryObjectHandle MemoryHandle, //IN 
+    const HsaMemoryMetaData* data // OUT 
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGpuDeviceGetFd(
+  HsaAMDGPUDeviceHandle DeviceHandle,
+  HSAint32* fd
+);
+
 #ifdef __cplusplus
 }   //extern "C"
 #endif

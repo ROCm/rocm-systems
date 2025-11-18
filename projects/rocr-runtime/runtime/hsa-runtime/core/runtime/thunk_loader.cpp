@@ -389,6 +389,18 @@ namespace core {
 
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)dlsym(thunk_handle, "hsaKmtAisReadWriteFile");
       if (HSAKMT_PFN(hsaKmtAisReadWriteFile) == NULL) goto ERROR;
+      
+      HSAKMT_PFN(hsaKmtMemoryImport) = (HSAKMT_DEF(hsaKmtMemoryImport)*)dlsym(thunk_handle, "hsaKmtMemoryImport");
+      if (HSAKMT_PFN(hsaKmtMemoryImport) == NULL) goto ERROR;
+      
+      HSAKMT_PFN(hsaKmtMemoryVaMap) = (HSAKMT_DEF(hsaKmtMemoryVaMap)*)dlsym(thunk_handle, "hsaKmtMemoryVaMap");
+      if (HSAKMT_PFN(hsaKmtMemoryVaMap) == NULL) goto ERROR;
+      
+      HSAKMT_PFN(hsaKmtMemoryVaUnmap) = (HSAKMT_DEF(hsaKmtMemoryVaUnmap)*)dlsym(thunk_handle, "hsaKmtMemoryVaUnmap");
+      if (HSAKMT_PFN(hsaKmtMemoryVaUnmap) == NULL) goto ERROR;
+      
+      HSAKMT_PFN(hsaKmtMemHandleFree) = (HSAKMT_DEF(hsaKmtMemHandleFree)*)dlsym(thunk_handle, "hsaKmtMemHandleFree");
+      if (HSAKMT_PFN(hsaKmtMemHandleFree) == NULL) goto ERROR;
 
       HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)dlsym(thunk_handle, "hsaKmtGetMemoryHandle");
       if (HSAKMT_PFN(hsaKmtGetMemoryHandle) == NULL) goto ERROR;
@@ -525,6 +537,10 @@ ERROR:
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)(&hsaKmtModelEnabled);
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)(&hsaKmtAisReadWriteFile);
       HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)(&hsaKmtGetMemoryHandle);
+      HSAKMT_PFN(hsaKmtMemoryImport) = (HSAKMT_DEF(hsaKmtMemoryImport)*)(&hsaKmtMemoryImport);
+      HSAKMT_PFN(hsaKmtMemoryVaMap) = (HSAKMT_DEF(hsaKmtMemoryVaMap)*)(&hsaKmtMemoryVaMap);
+      HSAKMT_PFN(hsaKmtMemoryVaUnmap) = (HSAKMT_DEF(hsaKmtMemoryVaUnmap)*)(&hsaKmtMemoryVaUnmap);
+      HSAKMT_PFN(hsaKmtMemHandleFree) = (HSAKMT_DEF(hsaKmtMemHandleFree)*)(&hsaKmtMemHandleFree);
 
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)(&amdgpu_device_initialize);
       DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)(&amdgpu_device_deinitialize);

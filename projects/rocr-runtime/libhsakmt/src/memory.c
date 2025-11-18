@@ -32,6 +32,10 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+
+#include <amdgpu.h>
+#include <amdgpu_drm.h>
+
 #include "fmm.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryPolicyCtx(HsaKFDContext *ctx,
@@ -936,4 +940,98 @@ hsaKmtGetMemoryHandle(void* va, void* MemoryAddress, HSAuint64 SizeInBytes,
 	CHECK_KFD_OPEN();
 
 	return HSAKMT_STATUS_NOT_SUPPORTED;
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryImport(const HsaExternalHandleDesc* import_desc,
+    					HsaMemoryImportResult* import_res)
+{
+	CHECK_KFD_OPEN();
+	amdgpu_device_handle devhandle =  (amdgpu_device_handle)import_desc->device_handle;
+	enum amdgpu_bo_handle_type type;
+	switch (import_desc->type) {
+	case HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME:
+		type = amdgpu_bo_handle_type_gem_flink_name;
+		break;
+	case HSA_EXTERNAL_HANDLE_KMS:
+		type = amdgpu_bo_handle_type_kms;
+		break;
+	case HSA_EXTERNAL_HANDLE_DMA_BUF:
+	default:
+		type = amdgpu_bo_handle_type_dma_buf_fd;
+		break;
+	}
+	struct amdgpu_bo_import_result res;
+	int ret = amdgpu_bo_import(devhandle, type, import_desc->fd, &res);
+	if (ret) {
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	import_res->buf_handle = (HsaMemoryObjectHandle)res.buf_handle;
+	import_res->alloc_size = (HSAuint64)res.alloc_size;
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAuint64 hsaKmtDrmPerm(HsaMemoryMapFlags flags) {
+  switch (flags) {
+  case HSA_MEMORY_ACCESS_RO:
+    return AMDGPU_VM_PAGE_READABLE;
+  case HSA_MEMORY_ACCESS_WO:
+    return AMDGPU_VM_PAGE_WRITEABLE;
+  case HSA_MEMORY_ACCESS_RW:
+    return AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  case HSA_MEMORY_ACCESS_NONE:
+  default:
+    return 0;
+  }
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
+    					HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
+						HsaMemoryMapFlags flags)
+{
+	CHECK_KFD_OPEN();
+	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
+    if (!drmhandle) {
+    	return HSAKMT_STATUS_ERROR;
+	}
+
+    int ret = amdgpu_bo_va_op(drmhandle, offset, size, addr,
+                      		  hsaKmtDrmPerm(flags), AMDGPU_VA_OP_MAP);
+	if (ret) {
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
+    					HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+{
+	CHECK_KFD_OPEN();
+	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
+    if (!drmhandle) {
+    	return HSAKMT_STATUS_ERROR;
+	}
+
+    int ret = amdgpu_bo_va_op(drmhandle, offset, size, addr, 0,
+							  AMDGPU_VA_OP_UNMAP);
+	if (ret) {
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
+{
+	CHECK_KFD_OPEN();
+	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
+	if (!drmhandle) {
+    	return HSAKMT_STATUS_ERROR;
+	}
+	int ret = amdgpu_bo_free(drmhandle);
+	if (ret) {
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
 }

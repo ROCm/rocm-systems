@@ -355,6 +355,7 @@ typedef struct _HsaNodeProperties
 
     HSAuint32       LuidLowPart;       // Windows Locally Unique Identifier Low 4 bytes
     HSAuint32       LuidHighPart;      // Windows Locally Unique Identifier High 4 bytes
+    HSAuint64       WallClockKHz;      // Wall Clock Frequency in KHz
 } HsaNodeProperties;
 
 
@@ -1526,6 +1527,56 @@ typedef enum _HsaAisFlags {
     HSA_AIS_READ = 0x1,
     HSA_AIS_WRITE= 0x2
 } HsaAisFlags;
+
+typedef struct _HsaMemoryObjectHandle* HsaMemoryObjectHandle;
+
+typedef enum _HsaMemoryMapFlags {
+    HSA_MEMORY_ACCESS_NONE = 0,
+    HSA_MEMORY_ACCESS_RO   = 1,
+    HSA_MEMORY_ACCESS_WO   = 2,
+    HSA_MEMORY_ACCESS_RW   = 3
+} HsaMemoryMapFlags;
+
+typedef struct _HsaMemoryMetaData {
+    HSAuint32 flags;
+    union 
+    {
+         HSAuint64 tiling_info;
+         HSAuint64 swizzle_info;
+    };
+    HSAuint32 size_metadata;
+    HSAuint32 umd_metadata[64];
+} HsaMemoryMetaData;
+
+typedef struct _HsaMemoryInfo {
+    HSAuint64 alloc_size;
+    HSAuint64 phys_alignment;
+    HSAuint32 preferred_heap;
+    HSAuint64 alloc_flags;
+    HsaMemoryMetaData metadata; 
+} HsaMemoryInfo;
+
+typedef enum _HsaExternalHandleType{
+    HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME = 0,
+    HSA_EXTERNAL_HANDLE_KMS     = 1,
+    HSA_EXTERNAL_HANDLE_DMA_BUF = 2
+} HsaExternalHandleType;
+
+typedef struct _HsaExternalHandleDesc {
+    HsaAMDGPUDeviceHandle device_handle; // GPU device handle (used for import only)
+    HSAint32 fd;                        // dmabuf fd
+    HsaExternalHandleType type;         // handle type
+    HsaMemoryObjectHandle mem_handle;   // memory handle (used for export only)
+} HsaExternalHandleDesc;
+
+typedef struct _HsaMemoryImportResult {
+    HsaMemoryObjectHandle buf_handle;
+    HSAuint64 alloc_size;
+} HsaMemoryImportResult;
+
+typedef struct _HsaMemoryExportResult {
+    HSAint32 fd; // dmabuf fd 
+} HsaMemoryExportResult;
 
 
 #ifdef __cplusplus
