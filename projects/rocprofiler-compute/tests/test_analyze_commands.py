@@ -1379,8 +1379,8 @@ def test_update_functions_coverage():
     assert result[0].isupper()
 
 
-def test_metric_evaluation_no_nalid_data():
-    """Test eval_metric with no valid dat"""
+def test_metric_evaluation_no_valid_data():
+    """Test emetric evaluation with no valid data"""
     import numpy as np
 
     from utils.parser import MetricEvaluator

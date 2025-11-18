@@ -166,7 +166,7 @@ def to_avg(
         else:
             return float(a)
     elif isinstance(a, str):
-        if not a:
+        if not a or a == "N/A":
             return np.nan
         return float(a)
     else:
