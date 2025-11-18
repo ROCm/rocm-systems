@@ -159,19 +159,23 @@ if(NOT APPLE)
     mark_as_advanced(HIP_HIPCC_EXECUTABLE)
 
     # Find HIPCC_CMAKE_LINKER_HELPER executable
-    find_program(
-        HIP_HIPCC_CMAKE_LINKER_HELPER
-        NAMES hipcc_cmake_linker_helper
-        PATHS
-        "${HIP_ROOT_DIR}"
-        ENV ROCM_PATH
-        ENV HIP_PATH
-        PATH_SUFFIXES bin
-        NO_DEFAULT_PATH
-        )
-    if(NOT HIP_HIPCC_CMAKE_LINKER_HELPER)
-        # Now search in default paths
-        find_program(HIP_HIPCC_CMAKE_LINKER_HELPER hipcc_cmake_linker_helper)
+    if(NOT WIN32)
+        find_program(
+            HIP_HIPCC_CMAKE_LINKER_HELPER
+            NAMES hipcc_cmake_linker_helper
+            PATHS
+            "${HIP_ROOT_DIR}"
+            ENV ROCM_PATH
+            ENV HIP_PATH
+            PATH_SUFFIXES bin
+            NO_DEFAULT_PATH
+            )
+        if(NOT HIP_HIPCC_CMAKE_LINKER_HELPER)
+            # Now search in default paths
+            find_program(HIP_HIPCC_CMAKE_LINKER_HELPER hipcc_cmake_linker_helper)
+        endif()
+    else()
+        set(HIP_HIPCC_CMAKE_LINKER_HELPER "hipcc")
     endif()
     mark_as_advanced(HIP_HIPCC_CMAKE_LINKER_HELPER)
 
@@ -270,7 +274,7 @@ if("${HIP_COMPILER}" STREQUAL "nvcc")
     set(CMAKE_HIP_CREATE_SHARED_LIBRARY "${HIP_HIPCC_CMAKE_LINKER_HELPER} <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> <SONAME_FLAG><TARGET_SONAME> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
     set(CMAKE_HIP_CREATE_SHARED_MODULE "${HIP_HIPCC_CMAKE_LINKER_HELPER} <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> <SONAME_FLAG><TARGET_SONAME> -o <TARGET> <LINK_LIBRARIES> -shared" )
     set(CMAKE_HIP_LINK_EXECUTABLE "${HIP_HIPCC_CMAKE_LINKER_HELPER} <FLAGS> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>")
-elseif("${HIP_COMPILER}" STREQUAL "clang")
+elseif(NOT WIN32 AND "${HIP_COMPILER}" STREQUAL "clang")
     #Set HIP_CLANG_PATH
     if("x${HIP_CLANG_PATH}" STREQUAL "x")
       # IF HIP_CLANG_INSTALL_DIR is Found
