@@ -10,7 +10,6 @@
         "Unit_atomicExch_system_Positive_Host_And_GPU - float",
         "Unit_hipModuleUnload_Negative_Double_Unload",
         "=== Below tests are failing PSDB ===",
-        "Unit_Assert_Positive_Basic_KernelFail",
         "Unit_hipMemMapArrayAsync_Positive_Basic",
     ]
 }
