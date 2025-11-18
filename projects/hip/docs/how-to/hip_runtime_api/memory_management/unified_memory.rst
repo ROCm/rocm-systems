@@ -203,24 +203,24 @@ functions on ROCm and CUDA, both with and without HMM support.
         - page-fault migration
       * - :cpp:func:`hipMalloc()`
         - device
-        - zero copy [zc]_
+        - zero copy [1]_
         - device
-        - zero copy [zc]_
+        - zero copy [1]_
       * - :cpp:func:`hipMallocManaged()`, ``__managed__``
         - pinned host
-        - zero copy [zc]_
+        - zero copy [1]_
         - first touch
         - page-fault migration
       * - :cpp:func:`hipHostRegister()`
         - pinned host
-        - zero copy [zc]_
+        - zero copy [1]_
         - pinned host
-        - zero copy [zc]_
+        - zero copy [1]_
       * - :cpp:func:`hipHostMalloc()`
         - pinned host
-        - zero copy [zc]_
+        - zero copy [1]_
         - pinned host
-        - zero copy [zc]_
+        - zero copy [1]_
 
   .. tab-item:: CUDA allocation behaviour
     :sync: cooperative-groups
@@ -256,15 +256,15 @@ functions on ROCm and CUDA, both with and without HMM support.
         - page-fault migration
       * - ``cudaMallocHost()``
         - pinned host
-        - zero copy [zc]_
+        - zero copy [1]_
         - pinned host
-        - zero copy [zc]_
+        - zero copy [1]_
 
-.. [zc] Zero copy is a feature, where the memory is pinned to either the device
-        or the host, and won't be transferred when accessed by another device or
-        the host. Instead only the requested memory is transferred, without
-        making an explicit copy, like a normal memory access, hence the term
-        "zero copy".
+.. [1] Zero copy is a feature, where the memory is pinned to either the device
+       or the host, and won't be transferred when accessed by another device or
+       the host. Instead only the requested memory is transferred, without
+       making an explicit copy, like a normal memory access, hence the term
+       "zero copy".
 
 .. _checking unified memory support:
 
