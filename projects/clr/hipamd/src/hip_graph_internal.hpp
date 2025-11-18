@@ -634,7 +634,6 @@ class Graph {
   const std::vector<Node>& GetNodes() const { return vertices_; }
   /// returns all the edges in the graph
   std::vector<std::pair<Node, Node>> GetEdges() const;
-  int instantiateDeviceId_ = -1;
   // returns the original graph ptr if cloned
   const Graph* getOriginalGraph() const { return pOriginalGraph_; }
   // Add user obj resource to graph
@@ -780,6 +779,7 @@ class Graph {
   //!< Used to track which devices are accessed by each parallel stream
   //!< during multi-device graph execution scheduling.
   std::unordered_map<int, std::set<int>> streams_dev_ids_;
+  int instantiateDeviceId_ = -1;
 
  private:
   friend class GraphExec;
