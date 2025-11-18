@@ -304,8 +304,7 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
       }
     }
 
-    execInfoOffset_ = totalSize_;
-    address last = mem + execInfoOffset_;
+    address last = mem + totalSize_;
     if (0 != execInfoSize) {
       ::memcpy(last, &execSvmPtr_[0], execInfoSize);
     }

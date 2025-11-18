@@ -58,7 +58,8 @@ list(REMOVE_ITEM ROCPROFILER_PACKAGING_COMPONENTS "Development" "Unspecified")
 list(LENGTH ROCPROFILER_PACKAGING_COMPONENTS NUM_ROCPROFILER_PACKAGING_COMPONENTS)
 
 # the packages we will generate
-set(ROCPROFILER_COMPONENT_GROUPS "core" "docs" "tests" "roctx" "rocpd" "benchmark")
+set(ROCPROFILER_COMPONENT_GROUPS "core" "docs" "tests" "roctx" "rocpd" "benchmark"
+                                 "rocattach")
 
 set(COMPONENT_GROUP_core_COMPONENTS "core" "development" "samples" "tools" "Development"
                                     "Unspecified")
@@ -67,6 +68,7 @@ set(COMPONENT_GROUP_tests_COMPONENTS "tests")
 set(COMPONENT_GROUP_roctx_COMPONENTS "roctx")
 set(COMPONENT_GROUP_rocpd_COMPONENTS "rocpd")
 set(COMPONENT_GROUP_benchmark_COMPONENTS "benchmark")
+set(COMPONENT_GROUP_rocattach_COMPONENTS "rocattach")
 
 # variables for each component group. Note: eventually we will probably want to separate
 # the core to just be the runtime libraries, development to be the headers and cmake
@@ -78,17 +80,22 @@ set(COMPONENT_NAME_tests "rocprofiler-sdk-tests")
 set(COMPONENT_NAME_roctx "rocprofiler-sdk-roctx")
 set(COMPONENT_NAME_rocpd "rocprofiler-sdk-rocpd")
 set(COMPONENT_NAME_benchmark "rocprofiler-sdk-benchmark")
+set(COMPONENT_NAME_rocattach "rocprofiler-sdk-rocattach")
 
-set(COMPONENT_DEP_core "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
-                       "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})")
+set(COMPONENT_DEP_core
+    "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
+    "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
+    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})")
 set(COMPONENT_DEP_docs "")
 set(COMPONENT_DEP_tests
     "rocprofiler-sdk (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
-    "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})")
+    "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
+    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})")
 set(COMPONENT_DEP_roctx "rocprofiler-register")
 set(COMPONENT_DEP_rocpd "")
 set(COMPONENT_DEP_benchmark "rocprofiler-sdk (>= ${PROJECT_VERSION})")
+set(COMPONENT_DEP_rocattach "")
 
 set(COMPONENT_DESC_core "rocprofiler-sdk libraries, headers, samples, and tools")
 set(COMPONENT_DESC_docs "rocprofiler-sdk documentation")
@@ -96,8 +103,9 @@ set(COMPONENT_DESC_tests "rocprofiler-sdk tests")
 set(COMPONENT_DESC_roctx "ROCm Tools Extension library and headers")
 set(COMPONENT_DESC_rocpd "ROCm Profiling Data library and headers")
 set(COMPONENT_DESC_benchmark "rocprofiler-sdk benchmark")
+set(COMPONENT_DESC_rocattach "ROCm Profiler Attachment library and headers")
 
-set(EXPECTED_PACKAGING_COMPONENTS 7)
+set(EXPECTED_PACKAGING_COMPONENTS 8)
 if(ROCPROFILER_BUILD_DOCS)
     math(EXPR EXPECTED_PACKAGING_COMPONENTS "${EXPECTED_PACKAGING_COMPONENTS} + 1")
 endif()

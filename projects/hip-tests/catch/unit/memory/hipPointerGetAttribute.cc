@@ -150,7 +150,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_KernelUpdation") {
  * from peer GPU device.It validates the memory type and
  * device ordinal in peer GPU
  */
-TEST_CASE("Unit_hipPointerGetAttribute_PeerGPU") {
+TEST_CASE("Unit_hipPointerGetAttribute_PeerGPU", "[multigpu]") {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);

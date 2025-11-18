@@ -135,7 +135,8 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional") {
   hipGraphMemAllocNodeGetParams_Functional();
 }
 
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice") {
+TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice",
+          "[multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
