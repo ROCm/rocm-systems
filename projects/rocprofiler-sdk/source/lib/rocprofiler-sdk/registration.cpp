@@ -982,6 +982,19 @@ rocprofiler_set_api_table(const char* name,
     ROCP_INFO << __FUNCTION__ << "(\"" << name << "\", " << lib_version << ", " << lib_instance
               << ", ..., " << num_tables << ")";
 
+    // if finalized/finalizing, ignore
+    if(rocprofiler::registration::get_fini_status() != 0)
+    {
+        ROCP_WARNING << fmt::format(
+            R"(rocprofiler-sdk has been finalized, ignoring {}(name="{}", lib_version={}, lib_instance={}, ..., num_tables={}) ...)",
+            __FUNCTION__,
+            name,
+            lib_version,
+            lib_instance,
+            num_tables);
+        return 0;
+    }
+
     static auto _once = std::once_flag{};
     std::call_once(_once, rocprofiler::registration::initialize);
 
