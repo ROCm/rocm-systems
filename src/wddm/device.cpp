@@ -409,14 +409,20 @@ void WDDMDevice::InitCmdbufInfo(void) {
     cmdbuf_aql_frame_size_ = 2 * sizeof(gfx10::AcquireMemTemplate);
   }
 
-  if (device_info_.major >= 11)
+  if (device_info_.major >= 11) {
     cmdbuf_aql_frame_size_ += sizeof(SetScratchTemplate);
+    cmdbuf_aql_frame_size_ += sizeof(DispatchProgramResourceRegs); // BuildComputeShaderParams
+  }
 
   cmdbuf_aql_frame_size_ +=
     sizeof(PM4MEC_COPY_DATA) * 2 +
     sizeof(BarrierTemplate) * 2 +
     sizeof(DispatchTemplate) +
     sizeof(AtomicTemplate) * 2;
+
+  // Add safety margin to account for alignment and future additions
+  cmdbuf_aql_frame_size_ += 128;
+
   cmdbuf_aql_frame_size_ = AlignUp(cmdbuf_aql_frame_size_, 0x10);
 
   cmdbuf_size_ = AlignUp(cmdbuf_aql_frame_num_ * cmdbuf_aql_frame_size_, 0x1000);

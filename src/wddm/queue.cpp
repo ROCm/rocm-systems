@@ -723,6 +723,12 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
   else
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t *)ring_rptr, cmdbuf_aql_frame_write_index + 1);
 
+  // Check if we exceeded the frame size
+  if ((i - ib_size) > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in KernelDispatch: used %d bytes, limit %d bytes\n", i - ib_size, cmdbuf_aql_frame_size);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
   ib_size = i;
   cmdbuf_aql_frame_write_index++;
   packet->header = HSA_PACKET_TYPE_INVALID;
@@ -811,6 +817,12 @@ ComputeQueue::BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet
   else
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t *)ring_rptr, cmdbuf_aql_frame_write_index + 1);
 
+  // Check if we exceeded the frame size
+  if ((i - ib_size) > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in BarrierGeneric: used %d bytes, limit %d bytes\n", i - ib_size, cmdbuf_aql_frame_size);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
   ib_size = i;
   cmdbuf_aql_frame_write_index++;
   packet->header = HSA_PACKET_TYPE_INVALID;
@@ -880,6 +892,12 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
     i += cmd_util.BuildAtomicMem((uint64_t *)ring_rptr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i);
   else
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t *)ring_rptr, cmdbuf_aql_frame_write_index + 1);
+
+  // Check if we exceeded the frame size
+  if ((i - ib_size) > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in VendorSpecific: used %d bytes, limit %d bytes\n", i - ib_size, cmdbuf_aql_frame_size);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   ib_size = i;
   cmdbuf_aql_frame_write_index++;
