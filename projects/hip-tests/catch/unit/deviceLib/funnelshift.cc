@@ -147,13 +147,13 @@ TEST_CASE("Unit_funnelshift") {
                      device_r_output, device_rc_output);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(host_l_output, device_l_output, NUM_TESTS * sizeof(unsigned int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(host_lc_output, device_lc_output, NUM_TESTS * sizeof(unsigned int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(host_r_output, device_r_output, NUM_TESTS * sizeof(unsigned int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(host_rc_output, device_rc_output, NUM_TESTS * sizeof(unsigned int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
 
   // verify the results
   errors = 0;
@@ -203,6 +203,11 @@ TEST_CASE("Unit_funnelshift") {
   free(host_lc_output);
   free(host_r_output);
   free(host_rc_output);
+
+  free(golden_l);
+  free(golden_lc);
+  free(golden_r);
+  free(golden_rc);
 
   REQUIRE(errors == 0);
 }

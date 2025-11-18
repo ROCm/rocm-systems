@@ -59,7 +59,7 @@ class WarpBallot : public WarpVoteTest<WarpBallot, uint64_t> {
       const auto rank_in_block = this->grid_.thread_rank_in_block(i).value();
       const auto rank_in_warp = rank_in_block % this->warp_size_;
       const auto warp_idx = this->warps_in_block_ * (i / this->grid_.threads_in_block_count_) +
-          rank_in_block / this->warp_size_;
+                            rank_in_block / this->warp_size_;
       const auto block_rank = warp_idx / this->warps_in_block_;
       const std::bitset<sizeof(uint64_t) * 8> active_mask(this->active_masks_[warp_idx]);
 
@@ -110,16 +110,12 @@ TEST_CASE("Unit_Warp_Ballot_Positive_Basic") {
     return;
   }
 
-  SECTION("Warp Ballot with specified active mask") {
-    WarpBallot().run(false);
-  }
+  SECTION("Warp Ballot with specified active mask") { WarpBallot().run(false); }
 
-  SECTION("Warp Ballot with random active mask") {
-    WarpBallot().run(true);
-  }
+  SECTION("Warp Ballot with random active mask") { WarpBallot().run(true); }
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

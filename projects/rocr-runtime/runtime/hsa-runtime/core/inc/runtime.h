@@ -51,11 +51,12 @@
 #include <tuple>
 #include <utility>
 #include <thread>
-#include <sys/un.h>
-
 #if defined(__linux__)
+#include <sys/un.h>
 #include <xf86drm.h>
 #include <amdgpu.h>
+#else
+#include <hsakmt/drm/amdgpu.h>
 #endif
 
 #include "core/inc/hsa_ext_interface.h"
@@ -68,12 +69,14 @@
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/memory_region.h"
 #include "core/inc/signal.h"
+#include "core/util/lazy_ptr.h"
 #include "core/inc/svm_profiler.h"
 #include "core/inc/thunk_loader.h"
 #include "core/util/flag.h"
 #include "core/util/locks.h"
 #include "core/util/os.h"
 #include "core/util/utils.h"
+#include "core/util/mpsc_queue.hpp"
 
 #include "core/inc/amd_loader_context.hpp"
 #include "core/inc/amd_hsa_code.hpp"
@@ -232,6 +235,7 @@ class Runtime {
   /// @param [in] size Copy size in bytes.
   ///
   /// @retval ::HSA_STATUS_SUCCESS if memory copy is successful and completed.
+  #undef CopyMemory
   hsa_status_t CopyMemory(void* dst, const void* src, size_t size);
 
   /// @brief Non-blocking memory copy from src to dst.
@@ -302,6 +306,7 @@ class Runtime {
   /// @param [in] count Number of uint32_t element to be set.
   ///
   /// @retval ::HSA_STATUS_SUCCESS if memory fill is successful and completed.
+  #undef FillMemory
   hsa_status_t FillMemory(void* ptr, uint32_t value, size_t count);
 
   /// @brief Set agents as the whitelist to access ptr.
@@ -342,7 +347,8 @@ class Runtime {
                                      hsa_amd_signal_handler handler, void* arg);
 
   hsa_status_t InteropMap(uint32_t num_agents, Agent** agents,
-                          int interop_handle, uint32_t flags, size_t* size,
+                          hsa_handle_t interop_handle,
+                          uint32_t flags, size_t* size,
                           void** ptr, size_t* metadata_size,
                           const void** metadata);
 
@@ -455,6 +461,7 @@ class Runtime {
   }
 
   const Flag& flag() const { return flag_; }
+  Flag& flag() { return flag_; }
 
   const ThunkLoader* thunkLoader() const { return thunkLoader_; }
 
@@ -479,6 +486,10 @@ class Runtime {
     if (version.KernelInterfaceMajorVersion == 1 &&
       version.KernelInterfaceMinorVersion >= 14)
       kfd_version.supports_event_age = true;
+
+    if (thunkLoader()->IsDXG()) {
+      kfd_version.supports_event_age = false;
+    }
   }
 
   void KfdVersion(bool exception_debugging, bool core_dump) {
@@ -508,27 +519,12 @@ class Runtime {
     return **driver;
   }
 
-  /// @brief Check if the drivers of the agents are different.
-  /// @param [in] agents Array of agents to check.
-  /// @param [in] num_agents Number of agents in the array.
-  /// @return True if the drivers of the agents are different, false otherwise.
-  static bool IsDifferentDriver(Agent* agents, uint32_t num_agents) {
-    if (num_agents == 0 || agents == nullptr) return true;
-
-    auto first_driver_type = agents[0].driver().kernel_driver_type_;
-    for (uint32_t i = 1; i < num_agents; ++i) {
-      if (agents[i].driver().kernel_driver_type_ != first_driver_type) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   std::vector<std::unique_ptr<Driver>>& AgentDrivers() { return agent_drivers_; }
 
   static bool IsGPUDriver(DriverType driver_type) {
     return driver_type == core::DriverType::KFD
-#ifdef HSAKMT_VIRTIO_ENABLED
+
+#if defined(HSAKMT_VIRTIO_ENABLED) && defined(__linux__)
         || driver_type == core::DriverType::KFD_VIRTIO
 #endif
         ;
@@ -570,13 +566,13 @@ class Runtime {
     amdgpu_bo_handle ldrm_bo;
   };
 
+  struct AsyncEventsInfo;
   struct AsyncEventsControl {
-    AsyncEventsControl() : async_events_thread_(NULL) {}
+    AsyncEventsControl(AsyncEventsInfo *asyncInfo);
     void Shutdown();
 
     hsa_signal_t wake;
-    os::Thread async_events_thread_;
-    HybridMutex lock;
+    os::Thread thread_;
     bool exit;
   };
 
@@ -600,6 +596,99 @@ class Runtime {
     std::vector<HsaEvent*> hsa_events_; //!< A list of HSA events for KFD wait
     std::vector<uint64_t> age_;         //!< The age list for KFD wait
     std::vector<void*> arg_;
+  };
+
+  // Event item structure to hold all signal information
+  struct AsyncEventItem {
+    hsa_signal_t signal;
+    hsa_signal_condition_t cond;
+    hsa_signal_value_t value;
+    hsa_amd_signal_handler handler;
+    void* arg;
+    HsaEvent* hsa_event;  //!< A list of HSA events for KFD wait
+    uint64_t age;         //!< The age list for KFD wait
+
+    AsyncEventItem() : signal{0}, cond(HSA_SIGNAL_CONDITION_EQ), value(0),
+                      handler(nullptr), arg(nullptr), hsa_event(nullptr), age(0) {}
+
+    AsyncEventItem(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t val,
+                    hsa_amd_signal_handler h, void* a)
+        : signal(sig), cond(c), value(val), handler(h), arg(a),
+          hsa_event(nullptr), age(0) {}
+
+    AsyncEventItem(const AsyncEventItem& other)
+        : signal(other.signal), cond(other.cond), value(other.value),
+          handler(other.handler), arg(other.arg), hsa_event(other.hsa_event), age(other.age) {}
+
+    void init(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t v, hsa_amd_signal_handler h, void* a) {
+        signal = sig;
+        cond = c;
+        value = v;
+        handler = h;
+        arg = a;
+    }
+    // Helper operator to convert signal to Signal* for easier access
+    Signal* operator->() {
+      if (signal.handle == 0) {
+        return nullptr;
+      }
+      return core::Signal::Convert(signal);
+    }
+  };
+
+  class AsyncEventsPool : private BaseShared {
+    public:
+      AsyncEventsPool() : block_size_(preallocblocks_ * minblock_) {}
+      ~AsyncEventsPool() { clear(); }
+
+      AsyncEventItem* alloc();
+      void free(AsyncEventItem* item);
+      void clear();
+
+    private:
+      static const size_t minblock_ = 4096 / sizeof(AsyncEventItem);
+      static const size_t preallocblocks_ = 512;
+      static const size_t maxblocksize_ = 1ULL << 28;
+      HybridMutex lock_;
+      std::vector<AsyncEventItem*> free_list_;
+      std::vector<std::pair<void*, size_t>> block_list_;
+      size_t block_size_;
+  };
+  // New concurrent events structure using lock-free queue
+  struct ConcurrentAsyncEvents {
+    ConcurrentAsyncEvents() {}
+
+    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
+                  hsa_signal_value_t value, hsa_amd_signal_handler handler, void* arg);
+
+    void Clear();
+
+    size_t Size();
+
+    bool empty() { return event_queue_.empty(); }
+
+    //! Get all events for processing
+    bool GetAllEvents(std::vector<AsyncEventItem>& all_events);
+
+    //! Get single event for processing
+    bool GetEvent(AsyncEventItem& event);
+
+    //! Add events back to queue (for events that need to be kept)
+    void AddEventsBack(const std::vector<AsyncEventItem>& events);
+  private:
+    //AsyncEventItem Queue
+    ::rocr::MPSCQueue<AsyncEventItem*> event_queue_;
+    AsyncEventsPool asyncEventPool_;
+  };
+
+  struct AsyncEventsInfo {
+    AsyncEventsControl control;
+    AsyncEvents events;
+    ConcurrentAsyncEvents new_events;
+    bool monitor_exceptions;
+
+    AsyncEventsInfo(bool exceptions);
+    ~AsyncEventsInfo();
   };
 
   struct PrefetchRange;
@@ -751,15 +840,8 @@ class Runtime {
   // Deprecated HSA Region API GPU (for legacy APU support only)
   Agent* region_gpu_;
 
-  struct AsyncEventsInfo {
-    AsyncEventsControl control;
-    AsyncEvents events;
-    AsyncEvents new_events;
-    bool monitor_exceptions;
-  };
-
-  struct AsyncEventsInfo asyncSignals_;
-  struct AsyncEventsInfo asyncExceptions_;
+  lazy_ptr<AsyncEventsInfo> asyncSignals_;
+  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
 
   // System clock frequency.
   uint64_t sys_clock_freq_;
@@ -886,12 +968,11 @@ class Runtime {
   };
 
   struct MappedHandle {
-    MappedHandle(MemoryHandle *mem_handle, AddressHandle *address_handle,
+    MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
                  uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle)
-        : mem_handle(mem_handle), address_handle(address_handle),
-          offset(offset), size(size), drm_fd(drm_fd),
-          drm_cpu_addr(drm_cpu_addr), shareable_handle(shareable_handle) {}
+                 hsa_access_permission_t perm, ShareableHandle shareable_handle);
+
+    MappedHandle() {}
 
     __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
 
@@ -922,9 +1003,8 @@ class Runtime {
   void InitIPCDmaBufSupport();
   bool ipc_dmabuf_supported_;
   int  IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
-                       amdgpu_bo_import_result *res,
                        unsigned int numNodes, HSAuint32 *nodes,
-                       void **importAddress, HSAuint64 *importSize);
+                       void **importAddress, HSAuint64 *importSize, bool isdmabufSysmem);
 };
 
 }  // namespace core

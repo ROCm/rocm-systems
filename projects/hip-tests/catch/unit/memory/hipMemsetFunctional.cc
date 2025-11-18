@@ -182,9 +182,8 @@ DEFINE_1D_BASIC_TEST_CASE("ZeroSize_hipMemsetD8", hipMemsetTypeD8, int8_t, 0x1, 
 
 // Helper function that sets a full region of memory with an initial value, sets a smaller subregion
 // with another value and check that the memset API do not write outside of the subregion of data.
-template <typename T>
-void partialMemsetTest(T valA, T valB, size_t count, size_t offset, MemsetType memsetType,
-                       bool async) {
+template <typename T> void partialMemsetTest(T valA, T valB, size_t count, size_t offset,
+                                             MemsetType memsetType, bool async) {
   T* devPtr;
   size_t subSize{count - offset};
   HIP_CHECK(hipMalloc(&devPtr, count * sizeof(T)));
@@ -250,9 +249,8 @@ void check_device_data_2D(T* devPtr, T value, size_t pitch, size_t width, size_t
 
 // Helper function for allocating memory, setting data with the specified 2D memset API and then
 // checking result of operation.
-template <typename T>
-void checkMemset2D(T value, size_t width, size_t height, bool async = false, size_t pitch = 0,
-                   T* devPtr = nullptr) {
+template <typename T> void checkMemset2D(T value, size_t width, size_t height, bool async = false,
+                                         size_t pitch = 0, T* devPtr = nullptr) {
   hipStream_t stream{nullptr};
   HIP_CHECK(hipStreamCreate(&stream));
   constexpr size_t elementSize = sizeof(T);
@@ -342,9 +340,9 @@ TEST_CASE("Unit_hipMemsetFunctional_ZeroSize_2D") {
 
 // Helper function that sets a full region of memory with an initial value, sets a smaller subregion
 // with another value and check that the memset API do not write outside of the subregion of data.
-template <typename T>
-void partialMemsetTest2D(T valA, T valB, size_t width, size_t height, size_t widthOffset,
-                         size_t heightOffset, bool async) {
+template <typename T> void partialMemsetTest2D(T valA, T valB, size_t width, size_t height,
+                                               size_t widthOffset, size_t heightOffset,
+                                               bool async) {
   T* devPtr{nullptr};
   size_t pitch{0};
   size_t subWidth{width - widthOffset};

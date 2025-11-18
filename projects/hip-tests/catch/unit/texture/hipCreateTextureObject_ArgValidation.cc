@@ -30,14 +30,16 @@ THE SOFTWARE.
 /**
  * Test Description
  * ------------------------
- *  - Validates handling of invalid arguments for [hipCreateTextureObject](@ref hipCreateTextureObject):
+ *  - Validates handling of invalid arguments for [hipCreateTextureObject](@ref
+ * hipCreateTextureObject):
  *    -# When output pointer to the texture object is `nullptr`
  *      - Expected output: do not return `hipSuccess`
  *    -# When resource descriptor is `nullptr`
  *      - Expected output: do not return `hipSuccess`
  *    -# When texture descriptor is `nullptr`
  *      - Expected output: do not return `hipSuccess`
- *  - Validates handling of invalid arguments for [hipDestroyTextureObject](@ref hipDestroyTextureObject):
+ *  - Validates handling of invalid arguments for [hipDestroyTextureObject](@ref
+ * hipDestroyTextureObject):
  *    -# When texture object handle is `nullptr`
  *      - Expected output: return `hipSuccess`
  * Test source
@@ -51,7 +53,7 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipCreateTextureObject_ArgValidation") {
   CHECK_IMAGE_SUPPORT
 
-  float *texBuf;
+  float* texBuf;
   hipError_t ret;
   constexpr int xsize = 32;
   hipResourceDesc resDesc;
@@ -64,8 +66,7 @@ TEST_CASE("Unit_hipCreateTextureObject_ArgValidation") {
   memset(&resDesc, 0, sizeof(resDesc));
   resDesc.resType = hipResourceTypeLinear;
   resDesc.res.linear.devPtr = texBuf;
-  resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0,
-                       hipChannelFormatKindFloat);
+  resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
   resDesc.res.linear.sizeInBytes = N * sizeof(float);
 
   // Populate texture descriptor
@@ -97,7 +98,7 @@ TEST_CASE("Unit_hipCreateTextureObject_ArgValidation") {
   }
 
   SECTION("Destroy TextureObject with nullptr") {
-    ret = hipDestroyTextureObject((hipTextureObject_t)nullptr);
+    ret = hipDestroyTextureObject((hipTextureObject_t) nullptr);
     // api to return success and no crash seen.
     REQUIRE(ret == hipSuccess);
   }
@@ -107,6 +108,6 @@ TEST_CASE("Unit_hipCreateTextureObject_ArgValidation") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

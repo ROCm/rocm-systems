@@ -1,4 +1,7 @@
-cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 if(NOT OMP_TARGET_COMPILER)
     find_program(
@@ -30,24 +33,6 @@ project(rocprofiler-systems-example-openmp-target-lib LANGUAGES CXX)
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 
-set(DEFAULT_GPU_TARGETS
-    "gfx900"
-    "gfx906"
-    "gfx908"
-    "gfx90a"
-    "gfx940"
-    "gfx941"
-    "gfx942"
-    "gfx950"
-    "gfx1030"
-    "gfx1010"
-    "gfx1100"
-    "gfx1101"
-    "gfx1102"
-)
-
-set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "GPU targets to compile for")
-
 find_package(Threads REQUIRED)
 
 function(add_offload_flags tgt)
@@ -57,19 +42,44 @@ function(add_offload_flags tgt)
     endforeach()
 endfunction()
 
-get_filename_component(OMP_TARGET_COMPILER_DIR ${OMP_TARGET_COMPILER} PATH)
-get_filename_component(OMP_TARGET_COMPILER_DIR ${OMP_TARGET_COMPILER_DIR} PATH)
+# Derive the ROCm root
+get_filename_component(_omp_bin_dir "${OMP_TARGET_COMPILER}" DIRECTORY)
+get_filename_component(ROCM_ROOT_DIR "${_omp_bin_dir}" DIRECTORY)
 
 message(STATUS "Using OpenMP target compiler: ${OMP_TARGET_COMPILER}")
-message(STATUS "Using OpenMP target compiler directory: ${OMP_TARGET_COMPILER_DIR}")
+message(STATUS "ROCm root inferred from compiler: ${ROCM_ROOT_DIR}")
 
-set(_rocm_llvm_lib "${OMP_TARGET_COMPILER_DIR}/llvm/lib")
-set(_rocm_clang_lib "${OMP_TARGET_COMPILER_DIR}/lib")
-set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib}")
+# Candidate lib directories for libomptarget across ROCm layouts
+set(_LLVM_LIB_HINTS
+    "${ROCmVersion_DIR}/llvm/lib"
+    "${ROCmVersion_DIR}/lib"
+    "${ROCM_ROOT_DIR}/lib"
+    "${ROCM_ROOT_DIR}/llvm/lib"
+    "$ENV{ROCM_PATH}/llvm/lib"
+    "$ENV{ROCM_PATH}/lib/llvm/lib"
+    "/opt/rocm/llvm/lib"
+    "/opt/rocm/lib/llvm/lib"
+)
 
-if(NOT EXISTS "${_rocm_llvm_lib}/libomptarget.so")
-    message(FATAL_ERROR "Could not find libomptarget.so in ${_rocm_llvm_lib}")
+# Find libomptarget
+find_library(LIBOMPTARGET_SO NAMES omptarget HINTS ${_LLVM_LIB_HINTS})
+
+if(NOT LIBOMPTARGET_SO)
+    message(FATAL_ERROR "Could not find libomptarget in any of:\n  ${_LLVM_LIB_HINTS}")
 endif()
+
+# Use the directory that actually contains the library we found
+get_filename_component(_rocm_llvm_lib "${LIBOMPTARGET_SO}" DIRECTORY)
+set(_rocm_clang_lib "${ROCM_ROOT_DIR}/lib")
+set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib};$ORIGIN")
+if(ROCmVersion_DIR)
+    list(APPEND _COMMON_RPATH "${ROCmVersion_DIR}/llvm/lib")
+endif()
+list(REMOVE_DUPLICATES _COMMON_RPATH)
+
+message(STATUS "libomptarget found at: ${LIBOMPTARGET_SO}")
+message(STATUS "LLVM libdir: ${_rocm_llvm_lib}")
+message(STATUS "Clang libdir: ${_rocm_clang_lib}")
 
 # Shared library
 
@@ -101,6 +111,7 @@ foreach(tgt openmp-target-lib openmp-target)
     target_link_options(
         ${tgt}
         PUBLIC
+            "-Wl,--enable-new-dtags"
             "-L${_rocm_llvm_lib}"
             "-Wl,-rpath,${_rocm_llvm_lib}"
             "-Wl,-rpath,${_rocm_clang_lib}"

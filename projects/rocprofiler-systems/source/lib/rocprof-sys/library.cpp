@@ -44,6 +44,9 @@
 #include "core/perfetto_fwd.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cache_utility.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/experiment.hpp"
@@ -55,7 +58,6 @@
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
-#include "library/ompt.hpp"
 #include "library/process_sampler.hpp"
 #include "library/ptl.hpp"
 #include "library/rocprofiler-sdk.hpp"
@@ -84,6 +86,7 @@
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/agent.h>
+#    include <rocprofiler-sdk/registration.h>
 #endif
 
 #include <atomic>
@@ -115,6 +118,22 @@ namespace
 {
 auto _timemory_manager  = tim::manager::instance();
 auto _timemory_settings = tim::settings::shared_instance();
+
+void
+set_metadata_process_start_timestamp(int64_t _ts)
+{
+    auto process_info  = trace_cache::get_metadata_registry().get_process_info();
+    process_info.start = _ts;
+    trace_cache::get_metadata_registry().set_process(process_info);
+}
+
+void
+set_metadata_process_end_timestamp(int64_t _ts)
+{
+    auto process_info = trace_cache::get_metadata_registry().get_process_info();
+    process_info.end  = _ts;
+    trace_cache::get_metadata_registry().set_process(process_info);
+}
 
 bool
 ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
@@ -328,37 +347,17 @@ read_command_line(pid_t _pid)
 }
 
 void
-rocprofsys_preinit_rocpd()
+rocprofsys_preinit_cache()
 {
-    auto&       _data_processor = rocpd::data_processor::get_instance();
-    const auto& _n_info         = node_info::get_instance();
-    auto        _cmd_line       = read_command_line(getpid());
-    auto&       _agent_manager  = agent_manager::get_instance();
+    auto _cmd_line = read_command_line(getpid());
 
     if(_cmd_line.empty())
     {
         _cmd_line.emplace_back("rocprofiler-systems");
     }
 
-    _data_processor.insert_node_info(
-        _n_info.id, _n_info.hash, _n_info.machine_id.c_str(), _n_info.system_name.c_str(),
-        _n_info.node_name.c_str(), _n_info.release.c_str(), _n_info.version.c_str(),
-        _n_info.machine.c_str(), _n_info.domain_name.c_str());
-    _data_processor.insert_process_info(_n_info.id, getppid(), getpid(), 0, 0, 0, 0,
-                                        _cmd_line[0].c_str(), "{}");
-
-    const auto& agents = _agent_manager.get_agents();
-    for(const auto& rocpd_agent : agents)
-    {
-        auto _base_id = rocpd::data_processor::get_instance().insert_agent(
-            _n_info.id, getpid(),
-            ((rocpd_agent->type == agent_type::GPU) ? "GPU" : "CPU"),
-            rocpd_agent->node_id, rocpd_agent->logical_node_id,
-            rocpd_agent->logical_node_type_id, rocpd_agent->id, rocpd_agent->name.c_str(),
-            rocpd_agent->model_name.c_str(), rocpd_agent->vendor_name.c_str(),
-            rocpd_agent->product_name.c_str(), "");
-        rocpd_agent->base_id = _base_id;
-    }
+    trace_cache::get_metadata_registry().set_process(
+        { getpid(), getppid(), _cmd_line.at(0) });
 }
 
 void
@@ -428,6 +427,22 @@ rocprofsys_init_library_hidden()
 
     static bool _once       = false;
     auto        _debug_init = get_debug_init();
+
+    int _selinux_mode = 0;
+    {
+        std::ifstream _fenforcing{ "/sys/fs/selinux/enforce" };
+        if(!(_fenforcing >> _selinux_mode)) _selinux_mode = 0;
+        _fenforcing.close();
+    }
+
+    if(_selinux_mode == 1)
+    {
+        ROCPROFSYS_BASIC_VERBOSE(0, "/sys/fs/selinux/enforce has a value of %i. \n",
+                                 _selinux_mode);
+        std::cerr << "SELinux enforcing mode detected. Consider disabling SELinux "
+                  << "or configure permissive mode with 'sudo setenforce 0'. Aborting.\n";
+        std::exit(EXIT_FAILURE);
+    }
 
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s...\n",
                                          std::to_string(get_state()).c_str());
@@ -534,7 +549,7 @@ rocprofsys_init_tooling_hidden(void)
 #if !(ROCPROFSYS_USE_ROCM > 0)
         rocprofsys_preinit_cpu_agents();
 #endif
-        if(get_use_rocpd()) rocprofsys_preinit_rocpd();
+        rocprofsys_preinit_cache();
 
         if(get_use_process_sampling())
         {
@@ -562,6 +577,8 @@ rocprofsys_init_tooling_hidden(void)
         get_main_bundle()->start();
         ROCPROFSYS_DEBUG_F("State: %s -> State::Active\n",
                            std::to_string(get_state()).c_str());
+
+        trace_cache::get_buffer_storage().start_flushing_thread(getpid());
         set_state(State::Active);  // set to active as very last operation
     } };
 
@@ -619,12 +636,6 @@ rocprofsys_init_tooling_hidden(void)
         {
             tim::trait::runtime_enabled<project::rocprofsys>::set(false);
         }
-    }
-
-    if(get_use_ompt())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Setting up OMPT...\n");
-        ompt::setup();
     }
 
     if(get_use_perfetto())
@@ -710,6 +721,8 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         if(get_state() == State::Active) rocprofsys_finalize_hidden();
     });
 
+    set_metadata_process_start_timestamp(comp::wall_clock::record());
+
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(
         get_debug_env() || get_verbose_env() > 2,
         "mode: %s | is binary rewrite: %s | command: %s\n", _mode,
@@ -766,8 +779,13 @@ rocprofsys_finalize_hidden(void)
                                  std::to_string(get_state()).c_str());
         return;
     }
-    else if(_is_child)
+
+    set_metadata_process_end_timestamp(comp::wall_clock::record());
+
+    if(_is_child)
     {
+        set_state(State::Finalized);
+
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
         // Flush buffered traces in case of child process
         if(get_use_rocm())
@@ -776,11 +794,13 @@ rocprofsys_finalize_hidden(void)
             rocprofiler_sdk::shutdown();
         }
 #endif
-        if(get_use_rocpd())
-        {
-            rocpd::data_processor::get_instance().flush();
-        }
-        set_state(State::Finalized);
+        auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        const auto _agents  = get_agent_manager_instance().get_agents();
+        _manager.shutdown();
+        const auto metadata_filepath =
+            trace_cache::get_metadata_filepath(get_root_process_id(), getpid());
+        _manager.get_metadata_registry().save_to_file(metadata_filepath, _agents);
+
         std::quick_exit(EXIT_SUCCESS);
         return;
     }
@@ -864,12 +884,6 @@ rocprofsys_finalize_hidden(void)
     {
         ROCPROFSYS_VERBOSE_F(1, "Shutting down VA-API tracing...\n");
         component::vaapi_gotcha::shutdown();
-    }
-
-    if(get_use_ompt())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down OMPT...\n");
-        ompt::shutdown();
     }
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
@@ -1016,6 +1030,12 @@ rocprofsys_finalize_hidden(void)
                                            _perfetto_output_error);
     }
 
+    {
+        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        _manager.shutdown();
+        _manager.post_process_bulk();
+    }
+
     if(_timemory_manager && _timemory_manager != nullptr)
     {
         _timemory_manager->add_metadata([](auto& ar) {
@@ -1070,10 +1090,6 @@ rocprofsys_finalize_hidden(void)
         [](int) {});
 
     common::destroy_static_objects();
-    if(get_use_rocpd())
-    {
-        rocpd::data_processor::get_instance().flush();
-    }
 }
 
 //======================================================================================//

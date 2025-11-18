@@ -26,6 +26,7 @@ env:
 
 jobs:
   prepare_matrix_ci:
+    if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
       matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
@@ -33,12 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: projects/rocprofiler-systems
+          sparse-checkout: projects/rocprofiler-systems/docker
 
       - name: Output data for containers matrix
+        working-directory: projects/rocprofiler-systems/docker
         id: generate_matrix_ci
         run: |
-          pushd projects/rocprofiler-systems/docker
           MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
           echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
 
@@ -54,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: projects/rocprofiler-systems
+          sparse-checkout: projects/rocprofiler-systems/docker
           submodules: recursive
 
       - name: Set up QEMU
@@ -68,8 +69,9 @@ jobs:
         with:
           username: ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
           password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}
-
-      - name: Build CI Container
+          
+      - name: Build CI Container (PR - No Push)
+        if: github.event_name == 'pull_request'
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -78,12 +80,37 @@ jobs:
           max_attempts: 3
           command: |
             pushd projects/rocprofiler-systems/docker
-            PUSH_COMMAND="--push"
-            if [ ${{ github.event_name == 'pull_request' }} ]; then PUSH_COMMAND=""; fi
-            ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} ${PUSH_COMMAND} --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0
+            ./build-docker-ci.sh \
+              --distro ${{ matrix.distro }} \
+              --versions ${{ matrix.version }} \
+              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
+              --jobs 2 \
+              --elfutils-version 0.188 \
+              --boost-version 1.79.0
+            popd
+
+      - name: Build Base Container (Push)
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 45
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 60
+          timeout_minutes: 45
+          max_attempts: 3
+          command: |
+            pushd projects/rocprofiler-systems/docker
+            ./build-docker-ci.sh \
+              --distro ${{ matrix.distro }} \
+              --versions ${{ matrix.version }} \
+              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
+              --jobs 2 \
+              --elfutils-version 0.188 \
+              --boost-version 1.79.0 \
+              --push
             popd
 
   prepare_matrix_release:
+    if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
       matrix_data: ${{ steps.generate_matrix_release.outputs.matrix_data }}
@@ -94,9 +121,9 @@ jobs:
           sparse-checkout: projects/rocprofiler-systems
 
       - name: Output data for containers matrix
+        working-directory: projects/rocprofiler-systems/docker
         id: generate_matrix_release
         run: |
-          pushd projects/rocprofiler-systems/docker
           MATRIX_CONTENT=$(cat containers.yml | yq '.matrix' -I=0 -o=json)
           echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
           
@@ -126,7 +153,8 @@ jobs:
           username: ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
           password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}
 
-      - name: Build Base Container
+      - name: Build Base Container (PR - No Push)
+        if: github.event_name == 'pull_request'
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -135,7 +163,27 @@ jobs:
           max_attempts: 3
           command: |
             pushd projects/rocprofiler-systems/docker
-            PUSH_COMMAND="--push"
-            if [ ${{ github.event_name == 'pull_request' }} ]; then PUSH_COMMAND=""; fi
-            ./build-docker.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }} --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} ${PUSH_COMMAND}
+            ./build-docker.sh \
+              --distro ${{ matrix.os-distro }} \
+              --versions ${{ matrix.os-version }} \
+              --rocm-versions ${{ matrix.rocm-version }} \
+              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
+            popd
+      
+      - name: Build Base Container (Push)
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 45
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 60
+          timeout_minutes: 45
+          max_attempts: 3
+          command: |
+            pushd projects/rocprofiler-systems/docker
+            ./build-docker.sh \
+              --distro ${{ matrix.os-distro }} \
+              --versions ${{ matrix.os-version }} \
+              --rocm-versions ${{ matrix.rocm-version }} \
+              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
+              --push
             popd

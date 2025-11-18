@@ -36,8 +36,8 @@ THE SOFTWARE.
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
 
-static constexpr auto source {
-R"(
+static constexpr auto source{
+    R"(
 #if __has_include(<type_traits>)
 #include <type_traits>
 
@@ -88,7 +88,7 @@ TEST_CASE("Unit_hiprtc_stdheaders") {
   hiprtcAddNameExpression(prog, str.c_str());
 
   string sarg = string("-I./headers");
-  const char* options[] = { sarg.c_str() };
+  const char* options[] = {sarg.c_str()};
 
   hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, options)};
   size_t logSize;
@@ -109,7 +109,7 @@ TEST_CASE("Unit_hiprtc_stdheaders") {
 
   // Do hip malloc first so that we dont need to do a cuInit manually before calling hipModule APIs
 
-  bool *dResult;
+  bool* dResult;
   HIP_CHECK(hipMalloc(&dResult, sizeof(bool)));
 
   hipModule_t module;

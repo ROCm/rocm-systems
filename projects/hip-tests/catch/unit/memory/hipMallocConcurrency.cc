@@ -229,9 +229,7 @@ TEST_CASE("Unit_hipMalloc_ArgumentValidation") {
     REQUIRE(ptr == nullptr);
   }
 
-  SECTION("hipFree() when freeing nullptr") {
-    HIP_CHECK(hipFree(ptr));
-  }
+  SECTION("hipFree() when freeing nullptr") { HIP_CHECK(hipFree(ptr)); }
 
   SECTION("hipMalloc() with invalid argument") {
     HIP_CHECK_ERROR(hipMalloc(nullptr, 100), hipErrorInvalidValue);
@@ -305,7 +303,7 @@ TEST_CASE("Unit_hipMalloc_AllocateAndPoolBuffers") {
  * Exercise hipMalloc() api parellely on all gpus from
  * multiple threads and regress the api.
  */
-TEST_CASE("Unit_hipMalloc_Multithreaded_MultiGPU") {
+TEST_CASE("Unit_hipMalloc_Multithreaded_MultiGPU", "[multigpu]") {
   std::vector<std::thread> threadlist;
   int devCnt;
 

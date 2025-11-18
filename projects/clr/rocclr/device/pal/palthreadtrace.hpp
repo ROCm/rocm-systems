@@ -92,7 +92,7 @@ class ThreadTrace : public device::ThreadTrace {
   bool info(uint infoType,  //!< The type of returned information
             uint* info,     //!< The returned information
             uint infoSize   //!< The size of returned information
-            ) const;
+  ) const;
 
   //! Set isNewBufferBinded_ to true/false if new buffer was binded/unbinded respectively
   void setNewBufferBinded(bool isNewBufferBinded) {}

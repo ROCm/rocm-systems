@@ -38,14 +38,15 @@ void saxpy(float a, float* x, float* y, float* out, size_t n)
 }
 )"};
 
-static constexpr size_t num_iterations = 200000; // 20K times
+static constexpr size_t num_iterations = 200000;  // 20K times
 
 bool CommitBCToFile(char* executable, size_t exe_size, const std::string& bit_code_file) {
   std::fstream bc_file;
   bc_file.open(bit_code_file, std::ios::out | std::ios::binary);
 
   if (!bc_file) {
-    WARN("Cannot create file");;
+    WARN("Cannot create file");
+    ;
     return false;
   }
 
@@ -74,7 +75,7 @@ void GetCodeObjectUsingRTC(size_t codeSize, std::vector<char>& code) {
   if (logSize) {
     std::string log(logSize, '\0');
     HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
-    WARN("Log: "<< log);
+    WARN("Log: " << log);
   }
   REQUIRE(compileResult == HIPRTC_SUCCESS);
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
@@ -102,7 +103,6 @@ void GetCodeObjectUsingRTC(size_t codeSize, std::vector<char>& code) {
  */
 
 TEST_CASE("Stress_hipModuleLoadUnload") {
-
   size_t code_size = 0;
   std::vector<char> code;
   GetCodeObjectUsingRTC(code_size, code);
@@ -115,7 +115,7 @@ TEST_CASE("Stress_hipModuleLoadUnload") {
 
   for (size_t iter_idx = 0; iter_idx < num_iterations; ++iter_idx) {
     if ((iter_idx % 2000) == 0) {
-      std::cout<<"Iteration :"<<iter_idx<<std::endl;
+      std::cout << "Iteration :" << iter_idx << std::endl;
       UNSCOPED_INFO("Unscoped Prints");
     }
 

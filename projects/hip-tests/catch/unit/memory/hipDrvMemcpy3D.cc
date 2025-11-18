@@ -64,21 +64,11 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior") {
     Memcpy3DDtoHPageableSyncBehavior(DrvMemcpy3DWrapper<>, true);
   }
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Device to Pinned Host") { Memcpy3DDtoHPinnedSyncBehavior(DrvMemcpy3DWrapper<>, true); }
-#endif
 
-  SECTION("Device to Device") {
-#if HT_NVIDIA
-    Memcpy3DDtoDSyncBehavior(DrvMemcpy3DWrapper<>, false);
-#else
-    Memcpy3DDtoDSyncBehavior(DrvMemcpy3DWrapper<>, true);
-#endif
-  }
+  SECTION("Device to Device") { Memcpy3DDtoDSyncBehavior(DrvMemcpy3DWrapper<>, false); }
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-232
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(DrvMemcpy3DWrapper<>, true); }
-#endif
 }
 
 TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Parameters") {

@@ -36,11 +36,6 @@ __global__ void tex2DKernel(float* outputData, int width) {
 TEST_CASE("Unit_hipTextureRef2D_Check") {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   constexpr int SIZE = 256;
   constexpr unsigned int width = SIZE;
   constexpr unsigned int height = SIZE;
@@ -56,12 +51,10 @@ TEST_CASE("Unit_hipTextureRef2D_Check") {
     }
   }
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0,
-                                           hipChannelFormatKindFloat);
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
   hipArray_t hipArray;
   HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height));
-  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size,
-                             hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice));
 
   tex.addressMode[0] = hipAddressModeWrap;
   tex.addressMode[1] = hipAddressModeWrap;
@@ -76,9 +69,8 @@ TEST_CASE("Unit_hipTextureRef2D_Check") {
 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid(width / dimBlock.x, height / dimBlock.y, 1);
-  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0,
-                     dData, width);
-  HIP_CHECK(hipGetLastError()); 
+  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dData, width);
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
   float* hOutputData = reinterpret_cast<float*>(malloc(size));
@@ -89,8 +81,8 @@ TEST_CASE("Unit_hipTextureRef2D_Check") {
   for (i = 0; i < height; i++) {
     for (j = 0; j < width; j++) {
       if (hData[i * width + j] != hOutputData[i * width + j]) {
-        INFO("Difference found at [ " << i << j << " ]: " <<
-              hData[i * width + j] << hOutputData[i * width + j]);
+        INFO("Difference found at [ " << i << j << " ]: " << hData[i * width + j]
+                                      << hOutputData[i * width + j]);
         REQUIRE(false);
       }
     }
@@ -101,5 +93,4 @@ TEST_CASE("Unit_hipTextureRef2D_Check") {
 }
 
 
-#endif // CUDA_VERSION < CUDA_12000
-
+#endif  // CUDA_VERSION < CUDA_12000

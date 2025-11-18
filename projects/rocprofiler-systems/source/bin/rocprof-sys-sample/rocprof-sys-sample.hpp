@@ -28,10 +28,10 @@
 
 enum update_mode : int
 {
-    UPD_REPLACE = 0x1,
-    UPD_PREPEND = 0x2,
-    UPD_APPEND  = 0x3,
-    UPD_WEAK    = 0x4,
+    UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
+    UPD_PREPEND = 1 << 0,  // 0x01
+    UPD_APPEND  = 1 << 1,  // 0x02
+    UPD_WEAK    = 1 << 2,  // 0x04
 };
 
 std::string
@@ -45,6 +45,9 @@ print_updated_environment(std::vector<char*> _env);
 
 std::vector<char*>
 get_initial_environment();
+
+std::string
+get_rocprofsys_root(void);
 
 std::string
 get_internal_libpath(const std::string& _lib);

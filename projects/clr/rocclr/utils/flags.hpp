@@ -1,4 +1,4 @@
-/* Copyright (c) 2009 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
 #ifndef FLAGS_HPP_
 #define FLAGS_HPP_
 
-
+// clang-format off
 #define RUNTIME_FLAGS(debug,release,release_on_stg)                           \
                                                                               \
 release(int, AMD_LOG_LEVEL, 0,                                                \
@@ -108,7 +108,7 @@ release(uint, OPENCL_VERSION, 200,                                            \
         "Force GPU opencl version")                                           \
 release(bool, HSA_LOCAL_MEMORY_ENABLE, true,                                  \
         "Enable HSA device local memory usage")                               \
-release(uint, HSA_KERNARG_POOL_SIZE, 1024 * 1024,                             \
+release(uint, HSA_KERNARG_POOL_SIZE, 4 * 1024 * 1024,                         \
         "Kernarg pool size")                                                  \
 release(bool, GPU_MIPMAP, true,                                               \
         "Enables GPU mipmap extension")                                       \
@@ -141,8 +141,6 @@ release(uint, PAL_MALL_POLICY, 0,                                             \
         "2 = Allocations will always be put through the MALL")                \
 release(bool, GPU_ENABLE_WAVE32_MODE, true,                                   \
         "Enables Wave32 compilation in HW if available")                      \
-release(bool, GPU_ENABLE_LC, true,                                            \
-        "Enables LC path")                                                    \
 release(bool, GPU_ENABLE_HW_P2P, false,                                       \
         "Enables HW P2P path")                                                \
 release(bool, GPU_ENABLE_COOP_GROUPS, true,                                   \
@@ -255,6 +253,8 @@ release(bool, DEBUG_HIP_FORCE_ASYNC_QUEUE, false,                             \
         "Forces grpahs into async queue mode. DEBUG_HIP_FORCE_GRAPH_QUEUES must be 1") \
 release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \
         "Forces the number of streams for the graph parallel execution")      \
+release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
+        "Number of graph nodes to batch at a time")                           \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \
@@ -272,7 +272,7 @@ release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
 release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
-        "Forces the minimum batch size for CPU sync")                         \
+        "Forces the minimum batch size for CPU sync")  // clang-format on
 
 namespace amd {
 
@@ -294,20 +294,17 @@ struct Flag {
   };
 
 #define DEFINE_FLAG_NAME(type, name, value, help) k##name,
-  enum Name {
-    RUNTIME_FLAGS(DEFINE_FLAG_NAME, DEFINE_FLAG_NAME, DEFINE_FLAG_NAME)
-    numFlags_
-  };
+  enum Name { RUNTIME_FLAGS(DEFINE_FLAG_NAME, DEFINE_FLAG_NAME, DEFINE_FLAG_NAME) numFlags_ };
 #undef DEFINE_FLAG_NAME
 
-#define CAN_SET(type, name, v, h)    static const bool cannotSet##name = false;
+#define CAN_SET(type, name, v, h) static const bool cannotSet##name = false;
 #define CANNOT_SET(type, name, v, h) static const bool cannotSet##name = true;
 
 #ifdef DEBUG
   RUNTIME_FLAGS(CAN_SET, CAN_SET, CAN_SET)
-#else // !DEBUG
+#else   // !DEBUG
   RUNTIME_FLAGS(CANNOT_SET, CAN_SET, CANNOT_SET)
-#endif // !DEBUG
+#endif  // !DEBUG
 
 #undef CAN_SET
 #undef CANNOT_SET
@@ -332,36 +329,35 @@ struct Flag {
   static bool isDefault(Name name) { return flags_[name].isDefault_; }
 };
 
-#define flagIsDefault(name) \
-  (amd::Flag::cannotSet##name || amd::Flag::isDefault(amd::Flag::k##name))
+#define flagIsDefault(name) (amd::Flag::cannotSet##name || amd::Flag::isDefault(amd::Flag::k##name))
 
-#define setIfNotDefault(var, opt, other) \
-  if (!flagIsDefault(opt)) \
-    var = (opt);\
-  else \
+#define setIfNotDefault(var, opt, other)                                                           \
+  if (!flagIsDefault(opt))                                                                         \
+    var = (opt);                                                                                   \
+  else                                                                                             \
     var = (other);
 
 //  @}
 
-} // namespace amd
+}  // namespace amd
 
 #ifdef _WIN32
-# define EXPORT_FLAG extern "C" __declspec(dllexport)
-#else // !_WIN32
+#define EXPORT_FLAG extern "C" __declspec(dllexport)
+#else  // !_WIN32
 #ifdef BUILD_STATIC_LIBS
-# define EXPORT_FLAG extern
+#define EXPORT_FLAG extern
 #else
-# define EXPORT_FLAG extern "C"
+#define EXPORT_FLAG extern "C"
 #endif
 namespace amd::flags {
-#endif // !_WIN32
+#endif  // !_WIN32
 
 #define DECLARE_RELEASE_FLAG(type, name, value, help) EXPORT_FLAG type name;
 #ifdef DEBUG
-# define DECLARE_DEBUG_FLAG(type, name, value, help) EXPORT_FLAG type name;
-#else // !DEBUG
-# define DECLARE_DEBUG_FLAG(type, name, value, help) const type name = value;
-#endif // !DEBUG
+#define DECLARE_DEBUG_FLAG(type, name, value, help) EXPORT_FLAG type name;
+#else  // !DEBUG
+#define DECLARE_DEBUG_FLAG(type, name, value, help) const type name = value;
+#endif  // !DEBUG
 
 RUNTIME_FLAGS(DECLARE_DEBUG_FLAG, DECLARE_RELEASE_FLAG, DECLARE_DEBUG_FLAG);
 
@@ -370,5 +366,5 @@ RUNTIME_FLAGS(DECLARE_DEBUG_FLAG, DECLARE_RELEASE_FLAG, DECLARE_DEBUG_FLAG);
 #ifndef _WIN32
 }
 using namespace amd::flags;
-#endif // !_WIN32
-#endif /*FLAGS_HPP_*/
+#endif  // !_WIN32
+#endif  /*FLAGS_HPP_*/

@@ -73,13 +73,15 @@ bool Runtime::init() {
     return true;
   }
 
-  if (!Flag::init() || !option::init() || !Device::init()
+  if (!Flag::init() || !option::init() ||
+      !Device::init()
       // Agent initializes last
       || (!amd::IS_HIP && !Agent::init())) {
     ClPrint(LOG_ERROR, LOG_INIT, "Runtime initialization failed");
     return false;
   }
-  ClPrint(LOG_INFO, LOG_MISC, "ROCclr version: %s", ROCCLR_VERSION_GITHASH);
+
+  ClPrint(LOG_INFO, LOG_MISC && !amd::IS_HIP, "ROCclr version: %s", ROCCLR_VERSION_GITHASH);
 
   initialized_ = true;
   pid_ = amd::Os::getProcessId();
@@ -113,7 +115,7 @@ RuntimeTearDown::~RuntimeTearDown() {
   // Only perform destruction if process matches the initialization,
   // to avoid a call with the child process after fork()
   if (amd::IS_HIP && amd::Os::getProcessId() == Runtime::pid()) {
-    for (auto it: external_) {
+    for (auto it : external_) {
       it->release();
     }
     Runtime::tearDown();
@@ -121,9 +123,7 @@ RuntimeTearDown::~RuntimeTearDown() {
 #endif
 }
 
-void RuntimeTearDown::RegisterObject(ReferenceCountedObject* obj) {
-    external_.push_back(obj);
-}
+void RuntimeTearDown::RegisterObject(ReferenceCountedObject* obj) { external_.push_back(obj); }
 
 class RuntimeTearDown runtime_tear_down;
 
@@ -134,7 +134,7 @@ uint ReferenceCountedObject::retain() {
 }
 
 uint ReferenceCountedObject::release() {
-  uint newCount = referenceCount_.fetch_sub(1, std::memory_order_relaxed) - 1;
+  uint newCount = referenceCount_.fetch_sub(1, std::memory_order_acq_rel) - 1;
   if (newCount == 0) {
     if (terminate()) {
       // The destructor should be called with a count==1 for the last thread

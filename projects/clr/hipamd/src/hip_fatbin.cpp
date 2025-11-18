@@ -37,10 +37,9 @@ template <typename comgr_T> class ComgrUniqueHandle {
   // constructor which takes ownership of a correctly initialzed handle
   ComgrUniqueHandle(comgr_T& handle) : comgr_obj_(handle) { handle = {0}; };
 
-  template <typename T = comgr_T,
-            std::enable_if_t<std::is_same_v<T, amd_comgr_data_set_t> ||
-                                 std::is_same_v<T, amd_comgr_action_info_t>,
-                             bool> = true>
+  template <typename T = comgr_T, std::enable_if_t<std::is_same_v<T, amd_comgr_data_set_t> ||
+                                                       std::is_same_v<T, amd_comgr_action_info_t>,
+                                                   bool> = true>
   [[nodiscard]] amd_comgr_status_t Create() {
     if constexpr (std::is_same_v<T, amd_comgr_data_set_t>) {
       return amd::Comgr::create_data_set(&comgr_obj_);
@@ -120,7 +119,6 @@ FatBinaryInfo::~FatBinaryInfo() {
     }
   }
   for (auto itemData : toDelete) {
-    LogPrintfInfo("~FatBinaryInfo(%p) will delete binary_image_ %p", this, itemData);
     delete[] reinterpret_cast<const char*>(itemData);
   }
   ReleaseImageAndFile();
@@ -273,8 +271,7 @@ static bool UncompressAndPopulateCodeObject(
     bundle_ids.push_back(bundle_id_str.c_str());
   }
 
-  const auto obheader =
-      reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
+  const auto obheader = reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
   const size_t size = obheader->totalSize;
 
   bool passed = false;
@@ -352,9 +349,10 @@ static bool UncompressAndPopulateCodeObject(
         LogError("Failed to get data unbundled code object");
         break;
       }
+      comgr_helper::ComgrDataUniqueHandle item_handle(item);
 
       size_t item_name_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data_name(item, &item_name_size, nullptr);
+      if (auto comgr_status = amd::Comgr::get_data_name(item_handle.get(), &item_name_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
         break;
@@ -362,14 +360,14 @@ static bool UncompressAndPopulateCodeObject(
 
       std::string item_bundle_id(item_name_size, 0);
       if (auto comgr_status =
-              amd::Comgr::get_data_name(item, &item_name_size, item_bundle_id.data());
+              amd::Comgr::get_data_name(item_handle.get(), &item_name_size, item_bundle_id.data());
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data");
         break;
       }
 
       size_t item_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data(item, &item_size, nullptr);
+      if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
         break;
@@ -377,7 +375,7 @@ static bool UncompressAndPopulateCodeObject(
 
       if (item_size > 0) {
         char* item_data = new char[item_size];
-        if (auto comgr_status = amd::Comgr::get_data(item, &item_size, item_data);
+        if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
             comgr_status != AMD_COMGR_STATUS_SUCCESS) {
           LogError("Failed to get data");
           break;
@@ -385,8 +383,6 @@ static bool UncompressAndPopulateCodeObject(
 
         std::string bundle_entry = remove_file_extension(
             std::string(item_bundle_id.c_str() + sizeof(symbols::kOffloadHipV4FatBinName_) - 1));
-        LogPrintfInfo("Inserting bundle entry of %s : size: %d, data: %p", bundle_entry.c_str(),
-                      item_size, item_data);
         code_obj_map[bundle_entry] = std::make_pair(item_data, item_size);
       }
     }
@@ -504,14 +500,14 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   // Create a list of all targets, which the current device can run
   // For example, gfx1030 can run gfx1030, gfx10-geneeric, amdgcnspirv
   std::set<std::string> unique_isa_names;
-  const std::string spirv_isa_name{"spirv64-amd-amdhsa--amdgcnspirv"};
-  unique_isa_names.insert(spirv_isa_name);  // Insert SPIRV ISA name
+  const std::string spirv_isa_name_empty{"spirv64-amd-amdhsa--amdgcnspirv"};
+  const std::string spirv_isa_name{"spirv64-amd-amdhsa-unknown-amdgcnspirv"};
+  unique_isa_names.insert(spirv_isa_name_empty);  // Insert SPIRV ISA name
+  unique_isa_names.insert(spirv_isa_name);
   for (auto device : devices) {
     std::string device_name = device->devices()[0]->isa().isaName();
     unique_isa_names.insert(device_name);
     auto generic_name = TargetToGeneric(device_name);
-    LogPrintfInfo("Looking up generic name of : %s - %s", device_name.c_str(),
-                  generic_name.c_str());
     if (!generic_name.empty()) {
       unique_isa_names.insert(generic_name);
     }
@@ -530,19 +526,17 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
   hipError_t hip_status = hipErrorInvalidImage;
   do {
-    bool spirv_isa_found = code_obj_map.find(spirv_isa_name) != code_obj_map.end();
+    bool spirv_isa_found = code_obj_map.find(spirv_isa_name) != code_obj_map.end() ||
+                           code_obj_map.find(spirv_isa_name_empty) != code_obj_map.end();
     for (auto device : devices) {
       std::string device_name = device->devices()[0]->isa().isaName();
       auto generic_target_name = TargetToGeneric(device_name);   // Generic Code Object
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
-      LogPrintfInfo("Device name: %s Generic name: %s", device_name.c_str(),
-                    generic_target_name.c_str());
+
 
       // If the size is not 0, that means we found the native isa code object
       if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using Native code object: %s", device->devices()[0]->isa().targetId());
-
         // We need to do this because there is existing mechanism which deletes code object in
         // destructor. Ideally next set of refactor should sort it.
         char* co = new char[native_co->second.second];
@@ -553,8 +547,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using Generic code object: %s : %s", device->devices()[0]->isa().targetId(),
-                      generic_target_name.c_str());
         char* co = new char[generic_co->second.second];
         std::memcpy(co, reinterpret_cast<const char*>(generic_co->second.first),
                     generic_co->second.second);
@@ -565,7 +557,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       } else if (spirv_isa_found) {
         std::string target_id = device->devices()[0]->isa().targetId();
         std::string isa = "amdgcn-amd-amdhsa--" + target_id;
-        LogPrintfInfo("Creating ISA for: %s from spirv", target_id.c_str());
 
         comgr_helper::ComgrDataSetUniqueHandle spirv_data_set;
         comgr_helper::ComgrDataSetUniqueHandle reloc_data;
@@ -583,7 +574,11 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
 
+        // Handle both SPIRV isa name
         auto spirv_isa_handle = code_obj_map.find(spirv_isa_name);
+        if (spirv_isa_handle == code_obj_map.end()) {
+          spirv_isa_handle = code_obj_map.find(spirv_isa_name_empty);
+        }
         if (auto comgr_status =
                 amd::Comgr::set_data(spirv_data.get(), spirv_isa_handle->second.second /* size */,
                                      reinterpret_cast<const char*>(spirv_isa_handle->second.first)
@@ -720,7 +715,8 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
   }
   if (CL_SUCCESS !=
       program->addDeviceProgram(*ctx->devices()[0], binary_image, binary_size, false, nullptr,
-                                nullptr, (ufd_ != nullptr ? ufd_->fdesc_ : amd::Os::FDescInit()), binary_offset, uri_)) {
+                                nullptr, (ufd_ != nullptr ? ufd_->fdesc_ : amd::Os::FDescInit()),
+                                binary_offset, uri_)) {
     return hipErrorInvalidKernelFile;
   }
   return hipSuccess;
@@ -736,9 +732,9 @@ hipError_t FatBinaryInfo::BuildProgram(const int device_id) {
 
   // If Program was already built skip this step and return success
   if (dev_programs_[device_id]->IsProgramBuilt(*g_devices[device_id]->devices()[0]) == false) {
-    if (CL_SUCCESS !=
-        dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr, nullptr, nullptr,
-                                        kOptionChangeable, kNewDevProg)) {
+    if (CL_SUCCESS != dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr,
+                                                      nullptr, nullptr, kOptionChangeable,
+                                                      kNewDevProg)) {
       return hipErrorNoBinaryForGpu;
     }
     if (!dev_programs_[device_id]->load()) {

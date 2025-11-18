@@ -307,6 +307,9 @@ TEST_CASE("Unit_bf16_basic") {
       INFO("Index: " << i << " input: " << in[i] << " output: " << res[i]);
       REQUIRE(res[i] == 1);
     }
+
+    HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_res));
   }
 
   SECTION("MathOp Compare") {
@@ -323,7 +326,7 @@ TEST_CASE("Unit_bf16_basic") {
     std::vector<unsigned> res(size, 0);
     HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned) * size, hipMemcpyDeviceToHost));
 
-    for(size_t i = 0; i < res.size(); i++) {
+    for (size_t i = 0; i < res.size(); i++) {
       INFO("Index: " << i << " input: " << in[i] << " output: " << res[i]);
       REQUIRE(res[i] == 1);
     }
@@ -349,7 +352,7 @@ TEST_CASE("Unit_bf16_basic") {
 
     HIP_CHECK(hipFree(d_in));
     HIP_CHECK(hipFree(d_res));
-    for(size_t i = 0; i < res.size(); i++) {
+    for (size_t i = 0; i < res.size(); i++) {
       INFO("Index: " << i << " input: " << in[i] << " expected: " << res_cmp[i]
                      << " result: " << res[i]);
       REQUIRE(abs(static_cast<int>(res_cmp[i] - res[i])) <= 2);
@@ -454,6 +457,7 @@ TEST_CASE("Unit_bf16_basic") {
 
     HIP_CHECK(hipFree(d_in1))
     HIP_CHECK(hipFree(d_in2));
+    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("abs") {
@@ -478,11 +482,11 @@ template <typename Type> __global__ void bf16_cvt_to_integral(Type* in, float* o
 TEMPLATE_TEST_CASE("Unit_bf16_conversion_to_integral_type", , unsigned short, short, int,
                    unsigned int) {
   constexpr TestType start = std::is_unsigned<TestType>::value
-      ? std::numeric_limits<unsigned short>::min()
-      : std::numeric_limits<short>::min();
+                                 ? std::numeric_limits<unsigned short>::min()
+                                 : std::numeric_limits<short>::min();
   constexpr TestType end = std::is_unsigned<TestType>::value
-      ? std::numeric_limits<unsigned short>::max()
-      : std::numeric_limits<short>::max();
+                               ? std::numeric_limits<unsigned short>::max()
+                               : std::numeric_limits<short>::max();
   const size_t size = (start < 0) ? end - start : end + start;
 
   TestType* d_input;

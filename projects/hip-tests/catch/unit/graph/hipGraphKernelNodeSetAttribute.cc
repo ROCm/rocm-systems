@@ -33,10 +33,10 @@ constexpr std::array<hipAccessProperty, 3> kAccessProperties{
 static bool CompareAccessPolicyWindow(const hipKernelNodeAttrValue& lhs,
                                       const hipKernelNodeAttrValue& rhs) {
   return lhs.accessPolicyWindow.base_ptr == rhs.accessPolicyWindow.base_ptr &&
-      lhs.accessPolicyWindow.num_bytes == rhs.accessPolicyWindow.num_bytes &&
-      lhs.accessPolicyWindow.hitRatio == rhs.accessPolicyWindow.hitRatio &&
-      lhs.accessPolicyWindow.hitProp == rhs.accessPolicyWindow.hitProp &&
-      lhs.accessPolicyWindow.missProp == rhs.accessPolicyWindow.missProp;
+         lhs.accessPolicyWindow.num_bytes == rhs.accessPolicyWindow.num_bytes &&
+         lhs.accessPolicyWindow.hitRatio == rhs.accessPolicyWindow.hitRatio &&
+         lhs.accessPolicyWindow.hitProp == rhs.accessPolicyWindow.hitProp &&
+         lhs.accessPolicyWindow.missProp == rhs.accessPolicyWindow.missProp;
 }
 
 TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow") {

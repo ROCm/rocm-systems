@@ -36,7 +36,7 @@ struct gridblockDim {
 };
 class GraphModuleLaunchKernel {
   int N = 64;
-  int SIZE = N*N;
+  int SIZE = N * N;
   int *A, *B, *C;
   hipDeviceptr_t *Ad, *Bd;
   hipStream_t stream1, stream2;
@@ -52,15 +52,13 @@ class GraphModuleLaunchKernel {
 
   static constexpr char matmulK[] = "matmulK";
 
- public :
+ public:
   GraphModuleLaunchKernel() {
     allocateMemory();
     moduleLoad();
   }
 
-  ~GraphModuleLaunchKernel() {
-    deAllocateMemory();
-  }
+  ~GraphModuleLaunchKernel() { deAllocateMemory(); }
 
   void allocateMemory();
   void deAllocateMemory();
@@ -71,31 +69,29 @@ class GraphModuleLaunchKernel {
 };
 
 void GraphModuleLaunchKernel::allocateMemory() {
-  A = new int[N*N*sizeof(int)];
-  B = new int[N*N*sizeof(int)];
-  for (int i=0; i < N; i++) {
-    for (int j=0; j < N; j++) {
-      A[i*N +j] = 1;
-      B[i*N +j] = 1;
+  A = new int[N * N * sizeof(int)];
+  B = new int[N * N * sizeof(int)];
+  for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+      A[i * N + j] = 1;
+      B[i * N + j] = 1;
     }
   }
   HIPCHECK(hipStreamCreate(&stream1));
   HIPCHECK(hipStreamCreate(&stream2));
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad),
-           SIZE*sizeof(int)));
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd),
-           SIZE*sizeof(int)));
-  HIPCHECK(hipHostMalloc(reinterpret_cast<void**>(&C), SIZE*sizeof(int)));
-  HIPCHECK(hipMemcpy(Ad, A, SIZE*sizeof(int), hipMemcpyHostToDevice));
-  HIPCHECK(hipMemcpy(Bd, B, SIZE*sizeof(int), hipMemcpyHostToDevice));
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE * sizeof(int)));
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE * sizeof(int)));
+  HIPCHECK(hipHostMalloc(reinterpret_cast<void**>(&C), SIZE * sizeof(int)));
+  HIPCHECK(hipMemcpy(Ad, A, SIZE * sizeof(int), hipMemcpyHostToDevice));
+  HIPCHECK(hipMemcpy(Bd, B, SIZE * sizeof(int), hipMemcpyHostToDevice));
   args1._Ad = Ad;
   args1._Bd = Bd;
   args1._Cd = C;
-  args1._n  = N;
+  args1._n = N;
   args2._Ad = NULL;
   args2._Bd = NULL;
   args2._Cd = NULL;
-  args2._n  = 0;
+  args2._n = 0;
   size1 = sizeof(args1);
   size2 = sizeof(args2);
 }
@@ -119,19 +115,15 @@ void GraphModuleLaunchKernel::deAllocateMemory() {
 bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmul() {
   bool testStatus = true;
   int mismatch = 0;
-  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
+  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
-  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32 , 1, 0,
-                                    stream1, NULL,
-                                    reinterpret_cast<void**>(&config1),
-                                    NULL, NULL, 0));
+  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32, 1, 0, stream1, NULL,
+                                    reinterpret_cast<void**>(&config1), NULL, NULL, 0));
   HIPCHECK(hipStreamSynchronize(stream1));
 
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < N; j++) {
-      if (C[i*N + j] != N)
-        mismatch++;
+      if (C[i * N + j] != N) mismatch++;
     }
   }
   if (mismatch) {
@@ -141,7 +133,8 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmul() {
   return testStatus;
 }
 
-bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCapture(bool LaunchByDifferentStream) {
+bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCapture(
+    bool LaunchByDifferentStream) {
   bool testStatus = true;
   int mismatch = 0;
 
@@ -150,14 +143,11 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCapture(bo
 
   HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
 
-  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
+  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
 
-  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32 , 1, 0,
-                                    stream1, NULL,
-                                    reinterpret_cast<void**>(&config1),
-                                    NULL, NULL, 0));
+  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32, 1, 0, stream1, NULL,
+                                    reinterpret_cast<void**>(&config1), NULL, NULL, 0));
 
   HIP_CHECK(hipStreamEndCapture(stream1, &graph));
 
@@ -177,8 +167,7 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCapture(bo
 
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < N; j++) {
-      if (C[i*N + j] != N)
-        mismatch++;
+      if (C[i * N + j] != N) mismatch++;
     }
   }
   if (mismatch) {
@@ -190,12 +179,10 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCapture(bo
 
 TEST_CASE("Unit_hipStreamCapture_ExtModuleLaunchKernel") {
   struct stat fileStat;
-  if (stat(GraphModuleLaunchKernel::fileName, &fileStat)
-      || !(fileStat.st_mode & S_IFREG)) {
-    FAIL("module file " << GraphModuleLaunchKernel::fileName
-         << " doesn't exist! aborted! \n"
-         << "To generate the file, type\n"
-         << "/opt/rocm/hip/bin/hipcc --genco hipMatMul.cc -o hipMatMul.code");
+  if (stat(GraphModuleLaunchKernel::fileName, &fileStat) || !(fileStat.st_mode & S_IFREG)) {
+    FAIL("module file " << GraphModuleLaunchKernel::fileName << " doesn't exist! aborted! \n"
+                        << "To generate the file, type\n"
+                        << "/opt/rocm/hip/bin/hipcc --genco hipMatMul.cc -o hipMatMul.code");
     return;
   }
   HIPCHECK(hipSetDevice(0));

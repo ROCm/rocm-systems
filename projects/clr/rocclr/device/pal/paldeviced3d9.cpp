@@ -59,7 +59,7 @@ bool Device::associateD3D9Device(void* d3d9Device) {
 
   // match the adapter
   bool canInteroperate = (properties().osProperties.luidHighPart == d3d9deviceLuid.HighPart) &&
-      (properties().osProperties.luidLowPart == d3d9deviceLuid.LowPart);
+                         (properties().osProperties.luidLowPart == d3d9deviceLuid.LowPart);
 
   return canInteroperate;
 }

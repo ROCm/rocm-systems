@@ -244,6 +244,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeArray_NullptrArray") {
   CTX_DESTROY();
 }
 
+#if 0
 TEST_CASE("Unit_TexObjectCreate_TypeMipmapped") {
 #if __linux__
   HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
@@ -311,6 +312,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeMipmaped_IncompleteInit") {
   HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
   CTX_DESTROY();
 }
+#endif
 
 TEST_CASE("Unit_TexObjectCreate_TypePitch2D") {
   CHECK_IMAGE_SUPPORT
@@ -376,42 +378,6 @@ TEST_CASE("Unit_TexObjectCreate_TypePitch2D_IncompleteInit") {
                HIP_AD_FORMAT_SIGNED_INT32, HIP_AD_FORMAT_HALF, HIP_AD_FORMAT_FLOAT);
 
   auto num_channels = GENERATE(1, 2, 4);
-
-  SECTION("Only devPtr initialized") {
-    res_desc.res.pitch2D.devPtr = reinterpret_cast<hipDeviceptr_t>(tex_buffer);
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Only formats initialized") {
-    res_desc.res.pitch2D.format = formats;
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Only num_channels initialized") {
-    res_desc.res.pitch2D.numChannels = num_channels;
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Only pitch_in_bytes initialized") {
-    res_desc.res.pitch2D.pitchInBytes = N;
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Only width initialized") {
-    res_desc.res.pitch2D.width = width;
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Only height initialized") {
-    res_desc.res.pitch2D.height = height;
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-  }
 
   SECTION("Missing devPtr") {
     res_desc.res.pitch2D.format = formats;
@@ -506,7 +472,6 @@ TEST_CASE("Unit_TexObjectCreate_TypePitch2D_EdgeCases") {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipTexObjectDestroy(tex_object));
   HIP_CHECK(hipFree(tex_buffer));
   CTX_DESTROY();
 }

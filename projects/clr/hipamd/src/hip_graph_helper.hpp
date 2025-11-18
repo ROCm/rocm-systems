@@ -35,7 +35,7 @@ hipError_t hipMemcpy2DValidateBuffer(const void* buf, size_t pitch, size_t width
 hipError_t ihipMemcpy_validate(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
 
 hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src, size_t sizeBytes,
-                             hipMemcpyKind kind, hip::Stream& stream, bool isAsync = false);
+                             hipMemcpyKind kind, hip::Stream& stream, bool isAsync = true);
 
 void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, hip::Stream& stream);
 
@@ -114,12 +114,12 @@ hipError_t ihipMemcpyAtoAValidate(hipArray_t srcArray, hipArray_t dstArray, amd:
 hipError_t ihipMemcpyHtoAValidate(const void* srcHost, hipArray_t dstArray, amd::Coord3D& srcOrigin,
                                   amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
                                   size_t srcRowPitch, size_t srcSlicePitch, amd::Image*& dstImage,
-                                  size_t &start);
+                                  size_t& start);
 
 hipError_t ihipMemcpyAtoHValidate(hipArray_t srcArray, void* dstHost, amd::Coord3D& srcOrigin,
                                   amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
                                   size_t dstRowPitch, size_t dstSlicePitch, amd::Image*& srcImage,
-                                  size_t &start);
+                                  size_t& start);
 
 hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams);
 

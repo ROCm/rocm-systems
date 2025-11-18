@@ -66,16 +66,14 @@ TEST_CASE("Unit_hipMemUnmap_negative") {
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
 
   hipMemGenericAllocationHandle_t handle;
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
 
-  SECTION("nullptr to ptrA") {
-    REQUIRE(hipMemUnmap((hipDeviceptr_t) nullptr, size_mem) == hipErrorInvalidValue);
-  }
+  SECTION("nullptr to ptrA") { REQUIRE(hipMemUnmap(nullptr, size_mem) == hipErrorInvalidValue); }
 
   SECTION("pass zero to size") { REQUIRE(hipMemUnmap(ptrA, 0) == hipErrorInvalidValue); }
 
@@ -89,7 +87,47 @@ TEST_CASE("Unit_hipMemUnmap_negative") {
   CTX_DESTROY();
 }
 
+TEST_CASE("Unit_hipMemUnmap_Capture") {
+  CTX_CREATE();
+  size_t granularity = 0;
+  constexpr size_t kBufferSize = N * sizeof(int);
+  int device_id = 0;
+  hipDevice_t device;
+
+  HIP_CHECK(hipDeviceGet(&device, device_id));
+  checkVMMSupported(device);
+
+  hipMemAllocationProp allocation_prop{};
+  allocation_prop.type = hipMemAllocationTypePinned;
+  allocation_prop.location.type = hipMemLocationTypeDevice;
+  allocation_prop.location.id = device;
+
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &allocation_prop,
+                                           hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  size_t mem_size = ((granularity + kBufferSize - 1) / granularity) * granularity;
+
+  hipMemGenericAllocationHandle_t allocation_handle;
+  void* device_ptr = nullptr;
+  HIP_CHECK(hipMemCreate(&allocation_handle, mem_size, &allocation_prop, 0));
+  HIP_CHECK(hipMemAddressReserve(&device_ptr, mem_size, 0, nullptr, 0));
+  HIP_CHECK(hipMemMap(device_ptr, mem_size, 0, allocation_handle, 0));
+  HIP_CHECK(hipMemRelease(allocation_handle));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemUnmap(device_ptr, mem_size));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemAddressFree(device_ptr, mem_size));
+  CTX_DESTROY();
+}
+
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

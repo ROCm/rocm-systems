@@ -45,6 +45,18 @@ def pytest_addoption(parser):
         default="hip-stream-display/out_results.pftrace",
         help="Input pftrace file",
     )
+    parser.addoption(
+        "--kernel-csv-input",
+        action="store",
+        default="hip-stream-display/out_kernel_trace.csv",
+        help="Input csv file",
+    )
+    parser.addoption(
+        "--memory-copy-csv-input",
+        action="store",
+        default="hip-stream-display/out_memory_copy_trace.csv",
+        help="Input csv file",
+    )
 
 
 @pytest.fixture
@@ -62,3 +74,29 @@ def pftrace_data(request):
     if not os.path.isfile(filename):
         return pytest.skip("stream tracing unavailable")
     return PerfettoReader(filename).read()[0]
+
+
+@pytest.fixture
+def kernel_csv_data(request):
+    filename = request.config.getoption("--kernel-csv-input")
+    data = []
+    if not os.path.isfile(filename):
+        raise FileExistsError(f"{filename} does not exist")
+    with open(filename, "r") as inp:
+        reader = csv.DictReader(inp)
+        for row in reader:
+            data.append(row)
+    return data
+
+
+@pytest.fixture
+def memory_copy_csv_data(request):
+    filename = request.config.getoption("--memory-copy-csv-input")
+    data = []
+    if not os.path.isfile(filename):
+        raise FileExistsError(f"{filename} does not exist")
+    with open(filename, "r") as inp:
+        reader = csv.DictReader(inp)
+        for row in reader:
+            data.append(row)
+    return data

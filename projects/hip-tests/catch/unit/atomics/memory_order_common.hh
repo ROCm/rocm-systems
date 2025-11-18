@@ -234,8 +234,12 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
 }
 
 template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() {
-  HipTest::HIP_SKIP_TEST("Skip system scope tests due to random failures!!");
-  return;
+  // The test need xnack on to make managed memory be host coherent.
+  // If xnack is off, managed memory has coarse grained access.
+  if (!HipTest::isXnackOn()) {
+    std::cerr << "GPU is not xnack enabled hence skipping system test\n";
+    return;
+  }
   std::thread host_thread;
 
   LinearAllocGuard<int> flag(LinearAllocs::hipMallocManaged, sizeof(int));
@@ -255,6 +259,9 @@ template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() 
       });
       ConsumerKernel<operation, memory_order, __HIP_MEMORY_SCOPE_SYSTEM>
           <<<1, 1>>>(flag.ptr(), data.ptr(), ret.ptr());
+
+      HIP_CHECK(hipDeviceSynchronize());
+      host_thread.join();
     }
 
     SECTION("Device producer - Host consumer") {
@@ -264,11 +271,11 @@ template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() 
       });
       ProducerKernel<operation, memory_order, __HIP_MEMORY_SCOPE_SYSTEM>
           <<<1, 1>>>(flag.ptr(), data.ptr());
+
+      HIP_CHECK(hipDeviceSynchronize());
+      host_thread.join();
     }
   }
-
-  HIP_CHECK(hipDeviceSynchronize());
-  host_thread.join();
 
   REQUIRE(ret.ptr()[0] == kTestValue);
 }
@@ -426,8 +433,12 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
 }
 
 template <BuiltinAtomicOperation operation> void SystemTest() {
-  HipTest::HIP_SKIP_TEST("Skip system scope tests due to random failures!!");
-  return;
+  // The test need xnack on to make managed memory be host coherent.
+  // If xnack is off, managed memory has coarse grained access.
+  if (!HipTest::isXnackOn()) {
+    std::cerr << "GPU is not xnack enabled hence skipping system test\n";
+    return;
+  }
   std::thread host_producer, host_consumer;
 
   LinearAllocGuard<int> counter1(LinearAllocs::hipMallocManaged, sizeof(int));

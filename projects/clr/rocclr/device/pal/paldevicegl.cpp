@@ -32,7 +32,7 @@
 #include <GL/glext.h>
 #include "CL/cl_gl.h"
 #include "paldevice.hpp"
-//#include "cwddeci.h"
+// #include "cwddeci.h"
 #include <GL/gl.h>
 #include "GL/gl_interop.h"
 #ifdef ATI_OS_LINUX
@@ -730,11 +730,10 @@ bool Device::initGLInteropPrivateExt(void* GLplatformContext, void* GLdeviceCont
       pfnWglGetCurrentContext =
           reinterpret_cast<PFNWGLGETCURRENTCONTEXT>(GetProcAddress(h, "wglGetCurrentContext"));
       pfnWglCreateContext =
-        reinterpret_cast<PFNWGLCREATECONTEXT>(GetProcAddress(h, "wglCreateContext"));
+          reinterpret_cast<PFNWGLCREATECONTEXT>(GetProcAddress(h, "wglCreateContext"));
       pfnWglDeleteContext =
-        reinterpret_cast<PFNWGLDELETECONTEXT>(GetProcAddress(h, "wglDeleteContext"));
-      pfnWglMakeCurrent =
-        reinterpret_cast<PFNWGLMAKECURRENT>(GetProcAddress(h, "wglMakeCurrent"));
+          reinterpret_cast<PFNWGLDELETECONTEXT>(GetProcAddress(h, "wglDeleteContext"));
+      pfnWglMakeCurrent = reinterpret_cast<PFNWGLMAKECURRENT>(GetProcAddress(h, "wglMakeCurrent"));
       if (!pfnWglGetProcAddress || !pfnWglGetCurrentContext || !pfnWglCreateContext ||
           !pfnWglDeleteContext || !pfnWglMakeCurrent) {
         LogError("Couldn't obtain WGL context API");
@@ -748,17 +747,14 @@ bool Device::initGLInteropPrivateExt(void* GLplatformContext, void* GLdeviceCont
       pfnWglMakeCurrent((HDC)GLdeviceContext, fakeRC);
     }
     wglBeginCLInteropAMD =
-      (PFNWGLBEGINCLINTEROPAMD)pfnWglGetProcAddress("wglBeginCLInteroperabilityAMD");
-    wglEndCLInteropAMD =
-       (PFNWGLENDCLINTEROPAMD)pfnWglGetProcAddress("wglEndCLInteroperabilityAMD");
+        (PFNWGLBEGINCLINTEROPAMD)pfnWglGetProcAddress("wglBeginCLInteroperabilityAMD");
+    wglEndCLInteropAMD = (PFNWGLENDCLINTEROPAMD)pfnWglGetProcAddress("wglEndCLInteroperabilityAMD");
     wglResourceAttachAMD = (PFNWGLRESOURCEATTACHAMD)pfnWglGetProcAddress("wglResourceAttachAMD");
-    wglResourceAcquireAMD =
-      (PFNWGLRESOURCEDETACHAMD)pfnWglGetProcAddress("wglResourceAcquireAMD");
-    wglResourceReleaseAMD =
-      (PFNWGLRESOURCEDETACHAMD)pfnWglGetProcAddress("wglResourceReleaseAMD");
+    wglResourceAcquireAMD = (PFNWGLRESOURCEDETACHAMD)pfnWglGetProcAddress("wglResourceAcquireAMD");
+    wglResourceReleaseAMD = (PFNWGLRESOURCEDETACHAMD)pfnWglGetProcAddress("wglResourceReleaseAMD");
     wglResourceDetachAMD = (PFNWGLRESOURCEDETACHAMD)pfnWglGetProcAddress("wglResourceDetachAMD");
     wglGetContextGPUInfoAMD =
-      (PFNWGLGETCONTEXTGPUINFOAMD)pfnWglGetProcAddress("wglGetContextGPUInfoAMD");
+        (PFNWGLGETCONTEXTGPUINFOAMD)pfnWglGetProcAddress("wglGetContextGPUInfoAMD");
     if (fakeRC) {
       pfnWglMakeCurrent(nullptr, nullptr);
       pfnWglDeleteContext(fakeRC);
@@ -786,8 +782,8 @@ bool Device::glCanInterop(void* GLplatformContext, void* GLdeviceContext) const 
   if (wglGetContextGPUInfoAMD(hRC, &glAdapterLuid, &glChainBitMask)) {
     // match the adapter
     canInteroperate = (properties().osProperties.luidHighPart == glAdapterLuid.HighPart) &&
-        (properties().osProperties.luidLowPart == glAdapterLuid.LowPart) &&
-        ((1 << properties().gpuIndex) == glChainBitMask);
+                      (properties().osProperties.luidLowPart == glAdapterLuid.LowPart) &&
+                      ((1 << properties().gpuIndex) == glChainBitMask);
   }
 #else
   GLuint glDeviceId = 0;
@@ -801,9 +797,9 @@ bool Device::glCanInterop(void* GLplatformContext, void* GLdeviceContext) const 
     if (pfnMesaGLInteropGLXQueryDeviceInfo(disp, ctx, &info) == 0) {
       // match the adapter
       canInteroperate = (properties().pciProperties.busNumber == info.pci_bus) &&
-          (properties().pciProperties.deviceNumber == info.pci_device) &&
-          (properties().pciProperties.functionNumber == info.pci_function) &&
-          (static_cast<GLuint>(1 << properties().gpuIndex) == glChainMask);
+                        (properties().pciProperties.deviceNumber == info.pci_device) &&
+                        (properties().pciProperties.functionNumber == info.pci_function) &&
+                        (static_cast<GLuint>(1 << properties().gpuIndex) == glChainMask);
     }
   }
 #endif
@@ -831,7 +827,7 @@ bool Device::glDissociate(void* GLplatformContext, void* GLdeviceContext) const 
   if (glXEndCLInteropAMD == nullptr) {
     return false;
   } else {
-     return (glXEndCLInteropAMD(ctx, 0)) ? true : false;
+    return (glXEndCLInteropAMD(ctx, 0)) ? true : false;
   }
 #else
   HGLRC hRC = (HGLRC)GLplatformContext;
@@ -849,7 +845,7 @@ bool Device::resGLAssociate(void* GLContext, uint name, uint type, Pal::OsExtern
                             ,
                             Pal::DoppDesktopInfo& doppDesktopInfo
 #endif
-                            ) const {
+) const {
   amd::ScopedLock lk(lockPAL());
 
   GLResource hRes = {};

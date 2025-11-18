@@ -20,8 +20,6 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 namespace amd::roc {
 
 class AppProfile : public amd::AppProfile {
@@ -32,6 +30,4 @@ class AppProfile : public amd::AppProfile {
   //! parse application profile based on application file name
   virtual bool ParseApplicationProfile();
 };
-}
-
-#endif
+}  // namespace amd::roc

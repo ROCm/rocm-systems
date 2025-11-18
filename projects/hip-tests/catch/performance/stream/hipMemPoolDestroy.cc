@@ -32,9 +32,7 @@ class MemPoolDestroyBenchmark : public Benchmark<MemPoolDestroyBenchmark> {
     hipMemPoolProps pool_props = CreateMemPoolProps(0, hipMemHandleTypeNone);
     HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
 
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemPoolDestroy(mem_pool));
-    }
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemPoolDestroy(mem_pool)); }
   }
 };
 
@@ -62,14 +60,15 @@ static void RunBenchmark() {
  */
 TEST_CASE("Performance_hipMemPoolDestroy") {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST("GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-                           "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
   RunBenchmark();
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

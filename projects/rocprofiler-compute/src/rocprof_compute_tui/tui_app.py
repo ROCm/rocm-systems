@@ -27,11 +27,11 @@ ROCm Compute Profiler TUI - Main Application with Analysis Methods
 ----------------------------------------------------------------
 """
 
+import argparse
 import importlib
 import json
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -43,7 +43,7 @@ import config
 from rocprof_compute_tui.config import APP_TITLE
 from rocprof_compute_tui.views.main_view import MainView
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import DropdownMenu
-from utils.specs import MachineSpecs, generate_machine_specs
+from utils.specs import generate_machine_specs
 from utils.utils import get_version
 
 
@@ -54,7 +54,7 @@ class RocprofTUIApp(App):
     TITLE = f"{APP_TITLE} v{VERSION}"
     SUB_TITLE = "Workload Analysis Tool"
 
-    CSS_PATH = "assets/style.css"
+    CSS_PATH = str(Path(__file__).parent / "assets" / "style.css")
     BINDINGS = [
         Binding(key="q", action="quit", description="Quit"),
         Binding(key="r", action="refresh", description="Refresh"),
@@ -63,122 +63,70 @@ class RocprofTUIApp(App):
     ]
 
     def __init__(
-        self, args: Optional[Any] = None, supported_archs: Optional[Dict] = None
+        self,
+        args: argparse.Namespace,
+        supported_archs: Optional[dict[str, Any]] = None,
     ) -> None:
-        """
-        Initialize the application.
-        """
         super().__init__()
         self.main_view = MainView()
+        self.recent_dirs = self._load_recent_dirs()
 
-        self.recent_file = Path.home() / ".textual_browser_recent.json"
-        self.recent_dirs: List[str] = []
-        self.current_path = ""
-        self.load_recent_directories()
-
-        # Initialize analysis-related attributes
+        # Analysis attributes
         self.args = args
         self.supported_archs = supported_archs or {}
-        self.soc: Dict = {}
-        self.mspec: Optional[MachineSpecs] = None
+        self.soc: dict[str, Any] = {}
+        self.mspec: Optional[Any] = None
 
     def compose(self) -> ComposeResult:
-        """Compose the application layout."""
         yield Header()
         yield self.main_view
         yield Footer()
 
     def action_refresh(self) -> None:
-        """Refresh the view."""
-        try:
-            self.main_view.refresh_view()
-        except Exception as e:
-            self.notify(f"Refresh failed: {str(e)}", severity="error")
+        self.main_view.refresh_view()
 
-    def load_soc_specs(self, sysinfo: dict = None) -> None:
-        """
-        Load OmniSoC instance for analysis.
-        """
+    def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
         self.mspec = generate_machine_specs(self.args, sysinfo)
-
-        if self.args and self.args.specs:
-            print(self.mspec)
-            return
-
         arch = self.mspec.gpu_arch
-
-        # Dynamically import and instantiate the SoC class
-        soc_module = importlib.import_module("rocprof_compute_soc.soc_" + arch)
-        soc_class = getattr(soc_module, arch + "_soc")
+        soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
+        soc_class = getattr(soc_module, f"{arch}_soc")
         self.soc[arch] = soc_class(self.args, self.mspec)
 
-    def get_soc(self) -> Dict:
-        """Get the SoC dictionary."""
-        return self.soc
+    def _load_recent_dirs(self) -> list[str]:
+        recent_file = Path.home() / ".textual_browser_recent.json"
+        if recent_file.exists():
+            with open(recent_file) as f:
+                return json.load(f)
+        return []
 
-    def get_mspec(self) -> Optional[MachineSpecs]:
-        """Get the machine specifications."""
-        return self.mspec
+    def _save_recent_dirs(self) -> None:
+        recent_file = Path.home() / ".textual_browser_recent.json"
+        with open(recent_file, "w") as f:
+            json.dump(self.recent_dirs, f, indent=2)
 
-    def load_recent_directories(self) -> None:
-        """Load recent directories from file."""
-        try:
-            if self.recent_file.exists():
-                with open(self.recent_file, "r") as f:
-                    self.recent_dirs = json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
-            self.recent_dirs = []
+    def add_recent_dir(self, directory: str) -> None:
+        directory = str(Path(directory).resolve())
 
-    def save_recent_directories(self) -> None:
-        """Save recent directories to file."""
-        try:
-            with open(self.recent_file, "w") as f:
-                json.dump(self.recent_dirs, f, indent=2)
-        except Exception as e:
-            self.notify(f"Failed to save recent directories: {e}", severity="error")
-
-    def add_to_recent(self, directory: str) -> None:
-        """Add directory to recent list (FIFO, max 5 items)."""
-        directory = os.path.abspath(directory)
-
-        # Remove if already exists
+        # Remove if exists, add to front, keep max 5
         if directory in self.recent_dirs:
             self.recent_dirs.remove(directory)
-
-        # Add to front
-        # TODO: should we check to if workload dir can be successfully loaded?
         self.recent_dirs.insert(0, directory)
-
-        # Keep only last 5
         self.recent_dirs = self.recent_dirs[:5]
-
-        # Save to file
-        self.save_recent_directories()
-
-    def on_recent_selected(self, selected_dir: str) -> None:
-        if selected_dir:
-            self.main_view.selected_path = selected_dir
-            self.main_view.run_analysis()
+        self._save_recent_dirs()
 
     @on(Button.Pressed, "#menu-open-workload")
     @work
-    async def pick_a_directory(self) -> None:
+    async def pick_directory(self) -> None:
         if opened := await self.push_screen_wait(SelectDirectory()):
-            self.add_to_recent(str(opened))
+            self.add_recent_dir(str(opened))
             self.main_view.selected_path = opened
-            dropdown = self.query_one("#file-dropdown", DropdownMenu)
-            dropdown.add_class("hidden")
+            self.query_one("#file-dropdown", DropdownMenu).add_class("hidden")
             self.main_view.run_analysis()
 
 
-def run_tui(args: Optional[Any] = None, supported_archs: Optional[list] = None) -> None:
-    """
-    Run the TUI application.
-    """
-    try:
-        app = RocprofTUIApp(args, supported_archs)
-        app.run()
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        raise RuntimeError(f"Failed to run TUI application: {str(e)}") from e
+def run_tui(
+    args: argparse.Namespace, supported_archs: Optional[dict[str, Any]] = None
+) -> None:
+    """Run the TUI application."""
+    app = RocprofTUIApp(args, supported_archs)
+    app.run()

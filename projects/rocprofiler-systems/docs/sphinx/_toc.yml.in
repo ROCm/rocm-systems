@@ -10,8 +10,6 @@ subtrees:
 
   - caption: Install
     entries:
-    - file: install/quick-start.rst
-      title: ROCm Systems Profiler quick start
     - file: install/install.rst
       title: ROCm Systems Profiler installation guide
 
@@ -39,6 +37,8 @@ subtrees:
           title: Network performance profiling
         - file: how-to/vcn-jpeg-sampling.rst
           title: VCN and JPEG sampling and tracing
+        - file: how-to/xgmi-pcie-sampling.rst
+          title: XGMI and PCIe metrics monitoring
     - file: how-to/understanding-rocprof-sys-output.rst
       title: Understanding the output
     - file: how-to/using-rocprof-sys-api.rst
@@ -68,7 +68,7 @@ subtrees:
 
   - caption: Tutorials
     entries:
-    - url: https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/examples
+    - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples
       title: GitHub examples
     - file: tutorials/video-tutorials.rst
       title: Video tutorials

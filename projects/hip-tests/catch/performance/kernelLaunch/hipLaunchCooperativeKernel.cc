@@ -32,8 +32,7 @@ THE SOFTWARE.
  * Contains performance tests for kernel launch overhead benchmarking.
  */
 
-template <KernelType kernel_type, bool timer_type>
-class LaunchCooperativeKernelBenchmark
+template <KernelType kernel_type, bool timer_type> class LaunchCooperativeKernelBenchmark
     : public KernelLaunchBenchmark<LaunchCooperativeKernelBenchmark<kernel_type, timer_type>,
                                    timer_type> {
  public:

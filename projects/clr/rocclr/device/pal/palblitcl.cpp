@@ -17,7 +17,7 @@
  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
-
+// clang-format off
 namespace amd::pal {
 
 #define RUNTIME_KERNEL(...) #__VA_ARGS__
@@ -49,7 +49,7 @@ extern void __amd_scheduler_pal(__global void*, __global void*, uint);
  * The trap handler source is copied from the above URL, with the following
  * modifications:
  *  - Add the following directive to declare the trap_entry symbol (this is
- *    later used by LightningProgram::GetTrapHandlerAddress to locate the load
+ *    later used by pal::Program::GetTrapHandlerAddress to locate the load
  *    address of the trap handler):
  *
  *     .globl      trap_entry
@@ -498,3 +498,4 @@ const char* TrapHandlerCode = RUNTIME_KERNEL(
 \n.endif
 \n);
 }  // namespace amd::pal
+// clang-format on

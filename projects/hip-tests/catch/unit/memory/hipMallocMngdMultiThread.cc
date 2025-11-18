@@ -33,7 +33,8 @@ __global__ void HmmMultiThread(int n, float* x, float* y) {
 
 __global__ void KrnlWth2MemTypes(int* Hmm, int* Dptr, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
-  for (size_t i = index; i < n; i++) {
+  size_t stride = blockDim.x * gridDim.x;
+  for (size_t i = index; i < n; i += stride) {
     Hmm[i] = Dptr[i] + 10;
   }
 }
@@ -81,14 +82,17 @@ static void LaunchKrnl(int* Hmm1, size_t NumElms, int InitVal, int GpuOrdnl, int
     WARN("Data Mismatch observed at line: " << __LINE__);
     IfTestPassed = false;
   }
+  HIPCHECK(hipFree(Hmm2));
+  HIPCHECK(hipStreamDestroy(strm));
 }
 
 static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
-  int *ptr = nullptr, blockSize = 64, *HstPtr = nullptr;
+  int *ptr = nullptr, blockSize = 64;
+  std::unique_ptr<int[]> host_ptr;
   hipStream_t strm;
   HIPCHECK(hipStreamCreate(&strm));
   if (HmmMem == 0) {
-    HstPtr = reinterpret_cast<int*>(new int[NumElms]);
+    host_ptr = std::make_unique<int[]>(NumElms);
     HIPCHECK(hipMalloc(&ptr, (sizeof(int) * NumElms)));
   } else {
     HIPCHECK(hipMallocManaged(&ptr, (sizeof(int) * NumElms)));
@@ -102,9 +106,9 @@ static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
   // Verifying the result
   int DataMismatch = 0;
   if (HmmMem == 0) {
-    HIPCHECK(hipMemcpy(HstPtr, ptr, (sizeof(int) * NumElms), hipMemcpyDeviceToHost));
+    HIPCHECK(hipMemcpy(host_ptr.get(), ptr, (sizeof(int) * NumElms), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < NumElms; ++i) {
-      if (HstPtr[i] != (InitVal + 10)) {
+      if (host_ptr[i] != (InitVal + 10)) {
         DataMismatch++;
       }
     }
@@ -293,7 +297,7 @@ static void AllocateHmmMemory(int flag, int device) {
   }
 }
 
-TEST_CASE("Unit_hipMallocManaged_MultiThread") {
+TEST_CASE("Unit_hipMallocManaged_MultiThread", "[multigpu]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -347,7 +351,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiThread") {
 
 // The following test checks what happens when same Hmm memory is used to
 // launch multiple threads over multiple gpus
-TEST_CASE("Unit_hipMallocManaged_MGpuMThread") {
+TEST_CASE("Unit_hipMallocManaged_MGpuMThread", "[multigpu]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -383,6 +387,7 @@ TEST_CASE("Unit_hipMallocManaged_MGpuMThread") {
       }
     }
   }
+  HIP_CHECK(hipFree(Hmm1));
   REQUIRE(IfTestPassed);
 }
 
@@ -418,6 +423,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiKrnlComnHmm") {
     }
   }
   delete[] HstPtr;
+  HIP_CHECK(hipFree(Hmm));
 }
 
 
@@ -481,6 +487,8 @@ TEST_CASE("Unit_hipMallocManaged_MultiThrdMultiStrm") {
       thr.join();
     }
   }
+
+  HIP_CHECK(hipFree(Hmm1));
 }
 
 

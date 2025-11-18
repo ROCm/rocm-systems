@@ -1,12 +1,38 @@
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 """
 Panel Widget Modules
 -------------------
 Contains the panel widgets used in the main layout.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from textual import on
+from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Label, RadioButton, RadioSet
 
@@ -53,25 +79,23 @@ class KernelView(Container):
     }
     """
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None) -> None:
         super().__init__(id="kernel-view")
-        self.status_label = None
-        self.dfs = {}
-        self.top_kernel = []
+        self.kernel_to_df_dict: dict[str, dict[str, Any]] = {}
+        self.top_kernel_to_df_list: list[dict[str, Any]] = []
+        self.current_selection: Optional[str] = None
+        self.status_label: Optional[Label] = None
 
-        if rocprof_compute_home:
-            config_path = (
-                rocprof_compute_home
-                / "rocprof_compute_tui"
-                / "utils"
-                / "kernel_view_config.yaml"
-            )
-        self.config_path = config_path
+        self.config_path = config_path or str(
+            rocprof_compute_home
+            / "rocprof_compute_tui"
+            / "utils"
+            / "kernel_view_config.yaml"
+            if rocprof_compute_home
+            else None
+        )
 
-        self.keys = None
-        self.current_selection = None
-
-    def compose(self):
+    def compose(self) -> ComposeResult:
         """
         Compose the split panel layout with two scrollable containers.
         """
@@ -88,94 +112,72 @@ class KernelView(Container):
             # empty on init
             pass
 
-    def update_results(self, per_kernel_dfs, top_kernels) -> None:
-        self.dfs = per_kernel_dfs
-        self.top_kernel = top_kernels
+    def update_results(
+        self,
+        kernel_to_df_dict: dict[str, dict[str, Any]],
+        top_kernel_to_df_list: list[dict[str, Any]],
+    ) -> None:
+        self.kernel_to_df_dict = kernel_to_df_dict
+        self.top_kernel_to_df_list = top_kernel_to_df_list
 
         top_container = self.query_one("#top-container", VerticalScroll)
         top_container.remove_children()
 
-        if self.top_kernel:
-            try:
-                header = self.build_header()
-                top_container.mount(header)
-                selector = self.build_selector()
-                top_container.mount(selector)
-            except Exception as e:
-                top_container.mount(
-                    Label(f"Error displaying kernel list: {str(e)}", classes="error")
-                )
-        else:
+        if not self.top_kernel_to_df_list:
             top_container.mount(Label("No kernels available", classes="placeholder"))
+            return
 
-        self.current_selection = self.top_kernel[0]["Kernel_Name"]
-        self._update_bottom_content()
+        # Build and mount components
+        self.new_perf_metric()
+        # build header section
+        keys = self.top_kernel_to_df_list[0].keys()
+        header_text = " | ".join(f"{key:25}" for key in keys)
+        top_container.mount(Label(header_text, classes="kernel-table-header"))
+
+        # build selector section
+        radio_buttons = []
+        for i, kernel in enumerate(self.top_kernel_to_df_list):
+            row_text = " | ".join(
+                f"{str(kernel.get(key, 'N/A'))[:18]:25}" for key in keys
+            )
+            button = RadioButton(row_text, id=f"kernel-{i}")
+            button.kernel_data = kernel
+            radio_buttons.append(button)
+        top_container.mount(RadioSet(*radio_buttons))
+
+        # build analysis section
+        self.current_selection = self.top_kernel_to_df_list[0]["Kernel_Name"]
+        self.update_bottom_content()
 
     def update_view(self, message: str, log_level: str) -> None:
-        """
-        Update the view with a status message.
-        """
-        if self.status_label is None:
-            self.status_label = Label(f"{message}", classes=log_level)
+        if not hasattr(self, "status_label") or self.status_label is None:
+            self.status_label = Label(message, classes=log_level)
             self.mount(self.status_label)
         else:
-            self.status_label.update(f"{message}")
+            self.status_label.update(message)
             self.status_label.set_classes(log_level)
 
-    def reload_config(self, config_path: str = None) -> None:
-        if config_path:
-            self.config_path = config_path
-
-        if self.dfs and self.top_kernel:
-            self.update_results()
-
-    def build_header(self):
-        all_keys = set()
-
-        for kernel in self.top_kernel:
-            all_keys.update(kernel.keys())
-
-        self.keys = sorted(all_keys)
-
-        if "Kernel_Name" in self.keys:
-            self.keys.remove("Kernel_Name")
-            self.keys.insert(0, "Kernel_Name")
-
-        header_text = " | ".join(f"{key:25}" for key in self.keys)
-        header_label = Label(header_text, classes="kernel-table-header")
-
-        return header_label
-
-    def build_selector(self):
-        radio_buttons = []
-
-        for i, kernel in enumerate(self.top_kernel):
-            row_data = []
-            for key in self.keys:
-                value = str(kernel.get(key, "N/A"))
-                if len(value) > 18:
-                    value = value[:15] + "..."
-                row_data.append(f"{value:25}")
-
-            row_text = " | ".join(row_data)
-            radio_button = RadioButton(row_text, id=f"kernel-{i}")
-            radio_button.kernel_data = kernel
-            radio_buttons.append(radio_button)
-
-        selector = RadioSet(*radio_buttons)
-
-        return selector
+    def new_perf_metric(self) -> None:
+        new_metrics = ["VGPRs", "Grid Size", "Workgroup Size"]
+        for new_metric in new_metrics:
+            for i, kernel in enumerate(self.top_kernel_to_df_list):
+                df_path = self.kernel_to_df_dict[kernel["Kernel_Name"]]["7. Wavefront"][
+                    "7.1 Wavefront Launch Stats"
+                ]["df"]
+                metric_avg = df_path[df_path["Metric"] == new_metric]["Avg"].iloc[0]
+                self.top_kernel_to_df_list[i][new_metric] = metric_avg
 
     @on(RadioSet.Changed)
     def on_radio_changed(self, event: RadioSet.Changed) -> None:
-        if event.pressed:
-            kernel_data = getattr(event.pressed, "kernel_data", None)
-            if kernel_data and "Kernel_Name" in kernel_data:
-                selected_kernel = kernel_data["Kernel_Name"]
-                self.current_selection = selected_kernel
-                self._update_bottom_content()
+        if not event.pressed:
+            return
 
-    def _update_bottom_content(self):
+        kernel_data = getattr(event.pressed, "kernel_data", None)
+        if kernel_data and "Kernel_Name" in kernel_data:
+            self.current_selection = kernel_data["Kernel_Name"]
+            self.update_bottom_content()
+
+    def update_bottom_content(self) -> None:
         bottom_container = self.query_one("#bottom-container", VerticalScroll)
         bottom_container.remove_children()
 
@@ -183,24 +185,28 @@ class KernelView(Container):
             Label("Toggle kernel selection to view detailed analysis.")
         )
 
-        if self.current_selection and self.current_selection in self.dfs:
-            bottom_container.mount(
-                Label(f"Current kernel selection: {self.current_selection}")
-            )
-            filtered_dfs = self.dfs[self.current_selection]
-
-            try:
-                sections = build_all_sections(filtered_dfs, self.config_path)
-                for section in sections:
-                    bottom_container.mount(section)
-            except Exception as e:
-                bottom_container.mount(
-                    Label(f"Error displaying results: {str(e)}", classes="error")
-                )
-        else:
+        if not (
+            self.current_selection and self.current_selection in self.kernel_to_df_dict
+        ):
             bottom_container.mount(
                 Label(
                     f"No data available for kernel: {self.current_selection}",
                     classes="error",
                 )
+            )
+            return
+
+        bottom_container.mount(
+            Label(f"Current kernel selection: {self.current_selection}")
+        )
+
+        try:
+            sections = build_all_sections(
+                self.kernel_to_df_dict[self.current_selection], self.config_path
+            )
+            for section in sections:
+                bottom_container.mount(section)
+        except Exception as e:
+            bottom_container.mount(
+                Label(f"Error displaying results: {str(e)}", classes="error")
             )

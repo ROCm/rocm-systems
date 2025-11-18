@@ -25,7 +25,7 @@ THE SOFTWARE.
 #define LEN 64
 /* Comparing 2 floating point/double variables using floating point
 precision. The precision is set at compile time using EPSILON. */
-#define COMPARE_REALNUM(A, B, EPSILON) (fabs(A-B) < EPSILON)
+#define COMPARE_REALNUM(A, B, EPSILON) (fabs(A - B) < EPSILON)
 
 enum ComplexFuncType {
   COMPLEX_ADD,
@@ -39,22 +39,18 @@ enum ComplexFuncType {
   COMPLEX_ABS
 };
 
-__global__ static void testMakeComplexFunc(float* A, float* B,
-                                    hipFloatComplex* C) {
+__global__ static void testMakeComplexFunc(float* A, float* B, hipFloatComplex* C) {
   int tx = threadIdx.x + blockIdx.x * blockDim.x;
   C[tx] = make_hipFloatComplex(A[tx], B[tx]);
 }
 
-__global__ static void testMakeComplexFunc(double* A, double* B,
-                                    hipDoubleComplex* C) {
+__global__ static void testMakeComplexFunc(double* A, double* B, hipDoubleComplex* C) {
   int tx = threadIdx.x + blockIdx.x * blockDim.x;
   C[tx] = make_hipDoubleComplex(A[tx], B[tx]);
 }
 
-__global__ static void testComplexMathFunc1(hipFloatComplex* A,
-                                    hipFloatComplex* B,
-                                    hipFloatComplex* C,
-                                    enum ComplexFuncType type) {
+__global__ static void testComplexMathFunc1(hipFloatComplex* A, hipFloatComplex* B,
+                                            hipFloatComplex* C, enum ComplexFuncType type) {
   int tx = threadIdx.x + blockIdx.x * blockDim.x;
   switch (type) {
     case COMPLEX_ADD:
@@ -77,10 +73,8 @@ __global__ static void testComplexMathFunc1(hipFloatComplex* A,
   }
 }
 
-__global__ static void testComplexMathFunc1(hipDoubleComplex* A,
-                                    hipDoubleComplex* B,
-                                    hipDoubleComplex* C,
-                                    enum ComplexFuncType type) {
+__global__ static void testComplexMathFunc1(hipDoubleComplex* A, hipDoubleComplex* B,
+                                            hipDoubleComplex* C, enum ComplexFuncType type) {
   int tx = threadIdx.x + blockIdx.x * blockDim.x;
   switch (type) {
     case COMPLEX_ADD:
@@ -103,9 +97,8 @@ __global__ static void testComplexMathFunc1(hipDoubleComplex* A,
   }
 }
 
-__global__ static void testComplexMathFunc2(hipFloatComplex* A,
-                                    float* B,
-                                    enum ComplexFuncType type) {
+__global__ static void testComplexMathFunc2(hipFloatComplex* A, float* B,
+                                            enum ComplexFuncType type) {
   int tx = threadIdx.x + blockIdx.x * blockDim.x;
   switch (type) {
     case COMPLEX_REAL:
@@ -125,9 +118,8 @@ __global__ static void testComplexMathFunc2(hipFloatComplex* A,
   }
 }
 
-__global__ static void testComplexMathFunc2(hipDoubleComplex* A,
-                                    double* B,
-                                    enum ComplexFuncType type) {
+__global__ static void testComplexMathFunc2(hipDoubleComplex* A, double* B,
+                                            enum ComplexFuncType type) {
   int tx = threadIdx.x + blockIdx.x * blockDim.x;
   switch (type) {
     case COMPLEX_REAL:
@@ -150,7 +142,7 @@ __global__ static void testComplexMathFunc2(hipDoubleComplex* A,
  * Validates all hipComplex inline functions on device
  * Functions validated are: make_hipDoubleComplex, make_hipFloatComplex
  */
-template<typename T1, typename T2> bool test_makehipComplex_dev() {
+template <typename T1, typename T2> bool test_makehipComplex_dev() {
   T2 *A, *Ad, *B, *Bd;
   T1 *C, *Cd;
   bool TestPassed = true;
@@ -158,8 +150,8 @@ template<typename T1, typename T2> bool test_makehipComplex_dev() {
   B = new T2[LEN];
   C = new T1[LEN];
   for (uint32_t i = 0; i < LEN; i++) {
-      A[i] = 2*i*1.0;
-      B[i] = (2*i + 1)*1.0;
+    A[i] = 2 * i * 1.0;
+    B[i] = (2 * i + 1) * 1.0;
   }
   unsigned int size2 = LEN * sizeof(T2);
   unsigned int size1 = LEN * sizeof(T1);
@@ -168,8 +160,7 @@ template<typename T1, typename T2> bool test_makehipComplex_dev() {
   HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Cd), size1));
   HIPCHECK(hipMemcpy(Ad, A, size2, hipMemcpyHostToDevice));
   HIPCHECK(hipMemcpy(Bd, B, size2, hipMemcpyHostToDevice));
-  hipLaunchKernelGGL(testMakeComplexFunc, dim3(1), dim3(LEN),
-                     0, 0, Ad, Bd, Cd);
+  hipLaunchKernelGGL(testMakeComplexFunc, dim3(1), dim3(LEN), 0, 0, Ad, Bd, Cd);
   HIPCHECK(hipMemcpy(C, Cd, size1, hipMemcpyDeviceToHost));
   // Validate the output of the kernel functions.
   for (uint32_t i = 0; i < LEN; i++) {
@@ -191,7 +182,7 @@ template<typename T1, typename T2> bool test_makehipComplex_dev() {
  * Functions validated are: hipCaddf, hipCsubf, hipCmulf and hipCdivf
  * hipCadd, hipCsub, hipCmul, hipCdiv
  */
-template<typename T1, typename T2>
+template <typename T1, typename T2>
 bool test_complexMathFunc1_dev(enum ComplexFuncType mathFuncType) {
   T1 *A, *Ad, *B, *Bd;
   T1 *C, *Cd;
@@ -200,10 +191,10 @@ bool test_complexMathFunc1_dev(enum ComplexFuncType mathFuncType) {
   B = new T1[LEN];
   C = new T1[LEN];
   for (uint32_t i = 0; i < LEN; i++) {
-    A[i].x = 2*i*1.0;
-    A[i].y = (2*i + 1)*1.0;
-    B[i].x = 2*i*1.0 + 0.5;
-    B[i].y = (2*i + 1)*1.0 + 0.5;
+    A[i].x = 2 * i * 1.0;
+    A[i].y = (2 * i + 1) * 1.0;
+    B[i].x = 2 * i * 1.0 + 0.5;
+    B[i].y = (2 * i + 1) * 1.0 + 0.5;
   }
   unsigned int size = LEN * sizeof(T1);
   HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), size));
@@ -211,8 +202,7 @@ bool test_complexMathFunc1_dev(enum ComplexFuncType mathFuncType) {
   HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Cd), size));
   HIPCHECK(hipMemcpy(Ad, A, size, hipMemcpyHostToDevice));
   HIPCHECK(hipMemcpy(Bd, B, size, hipMemcpyHostToDevice));
-  hipLaunchKernelGGL(testComplexMathFunc1, dim3(1), dim3(LEN),
-                     0, 0, Ad, Bd, Cd, mathFuncType);
+  hipLaunchKernelGGL(testComplexMathFunc1, dim3(1), dim3(LEN), 0, 0, Ad, Bd, Cd, mathFuncType);
   HIPCHECK(hipMemcpy(C, Cd, size, hipMemcpyDeviceToHost));
   // Validate the output of the kernel functions.
   T2 epsilon = 0.0001f;
@@ -225,18 +215,17 @@ bool test_complexMathFunc1_dev(enum ComplexFuncType mathFuncType) {
       real = (A[i].x - B[i].x);
       imag = (A[i].y - B[i].y);
     } else if (mathFuncType == COMPLEX_MUL) {
-      real = (A[i].x*B[i].x - A[i].y*B[i].y);
-      imag = (A[i].y*B[i].x + A[i].x*B[i].y);
+      real = (A[i].x * B[i].x - A[i].y * B[i].y);
+      imag = (A[i].y * B[i].x + A[i].x * B[i].y);
     } else if (mathFuncType == COMPLEX_DIV) {
-      T2 sqabs = (B[i].x*B[i].x + B[i].y*B[i].y);
-      real = (A[i].x * B[i].x + A[i].y * B[i].y)/sqabs;
-      imag = (A[i].y * B[i].x - A[i].x * B[i].y)/sqabs;
+      T2 sqabs = (B[i].x * B[i].x + B[i].y * B[i].y);
+      real = (A[i].x * B[i].x + A[i].y * B[i].y) / sqabs;
+      imag = (A[i].y * B[i].x - A[i].x * B[i].y) / sqabs;
     } else if (mathFuncType == COMPLEX_CONJ) {
       real = A[i].x;
       imag = -A[i].y;
     }
-    if (!COMPARE_REALNUM(real, C[i].x, epsilon) ||
-        !COMPARE_REALNUM(imag, C[i].y, epsilon)) {
+    if (!COMPARE_REALNUM(real, C[i].x, epsilon) || !COMPARE_REALNUM(imag, C[i].y, epsilon)) {
       TestPassed = false;
       break;
     }
@@ -254,7 +243,7 @@ bool test_complexMathFunc1_dev(enum ComplexFuncType mathFuncType) {
  * Functions validated are: hipCrealf, hipCimagf, hipCsqabsf and hipCabsf
  * hipCreal, hipCimag, hipCsqabs, hipCabs
  */
-template<typename T1, typename T2>
+template <typename T1, typename T2>
 bool test_complexMathFunc2_dev(enum ComplexFuncType mathFuncType) {
   T1 *A, *Ad;
   T2 *B, *Bd;
@@ -262,16 +251,15 @@ bool test_complexMathFunc2_dev(enum ComplexFuncType mathFuncType) {
   A = new T1[LEN];
   B = new T2[LEN];
   for (uint32_t i = 0; i < LEN; i++) {
-    A[i].x = 2*i*1.0;
-    A[i].y = (2*i + 1)*1.0;
+    A[i].x = 2 * i * 1.0;
+    A[i].y = (2 * i + 1) * 1.0;
   }
   unsigned int size1 = LEN * sizeof(T1);
   unsigned int size2 = LEN * sizeof(T2);
   HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), size1));
   HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd), size2));
   HIPCHECK(hipMemcpy(Ad, A, size1, hipMemcpyHostToDevice));
-  hipLaunchKernelGGL(testComplexMathFunc2, dim3(1), dim3(LEN),
-                     0, 0, Ad, Bd, mathFuncType);
+  hipLaunchKernelGGL(testComplexMathFunc2, dim3(1), dim3(LEN), 0, 0, Ad, Bd, mathFuncType);
   HIPCHECK(hipMemcpy(B, Bd, size2, hipMemcpyDeviceToHost));
   // Validate the output of the kernel functions.
   T2 epsilon = 0.0001f;
@@ -345,15 +333,14 @@ static bool test_allcomplexMathFunc_host() {
     TestPassed &= false;
   }
   fx = hipCmulf(fp, fq);
-  if ((fx.x != (fp.x*fq.x - fp.y*fq.y)) ||
-      (fx.y != (fp.y*fq.x + fp.x*fq.y))) {
+  if ((fx.x != (fp.x * fq.x - fp.y * fq.y)) || (fx.y != (fp.y * fq.x + fp.x * fq.y))) {
     TestPassed &= false;
   }
   fx = hipCdivf(fp, fq);
-  float fsqabs = fq.x*fq.x + fq.y*fq.y;
+  float fsqabs = fq.x * fq.x + fq.y * fq.y;
   float epsilon = 0.0001f;
-  if ((!COMPARE_REALNUM(fx.x, (fp.x*fq.x + fp.y*fq.y)/fsqabs, epsilon)) ||
-      (!COMPARE_REALNUM(fx.y, (fp.y*fq.x - fp.x*fq.y)/fsqabs, epsilon))) {
+  if ((!COMPARE_REALNUM(fx.x, (fp.x * fq.x + fp.y * fq.y) / fsqabs, epsilon)) ||
+      (!COMPARE_REALNUM(fx.y, (fp.y * fq.x - fp.x * fq.y) / fsqabs, epsilon))) {
     TestPassed &= false;
   }
   if ((fp.x != hipCrealf(fp)) || (fp.y != hipCimagf(fp))) {
@@ -363,10 +350,10 @@ static bool test_allcomplexMathFunc_host() {
   if ((fx.x != fp.x) || (fx.y != -fp.y)) {
     TestPassed &= false;
   }
-  if (!COMPARE_REALNUM((fp.x*fp.x + fp.y*fp.y), hipCsqabsf(fp), epsilon)) {
+  if (!COMPARE_REALNUM((fp.x * fp.x + fp.y * fp.y), hipCsqabsf(fp), epsilon)) {
     TestPassed &= false;
   }
-  if (!COMPARE_REALNUM(sqrtf(fp.x*fp.x + fp.y*fp.y), hipCabsf(fp), epsilon)) {
+  if (!COMPARE_REALNUM(sqrtf(fp.x * fp.x + fp.y * fp.y), hipCabsf(fp), epsilon)) {
     TestPassed &= false;
   }
   hipDoubleComplex dp, dq, dx;
@@ -383,14 +370,13 @@ static bool test_allcomplexMathFunc_host() {
     TestPassed &= false;
   }
   dx = hipCmul(dp, dq);
-  if ((dx.x != (dp.x*dq.x - dp.y*dq.y)) ||
-      (dx.y != (dp.y*dq.x + dp.x*dq.y))) {
+  if ((dx.x != (dp.x * dq.x - dp.y * dq.y)) || (dx.y != (dp.y * dq.x + dp.x * dq.y))) {
     TestPassed &= false;
   }
   dx = hipCdiv(dp, dq);
-  float dsqabs = dq.x*dq.x + dq.y*dq.y;
-  if ((!COMPARE_REALNUM(dx.x, (dp.x*dq.x + dp.y*dq.y)/dsqabs, epsilon)) ||
-      (!COMPARE_REALNUM(dx.y, (dp.y*dq.x - dp.x*dq.y)/dsqabs, epsilon))) {
+  float dsqabs = dq.x * dq.x + dq.y * dq.y;
+  if ((!COMPARE_REALNUM(dx.x, (dp.x * dq.x + dp.y * dq.y) / dsqabs, epsilon)) ||
+      (!COMPARE_REALNUM(dx.y, (dp.y * dq.x - dp.x * dq.y) / dsqabs, epsilon))) {
     TestPassed &= false;
   }
   if ((dp.x != hipCreal(dp)) || (dp.y != hipCimag(dp))) {
@@ -400,10 +386,10 @@ static bool test_allcomplexMathFunc_host() {
   if ((dx.x != dp.x) || (dx.y != -dp.y)) {
     TestPassed &= false;
   }
-  if (!COMPARE_REALNUM((dp.x*dp.x + dp.y*dp.y), hipCsqabs(dp), epsilon)) {
+  if (!COMPARE_REALNUM((dp.x * dp.x + dp.y * dp.y), hipCsqabs(dp), epsilon)) {
     TestPassed &= false;
   }
-  if (!COMPARE_REALNUM(sqrtf(dp.x*dp.x + dp.y*dp.y), hipCabs(dp), epsilon)) {
+  if (!COMPARE_REALNUM(sqrtf(dp.x * dp.x + dp.y * dp.y), hipCabs(dp), epsilon)) {
     TestPassed &= false;
   }
   return TestPassed;
@@ -412,27 +398,27 @@ static bool test_allcomplexMathFunc_host() {
 TEST_CASE("Unit_TestMathFuncComplex") {
   bool TestPassed = false;
   TestPassed = test_makehipComplex_dev<hipFloatComplex, float>() &&
-    test_makehipComplex_dev<float2, float>() &&
-    test_makehipComplex_dev<hipDoubleComplex, double>() &&
-    test_makehipComplex_dev<double2, double>() &&
-    test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_ADD) &&
-    test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_ADD)
-    && test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_SUB)
-    && test_complexMathFunc1_dev<hipDoubleComplex, double>
-    (COMPLEX_SUB) && test_complexMathFunc1_dev<hipFloatComplex,
-    float>(COMPLEX_MUL) && test_complexMathFunc1_dev<hipDoubleComplex,
-    double>(COMPLEX_MUL) && test_complexMathFunc1_dev<hipFloatComplex,
-    float>(COMPLEX_DIV) && test_complexMathFunc1_dev<hipDoubleComplex,
-    double>(COMPLEX_DIV) && test_complexMathFunc1_dev<hipFloatComplex,
-    float>(COMPLEX_CONJ) && test_complexMathFunc1_dev<
-    hipDoubleComplex, double>(COMPLEX_CONJ) && test_complexMathFunc2_dev
-    <hipFloatComplex, float>(COMPLEX_REAL) && test_complexMathFunc2_dev
-    <hipDoubleComplex, double>(COMPLEX_REAL) && test_complexMathFunc2_dev
-    <hipFloatComplex, float>(COMPLEX_IMAG) && test_complexMathFunc2_dev
-    <hipDoubleComplex, double>(COMPLEX_IMAG) && test_complexMathFunc2_dev
-    <hipFloatComplex, float>(COMPLEX_SQABS) && test_complexMathFunc2_dev
-    <hipDoubleComplex, double>(COMPLEX_SQABS) && test_complexMathFunc2_dev
-    <hipFloatComplex, float>(COMPLEX_ABS) && test_complexMathFunc2_dev
-    <hipDoubleComplex, double>(COMPLEX_ABS) &&test_allcomplexMathFunc_host();
+               test_makehipComplex_dev<float2, float>() &&
+               test_makehipComplex_dev<hipDoubleComplex, double>() &&
+               test_makehipComplex_dev<double2, double>() &&
+               test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_ADD) &&
+               test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_ADD) &&
+               test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_SUB) &&
+               test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_SUB) &&
+               test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_MUL) &&
+               test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_MUL) &&
+               test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_DIV) &&
+               test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_DIV) &&
+               test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_CONJ) &&
+               test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_CONJ) &&
+               test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_REAL) &&
+               test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_REAL) &&
+               test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_IMAG) &&
+               test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_IMAG) &&
+               test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_SQABS) &&
+               test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_SQABS) &&
+               test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_ABS) &&
+               test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_ABS) &&
+               test_allcomplexMathFunc_host();
   REQUIRE(TestPassed == true);
 }

@@ -57,9 +57,9 @@ bool HostMemoryReference::allocateMemory(size_t size, const Context& context) {
   size_t memoryAlignment = (CPU_MEMORY_ALIGNMENT_SIZE <= 0) ? 256 : CPU_MEMORY_ALIGNMENT_SIZE;
   size_ = amd::alignUp(size, memoryAlignment);
   //! \note memory size must be aligned for CAL pinning
-  hostMem_ = CPU_MEMORY_GUARD_PAGES
-      ? GuardedMemory::allocate(size_, MEMOBJ_BASE_ADDR_ALIGN, CPU_MEMORY_GUARD_PAGE_SIZE * Ki)
-      : context.hostAlloc(size_, MEMOBJ_BASE_ADDR_ALIGN);
+  hostMem_ = CPU_MEMORY_GUARD_PAGES ? GuardedMemory::allocate(size_, MEMOBJ_BASE_ADDR_ALIGN,
+                                                              CPU_MEMORY_GUARD_PAGE_SIZE * Ki)
+                                    : context.hostAlloc(size_, MEMOBJ_BASE_ADDR_ALIGN);
   alloced_ = (hostMem_ != NULL);
   return alloced_;
 }
@@ -146,7 +146,7 @@ Memory::Memory(Memory& parent, Flags flags, size_t origin, size_t size, Type typ
 
   if ((flags_ & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) == 0) {
     flags_ |= parent_->getMemFlags() &
-        (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS);
+              (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS);
   }
 }
 
@@ -169,7 +169,6 @@ void Memory::initDeviceMemory() {
 
 // ================================================================================================
 void Memory::resetAllocationState() {
-
   // Reset device memory allocation state
   for (size_t i = 0; i < context_().devices().size(); i++) {
     deviceAlloced_[context_().devices()[i]].store(AllocInit, std::memory_order_relaxed);
@@ -298,7 +297,7 @@ bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
 
   const std::vector<Device*>& devices = context_().devices();
   if (IS_LINUX && (devices.size() == 1) && devices[0]->info().largeBar_) {
-      largeBarSystem_ = 1;
+    largeBarSystem_ = 1;
   }
 
   // Forces system memory allocation on the device,
@@ -312,9 +311,7 @@ bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
     deviceMemories_[i].ref_ = devices[i];
     deviceMemories_[i].value_ = NULL;
 
-    if (forceAlloc ||
-        (!skipAlloc &&
-         ((devices.size() == 1) || DISABLE_DEFERRED_ALLOC))) {
+    if (forceAlloc || (!skipAlloc && ((devices.size() == 1) || DISABLE_DEFERRED_ALLOC))) {
       device::Memory* mem = getDeviceMemory(*devices[i]);
       if (NULL == mem) {
         LogPrintfError("Can't allocate memory size - 0x%08X bytes!", getSize());
@@ -416,7 +413,6 @@ device::Memory* Memory::getDeviceMemory(const Device& dev, bool alloc) {
 
 // ================================================================================================
 Memory::~Memory() {
-
   if (ipcShared()) {
     amd::MemObjMap::RemoveIpcHandleMemObj(this);
     auto device = context_().devices()[0];
@@ -487,8 +483,8 @@ bool Memory::setDestructorCallback(DestructorCallBackFunction callback, void* da
   }
 
   entry->next_ = destructorCallbacks_;
-  while (!destructorCallbacks_.compare_exchange_weak(entry->next_, entry))
-    ;  // Someone else is also updating the head of the linked list! reload.
+  while (!destructorCallbacks_.compare_exchange_weak(
+      entry->next_, entry));  // Someone else is also updating the head of the linked list! reload.
 
   return true;
 }
@@ -594,8 +590,8 @@ bool Buffer::isEntirelyCovered(const Coord3D& origin, const Coord3D& region) con
 
 bool Buffer::validateRegion(const Coord3D& origin, const Coord3D& region) const {
   return ((region[0] > 0) && (origin[0] < getSize()) && ((origin[0] + region[0]) <= getSize()))
-      ? true
-      : false;
+             ? true
+             : false;
 }
 
 void Pipe::initDeviceMemory() {
@@ -609,15 +605,16 @@ Image::Image(const Format& format, Image& parent, uint baseMipLevel, cl_mem_flag
              bool isMipmapView)
     : Memory(parent, flags, 0,
              parent.getWidth() * parent.getHeight() * parent.getDepth() * format.getElementSize()),
-      impl_(format, Coord3D(parent.getWidth() * parent.getImageFormat().getElementSize() /
-                                format.getElementSize(),
-                            parent.getHeight(), parent.getDepth()),
+      impl_(format,
+            Coord3D(parent.getWidth() * parent.getImageFormat().getElementSize() /
+                        format.getElementSize(),
+                    parent.getHeight(), parent.getDepth()),
             parent.getRowPitch(), parent.getSlicePitch(), parent.getBytePitch()),
       mipLevels_(isMipmapView ? parent.getMipLevels() : 1),
       baseMipLevel_(baseMipLevel) {
   if (baseMipLevel > 0) {
     impl_.region_.c[0] = GETMIPDIM(parent.getWidth(), baseMipLevel) *
-        parent.getImageFormat().getElementSize() / format.getElementSize();
+                         parent.getImageFormat().getElementSize() / format.getElementSize();
     impl_.region_.c[1] = GETMIPDIM(parent.getHeight(), baseMipLevel);
     impl_.region_.c[2] = GETMIPDIM(parent.getDepth(), baseMipLevel);
 
@@ -657,8 +654,8 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
   switch (type) {
     case CL_MEM_OBJECT_IMAGE3D:
       if ((width == 0) || (height == 0) || (depth < 1)) {
-        DevLogPrintfError("Invalid Dimenstions, width: %u height: %u depth: %u \n",
-                          width, height, depth);
+        DevLogPrintfError("Invalid Dimenstions, width: %u height: %u depth: %u \n", width, height,
+                          depth);
         return false;
       }
       for (const auto& dev : devices) {
@@ -833,8 +830,7 @@ bool Image::Format::isValid() const {
       break;
 
     default: {
-      DevLogPrintfError("Invalid Image format: %u \n",
-                        image_channel_data_type);
+      DevLogPrintfError("Invalid Image format: %u \n", image_channel_data_type);
       return false;
     }
   }
@@ -859,8 +855,7 @@ bool Image::Format::isValid() const {
           break;
 
         default: {
-          DevLogPrintfError("Invalid Luminance: %u \n",
-                            image_channel_data_type);
+          DevLogPrintfError("Invalid Luminance: %u \n", image_channel_data_type);
           return false;
         }
       }
@@ -874,8 +869,7 @@ bool Image::Format::isValid() const {
           break;
 
         default: {
-          DevLogPrintfError("Invalid RGB: %u \n",
-                         image_channel_data_type);
+          DevLogPrintfError("Invalid RGB: %u \n", image_channel_data_type);
           return false;
         }
       }
@@ -891,8 +885,7 @@ bool Image::Format::isValid() const {
           break;
 
         default: {
-          DevLogPrintfError("Invalid BGRA/ARGB: %u \n",
-                         image_channel_data_type);
+          DevLogPrintfError("Invalid BGRA/ARGB: %u \n", image_channel_data_type);
           return false;
         }
       }
@@ -906,8 +899,7 @@ bool Image::Format::isValid() const {
         case CL_UNORM_INT8:
           break;
         default: {
-          DevLogPrintfError("Invalid sBGRA: %u \n",
-                         image_channel_data_type);
+          DevLogPrintfError("Invalid sBGRA: %u \n", image_channel_data_type);
           return false;
         }
       }
@@ -919,16 +911,14 @@ bool Image::Format::isValid() const {
         case CL_FLOAT:
           break;
         default: {
-          DevLogPrintfError("Invalid CL Depth: %u \n",
-                         image_channel_data_type);
+          DevLogPrintfError("Invalid CL Depth: %u \n", image_channel_data_type);
           return false;
         }
       }
       break;
 
     default: {
-      DevLogPrintfError("Invalid image_channel_order: %u \n",
-                     image_channel_order);
+      DevLogPrintfError("Invalid image_channel_order: %u \n", image_channel_order);
       return false;
     }
   }
@@ -936,7 +926,7 @@ bool Image::Format::isValid() const {
 }
 
 // definition of list of supported formats
-const cl_image_format Image::supportedFormats[]= {
+const cl_image_format Image::supportedFormats[] = {
     // R
     {CL_R, CL_SNORM_INT8},
     {CL_R, CL_SNORM_INT16},
@@ -1040,11 +1030,11 @@ const cl_image_format Image::supportedFormats[]= {
     {CL_DEPTH, CL_FLOAT},
 };
 
-const uint32_t NUM_CHANNEL_ORDER_OF_RGB = 1;  // The number of channel orders of RGB at the end of
-                                             // the table supportedFormats above and before sRGB and
-                                             // depth.
+const uint32_t NUM_CHANNEL_ORDER_OF_RGB = 1;   // The number of channel orders of RGB at the end of
+                                               // the table supportedFormats above and before sRGB
+                                               // and depth.
 const uint32_t NUM_CHANNEL_ORDER_OF_sRGB = 1;  // The number of channel orders of sRGB at the end of
-                                              // the table supportedFormats above and before depth.
+                                               // the table supportedFormats above and before depth.
 const uint32_t NUM_CHANNEL_ORDER_OF_DEPTH =
     2;  // The number of channel orders of DEPTH at the end of the table supportedFormats above.
 
@@ -1062,7 +1052,7 @@ const cl_image_format Image::supportedDepthStencilFormats[] = {
     {CL_DEPTH_STENCIL, CL_UNORM_INT24}};
 
 uint32_t Image::numSupportedFormats(const Context& context, cl_mem_object_type image_type,
-                                   cl_mem_flags flags) {
+                                    cl_mem_flags flags) {
   const std::vector<amd::Device*>& devices = context.devices();
   uint numFormats = sizeof(supportedFormats) / sizeof(cl_image_format);
 
@@ -1116,8 +1106,8 @@ uint32_t Image::numSupportedFormats(const Context& context, cl_mem_object_type i
 }
 
 uint32_t Image::getSupportedFormats(const Context& context, cl_mem_object_type image_type,
-                                   const uint32_t num_entries, cl_image_format* image_formats,
-                                   cl_mem_flags flags) {
+                                    const uint32_t num_entries, cl_image_format* image_formats,
+                                    cl_mem_flags flags) {
   const std::vector<amd::Device*>& devices = context.devices();
   uint numFormats = 0;
 
@@ -1216,7 +1206,7 @@ bool Image::Format::isSupported(const Context& context, cl_mem_object_type image
     }
   }
   if (*this == RGBA10) {
-      return true;
+    return true;
   }
 
   return false;
@@ -1226,7 +1216,6 @@ bool Image::Format::isSupported(const Context& context, cl_mem_object_type image
 Image* Image::createView(const Context& context, const Format& format, device::VirtualDevice* vDev,
                          uint baseMipLevel, cl_mem_flags flags, bool createMipmapView,
                          bool forceAlloc) {
-
   // Find the image dimensions and create a corresponding object
   Image* view = new (context) Image(format, *this, baseMipLevel, flags, createMipmapView);
 
@@ -1243,8 +1232,7 @@ Image* Image::createView(const Context& context, const Format& format, device::V
     if ((context.devices().size() == 1) || DISABLE_DEFERRED_ALLOC || forceAlloc) {
       for (uint i = 0; i < numDevices_; ++i) {
         // Make sure the parent's device memory is avaialbe
-        if ((deviceMemories_[i].ref_ != nullptr) &&
-            (deviceMemories_[i].value_ != nullptr)) {
+        if ((deviceMemories_[i].ref_ != nullptr) && (deviceMemories_[i].value_ != nullptr)) {
           device::Memory* mem = view->getDeviceMemory(*(deviceMemories_[i].ref_));
         }
       }
@@ -1258,8 +1246,8 @@ Image* Image::createView(const Context& context, const Format& format, device::V
 bool Image::isEntirelyCovered(const Coord3D& origin, const Coord3D& region) const {
   return (origin[0] == 0 && origin[1] == 0 && origin[2] == 0 && region[0] == getWidth() &&
           region[1] == getHeight() && region[2] == getDepth())
-      ? true
-      : false;
+             ? true
+             : false;
 }
 
 bool Image::validateRegion(const Coord3D& origin, const Coord3D& region) const {
@@ -1267,15 +1255,15 @@ bool Image::validateRegion(const Coord3D& origin, const Coord3D& region) const {
           (region[0] != 0) && (origin[1] < getHeight()) && (region[1] != 0) &&
           (origin[2] < getDepth()) && (region[2] != 0) && ((origin[0] + region[0]) <= getWidth()) &&
           ((origin[1] + region[1]) <= getHeight()) && ((origin[2] + region[2]) <= getDepth()))
-      ? true
-      : false;
+             ? true
+             : false;
 }
 
 bool Image::isRowSliceValid(size_t rowPitch, size_t slice, size_t width, size_t height) const {
   size_t tmpHeight = (getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) ? 1 : height;
 
   bool valid = (rowPitch == 0) ||
-      ((rowPitch != 0) && (rowPitch >= width * getImageFormat().getElementSize()));
+               ((rowPitch != 0) && (rowPitch >= width * getImageFormat().getElementSize()));
 
   return ((slice == 0) || ((slice != 0) && (slice >= rowPitch * tmpHeight))) ? valid : false;
 }
@@ -1528,7 +1516,7 @@ void Image::Format::formatColor(const void* colorRGBA, void* colorFormat) const 
   }
 }
 
-Monitor SvmBuffer::AllocatedLock_ ROCCLR_INIT_PRIORITY(101) ("Guards SVM allocation list");
+Monitor SvmBuffer::AllocatedLock_ ROCCLR_INIT_PRIORITY(101)("Guards SVM allocation list");
 std::map<uintptr_t, uintptr_t> SvmBuffer::Allocated_ ROCCLR_INIT_PRIORITY(101);
 
 void SvmBuffer::Add(uintptr_t k, uintptr_t v) {

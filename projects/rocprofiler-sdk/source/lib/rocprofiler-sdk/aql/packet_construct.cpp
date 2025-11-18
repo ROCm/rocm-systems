@@ -164,7 +164,7 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
                               {buffer_size_hi}});
     }
 
-    if(perf_exclude_mask)
+    if(perf_exclude_mask != 0u)
     {
         // Bitwise NOT because aqlprofile receives the mask, not the exclude mask
         aql_params.push_back(

@@ -71,16 +71,12 @@ TEST_CASE("Unit_hipChooseDevice_NegTst") {
   hipDeviceProp_t prop;
   int dev = -1;
 
-  SECTION("dev is nullptr") {
-    REQUIRE_FALSE(hipSuccess == hipChooseDevice(nullptr, &prop));
-  }
+  SECTION("dev is nullptr") { REQUIRE_FALSE(hipSuccess == hipChooseDevice(nullptr, &prop)); }
 
-  SECTION("prop is nullptr") {
-    REQUIRE_FALSE(hipSuccess == hipChooseDevice(&dev, nullptr));
-  }
+  SECTION("prop is nullptr") { REQUIRE_FALSE(hipSuccess == hipChooseDevice(&dev, nullptr)); }
 }
 
 /**
-* End doxygen group DeviceTest.
-* @}
-*/
+ * End doxygen group DeviceTest.
+ * @}
+ */

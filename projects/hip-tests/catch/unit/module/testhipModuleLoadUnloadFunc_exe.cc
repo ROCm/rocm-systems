@@ -20,24 +20,21 @@ THE SOFTWARE.
 #include <fstream>
 #include <cstddef>
 #include <vector>
-#include<iostream>
-#define HIP_CHECK(error)\
-{\
-  hipError_t localError = error;\
-  if ((localError != hipSuccess) && \
-      (localError != hipErrorPeerAccessAlreadyEnabled)) {\
-    printf("error: '%s'(%d) from %s at %s:%d\n", \
-           hipGetErrorString(localError), \
-            localError, #error, __FUNCTION__, __LINE__);\
-    exit(0);\
-  }\
-}
+#include <iostream>
+#define HIP_CHECK(error)                                                                           \
+  {                                                                                                \
+    hipError_t localError = error;                                                                 \
+    if ((localError != hipSuccess) && (localError != hipErrorPeerAccessAlreadyEnabled)) {          \
+      printf("error: '%s'(%d) from %s at %s:%d\n", hipGetErrorString(localError), localError,      \
+             #error, __FUNCTION__, __LINE__);                                                      \
+      exit(0);                                                                                     \
+    }                                                                                              \
+  }
 constexpr auto CODEOBJ_FILE = "kernel_composite_test.code";
 
-bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer,
-                                 char* globTestID) {
+bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTestID) {
   constexpr auto CODEOBJ_GLOB_KERNEL1 = "testWeightedCopy";
-  size_t N = 16*16;
+  size_t N = 16 * 16;
   size_t Nbytes = N * sizeof(int);
   int *A_d, *B_d;
   int *A_h, *B_h;
@@ -47,8 +44,8 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer,
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   HIP_CHECK(hipMalloc(&B_d, Nbytes));
 
-  A_h = reinterpret_cast<int *>(malloc(Nbytes));
-  B_h = reinterpret_cast<int *>(malloc(Nbytes));
+  A_h = reinterpret_cast<int*>(malloc(Nbytes));
+  B_h = reinterpret_cast<int*>(malloc(Nbytes));
   // set host buffers
   for (size_t idx = 0; idx < N; idx++) {
     A_h[idx] = deviceid;
@@ -58,56 +55,37 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer,
   hipModule_t Module;
   hipFunction_t Function;
   int check = atoi(globTestID);
-/**
- * Validates hipModuleLoadUnload if globTestID = 1
- * Validates hipModuleLoadDataUnload if globTestID = 2
- * Validates hipModuleLoadDataExUnload if globTestID = 3
-*/
+  /**
+   * Validates hipModuleLoadUnload if globTestID = 1
+   * Validates hipModuleLoadDataUnload if globTestID = 2
+   * Validates hipModuleLoadDataExUnload if globTestID = 3
+   */
   switch (check) {
     case 1:
       HIP_CHECK(hipModuleLoad(&Module, CODEOBJ_FILE));
     case 2:
       HIP_CHECK(hipModuleLoadData(&Module, &buffer[0]));
     case 3:
-      HIP_CHECK(hipModuleLoadDataEx(&Module,
-            &buffer[0], 0, nullptr, nullptr));
+      HIP_CHECK(hipModuleLoadDataEx(&Module, &buffer[0], 0, nullptr, nullptr));
   }
-  HIP_CHECK(hipModuleGetFunction(&Function, Module,
-                               CODEOBJ_GLOB_KERNEL1));
+  HIP_CHECK(hipModuleGetFunction(&Function, Module, CODEOBJ_GLOB_KERNEL1));
   float deviceGlobalFloatH = 3.14;
-  int   deviceGlobalInt1H = 100*deviceid;
-  int   deviceGlobalInt2H = 50*deviceid;
-  uint32_t deviceGlobalShortH = 25*deviceid;
-  char  deviceGlobalCharH = 13*deviceid;
+  int deviceGlobalInt1H = 100 * deviceid;
+  int deviceGlobalInt2H = 50 * deviceid;
+  uint32_t deviceGlobalShortH = 25 * deviceid;
+  char deviceGlobalCharH = 13 * deviceid;
   hipDeviceptr_t deviceGlobal;
   size_t deviceGlobalSize;
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal,
-           &deviceGlobalSize,
-           Module, "deviceGlobalFloat"));
-  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal),
-           &deviceGlobalFloatH,
-           deviceGlobalSize));
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal,
-           &deviceGlobalSize,
-           Module, "deviceGlobalInt1"));
-  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal),
-           &deviceGlobalInt1H,
-           deviceGlobalSize));
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal,
-           &deviceGlobalSize,
-           Module,
-           "deviceGlobalInt2"));
-  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal),
-           &deviceGlobalInt2H, deviceGlobalSize));
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal,
-           &deviceGlobalSize,
-           Module, "deviceGlobalShort"));
-  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal),
-           &deviceGlobalShortH, deviceGlobalSize));
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal,
-           &deviceGlobalSize, Module, "deviceGlobalChar"));
-  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal),
-           &deviceGlobalCharH, deviceGlobalSize));
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalFloat"));
+  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalFloatH, deviceGlobalSize));
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalInt1"));
+  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalInt1H, deviceGlobalSize));
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalInt2"));
+  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalInt2H, deviceGlobalSize));
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalShort"));
+  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalShortH, deviceGlobalSize));
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalChar"));
+  HIP_CHECK(hipMemcpyHtoD(hipDeviceptr_t(deviceGlobal), &deviceGlobalCharH, deviceGlobalSize));
   // Launch Function kernel function
 
   hipStream_t stream;
@@ -121,12 +99,10 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer,
   args._Bd = reinterpret_cast<void*>(B_d);
   size_t size = sizeof(args);
 
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1,
-            N, 1, 1, 0, stream, NULL,
-            reinterpret_cast<void**>(&config)));
+  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, N, 1, 1, 0, stream, NULL,
+                                  reinterpret_cast<void**>(&config)));
   // Copy buffer from decice to host
   HIP_CHECK(hipMemcpyAsync(B_h, B_d, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipDeviceSynchronize());
@@ -134,13 +110,11 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer,
 
   // Check the results
   for (size_t idx = 0; idx < N; idx++) {
-    if (B_h[idx] != (deviceGlobalInt1H*A_h[idx]
-            + deviceGlobalInt2H
-            + static_cast<int>(deviceGlobalShortH) +
-            + static_cast<int>(deviceGlobalCharH)
-            + static_cast<int>(deviceGlobalFloatH*deviceGlobalFloatH))) {
-        // exit the current process with failure
-        return false;
+    if (B_h[idx] != (deviceGlobalInt1H * A_h[idx] + deviceGlobalInt2H +
+                     static_cast<int>(deviceGlobalShortH) + +static_cast<int>(deviceGlobalCharH) +
+                     static_cast<int>(deviceGlobalFloatH * deviceGlobalFloatH))) {
+      // exit the current process with failure
+      return false;
     }
   }
   HIP_CHECK(hipModuleUnload(Module));
@@ -153,10 +127,9 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer,
   return true;
 }
 int main(int argc, char* argv[]) {
-  if(argc > 0) {
+  if (argc > 0) {
     bool value = false;
-    std::ifstream file(CODEOBJ_FILE,
-                    std::ios::binary | std::ios::ate);
+    std::ifstream file(CODEOBJ_FILE, std::ios::binary | std::ios::ate);
     std::streamsize fsize = file.tellg();
     file.seekg(0, std::ios::beg);
     std::vector<char> buffer(fsize);

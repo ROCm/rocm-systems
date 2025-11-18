@@ -43,8 +43,9 @@ ROCprofiler-SDK is AMD’s new and improved tooling infrastructure, providing a 
 
 ## Tool Support
 
-rocprofv3 is the command line tool built using the rocprofiler-sdk library and shipped with the ROCm stack. To see details on
-the command line options of rocprofv3, please see rocprofv3 user guide
+rocprofv3 is the command line tool built using the rocprofiler-sdk library and shipped with the ROCm stack. It supports both launching applications with profiling enabled and attaching to already running processes for dynamic profiling using `--attach`/`--pid`/`-p` options.
+
+To see details on the command line options of rocprofv3, please see rocprofv3 user guide
 [Click Here](source/docs/how-to/using-rocprofv3.rst)
 
 ## Documentation
@@ -61,12 +62,16 @@ It can be set by the user in different locations if needed.
 ## Build and Installation
 
 ```bash
-git clone https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
+git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+cd rocm-systems
+git sparse-checkout init --cone
+git sparse-checkout set projects/rocprofiler-sdk
+git checkout develop
 cmake                                         \
       -B rocprofiler-sdk-build                \
       -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
       -DCMAKE_PREFIX_PATH=/opt/rocm           \
-       rocprofiler-sdk-source
+      projects/rocprofiler-sdk
 
 cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
 ```
@@ -125,9 +130,8 @@ Please report issues on GitHub OR send an email to <dl.ROCm-Profiler.support@amd
           NUM_COMPUTE_UNITS: 28
           TARGET_GRAPHICS_VERSION: gfx1102
   ```
-
-
-
-
-> [!WARNING]
-> To use ROCprofiler-SDK, obtain the latest mainline version of AQLprofile from [here](https://github.com/ROCm/aqlprofile).
+- On `RHEL8.X` or similar distributions, there could be a missing dependency for `libsqlite3x-devel`. To workaround this for now, user can:
+  ```bash
+    sudo dnf install libsqlite3x-devel
+    sudo ln -s /lib64/libsqlite3.so /usr/local/lib/libsqlite3.so
+  ```

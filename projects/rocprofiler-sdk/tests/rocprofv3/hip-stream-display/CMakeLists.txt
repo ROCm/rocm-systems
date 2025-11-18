@@ -41,7 +41,7 @@ add_test(
     NAME rocprofv3-test-hip-stream-display-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-rename -s -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json pftrace
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json pftrace csv
         --log-level env -- $<TARGET_FILE:hip-streams>)
 
 set_tests_properties(
@@ -62,7 +62,11 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.json --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.pftrace)
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.pftrace
+        --kernel-csv-input
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_kernel_trace.csv
+        --memory-copy-csv-input
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_memory_copy_trace.csv)
 
 set_tests_properties(
     rocprofv3-test-hip-stream-display-validate

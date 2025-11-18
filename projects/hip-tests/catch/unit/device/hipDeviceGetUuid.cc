@@ -31,7 +31,7 @@ THE SOFTWARE.
 #include <sstream>
 #include <vector>
 #include <thread>  // NOLINT
-#include <mutex>  //NOLINT
+#include <mutex>   //NOLINT
 
 #ifdef _WIN64
 #define setenv(x, y, z) _putenv_s(x, y)
@@ -40,7 +40,7 @@ THE SOFTWARE.
 #define COMMAND_LEN 256
 #define BUFFER_LEN 512
 
-std::atomic<int> tState { 1 }; // 0:fail, 1:pass, 2:skip
+std::atomic<int> tState{1};  // 0:fail, 1:pass, 2:skip
 
 /**
  * @addtogroup hipDeviceGetUuid hipDeviceGetUuid
@@ -114,6 +114,26 @@ TEST_CASE("Unit_hipDeviceGetUuid_Negative") {
 }
 #ifdef __linux__
 #if HT_AMD
+
+static inline std::vector<int> parseVisibleDevices() {
+  std::vector<int> res;
+  auto env_res = std::getenv("HIP_VISIBLE_DEVICES");
+  if (env_res == nullptr) {
+    env_res = std::getenv("ROCR_VISIBLE_DEVICES");
+    if (env_res == nullptr) {
+      return res;
+    }
+  }
+
+  std::stringstream ss(std::string{env_res});
+  std::string item;
+  while (std::getline(ss, item, ',')) {
+    res.push_back(std::stoi(item));
+  }
+
+  return res;
+}
+
 /**
  * Test Description
  * ------------------------
@@ -125,7 +145,7 @@ TEST_CASE("Unit_hipDeviceGetUuid_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo") {
+TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   assert(deviceCount > 0);
@@ -149,16 +169,27 @@ TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo") {
     std::string rocminfo_line(command_op);
     if (std::string::npos != rocminfo_line.find("CPU-")) {
       continue;
-    } else if (auto loc = rocminfo_line.find("GPU-");
-                    loc != std::string::npos) {
+    } else if (auto loc = rocminfo_line.find("GPU-"); loc != std::string::npos) {
       if (std::string::npos ==
-        rocminfo_line.find("GPU-XX")) {  // Only make an entry if the device is not an iGPU  // NOLINT
+          rocminfo_line.find(
+              "GPU-XX")) {  // Only make an entry if the device is not an iGPU  // NOLINT
         std::vector<char> t_uuid(16, 0);
         std::memcpy(t_uuid.data(), &rocminfo_line[loc + 4], 16);
         uuid_map[j] = t_uuid;
       }
     }
     j++;
+  }
+
+  auto visible_devices = parseVisibleDevices();
+  if (visible_devices.size() > 0) {
+    // We have visible devices set, basically parse the visible devices and remove the entries
+    size_t start = 0;  // The devices will be reported from 0..
+    std::map<int, std::vector<char>> uuid_map_copy;
+    for (auto device : visible_devices) {
+      uuid_map_copy[start] = uuid_map[device];
+    }
+    uuid_map = uuid_map_copy;
   }
 
   for (const auto& i : uuid_map) {
@@ -188,7 +219,8 @@ TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo") {
  */
 // Guarding it against NVIDIA as this test is faling on it.
 #if HT_AMD
-TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties") {
+TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties",
+          "[multigpu]") {
   int deviceCount = 0;
   hipDevice_t device;
   hipDeviceProp_t prop;
@@ -208,7 +240,7 @@ TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties") {
 
 #if HT_AMD
 #ifdef __linux__
-auto  getUUIDlistFromRocmInfo() {
+auto getUUIDlistFromRocmInfo() {
   FILE* fpipe;
   char command[COMMAND_LEN] = "";
   const char* rocmInfo = "rocminfo";
@@ -228,10 +260,8 @@ auto  getUUIDlistFromRocmInfo() {
     std::string rocminfo_line(command_op);
     if (std::string::npos != rocminfo_line.find("CPU-")) {
       continue;
-    } else if (auto loc = rocminfo_line.find("GPU-");
-                    loc != std::string::npos) {
-      if (std::string::npos ==
-          rocminfo_line.find("GPU-XX")) {
+    } else if (auto loc = rocminfo_line.find("GPU-"); loc != std::string::npos) {
+      if (std::string::npos == rocminfo_line.find("GPU-XX")) {
         std::vector<char> t_uuid(20, 0);
         std::memcpy(t_uuid.data(), &rocminfo_line[loc], 20);
         uuid_map[j] = t_uuid;
@@ -269,7 +299,7 @@ auto getUUIDlistWithoutRocmInfo() {
  * ------------------------
  *  - All the tests contains the various cases of setting the Env
  *  - var HIP_VISIBLE_DEVICES in different process (parent/child)
- *  - and verifies the Env functionality by checking UUID'S in 
+ *  - and verifies the Env functionality by checking UUID'S in
  *  - different process.
  * Test source
  * ------------------------
@@ -280,11 +310,11 @@ auto getUUIDlistWithoutRocmInfo() {
  */
 TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
   std::map<int, std::vector<char>> uuid_map;
-  #ifdef __linux__
-    uuid_map = getUUIDlistFromRocmInfo();
-  #else
-    uuid_map = getUUIDlistWithoutRocmInfo();
-  #endif
+#ifdef __linux__
+  uuid_map = getUUIDlistFromRocmInfo();
+#else
+  uuid_map = getUUIDlistWithoutRocmInfo();
+#endif
   if (uuid_map.size() > 0) {
     SECTION("Set Env in parent and verify UUID in child ") {
       // Set Env Var with first GPU
@@ -297,7 +327,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
       REQUIRE(proc.run(t_uuid) == 1);
       unsetenv("HIP_VISIBLE_DEVICES");
     }
-    #if 0  // Disabling below 2 tests due to the defect SWDEV-467665
+#if 0  // Disabling below 2 tests due to the defect SWDEV-467665
     SECTION("Set Env in parent and verify UUID in Grand child") {
       std::string uuid = uuid_map[0].data();
       std::string uuidEnv = uuid.substr(0, 20);
@@ -321,7 +351,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
         HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
       }
     }
-    #endif
+#endif
     SECTION("Get Dev Count from Child") {
       if (uuid_map.size() >= 2) {
         std::string uuid = uuid_map[0].data();
@@ -338,7 +368,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
         HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
       }
     }
-  #ifdef __linux__
+#ifdef __linux__
     SECTION("Get UUID from Child proc rocminfo") {
       std::string setUuid = uuid_map[0].data();
       std::string uuidEnv = setUuid.substr(0, 20);
@@ -364,7 +394,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
       REQUIRE(proc.run(finalUuid) == 1);
       unsetenv("HIP_VISIBLE_DEVICES");
     }
-  #endif
+#endif
     SECTION("Set multiple uuid") {
       std::string wholeString;
       std::string uuid;
@@ -410,8 +440,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
         std::string uuidEnv1 = uuid1.substr(0, 20);
         std::string uuid2 = uuid_map[1].data();
         std::string uuidEnv2 = uuid2.substr(0, 20);
-        std::string totalString = uuid + "," + uuidEnv2 + ","
-                                  + uuidEnv1 + "," + uuid;
+        std::string totalString = uuid + "," + uuidEnv2 + "," + uuidEnv1 + "," + uuid;
         unsetenv("HIP_VISIBLE_DEVICES");
         setenv("HIP_VISIBLE_DEVICES", totalString.c_str(), 1);
         hip::SpawnProc proc("setuuidGetDevCount", true);
@@ -430,7 +459,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
       HIP_CHECK(hipGetDeviceCount(&devCount));
       REQUIRE(devCount == uuid_map.size());
     }
-  #ifdef __linux__
+#ifdef __linux__
     SECTION("Chk RocmInfo Uuid list before and after set Env") {
       std::map<int, std::vector<char>> uuid_map;
       uuid_map = getUUIDlistFromRocmInfo();
@@ -441,9 +470,9 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
       uuid_map1 = getUUIDlistFromRocmInfo();
       REQUIRE(uuid_map.size() == uuid_map1.size());
     }
-  #endif
+#endif
   } else {
-      HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 1");  // NOLINT
+    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 1");  // NOLINT
   }
 }
 
@@ -463,11 +492,11 @@ void ChkUUID() {
   hipUUID d_uuid{0};
   HIP_CHECK(hipDeviceGetUuid(&d_uuid, device));
   std::map<int, std::vector<char>> uuid_map;
-  #ifdef __linux__
-    uuid_map = getUUIDlistFromRocmInfo();
-  #else
-    uuid_map = getUUIDlistWithoutRocmInfo();
-  #endif
+#ifdef __linux__
+  uuid_map = getUUIDlistFromRocmInfo();
+#else
+  uuid_map = getUUIDlistWithoutRocmInfo();
+#endif
   if (!uuid_map.empty()) {
     std::string uuid = uuid_map[0].data();
     std::string t_uuid = uuid.substr(4, 19);
@@ -479,11 +508,11 @@ void ChkUUID() {
 
 void setEnv() {
   std::map<int, std::vector<char>> uuid_map;
-  #ifdef __linux__
-    uuid_map = getUUIDlistFromRocmInfo();
-  #else
-    uuid_map = getUUIDlistWithoutRocmInfo();
-  #endif
+#ifdef __linux__
+  uuid_map = getUUIDlistFromRocmInfo();
+#else
+  uuid_map = getUUIDlistWithoutRocmInfo();
+#endif
   if (uuid_map.size() >= 2) {
     std::string uuid = uuid_map[1].data();
     std::string uuidEnv = uuid.substr(0, 20);
@@ -519,6 +548,6 @@ TEST_CASE("Unit_UUID_setEnv_Thread") {
 }
 #endif
 /**
-* End doxygen group DriverTest.
-* @}
-*/
+ * End doxygen group DriverTest.
+ * @}
+ */

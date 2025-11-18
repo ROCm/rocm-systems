@@ -27,7 +27,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpyParam2D_Positive_Basic") {
+TEST_CASE("Unit_hipMemcpyParam2D_Positive_Basic", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   constexpr bool async = false;
 
@@ -57,19 +57,13 @@ TEST_CASE("Unit_hipMemcpyParam2D_Positive_Synchronization_Behavior") {
     Memcpy2DDtoHPageableSyncBehavior(MemcpyParam2DAdapter<>(), true);
   }
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Device to Pinned Host") {
     Memcpy2DDtoHPinnedSyncBehavior(MemcpyParam2DAdapter<>(), true);
   }
-#endif
 
-  SECTION("Device to Device") {
-    Memcpy2DDtoDSyncBehavior(MemcpyParam2DAdapter<>(), false);
-  }
+  SECTION("Device to Device") { Memcpy2DDtoDSyncBehavior(MemcpyParam2DAdapter<>(), false); }
 
-#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-232
   SECTION("Host to Host") { Memcpy2DHtoHSyncBehavior(MemcpyParam2DAdapter<>(), true); }
-#endif
 }
 
 TEST_CASE("Unit_hipMemcpyParam2D_Positive_Parameters") {
@@ -191,7 +185,7 @@ TEST_CASE("Unit_hipMemcpyParam2D_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpyParam2D_Capture") { 
+TEST_CASE("Unit_hipMemcpyParam2D_Capture") {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t cols = 128;

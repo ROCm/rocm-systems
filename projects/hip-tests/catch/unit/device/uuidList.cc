@@ -54,7 +54,6 @@ int main() {
       uuid = uuid + "GPU-" + d_uuid.bytes + ",";
     }
   }
-  std::cout<< uuid;
+  std::cout << uuid;
   return 0;
 }
-

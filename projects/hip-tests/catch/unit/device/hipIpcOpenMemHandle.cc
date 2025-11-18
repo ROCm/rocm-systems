@@ -33,7 +33,7 @@ THE SOFTWARE.
  * @{
  * @ingroup DeviceTest
  * `hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags)` -
- * Opens an interprocess memory handle exported from another process 
+ * Opens an interprocess memory handle exported from another process
  * and returns a device pointer usable in the local process.
  */
 
@@ -127,6 +127,6 @@ TEST_CASE("Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device") 
 }
 
 /**
-* End doxygen group DeviceTest.
-* @}
-*/
+ * End doxygen group DeviceTest.
+ * @}
+ */

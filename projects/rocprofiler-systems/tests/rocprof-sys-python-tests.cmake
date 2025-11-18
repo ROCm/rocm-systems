@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -153,7 +134,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             COMMAND ${ROCPROFSYS_CAT_COMMAND}
             PYTHON_VERSION ${_VERSION}
             FILE rocprof-sys-tests-output/python-builtin/${_VERSION}/trip_count.txt
-            PASS_REGEX "\\\[inefficient\\\]\\\[builtin.py:14\\\]"
+            PASS_REGEX "\\\[inefficient\\\]\\\[builtin.py:17\\\]"
             DEPENDS python-builtin-${_VERSION}
             ENVIRONMENT "${_python_environment}"
         )
@@ -180,7 +161,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             TEST
             ""
             "NAME;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_FILE"
-            "ARGS;PERFETTO_METRIC"
+            "ARGS;PERFETTO_METRIC;ROCPD_FILE;ROCPD_RULES"
             ${ARGN}
         )
 
@@ -210,6 +191,27 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
                 "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_PERFETTO_FILE} validated"
             ENVIRONMENT "${_python_environment}"
         )
+
+        if(
+            ${ENABLE_ROCPD_TEST}
+            AND ${_VALID_GPU}
+            AND TEST_ROCPD_FILE
+            AND TEST_ROCPD_RULES
+        )
+            rocprofiler_systems_add_python_test(
+                NAME ${TEST_NAME}-validate-rocpd
+                COMMAND
+                    ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
+                    -r ${TEST_ROCPD_RULES} -db
+                PYTHON_VERSION ${_VERSION}
+                FILE rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_ROCPD_FILE}
+                DEPENDS ${TEST_NAME}-${_VERSION}
+                PASS_REGEX
+                    "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_ROCPD_FILE} validated"
+                ENVIRONMENT "${_python_environment}"
+                LABELS "rocpd"
+            )
+        endif()
     endfunction()
 
     set(python_source_labels
@@ -256,21 +258,24 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PERFETTO_METRIC ${python_source_categories}
         ARGS -l ${python_source_labels} -c ${python_source_count} -d
              ${python_source_depth}
+        ROCPD_FILE "rocpd.db"
+        ROCPD_RULES
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-source-rules.json"
     )
 
     set(python_builtin_labels
-        [run][builtin.py:28]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [fib][builtin.py:10]
-        [inefficient][builtin.py:14]
+        [run][builtin.py:31]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [fib][builtin.py:13]
+        [inefficient][builtin.py:17]
     )
     set(python_builtin_count
         5
@@ -309,6 +314,17 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PERFETTO_FILE "perfetto-trace.proto"
         ARGS -l ${python_builtin_labels} -c ${python_builtin_count} -d
              ${python_builtin_depth}
+        ROCPD_FILE "rocpd.db"
+        ROCPD_RULES
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-builtin-rules.json"
     )
+
+    list(GET ROCPROFSYS_PYTHON_ROOT_DIRS ${_INDEX} Python3_ROOT_DIR)
+    rocprofiler_systems_python_console_script(
+        "${BINARY_NAME_PREFIX}-python" "rocprofsys"
+        VERSION ${_VERSION}
+        ROOT_DIR "${Python3_ROOT_DIR}"
+    )
+
     math(EXPR _INDEX "${_INDEX} + 1")
 endforeach()

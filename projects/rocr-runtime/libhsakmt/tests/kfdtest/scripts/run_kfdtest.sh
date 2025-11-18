@@ -78,6 +78,8 @@ fi
 PLATFORM=""
 GDB=""
 NODE=""
+CONCURRENTNODES=""
+TESTNODENUM=""
 FORCE_HIGH=""
 RUN_IN_DOCKER=""
 ADDITIONAL_EXCLUDE=""
@@ -95,6 +97,14 @@ printUsage() {
                                "quoted, space-separated string as an argument"\
                                "(e.g. -n 1 OR -n \"1 2 3\")"\
                                "NOTE: Node numbers come from /sys/class/kfd/kfd/topology/nodes/#"
+    echo "  -c            , --concurrentnodes        Concurrent nodes string for multi-gpu testing."\
+                               "Takes a string comma-separated as an argument"\
+                               "(e.g. -c \"1,2,3\" or --concurrentnodes \"1,2,3\")"\
+                               "use -c \"all\" or --concurrentnodes \"all\" to test on all available nodes"\
+                               "NOTE: Node numbers come from /sys/class/kfd/kfd/topology/nodes/#"
+    echo "  -t            , --testnodenum            Number of concurrent nodes for multi-gpu testing."\
+                               "Takes an integer as argument"\
+                               "(e.g. -t 2 or --testnodenum 2)"
     echo "  -l            , --list                   List available nodes"
     echo "  --high                                   Force clocks to high for test execution"
     echo "  -d            , --docker                 Run in docker container"
@@ -241,10 +251,15 @@ runKfdTest() {
             fi
             sudo docker rm kfdtest_docker
         else
-            if [ "$HSA_TEST_GPUS_NUM" != "" ]; then
-                echo "++++ Starting parallel testing on $HSA_TEST_GPUS_NUM gpu(s) ++++"
-                $GDB $KFDTEST $gtestFilter $GTEST_ARGS
-                echo "++++ Finished parallel testing on $HSA_TEST_GPUS_NUM gpu(s) ++++"
+            if [ -n "$CONCURRENTNODES" ]; then
+                echo "++++ Starting parallel testing on node(s) $CONCURRENTNODES  ++++"
+                $GDB $KFDTEST "--concurrentnodes=$CONCURRENTNODES" $gtestFilter $GTEST_ARGS
+                echo "++++ Finished parallel testing on node(s) $CONCURRENTNODES  ++++"
+                exit 0;
+            elif [ -n "$TESTNODENUM" ]; then
+                echo "++++ Starting parallel testing on $TESTNODENUM node(s) ++++"
+                $GDB $KFDTEST "--testnodenum=$TESTNODENUM" $gtestFilter $GTEST_ARGS
+                echo "++++ Finished parallel testing on $TESTNODENUM node(s) ++++"
                 exit 0;
             else
                 echo ""
@@ -278,6 +293,10 @@ while [ "$1" != "" ]; do
             printGpuNodelist; exit 0 ;;
         -n  | --node )
             shift 1; NODE=$1 ;;
+        -c  | --concurrentnodes )
+            shift 1; CONCURRENTNODES="$1" ;;
+        -t  | --testnodenum )
+            shift 1; TESTNODENUM="$1" ;;
         --high)
             FORCE_HIGH="true" ;;
         -d  | --docker )
@@ -291,6 +310,23 @@ while [ "$1" != "" ]; do
     esac
     shift 1
 done
+
+if [ "$CONCURRENTNODES" == "all" ]; then
+    validNodes=$(getHsaNodes)
+    CONCURRENTNODES=$(echo $validNodes | tr ' ' ',') 
+else
+    validNodes=$(getHsaNodes)
+    validNodesArray=($validNodes)
+    IFS=',' read -ra concurrentNodesArray <<< "$CONCURRENTNODES"
+
+    for concurrentNode in "${concurrentNodesArray[@]}"; do
+        if [[ ! " ${validNodesArray[@]} " =~ " $concurrentNode " ]]; then
+            echo "Error: Invalid node $concurrentNode specified in --concurrentnodes."
+            echo "Valid nodes are: $validNodes"
+            exit 1
+        fi
+    done
+fi
 
 # If the SMI is missing, try to find it
 SMI="$(find /opt/rocm* -type l -name rocm-smi 2>/dev/null | tail -1)"

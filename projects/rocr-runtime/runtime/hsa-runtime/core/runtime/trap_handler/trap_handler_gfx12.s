@@ -231,7 +231,7 @@
   s_getreg_b32      ttmp2, hwreg(HW_REG_EXCP_FLAG_PRIV)     // EXCP_FLAG_PRIV.b10=stochastic_sample_trap
   s_bitcmp1_b32     ttmp2, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT // Test Performance Snapshot bit.
 
-  s_cbranch_scc0    .check_exceptions                       // If not Stochastic, check for other exceptions.
+  s_cbranch_scc0    .handle_sw_trap                       // If not Stochastic, continue to check trap ID
 
   s_load_b64           ttmp[14:15], ttmp[14:15], 0x8, scope:SCOPE_CU         // ttmp[14:15]=*stoch_trap_buf
   s_wait_kmcnt      0
@@ -241,6 +241,7 @@
   s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT,1), 0 // Clear the perf_snapshot flag
   s_branch          .profile_trap_handlers
 
+.handle_sw_trap:
   // Check if this is a trap (s_trap instruction) or a hardware exception.
   // Extract TrapID from ttmp1 (which contains PC_HI).
   // Branch if not a trap (an exception instead).

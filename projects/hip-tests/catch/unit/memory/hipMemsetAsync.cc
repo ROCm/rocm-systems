@@ -34,9 +34,8 @@ constexpr int testValue2 = 98;
 using namespace mem_utils;
 
 // Helper function to run tests for hipMemset allocation types
-template <typename T>
-void runAsyncTests(hipStream_t stream, allocType type, memType memType, MultiDData data1,
-                   MultiDData data2) {
+template <typename T> void runAsyncTests(hipStream_t stream, allocType type, memType memType,
+                                         MultiDData data1, MultiDData data2) {
   std::pair<T*, T*> aPtr{};
   MultiDData totalRange;
   totalRange.width = data1.width + data2.width;
@@ -61,9 +60,8 @@ void runAsyncTests(hipStream_t stream, allocType type, memType memType, MultiDDa
   }
 }
 
-template <typename T>
-static void doMemsetTest(allocType mallocType, memType memset_type, MultiDData data1,
-                         MultiDData data2) {
+template <typename T> static void doMemsetTest(allocType mallocType, memType memset_type,
+                                               MultiDData data1, MultiDData data2) {
   enum StreamType { NULLSTR, CREATEDSTR };
   auto streamType = GENERATE(NULLSTR, CREATEDSTR);
   hipStream_t stream{nullptr};
@@ -80,7 +78,6 @@ static void doMemsetTest(allocType mallocType, memType memset_type, MultiDData d
  */
 
 TEST_CASE("Unit_hipMemsetASyncMulti") {
-
   allocType mallocType = GENERATE(allocType::hostMalloc, allocType::deviceMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memType mem_type = memType::hipMemsetD8;

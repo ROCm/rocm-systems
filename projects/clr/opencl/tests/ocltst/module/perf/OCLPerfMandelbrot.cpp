@@ -48,7 +48,7 @@ coordRec coords[] = {
 
 static unsigned int numCoords = sizeof(coords) / sizeof(coordRec);
 
-static const char *float_mandel =
+static const char* float_mandel =
     "__kernel void mandelbrot(__global uint *out, uint width, float xPos, "
     "float yPos, float xStep, float yStep, uint maxIter)\n"
     "{\n"
@@ -72,7 +72,7 @@ static const char *float_mandel =
     "    out[tid] = iter;\n"
     "}\n";
 
-static const char *float_mandel_vec =
+static const char* float_mandel_vec =
     "__kernel void mandelbrot(__global uint *out, uint width, float xPos, "
     "float yPos, float xStep, float yStep, uint maxIter)\n"
     "{\n"
@@ -197,7 +197,7 @@ static const char *float_mandel_vec =
     "    vecOut[tid] = convert_uint4(ccount);\n"
     "}\n";
 
-static const char *float_mandel_unroll =
+static const char* float_mandel_unroll =
     "__kernel void mandelbrot(__global uint *out, uint width, float xPos, "
     "float yPos, float xStep, float yStep, uint maxIter)\n"
     "{\n"
@@ -305,7 +305,7 @@ static const char *float_mandel_unroll =
     "    out[tid] = (uint)ccount;\n"
     "}\n";
 
-static const char *double_mandel =
+static const char* double_mandel =
     "#ifdef USE_CL_AMD_FP64\n"
     "#pragma OPENCL EXTENSION cl_amd_fp64 : enable\n"
     "#endif\n"
@@ -335,7 +335,7 @@ static const char *double_mandel =
     "    out[tid] = iter;\n"
     "}\n";
 
-static const char *double_mandel_unroll =
+static const char* double_mandel_unroll =
     "#ifdef USE_CL_AMD_FP64\n"
     "#pragma OPENCL EXTENSION cl_amd_fp64 : enable\n"
     "#endif\n"
@@ -453,65 +453,56 @@ static const unsigned int FMA_EXPECTEDVALUES_INDEX = 15;
 
 // Expected results for each kernel run at each coord
 unsigned long long expectedIters[] = {
-    203277748ull,  2147483648ull, 120254651ull,  203277748ull,  2147483648ull,
-    120254651ull,  203277748ull,  2147483648ull, 120254651ull,  203315114ull,
-    2147483648ull, 120042599ull,  203315114ull,  2147483648ull, 120042599ull,
-    203280620ull,  2147483648ull, 120485704ull,  203280620ull,  2147483648ull,
-    120485704ull,  203280620ull,  2147483648ull, 120485704ull,  203315114ull,
-    2147483648ull, 120042599ull,  203315114ull,  2147483648ull, 120042599ull};
+    203277748ull, 2147483648ull, 120254651ull, 203277748ull, 2147483648ull, 120254651ull,
+    203277748ull, 2147483648ull, 120254651ull, 203315114ull, 2147483648ull, 120042599ull,
+    203315114ull, 2147483648ull, 120042599ull, 203280620ull, 2147483648ull, 120485704ull,
+    203280620ull, 2147483648ull, 120485704ull, 203280620ull, 2147483648ull, 120485704ull,
+    203315114ull, 2147483648ull, 120042599ull, 203315114ull, 2147483648ull, 120042599ull};
 
 // nvidia supports CL_KHR_FP64, so they get better results for doubles.  Not
 // sure why we differ in floats though
 unsigned long long expectedItersNV[] = {
-    203277748ull,  2147483648ull, 120254651ull,  203277748ull,
-    2147483648ull, 120254651ull,  203277748ull,  2147483648ull,
-    120254651ull,  203315226ull,  2147483648ull, 120091921ull,
-    203315226ull,  2147483648ull, 120091921ull,  // end of mad
-    203280620ull,  2147483648ull, 120485704ull,  203280620ull,
-    2147483648ull, 120485704ull,  203280620ull,  2147483648ull,
-    120485704ull,  203315114ull,  2147483648ull, 120042599ull,
-    203315114ull,  2147483648ull, 120042599ull};
+    203277748ull,  2147483648ull, 120254651ull,  203277748ull,  2147483648ull,
+    120254651ull,  203277748ull,  2147483648ull, 120254651ull,  203315226ull,
+    2147483648ull, 120091921ull,  203315226ull,  2147483648ull, 120091921ull,  // end of mad
+    203280620ull,  2147483648ull, 120485704ull,  203280620ull,  2147483648ull,
+    120485704ull,  203280620ull,  2147483648ull, 120485704ull,  203315114ull,
+    2147483648ull, 120042599ull,  203315114ull,  2147483648ull, 120042599ull};
 
-const char *shaderStr[] = {"        float_mad", " float_vector_mad",
-                           " float_unroll_mad", "       double_mad",
-                           "double_unroll_mad", "        float_fma",
-                           " float_vector_fma", " float_unroll_fma",
-                           "       double_fma", "double_unroll_fma"};
+const char* shaderStr[] = {"        float_mad", " float_vector_mad", " float_unroll_mad",
+                           "       double_mad", "double_unroll_mad", "        float_fma",
+                           " float_vector_fma", " float_unroll_fma", "       double_fma",
+                           "double_unroll_fma"};
 
 OCLPerfMandelbrot::OCLPerfMandelbrot() { _numSubTests = 10 * numCoords; }
 
 OCLPerfMandelbrot::~OCLPerfMandelbrot() {}
 
 void OCLPerfMandelbrot::setData(cl_mem buffer, unsigned int val) {
-  unsigned int *data = (unsigned int *)_wrapper->clEnqueueMapBuffer(
-      cmd_queue_, buffer, true, CL_MAP_WRITE, 0, bufSize_, 0, NULL, NULL,
-      &error_);
+  unsigned int* data = (unsigned int*)_wrapper->clEnqueueMapBuffer(
+      cmd_queue_, buffer, true, CL_MAP_WRITE, 0, bufSize_, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < width_ * width_; i++) data[i] = val;
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL,
-                                             NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL, NULL);
 }
 
 void OCLPerfMandelbrot::checkData(cl_mem buffer) {
-  unsigned int *data = (unsigned int *)_wrapper->clEnqueueMapBuffer(
-      cmd_queue_, buffer, true, CL_MAP_READ, 0, bufSize_, 0, NULL, NULL,
-      &error_);
+  unsigned int* data = (unsigned int*)_wrapper->clEnqueueMapBuffer(
+      cmd_queue_, buffer, true, CL_MAP_READ, 0, bufSize_, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < width_ * width_; i++) {
     totalIters += data[i];
   }
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL,
-                                             NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL, NULL);
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfMandelbrot::open(unsigned int test, char *units, double &conversion,
+void OCLPerfMandelbrot::open(unsigned int test, char* units, double& conversion,
                              unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   device = NULL;
   _crcword = 0;
   conversion = 1.0f;
@@ -544,7 +535,7 @@ void OCLPerfMandelbrot::open(unsigned int test, char *units, double &conversion,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
     // Get last for default
@@ -553,9 +544,8 @@ void OCLPerfMandelbrot::open(unsigned int test, char *units, double &conversion,
         for (unsigned i = 0; i < numPlatforms; ++i) {
 #endif
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
 #if 0
             if (!strcmp(pbuf, "Advanced Micro Devices, Inc.")) {
                 platform = platforms[i];
@@ -564,8 +554,7 @@ void OCLPerfMandelbrot::open(unsigned int test, char *units, double &conversion,
 #endif
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     // Runtime returns an error when no GPU devices are present instead of just
     // returning 0 devices
     // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -585,34 +574,30 @@ void OCLPerfMandelbrot::open(unsigned int test, char *units, double &conversion,
    * If we could find our platform, use it. If not, die as we need the AMD
    * platform for these extensions.
    */
-  CHECK_RESULT(platform == 0,
-               "Couldn't find platform with GPU devices, cannot proceed");
+  CHECK_RESULT(platform == 0, "Couldn't find platform with GPU devices, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
   device = devices[_deviceId];
 
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   char charbuf[1024];
   size_t retsize;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024,
-                                     charbuf, &retsize);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024, charbuf, &retsize);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
   doubleSupport = false;
 
-  char *p = strstr(charbuf, "cl_amd_fp64");
-  char *p2 = strstr(charbuf, "cl_khr_fp64");
+  char* p = strstr(charbuf, "cl_amd_fp64");
+  char* p2 = strstr(charbuf, "cl_khr_fp64");
 
   if (p || p2)
     doubleSupport = true;
@@ -625,10 +610,10 @@ void OCLPerfMandelbrot::open(unsigned int test, char *units, double &conversion,
   outBuffer_ = _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
   CHECK_RESULT(outBuffer_ == 0, "clCreateBuffer(outBuffer) failed");
 
-  const char *tmp;
+  const char* tmp;
   shaderIdx = _openTest / numCoords;
-  if ((doubleSupport != true) && ((shaderIdx == 3) || (shaderIdx == 4) ||
-                                  (shaderIdx == 8) || (shaderIdx == 9))) {
+  if ((doubleSupport != true) &&
+      ((shaderIdx == 3) || (shaderIdx == 4) || (shaderIdx == 8) || (shaderIdx == 9))) {
     // We don't support doubles, so skip those tests
     skip = true;
     _perfInfo = 0.0f;
@@ -663,11 +648,10 @@ void OCLPerfMandelbrot::open(unsigned int test, char *units, double &conversion,
 
   tmp = curr.c_str();
 
-  program_ = _wrapper->clCreateProgramWithSource(
-      context_, 1, (const char **)&tmp, NULL, &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&tmp, NULL, &error_);
   CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
 
-  const char *buildOps = NULL;
+  const char* buildOps = NULL;
   if (p)
     buildOps = "-DUSE_CL_AMD_FP64";
   else if (p2)
@@ -677,9 +661,8 @@ void OCLPerfMandelbrot::open(unsigned int test, char *units, double &conversion,
   if (error_ != CL_SUCCESS) {
     cl_int intError;
     char log[16384];
-    intError =
-        _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
-                                        16384 * sizeof(char), log, NULL);
+    intError = _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
+                                               16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
 
     CHECK_RESULT(0, "clBuildProgram failed");
@@ -688,45 +671,31 @@ void OCLPerfMandelbrot::open(unsigned int test, char *units, double &conversion,
   CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
 
   coordIdx = _openTest % numCoords;
-  if ((shaderIdx == 0) || (shaderIdx == 1) || (shaderIdx == 2) ||
-      (shaderIdx == 5) || (shaderIdx == 6) || (shaderIdx == 7)) {
+  if ((shaderIdx == 0) || (shaderIdx == 1) || (shaderIdx == 2) || (shaderIdx == 5) ||
+      (shaderIdx == 6) || (shaderIdx == 7)) {
     float xStep = (float)(coords[coordIdx].width / (double)width_);
     float yStep = (float)(-coords[coordIdx].width / (double)width_);
     float xPos = (float)(coords[coordIdx].x - 0.5 * coords[coordIdx].width);
     float yPos = (float)(coords[coordIdx].y + 0.5 * coords[coordIdx].width);
-    error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                      (void *)&outBuffer_);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_uint), (void *)&width_);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_float), (void *)&xPos);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_float), (void *)&yPos);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_float), (void *)&xStep);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 5, sizeof(cl_float), (void *)&yStep);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 6, sizeof(cl_uint), (void *)&maxIter);
+    error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&outBuffer_);
+    error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_uint), (void*)&width_);
+    error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_float), (void*)&xPos);
+    error_ = _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_float), (void*)&yPos);
+    error_ = _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_float), (void*)&xStep);
+    error_ = _wrapper->clSetKernelArg(kernel_, 5, sizeof(cl_float), (void*)&yStep);
+    error_ = _wrapper->clSetKernelArg(kernel_, 6, sizeof(cl_uint), (void*)&maxIter);
   } else {
     double xStep = coords[coordIdx].width / (double)width_;
     double yStep = -coords[coordIdx].width / (double)width_;
     double xPos = coords[coordIdx].x - 0.5 * coords[coordIdx].width;
     double yPos = coords[coordIdx].y + 0.5 * coords[coordIdx].width;
-    error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                      (void *)&outBuffer_);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_uint), (void *)&width_);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_double), (void *)&xPos);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_double), (void *)&yPos);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_double), (void *)&xStep);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 5, sizeof(cl_double), (void *)&yStep);
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, 6, sizeof(cl_uint), (void *)&maxIter);
+    error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&outBuffer_);
+    error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_uint), (void*)&width_);
+    error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_double), (void*)&xPos);
+    error_ = _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_double), (void*)&yPos);
+    error_ = _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_double), (void*)&xStep);
+    error_ = _wrapper->clSetKernelArg(kernel_, 5, sizeof(cl_double), (void*)&yStep);
+    error_ = _wrapper->clSetKernelArg(kernel_, 6, sizeof(cl_uint), (void*)&maxIter);
   }
   setData(outBuffer_, 0xdeadbeef);
 }
@@ -742,9 +711,9 @@ void OCLPerfMandelbrot::run(void) {
   size_t local_work_size[1] = {(size_t)local};
 
   // Warm-up
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-      (const size_t *)local_work_size, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                            (const size_t*)global_work_size,
+                                            (const size_t*)local_work_size, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
   _wrapper->clFinish(cmd_queue_);
@@ -756,9 +725,9 @@ void OCLPerfMandelbrot::run(void) {
 
     timer.Reset();
     timer.Start();
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
 
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
     _wrapper->clFinish(cmd_queue_);
@@ -770,8 +739,7 @@ void OCLPerfMandelbrot::run(void) {
 
   checkData(outBuffer_);
   // Compute GFLOPS.  There are 7 FLOPs per iteration
-  double perf = ((double)totalIters * 7 * (double)(1e-09)) /
-                (totalTime / (double)numLoops);
+  double perf = ((double)totalIters * 7 * (double)(1e-09)) / (totalTime / (double)numLoops);
 
   _perfInfo = (float)perf;
   char buf[256];
@@ -781,22 +749,19 @@ void OCLPerfMandelbrot::run(void) {
   // printf(" totalIter = %lld\n", totalIters);
   if (isAMD && (type_ == CL_DEVICE_TYPE_GPU)) {
     CHECK_RESULT((totalIters != expectedIters[_openTest]) &&
-                     (totalIters !=
-                      expectedIters[(_openTest < FMA_EXPECTEDVALUES_INDEX
-                                         ? _openTest + FMA_EXPECTEDVALUES_INDEX
-                                         : _openTest)]),
+                     (totalIters != expectedIters[(_openTest < FMA_EXPECTEDVALUES_INDEX
+                                                       ? _openTest + FMA_EXPECTEDVALUES_INDEX
+                                                       : _openTest)]),
                  "Incorrect iteration count detected!");
   } else {
-    CHECK_RESULT(totalIters != expectedItersNV[_openTest],
-                 "Incorrect iteration count detected!");
+    CHECK_RESULT(totalIters != expectedItersNV[_openTest], "Incorrect iteration count detected!");
   }
 }
 
 unsigned int OCLPerfMandelbrot::close(void) {
   if (outBuffer_) {
     error_ = _wrapper->clReleaseMemObject(outBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
   if (kernel_) {
     error_ = _wrapper->clReleaseKernel(kernel_);
@@ -808,8 +773,7 @@ unsigned int OCLPerfMandelbrot::close(void) {
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);
@@ -823,8 +787,8 @@ OCLPerfAsyncMandelbrot::OCLPerfAsyncMandelbrot() {}
 
 OCLPerfAsyncMandelbrot::~OCLPerfAsyncMandelbrot() {}
 
-void OCLPerfAsyncMandelbrot::open(unsigned int test, char *units,
-                                  double &conversion, unsigned int deviceId) {
+void OCLPerfAsyncMandelbrot::open(unsigned int test, char* units, double& conversion,
+                                  unsigned int deviceId) {
   // Create common items first
   OCLPerfMandelbrot::open(test, units, conversion, deviceId);
 
@@ -847,18 +811,17 @@ void OCLPerfAsyncMandelbrot::run(void) {
   size_t local_work_size[1] = {(size_t)local};
 
   // Warm-up
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-      (const size_t *)local_work_size, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                            (const size_t*)global_work_size,
+                                            (const size_t*)local_work_size, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
   _wrapper->clFinish(cmd_queue_);
 
-  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                    (void *)&outBuffer2_);
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue2_, kernel_, 1, NULL, (const size_t *)global_work_size,
-      (const size_t *)local_work_size, 0, NULL, NULL);
+  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&outBuffer2_);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue2_, kernel_, 1, NULL,
+                                            (const size_t*)global_work_size,
+                                            (const size_t*)local_work_size, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
   _wrapper->clFinish(cmd_queue2_);
@@ -870,18 +833,16 @@ void OCLPerfAsyncMandelbrot::run(void) {
 
     timer.Reset();
     timer.Start();
-    error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                      (void *)&outBuffer_);
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&outBuffer_);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
 
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
-    error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                      (void *)&outBuffer2_);
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue2_, kernel_, 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&outBuffer2_);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue2_, kernel_, 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
 
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
     _wrapper->clFlush(cmd_queue_);
@@ -897,8 +858,7 @@ void OCLPerfAsyncMandelbrot::run(void) {
   checkData(outBuffer_);
   checkData(outBuffer2_);
   // Compute GFLOPS.  There are 7 FLOPs per iteration
-  double perf = ((double)(totalIters * 7) * (double)(1e-09)) /
-                (totalTime / (double)numLoops);
+  double perf = ((double)(totalIters * 7) * (double)(1e-09)) / (totalTime / (double)numLoops);
 
   _perfInfo = (float)perf;
   char buf[256];
@@ -907,13 +867,11 @@ void OCLPerfAsyncMandelbrot::run(void) {
   // Dump iteration count
   // printf(" totalIter = %lld\n", totalIters);
   if (isAMD && (type_ == CL_DEVICE_TYPE_GPU)) {
-    CHECK_RESULT(
-        (totalIters != 2 * expectedIters[_openTest]) &&
-            (totalIters !=
-             2 * expectedIters[(_openTest < FMA_EXPECTEDVALUES_INDEX
-                                    ? _openTest + FMA_EXPECTEDVALUES_INDEX
-                                    : _openTest)]),
-        "Incorrect iteration count detected!");
+    CHECK_RESULT((totalIters != 2 * expectedIters[_openTest]) &&
+                     (totalIters != 2 * expectedIters[(_openTest < FMA_EXPECTEDVALUES_INDEX
+                                                           ? _openTest + FMA_EXPECTEDVALUES_INDEX
+                                                           : _openTest)]),
+                 "Incorrect iteration count detected!");
   } else {
     CHECK_RESULT(totalIters != 2 * expectedItersNV[_openTest],
                  "Incorrect iteration count detected!");
@@ -927,13 +885,11 @@ unsigned int OCLPerfAsyncMandelbrot::close(void) {
   // Clean up async test items
   if (outBuffer2_) {
     error_ = _wrapper->clReleaseMemObject(outBuffer2_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer2_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer2_) failed");
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue2_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   // Clean up the rest
   return OCLPerfMandelbrot::close();

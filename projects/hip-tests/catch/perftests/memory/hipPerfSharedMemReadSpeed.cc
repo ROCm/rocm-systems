@@ -179,7 +179,7 @@ static bool hipPerfSharedMemReadSpeed_test() {
     // read speed in GB/s
     double perf = (static_cast<double>(blocks * threadsPerBlock) *
                    (numReads1 * sizeof(float) + sharedMemSizeBytes1 / 64) * nIter * (1e-09)) /
-        all_kernel_time.count();
+                  all_kernel_time.count();
 
     CONSOLE_PRINT(
         "info: read speed = %.2f GB/s for %d KB shared memory with %d threads, %d reads in "
@@ -220,7 +220,7 @@ static bool hipPerfSharedMemReadSpeed_test() {
     // read speed in GB/s
     double perf = (static_cast<double>(blocks * threadsPerBlock) *
                    (numReads2 * sizeof(float) + sharedMemSizeBytes2 / 64) * nIter * (1e-09)) /
-        all_kernel_time.count();
+                  all_kernel_time.count();
 
     CONSOLE_PRINT(
         "info: read speed = %.2f GB/s for %d KB shared memory with %d threads, %d reads in "

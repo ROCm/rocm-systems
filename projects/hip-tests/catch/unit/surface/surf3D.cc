@@ -33,9 +33,8 @@ THE SOFTWARE.
 #pragma clang diagnostic ignored "-Wunused-variable"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
-template <typename T>
-__global__ void surf3DKernelR(hipSurfaceObject_t surfaceObject, T* outputData, int width,
-                              int height, int depth) {
+template <typename T> __global__ void surf3DKernelR(hipSurfaceObject_t surfaceObject, T* outputData,
+                                                    int width, int height, int depth) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -46,9 +45,8 @@ __global__ void surf3DKernelR(hipSurfaceObject_t surfaceObject, T* outputData, i
 #endif
 }
 
-template <typename T>
-__global__ void surf3DKernelW(hipSurfaceObject_t surfaceObject, T* inputData, int width, int height,
-                              int depth) {
+template <typename T> __global__ void surf3DKernelW(hipSurfaceObject_t surfaceObject, T* inputData,
+                                                    int width, int height, int depth) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -59,9 +57,9 @@ __global__ void surf3DKernelW(hipSurfaceObject_t surfaceObject, T* inputData, in
 #endif
 }
 
-template <typename T>
-__global__ void surf3DKernelRW(hipSurfaceObject_t surfaceObject, hipSurfaceObject_t outputSurfObj,
-                               int width, int height, int depth) {
+template <typename T> __global__ void surf3DKernelRW(hipSurfaceObject_t surfaceObject,
+                                                     hipSurfaceObject_t outputSurfObj, int width,
+                                                     int height, int depth) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -334,11 +332,6 @@ TEMPLATE_TEST_CASE("Unit_surf3Dread_Positive_Basic", "", char, uchar, short, ush
                    uint4, float4) {
   CHECK_IMAGE_SUPPORT;
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
   const int depth = GENERATE(4, 11);
@@ -361,11 +354,6 @@ TEMPLATE_TEST_CASE("Unit_surf3Dwrite_Positive_Basic", "", char, uchar, short, us
                    short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
                    uint4, float4) {
   CHECK_IMAGE_SUPPORT;
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
@@ -390,11 +378,6 @@ TEMPLATE_TEST_CASE("Unit_surf3D_Positive_ReadWrite", "", char, uchar, short, ush
                    uint4, float4) {
   CHECK_IMAGE_SUPPORT;
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
   const int depth = GENERATE(4, 11);
@@ -402,6 +385,6 @@ TEMPLATE_TEST_CASE("Unit_surf3D_Positive_ReadWrite", "", char, uchar, short, ush
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

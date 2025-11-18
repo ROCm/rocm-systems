@@ -41,9 +41,7 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipStreamQuery_spt_WithNoWork") {
   hipStream_t stream{nullptr};
 
-  SECTION("Null Stream") {
-    HIP_CHECK(hipStreamQuery_spt(stream));
-  }
+  SECTION("Null Stream") { HIP_CHECK(hipStreamQuery_spt(stream)); }
 
   SECTION("Created Stream") {
     HIP_CHECK(hipStreamCreate(&stream));
@@ -134,7 +132,6 @@ TEST_CASE("Unit_hipStreamQuery_spt_WithPendingWork") {
 #endif
 
 /**
-* End doxygen group StreamTest.
-* @}
-*/
-
+ * End doxygen group StreamTest.
+ * @}
+ */

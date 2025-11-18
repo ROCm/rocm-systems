@@ -6,6 +6,9 @@ matrix:
     version: "22.04"
   - distro: "ubuntu"
     version: "24.04"
+  # debian
+  - distro: "debian"
+    version: "12"
   # opensuse
   - distro: "opensuse"
     version: "15.5"
@@ -16,8 +19,7 @@ matrix:
     version: "8.10"
   # RHEL9
   - distro: "rhel"
-    version: "9.3"
+    version: "9"
+  # RHEL10
   - distro: "rhel"
-    version: "9.4"
-  - distro: "rhel"
-    version: "9.5"
+    version: "10"

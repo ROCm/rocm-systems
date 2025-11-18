@@ -121,6 +121,6 @@ TEST_CASE("Unit_hipMemGetAddressRange_Negative") {
 }
 
 /**
-* End doxygen group PeerToPeerTest.
-* @}
-*/
+ * End doxygen group PeerToPeerTest.
+ * @}
+ */

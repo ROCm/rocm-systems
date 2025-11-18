@@ -41,8 +41,8 @@ void Heap::AddMemory(amd::Memory* memory, const MemoryTimestamp& ts) {
 }
 
 // ================================================================================================
-amd::Memory* Heap::FindMemory(size_t size, Stream* stream, bool opportunistic,
-    void* dptr, MemoryTimestamp* ts) {
+amd::Memory* Heap::FindMemory(size_t size, Stream* stream, bool opportunistic, void* dptr,
+                              MemoryTimestamp* ts) {
   amd::Memory* memory = nullptr;
   auto start = allocations_.lower_bound({size, nullptr});
   for (auto it = start; it != allocations_.end();) {
@@ -201,11 +201,13 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
       dev_ptr = amd::SvmBuffer::malloc(*context, flags, size, dev_info.memBaseAddrAlign_, nullptr);
     }
     if (dev_ptr == nullptr) {
-      size_t free = 0, total =0;
+      size_t free = 0, total = 0;
       hipError_t err = hipMemGetInfo(&free, &total);
       if (err == hipSuccess) {
-        LogPrintfError("Allocation failed : Device memory : required :\
-          %zu | free :%zu | total :%zu", size, free, total);
+        LogPrintfError(
+            "Allocation failed : Device memory : required :\
+          %zu | free :%zu | total :%zu",
+            size, free, total);
       }
       return nullptr;
     }
@@ -231,8 +233,8 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
   ts.AddSafeStream(stream);
   busy_heap_.AddMemory(memory, ts);
 
-  max_total_size_ = std::max(max_total_size_, busy_heap_.GetTotalSize() +
-                                                  free_heap_.GetTotalSize());
+  max_total_size_ =
+      std::max(max_total_size_, busy_heap_.GetTotalSize() + free_heap_.GetTotalSize());
   // Increment the reference counter on the pool
   retain();
 
@@ -360,7 +362,7 @@ hipError_t MemoryPool::SetAttribute(hipMemPoolAttr attr, void* value) {
       // Enable/disable HIP event check for freed memory
       state_.opportunistic_ = *reinterpret_cast<int32_t*>(value);
       break;
-    case  hipMemPoolReuseAllowInternalDependencies:
+    case hipMemPoolReuseAllowInternalDependencies:
       // Enable/disable internal extra dependencies introduced in runtime
       state_.internal_dependencies_ = *reinterpret_cast<int32_t*>(value);
       break;
@@ -411,7 +413,7 @@ hipError_t MemoryPool::GetAttribute(hipMemPoolAttr attr, void* value) {
       // Enable/disable HIP event check for freed memory
       *reinterpret_cast<int32_t*>(value) = Opportunistic();
       break;
-    case  hipMemPoolReuseAllowInternalDependencies:
+    case hipMemPoolReuseAllowInternalDependencies:
       // Enable/disable internal extra dependencies introduced in runtime
       *reinterpret_cast<int32_t*>(value) = InternalDependencies();
       break;
@@ -420,13 +422,14 @@ hipError_t MemoryPool::GetAttribute(hipMemPoolAttr attr, void* value) {
       break;
     case hipMemPoolAttrReservedMemCurrent:
       // All allocated memory by the pool in OS
-      *reinterpret_cast<uint64_t*>(value) = (state_.use_vm_heap_) ? MappedSize() :
-        (busy_heap_.GetTotalSize() + free_heap_.GetTotalSize());
+      *reinterpret_cast<uint64_t*>(value) =
+          (state_.use_vm_heap_) ? MappedSize()
+                                : (busy_heap_.GetTotalSize() + free_heap_.GetTotalSize());
       break;
     case hipMemPoolAttrReservedMemHigh:
       // High watermark of all allocated memory in OS, since the last reset
-      *reinterpret_cast<uint64_t*>(value) = (state_.use_vm_heap_)
-          ? MaxMappedSize() : max_total_size_;
+      *reinterpret_cast<uint64_t*>(value) =
+          (state_.use_vm_heap_) ? MaxMappedSize() : max_total_size_;
       break;
     case hipMemPoolAttrUsedMemCurrent:
       // Total currently used memory by the pool
@@ -505,14 +508,14 @@ amd::Os::FileDesc MemoryPool::Export() {
   // Note: Windows can accept an unnamed allocation
   snprintf(file_name, kFileNameSize, "%p", this);
   amd::Os::FileDesc handle{};
-  shared_ = reinterpret_cast<SharedMemPool*>(amd::Os::CreateIpcMemory(
-      file_name, sizeof(SharedMemPool), &handle));
+  shared_ = reinterpret_cast<SharedMemPool*>(
+      amd::Os::CreateIpcMemory(file_name, sizeof(SharedMemPool), &handle));
   if (shared_ != nullptr) {
     shared_->handle_ = handle;
     shared_->state_ = state_.value_;
     shared_->access_size_ = 0;
     memset(shared_->access_, 0, sizeof(SharedAccess) * kMaxMgpuAccess);
-    assert((access_map_.size() <= kMaxMgpuAccess) && "Can't support more GPU(s) in shared access" );
+    assert((access_map_.size() <= kMaxMgpuAccess) && "Can't support more GPU(s) in shared access");
     for (auto it : access_map_) {
       shared_->access_[shared_->access_size_] = SharedAccess{it.first->deviceId(), it.second};
       shared_->access_size_++;
@@ -537,4 +540,4 @@ bool MemoryPool::Import(amd::Os::FileDesc handle) {
   }
   return result;
 }
-}
+}  // namespace hip

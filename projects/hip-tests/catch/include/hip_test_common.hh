@@ -36,6 +36,24 @@ THE SOFTWARE.
 #include <thread>
 #include "hip_test_features.hh"
 
+#if HT_LINUX
+#include <sys/resource.h>
+#endif
+
+#if !defined(__HIP_ATOMIC_BACKWARD_COMPAT)
+#define __HIP_ATOMIC_BACKWARD_COMPAT 1
+#endif
+
+#if HT_AMD
+#if defined(__has_extension) && __has_extension(clang_atomic_attributes) && __HIP_ATOMIC_BACKWARD_COMPAT
+#define HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY [[clang::atomic(fine_grained_memory, remote_memory)]]
+#else
+#define HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY
+#endif
+#elif HT_NVIDIA
+#define HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY
+#endif
+
 #ifdef TEST_CLOCK_CYCLE
 #define clock_function() clock64()
 #else
@@ -264,6 +282,28 @@ static inline bool IsGfx11() {
 #endif
 }
 
+static inline bool IsNavi4X() {
+#if HT_NVIDIA
+  return false;
+#elif HT_AMD
+  int device = -1;
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  std::string arch = std::string(props.gcnArchName);
+  if (arch.find("gfx1200") != std::string::npos ||
+      arch.find("gfx1201") != std::string::npos) {
+    // gfx1200 = Navi44, gfx1201 = Navi48
+    return true;
+  } else {
+    return false;
+  }
+#else
+  std::cout << "Have to be either Nvidia or AMD platform, asserting" << std::endl;
+  assert(false);
+#endif
+}
+
 // Utility Functions
 namespace HipTest {
 static inline int getDeviceCount() {
@@ -334,13 +374,12 @@ inline bool isImageSupported() {
   return imageSupport != 0;
 }
 
-inline bool isPcieAtomicsSupported() {
-  int pcieAtomics = 1;
+inline bool isPcieAtomicSupported() {
+  int pcieAtomic = 1;
   int device;
   HIP_CHECK(hipGetDevice(&device));
-  HIPCHECK(hipDeviceGetAttribute(&pcieAtomics, hipDeviceAttributeHostNativeAtomicSupported,
-           device));
-  return pcieAtomics != 0;
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, device));
+  return pcieAtomic;
 }
 
 inline bool isP2PSupported(int& d1, int& d2) {
@@ -361,6 +400,30 @@ inline bool isP2PSupported(int& d1, int& d2) {
     }
   }
   return supported;
+}
+
+inline bool checkConcurrentKernels(int num_devices) {
+  for (auto i = 0; i < num_devices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    int concurrent_kernels = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, i));
+    if (!concurrent_kernels) {
+      return false;
+    }
+  }
+  if (num_devices > 1) {
+    HIP_CHECK(hipSetDevice(0));
+  }
+  return true;
+}
+
+inline bool isXnackOn() {
+  hipDeviceProp_t prop;
+  int device = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  std::string gfxName(prop.gcnArchName);
+  return gfxName.find("xnack+") != std::string::npos;
 }
 
 inline bool areWarpMatchFunctionsSupported() {
@@ -549,12 +612,11 @@ class BlockingContext {
     return;                                                                                        \
   }
 
-// This must be called in host-device memory conherency tests
-#define CHECK_PCIE_ATOMICS_SUPPORT                                                                 \
-  if (!HipTest::isPcieAtomicsSupported()) {                                                        \
-    INFO("Pcie atomics is not support on the device. Skipped.");                                   \
+#define CHECK_PCIE_ATOMIC_SUPPORT                                                                 \
+  if (!HipTest::isPcieAtomicSupported()) {                                                        \
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");                         \
     return;                                                                                        \
-  }
+  }   
 
 #define CHECK_P2P_SUPPORT                                                                          \
   int d1, d2;                                                                                      \
@@ -636,3 +698,29 @@ class BlockingContext {
     }                                                                                              \
     HIP_CHECK(hipStreamDestroy(stream));                                                           \
   }
+
+// Manage core dumps in specific tests which require it disabled (e.g., hipGetLastErrorOnAbort.cc)
+#if HT_LINUX
+#define DISABLE_CORE_DUMPS()                                                                       \
+  struct rlimit core_limit;                                                                        \
+  bool rlimit_saved = false;                                                                       \
+  if (getrlimit(RLIMIT_CORE, &core_limit) == 0) {                                                  \
+    if (core_limit.rlim_cur != 0) {                                                                \
+      struct rlimit new_limit;                                                                     \
+      new_limit.rlim_cur = 0;                                                                      \
+      new_limit.rlim_max = core_limit.rlim_max;                                                    \
+      if (setrlimit(RLIMIT_CORE, &new_limit) == 0) {                                               \
+        rlimit_saved = true;                                                                       \
+      }                                                                                            \
+    }                                                                                              \
+  }
+
+#define RESTORE_CORE_DUMPS()                                                                       \
+  if (rlimit_saved) {                                                                              \
+    setrlimit(RLIMIT_CORE, &core_limit);                                                           \
+    rlimit_saved = false;                                                                          \
+  }
+#else
+#define DISABLE_CORE_DUMPS()
+#define RESTORE_CORE_DUMPS()
+#endif

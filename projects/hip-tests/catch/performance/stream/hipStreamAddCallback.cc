@@ -34,9 +34,7 @@ class StreamAddCallbackBenchmark : public Benchmark<StreamAddCallbackBenchmark> 
     const StreamGuard stream_guard{Streams::created};
     const hipStream_t stream = stream_guard.stream();
 
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipStreamAddCallback(stream, Callback, nullptr, 0));
-    }
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipStreamAddCallback(stream, Callback, nullptr, 0)); }
   }
 };
 
@@ -56,11 +54,9 @@ static void RunBenchmark() {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipStreamAddCallback") {
-  RunBenchmark();
-}
+TEST_CASE("Performance_hipStreamAddCallback") { RunBenchmark(); }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

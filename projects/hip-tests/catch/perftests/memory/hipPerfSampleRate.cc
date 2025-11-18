@@ -52,9 +52,8 @@ __host__ __device__ void operator+=(float4& a, float4 b) {  // NOLINT
 }
 #endif
 
-template <typename T>
-__global__ void sampleRate(T* outBuffer, unsigned int inBufSize, unsigned int writeIt, T** inBuffer,
-                           int numBufs) {
+template <typename T> __global__ void sampleRate(T* outBuffer, unsigned int inBufSize,
+                                                 unsigned int writeIt, T** inBuffer, int numBufs) {
   uint gid = (blockIdx.x * blockDim.x + threadIdx.x);
   uint inputIdx = gid % inBufSize;
 
@@ -69,9 +68,9 @@ __global__ void sampleRate(T* outBuffer, unsigned int inBufSize, unsigned int wr
   }
 }
 
-template <typename T>
-__global__ void sampleRateFloat(T* outBuffer, unsigned int inBufSize, unsigned int writeIt,
-                                T** inBuffer, int numBufs) {
+template <typename T> __global__ void sampleRateFloat(T* outBuffer, unsigned int inBufSize,
+                                                      unsigned int writeIt, T** inBuffer,
+                                                      int numBufs) {
   uint gid = (blockIdx.x * blockDim.x + threadIdx.x);
   uint inputIdx = gid % inBufSize;
 

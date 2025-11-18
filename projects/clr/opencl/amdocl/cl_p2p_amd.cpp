@@ -60,9 +60,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyBufferP2PAMD,
     return CL_INVALID_VALUE;
   }
 
-  if (srcBuffer == dstBuffer &&
-      ((src_offset <= dst_offset && dst_offset < src_offset + cb) ||
-       (dst_offset <= src_offset && src_offset < dst_offset + cb))) {
+  if (srcBuffer == dstBuffer && ((src_offset <= dst_offset && dst_offset < src_offset + cb) ||
+                                 (dst_offset <= src_offset && src_offset < dst_offset + cb))) {
     return CL_MEM_COPY_OVERLAP;
   }
 

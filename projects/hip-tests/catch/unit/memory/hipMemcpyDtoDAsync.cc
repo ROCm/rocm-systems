@@ -25,6 +25,7 @@ This testcase verifies the Basic scenario
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
+#include <numeric>
 
 static constexpr auto NUM_ELM{1024};
 
@@ -39,12 +40,11 @@ This testcase verifies hipMemcpyDtoDAsync API
 7.DtoH copy and validating the result
 */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "",
-                   int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
+                   double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
   int numDevices = 0;
-  TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr},
-           *X_d{nullptr}, *Y_d{nullptr}, *Z_d{nullptr};
+  TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr}, *X_d{nullptr}, *Y_d{nullptr}, *Z_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
   hipStream_t stream;
 
@@ -55,12 +55,10 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "",
     HIP_CHECK(hipSetDevice(0));
     if (canAccessPeer) {
       HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
-    }
-    else {
+    } else {
       INFO("Machine does not have P2P Capabilities");
     }
-    HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h,
-                                  NUM_ELM, false);
+    HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
     HIP_CHECK(hipSetDevice(1));
     HIP_CHECK(hipMalloc(&X_d, Nbytes));
     HIP_CHECK(hipMalloc(&Y_d, Nbytes));
@@ -69,10 +67,9 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "",
     HIP_CHECK(hipSetDevice(0));
     HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1),
-                        dim3(1), 0, 0,
-                        static_cast<const TestType *>(A_d),
-                        static_cast<const TestType *>(B_d), C_d, NUM_ELM);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0,
+                       static_cast<const TestType*>(A_d), static_cast<const TestType*>(B_d), C_d,
+                       NUM_ELM);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
@@ -80,16 +77,13 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "",
 
     HIP_CHECK(hipSetDevice(1));
     HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemcpyDtoDAsync((hipDeviceptr_t)X_d, (hipDeviceptr_t)A_d,
-                                  Nbytes, stream));
-    HIP_CHECK(hipMemcpyDtoDAsync((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d,
-                                  Nbytes, stream));
+    HIP_CHECK(hipMemcpyDtoDAsync((hipDeviceptr_t)X_d, (hipDeviceptr_t)A_d, Nbytes, stream));
+    HIP_CHECK(hipMemcpyDtoDAsync((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d, Nbytes, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1),
-                        dim3(1), 0, 0,
-                        static_cast<const TestType*>(X_d),
-                        static_cast<const TestType*>(Y_d), Z_d, NUM_ELM);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0,
+                       static_cast<const TestType*>(X_d), static_cast<const TestType*>(Y_d), Z_d,
+                       NUM_ELM);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpyDtoHAsync(C_h, (hipDeviceptr_t)Z_d, Nbytes, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -104,68 +98,67 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "",
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Basic functional testcase to trigger capturehipMemcpyDtoDAsync internal api
-*  to improve code coverage.
-* Test source
-* ------------------------
-*  - unit/memory/hipMemcpyDtoDAsync.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.0
-*/
-TEST_CASE("Unit_hipMemcpyDtoDAsync_capturehipMemcpyDtoDAsync") {
-  int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
-  if (numDevices > 1) {
-    int canAccessPeer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
-    if (canAccessPeer == 1) {
-      hipGraph_t graph{nullptr};
-      hipGraphExec_t graphExec{nullptr};
-      hipStream_t stream;
-      size_t Nbytes = NUM_ELM * sizeof(int);
-      HIP_CHECK(hipStreamCreate(&stream));
-      int *A_h = reinterpret_cast<int*>(malloc(Nbytes));
-      int *B_h = reinterpret_cast<int*>(malloc(Nbytes));
-      int *A_d, *B_d;
-      for (int i = 0; i < NUM_ELM; i++) {
-        A_h[i] = i;
-      }
-      HIP_CHECK(hipSetDevice(0));
-      HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), Nbytes));
-      HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&B_d), Nbytes));
-
-      // Start Capturing
-      HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-      HIP_CHECK(hipMemcpyDtoDAsync((hipDeviceptr_t)B_d, (hipDeviceptr_t)A_d, Nbytes, stream));
-      // End Capture
-      HIP_CHECK(hipStreamEndCapture(stream, &graph));
-
-      // Create and Launch Executable Graphs
-      HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-      HIP_CHECK(hipGraphLaunch(graphExec, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
-
-      HIP_CHECK(hipMemcpyDtoH(B_h, (hipDeviceptr_t)B_d, Nbytes));
-      for (int i = 0; i < NUM_ELM; i++) {
-        REQUIRE(B_h[i] == A_h[i]);
-      }
-      HIP_CHECK(hipGraphExecDestroy(graphExec))
-      HIP_CHECK(hipGraphDestroy(graph));
-      HIP_CHECK(hipStreamDestroy(stream));
-      free(A_h);
-      free(B_h);
-      HIP_CHECK(hipFree(A_d));
-      HIP_CHECK(hipFree(B_d));
-    } else {
-      SUCCEED("Machine doesnt have P2P support enabled hence skipping test");
-    }
-  } else {
-    SUCCEED("Machine doesnt have multiple gpus hence skipping test");
+ * Test Description
+ * ------------------------
+ *  - Basic functional testcase to trigger capturehipMemcpyDtoDAsync internal api
+ *  to improve code coverage.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpyDtoDAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipMemcpyDtoDAsync_Capture") {
+  int device_count = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_count));
+  if (device_count <= 1) {
+    SUCCEED("Machine doesn't have multiple GPUs; skipping test");
+    return;
   }
+
+  int peer_access = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&peer_access, 0, 1));
+  if (!peer_access) {
+    SUCCEED("Machine doesn't have P2P support enabled; skipping test");
+    return;
+  }
+
+  constexpr size_t kNumElements = NUM_ELM;
+  const size_t kNumBytes = kNumElements * sizeof(int);
+
+  hipStream_t stream = nullptr;
+
+  auto host_src = std::make_unique<int[]>(kNumElements);
+  auto host_dst = std::make_unique<int[]>(kNumElements);
+  std::iota(host_src.get(), host_src.get() + kNumElements, 0);
+
+  int* device_src = nullptr;
+  int* device_dst = nullptr;
+
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_src), kNumBytes));
+  HIP_CHECK(hipMemcpy(device_src, host_src.get(), kNumBytes, hipMemcpyHostToDevice));
+
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_dst), kNumBytes));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(device_dst),
+                               reinterpret_cast<hipDeviceptr_t>(device_src), kNumBytes, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  HIP_CHECK(hipMemcpyDtoH(host_dst.get(), reinterpret_cast<hipDeviceptr_t>(device_dst), kNumBytes));
+  for (size_t i = 0; i < kNumElements; ++i) {
+    REQUIRE(host_dst[i] == host_src[i]);
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(device_src));
+  HIP_CHECK(hipFree(device_dst));
 }

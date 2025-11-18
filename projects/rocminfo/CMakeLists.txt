@@ -38,7 +38,7 @@ cmake_minimum_required(VERSION 3.6.3)
 
 set(ROCMINFO_EXE "rocminfo")
 set(PROJECT_NAME ${ROCMINFO_EXE})
-project (${PROJECT_NAME})
+project (${PROJECT_NAME} LANGUAGES CXX)
 
 include ( GNUInstallDirs )
 if(WIN32)
@@ -132,7 +132,7 @@ add_definitions(-DLITTLEENDIAN_CPU=1)
 #
 # Linux Compiler options
 #
-set(ROCMINFO_CXX_FLAGS -std=c++11)
+set(CMAKE_CXX_STANDARD 11)
 set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fexceptions)
 set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fno-rtti)
 set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fno-math-errno)
@@ -212,7 +212,7 @@ endif()
 
 #Debian package specific variables
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "hsa-rocr, pciutils, python3, libc6, libgcc-s1 | libgcc1, libstdc++6")
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE ${CPACK_DEBIAN_PACKAGE_HOMEPAGE} CACHE STRING "https://github.com/RadeonOpenCompute/ROCm")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE ${CPACK_DEBIAN_PACKAGE_HOMEPAGE} CACHE STRING "https://github.com/ROCm/rocm-systems")
 if (DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
    set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
 else()

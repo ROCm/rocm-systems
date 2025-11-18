@@ -1,3 +1,9 @@
+/*
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
+ * 
+ * SPDX-License-Identifier: MIT
+ */
+ 
 #ifndef ROCR_PERF_CNTR_APP_H_
 #define ROCR_PERF_CNTR_APP_H_
 

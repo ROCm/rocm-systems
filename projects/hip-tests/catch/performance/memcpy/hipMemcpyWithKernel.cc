@@ -28,7 +28,8 @@ __global__ void Sum(void* ptr, size_t size) {
     atomicAdd(&((unsigned long long*)ptr)[0], ((unsigned long long*)ptr)[index]);
   }
 }
-class MemcpyHtoDKernelDtoHv1AsyncBenchmark : public Benchmark<MemcpyHtoDKernelDtoHv1AsyncBenchmark> {
+class MemcpyHtoDKernelDtoHv1AsyncBenchmark
+    : public Benchmark<MemcpyHtoDKernelDtoHv1AsyncBenchmark> {
  public:
   void operator()(void* host_mem, void* device_mem, size_t size, const hipStream_t& stream) {
     size_t count = size / sizeof(size_t);
@@ -36,19 +37,20 @@ class MemcpyHtoDKernelDtoHv1AsyncBenchmark : public Benchmark<MemcpyHtoDKernelDt
       ((size_t*)host_mem)[i] = i;
     }
     TIMED_SECTION_STREAM(kTimerTypeCpu, stream) {
-      HIP_CHECK(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(device_mem), host_mem,
-                                   size, stream));
+      HIP_CHECK(
+          hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(device_mem), host_mem, size, stream));
       int threads_num = 32;
       Sum<<<count / threads_num + 1, threads_num, 0, stream>>>(device_mem, count);
-      HIP_CHECK(hipMemcpyDtoHAsync(host_mem, reinterpret_cast<hipDeviceptr_t>(device_mem),
-                                   size, stream));
+      HIP_CHECK(
+          hipMemcpyDtoHAsync(host_mem, reinterpret_cast<hipDeviceptr_t>(device_mem), size, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
     }
     size_t sum = ((size_t*)host_mem)[0];
     REQUIRE(sum == count * (count - 1) / 2);
   }
 };
-class MemcpyHtoDKernelDtoHv2AsyncBenchmark : public Benchmark<MemcpyHtoDKernelDtoHv2AsyncBenchmark> {
+class MemcpyHtoDKernelDtoHv2AsyncBenchmark
+    : public Benchmark<MemcpyHtoDKernelDtoHv2AsyncBenchmark> {
  public:
   void operator()(void* host_mem, void* device_mem, size_t size, const hipStream_t& stream) {
     size_t count = size / sizeof(size_t);
@@ -56,21 +58,19 @@ class MemcpyHtoDKernelDtoHv2AsyncBenchmark : public Benchmark<MemcpyHtoDKernelDt
       ((size_t*)host_mem)[i] = i;
     }
     TIMED_SECTION_STREAM(kTimerTypeCpu, stream) {
-      HIP_CHECK(hipMemcpyAsync(device_mem, host_mem, size, hipMemcpyHostToDevice,
-                               stream));
+      HIP_CHECK(hipMemcpyAsync(device_mem, host_mem, size, hipMemcpyHostToDevice, stream));
       int threads_num = 32;
       Sum<<<count / threads_num + 1, threads_num, 0, stream>>>(device_mem, count);
-      HIP_CHECK(hipMemcpyWithStream(host_mem, device_mem, size,
-                                    hipMemcpyDeviceToHost, stream));
+      HIP_CHECK(hipMemcpyWithStream(host_mem, device_mem, size, hipMemcpyDeviceToHost, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
     }
     size_t sum = ((size_t*)host_mem)[0];
     REQUIRE(sum == count * (count - 1) / 2);
   }
 };
-template<typename BenchmarkType>
-static void RunBenchmark(LinearAllocs host_allocation_type, LinearAllocs device_allocation_type,
-                         size_t size) {
+template <typename BenchmarkType> static void RunBenchmark(LinearAllocs host_allocation_type,
+                                                           LinearAllocs device_allocation_type,
+                                                           size_t size) {
   BenchmarkType benchmark;
   if (size < 1_KB) {
     benchmark.AddSectionName(std::to_string(size));

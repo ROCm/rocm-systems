@@ -47,7 +47,7 @@ __global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
   }
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Basic") {
+TEST_CASE("Unit_hipMemPrefetchAsync_Basic", "[multigpu]") {
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
@@ -120,7 +120,8 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Rounding_Behavior") {
   HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
                                     hipMemRangeAttributeLastPrefetchLocation, alloc.ptr(),
                                     3 * kPageSize));
-  REQUIRE((rounded_up == 3 * kPageSize ? device : hipInvalidDeviceId) == static_cast<int>(attribute));
+  REQUIRE((rounded_up == 3 * kPageSize ? device : hipInvalidDeviceId) ==
+          static_cast<int>(attribute));
 }
 
 TEST_CASE("Unit_hipMemPrefetchAsync_Negative_Parameters") {

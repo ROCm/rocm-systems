@@ -6,7 +6,7 @@
 ROCm Systems Profiler features and use cases
 ********************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ is designed to be highly extensible.
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ is designed to be highly extensible.
 Internally, it leverages the `Timemory performance analysis toolkit <https://github.com/ROCm/timemory>`_
 to manage extensions, resources, data, and other items. It supports the following features,
 modes, metrics, and APIs.
@@ -62,7 +62,12 @@ GPU metrics
   * Utilization
   * VCN activity
   * JPEG activity
-    Note: The availability of VCN and JPEG engine activity depends on device support for different ASICs. If unsupported, all values for VCN_ACTIVITY and JPEG_ACTIVITY will be reported as N/A in the output of amd-smi metric--usage.
+  * XGMI interconnect metrics (link width, link speed, read/write data)
+  * PCIe metrics (link width, link speed, bandwidth)
+  
+  .. note::
+  
+  The availability of VCN, JPEG, XGMI, and PCIe metrics depends on device support and system topology. If unsupported, values will be reported as ``N/A`` in the output of ``amd-smi metric --usage``.
 
 CPU metrics
 ========================================
@@ -86,17 +91,6 @@ CPU metrics
 * Network statistics
 * I/O metrics
 * Many others
-
-Third-party API support
-========================================
-
-* TAU
-* LIKWID
-* Caliper
-* CrayPAT
-* VTune
-* NVTX
-* ROCTX
 
 ROCm Systems Profiler use cases
 ========================================

@@ -30,8 +30,7 @@ constexpr int NUM = WIDTH * HEIGHT;
 constexpr int THREADS_PER_BLOCK_X = 8;
 constexpr int THREADS_PER_BLOCK_Y = 8;
 
-template <typename T>
-__global__ void vectoradd_float(T* a, const T* bm, int width, int height)
+template <typename T> __global__ void vectoradd_float(T* a, const T* bm, int width, int height)
 
 {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
@@ -227,25 +226,26 @@ TEST_CASE("Unit_ldg") {
   int errors;
 
   errors = dataTypesRun<char, char>() | dataTypesRun<short, short>() | dataTypesRun<int, int>() |
-      dataTypesRun<long, long>() | dataTypesRun<long long, long long>() |
-      dataTypesRun<signed char, signed char>() | dataTypesRun<unsigned char, unsigned char>() |
-      dataTypesRun<unsigned short, unsigned short>() | dataTypesRun<unsigned int, unsigned int>() |
-      dataTypesRun<unsigned long, unsigned long>() |
-      dataTypesRun<unsigned long long, unsigned long long>() | dataTypesRun<float, float>() |
-      dataTypesRun<double, double>();
+           dataTypesRun<long, long>() | dataTypesRun<long long, long long>() |
+           dataTypesRun<signed char, signed char>() | dataTypesRun<unsigned char, unsigned char>() |
+           dataTypesRun<unsigned short, unsigned short>() |
+           dataTypesRun<unsigned int, unsigned int>() |
+           dataTypesRun<unsigned long, unsigned long>() |
+           dataTypesRun<unsigned long long, unsigned long long>() | dataTypesRun<float, float>() |
+           dataTypesRun<double, double>();
 
   REQUIRE(errors == 0);
 
   errors = dataTypesRun2<int2, int>() | dataTypesRun2<short2, short>() |
-      dataTypesRun2<ushort2, unsigned short>() | dataTypesRun2<char2, signed char>() |
-      dataTypesRun2<uchar2, unsigned char>() | dataTypesRun2<uint2, unsigned int>() |
-      dataTypesRun2<float2, float>() | dataTypesRun2<double2, double>();
+           dataTypesRun2<ushort2, unsigned short>() | dataTypesRun2<char2, signed char>() |
+           dataTypesRun2<uchar2, unsigned char>() | dataTypesRun2<uint2, unsigned int>() |
+           dataTypesRun2<float2, float>() | dataTypesRun2<double2, double>();
 
   REQUIRE(errors == 0);
 
   errors = dataTypesRun4<int4, int>() | dataTypesRun4<char4, signed char>() |
-      dataTypesRun4<uchar4, unsigned char>() | dataTypesRun4<short4, short>() |
-      dataTypesRun4<uint4, unsigned int>() | dataTypesRun4<float4, float>();
+           dataTypesRun4<uchar4, unsigned char>() | dataTypesRun4<short4, short>() |
+           dataTypesRun4<uint4, unsigned int>() | dataTypesRun4<float4, float>();
 
   REQUIRE(errors == 0);
 }

@@ -344,8 +344,8 @@ RUNTIME_ENTRY_RET(cl_program, clCreateProgramWithBinary,
 RUNTIME_EXIT
 
 RUNTIME_ENTRY_RET(cl_program, clCreateProgramWithAssemblyAMD,
-    (cl_context context, cl_uint count, const char** strings, const size_t* lengths,
-        cl_int* errcode_ret)) {
+                  (cl_context context, cl_uint count, const char** strings, const size_t* lengths,
+                   cl_int* errcode_ret)) {
   if (!is_valid(context)) {
     *not_null(errcode_ret) = CL_INVALID_CONTEXT;
     return (cl_program)0;
@@ -1238,9 +1238,9 @@ RUNTIME_EXIT
  * \version 2.2-3
  */
 RUNTIME_ENTRY(cl_int, clSetProgramReleaseCallback,
-              (cl_program program, void (CL_CALLBACK *pfn_notify)(
-                  cl_program program, void *user_data
-                  ), void *user_data)) {
+              (cl_program program,
+               void(CL_CALLBACK* pfn_notify)(cl_program program, void* user_data),
+               void* user_data)) {
   if (!is_valid(program)) {
     return CL_INVALID_PROGRAM;
   }
@@ -1375,8 +1375,9 @@ RUNTIME_EXIT
  *
  *  \version 1.0r33
  */
-RUNTIME_ENTRY(cl_int, clCreateKernelsInProgram, (cl_program program, cl_uint num_kernels,
-                                                 cl_kernel* kernels, cl_uint* num_kernels_ret)) {
+RUNTIME_ENTRY(cl_int, clCreateKernelsInProgram,
+              (cl_program program, cl_uint num_kernels, cl_kernel* kernels,
+               cl_uint* num_kernels_ret)) {
   if (!is_valid(program)) {
     return CL_INVALID_PROGRAM;
   }
@@ -1475,8 +1476,7 @@ RUNTIME_EXIT
  *
  *  \version 2.1r01
  */
-RUNTIME_ENTRY_RET(cl_kernel, clCloneKernel,
-                  (cl_kernel source_kernel, cl_int* errcode_ret)) {
+RUNTIME_ENTRY_RET(cl_kernel, clCloneKernel, (cl_kernel source_kernel, cl_int* errcode_ret)) {
   if (!is_valid(source_kernel)) {
     *not_null(errcode_ret) = CL_INVALID_KERNEL;
     return (cl_kernel)0;
@@ -1593,7 +1593,7 @@ RUNTIME_ENTRY(cl_int, clSetKernelArg,
     }
   }
   if ((!is_local && (arg_size != desc.size_)) || (is_local && (arg_size == 0))) {
-    if (LP64_ONLY(true ||) ((desc.type_ != T_POINTER) && (desc.type_ != T_SAMPLER)) ||
+    if (LP64_ONLY(true ||)((desc.type_ != T_POINTER) && (desc.type_ != T_SAMPLER)) ||
         (arg_size != sizeof(void*))) {
       as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
       return CL_INVALID_ARG_SIZE;
@@ -1833,7 +1833,7 @@ RUNTIME_ENTRY(cl_int, clGetKernelWorkGroupInfo,
       // Return the amount of used local memory
       const size_t align = amdDevice.info().minDataTypeAlignSize_;
       cl_ulong memSize = as_amd(kernel)->parameters().localMemSize(align) +
-          amd::alignUp(devKernel->workGroupInfo()->localMemSize_, align);
+                         amd::alignUp(devKernel->workGroupInfo()->localMemSize_, align);
       return amd::clGetInfo(memSize, param_value_size, param_value, param_value_size_ret);
     }
     case CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: {
@@ -1969,7 +1969,7 @@ RUNTIME_ENTRY(cl_int, clGetKernelSubGroupInfo,
     }
     case CL_KERNEL_MAX_NUM_SUB_GROUPS: {
       size_t waveSize = as_amd(device)->info().wavefrontWidth_;
-      size_t numSubGroups = (devKernel->workGroupInfo()->size_  + waveSize - 1) / waveSize;
+      size_t numSubGroups = (devKernel->workGroupInfo()->size_ + waveSize - 1) / waveSize;
       return amd::clGetInfo(numSubGroups, param_value_size, param_value, param_value_size_ret);
     }
     case CL_KERNEL_LOCAL_SIZE_FOR_SUB_GROUP_COUNT: {

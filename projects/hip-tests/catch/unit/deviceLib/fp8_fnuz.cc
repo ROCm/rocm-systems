@@ -31,13 +31,13 @@ THE SOFTWARE.
 #endif
 
 /*
-* This catch test is meant for FP8 FNUZ conversion checking
-* tests only supported on gfx942 archs.
-*/
+ * This catch test is meant for FP8 FNUZ conversion checking
+ * tests only supported on gfx942 archs.
+ */
 
 static_assert(sizeof(unsigned int) == sizeof(float));
 
-std::string get_arch_type()  {
+std::string get_arch_type() {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -46,39 +46,37 @@ std::string get_arch_type()  {
   return gfxName;
 }
 
-#define ARCH_TYPE_GFX940(name) \
-  (name.find("gfx942") != std::string::npos)
+#define ARCH_TYPE_GFX940(name) (name.find("gfx942") != std::string::npos)
 
-#define FP8_FNUZ_SKIP_TEST \
-  std::string gfxName = get_arch_type(); \
-  if (!(ARCH_TYPE_GFX940(gfxName))) { \
-    HipTest::HIP_SKIP_TEST("This test can only be run on gfx942 arch"); \
-    return; \
+#define FP8_FNUZ_SKIP_TEST                                                                         \
+  std::string gfxName = get_arch_type();                                                           \
+  if (!(ARCH_TYPE_GFX940(gfxName))) {                                                              \
+    HipTest::HIP_SKIP_TEST("This test can only be run on gfx942 arch");                            \
+    return;                                                                                        \
   }
 
 #define __FP8_DEVICE__ __device__ static inline
 
-template<typename T> __FP8_DEVICE__ void e4m3_fnuz_device(T *val)
-{
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e4m3_fnuz tmp(*val);
-    *val = tmp;
-  #else
-    *val = 0;
-  #endif
+template <typename T> __FP8_DEVICE__ void e4m3_fnuz_device(T* val) {
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e4m3_fnuz tmp(*val);
+  *val = tmp;
+#else
+  *val = 0;
+#endif
 }
 
-template<typename T> __FP8_DEVICE__ void e5m2_fnuz_device(T *val)
-{
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e5m2_fnuz tmp(*val);
-    *val = tmp;
-  #else
-    *val = 0;
-  #endif
+template <typename T> __FP8_DEVICE__ void e5m2_fnuz_device(T* val) {
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e5m2_fnuz tmp(*val);
+  *val = tmp;
+#else
+  *val = 0;
+#endif
 }
 
-template <typename T, bool is_e4m3_fnuz> __global__ void cvt_float_fp8_float_fnuz(T* in, size_t len) {
+template <typename T, bool is_e4m3_fnuz>
+__global__ void cvt_float_fp8_float_fnuz(T* in, size_t len) {
   int i = threadIdx.x;
   if (i < len) {
     T val = in[i];
@@ -147,24 +145,22 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_compare_host_device", "", float, double) {
   }
 }
 
-__FP8_DEVICE__ void e4m3_fp8x2_fnuz_device(float2 *val)
-{
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8x2_e4m3_fnuz tmp(*val);
-    *val = tmp;
-  #else
-    *val = float2(0.0,0.0);
-  #endif
+__FP8_DEVICE__ void e4m3_fp8x2_fnuz_device(float2* val) {
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8x2_e4m3_fnuz tmp(*val);
+  *val = tmp;
+#else
+  *val = float2(0.0, 0.0);
+#endif
 }
 
-__FP8_DEVICE__ void e5m2_fp8x2_fnuz_device(float2 *val)
-{
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8x2_e5m2_fnuz tmp(*val);
-    *val = tmp;
-  #else
-    *val = float2(0.0,0.0);
-  #endif
+__FP8_DEVICE__ void e5m2_fp8x2_fnuz_device(float2* val) {
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8x2_e5m2_fnuz tmp(*val);
+  *val = tmp;
+#else
+  *val = float2(0.0, 0.0);
+#endif
 }
 
 template <bool is_e4m3_fnuz> __global__ void cvt_float2_fp8x2_float2_fnuz(float2* in, size_t size) {
@@ -297,24 +293,22 @@ TEST_CASE("Unit_fp8x2_fnuz_split_compare") {
   }
 }
 
-__FP8_DEVICE__ void e4m3_fp8x4_fnuz_device(float4 *val)
-{
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8x4_e4m3_fnuz tmp(*val);
-    *val = tmp;
-  #else
-    *val = float4(0.0,0.0,0.0,0.0);
-  #endif
+__FP8_DEVICE__ void e4m3_fp8x4_fnuz_device(float4* val) {
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8x4_e4m3_fnuz tmp(*val);
+  *val = tmp;
+#else
+  *val = float4(0.0, 0.0, 0.0, 0.0);
+#endif
 }
 
-__FP8_DEVICE__ void e5m2_fp8x4_fnuz_device(float4 *val)
-{
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8x4_e5m2_fnuz tmp(*val);
-    *val = tmp;
-  #else
-    *val = float4(0.0,0.0,0.0,0.0);
-  #endif
+__FP8_DEVICE__ void e5m2_fp8x4_fnuz_device(float4* val) {
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8x4_e5m2_fnuz tmp(*val);
+  *val = tmp;
+#else
+  *val = float4(0.0, 0.0, 0.0, 0.0);
+#endif
 }
 
 template <bool is_e4m3_fnuz> __global__ void cvt_float4_fp8x4_float4_fnuz(float4* in, size_t size) {
@@ -396,29 +390,27 @@ TEST_CASE("Unit_fp8x4_fnuz_split_compare") {
     CHECK(cpu_result[i] == result[i]);
   }
 }
-__FP8_DEVICE__ bool e4m3_bool_fnuz_device(float val)
-{
+__FP8_DEVICE__ bool e4m3_bool_fnuz_device(float val) {
   bool x = false;
   float y = val;
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e4m3_fnuz tmp(y);
-    x = tmp;
-  #else
-    x = (y == 0);
-  #endif
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e4m3_fnuz tmp(y);
+  x = tmp;
+#else
+  x = (y == 0);
+#endif
   return x;
 }
 
-__FP8_DEVICE__ bool e5m2_bool_fnuz_device(float val)
-{
+__FP8_DEVICE__ bool e5m2_bool_fnuz_device(float val) {
   bool x = false;
   float y = val;
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e5m2_fnuz tmp(y);
-    x = tmp;
-  #else
-    x = (y == 0);
-  #endif
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e5m2_fnuz tmp(y);
+  x = tmp;
+#else
+  x = (y == 0);
+#endif
   return x;
 }
 
@@ -496,29 +488,27 @@ std::vector<__hip_fp8_storage_t> get_all_fp8_fnuz_nums() {
   return ret;
 }
 
-__FP8_DEVICE__ __hip_fp8_storage_t e4m3_fnuz_fp8_device(float val)
-{
+__FP8_DEVICE__ __hip_fp8_storage_t e4m3_fnuz_fp8_device(float val) {
   __hip_fp8_storage_t x = 0;
   float y = val;
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e4m3_fnuz tmp(y);
-    x = tmp.__x;
-  #else
-    x = (y == 0) ? 0x0 : 0x80;
-  #endif
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e4m3_fnuz tmp(y);
+  x = tmp.__x;
+#else
+  x = (y == 0) ? 0x0 : 0x80;
+#endif
   return x;
 }
 
-__FP8_DEVICE__ __hip_fp8_storage_t e5m2_fnuz_fp8_device(float val)
-{
+__FP8_DEVICE__ __hip_fp8_storage_t e5m2_fnuz_fp8_device(float val) {
   __hip_fp8_storage_t x = 0;
   float y = val;
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e5m2_fnuz tmp(y);
-    x = tmp.__x;
-  #else
-    x = (y == 0) ? 0x0 : 0x80;
-  #endif
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e5m2_fnuz tmp(y);
+  x = tmp.__x;
+#else
+  x = (y == 0) ? 0x0 : 0x80;
+#endif
   return x;
 }
 
@@ -625,47 +615,45 @@ TEST_CASE("Unit_all_fp8_fnuz_cvt") {
   HIP_CHECK(hipFree(d_res));
 }
 
-template<typename T> __FP8_DEVICE__ void e4m3_fnuz_fp8_cvt(T val, float *cvt1, float *cvt2)
-{
+template <typename T> __FP8_DEVICE__ void e4m3_fnuz_fp8_cvt(T val, float* cvt1, float* cvt2) {
   T y = val;
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e4m3_fnuz tmp(y);
-    *cvt1 = tmp;
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e4m3_fnuz tmp(y);
+  *cvt1 = tmp;
 
-    __hip_fp8_e4m3_fnuz tmp1;
-    tmp1.__x = std::is_same<T, float>::value
-          ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3_FNUZ)
-          : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3_FNUZ);
-      ;
-    *cvt2 = tmp1;
-  #else
-    *cvt1 = (y == 0) ? 0 : y;
-    *cvt2 = (y == 0) ? 0 : y;
-  #endif
+  __hip_fp8_e4m3_fnuz tmp1;
+  tmp1.__x = std::is_same<T, float>::value
+                 ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3_FNUZ)
+                 : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3_FNUZ);
+  ;
+  *cvt2 = tmp1;
+#else
+  *cvt1 = (y == 0) ? 0 : y;
+  *cvt2 = (y == 0) ? 0 : y;
+#endif
 }
 
-template<typename T> __FP8_DEVICE__ void e5m2_fnuz_fp8_cvt(T val, float *cvt1, float *cvt2)
-{
+template <typename T> __FP8_DEVICE__ void e5m2_fnuz_fp8_cvt(T val, float* cvt1, float* cvt2) {
   T y = val;
-  #if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
-    __hip_fp8_e5m2_fnuz tmp(y);
-    *cvt1 = tmp;
+#if defined(__gfx94plus_local__) && __HIP_DEVICE_COMPILE__
+  __hip_fp8_e5m2_fnuz tmp(y);
+  *cvt1 = tmp;
 
-    __hip_fp8_e5m2_fnuz tmp1;
-    tmp1.__x = std::is_same<T, float>::value
-          ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2_FNUZ)
-          : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2_FNUZ);
-      ;
-    *cvt2 = tmp1;
-  #else
-    *cvt1 = (y == 0) ? 0 : y;
-    *cvt2 = (y == 0) ? 0 : y;
-  #endif
+  __hip_fp8_e5m2_fnuz tmp1;
+  tmp1.__x = std::is_same<T, float>::value
+                 ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2_FNUZ)
+                 : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2_FNUZ);
+  ;
+  *cvt2 = tmp1;
+#else
+  *cvt1 = (y == 0) ? 0 : y;
+  *cvt2 = (y == 0) ? 0 : y;
+#endif
 }
 
 
 template <typename T, bool is_e4m3_fnuz>
-__global__ void Type_to_fp8_fnuz_cvt(T* f, float *cvt1, float *cvt2, size_t size) {
+__global__ void Type_to_fp8_fnuz_cvt(T* f, float* cvt1, float* cvt2, size_t size) {
   auto i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < size) {
     if constexpr (is_e4m3_fnuz) {
@@ -770,9 +758,12 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness_device", "", float, double) {
                                             -208,        -224,        -240};
 
     size_t totalnums = e4m3_fnuz_nums.size();
-    TestType *fnums; HIP_CHECK(hipMalloc((void **)&fnums, totalnums * sizeof(TestType)));
-    float *cvt1_dev; HIP_CHECK(hipMalloc((void **)&cvt1_dev, totalnums * sizeof(TestType)));
-    float *cvt2_dev; HIP_CHECK(hipMalloc((void **)&cvt2_dev, totalnums * sizeof(TestType)));
+    TestType* fnums;
+    HIP_CHECK(hipMalloc((void**)&fnums, totalnums * sizeof(TestType)));
+    float* cvt1_dev;
+    HIP_CHECK(hipMalloc((void**)&cvt1_dev, totalnums * sizeof(TestType)));
+    float* cvt2_dev;
+    HIP_CHECK(hipMalloc((void**)&cvt2_dev, totalnums * sizeof(TestType)));
 
     HIP_CHECK(hipMemcpy(fnums, e4m3_fnuz_nums.data(), totalnums * sizeof(TestType),
                         hipMemcpyHostToDevice));
@@ -780,11 +771,11 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness_device", "", float, double) {
     auto fp8_kernel = Type_to_fp8_fnuz_cvt<TestType, true>;
     fp8_kernel<<<totalnums / 256 + 1, 256>>>(fnums, cvt1_dev, cvt2_dev, totalnums);
 
-    float *cvt1_host = (float *)malloc(sizeof(float) * totalnums);
-    float *cvt2_host = (float *)malloc(sizeof(float) * totalnums);
+    float* cvt1_host = (float*)malloc(sizeof(float) * totalnums);
+    float* cvt2_host = (float*)malloc(sizeof(float) * totalnums);
 
-    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float) , hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float) , hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -1067,9 +1058,12 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness_device", "", float, double) {
                                             -57344};
 
     size_t totalnums = e5m2_fnuz_nums.size();
-    TestType *fnums; HIP_CHECK(hipMalloc((void **)&fnums, totalnums * sizeof(TestType)));
-    float *cvt1_dev; HIP_CHECK(hipMalloc((void **)&cvt1_dev, totalnums * sizeof(TestType)));
-    float *cvt2_dev; HIP_CHECK(hipMalloc((void **)&cvt2_dev, totalnums * sizeof(TestType)));
+    TestType* fnums;
+    HIP_CHECK(hipMalloc((void**)&fnums, totalnums * sizeof(TestType)));
+    float* cvt1_dev;
+    HIP_CHECK(hipMalloc((void**)&cvt1_dev, totalnums * sizeof(TestType)));
+    float* cvt2_dev;
+    HIP_CHECK(hipMalloc((void**)&cvt2_dev, totalnums * sizeof(TestType)));
 
     HIP_CHECK(hipMemcpy(fnums, e5m2_fnuz_nums.data(), totalnums * sizeof(TestType),
                         hipMemcpyHostToDevice));
@@ -1077,11 +1071,11 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness_device", "", float, double) {
     auto fp8_kernel = Type_to_fp8_fnuz_cvt<TestType, false>;
     fp8_kernel<<<totalnums / 256 + 1, 256>>>(fnums, cvt1_dev, cvt2_dev, totalnums);
 
-    float *cvt1_host = (float *)malloc(sizeof(float) * totalnums);
-    float *cvt2_host = (float *)malloc(sizeof(float) * totalnums);
+    float* cvt1_host = (float*)malloc(sizeof(float) * totalnums);
+    float* cvt2_host = (float*)malloc(sizeof(float) * totalnums);
 
-    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float) , hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float) , hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(cvt1_host, cvt1_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(cvt2_host, cvt2_dev, totalnums * sizeof(float), hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipDeviceSynchronize());
 

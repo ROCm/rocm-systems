@@ -143,7 +143,7 @@ static bool hipPerfBufferCopyRectSpeed_test(int p_tests) {
 
     // read speed in GB/s
     double perf = (static_cast<double>(bufSize_ * numIter) * static_cast<double>(1e-09)) /
-        elapsed_secs.count();
+                  elapsed_secs.count();
 
     const char* strSrc = NULL;
     const char* strDst = NULL;

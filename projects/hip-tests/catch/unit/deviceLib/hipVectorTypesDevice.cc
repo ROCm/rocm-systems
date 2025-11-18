@@ -259,7 +259,7 @@ TEST_CASE("Unit_hipVectorTypes_test_on_device") {
   REQUIRE(res == hipSuccess);
 
   passed = passed &&
-      run_CheckSharedVectorTypes<
+           run_CheckSharedVectorTypes<
                char1, char2, char3, char4, uchar1, uchar2, uchar3, uchar4, short1, short2, short3,
                short4, ushort1, ushort2, ushort3, ushort4, int1, int2, int3, int4, uint1, uint2,
                uint3, uint4, long1, long2, long3, long4, ulong1, ulong2, ulong3, ulong4, longlong1,

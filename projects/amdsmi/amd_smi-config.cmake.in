@@ -1,0 +1,27 @@
+# - Config file for the amd_smi package
+# It defines the following variables
+#  AMD_SMI_INCLUDE_DIRS - include directories for amd_smi
+#  AMD_SMI_LIBRARIES    - libraries to link against
+
+# Compute paths
+@PACKAGE_INIT@
+get_filename_component(AMD_SMI_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
+set_and_check(amd_smi_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set_and_check(AMD_SMI_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set_and_check(AMD_SMI_INCLUDE_DIRS "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set_and_check(amd_smi_LIB_DIR "@PACKAGE_CMAKE_INSTALL_LIBDIR@")
+set_and_check(AMD_SMI_LIB_DIR "@PACKAGE_CMAKE_INSTALL_LIBDIR@")
+set_and_check(AMD_SMI_LIB_DIRS "@PACKAGE_CMAKE_INSTALL_LIBDIR@")
+
+# Our library dependencies (contains definitions for IMPORTED targets)
+if(NOT TARGET amd_smi AND NOT amd_smi_BINARY_DIR)
+    include("${AMD_SMI_CMAKE_DIR}/amd_smiTargets.cmake")
+endif()
+
+# These are IMPORTED targets created by AmdSmiTargets.cmake
+# TODO: Need to check if OAM libraries are needed here!
+set(AMD_SMI_LIBRARIES amd_smi)
+set(AMD_SMI_LIBRARY amd_smi)
+
+check_required_components(amd_smi)

@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-examples LANGUAGES C CXX)
 
@@ -78,3 +78,5 @@ add_subdirectory(fork)
 add_subdirectory(videodecode)
 add_subdirectory(jpegdecode)
 add_subdirectory(roctx)
+add_subdirectory(thread-limit)
+add_subdirectory(transferBench)

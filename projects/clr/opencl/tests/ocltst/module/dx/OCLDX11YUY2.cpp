@@ -57,8 +57,7 @@ OCLDX11YUY2::OCLDX11YUY2() : OCLDX11Common() {
 
 OCLDX11YUY2::~OCLDX11YUY2() {}
 
-void OCLDX11YUY2::open(unsigned int test, char *units, double &conversion,
-                       unsigned int deviceId) {
+void OCLDX11YUY2::open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
   dxDX11Texture = 0;
   clImage2DOut = 0;
   _openTest = test;
@@ -113,21 +112,20 @@ void OCLDX11YUY2::run(void) {
   Desc.BindFlags = 0;
   Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE | D3D11_CPU_ACCESS_READ;
 
-  ID3D11Texture2D *pTextureTmp;
+  ID3D11Texture2D* pTextureTmp;
   HRESULT hr = dxD3D11Device->CreateTexture2D(&Desc, NULL, &pTextureTmp);
 
   // fill memory
   D3D11_MAPPED_SUBRESOURCE LockedRectD11;
   if (SUCCEEDED(hr)) {
-    hr =
-        dxD3D11Context->Map(pTextureTmp, 0, D3D11_MAP_WRITE, 0, &LockedRectD11);
+    hr = dxD3D11Context->Map(pTextureTmp, 0, D3D11_MAP_WRITE, 0, &LockedRectD11);
   }
   if (SUCCEEDED(hr)) {
     // fill memory with something
     for (int y = 0; y < OCLDX11YUY2::HEIGHT; y++) {
-      BYTE *pLine = (BYTE *)LockedRectD11.pData + y * LockedRectD11.RowPitch;
+      BYTE* pLine = (BYTE*)LockedRectD11.pData + y * LockedRectD11.RowPitch;
 
-      BYTE *pLineUV = (BYTE *)LockedRectD11.pData + y * LockedRectD11.RowPitch +
+      BYTE* pLineUV = (BYTE*)LockedRectD11.pData + y * LockedRectD11.RowPitch +
                       OCLDX11YUY2::HEIGHT * LockedRectD11.RowPitch;
 
       for (int x = 0; x < OCLDX11YUY2::WIDTH; x++) {
@@ -144,15 +142,12 @@ void OCLDX11YUY2::run(void) {
   Desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
   Desc.Usage = D3D11_USAGE_DEFAULT;
   Desc.CPUAccessFlags = 0;
-  Desc.MiscFlags = (_openTest == 0)
-                       ? 0
-                       : D3D11_RESOURCE_MISC_SHARED;  // MM for fast GPU interop
+  Desc.MiscFlags = (_openTest == 0) ? 0 : D3D11_RESOURCE_MISC_SHARED;  // MM for fast GPU interop
 
   hr = dxD3D11Device->CreateTexture2D(&Desc, NULL, &dxDX11Texture);
 
   if (pTextureTmp != NULL) {
-    dxD3D11Context->CopySubresourceRegion(dxDX11Texture, 0, 0, 0, 0,
-                                          pTextureTmp, 0, NULL);
+    dxD3D11Context->CopySubresourceRegion(dxDX11Texture, 0, 0, 0, 0, pTextureTmp, 0, NULL);
     pTextureTmp->Release();
   }
   testInterop();
@@ -170,18 +165,15 @@ void OCLDX11YUY2::AllocateOpenCLImage() {
   descr.image_width = WIDTH;
   descr.image_height = HEIGHT + HEIGHT / 2;
 
-  clImage2DOut = clCreateImage(context_, CL_MEM_WRITE_ONLY, &format, &descr,
-                               NULL, &status);
+  clImage2DOut = clCreateImage(context_, CL_MEM_WRITE_ONLY, &format, &descr, NULL, &status);
   CHECK_RESULT((status != CL_SUCCESS), "AllocateOpenCLImage() failed");
 }
 
 void OCLDX11YUY2::testInterop() {
   // alloc
   cl_int clStatus = 0;
-  cl_mem clImage2D =
-      clCreateFromD3D11Texture2DKHR(context_, 0, dxDX11Texture, 0, &clStatus);
-  CHECK_RESULT((clStatus != CL_SUCCESS),
-               "clCreateFromD3D11Texture2DKHR() failed");
+  cl_mem clImage2D = clCreateFromD3D11Texture2DKHR(context_, 0, dxDX11Texture, 0, &clStatus);
+  CHECK_RESULT((clStatus != CL_SUCCESS), "clCreateFromD3D11Texture2DKHR() failed");
 
   // bring objects to the queue
   cl_event clEvent = NULL;
@@ -192,10 +184,8 @@ void OCLDX11YUY2::testInterop() {
   CopyOpenCLImage(clImage2D);
   bool ImageReadWorks = CheckCLImage(clImage2D);
   bool bKernelWorks = CheckCLImage(clImage2DOut);
-  CHECK_RESULT_NO_RETURN((ImageReadWorks != true),
-                         "CheckCLImage(clImage2D) failed");
-  CHECK_RESULT_NO_RETURN((bKernelWorks != true),
-                         "CheckCLImage(clImage2DOut) failed");
+  CHECK_RESULT_NO_RETURN((ImageReadWorks != true), "CheckCLImage(clImage2D) failed");
+  CHECK_RESULT_NO_RETURN((bKernelWorks != true), "CheckCLImage(clImage2DOut) failed");
 
   cl_mem planeY = clGetPlaneFromImageAMD(context_, clImage2D, 0, &clStatus);
   CHECK_RESULT((clStatus != CL_SUCCESS),
@@ -214,8 +204,7 @@ void OCLDX11YUY2::testInterop() {
   // release
   clEvent = NULL;
   // release object from the queue
-  clStatus =
-      clEnqueueReleaseD3D11ObjectsKHR(_queue, 1, &clImage2D, 0, NULL, &clEvent);
+  clStatus = clEnqueueReleaseD3D11ObjectsKHR(_queue, 1, &clImage2D, 0, NULL, &clEvent);
   clStatus = clWaitForEvents(1, &clEvent);
   clReleaseEvent(clEvent);
 
@@ -236,27 +225,23 @@ bool OCLDX11YUY2::CheckCLImage(cl_mem clImage) {
   cl_int clStatus = 0;
 
   size_t pitch = 0;
-  clStatus =
-      clGetImageInfo(clImage, CL_IMAGE_ROW_PITCH, sizeof(pitch), &pitch, NULL);
+  clStatus = clGetImageInfo(clImage, CL_IMAGE_ROW_PITCH, sizeof(pitch), &pitch, NULL);
   pitch *= 2;
 
   cl_image_format format;
-  clStatus =
-      clGetImageInfo(clImage, CL_IMAGE_FORMAT, sizeof(format), &format, NULL);
+  clStatus = clGetImageInfo(clImage, CL_IMAGE_FORMAT, sizeof(format), &format, NULL);
 
   size_t height;
-  clStatus =
-      clGetImageInfo(clImage, CL_IMAGE_HEIGHT, sizeof(height), &height, NULL);
+  clStatus = clGetImageInfo(clImage, CL_IMAGE_HEIGHT, sizeof(height), &height, NULL);
 
   CHECK_RESULT_NO_RETURN(height != (HEIGHT + HEIGHT / 2),
                          "CheckCLImage: height!=(HEIGHT+HEIGHT/2)");
 
-  char *pTempBuffer = new char[(HEIGHT + HEIGHT / 2) * pitch];
+  char* pTempBuffer = new char[(HEIGHT + HEIGHT / 2) * pitch];
 
   size_t origin[] = {0, 0, 0};
   size_t region[] = {WIDTH, HEIGHT + HEIGHT / 2, 1};
-  clStatus = clEnqueueReadImage(_queue, clImage, 1, origin, region, pitch, 0,
-                                pTempBuffer, 0, 0, 0);
+  clStatus = clEnqueueReadImage(_queue, clImage, 1, origin, region, pitch, 0, pTempBuffer, 0, 0, 0);
 
   ::clFinish(_queue);
 
@@ -264,8 +249,8 @@ bool OCLDX11YUY2::CheckCLImage(cl_mem clImage) {
 
   bool bBreak = false;
   for (int y = 0; y < HEIGHT && !bBreak; y++) {
-    char *pLine = (char *)pTempBuffer + y * pitch;
-    char *pLineUV = (char *)pTempBuffer + y * pitch + HEIGHT * pitch;
+    char* pLine = (char*)pTempBuffer + y * pitch;
+    char* pLineUV = (char*)pTempBuffer + y * pitch + HEIGHT * pitch;
 
     for (int x = 0; x < WIDTH; x++) {
       if (*pLine != 0x7F)  // Y
@@ -299,26 +284,22 @@ bool OCLDX11YUY2::CheckCLImageY(cl_mem clImage) {
   cl_int clStatus = 0;
 
   size_t pitch = 0;
-  clStatus =
-      clGetImageInfo(clImage, CL_IMAGE_ROW_PITCH, sizeof(pitch), &pitch, NULL);
+  clStatus = clGetImageInfo(clImage, CL_IMAGE_ROW_PITCH, sizeof(pitch), &pitch, NULL);
   pitch *= 2;
 
   cl_image_format format;
-  clStatus =
-      clGetImageInfo(clImage, CL_IMAGE_FORMAT, sizeof(format), &format, NULL);
+  clStatus = clGetImageInfo(clImage, CL_IMAGE_FORMAT, sizeof(format), &format, NULL);
 
   size_t height;
-  clStatus =
-      clGetImageInfo(clImage, CL_IMAGE_HEIGHT, sizeof(height), &height, NULL);
+  clStatus = clGetImageInfo(clImage, CL_IMAGE_HEIGHT, sizeof(height), &height, NULL);
 
   CHECK_RESULT_NO_RETURN(height != HEIGHT, "CheckCLImageY: height!=HEIGHT");
 
-  char *pTempBuffer = new char[HEIGHT * pitch];
+  char* pTempBuffer = new char[HEIGHT * pitch];
 
   size_t origin[] = {0, 0, 0};
   size_t region[] = {WIDTH, HEIGHT, 1};
-  clStatus = clEnqueueReadImage(_queue, clImage, 1, origin, region, pitch, 0,
-                                pTempBuffer, 0, 0, 0);
+  clStatus = clEnqueueReadImage(_queue, clImage, 1, origin, region, pitch, 0, pTempBuffer, 0, 0, 0);
 
   ::clFinish(_queue);
 
@@ -326,7 +307,7 @@ bool OCLDX11YUY2::CheckCLImageY(cl_mem clImage) {
 
   bool bBreak = false;
   for (int y = 0; y < HEIGHT && !bBreak; y++) {
-    char *pLine = (char *)pTempBuffer + y * pitch;
+    char* pLine = (char*)pTempBuffer + y * pitch;
     for (int x = 0; x < WIDTH; x++) {
       if (*pLine != 0x7F)  // Y
       {
@@ -346,36 +327,30 @@ bool OCLDX11YUY2::CheckCLImageUV(cl_mem clImage) {
   cl_int clStatus = 0;
 
   size_t pitch = 0;
-  clStatus =
-      clGetImageInfo(clImage, CL_IMAGE_ROW_PITCH, sizeof(pitch), &pitch, NULL);
+  clStatus = clGetImageInfo(clImage, CL_IMAGE_ROW_PITCH, sizeof(pitch), &pitch, NULL);
   pitch *= 2;
   size_t width = 0;
-  clStatus =
-      clGetImageInfo(clImage, CL_IMAGE_WIDTH, sizeof(width), &width, NULL);
+  clStatus = clGetImageInfo(clImage, CL_IMAGE_WIDTH, sizeof(width), &width, NULL);
 
   cl_image_format format;
-  clStatus =
-      clGetImageInfo(clImage, CL_IMAGE_FORMAT, sizeof(format), &format, NULL);
+  clStatus = clGetImageInfo(clImage, CL_IMAGE_FORMAT, sizeof(format), &format, NULL);
 
   size_t height;
-  clStatus =
-      clGetImageInfo(clImage, CL_IMAGE_HEIGHT, sizeof(height), &height, NULL);
+  clStatus = clGetImageInfo(clImage, CL_IMAGE_HEIGHT, sizeof(height), &height, NULL);
 
-  CHECK_RESULT_NO_RETURN(height != HEIGHT / 2,
-                         "CheckCLImageUV: height!=HEIGHT/2");
+  CHECK_RESULT_NO_RETURN(height != HEIGHT / 2, "CheckCLImageUV: height!=HEIGHT/2");
 
-  char *pTempBuffer = new char[(HEIGHT / 2) * pitch];
+  char* pTempBuffer = new char[(HEIGHT / 2) * pitch];
 
   size_t origin[] = {0, 0, 0};
   size_t region[] = {WIDTH / 2, HEIGHT / 2, 1};
-  clStatus = clEnqueueReadImage(_queue, clImage, 1, origin, region, pitch, 0,
-                                pTempBuffer, 0, 0, 0);
+  clStatus = clEnqueueReadImage(_queue, clImage, 1, origin, region, pitch, 0, pTempBuffer, 0, 0, 0);
 
   ::clFinish(_queue);
 
   bool bBreak = false;
   for (int y = 0; y < HEIGHT / 2 && !bBreak; y++) {
-    char *pLineUV = (char *)pTempBuffer + y * pitch;
+    char* pLineUV = (char*)pTempBuffer + y * pitch;
     for (int x = 0; x < WIDTH / 2; x++) {
       if (*pLineUV != 0x1F)  // U
       {
@@ -418,10 +393,8 @@ void OCLDX11YUY2::CopyOpenCLImage(cl_mem clImageSrc) {
 
   // status =
   // clEnqueueNDRangeKernel(_queue,kernel_,2,NULL,globalThreads,localThreads,0,NULL,0);
-  status = clEnqueueNDRangeKernel(_queue, kernel_, 2, NULL, globalThreads, NULL,
-                                  0, NULL, 0);
-  CHECK_RESULT((status != CL_SUCCESS),
-               "CopyOpenCLImage() failed at clEnqueueNDRangeKernel");
+  status = clEnqueueNDRangeKernel(_queue, kernel_, 2, NULL, globalThreads, NULL, 0, NULL, 0);
+  CHECK_RESULT((status != CL_SUCCESS), "CopyOpenCLImage() failed at clEnqueueNDRangeKernel");
 
   status = clFinish(_queue);
   CHECK_RESULT((status != CL_SUCCESS), "CopyOpenCLImage() failed at clFinish");
@@ -431,26 +404,22 @@ void OCLDX11YUY2::CompileKernel() {
   cl_int status = 0;
 
   size_t kernelSize = sizeof(strKernel);
-  const char *strs = (const char *)&strKernel[0];
+  const char* strs = (const char*)&strKernel[0];
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strs,
-                                                 &kernelSize, &status);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strs, &kernelSize, &status);
 
-  status = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL,
-                                    NULL, NULL);
+  status = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL, NULL, NULL);
   if (status != CL_SUCCESS) {
     if (status == CL_BUILD_PROGRAM_FAILURE) {
       cl_int logStatus;
       size_t buildLogSize = 0;
-      logStatus = clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                        CL_PROGRAM_BUILD_LOG, buildLogSize,
-                                        NULL, &buildLogSize);
+      logStatus = clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG,
+                                        buildLogSize, NULL, &buildLogSize);
       std::string buildLog;
       buildLog.resize(buildLogSize);
 
-      logStatus = clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                        CL_PROGRAM_BUILD_LOG, buildLogSize,
-                                        &buildLog[0], NULL);
+      logStatus = clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG,
+                                        buildLogSize, &buildLog[0], NULL);
       printf("%s", buildLog.c_str());
     }
     return;
@@ -459,9 +428,8 @@ void OCLDX11YUY2::CompileKernel() {
   kernel_ = _wrapper->clCreateKernel(program_, "image2imageCopy", &status);
 
   size_t kernel2DWorkGroupSize = 0;
-  status = clGetKernelWorkGroupInfo(kernel_, devices_[_deviceId],
-                                    CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t),
-                                    &kernel2DWorkGroupSize, 0);
+  status = clGetKernelWorkGroupInfo(kernel_, devices_[_deviceId], CL_KERNEL_WORK_GROUP_SIZE,
+                                    sizeof(size_t), &kernel2DWorkGroupSize, 0);
 
   if ((blockSizeX * blockSizeY) > kernel2DWorkGroupSize) {
     if (blockSizeX > kernel2DWorkGroupSize) {
@@ -473,6 +441,6 @@ void OCLDX11YUY2::CompileKernel() {
 
 bool OCLDX11YUY2::formatSupported() {
   UINT supported = 0u;
-  dxD3D11Device->CheckFormatSupport(dxFormat, (UINT *)&supported);
+  dxD3D11Device->CheckFormatSupport(dxFormat, (UINT*)&supported);
   return supported & D3D11_FORMAT_SUPPORT_TEXTURE2D;
 }

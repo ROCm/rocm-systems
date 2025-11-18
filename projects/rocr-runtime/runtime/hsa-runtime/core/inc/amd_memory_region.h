@@ -105,7 +105,8 @@ class MemoryRegion : public core::MemoryRegion {
   hsa_status_t Migrate(uint32_t flag, const void* ptr) const;
 
   hsa_status_t Lock(uint32_t num_agents, const hsa_agent_t* agents,
-                    void* host_ptr, size_t size, void** agent_ptr) const;
+                    void* host_ptr, size_t size, uint32_t flags,
+                                                      void** agent_ptr) const;
 
   hsa_status_t Unlock(void* host_ptr) const;
 

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2023-25 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -58,7 +58,7 @@ static __global__ void square_kernel(int* Buff) {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
   size_t granularity = 0;
@@ -68,7 +68,17 @@ TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -95,7 +105,7 @@ TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
   size_t granularity = 0;
@@ -107,7 +117,17 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -118,7 +138,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
   // Set access
@@ -134,8 +154,8 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
   for (size_t idx = 0; idx < N; idx++) {
     A_h[idx] = idx;
   }
-  HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
@@ -154,7 +174,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
   size_t granularity = 0;
@@ -166,7 +186,17 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -177,7 +207,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
   HIP_CHECK(hipMemRelease(handle));
@@ -194,8 +224,8 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
   for (size_t idx = 0; idx < N; idx++) {
     A_h[idx] = idx;
   }
-  HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
@@ -213,7 +243,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
   size_t granularity = 0;
@@ -225,7 +255,17 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -236,7 +276,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
   HIP_CHECK(hipMemRelease(handle));
@@ -253,11 +293,11 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
     A_h[idx] = idx;
     C_h[idx] = idx * idx;
   }
-  HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
   // Invoke kernel
   hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
                      reinterpret_cast<int*>(ptrA));
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
@@ -276,7 +316,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
   size_t granularity = 0;
@@ -289,7 +329,17 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -302,12 +352,12 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
     HIP_CHECK(hipMemCreate(&handle[count], size_mem, &prop, 0));
   }
   // Allocate virtual address range for all the memory chunks
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, (numOfBuffers * size_mem), 0, 0, 0));
   for (int idx = 0; idx < numOfBuffers; idx++) {
     unsigned long long uiptr = reinterpret_cast<unsigned long long>(ptrA);
     uiptr = uiptr + idx * size_mem;
-    HIP_CHECK(hipMemMap(reinterpret_cast<hipDeviceptr_t>(uiptr), size_mem, 0, handle[idx], 0));
+    HIP_CHECK(hipMemMap(reinterpret_cast<void*>(uiptr), size_mem, 0, handle[idx], 0));
     HIP_CHECK(hipMemRelease(handle[idx]));
   }
   hipMemAccessDesc accessDesc = {};
@@ -323,18 +373,20 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
     A_h[idx] = idx;
     C_h[idx] = idx * idx;
   }
-  HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), numOfBuffers * buffer_size));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(),
+                          numOfBuffers * buffer_size));
   // Launch square kernel
   hipLaunchKernelGGL(square_kernel, dim3((N * numOfBuffers) / THREADS_PER_BLOCK),
                      dim3(THREADS_PER_BLOCK), 0, 0, reinterpret_cast<int*>(ptrA));
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, numOfBuffers * buffer_size));
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA),
+                         numOfBuffers * buffer_size));
   HIP_CHECK(hipDeviceSynchronize());
   // Validate Results
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
   for (int idx = 0; idx < numOfBuffers; idx++) {
     unsigned long long uiptr = reinterpret_cast<unsigned long long>(ptrA);
     uiptr = uiptr + idx * size_mem;
-    HIP_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(uiptr), size_mem));
+    HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(uiptr), size_mem));
   }
   HIP_CHECK(hipMemAddressFree(ptrA, (numOfBuffers * size_mem)));
   CTX_DESTROY();
@@ -350,7 +402,7 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
  *    - unit/virtualMemoryManagement/hipMemCreate.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.1
+ *    - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   size_t granularity = 0;
@@ -363,7 +415,17 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
+
+  SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
+    prop.type = hipMemAllocationTypePinned;
+  }
+
+  #if HT_AMD
+  SECTION("Memory Allocation Type as hipMemAllocationTypeUncached") {
+    prop.type = hipMemAllocationTypeUncached;
+  }
+  #endif
+
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;  // Current Devices
   HIP_CHECK(
@@ -374,7 +436,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
   // Set access
@@ -385,8 +447,8 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   // Make the address accessible to GPU 0
   HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
   std::vector<int> A_h(N);
-  HIP_CHECK(hipMemset(reinterpret_cast<void*>(ptrA), init_val, buffer_size));
-  HIP_CHECK(hipMemcpyDtoH(A_h.data(), ptrA, buffer_size));
+  HIP_CHECK(hipMemset(ptrA, init_val, buffer_size));
+  HIP_CHECK(hipMemcpyDtoH(A_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
   for (int idx = 0; idx < N; idx++) {
     REQUIRE(A_h[idx] == init_val);
   }
@@ -460,7 +522,38 @@ TEST_CASE("Unit_hipMemCreate_Negative") {
   CTX_DESTROY();
 }
 
+TEST_CASE("Unit_hipMemCreate_Capture") {
+  CTX_CREATE();
+
+  hipMemGenericAllocationHandle_t allocation_handle;
+  size_t allocation_granularity = 0;
+  constexpr int kDeviceId = 0;
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+
+  hipMemAllocationProp allocation_prop{};
+  allocation_prop.type = hipMemAllocationTypePinned;
+  allocation_prop.location.type = hipMemLocationTypeDevice;
+  allocation_prop.location.id = device;
+
+  HIP_CHECK(hipMemGetAllocationGranularity(&allocation_granularity, &allocation_prop,
+                                           hipMemAllocationGranularityMinimum));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemCreate(&allocation_handle, allocation_granularity, &allocation_prop, 0));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemRelease(allocation_handle));
+  CTX_DESTROY();
+}
+
+
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

@@ -9,6 +9,7 @@ set(common_sources
     environment.cpp
     logging.cpp
     md5sum.cpp
+    regex.cpp
     sha256.cpp
     simple_timer.cpp
     static_object.cpp
@@ -27,6 +28,7 @@ set(common_headers
     logging.hpp
     md5sum.hpp
     mpl.hpp
+    regex.hpp
     scope_destructor.hpp
     sha256.hpp
     simple_timer.hpp

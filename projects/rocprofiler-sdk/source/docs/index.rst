@@ -15,8 +15,13 @@ The ROCprofiler-SDK library provides runtime-independent APIs for tracing runtim
 In summary, ROCprofiler-SDK combines `ROCProfiler <https://rocm.docs.amd.com/projects/rocprofiler/en/latest/index.html>`_ and `ROCTracer <https://rocm.docs.amd.com/projects/roctracer/en/latest/index.html>`_.
 You can utilize the ROCprofiler-SDK to develop a tool for profiling and tracing HIP applications on ROCm software.
 
-The code is open and hosted at `<https://github.com/ROCm/rocprofiler-sdk>`_.
+The code is open source and hosted at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk>`_.
 
+.. note::
+  
+  The ROCprofiler-SDK repository for ROCm 7.0 and earlier is located at `<https://github.com/ROCm/rocprofiler-sdk>`_.
+
+ROCprofiler-SDK uses a companion library called `AQLprofile <https://rocm.docs.amd.com/projects/aqlprofile/en/latest/index.html>`__ that generates profiling command packets (AQL/PM4) for performance counters and SQ thread trace. See the `AQLprofile docs <https://rocm.docs.amd.com/projects/aqlprofile/en/latest/index.html>`__ for more info.
 
 The documentation is structured as follows:
 
@@ -27,11 +32,16 @@ The documentation is structured as follows:
 
     * :ref:`installing-rocprofiler-sdk`
 
+  .. grid-item-card:: Quick Reference
+
+    * :ref:`quick-guide`
+
   .. grid-item-card:: How to
 
     * :doc:`Samples <how-to/samples>`
     * :ref:`using-rocprofv3`
     * :ref:`using-rocprofv3-avail`
+    * :ref:`rocprofv3_process_attachment`
     * :ref:`using-rocpd-output-format`
     * :ref:`using-rocprofiler-sdk-roctx`
     * :ref:`using-rocprofv3-with-mpi`
@@ -43,6 +53,7 @@ The documentation is structured as follows:
 
     * :doc:`Tool library <api-reference/tool_library>`
     * :ref:`runtime-intercept-tables`
+    * :doc:`Process attachment <api-reference/process_attachment>`
     * :doc:`Buffered services <api-reference/buffered_services>`
     * :doc:`Callback services <api-reference/callback_services>`
     * :doc:`Counter collection services <api-reference/counter_collection_services>`

@@ -69,8 +69,8 @@ class GpuMemoryReference : public amd::ReferenceCountedObject {
   void* cpuAddress_;         //!< CPU address of this memory
   const Device& device_;     //!< GPU device
   //! @note: This field is necessary for the thread safe release only
-  VirtualGPU* gpu_;  //!< Resource will be used only on this queue
-  bool va_range_ = false; //!< Resource is a VA range(@note: PAL doesn't provide this info)
+  VirtualGPU* gpu_;        //!< Resource will be used only on this queue
+  bool va_range_ = false;  //!< Resource is a VA range(@note: PAL doesn't provide this info)
 
  protected:
   //! Default destructor
@@ -106,8 +106,8 @@ class Resource : public amd::HeapObject {
     const Resource* svmBase_;  //!< SVM base for MGPU allocations
     bool interprocess_;        //!< Ressource can be used in the interprocess communication
     size_t alignment_;         //!< allocation address alignment
-    CreateParams() : owner_(nullptr), gpu_(nullptr), svmBase_(nullptr), interprocess_(false),
-                     alignment_(0) {}
+    CreateParams()
+        : owner_(nullptr), gpu_(nullptr), svmBase_(nullptr), interprocess_(false), alignment_(0) {}
   };
 
   struct PinnedParams : public CreateParams {
@@ -162,28 +162,28 @@ class Resource : public amd::HeapObject {
 
   //! Resource memory
   enum MemoryType {
-    Empty = 0x0,       //!< resource is empty
-    Local,             //!< resource in local memory
-    Persistent,        //!< resource in persistent memory
-    Remote,            //!< resource in nonlocal memory
-    RemoteUSWC,        //!< resource in nonlocal memory
-    Pinned,            //!< resource in pinned system memory
-    View,              //!< resource is an alias
-    OGLInterop,        //!< resource is an OGL memory object
-    D3D10Interop,      //!< resource is a D3D10 memory object
-    D3D11Interop,      //!< resource is a D3D11 memory object
-    ImageView,         //!< resource is a view to some image
-    ImageBuffer,       //!< resource is an image view of a buffer
-    BusAddressable,    //!< resource is a bus addressable memory
-    ExternalPhysical,  //!< resource is an external physical memory
-    D3D9Interop,       //!< resource is a D3D9 memory object
-    Scratch,           //!< resource is scratch memory
-    Shader,            //!< resource is a shader
-    P2PAccess,         //!< resource is a shared resource for P2P access
-    VkInterop,         //!< resource is a Vulkan memory object
-    VaRange,           //!< reousrce is a virtual address range
-    IpcMemory,         //!< reousrce is a IPC memory object
-    ImageExternalBuffer //!< resource is an image view of an external buffer
+    Empty = 0x0,         //!< resource is empty
+    Local,               //!< resource in local memory
+    Persistent,          //!< resource in persistent memory
+    Remote,              //!< resource in nonlocal memory
+    RemoteUSWC,          //!< resource in nonlocal memory
+    Pinned,              //!< resource in pinned system memory
+    View,                //!< resource is an alias
+    OGLInterop,          //!< resource is an OGL memory object
+    D3D10Interop,        //!< resource is a D3D10 memory object
+    D3D11Interop,        //!< resource is a D3D11 memory object
+    ImageView,           //!< resource is a view to some image
+    ImageBuffer,         //!< resource is an image view of a buffer
+    BusAddressable,      //!< resource is a bus addressable memory
+    ExternalPhysical,    //!< resource is an external physical memory
+    D3D9Interop,         //!< resource is a D3D9 memory object
+    Scratch,             //!< resource is scratch memory
+    Shader,              //!< resource is a shader
+    P2PAccess,           //!< resource is a shared resource for P2P access
+    VkInterop,           //!< resource is a Vulkan memory object
+    VaRange,             //!< reousrce is a virtual address range
+    IpcMemory,           //!< reousrce is a IPC memory object
+    ImageExternalBuffer  //!< resource is an image view of an external buffer
   };
 
   //! Resource map flags
@@ -209,18 +209,18 @@ class Resource : public amd::HeapObject {
     cl_mem_object_type topology_;  //!< CL mem object type
     union {
       struct {
-        uint dimSize_ : 2;         //!< Dimension size
-        uint cardMemory_ : 1;      //!< PAL resource is in video memory
-        uint imageArray_ : 1;      //!< PAL resource is an array of images
-        uint buffer_ : 1;          //!< PAL resource is a buffer
-        uint tiled_ : 1;           //!< PAL resource is tiled
-        uint SVMRes_ : 1;          //!< SVM flag to the pal resource
-        uint scratch_ : 1;         //!< Scratch buffer
-        uint isAllocExecute_ : 1;  //!< SVM resource allocation attribute for shader\cmdbuf
-        uint isDoppTexture_ : 1;   //!< PAL resource is for a DOPP desktop texture
-        uint gl2CacheDisabled_ : 1;//!< PAL resource is allocated with GPU L2 cache disabled.
-        uint reserved_va_ : 1;     //!< PAL resource was allocated for a reserved VA
-        uint interprocess_ : 1;    //!< PAL resource can be shared between processes
+        uint dimSize_ : 2;           //!< Dimension size
+        uint cardMemory_ : 1;        //!< PAL resource is in video memory
+        uint imageArray_ : 1;        //!< PAL resource is an array of images
+        uint buffer_ : 1;            //!< PAL resource is a buffer
+        uint tiled_ : 1;             //!< PAL resource is tiled
+        uint SVMRes_ : 1;            //!< SVM flag to the pal resource
+        uint scratch_ : 1;           //!< Scratch buffer
+        uint isAllocExecute_ : 1;    //!< SVM resource allocation attribute for shader\cmdbuf
+        uint isDoppTexture_ : 1;     //!< PAL resource is for a DOPP desktop texture
+        uint gl2CacheDisabled_ : 1;  //!< PAL resource is allocated with GPU L2 cache disabled.
+        uint reserved_va_ : 1;       //!< PAL resource was allocated for a reserved VA
+        uint interprocess_ : 1;      //!< PAL resource can be shared between processes
       };
       uint state_;
     };
@@ -248,9 +248,9 @@ class Resource : public amd::HeapObject {
    *
    *  \return True if we succesfully created a PAL resource
    */
-  virtual bool create(MemoryType memType,       //!< memory type
-                      CreateParams* params = 0, //!< special parameters for resource allocation
-                      bool forceLinear = false  //!< Forces linear tiling for images
+  virtual bool create(MemoryType memType,        //!< memory type
+                      CreateParams* params = 0,  //!< special parameters for resource allocation
+                      bool forceLinear = false   //!< Forces linear tiling for images
   );
 
   /*! \brief Copies a subregion of memory from one resource to another
@@ -269,7 +269,7 @@ class Resource : public amd::HeapObject {
                         bool enableRectCopy = false,    //!< Rectangular DMA support
                         bool flushDMA = false,          //!< Flush DMA if requested
                         uint bytesPerElement = 1        //!< Bytes Per Element
-                        ) const;
+  ) const;
 
   /*! \brief Copies size/4 DWORD of memory to a surface
    *
@@ -282,7 +282,7 @@ class Resource : public amd::HeapObject {
                     size_t size,       //!< Size in bytes of data to be copied(multiple of DWORDS)
                     const void* data,  //!< Data to be copied
                     bool waitForEvent  //!< Wait for event complete
-                    ) const;
+  ) const;
 
   //! Returns the offset in GPU memory for aliases
   size_t offset() const { return offset_; }
@@ -332,12 +332,12 @@ class Resource : public amd::HeapObject {
   //! Marks the resource as busy
   void setBusy(VirtualGPU& gpu,   //!< Virtual GPU device object
                GpuEvent calEvent  //!< PAL event
-               ) const;
+  ) const;
 
   //! Wait for the resource
   void wait(VirtualGPU& gpu,               //!< Virtual GPU device object
             bool waitOnBusyEngine = false  //!< Wait only if engine has changed
-            ) const;
+  ) const;
 
   //! Performs host write to the resource GPU memory
   bool hostWrite(VirtualGPU* gpu,             //!< Virtual GPU device object
@@ -375,8 +375,7 @@ class Resource : public amd::HeapObject {
   bool isMemoryType(MemoryType memType) const;
 
   //! Returns TRUE if resource was allocated as CPU accessible and cacheable
-  bool isCacheable() const { return (isMemoryType(Remote) ||
-                                     isMemoryType(Pinned)) ? true : false; }
+  bool isCacheable() const { return (isMemoryType(Remote) || isMemoryType(Pinned)) ? true : false; }
 
   //! Returns TRUE if resource was allocated as CPU visible device memory
   bool IsPersistent() const { return isMemoryType(Persistent) ? true : false; }
@@ -425,7 +424,7 @@ class Resource : public amd::HeapObject {
       memRef_ = viewOwner_->memRef_;
       memRef_->retain();
       desc_.width_ = amd::alignUp(size, Pal::Formats::BytesPerPixel(Pal::ChNumFormat::X32_Uint)) /
-          Pal::Formats::BytesPerPixel(Pal::ChNumFormat::X32_Uint);
+                     Pal::Formats::BytesPerPixel(Pal::ChNumFormat::X32_Uint);
       setBusy(*memRef()->gpu_, GpuEvent::InvalidID);
     }
   }
@@ -440,22 +439,22 @@ class Resource : public amd::HeapObject {
    *
    *  \return True if we succesfully created a PAL P2P resource
    */
-  bool CreateP2PAccess(CreateParams* params //!< special parameters for resource allocation
-                      );
+  bool CreateP2PAccess(CreateParams* params  //!< special parameters for resource allocation
+  );
 
  protected:
-    /*! \brief Creates a PAL memory object, from IPC handle
+  /*! \brief Creates a PAL memory object, from IPC handle
    *
    *  \return True if we succesfully created a PAL resource
    */
   bool CreateIpc(CreateParams* params);
 
-   /*! \brief Creates a PAL iamge object, associated with the resource
+  /*! \brief Creates a PAL iamge object, associated with the resource
    *
    *  \return True if we succesfully created a PAL resource
    */
-  bool CreateImage(CreateParams* params,  //!< special parameters for resource allocation
-                   bool          forceLinear = false  //!< forces linear tiling for images
+  bool CreateImage(CreateParams* params,     //!< special parameters for resource allocation
+                   bool forceLinear = false  //!< forces linear tiling for images
   );
 
   /*! \brief Creates a PAL interop object, associated with the resource
@@ -495,11 +494,11 @@ class Resource : public amd::HeapObject {
   void* gpuMemoryMap(size_t* pitch,             //!< Pitch value for the image
                      uint flags,                //!< Map flags
                      Pal::IGpuMemory* resource  //!< PAL memory object
-                     ) const;
+  ) const;
 
   //! Uses PAL to unmap a resource
   void gpuMemoryUnmap(Pal::IGpuMemory* resource  //!< PAL memory object
-                      ) const;
+  ) const;
 
   //! Fress all PAL resources associated with OCL resource
   void palFree() const;
@@ -593,7 +592,7 @@ class ResourceCache : public amd::HeapObject {
         mem_sub_alloc_local_(device),
         mem_sub_alloc_coarse_(device),
         mem_sub_alloc_fine_(device),
-        mem_sub_alloc_fine_uncached_(device){}
+        mem_sub_alloc_fine_uncached_(device) {}
 
   //! Default destructor
   ~ResourceCache();
@@ -636,18 +635,19 @@ class ResourceCache : public amd::HeapObject {
 
   amd::Monitor lockCacheOps_;  //!< Lock to serialise cache access
 
-  size_t cacheSize_;            //!< Current cache size in bytes
-  size_t lclCacheSize_;         //!< Local memory stored in the cache
-  size_t persistentCacheSize_;  //!< Persistent memory stored in the cache
-  const size_t cacheSizeLimit_; //!< Cache size limit in bytes
+  size_t cacheSize_;             //!< Current cache size in bytes
+  size_t lclCacheSize_;          //!< Local memory stored in the cache
+  size_t persistentCacheSize_;   //!< Persistent memory stored in the cache
+  const size_t cacheSizeLimit_;  //!< Cache size limit in bytes
 
   //! PAL resource cache
   std::list<std::pair<Resource::Descriptor*, GpuMemoryReference*> > resCache_;
 
-  MemorySubAllocator mem_sub_alloc_local_;                     //!< Allocator for suballocations in Local
-  CoarseMemorySubAllocator mem_sub_alloc_coarse_;              //!< Allocator for suballocations in Coarse SVM
-  FineMemorySubAllocator mem_sub_alloc_fine_;                  //!< Allocator for suballocations in Fine SVM
-  FineUncachedMemorySubAllocator mem_sub_alloc_fine_uncached_; //!< Allocator for suballocations in Fine uncached SVM
+  MemorySubAllocator mem_sub_alloc_local_;         //!< Allocator for suballocations in Local
+  CoarseMemorySubAllocator mem_sub_alloc_coarse_;  //!< Allocator for suballocations in Coarse SVM
+  FineMemorySubAllocator mem_sub_alloc_fine_;      //!< Allocator for suballocations in Fine SVM
+  FineUncachedMemorySubAllocator
+      mem_sub_alloc_fine_uncached_;  //!< Allocator for suballocations in Fine uncached SVM
 };
 
 /*@}*/  // namespace amd::pal

@@ -21,7 +21,7 @@
 #
 ################################################################################
 
-cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 # This example requires hip and rocjpeg.
 find_package(HIP QUIET)

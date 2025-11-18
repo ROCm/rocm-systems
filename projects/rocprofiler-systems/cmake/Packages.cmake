@@ -56,6 +56,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
 rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
                                           "Use SQLite3 for rocpd data storage"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-json
+                                          "Use nlohmann/json for json data handling"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
                                           "Provides timemory libraries"
 )
@@ -169,11 +172,7 @@ if(ROCPROFSYS_USE_ROCM)
             HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
             PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
         )
-        if(SPACK_BUILD)
-            find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-        else()
-            find_package(ROCmVersion REQUIRED HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-        endif()
+        find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
     endif()
 
     if(NOT ROCmVersion_FOUND)
@@ -193,7 +192,7 @@ if(ROCPROFSYS_USE_ROCM)
         list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
     endif()
 
-    set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_FULL_VERSION})
+    set(ROCPROFSYS_ROCM_VERSION_FULL ${ROCmVersion_FULL_VERSION})
     set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
     set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
     set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
@@ -216,6 +215,7 @@ endif()
 # ----------------------------------------------------------------------------------------#
 
 if(ROCPROFSYS_USE_ROCM)
+    # ROCProfiler SDK
     find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
     rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm
                                                    INTERFACE ROCPROFSYS_USE_ROCM
@@ -225,8 +225,140 @@ if(ROCPROFSYS_USE_ROCM)
         INTERFACE rocprofiler-sdk::rocprofiler-sdk
     )
 
-    find_package(amd-smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd-smi::amd-smi)
+    # AMD SMI
+    find_package(
+        amd_smi
+        ${rocprofiler_systems_FIND_QUIETLY}
+        HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        REQUIRED
+    )
+
+    # amd_smi in ROCm 6.4 requires both drm and drm_amdgpu libraries to be explicitly linked.
+    # This is no longer the case in ROCm 7.0.
+    if(ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6 AND ROCPROFSYS_ROCM_VERSION_MINOR EQUAL 4)
+        # Find drm library
+        find_library(
+            drm_LIBRARY
+            NAMES drm
+            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES lib lib64
+            REQUIRED
+        )
+        # Find drm_amdgpu library
+        find_library(
+            drm_amdgpu_LIBRARY
+            NAMES drm_amdgpu
+            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES lib lib64
+            REQUIRED
+        )
+
+        get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
+        get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
+
+        set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
+        list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
+
+        target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
+    endif()
+
+    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# ROCpd
+#
+# ----------------------------------------------------------------------------------------#
+
+function(ROCPROFSYS_CONFIGURE_ROCPD_SCHEMA_FILES)
+    rocprofiler_systems_target_compile_definitions(
+        rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=0
+    )
+
+    set(SCHEMA_FILES
+        "rocpd_tables.sql"
+        "rocpd_views.sql"
+        "data_views.sql"
+        "marker_views.sql"
+        "summary_views.sql"
+    )
+
+    set(SCHEMA_SOURCE_DIR
+        "${PROJECT_SOURCE_DIR}/source/lib/core/rocpd/data_storage/schema"
+    )
+    set(SCHEMA_BINARY_DIR
+        "${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage/schema"
+    )
+    set(TEMPLATE_FILE "${PROJECT_SOURCE_DIR}/cmake/Templates/rocpd_schema.in")
+
+    file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR})
+
+    foreach(SCHEMA_FILE ${SCHEMA_FILES})
+        file(READ "${SCHEMA_SOURCE_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
+
+        string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
+        string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")
+        string(REPLACE "\n" "\\n\"\n\"" SQL_CONTENT "${SQL_CONTENT}")
+
+        get_filename_component(SCHEMA_NAME ${SCHEMA_FILE} NAME_WE)
+        string(TOUPPER ${SCHEMA_NAME} SCHEMA_NAME_UPPER)
+
+        configure_file("${TEMPLATE_FILE}" "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp" @ONLY)
+    endforeach()
+
+    target_include_directories(
+        rocprofiler-systems-headers
+        INTERFACE
+            $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage>
+    )
+endfunction()
+
+set(ROCPROFSYS_USE_ROCPD_LIBRARY OFF CACHE BOOL "Use rocpd library" FORCE)
+find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
+
+if(rocprofiler-sdk-rocpd_FOUND)
+    set(ROCPROFSYS_ROCPD_HAS_SQL_H FALSE)
+
+    if(rocprofiler-sdk-rocpd_INCLUDE_DIR)
+        set(_INCLUDE_PATH "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd")
+        message(STATUS "${_INCLUDE_PATH}/sql.h")
+        if(EXISTS "${_INCLUDE_PATH}/sql.h")
+            set(ROCPROFSYS_ROCPD_HAS_SQL_H TRUE)
+        endif()
+    endif()
+
+    if(ROCPROFSYS_ROCPD_HAS_SQL_H)
+        set(ROCPROFSYS_USE_ROCPD_LIBRARY ON CACHE BOOL "Use rocpd library" FORCE)
+
+        rocprofiler_systems_target_compile_definitions(
+            rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=1
+        )
+
+        target_link_libraries(
+            rocprofiler-systems-rocm
+            INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
+        )
+
+        message(
+            STATUS
+            "rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
+        )
+    else()
+        message(
+            STATUS
+            "rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
+        )
+    endif()
+else()
+    message(STATUS "rocprofiler-sdk-rocpd not found - using local schema files")
+endif()
+
+if(NOT ROCPROFSYS_USE_ROCPD_LIBRARY)
+    rocprofsys_configure_rocpd_schema_files()
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -545,6 +677,14 @@ include(SQLite3)
 
 # ----------------------------------------------------------------------------------------#
 #
+# NlohmannJson
+#
+# ----------------------------------------------------------------------------------------#
+
+include(NlohmannJson)
+
+# ----------------------------------------------------------------------------------------#
+#
 # ELFIO
 #
 # ----------------------------------------------------------------------------------------#
@@ -630,12 +770,7 @@ set(TIMEMORY_QUIET_CONFIG ON CACHE BOOL "Make timemory configuration quieter")
 # timemory feature settings
 set(TIMEMORY_USE_GOTCHA ON CACHE BOOL "Enable GOTCHA support in timemory")
 set(TIMEMORY_USE_PERFETTO OFF CACHE BOOL "Disable perfetto support in timemory")
-set(TIMEMORY_USE_OMPT
-    ${ROCPROFSYS_USE_OMPT}
-    CACHE BOOL
-    "Enable OMPT support in timemory"
-    FORCE
-)
+set(TIMEMORY_USE_OMPT OFF CACHE BOOL "Enable OMPT support in timemory" FORCE)
 set(TIMEMORY_USE_PAPI
     ${ROCPROFSYS_USE_PAPI}
     CACHE BOOL

@@ -33,8 +33,7 @@ unsuccessful execution of hipMemcpy2DToArray api when parameters are invalid
 #include <resource_guards.hh>
 #include <utils.hh>
 
-
-TEST_CASE("Unit_hipMemcpy2DToArray_Positive_Default") {
+TEST_CASE("Unit_hipMemcpy2DToArray_Positive_Default", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -127,9 +126,9 @@ TEST_CASE("Unit_hipMemcpy2DToArray_Positive_ZeroWidthHeight") {
           width, height);
     }
     SECTION("Width is 0") {
-      Memcpy2DToArrayZeroWidthHeight<false>(std::bind(hipMemcpy2DToArray, _1, 0, 0, _2,
-                                                      _3, 0, height, hipMemcpyHostToDevice),
-                                            width, height);
+      Memcpy2DToArrayZeroWidthHeight<false>(
+          std::bind(hipMemcpy2DToArray, _1, 0, 0, _2, _3, 0, height, hipMemcpyHostToDevice), width,
+          height);
     }
   }
   SECTION("Array to device") {
@@ -140,9 +139,9 @@ TEST_CASE("Unit_hipMemcpy2DToArray_Positive_ZeroWidthHeight") {
           width, height);
     }
     SECTION("Width is 0") {
-      Memcpy2DToArrayZeroWidthHeight<false>(std::bind(hipMemcpy2DToArray, _1, 0, 0, _2,
-                                                      _3, 0, height, hipMemcpyDeviceToDevice),
-                                            width, height);
+      Memcpy2DToArrayZeroWidthHeight<false>(
+          std::bind(hipMemcpy2DToArray, _1, 0, 0, _2, _3, 0, height, hipMemcpyDeviceToDevice),
+          width, height);
     }
   }
 }

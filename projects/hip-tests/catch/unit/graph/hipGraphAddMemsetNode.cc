@@ -132,9 +132,8 @@ TEST_CASE("Unit_hipGraphAddMemsetNode_Negative_Parameters") {
 TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocPitch_2D") {
   CHECK_IMAGE_SUPPORT
 
-  size_t width = SIZE * sizeof(char), numW{SIZE},
-         numH{SIZE}, pitch_A;
-  char *A_d;
+  size_t width = SIZE * sizeof(char), numW{SIZE}, numH{SIZE}, pitch_A;
+  char* A_d;
 
   hipGraph_t graph;
   std::vector<hipGraphNode_t> nodeDependencies;
@@ -532,6 +531,6 @@ TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocManaged") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

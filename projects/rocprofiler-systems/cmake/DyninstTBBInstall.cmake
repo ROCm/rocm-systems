@@ -9,7 +9,7 @@
 #
 # ########################################################################################
 
-cmake_minimum_required(VERSION 3.13.0)
+cmake_minimum_required(VERSION 3.21)
 
 if(NOT CMAKE_STRIP)
     find_program(CMAKE_STRIP NAMES strip)

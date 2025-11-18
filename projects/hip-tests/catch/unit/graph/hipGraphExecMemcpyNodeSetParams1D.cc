@@ -224,11 +224,10 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Changing_Memcpy_Direc
   HIP_CHECK(hipMalloc(&dev1, sizeof(int)));
   HIP_CHECK(hipMalloc(&dev2, sizeof(int)));
 
-  const auto [dir, src, dst] =
-      GENERATE_REF(std::make_tuple(hipMemcpyHostToHost, host1, host2),
-                   std::make_tuple(hipMemcpyHostToDevice, host1, dev1),
-                   std::make_tuple(hipMemcpyDeviceToHost, dev1, host1),
-                   std::make_tuple(hipMemcpyDeviceToDevice, dev1, dev2));
+  const auto [dir, src, dst] = GENERATE_REF(std::make_tuple(hipMemcpyHostToHost, host1, host2),
+                                            std::make_tuple(hipMemcpyHostToDevice, host1, dev1),
+                                            std::make_tuple(hipMemcpyDeviceToHost, dev1, host1),
+                                            std::make_tuple(hipMemcpyDeviceToDevice, dev1, dev2));
 
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -241,15 +240,11 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Changing_Memcpy_Direc
 
   const auto set_dir = GENERATE(hipMemcpyHostToHost, hipMemcpyHostToDevice, hipMemcpyDeviceToHost,
                                 hipMemcpyDeviceToDevice, hipMemcpyDefault);
-  if (dir == set_dir) {
-    HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK(hipGraphDestroy(graph));
-    return;
+  if (dir != set_dir) {
+    HIP_CHECK_ERROR(
+        hipGraphExecMemcpyNodeSetParams1D(graph_exec, node, dst, src, sizeof(int), set_dir),
+        hipErrorInvalidValue);
   }
-
-  HIP_CHECK_ERROR(
-      hipGraphExecMemcpyNodeSetParams1D(graph_exec, node, dst, src, sizeof(int), set_dir),
-      hipErrorInvalidValue);
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec));
   HIP_CHECK(hipGraphDestroy(graph));
@@ -261,7 +256,6 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Changing_Memcpy_Direc
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
-
+ * End doxygen group GraphTest.
+ * @}
+ */

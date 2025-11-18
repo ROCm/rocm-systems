@@ -30,9 +30,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-unsigned int SavePFM(const char* filename, const float* buffer,
-                     unsigned int width, unsigned int height,
-                     unsigned int components) {
+unsigned int SavePFM(const char* filename, const float* buffer, unsigned int width,
+                     unsigned int height, unsigned int components) {
   unsigned int error = 0;
 
   //
@@ -59,13 +58,10 @@ unsigned int SavePFM(const char* filename, const float* buffer,
     const float* v = buffer + components * width * (y - 1);
     for (unsigned int x = 0; x < width; x++) {
       line[x * 3 + 0] = v[x * components + 0];
-      line[x * 3 + 1] =
-          (components > 1) ? v[x * components + 1] : v[x * components + 0];
-      line[x * 3 + 2] =
-          (components > 2) ? v[x * components + 2] : v[x * components + 0];
+      line[x * 3 + 1] = (components > 1) ? v[x * components + 1] : v[x * components + 0];
+      line[x * 3 + 2] = (components > 2) ? v[x * components + 2] : v[x * components + 0];
     }
-    unsigned int written =
-        (unsigned int)fwrite(line, (unsigned int)sizeof(float), lineSize, fh);
+    unsigned int written = (unsigned int)fwrite(line, (unsigned int)sizeof(float), lineSize, fh);
     if (written != lineSize) {
       error = 1;
       break;

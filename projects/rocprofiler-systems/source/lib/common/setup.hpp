@@ -109,25 +109,6 @@ get_environ(int _verbose, std::string _search_paths = {},
     _omnilib    = common::path::find_path(_omnilib, _verbose, _search_paths);
     _omnilib_dl = common::path::find_path(_omnilib_dl, _verbose, _search_paths);
 
-#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
-    if(get_env("ROCPROFSYS_USE_OMPT", true))
-    {
-        std::string _omni_omp_libs = _omnilib_dl;
-        const char* _omp_libs      = getenv("OMP_TOOL_LIBRARIES");
-        int         _override      = 0;
-        if(_omp_libs != nullptr &&
-           std::string_view{ _omp_libs }.find(_omnilib_dl) == std::string::npos)
-        {
-            _override      = 1;
-            _omni_omp_libs = common::join(':', _omp_libs, _omnilib_dl);
-        }
-        ROCPROFSYS_SETUP_LOG(_verbose >= 2, "setting OMP_TOOL_LIBRARIES to '%s'\n",
-                             _omni_omp_libs.c_str());
-        _data.emplace_back(
-            env_config{ "OMP_TOOL_LIBRARIES", _omni_omp_libs.c_str(), _override });
-    }
-#endif
-
     return _data;
 }
 

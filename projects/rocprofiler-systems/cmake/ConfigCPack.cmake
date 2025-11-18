@@ -51,7 +51,7 @@ set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 
 set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/rocprofiler-systems")
-set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 
 # For handling the project rebranding from "omnitrace" to "rocprofiler-systems"
@@ -177,8 +177,7 @@ if(NOT ROCPROFSYS_BUILD_DYNINST)
             timer
         )
             list(
-                APPEND
-                _DEBIAN_PACKAGE_DEPENDS
+                APPEND _DEBIAN_PACKAGE_DEPENDS
                 "libboost-${_BOOST_COMPONENT}-dev (>= 1.67.0)"
             )
         endforeach()

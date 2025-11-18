@@ -116,8 +116,8 @@ bool DmaBlitManager::readMemoryStaged(Memory& srcMemory, void* dstHost, Memory**
 }
 
 bool DmaBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
-                                const amd::Coord3D& origin, const amd::Coord3D& size,
-                                bool entire, amd::CopyMetadata copyMetadata) const {
+                                const amd::Coord3D& origin, const amd::Coord3D& size, bool entire,
+                                amd::CopyMetadata copyMetadata) const {
   // Use host copy if memory has direct access
   if (setup_.disableReadBuffer_ ||
       (gpuMem(srcMemory).isHostMemDirectAccess() && gpuMem(srcMemory).isCacheable())) {
@@ -328,8 +328,8 @@ bool DmaBlitManager::writeMemoryStaged(const void* srcHost, Memory& dstMemory, M
 }
 
 bool DmaBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory,
-                                 const amd::Coord3D& origin, const amd::Coord3D& size,
-                                 bool entire, amd::CopyMetadata copyMetadata) const {
+                                 const amd::Coord3D& origin, const amd::Coord3D& size, bool entire,
+                                 amd::CopyMetadata copyMetadata) const {
   // Use host copy if memory has direct access or it's persistent
   if (setup_.disableWriteBuffer_ ||
       (gpuMem(dstMemory).isHostMemDirectAccess() &&
@@ -986,8 +986,9 @@ void CalcRowSlicePitches(uint64_t* pitch, const int32_t* copySize, size_t rowPit
 }
 
 inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, size_t size,
-                        const void* value, size_t offset,
-                        const device::Memory* dev_mem, bool writeVAImmediate) const {
+                                           const void* value, size_t offset,
+                                           const device::Memory* dev_mem,
+                                           bool writeVAImmediate) const {
   const amd::KernelParameterDescriptor& desc = kernel->signature().at(index);
 
   void* param = kernel->parameters().values() + desc.offset_;
@@ -1053,20 +1054,16 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, si
   }
 }
 
-bool KernelBlitManager::copyBufferToImageKernel(device::Memory& srcMemory,
-                                                device::Memory& dstMemory,
-                                                const amd::Coord3D& srcOrigin,
-                                                const amd::Coord3D& dstOrigin,
-                                                const amd::Coord3D& size, bool entire,
-                                                size_t rowPitch, size_t slicePitch,
-                                                amd::CopyMetadata copyMetadata) const {
+bool KernelBlitManager::copyBufferToImageKernel(
+    device::Memory& srcMemory, device::Memory& dstMemory, const amd::Coord3D& srcOrigin,
+    const amd::Coord3D& dstOrigin, const amd::Coord3D& size, bool entire, size_t rowPitch,
+    size_t slicePitch, amd::CopyMetadata copyMetadata) const {
   bool rejected = false;
   Memory* dstView = &gpuMem(dstMemory);
   bool releaseView = false;
   bool result = false;
   amd::Image::Format newFormat(gpuMem(dstMemory).desc().format_);
-  bool swapLayer =
-      dstView->desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY;
+  bool swapLayer = dstView->desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY;
 
   // Find unsupported formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
@@ -1375,20 +1372,16 @@ bool KernelBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Mem
   return result;
 }
 
-bool KernelBlitManager::copyImageToBufferKernel(device::Memory& srcMemory,
-                                                device::Memory& dstMemory,
-                                                const amd::Coord3D& srcOrigin,
-                                                const amd::Coord3D& dstOrigin,
-                                                const amd::Coord3D& size, bool entire,
-                                                size_t rowPitch, size_t slicePitch,
-                                                amd::CopyMetadata copyMetadata) const {
+bool KernelBlitManager::copyImageToBufferKernel(
+    device::Memory& srcMemory, device::Memory& dstMemory, const amd::Coord3D& srcOrigin,
+    const amd::Coord3D& dstOrigin, const amd::Coord3D& size, bool entire, size_t rowPitch,
+    size_t slicePitch, amd::CopyMetadata copyMetadata) const {
   bool rejected = false;
   Memory* srcView = &gpuMem(srcMemory);
   bool releaseView = false;
   bool result = false;
   amd::Image::Format newFormat(gpuMem(srcMemory).desc().format_);
-  bool swapLayer =
-      srcView->desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY;
+  bool swapLayer = srcView->desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY;
 
   // Find unsupported formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
@@ -1575,7 +1568,7 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
 
   if (srcFormat.image_channel_order != dstFormat.image_channel_order ||
       srcFormat.image_channel_data_type != dstFormat.image_channel_data_type) {
-    //Give hint if any related test fails
+    // Give hint if any related test fails
     LogPrintfInfo("srcFormat(order=0x%xh, type=0x%xh) != dstFormat(order=0x%xh, type=0x%xh)",
                   srcFormat.image_channel_order, srcFormat.image_channel_data_type,
                   dstFormat.image_channel_order, dstFormat.image_channel_data_type);
@@ -1726,9 +1719,8 @@ bool KernelBlitManager::readImage(device::Memory& srcMemory, void* dstHost,
       (gpuMem(srcMemory).isHostMemDirectAccess() && gpuMem(srcMemory).isCacheable())) {
     gpu().releaseGpuMemoryFence();
 
-    result =
-        HostBlitManager::readImage(srcMemory, dstHost, origin, size, rowPitch, slicePitch, entire,
-                                   copyMetadata);
+    result = HostBlitManager::readImage(srcMemory, dstHost, origin, size, rowPitch, slicePitch,
+                                        entire, copyMetadata);
     synchronize();
     return result;
   } else {
@@ -1777,9 +1769,8 @@ bool KernelBlitManager::writeImage(const void* srcHost, device::Memory& dstMemor
       gpuMem(dstMemory).isPersistentDirectMap()) {
     gpu().releaseGpuMemoryFence();
 
-    result =
-        HostBlitManager::writeImage(srcHost, dstMemory, origin, size, rowPitch, slicePitch, entire,
-                                    copyMetadata);
+    result = HostBlitManager::writeImage(srcHost, dstMemory, origin, size, rowPitch, slicePitch,
+                                         entire, copyMetadata);
     synchronize();
     return result;
   } else {
@@ -1840,9 +1831,8 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
   if (setup_.disableCopyBufferRect_ || gpuMem(srcMemory).isHostMemDirectAccess() ||
       gpuMem(dstMemory).isHostMemDirectAccess()) {
     if (!dev().settings().disableSdma_) {
-      result =
-        DmaBlitManager::copyBufferRect(srcMemory, dstMemory, srcRectIn, dstRectIn, sizeIn, entire,
-                                       copyMetadata);
+      result = DmaBlitManager::copyBufferRect(srcMemory, dstMemory, srcRectIn, dstRectIn, sizeIn,
+                                              entire, copyMetadata);
     }
     if (result) {
       synchronize();
@@ -1967,7 +1957,8 @@ bool KernelBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
 
       if (amdMemory == NULL) {
         // Force SW copy
-        result = HostBlitManager::readBuffer(srcMemory, dstHost, origin, size, entire, copyMetadata);
+        result =
+            HostBlitManager::readBuffer(srcMemory, dstHost, origin, size, entire, copyMetadata);
         synchronize();
         return result;
       }
@@ -2033,8 +2024,7 @@ bool KernelBlitManager::readBufferRect(device::Memory& srcMemory, void* dstHost,
     Memory* dstMemory = dev().getGpuMemory(amdMemory);
 
     // Copy image to buffer
-    result = copyBufferRect(srcMemory, *dstMemory, bufRect, rect, size, entire,
-                            copyMetadata);
+    result = copyBufferRect(srcMemory, *dstMemory, bufRect, rect, size, entire, copyMetadata);
 
     // Add pinned memory for a later release
     gpu().addPinnedMem(amdMemory);
@@ -2071,7 +2061,8 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
 
       if (amdMemory == NULL) {
         // Force SW copy
-        result = DmaBlitManager::writeBuffer(srcHost, dstMemory, origin, size, entire, copyMetadata);
+        result =
+            DmaBlitManager::writeBuffer(srcHost, dstMemory, origin, size, entire, copyMetadata);
         synchronize();
         return result;
       }
@@ -2122,9 +2113,8 @@ bool KernelBlitManager::writeBufferRect(const void* srcHost, device::Memory& dst
 
     if (amdMemory == NULL) {
       // Force SW copy
-      result =
-          HostBlitManager::writeBufferRect(srcHost, dstMemory, hostRect, bufRect, size, entire,
-                                           copyMetadata);
+      result = HostBlitManager::writeBufferRect(srcHost, dstMemory, hostRect, bufRect, size, entire,
+                                                copyMetadata);
       synchronize();
       return result;
     }
@@ -2143,8 +2133,7 @@ bool KernelBlitManager::writeBufferRect(const void* srcHost, device::Memory& dst
     rect.end_ = hostRect.end_;
 
     // Copy buffer rect
-    result = copyBufferRect(*srcMemory, dstMemory, rect, bufRect, size, entire,
-                            copyMetadata);
+    result = copyBufferRect(*srcMemory, dstMemory, rect, bufRect, size, entire, copyMetadata);
 
     // Add pinned memory for a later release
     gpu().addPinnedMem(amdMemory);
@@ -2165,8 +2154,7 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
   if (setup_.disableFillBuffer_ || (!forceBlit && gpuMem(memory).isHostMemDirectAccess())) {
     gpu().releaseGpuMemoryFence();
 
-    result = HostBlitManager::fillBuffer(memory, pattern, patternSize, size, origin, size,
-                                         entire);
+    result = HostBlitManager::fillBuffer(memory, pattern, patternSize, size, origin, size, entire);
     synchronize();
     return result;
   } else {
@@ -2178,24 +2166,24 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
     for (auto& packed_obj : packed_vector) {
       constexpr uint32_t kFillType = FillBufferAligned;
       uint32_t kpattern_size = (packed_obj.pattern_expanded_)
-          ? HostBlitManager::FillBufferInfo::kExtendedSize
-          : patternSize;
+                                   ? HostBlitManager::FillBufferInfo::kExtendedSize
+                                   : patternSize;
       size_t kfill_size = packed_obj.fill_size_ / kpattern_size;
       uint64_t koffset = overall_offset;
       overall_offset += packed_obj.fill_size_;
 
       size_t globalWorkOffset[3] = {0, 0, 0};
-      uint32_t alignment = (kpattern_size & 0xf) == 0 ? 2 * sizeof(uint64_t) :
-                           (kpattern_size & 0x7) == 0 ? sizeof(uint64_t) :
-                           (kpattern_size & 0x3) == 0 ? sizeof(uint32_t) :
-                           (kpattern_size & 0x1) == 0 ? sizeof(uint16_t) : sizeof(uint8_t);
+      uint32_t alignment = (kpattern_size & 0xf) == 0   ? 2 * sizeof(uint64_t)
+                           : (kpattern_size & 0x7) == 0 ? sizeof(uint64_t)
+                           : (kpattern_size & 0x3) == 0 ? sizeof(uint32_t)
+                           : (kpattern_size & 0x1) == 0 ? sizeof(uint16_t)
+                                                        : sizeof(uint8_t);
 
       // Program kernels arguments for the fill operation
       Memory* mem = &gpuMem(memory);
       setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, koffset);
       const size_t localWorkSize = 256;
-      size_t globalWorkSize =
-          std::min(dev().settings().limit_blit_wg_ * localWorkSize, kfill_size);
+      size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, kfill_size);
       globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
 
       Memory& gpuCB = gpu().xferWrite().Acquire(patternSize);
@@ -2217,8 +2205,7 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
       setArgument(kernels_[kFillType], 3, sizeof(alignment), &alignment);
 
       // Calculate max id
-      uint64_t end_ptr = memory.virtualAddress() + koffset +
-        kfill_size * kpattern_size * alignment;
+      uint64_t end_ptr = memory.virtualAddress() + koffset + kfill_size * kpattern_size * alignment;
       setArgument(kernels_[kFillType], 4, sizeof(end_ptr), &end_ptr);
       uint32_t next_chunk = globalWorkSize * kpattern_size;
       setArgument(kernels_[kFillType], 5, sizeof(uint32_t), &next_chunk);
@@ -2242,7 +2229,8 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
 
 bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                    const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
-                                   const amd::Coord3D& sizeIn, bool entire, amd::CopyMetadata copyMetadata) const {
+                                   const amd::Coord3D& sizeIn, bool entire,
+                                   amd::CopyMetadata copyMetadata) const {
   amd::ScopedLock k(lockXferOps_);
   bool result = false;
 
@@ -2297,7 +2285,8 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
     address parameters = kernels_[kBlitType]->parameters().values();
     result = gpu().submitKernelInternal(ndrange, *kernels_[kBlitType], parameters);
   } else {
-    result = DmaBlitManager::copyBuffer(srcMemory, dstMemory, srcOrigin, dstOrigin, sizeIn, entire, copyMetadata);
+    result = DmaBlitManager::copyBuffer(srcMemory, dstMemory, srcOrigin, dstOrigin, sizeIn, entire,
+                                        copyMetadata);
   }
 
   synchronize();
@@ -2313,9 +2302,8 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   constexpr size_t kFillImageThreshold = 256 * 256;
 
   // Use host fill if memory has direct access and image is small
-  if (setup_.disableFillImage_ ||
-      (gpuMem(memory).isHostMemDirectAccess() &&
-      (size.c[0] * size.c[1] * size.c[2]) <= kFillImageThreshold)) {
+  if (setup_.disableFillImage_ || (gpuMem(memory).isHostMemDirectAccess() &&
+                                   (size.c[0] * size.c[1] * size.c[2]) <= kFillImageThreshold)) {
     gpu().releaseGpuMemoryFence();
 
     result = HostBlitManager::fillImage(memory, pattern, origin, size, entire);
@@ -2330,8 +2318,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   size_t localWorkSize[3];
   Memory* memView = &gpuMem(memory);
   amd::Image::Format newFormat(gpuMem(memory).owner()->asImage()->getImageFormat());
-  bool swapLayer =
-      memView->desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY;
+  bool swapLayer = memView->desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY;
 
   // Program the kernels workload depending on the fill dimensions
   fillType = FillImage;
@@ -2472,15 +2459,15 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
 }
 
 // ================================================================================================
-bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value,
-                                       size_t offset, size_t sizeBytes) const {
+bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, size_t offset,
+                                       size_t sizeBytes) const {
   amd::ScopedLock k(lockXferOps_);
   bool result = false;
   uint blitType = StreamOpsWrite;
   size_t dim = 1;
-  size_t globalWorkOffset[1] = { 0 };
-  size_t globalWorkSize[1] = { 1 };
-  size_t localWorkSize[1] = { 1 };
+  size_t globalWorkOffset[1] = {0};
+  size_t globalWorkSize[1] = {1};
+  size_t localWorkSize[1] = {1};
   // Program kernels arguments for the write operation
   Memory* mem = &gpuMem(memory);
   bool is32BitWrite = (sizeBytes == sizeof(uint32_t)) ? true : false;
@@ -2510,9 +2497,9 @@ bool KernelBlitManager::streamOpsWait(device::Memory& memory, uint64_t value, si
   uint blitType = StreamOpsWait;
   size_t dim = 1;
 
-  size_t globalWorkOffset[1] = { 0 };
-  size_t globalWorkSize[1] = { 1 };
-  size_t localWorkSize[1] = { 1 };
+  size_t globalWorkOffset[1] = {0};
+  size_t globalWorkSize[1] = {1};
+  size_t localWorkSize[1] = {1};
 
   // Program kernels arguments for the wait operation
   Memory* mem = &gpuMem(memory);
@@ -2602,8 +2589,7 @@ void KernelBlitManager::writeRawData(device::Memory& memory, size_t size, const 
   synchronize();
 }
 
-bool KernelBlitManager::RunGwsInit(
-  uint32_t value) const {
+bool KernelBlitManager::RunGwsInit(uint32_t value) const {
   amd::ScopedLock k(lockXferOps_);
 
   if (dev().settings().gwsInitSupported_ == false) {
@@ -2611,9 +2597,9 @@ bool KernelBlitManager::RunGwsInit(
     return false;
   }
 
-  size_t globalWorkOffset[1] = { 0 };
-  size_t globalWorkSize[1] = { 1 };
-  size_t localWorkSize[1] = { 1 };
+  size_t globalWorkOffset[1] = {0};
+  size_t globalWorkSize[1] = {1};
+  size_t localWorkSize[1] = {1};
 
   // Program kernels arguments
   setArgument(kernels_[GwsInit], 0, sizeof(uint32_t), &value);

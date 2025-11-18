@@ -31,9 +31,9 @@ THE SOFTWARE.
 
 namespace cg = cooperative_groups;
 
-template <typename T>
-__global__ void shfl_up(T* const out, const T* const in, const uint64_t* const active_masks,
-                        const unsigned int* const deltas, const int width) {
+template <typename T> __global__ void shfl_up(T* const out, const T* const in,
+                                              const uint64_t* const active_masks,
+                                              const unsigned int* const deltas, const int width) {
   if (deactivate_thread(active_masks)) {
     return;
   }
@@ -65,7 +65,7 @@ template <typename T> class WarpShflUp : public WarpShflTest<WarpShflUp<T>, T> {
       const auto rank_in_warp = rank_in_block % this->warp_size_;
       const auto rank_in_partition = rank_in_block % width_;
       const auto mask_idx = this->warps_in_block_ * (i / this->grid_.threads_in_block_count_) +
-          rank_in_block / this->warp_size_;
+                            rank_in_block / this->warp_size_;
       const unsigned int delta = deltas_[rank_in_partition] % width_;
       const std::bitset<sizeof(uint64_t) * 8> active_mask(this->active_masks_[mask_idx]);
 
@@ -120,6 +120,6 @@ TEMPLATE_TEST_CASE("Unit_Warp_Shfl_Up_Positive_Basic", "", int, unsigned int, lo
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

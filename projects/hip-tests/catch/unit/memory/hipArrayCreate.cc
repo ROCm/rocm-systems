@@ -50,8 +50,9 @@ static constexpr auto ARRAY_LOOP{100};
 
 static void ArrayCreate_DiffSizes(int gpu) {
   HIP_CHECK_THREAD(hipSetDevice(gpu));
-  //Use of GENERATE in thead function causes random failures with multithread condition.
-  std::vector<std::pair<size_t, size_t>> runs {std::make_pair(NUM_W, NUM_H), std::make_pair(BIGNUM_W, BIGNUM_H)};
+  // Use of GENERATE in thead function causes random failures with multithread condition.
+  std::vector<std::pair<size_t, size_t>> runs{std::make_pair(NUM_W, NUM_H),
+                                              std::make_pair(BIGNUM_W, BIGNUM_H)};
   for (const auto& size : runs) {
     std::array<HIP_ARRAY, ARRAY_LOOP> array;
     size_t pavail;
@@ -75,11 +76,6 @@ static void ArrayCreate_DiffSizes(int gpu) {
 TEST_CASE("Unit_hipArrayCreate_DiffSizes") {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   ArrayCreate_DiffSizes(0);
   HIP_CHECK_THREAD_FINALIZE();
 }
@@ -89,13 +85,8 @@ This testcase verifies the hipArrayCreate API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipArrayCreate API with small and big chunks data
 */
-TEST_CASE("Unit_hipArrayCreate_MultiThread") {
+TEST_CASE("Unit_hipArrayCreate_MultiThread", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   std::vector<std::thread> threadlist;
   int devCnt = 0;
@@ -213,11 +204,6 @@ TEMPLATE_TEST_CASE("Unit_hipArrayCreate_happy", "", uint, int, int4, ushort, sho
                    char4, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   using vec_info = vector_info<TestType>;
   DriverContext ctx;
 
@@ -242,11 +228,6 @@ TEMPLATE_TEST_CASE("Unit_hipArrayCreate_happy", "", uint, int, int4, ushort, sho
 TEMPLATE_TEST_CASE("Unit_hipArrayCreate_maxTexture", "", uint, int, int4, ushort, short2, char,
                    uchar2, char4, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   using vec_info = vector_info<TestType>;
   DriverContext ctx;
@@ -308,11 +289,6 @@ TEMPLATE_TEST_CASE("Unit_hipArrayCreate_maxTexture", "", uint, int, int4, ushort
 TEST_CASE("Unit_hipArrayCreate_ZeroWidth") {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   DriverContext ctx;
   HIP_ARRAY_DESCRIPTOR desc;
   desc.Format = driverFormats[0];
@@ -328,11 +304,6 @@ TEST_CASE("Unit_hipArrayCreate_ZeroWidth") {
 // HipArrayCreate will return an error when nullptr is used as the array argument
 TEST_CASE("Unit_hipArrayCreate_Nullptr") {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   DriverContext ctx;
   SECTION("Null array") {
@@ -354,11 +325,6 @@ TEST_CASE("Unit_hipArrayCreate_Nullptr") {
 TEST_CASE("Unit_hipArrayCreate_BadNumberChannelElement") {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   DriverContext ctx;
   HIP_ARRAY_DESCRIPTOR desc;
   desc.Format = GENERATE(from_range(std::begin(driverFormats), std::end(driverFormats)));
@@ -376,11 +342,6 @@ TEST_CASE("Unit_hipArrayCreate_BadNumberChannelElement") {
 // Only certain channel formats are acceptable.
 TEST_CASE("Unit_hipArrayCreate_BadChannelFormat") {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   DriverContext ctx;
   HIP_ARRAY_DESCRIPTOR desc;

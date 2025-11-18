@@ -6,7 +6,6 @@ format_rocprof_output: csv
 hip_trace: false
 join_type: grid
 kernel: null
-kernel_names: false
 kokkos_trace: false
 list_metrics: null
 loglevel: 10

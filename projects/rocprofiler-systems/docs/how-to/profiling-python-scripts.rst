@@ -6,7 +6,7 @@
 Profiling Python scripts
 ****************************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ supports profiling Python code at the
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports profiling Python code at the
 source level and the script level.
 Python support is enabled via the ``ROCPROFSYS_USE_PYTHON`` and the
 ``ROCPROFSYS_PYTHON_VERSIONS="<MAJOR>.<MINOR>`` CMake options.
@@ -30,9 +30,9 @@ be the same size.
 
 .. note::
 
-   ROCm Systems Profiler has limited support for Artificial Intelligence (AI) and Machine Learning (ML) workloads.
-   Data from child threads is not captured. For other profiling options,
-   see `rocprofV3 <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#using-rocprofv3>`_.
+   Direct Perfetto output (using ``--trace`` or ``ROCPROFSYS_USE_TRACE=ON``) has limited support for Artificial Intelligence (AI) and Machine Learning (ML) workloads.
+   Data from child threads is not captured. Instead, use ROCPD (``ROCPROFSYS_USE_ROCPD=ON``) as the output type.
+   For more information, see the :ref:`rocprof_sys_rocpd_output` section.
 
 Getting started
 ========================================
@@ -49,6 +49,14 @@ Both the ``share/rocprofiler-systems/setup-env.sh`` script and the module file i
 ``share/modulefiles/rocprofiler-systems`` automatically handle the prefixing of the ``PYTHONPATH``
 environment variable.
 
+.. note::
+
+   Profiling PyTorch and other AI workloads might fail because it is unable to find the libraries in the default linker path. As a workaround, you need to explicitly add the library path to ``LD_LIBRARY_PATH``. For example, when using PyTorch with Python 3.10, add the following to the environment:
+
+   .. code-block:: shell
+
+      export LD_LIBRARY_PATH=:/opt/venv/lib/python3.10/site-packages/torch/lib:$LD_LIBRARY_PATH
+   
 Running ROCm Systems Profiler on a Python script
 ================================================
 

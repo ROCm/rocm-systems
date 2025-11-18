@@ -83,7 +83,8 @@ TEST_CASE("Unit_hipMemAllocHost_Negative") {
   }
 
   SECTION("size is negative") {
-    HIP_CHECK_ERROR(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), -1), hipErrorOutOfMemory);
+    HIP_CHECK_ERROR(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), -1),
+                    hipErrorOutOfMemory);
   }
 
   HIP_CHECK(hipCtxDestroy(ctx));
@@ -91,8 +92,8 @@ TEST_CASE("Unit_hipMemAllocHost_Negative") {
 
 /*
  * Verify that a device can read/write to the memory of another device
-*/
-TEST_CASE("Unit_hipMemAllocHost_VerifyAccess") {
+ */
+TEST_CASE("Unit_hipMemAllocHost_VerifyAccess", "[multigpu]") {
   int devices_number = 0;
   HIP_CHECK(hipGetDeviceCount(&devices_number));
   std::vector<int*> devices_memories(devices_number);
@@ -124,8 +125,25 @@ TEST_CASE("Unit_hipMemAllocHost_VerifyAccess") {
     HIP_CHECK(hipDeviceSynchronize());
   }
 
-  for (int device_index = 1; device_index < devices_number; device_index++) {
+  for (int device_index = 0; device_index < devices_number; device_index++) {
     REQUIRE(*devices_memories[device_index] == device_index);
+    HIP_CHECK(hipFree(devices_memories[device_index]));
     HIP_CHECK(hipCtxDestroy(devices_ctxs[device_index]));
+  }
+}
+
+TEST_CASE("Unit_hipMemAllocHost_Capture") {
+  int* host_memory = nullptr;
+
+  hipError_t capture_error = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)),
+                  capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (capture_error == hipSuccess) {
+    REQUIRE(host_memory != nullptr);
+    HIP_CHECK(hipHostFree(host_memory));
   }
 }

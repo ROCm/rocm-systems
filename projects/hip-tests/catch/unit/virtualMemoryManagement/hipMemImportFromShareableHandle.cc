@@ -80,9 +80,11 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
   HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
                                           hipMemHandleTypePosixFileDescriptor, 0));
   hipMemGenericAllocationHandle_t imported_handle;
-  HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle, &shareable_handle,
-                                            hipMemHandleTypePosixFileDescriptor));
+  HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
+            hipMemHandleTypePosixFileDescriptor));
   HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemRelease(imported_handle));
   CTX_DESTROY();
 }
 
@@ -179,8 +181,9 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
     hipMemGenericAllocationHandle_t imported_handle;
     // import the sareable handle
-    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle, &shHandle,
-                                              hipMemHandleTypePosixFileDescriptor));
+    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+              reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
+              hipMemHandleTypePosixFileDescriptor));
     // Allocate virtual address range
     hipDeviceptr_t ptrA;
     HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
@@ -201,7 +204,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
     // Invoke kernel
     hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                     reinterpret_cast<int*>(ptrA));
+                       reinterpret_cast<int*>(ptrA));
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
     HIP_CHECK(hipDeviceSynchronize());
     // validate
@@ -232,8 +235,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     HIP_CHECK(
         hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
     REQUIRE(granularity > 0);
-    size_t size_mem =
-    ((granularity + buffer_size - 1) / granularity) * granularity;
+    size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
     hipMemGenericAllocationHandle_t handle;
     HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
 
@@ -247,8 +249,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     // Wait for the child process to receive msg
     int sig = 0;
     REQUIRE(read(fdSig[0], &sig, sizeof(int)) >= 0);
-    checkSysCallErrors(
-      sockObj.sendShareableHdl(shareable_handle, pid));
+    checkSysCallErrors(sockObj.sendShareableHdl(shareable_handle, pid));
     // Wait for child process to exit.
     int status;
     REQUIRE(wait(&status) >= 0);
@@ -313,8 +314,9 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     hipMemGenericAllocationHandle_t imported_handle;
 
     // import the sareable handle
-    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle, &shHandle,
-                                              hipMemHandleTypePosixFileDescriptor));
+    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+              reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
+              hipMemHandleTypePosixFileDescriptor));
     // Allocate virtual address range
     hipDeviceptr_t ptrA;
     HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
@@ -329,7 +331,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
     // Invoke kernel
     hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                     reinterpret_cast<int*>(ptrA));
+                       reinterpret_cast<int*>(ptrA));
     HIP_CHECK(hipDeviceSynchronize());
 
     // free resources
@@ -356,8 +358,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     HIP_CHECK(
         hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
     REQUIRE(granularity > 0);
-    size_t size_mem =
-    ((granularity + buffer_size - 1) / granularity) * granularity;
+    size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
     hipMemGenericAllocationHandle_t handle;
     HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
 
@@ -451,8 +452,9 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
       hipMemGenericAllocationHandle_t imported_handle;
 
       // import the sareable handle
-      HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle, &shHandle,
-                                                hipMemHandleTypePosixFileDescriptor));
+      HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+                reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
+                hipMemHandleTypePosixFileDescriptor));
       // Allocate virtual address range
       hipDeviceptr_t ptrA;
       HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
@@ -516,8 +518,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
     HIP_CHECK(
         hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
     REQUIRE(granularity > 0);
-    size_t size_mem =
-    ((granularity + buffer_size - 1) / granularity) * granularity;
+    size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
     hipMemGenericAllocationHandle_t handle;
     HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
 
@@ -546,7 +547,45 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
     REQUIRE(close(fdpid[0]) == 0);
   }
 }
+
+TEST_CASE("Unit_hipMemImportFromShareableHandle_Capture") {
+  CTX_CREATE();
+
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+
+  hipMemAllocationProp allocation_prop = {};
+  allocation_prop.type = hipMemAllocationTypePinned;
+  allocation_prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  allocation_prop.location.type = hipMemLocationTypeDevice;
+  allocation_prop.location.id = device;
+
+  size_t granularity = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &allocation_prop,
+                                           hipMemAllocationGranularityMinimum));
+
+  hipMemGenericAllocationHandle_t allocation_handle;
+  HIP_CHECK(hipMemCreate(&allocation_handle, granularity * 2, &allocation_prop, 0));
+  ShareableHandle shareable_handle;
+  HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, allocation_handle,
+                                          hipMemHandleTypePosixFileDescriptor, 0));
+  hipMemGenericAllocationHandle_t imported_handle;
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
+            hipMemHandleTypePosixFileDescriptor));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemRelease(allocation_handle));
+  CTX_DESTROY();
+}
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

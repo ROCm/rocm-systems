@@ -96,6 +96,6 @@ TEST_CASE("Unit_hipCreateTextureObject_MmArrayResource") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

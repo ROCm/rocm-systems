@@ -61,13 +61,17 @@ TEST_CASE("Unit_hipDestroySurfaceObject_Negative_Parameters") {
     HIP_CHECK(hipCreateSurfaceObject(&surf, &resc));
 
     HIP_CHECK(hipDestroySurfaceObject(surf));
+#if HT_AMD
     HIP_CHECK_ERROR(hipDestroySurfaceObject(surf), hipErrorInvalidValue);
+#else
+    HIP_CHECK(hipDestroySurfaceObject(surf));
+#endif
 
     HIP_CHECK(hipFreeArray(array));
   }
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

@@ -651,9 +651,8 @@ TEST_CASE("Unit_Device___mul64hi_Sanity_Positive") {
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
-  REQUIRE(
-      y.ptr()[0] ==
-      static_cast<long long>((static_cast<__int128_t>(x1) * static_cast<__int128_t>(x2)) >> 64));
+  REQUIRE(y.ptr()[0] == static_cast<long long>(
+                            (static_cast<__int128_t>(x1) * static_cast<__int128_t>(x2)) >> 64));
 }
 
 __global__ void __umul64hi_kernel(unsigned long long* y, unsigned long long x1,
@@ -685,9 +684,8 @@ TEST_CASE("Unit_Device___umul64hi_Sanity_Positive") {
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
-  REQUIRE(y.ptr()[0] ==
-          static_cast<unsigned long long>(
-              (static_cast<__uint128_t>(x1) * static_cast<__uint128_t>(x2)) >> 64));
+  REQUIRE(y.ptr()[0] == static_cast<unsigned long long>(
+                            (static_cast<__uint128_t>(x1) * static_cast<__uint128_t>(x2)) >> 64));
 }
 
 __global__ void __sad_kernel(unsigned int* y, int x1, int x2, unsigned int x3) {
@@ -749,10 +747,9 @@ TEST_CASE("Unit_Device___usad_Sanity_Positive") {
 
   INFO("x1: " << x1);
   INFO("x2: " << x2);
-  REQUIRE(y.ptr()[0] ==
-          (static_cast<unsigned int>(
-               std::abs(static_cast<long long>(x1) - static_cast<long long>(x2))) +
-           x3));
+  REQUIRE(y.ptr()[0] == (static_cast<unsigned int>(
+                             std::abs(static_cast<long long>(x1) - static_cast<long long>(x2))) +
+                         x3));
 }
 
 __global__ void __byte_perm(unsigned int* y, unsigned int x1, unsigned int x2, unsigned int s) {

@@ -70,6 +70,9 @@ TEST_CASE("Unit_hipMallocManaged_Basic") {
   HIP_CHECK(hipMallocManaged(&A, numElements * sizeof(float)));
   HIP_CHECK(hipMallocManaged(&B, numElements * sizeof(float)));
   HIP_CHECK(hipMallocManaged(&C, numElements * sizeof(float)));
+  HIP_CHECK(hipFree(A));
+  HIP_CHECK(hipFree(B));
+  HIP_CHECK(hipFree(C));
 }
 
 /*

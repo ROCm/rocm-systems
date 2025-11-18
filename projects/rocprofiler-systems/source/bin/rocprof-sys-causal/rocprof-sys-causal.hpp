@@ -53,6 +53,9 @@ void
 prepare_environment_for_run(std::vector<char*>&);
 
 std::string
+get_rocprofsys_root(void);
+
+std::string
 get_internal_libpath(const std::string& _lib);
 
 std::string
