@@ -392,6 +392,12 @@ int aql_perf_create_read_packet(struct aql_measurement *measurement,
         return -EINVAL;
     }
 
+    /* Check if data_buffer is still valid (may be NULL during cleanup) */
+    if (!measurement->allocated_counter->allocation.data_buffer) {
+        aql_debug("[PMU] aql_perf_create_read_packet: data_buffer freed (measurement being cleaned up)");
+        return -ESHUTDOWN;
+    }
+
     aql_info("[PMU] aql_perf_create_read_packet: GPU %u, allocated_counter=%p",
              measurement->gpu_id, measurement->allocated_counter);
 
