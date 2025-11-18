@@ -339,6 +339,7 @@ write_perfetto(
             fmt::format(
                 "SELECT * FROM region_args WHERE guid='{}' AND id={}", process.guid, region_id));
     };
+    uint64_t global_flow_index = 0;
 
     {
         for(auto ditr : memory_copy_gen)
@@ -534,7 +535,7 @@ write_perfetto(
                     perfetto_session.get_static_event_name(_name),
                     track,
                     itr.start,
-                    ::perfetto::Flow::Global(itr.stack_id ^ this_pid_track.uuid),
+                    ::perfetto::Flow::Global(++global_flow_index),
                     "begin_ns",
                     itr.start,
                     "end_ns",
@@ -621,7 +622,7 @@ write_perfetto(
                                   perfetto_session.get_static_event_name(itr.name),
                                   *_track,
                                   itr.start,
-                                  ::perfetto::Flow::Global(itr.stack_id ^ this_pid_track.uuid),
+                                  ::perfetto::Flow::Global(++global_flow_index),
                                   "begin_ns",
                                   itr.start,
                                   "end_ns",
@@ -854,7 +855,7 @@ write_perfetto(
                                   perfetto_session.get_static_event_name(_name),
                                   *_track,
                                   current.start,
-                                  ::perfetto::Flow::Global(current.stack_id ^ this_pid_track.uuid),
+                                  ::perfetto::Flow::Global(++global_flow_index),
                                   "begin_ns",
                                   current.start,
                                   "end_ns",
