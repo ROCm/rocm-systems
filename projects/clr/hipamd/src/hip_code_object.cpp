@@ -361,6 +361,7 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
   return hipSuccess;
 }
 
+//==================================================================================================
 hipError_t StatCO::removeAllFatBinaries() {
   amd::ScopedLock lock(sclock_);
   

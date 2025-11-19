@@ -113,6 +113,7 @@ std::vector<std::pair<std::string, RuntimeTearDown::TearDownCallback>>
   RuntimeTearDown::tear_down_funcs_ ROCCLR_INIT_PRIORITY(101) {};
 class RuntimeTearDown runtime_tear_down ROCCLR_INIT_PRIORITY(101) {};
 
+//==================================================================================================
 RuntimeTearDown::~RuntimeTearDown() {
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Begin runtime teardown");
 #if !defined(_WIN32) && !defined(BUILD_STATIC_LIBS)
@@ -121,7 +122,8 @@ RuntimeTearDown::~RuntimeTearDown() {
   if (amd::IS_HIP && amd::Os::getProcessId() == Runtime::pid()) {
     // Execute teardown funcs in reverse order of registration
     for (auto it = tear_down_funcs_.rbegin(); it != tear_down_funcs_.rend(); ++it) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "~RuntimeTearDown invoke callback: %s", it->first.c_str());
+      ClPrint(amd::LOG_DEBUG, amd::LOG_INIT,
+              "~RuntimeTearDown invoke callback: %s", it->first.c_str());
       it->second();
     }
     for (auto it : external_) {
@@ -133,19 +135,24 @@ RuntimeTearDown::~RuntimeTearDown() {
 #endif
 }
 
+//==================================================================================================
 void RuntimeTearDown::RegisterObject(ReferenceCountedObject* obj) {
   if (obj) {
     external_.push_back(obj);
     ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered external object: %p", obj);
   }
 }
+
+//==================================================================================================
 void RuntimeTearDown::RegisterTearDownCallback(const std::string& msg, TearDownCallback func) {
   if (func) {
     tear_down_funcs_.emplace_back(msg, std::move(func));
-    ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered callback fun: %s", msg.c_str());
+    ClPrint(amd::LOG_DEBUG, amd::LOG_INIT,
+            "RuntimeTearDown registered callback fun: %s", msg.c_str());
   }
 }
 
+//==================================================================================================
 uint ReferenceCountedObject::retain() {
   uint prev = referenceCount_.fetch_add(1, std::memory_order_relaxed);
   assert(prev != 0 && "An object with count==0 is invalid");
