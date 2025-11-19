@@ -45,26 +45,11 @@ int main(int argc, char* argv[]) {
   size_t N = 1000000;
   size_t Nbytes = N * sizeof(uint32_t);
 
-#ifdef __HIP_ENABLE_PCH
-  // Verify hip_pch.o
-  const char* pch = nullptr;
-  unsigned int size = 0;
-  __hipGetPCH(&pch, &size);
-  printf("pch size: %u\n", size);
-  if (size == 0) {
-    printf("__hipGetPCH failed!\n");
-    return -1;
-  } else {
-    printf("__hipGetPCH succeeded!\n");
-  }
-#endif
-
   int deviceId;
   checkHipErrors(hipGetDevice(&deviceId));
   hipDeviceProp_t props;
   checkHipErrors(hipGetDeviceProperties(&props, deviceId));
   printf("info: running on device #%d %s\n", deviceId, props.name);
-
 
   printf("info: allocate host mem (%6.2f MB)\n", 2 * Nbytes / 1024.0 / 1024.0);
   A_h = (uint32_t*)malloc(Nbytes);

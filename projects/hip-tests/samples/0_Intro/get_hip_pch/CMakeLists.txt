@@ -18,22 +18,25 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required(VERSION 3.21)
+project(get_hip_pch)
+
+cmake_minimum_required(VERSION 3.10)
 
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
-    if(DEFINED ENV{ROCM_PATH})
-      set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
-    else()
-      set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory.")
-    endif()
+    set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory.")
   endif()
   # Search for rocm in common locations
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
-  
 endif()
 
-project(bit_extract LANGUAGES CXX HIP)
+# Find hip
+find_package(hip)
+
+# Set compiler and linker
+set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
+
+set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
 
 # Create the excutable
 if(TARGET build_intro)
@@ -41,22 +44,13 @@ set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
 else()
 set(EXCLUDE_OPTION )
 endif()
+add_executable(get_hip_pch ${EXCLUDE_OPTION} get_hip_pch.cpp)
 
-# Mark source file as HIP code (contains __global__ kernels)
-set_source_files_properties(bit_extract.cpp PROPERTIES LANGUAGE HIP)
+target_include_directories(get_hip_pch PRIVATE ../../common)
 
-add_executable(bit_extract ${EXCLUDE_OPTION} bit_extract.cpp)
-
-target_include_directories(bit_extract PRIVATE ../../common)
-
-# Set RPATH so executable can find HIP libraries at runtime
-if(UNIX)
-  set_target_properties(bit_extract PROPERTIES
-    BUILD_RPATH "${ROCM_PATH}/lib"
-    INSTALL_RPATH "${ROCM_PATH}/lib"
-  )
-endif()
+# Link with HIP
+target_link_libraries(get_hip_pch hip::host)
 
 if(TARGET build_intro)
-  add_dependencies(build_intro bit_extract)
+  add_dependencies(build_intro get_hip_pch)
 endif()
