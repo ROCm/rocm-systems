@@ -27,6 +27,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <iomanip>
 
 /**
  * Test Description
@@ -110,6 +111,121 @@ bool ValidateUsingCopy(int deviceId, void* dev_ptr, size_t data_size,
   return true;
 }
 
+// Structure to store timing results
+struct TimingResults {
+  size_t size_gb;
+  std::chrono::microseconds reserve;
+  std::chrono::microseconds alloc;
+  std::chrono::microseconds map;
+  std::chrono::microseconds unmap;
+  std::chrono::microseconds release;
+  std::chrono::microseconds free;
+  std::chrono::microseconds h2d;
+  std::chrono::microseconds d2h;
+  std::chrono::microseconds hip_malloc;
+  std::chrono::microseconds hip_free;
+};
+
+bool WarmupDevice(int deviceId, size_t granularity) {
+  std::cout << "Warming up device " << deviceId << "..." << std::endl;
+  
+  HIP_CHECK(hipSetDevice(deviceId));
+  
+  // Warmup 1: VMM operations
+  void* dev_ptr = nullptr;
+  size_t warmup_size = 64 * kMB;  // Small size for warmup
+  
+  // Reserve
+  HIP_CHECK(hipMemAddressReserve(&dev_ptr, warmup_size, granularity, nullptr, 0));
+  
+  // Create physical memory
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = deviceId;
+  hipMemGenericAllocationHandle_t handle;
+  HIP_CHECK(hipMemCreate(&handle, warmup_size, &prop, 0));
+  
+  // Map
+  HIP_CHECK(hipMemMap(dev_ptr, warmup_size, 0, handle, 0));
+  
+  // Set access
+  hipMemAccessDesc accessDesc = {};
+  accessDesc.location.type = hipMemLocationTypeDevice;
+  accessDesc.location.id = deviceId;
+  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(dev_ptr, warmup_size, &accessDesc, 1));
+  
+  // Allocate host memory for warmup copy
+  std::vector<int> warmup_data(warmup_size / sizeof(int), 42);
+  
+  // Warmup copy operations
+  HIP_CHECK(hipMemcpy(dev_ptr, warmup_data.data(), warmup_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(warmup_data.data(), dev_ptr, warmup_size, hipMemcpyDeviceToHost));
+  
+  // Cleanup
+  HIP_CHECK(hipMemUnmap(dev_ptr, warmup_size));
+  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemAddressFree(dev_ptr, warmup_size));
+  
+  // Warmup 2: Legacy hipMalloc
+  void* dev_ptr_legacy = nullptr;
+  HIP_CHECK(hipMalloc(&dev_ptr_legacy, warmup_size));
+  HIP_CHECK(hipMemcpy(dev_ptr_legacy, warmup_data.data(), warmup_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(warmup_data.data(), dev_ptr_legacy, warmup_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(dev_ptr_legacy));
+  
+  // Synchronize to ensure all warmup operations complete
+  HIP_CHECK(hipDeviceSynchronize());
+  
+  std::cout << "Warmup complete!" << std::endl << std::endl;
+  return true;
+}
+
+void PrintResultsTable(const std::vector<TimingResults>& results) {
+  if (results.empty()) return;
+
+  // Print header
+  std::cout << "\n" << std::string(100, '=') << std::endl;
+  std::cout << "VMM Performance Results (microseconds)" << std::endl;
+  std::cout << std::string(100, '=') << std::endl;
+  
+  // Print size header
+  std::cout << std::left << std::setw(20) << "Operation";
+  for (const auto& result : results) {
+    std::cout << std::right << std::setw(12) << (std::to_string(result.size_gb) + " GB");
+  }
+  std::cout << std::endl;
+  std::cout << std::string(100, '-') << std::endl;
+
+  // Print each operation row
+  auto print_row = [&](const std::string& name, auto TimingResults::*member) {
+    std::cout << std::left << std::setw(20) << name;
+    for (const auto& result : results) {
+      std::cout << std::right << std::setw(12) << (result.*member).count();
+    }
+    std::cout << std::endl;
+  };
+
+  std::cout << "\n--- VMM Operations ---" << std::endl;
+  print_row("Reserve", &TimingResults::reserve);
+  print_row("Alloc", &TimingResults::alloc);
+  print_row("Map", &TimingResults::map);
+  print_row("Unmap", &TimingResults::unmap);
+  print_row("Release", &TimingResults::release);
+  print_row("Free", &TimingResults::free);
+  
+  std::cout << "\n--- Memory Copy ---" << std::endl;
+  print_row("H2D Copy", &TimingResults::h2d);
+  print_row("D2H Copy", &TimingResults::d2h);
+  
+  std::cout << "\n--- Legacy hipMalloc ---" << std::endl;
+  print_row("hipMalloc", &TimingResults::hip_malloc);
+  print_row("hipFree", &TimingResults::hip_free);
+  
+  std::cout << std::string(100, '=') << std::endl << std::endl;
+}
+
 bool TestOnDevice(int deviceId) {
   HIP_CHECK(hipSetDevice(deviceId));
   // Check if VMM is supported
@@ -123,6 +239,15 @@ bool TestOnDevice(int deviceId) {
     INFO("Cannot get granularity on device: " << deviceId);
     return false;
   }
+
+  // Warmup the device and driver
+  if (!WarmupDevice(deviceId, granularity)) {
+    INFO("Warmup failed on device: " << deviceId);
+    return false;
+  }
+
+  // Vector to store timing results for all sizes
+  std::vector<TimingResults> all_results;
 
   // Measure CPU time of allocation taken
   size_t start_size = 1 * kGB;
@@ -249,21 +374,7 @@ bool TestOnDevice(int deviceId) {
     std::chrono::microseconds free_elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
-    // Print the results
-    std::cout << "-------------Size: " << (size_idx / kGB) << " GB----------------" << std::endl;
-    std::cout << "Time taken to reserve : " << reserve_elapsed.count()
-              << " micro seconds and free: " << free_elapsed.count() << " micro seconds"
-              << std::endl;
-    std::cout << "Time taken to alloc : " << alloc_elapsed.count()
-              << " micro seconds and release: " << release_elapsed.count() << " micro seconds"
-              << std::endl;
-    std::cout << "Time taken to map : " << map_elapsed.count()
-              << " micro seconds and unmap: " << unmap_elapsed.count() << " micro seconds"
-              << std::endl;
-    std::cout << "Time taken to H2D : " << h2d_elapsed.count()
-              << " micro seconds and D2H: " << d2h_elapsed.count() << " micro seconds" << std::endl;
-    std::cout << "-------------------------/hipMallocPerf------------------------" << std::endl;
-
+    // Measure hipMalloc/hipFree for comparison
     void* dev_ptr_legacy = nullptr;
     start = std::chrono::high_resolution_clock::now();
     HIP_CHECK(hipMalloc(&dev_ptr_legacy, size_idx));
@@ -275,12 +386,28 @@ bool TestOnDevice(int deviceId) {
     end = std::chrono::high_resolution_clock::now();
     std::chrono::microseconds hf_elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "Time taken for hipMalloc : " << hm_elapsed.count()
-              << " micro seconds and hipFree: " << hf_elapsed.count() << " micro seconds"
-              << std::endl;
-    std::cout << "---------------------------------------------------------------" << std::endl;
-    std::cout << std::endl;
+
+    // Store results
+    TimingResults result;
+    result.size_gb = size_idx / kGB;
+    result.reserve = reserve_elapsed;
+    result.alloc = alloc_elapsed;
+    result.map = map_elapsed;
+    result.unmap = unmap_elapsed;
+    result.release = release_elapsed;
+    result.free = free_elapsed;
+    result.h2d = h2d_elapsed;
+    result.d2h = d2h_elapsed;
+    result.hip_malloc = hm_elapsed;
+    result.hip_free = hf_elapsed;
+    all_results.push_back(result);
+
+    // Print progress
+    std::cout << "Completed test for " << (size_idx / kGB) << " GB" << std::endl;
   }
+
+  // Print results in tabular format
+  PrintResultsTable(all_results);
 
   return true;
 }
