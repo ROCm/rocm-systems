@@ -304,6 +304,11 @@ class AtomicExch
          << (scope == AtomicScopes::device
                  ? "device"
                  : (scope == AtomicScopes::system ? "system" : "builtin")));
+    INFO("Atomic exchange parameters\n"
+         << " blocks: " << p.blocks << " threads: " << p.threads << " num_devices: "
+         << p.num_devices << " kernel count: " << p.kernel_count << " width: " << p.width
+         << " pitch: " << p.pitch << " host_thread_count: " << p.host_thread_count
+         << " allocation type: " << static_cast<int>(p.allocation_type));
     std::sort(old_vals.begin(), old_vals.end());
 
     for (auto i = 0u; i < old_vals.size(); ++i) {
