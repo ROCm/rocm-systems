@@ -948,7 +948,8 @@ configure_settings(bool _init)
            !_config->get_papi_events().empty())
         {
             std::vector<std::string> _papi_choices = {};
-            for(auto itr : tim::papi::available_events_info({ "perf_event_uncore" }))
+            for(const auto& itr :
+                tim::papi::available_events_info({ "perf_event_uncore" }))
             {
                 if(itr.available()) _papi_choices.emplace_back(itr.symbol());
             }
