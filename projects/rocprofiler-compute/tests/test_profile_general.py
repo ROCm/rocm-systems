@@ -74,99 +74,23 @@ num_devices = 1
 
 attach_detach_interval_msec_no_delay = 10000
 attach_detach_interval_msec_with_delay = 60000
-
 DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
 MAX_REOCCURING_COUNT = 28
 
-ALL_CSVS_MI100 = sorted([
-    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-    "SQ_IFETCH_LEVEL.csv",
-    "SQ_INST_LEVEL_LDS.csv",
-    "SQ_LEVEL_WAVES.csv",
+CSVS = sorted([
     "pmc_perf.csv",
-    "pmc_perf_0.csv",
-    "pmc_perf_1.csv",
-    "pmc_perf_2.csv",
-    "pmc_perf_3.csv",
-    "pmc_perf_4.csv",
-    "pmc_perf_5.csv",
-    "pmc_perf_6.csv",
-    "sysinfo.csv",
-])
-
-ALL_CSVS_MI200 = sorted([
-    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-    "SQ_IFETCH_LEVEL.csv",
-    "SQ_INST_LEVEL_LDS.csv",
-    "SQ_INST_LEVEL_SMEM.csv",
-    "SQ_INST_LEVEL_VMEM.csv",
-    "SQ_LEVEL_WAVES.csv",
-    "pmc_perf.csv",
-    "pmc_perf_0.csv",
-    "pmc_perf_1.csv",
-    "pmc_perf_2.csv",
-    "pmc_perf_3.csv",
-    "pmc_perf_4.csv",
-    "pmc_perf_5.csv",
-    "sysinfo.csv",
-])
-ALL_CSVS_MI300 = sorted([
-    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-    "SQ_IFETCH_LEVEL.csv",
-    "SQ_INST_LEVEL_LDS.csv",
-    "SQ_INST_LEVEL_SMEM.csv",
-    "SQ_INST_LEVEL_VMEM.csv",
-    "SQ_LEVEL_WAVES.csv",
-    "pmc_perf.csv",
-    "pmc_perf_0.csv",
-    "pmc_perf_1.csv",
-    "pmc_perf_2.csv",
-    "pmc_perf_3.csv",
-    "pmc_perf_4.csv",
-    "pmc_perf_5.csv",
-    "sysinfo.csv",
-])
-ALL_CSVS_MI350 = sorted([
-    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-    "SQ_IFETCH_LEVEL.csv",
-    "SQ_INST_LEVEL_LDS.csv",
-    "SQ_INST_LEVEL_SMEM.csv",
-    "SQ_INST_LEVEL_VMEM.csv",
-    "SQ_LEVEL_WAVES.csv",
-    "pmc_perf.csv",
-    "pmc_perf_0.csv",
-    "pmc_perf_1.csv",
-    "pmc_perf_2.csv",
-    "pmc_perf_3.csv",
-    "pmc_perf_4.csv",
-    "pmc_perf_5.csv",
-    "pmc_perf_6.csv",
-    "pmc_perf_7.csv",
-    "pmc_perf_8.csv",
-    "pmc_perf_9.csv",
-    "pmc_perf_10.csv",
-    "pmc_perf_11.csv",
-    "pmc_perf_12.csv",
     "sysinfo.csv",
 ])
 
 ROOF_ONLY_FILES = sorted([
     "empirRoof_gpu-0_FP32.pdf",
     "pmc_perf.csv",
-    "pmc_perf_0.csv",
-    "pmc_perf_1.csv",
-    "pmc_perf_2.csv",
     "roofline.csv",
     "sysinfo.csv",
 ])
 
 PC_SAMPLING_HOST_TRAP_FILES = sorted([
-    "pmc_perf_0.csv",
     "pmc_perf.csv",
     "ps_file_agent_info.csv",
     "ps_file_kernel_trace.csv",
@@ -176,7 +100,6 @@ PC_SAMPLING_HOST_TRAP_FILES = sorted([
 ])
 
 PC_SAMPLING_STOCHASTIC_FILES = sorted([
-    "pmc_perf_0.csv",
     "pmc_perf.csv",
     "ps_file_agent_info.csv",
     "ps_file_kernel_trace.csv",
@@ -550,13 +473,38 @@ def test_path(binary_handler_profile_rocprof_compute):
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
+        assert sorted(list(file_dict.keys())) == CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
+        assert sorted(list(file_dict.keys())) == CSVS
+    else:
+        print(f"This test is not supported for {soc}")
+        assert 0
+
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.path
+def test_path_no_native(binary_handler_profile_rocprof_compute):
+    workload_dir = test_utils.get_output_dir()
+    options = ["--no-native-tool"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+
+    if soc == "MI100":
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif "MI350" in soc:
+        assert sorted(list(file_dict.keys())) == CSVS
     else:
         print(f"This test is not supported for {soc}")
         assert 0
@@ -586,7 +534,108 @@ def test_path_rocpd(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.path
+def test_path_csv(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
+    workload_dir = test_utils.get_output_dir()
+    options = ["--format-rocprof-output", "csv"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    all_csvs_mi100 = sorted([
+        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "sysinfo.csv",
+    ])
+    all_csvs_mi200 = sorted([
+        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "sysinfo.csv",
+    ])
+    all_csvs_mi300 = sorted([
+        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "sysinfo.csv",
+    ])
+    all_csvs_mi350 = sorted([
+        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "pmc_perf_10.csv",
+        "pmc_perf_11.csv",
+        "pmc_perf_12.csv",
+        "sysinfo.csv",
+    ])
+
+    if soc == "MI100":
+        assert sorted(list(file_dict.keys())) == all_csvs_mi100
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == all_csvs_mi200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == all_csvs_mi300
+    elif "MI350" in soc:
+        assert sorted(list(file_dict.keys())) == all_csvs_mi350
+    else:
+        print(f"This test is not supported for {soc}")
+        assert 0
+
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline_1
 def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     """
     Test basic roofline PDF generation with full validation pipeline.
@@ -622,7 +671,7 @@ def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roof_multiple_data_types(binary_handler_profile_rocprof_compute):
     """Test roofline with multiple data types"""
     if soc in ("MI100"):
@@ -659,7 +708,7 @@ def test_roof_multiple_data_types(binary_handler_profile_rocprof_compute):
             test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roof_invalid_data_type(binary_handler_profile_rocprof_compute):
     """Test roofline with invalid data type"""
     if soc in ("MI100"):
@@ -688,7 +737,7 @@ def test_roof_invalid_data_type(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roof_file_validation(binary_handler_profile_rocprof_compute):
     """Test file validation paths in roofline"""
     if soc in ("MI100"):
@@ -717,7 +766,7 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roof_rocpd(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         pytest.skip("Roofline not supported on MI100")
@@ -798,7 +847,7 @@ def test_analyze_rocpd(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roofline_workload_dir_not_set_error():
     """
     Test roof_setup() error: "Workload directory is not set. Cannot perform setup."
@@ -855,7 +904,7 @@ def test_roofline_workload_dir_not_set_error():
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -879,7 +928,7 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_compute):
     """
     Test roofline behavior when kernel filter doesn't match any
@@ -919,7 +968,7 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     """
     Test roofline multi-attempt profiling with `--kernel`
@@ -957,7 +1006,7 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_compute):
     """
     Test datatype validation error in empirical_roofline()
@@ -983,7 +1032,7 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -1029,7 +1078,7 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -1055,7 +1104,7 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
         pytest.skip("plotext not available for CLI testing")
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -1075,7 +1124,7 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
     """
     Test handling of missing roofline.csv file
@@ -1127,7 +1176,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
     """
     Test CLI plot generation with invalid datatype
@@ -1177,7 +1226,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roofline_ceiling_data_validation(binary_handler_profile_rocprof_compute):
     """
     Test ceiling data validation in generate_plot()
@@ -1197,7 +1246,7 @@ def test_roofline_ceiling_data_validation(binary_handler_profile_rocprof_compute
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roofline_plot_points_data_generation():
     """
     Test that plot points data structure is correctly generated with:
@@ -1297,7 +1346,7 @@ def test_roofline_plot_points_data_generation():
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roofline_bound_status_calculation():
     """
     Test _determine_kernel_bound_status() correctly classifies kernels as
@@ -1369,7 +1418,7 @@ def test_roofline_bound_status_calculation():
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_compute):
     """
     Test roofline PDF generation with many kernels (10+) to verify:
@@ -1422,13 +1471,13 @@ def test_device_filter(binary_handler_profile_rocprof_compute):
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
+        assert sorted(list(file_dict.keys())) == CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
+        assert sorted(list(file_dict.keys())) == CSVS
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1452,13 +1501,13 @@ def test_kernel(binary_handler_profile_rocprof_compute):
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
+        assert sorted(list(file_dict.keys())) == CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
+        assert sorted(list(file_dict.keys())) == CSVS
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1474,19 +1523,19 @@ def test_kernel(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.dispatch
 def test_dispatch_0(binary_handler_profile_rocprof_compute):
-    options = ["--dispatch", "0"]
+    options = ["--dispatch", "1"]
     workload_dir = test_utils.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
+        assert sorted(list(file_dict.keys())) == CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
+        assert sorted(list(file_dict.keys())) == CSVS
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1497,7 +1546,7 @@ def test_dispatch_0(binary_handler_profile_rocprof_compute):
         file_dict,
         [
             "--dispatch",
-            "0",
+            "1",
         ],
     )
 
@@ -1506,19 +1555,19 @@ def test_dispatch_0(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.dispatch
 def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
-    options = ["--dispatch", "0:2"]
+    options = ["--dispatch", "1:2"]
     workload_dir = test_utils.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 2)
     if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
+        assert sorted(list(file_dict.keys())) == CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
+        assert sorted(list(file_dict.keys())) == CSVS
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1527,7 +1576,7 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        ["--dispatch", "0", "1"],
+        ["--dispatch", "1", "2"],
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1535,19 +1584,19 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.dispatch
 def test_dispatch_2(binary_handler_profile_rocprof_compute):
-    options = ["--dispatch", "0"]
+    options = ["--dispatch", "1"]
     workload_dir = test_utils.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
+        assert sorted(list(file_dict.keys())) == CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
+        assert sorted(list(file_dict.keys())) == CSVS
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1558,7 +1607,7 @@ def test_dispatch_2(binary_handler_profile_rocprof_compute):
         file_dict,
         [
             "--dispatch",
-            "0",
+            "1",
         ],
     )
 
@@ -1573,13 +1622,13 @@ def test_join_type_grid(binary_handler_profile_rocprof_compute):
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
+        assert sorted(list(file_dict.keys())) == CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
+        assert sorted(list(file_dict.keys())) == CSVS
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -1602,13 +1651,13 @@ def test_join_type_kernel(binary_handler_profile_rocprof_compute):
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
+        assert sorted(list(file_dict.keys())) == CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == CSVS
     elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI350
+        assert sorted(list(file_dict.keys())) == CSVS
     else:
         print(f"Testing isn't supported yet for {soc}")
         assert 0
@@ -2321,3 +2370,105 @@ class TestSetsIntegration:
         # workload dir should not exist
         assert not Path(workload_dir).exists()
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing
+def test_profiler_options(binary_handler_profile_rocprof_compute):
+    options = ["--no-native-tool", "--iteration-multiplexing"]
+    workload_dir = test_utils.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    assert code == 1
+
+
+@pytest.mark.iteration_multiplexing
+def test_iteration_multiplexing(binary_handler_profile_rocprof_compute):
+    options = ["--iteration-multiplexing"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    if soc == "MI100":
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif "MI350" in soc:
+        assert sorted(list(file_dict.keys())) == CSVS
+    else:
+        print(f"Testing isn't supported yet for {soc}")
+        assert 0
+
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing
+def test_iteration_multiplexing_kernel(binary_handler_profile_rocprof_compute):
+    options = ["--iteration-multiplexing", "kernel"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    if soc == "MI100":
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif "MI350" in soc:
+        assert sorted(list(file_dict.keys())) == CSVS
+    else:
+        print(f"Testing isn't supported yet for {soc}")
+        assert 0
+
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing
+def test_iteration_multiplexing_kernel_launch_params(
+    binary_handler_profile_rocprof_compute,
+):
+    options = ["--iteration-multiplexing", "kernel_launch_params"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    if soc == "MI100":
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == CSVS
+    elif "MI350" in soc:
+        assert sorted(list(file_dict.keys())) == CSVS
+    else:
+        print(f"Testing isn't supported yet for {soc}")
+        assert 0
+
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
