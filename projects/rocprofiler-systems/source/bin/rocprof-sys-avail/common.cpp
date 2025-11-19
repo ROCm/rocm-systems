@@ -26,6 +26,7 @@
 #include <timemory/settings/settings.hpp>
 #include <timemory/variadic/macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <sys/stat.h>
 
@@ -307,30 +308,60 @@ process_categories(parser_t& p, const str_set_t& _category_options)
 {
     category_view = p.get<str_set_t>("categories");
     std::vector<std::function<void()>> _shorthand_patches{};
+
+    // Helper to do case-insensitive string comparison
+    auto _tolower = [](const std::string& in) {
+        std::string out = in;
+        std::transform(out.begin(), out.end(), out.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        return out;
+    };
+
+    // Helper to find case-insensitive match in category options
+    auto _find_category = [&_category_options,
+                           &_tolower](const std::string& input) -> std::string {
+        auto input_lower = _tolower(input);
+        for(const auto& opt : _category_options)
+        {
+            if(_tolower(opt) == input_lower) return opt;
+        }
+        return "";
+    };
+
     for(const auto& itr : category_view)
     {
-        auto _is_shorthand = [&_shorthand_patches, &_category_options,
+        auto _is_shorthand = [&_shorthand_patches, &_find_category,
                               itr](const std::string& _prefix) {
-            auto _opt = TIMEMORY_JOIN("::", _prefix, itr);
-            if(_category_options.count(_opt) > 0)
+            auto _opt     = TIMEMORY_JOIN("::", _prefix, itr);
+            auto _matched = _find_category(_opt);
+            if(!_matched.empty())
             {
-                _shorthand_patches.emplace_back([itr, _opt]() {
+                _shorthand_patches.emplace_back([itr, _matched]() {
                     category_view.erase(itr);
-                    category_view.emplace(_opt);
+                    category_view.emplace(_matched);
                 });
                 return true;
             }
             return false;
         };
 
-        if(_category_options.count(itr) == 0)
+        // Try case-insensitive match
+        auto _matched = _find_category(itr);
+        if(!_matched.empty())
         {
-            if(!_is_shorthand("component") && !_is_shorthand("settings") &&
-               !_is_shorthand("hw_counters"))
-                throw std::runtime_error(
-                    itr + " is not a valid category. Use --list-categories to view "
-                          "valid categories");
+            _shorthand_patches.emplace_back([itr, _matched]() {
+                category_view.erase(itr);
+                category_view.emplace(_matched);
+            });
+            continue;
         }
+
+        // Try shorthand notation
+        if(!_is_shorthand("component") && !_is_shorthand("settings") &&
+           !_is_shorthand("hw_counters"))
+            throw std::runtime_error(
+                itr + " is not a valid category. Use --list-categories to view "
+                      "valid categories");
     }
     for(auto&& itr : _shorthand_patches)
         itr();
