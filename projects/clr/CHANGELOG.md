@@ -33,7 +33,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 
-* Made correction in the calculation for the value of maximum shared memory per multiprocessor, in HIP device properties. 
+* Corrected the calculation of the value of maximum shared memory per multiprocessor, in HIP device properties. 
 
 ### Optimized
 
