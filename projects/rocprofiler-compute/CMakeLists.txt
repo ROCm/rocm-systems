@@ -287,10 +287,19 @@ add_test(
 )
 
 add_test(
-    NAME test_profile_roofline
+    NAME test_profile_roofline_1
     COMMAND
-        ${Python3_EXECUTABLE} -m pytest -m roofline
-        --junitxml=tests/test_profile_roofline.xml ${COV_OPTION}
+        ${Python3_EXECUTABLE} -m pytest -m roofline_1
+        --junitxml=tests/test_profile_roofline_1.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
+add_test(
+    NAME test_profile_roofline_2
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -m roofline_2
+        --junitxml=tests/test_profile_roofline_2.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
 )
@@ -339,7 +348,8 @@ set_tests_properties(
     test_profile_sort
     test_profile_misc
     test_profile_path
-    test_profile_roofline
+    test_profile_roofline_1
+    test_profile_roofline_2
     test_profile_section
     test_profile_pc_sampling
     test_profile_sets_func
@@ -445,7 +455,8 @@ if(${ENABLE_COVERAGE})
         test_profile_sort
         test_profile_misc
         test_profile_path
-        test_profile_roofline
+        test_profile_roofline_1
+        test_profile_roofline_2
         test_profile_section
         test_profile_sets_func
         test_analyze_commands
