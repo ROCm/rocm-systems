@@ -1947,7 +1947,7 @@ class AMDSMICommands():
                             power_info[key] = self.helpers.unit_format(self.logger,
                                                                         value,
                                                                         voltage_unit)
-                        elif key == "socket_power":
+                        elif 'power' in key:
                             power_info[key] = self.helpers.unit_format(self.logger,
                                                                         value,
                                                                         power_unit)
