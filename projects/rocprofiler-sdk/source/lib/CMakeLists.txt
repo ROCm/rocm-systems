@@ -15,10 +15,12 @@ add_subdirectory(rocprofiler-sdk-roctx)
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "rocpd")
 add_subdirectory(rocprofiler-sdk-rocpd)
 
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "rocattach")
+add_subdirectory(rocprofiler-sdk-rocattach)
+
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tools")
 add_subdirectory(att-tool)
 add_subdirectory(rocprofiler-sdk-tool)
-add_subdirectory(rocprofv3-attach)
 
 add_subdirectory(python)
 
