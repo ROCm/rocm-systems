@@ -1405,10 +1405,9 @@ def test_metric_evaluation_no_valid_data():
         mock_eval.side_effect = KeyError("Some KeyError")
         assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
-        with patch("sys.exit") as mock_sys_exit:
+        with patch("sys.exit"):
             mock_eval.side_effect = AttributeError("Some AttributeError")
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
-            assert mock_sys_exit.called_once
 
         mock_eval.side_effect = AttributeError(
             "'NoneType' object has no attribute 'get'"
