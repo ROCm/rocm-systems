@@ -26,7 +26,10 @@ find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
 # hip root dir is 3 levels down the hip-config.cmake file path
 set(HIP_PATH ${hip_DIR}/../../../)
 if(NOT DEFINED ROCM_PATH)
-    set(ROCM_PATH ${HIP_PATH})
+    set(ROCM_PATH "/opt/rocm")
+    if(NOT EXISTS "${ROCM_PATH}")
+        set(ROCM_PATH ${HIP_PATH})
+    endif()
 endif()
 if(UNIX)
     find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
@@ -37,7 +40,7 @@ else() # Win32
                  PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
 endif()
 find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
-             PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
+             PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH}/llvm/bin)
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
 
 # used by clang to find hip
