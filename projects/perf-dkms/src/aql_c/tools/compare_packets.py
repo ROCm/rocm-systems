@@ -350,13 +350,13 @@ def print_comparison_results(block_name: str, event_id: str,
         print(f"{'-' * 80}")
 
         if result['error']:
-            print(f"{Colors.FAIL}ERROR: {result['error']}{Colors.ENDC}\n")
+            print(f"{Colors.FAIL}✗ ERROR: {result['error']}{Colors.ENDC}\n")
             continue
 
         if result['match']:
             print(f"{Colors.OKGREEN}✓ Packets match{Colors.ENDC}\n")
         else:
-            print(f"{Colors.WARNING}✗ Packets differ{Colors.ENDC}")
+            print(f"{Colors.WARNING}! Packets differ{Colors.ENDC}")
             print(result['diff'])
 
         print()
@@ -424,12 +424,12 @@ Examples:
 
         # Check if block/event exists in both files
         if original_block is None:
-            print(f"{Colors.FAIL}ERROR: Block '{args.block_name}' with event '{event_id}' "
+            print(f"{Colors.FAIL}✗ ERROR: Block '{args.block_name}' with event '{event_id}' "
                   f"not found in {original_json_path}{Colors.ENDC}")
             sys.exit(1)
 
         if new_block is None:
-            print(f"{Colors.FAIL}ERROR: Block '{args.block_name}' with event '{event_id}' "
+            print(f"{Colors.FAIL}✗ ERROR: Block '{args.block_name}' with event '{event_id}' "
                   f"not found in {new_json_path}{Colors.ENDC}")
             sys.exit(1)
 
@@ -468,19 +468,19 @@ Examples:
                 sys.exit(0)
 
     except FileNotFoundError as e:
-        print(f"{Colors.FAIL}ERROR: {str(e)}{Colors.ENDC}")
+        print(f"{Colors.FAIL}✗ ERROR: {str(e)}{Colors.ENDC}")
         sys.exit(1)
     except ValueError as e:
-        print(f"{Colors.FAIL}ERROR: {str(e)}{Colors.ENDC}")
+        print(f"{Colors.FAIL}✗ ERROR: {str(e)}{Colors.ENDC}")
         sys.exit(1)
     except json.JSONDecodeError as e:
-        print(f"{Colors.FAIL}ERROR: {str(e)}{Colors.ENDC}")
+        print(f"{Colors.FAIL}✗ ERROR: {str(e)}{Colors.ENDC}")
         sys.exit(1)
     except KeyboardInterrupt:
-        print(f"\n{Colors.WARNING}Interrupted by user{Colors.ENDC}")
+        print(f"\n{Colors.WARNING}! Interrupted by user{Colors.ENDC}")
         sys.exit(130)
     except Exception as e:
-        print(f"{Colors.FAIL}UNEXPECTED ERROR: {str(e)}{Colors.ENDC}")
+        print(f"{Colors.FAIL}✗ UNEXPECTED ERROR: {str(e)}{Colors.ENDC}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

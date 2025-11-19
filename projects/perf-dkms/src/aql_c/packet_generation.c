@@ -342,12 +342,11 @@ int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
      * dimensions if needed.
      */
     bool has_se_dimension = false;
-    uint32_t num_se = 1;
-    uint32_t num_sa = 1;
-    uint32_t num_wgp = 1;
+    uint32_t num_se = arch->num_se;
+    uint32_t num_sa = arch->num_sa;
+    uint32_t num_wgp = arch->num_wgp_per_sa;
 
-    /* Extract dimension sizes from block dimensions.
-     * Start with 1 for each dimension and only multiply if the block has that dimension. */
+    /* Extract dimension sizes from block dimensions */
     for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
       dimension_t *dim = &block->dimensions[dim_idx];
       if (dim->dim == HARDWARE_DIM_SE) {

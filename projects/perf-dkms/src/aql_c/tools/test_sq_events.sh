@@ -1,4 +1,6 @@
 #!/bin/bash
+set -e
+set -u
 # Test all SQ events and report results
 
 echo "Testing SQ Event Packets After Fixes"
