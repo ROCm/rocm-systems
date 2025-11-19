@@ -23,17 +23,23 @@ find_package(hiprtc)
 find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
-
+# hip root dir is 3 levels down the hip-config.cmake file path
+set(HIP_PATH ${hip_DIR}/../../../)
+if(NOT DEFINED ROCM_PATH)
+    set(ROCM_PATH ${HIP_PATH})
+endif()
 if(UNIX)
     find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
     find_program(GCC_EXEC gcc)
     find_program(GXX_EXEC g++)
 else() # Win32
-    find_program(LLVM_RC_EXEC llvm-rc)
+    find_program(LLVM_RC_EXEC NAMES llvm-rc llvm-rc.exe
+                 PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
 endif()
+find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
+             PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
-# hip root dir is 3 levels down the hip-config.cmake file path
-set(HIP_PATH ${hip_DIR}/../../../)
+
 # used by clang to find hip
 set(HIP_PATH_OPT "--hip-path=${HIP_PATH}")
 
@@ -142,12 +148,10 @@ endforeach()
 
 if (WIN32)
   configure_file(catchProp_in_rc.in ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc @ONLY)
-  cmake_path(SET LLVM_RC_PATH "${HIP_PATH}/../lc/bin/llvm-rc.exe")
-  cmake_path(SET LLVM_RC_PATH NORMALIZE "${LLVM_RC_PATH}")
 
   # generates the .res files to be used by executables to populate the properties
   # expects LC folder with clang, llvm-rc to be present one level up of HIP
-  execute_process(COMMAND ${LLVM_RC_PATH} ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc
+  execute_process(COMMAND ${LLVM_RC_EXEC} ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc
                   OUTPUT_VARIABLE RC_OUTPUT)
   set(PROP_RC ${CMAKE_CURRENT_BINARY_DIR})
   # When args to linker exceeds max chars.
@@ -241,9 +245,8 @@ if(WIN32)
     set(configToUse "config_amd_windows")
     set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
     set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
-    set(CLANG_CPP "${HIP_PATH}/../lc/bin/clang-cpp.exe")
 
-    set(cmd "${CLANG_CPP} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
+    set(cmd "${CLANG_CPP_EXEC} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
     message(${cmd})
     execute_process(COMMAND cmd.exe /C ${cmd}
     RESULT_VARIABLE json_result)
@@ -253,7 +256,7 @@ else()
     foreach(arch ${hip_gpu_arch_list})
         set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
         set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
-        set(cmd "${ROCM_PATH}/llvm/bin/clang-cpp -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
+        set(cmd "${CLANG_CPP_EXEC} -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
         message(${cmd})
         execute_process(COMMAND bash -c ${cmd}
         RESULT_VARIABLE json_result)
