@@ -15,13 +15,7 @@
 #include <iostream>
 #include <openssl/sha.h>
 
-// get secondary CUID from cuid file?
 amdcuid_status_t AmdCuidDevice::get_secondary_cuid(amdcuid& id) const {
-    amdcuid primary;
-    amdcuid_status_t status = get_primary_cuid(primary);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        return status;
-    }
-
-    return AMDCUID_STATUS_SUCCESS;
+    (void)id;
+    return AMDCUID_STATUS_UNSUPPORTED;
 }
