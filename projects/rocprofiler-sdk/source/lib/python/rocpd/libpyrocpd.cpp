@@ -130,21 +130,43 @@ get_type_name(const py::object& obj)
     return obj.get_type().attr("__name__").cast<std::string>();
 }
 
-struct db_index
+struct node_unique_index
 {
     using guid_t = std::string;
     guid_t guid  = {};
     pid_t  nid   = {};
-    pid_t  pid   = {};
 
-    bool operator==(const db_index& other) const
+    bool operator==(const node_unique_index& other) const
     {
-        return guid == other.guid && nid == other.nid && pid == other.pid;
+        return guid == other.guid && nid == other.nid;
     }
 
-    bool operator<(const db_index& other) const
+    bool operator<(const node_unique_index& other) const
     {
-        return std::tie(guid, nid, pid) < std::tie(other.guid, other.nid, other.pid);
+        return std::tie(guid, nid) < std::tie(other.guid, other.nid);
+    }
+};
+
+struct process_unique_index : public node_unique_index
+{
+    pid_t pid = {};
+
+    bool operator==(const process_unique_index& other) const
+    {
+        return static_cast<const node_unique_index&>(*this) ==
+                   static_cast<const node_unique_index&>(other) &&
+               pid == other.pid;
+    }
+
+    bool operator<(const process_unique_index& other) const
+    {
+        const node_unique_index& base_this  = *this;
+        const node_unique_index& base_other = other;
+
+        if(base_this < base_other) return true;
+        if(base_other < base_this) return false;
+
+        return pid < other.pid;
     }
 };
 
@@ -171,10 +193,10 @@ public:
     }
     ~sql_data_handler() = default;
 
-    const std::vector<T>& operator[](const db_index& index) { return data_[index]; }
+    const std::vector<T>& operator[](const process_unique_index& index) { return data_[index]; }
 
 private:
-    std::map<db_index, std::vector<T>> data_;
+    std::map<process_unique_index, std::vector<T>> data_;
 };
 
 struct RocpdImportData
@@ -444,16 +466,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
     pyrocpd.def(
         "write_perfetto",
         [](rocpd::RocpdImportData& data, const tool::output_config& output_cfg) -> bool {
-            auto _create_agent_index =
-                [&output_cfg](const rocpd::types::agent& _agent) -> tool::agent_index {
-                auto ret_index = tool::create_agent_index(
-                    output_cfg.agent_index_value,
-                    _agent.node_id,                                      // absolute index
-                    static_cast<uint32_t>(_agent.logical_node_id),       // relative index
-                    static_cast<uint32_t>(_agent.logical_node_type_id),  // type-relative index
-                    std::string_view(_agent.type));
-                return ret_index;
-            };
             // ORDER BY expression for kernel dispatches
             constexpr auto kernels_order_by =
                 "agent_abs_index ASC, stream_id ASC, queue_id ASC, start ASC, end DESC";
@@ -464,12 +476,13 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             auto perfetto_session = rocpd::output::PerfettoSession{output_cfg};
             auto sqlgen_perf      = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
+
             for(auto obj : {data.connection})
             {
-                auto* conn  = rocpd::interop::get_connection(std::move(obj));
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
+                auto* conn = rocpd::interop::get_connection(std::move(obj));
 
                 auto _sqlgen_perft = common::simple_timer{"Perfetto generation from SQL (total)"};
+
                 rocpd::sql_data_handler<rocpd::types::kernel_dispatch> kernels(
                     conn, "kernels", kernels_order_by);
                 rocpd::sql_data_handler<rocpd::types::memory_allocation> memory_allocations(
@@ -486,68 +499,63 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                     conn, "samples", sample_order_by);
                 rocpd::sql_data_handler<rocpd::types::thread> threads(conn, "threads");
 
-                std::vector<rocpd::db_index> db_indexes;
-                std::map<
-                    rocpd::db_index,
-                    std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>>
-                                                                 db_agent_map;
-                std::map<rocpd::db_index, rocpd::types::process> db_process_map;
-
-                for(const auto& nitr : nodes)
+                std::vector<rocpd::types::node> nodes;
                 {
-                    auto agents = rocpd::read<rocpd::types::agent>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
-                    auto processes = rocpd::read<rocpd::types::process>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
+                    auto sqlgen_perf = rocprofiler::common::simple_timer{
+                        fmt::format("Fetching data from table: \"nodes\"")};
+                    nodes = rocpd::read<rocpd::types::node>(conn);
+                }
 
-                    for(const auto& pitr : processes)
+                std::map<rocpd::node_unique_index, std::vector<rocpd::types::agent>> agents;
+                {
+                    auto sqlgen_perf = rocprofiler::common::simple_timer{
+                        fmt::format("Fetching data from table: \"agents\"")};
+                    for(const auto& nitr : nodes)
                     {
-                        ROCP_FATAL_IF(pitr.nid != nitr.id || pitr.guid != nitr.guid)
-                            << fmt::format("Found process with a mismatched nid/guid. process: "
-                                           "{}/{} vs. node: {}/{}",
-                                           pitr.nid,
-                                           pitr.guid,
-                                           nitr.id,
-                                           nitr.guid);
+                        auto node_agents = rocpd::read<rocpd::types::agent>(
+                            conn,
+                            fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
 
-                        // absolute_index |-> (agent, agent_index)
-                        auto agents_map =
-                            std::unordered_map<uint64_t,
-                                               std::pair<rocpd::types::agent, tool::agent_index>>{};
-
-                        for(const auto& itr : agents)
-                        {
-                            auto new_index = _create_agent_index(itr);
-                            agents_map.emplace(itr.absolute_index, std::make_pair(itr, new_index));
-                        }
-
-                        ROCP_TRACE << "Starting Perfetto generation from SQL for process "
-                                   << pitr.pid;
-
-                        rocpd::db_index index{pitr.guid, static_cast<pid_t>(nitr.id), pitr.pid};
-
-                        db_agent_map[index]   = std::move(agents_map);
-                        db_process_map[index] = std::move(pitr);
-                        db_indexes.push_back(std::move(index));
+                        rocpd::node_unique_index node_index{nitr.guid, static_cast<pid_t>(nitr.id)};
+                        agents[node_index] = std::move(node_agents);
                     }
                 }
 
-                for(const rocpd::db_index& index : db_indexes)
+                std::map<rocpd::process_unique_index, rocpd::types::process> processes;
+                {
+                    auto sqlgen_perf = rocprofiler::common::simple_timer{
+                        fmt::format("Fetching data from table: \"processes\"")};
+                    for(const auto& nitr : nodes)
+                    {
+                        auto node_processes = rocpd::read<rocpd::types::process>(
+                            conn,
+                            fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
+
+                        for(const auto& pitr : node_processes)
+                        {
+                            rocpd::process_unique_index process_index{
+                                {nitr.guid, static_cast<pid_t>(nitr.id)}, pitr.pid};
+                            processes[process_index] = std::move(pitr);
+                        }
+                    }
+                }
+
+                for(const auto& [process_index, processes] : processes)
                 {
                     auto _sqlgen_perfw = common::simple_timer{fmt::format(
-                        "Perfetto generation from SQL for process {} (write)", index.pid)};
+                        "Perfetto generation from SQL for process {} (write)", process_index.pid)};
 
                     rocpd::output::write_perfetto(perfetto_session,
-                                                  db_process_map[index],
-                                                  db_agent_map[index],
-                                                  threads[index],
-                                                  regions[index],
-                                                  samples[index],
-                                                  kernels[index],
-                                                  memory_copies[index],
-                                                  scratch_memory[index],
-                                                  memory_allocations[index],
-                                                  counters[index]);
+                                                  processes,
+                                                  agents[process_index],
+                                                  threads[process_index],
+                                                  regions[process_index],
+                                                  samples[process_index],
+                                                  kernels[process_index],
+                                                  memory_copies[process_index],
+                                                  scratch_memory[process_index],
+                                                  memory_allocations[process_index],
+                                                  counters[process_index]);
                 }
             }
             return true;

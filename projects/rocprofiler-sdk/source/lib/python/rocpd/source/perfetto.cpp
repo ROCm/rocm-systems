@@ -165,19 +165,17 @@ PerfettoSession::~PerfettoSession()
 }
 
 void
-write_perfetto(
-    const PerfettoSession& perfetto_session,
-    const types::process&  process,
-    const std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>&
-                                                 agent_data,
-    const std::vector<types::thread>&            thread_gen,
-    const std::vector<types::region>&            region_gen,
-    const std::vector<types::sample>&            sample_gen,
-    const std::vector<types::kernel_dispatch>&   kernel_dispatch_gen,
-    const std::vector<types::memory_copies>&     memory_copy_gen,
-    const std::vector<types::scratch_memory>&    scratch_memory_gen,
-    const std::vector<types::memory_allocation>& memory_allocation_gen,
-    const std::vector<types::counter>&           counter_collection_gen)
+write_perfetto(const PerfettoSession&                       perfetto_session,
+               const types::process&                        process,
+               const std::vector<types::agent>&             agent_data,
+               const std::vector<types::thread>&            thread_gen,
+               const std::vector<types::region>&            region_gen,
+               const std::vector<types::sample>&            sample_gen,
+               const std::vector<types::kernel_dispatch>&   kernel_dispatch_gen,
+               const std::vector<types::memory_copies>&     memory_copy_gen,
+               const std::vector<types::scratch_memory>&    scratch_memory_gen,
+               const std::vector<types::memory_allocation>& memory_allocation_gen,
+               const std::vector<types::counter>&           counter_collection_gen)
 {
     namespace sdk    = ::rocprofiler::sdk;
     namespace common = ::rocprofiler::common;
@@ -225,15 +223,35 @@ write_perfetto(
                            std::unordered_map<rocprofiler_queue_id_t, ::perfetto::Track>>{};
     auto stream_tracks = std::unordered_map<rocprofiler_stream_id_t, ::perfetto::Track>{};
 
+    const tool::output_config& output_cfg = perfetto_session.config;
+    auto                       _create_agent_index =
+        [&output_cfg](const rocpd::types::agent& _agent) -> tool::agent_index {
+        auto ret_index = tool::create_agent_index(
+            output_cfg.agent_index_value,
+            _agent.node_id,                                      // absolute index
+            static_cast<uint32_t>(_agent.logical_node_id),       // relative index
+            static_cast<uint32_t>(_agent.logical_node_type_id),  // type-relative index
+            std::string_view(_agent.type));
+        return ret_index;
+    };
+
+    // absolute_index |-> (agent, agent_index)
+    auto agents_map =
+        std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>{};
+
+    for(const auto& itr : agent_data)
     {
-        for(const auto& itr : memory_copy_gen)
+        auto new_index = _create_agent_index(itr);
+        agents_map.emplace(itr.absolute_index, std::make_pair(itr, new_index));
+    }
+
+    for(const auto& itr : memory_copy_gen)
+    {
+        auto stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
+        agent_stream_ids.emplace(stream_id);
+        if(ocfg.group_by_queue)
         {
-            auto stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
-            agent_stream_ids.emplace(stream_id);
-            if(ocfg.group_by_queue)
-            {
-                agent_thread_ids[itr.dst_agent_abs_index].emplace(itr.tid);
-            }
+            agent_thread_ids[itr.dst_agent_abs_index].emplace(itr.tid);
         }
     }
 
@@ -281,7 +299,7 @@ write_perfetto(
 
     for(const auto& [abs_index, thread_ids] : agent_thread_ids)
     {
-        const auto _agent = agent_data.at(abs_index).first;
+        const auto _agent = agents_map.at(abs_index).first;
 
         for(auto titr : thread_ids)
         {
@@ -308,9 +326,8 @@ write_perfetto(
 
     for(const auto& [abs_index, queue_ids] : agent_queue_ids)
     {
-        uint32_t   nqueue           = 0;
-        const auto _agent           = agent_data.at(abs_index).first;
-        auto       agent_index_info = agent_data.at(abs_index).second;
+        uint32_t nqueue           = 0;
+        auto     agent_index_info = agents_map.at(abs_index).second;
 
         for(auto qitr : queue_ids)
         {
@@ -406,9 +423,9 @@ write_perfetto(
                               [&](::perfetto::EventContext ctx) { (void) ctx; });
 
             TRACE_EVENT_END(_category, track, itr.end);
-
-            tracing_session->FlushBlocking();
         }
+
+        tracing_session->FlushBlocking();
 
         for(const auto& itr : sample_gen)
         {
@@ -464,8 +481,8 @@ write_perfetto(
                 _track         = &stream_tracks.at(stream_id);
             }
 
-            auto src_agent_index = agent_data.at(itr.src_agent_abs_index).second;
-            auto dst_agent_index = agent_data.at(itr.dst_agent_abs_index).second;
+            auto src_agent_index = agents_map.at(itr.src_agent_abs_index).second;
+            auto dst_agent_index = agents_map.at(itr.dst_agent_abs_index).second;
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_copy>::name,
                               ::perfetto::DynamicString{itr.name},
                               *_track,
@@ -496,6 +513,7 @@ write_perfetto(
             TRACE_EVENT_END(
                 sdk::perfetto_category<sdk::category::memory_copy>::name, *_track, itr.end);
         }
+
         tracing_session->FlushBlocking();
 
         // Temporary fix until timestamp issues are resolved:
@@ -628,7 +646,7 @@ write_perfetto(
                 _track = &stream_tracks.at(stream_id);
             }
 
-            auto agent_index = agent_data.at(current.agent_abs_index).second;
+            auto agent_index = agents_map.at(current.agent_abs_index).second;
             auto _name =
                 (ocfg.kernel_rename && !current.region.empty()) ? current.region : current.name;
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
@@ -674,6 +692,7 @@ write_perfetto(
             TRACE_EVENT_END(
                 sdk::perfetto_category<sdk::category::kernel_dispatch>::name, *_track, current.end);
         }
+
         tracing_session->FlushBlocking();
     }
 
@@ -724,9 +743,8 @@ write_perfetto(
             mem_cpy_endpoints[abs_index].emplace(mem_cpy_extremes.second + extremes_endpoint_buffer,
                                                  0);
 
-            auto       _track_name      = std::stringstream{};
-            const auto _agent           = agent_data.at(abs_index).first;
-            auto       agent_index_info = agent_data.at(abs_index).second;
+            auto _track_name      = std::stringstream{};
+            auto agent_index_info = agents_map.at(abs_index).second;
             _track_name << "COPY BYTES to " << agent_index_info.label << " ["
                         << agent_index_info.index << "] (" << agent_index_info.type << ")";
 
@@ -912,10 +930,10 @@ write_perfetto(
 
             auto _track_name = std::stringstream{};
 
-            if(agent_data.find(abs_index) != agent_data.end())
+            auto agent_it = agents_map.find(abs_index);
+            if(agent_it != agents_map.end())
             {
-                const auto _agent           = agent_data.at(abs_index).first;
-                auto       agent_index_info = agent_data.at(abs_index).second;
+                auto& [_, agent_index_info] = agent_it->second;
                 _track_name << "ALLOCATE BYTES on " << agent_index_info.label << " ["
                             << agent_index_info.index << "] (" << agent_index_info.type << ")";
             }
@@ -994,9 +1012,8 @@ write_perfetto(
             // Add buffer timestamps for better visualization
             if(!ts_map.empty())
             {
-                auto       _track_name      = std::stringstream{};
-                const auto _agent           = agent_data.at(abs_index).first;
-                auto       agent_index_info = agent_data.at(abs_index).second;
+                auto _track_name      = std::stringstream{};
+                auto agent_index_info = agents_map.at(abs_index).second;
 
                 _track_name << "SCRATCH MEMORY on " << agent_index_info.label << " ["
                             << agent_index_info.index << "] (" << agent_index_info.type << ")";
@@ -1086,9 +1103,8 @@ write_perfetto(
                 counters_endpoints[record.agent_id][counter_id].emplace(
                     counters_extremes.second + extremes_endpoint_buffer, 0);
 
-                const auto _agent           = agent_data.at(record.agent_abs_index).first;
-                auto       agent_index_info = agent_data.at(record.agent_abs_index).second;
-                auto       track_name_ss    = std::stringstream{};
+                auto agent_index_info = agents_map.at(record.agent_abs_index).second;
+                auto track_name_ss    = std::stringstream{};
                 track_name_ss << agent_index_info.label << " [" << agent_index_info.index << "] "
                               << "PMC " << record.counter_name;
 

@@ -53,18 +53,16 @@ struct PerfettoSession
 };
 
 void
-write_perfetto(
-    const PerfettoSession& perfetto_session,
-    const types::process&  process,
-    const std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>&
-                                                 agent_data,
-    const std::vector<types::thread>&            thread_gen,
-    const std::vector<types::region>&            region_gen,
-    const std::vector<types::sample>&            sample_gen,
-    const std::vector<types::kernel_dispatch>&   kernel_dispatch_gen,
-    const std::vector<types::memory_copies>&     memory_copy_gen,
-    const std::vector<types::scratch_memory>&    scratch_memory_gen,
-    const std::vector<types::memory_allocation>& memory_allocation_gen,
-    const std::vector<types::counter>&           counter_collection_gen);
+write_perfetto(const PerfettoSession&                       perfetto_session,
+               const types::process&                        process,
+               const std::vector<types::agent>&             agent_data,
+               const std::vector<types::thread>&            thread_data,
+               const std::vector<types::region>&            region_data,
+               const std::vector<types::sample>&            sample_data,
+               const std::vector<types::kernel_dispatch>&   kernel_dispatch_data,
+               const std::vector<types::memory_copies>&     memory_copy_data,
+               const std::vector<types::scratch_memory>&    scratch_memory_data,
+               const std::vector<types::memory_allocation>& memory_allocation_datan,
+               const std::vector<types::counter>&           counter_collection_data);
 }  // namespace output
 }  // namespace rocpd
