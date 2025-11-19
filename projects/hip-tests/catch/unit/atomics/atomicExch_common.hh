@@ -295,9 +295,30 @@ class AtomicExch
   }
 
   void ValidateResults(std::vector<T>& old_vals) const {
+    bool failure = false;
+    std::vector<std::pair<T>> missingValues;
+
+    INFO("Validating results for AtomicExch with "
+         << (use_shared_mem ? "shared memory" : "global memory") << " and scope "
+         << (scope == AtomicScopes::device
+                 ? "device"
+                 : (scope == AtomicScopes::system ? "system" : "builtin")));
     std::sort(old_vals.begin(), old_vals.end());
+
     for (auto i = 0u; i < old_vals.size(); ++i) {
-      REQUIRE(i == old_vals[i]);
+      if (i != old_vals[i]) {
+        missingValues.push_back(i, old_vals[i]);
+        failure = true;
+      }
+    }
+
+    if (failure) {
+      INFO("Found (" << missingValues.size() << "/" << old_vals.size() + ") unexpected values");
+
+      for (auto& val_pair : missingValues) {
+        INFO("Expected value: " << val_pair.first << " got: " << val_pair.second);
+      }
+      REQUIRE(false);
     }
   }
 };
@@ -412,7 +433,7 @@ void AtomicExchMultipleDeviceMultipleKernelAndHostTest(const unsigned int num_de
   for (const auto alloc_type : {LA::hipHostMalloc , LA::hipMallocManaged}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-      AtomicExch<TestType, false, AtomicScopes::system>().run(params);
+      AtomicExch<TestType, false, AtomicScopes::system, __HIP_MEMORY_SCOPE_SYSTEM>().run(params);
     }
   }
 }
