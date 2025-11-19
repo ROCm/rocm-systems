@@ -4,6 +4,36 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ## Unreleased
 
+### Added
+
+* Native tool to perform counter collection using ROCprofiler-SDK public API. It is only supported for ROCm version 7.0.0 (and later).
+  * Native tool is now the default for counter collection.
+  * Native tool for counter collection will not be used under the following conditions:
+    * Specific profiler is provided through the ``ROCPROF`` environment variable.
+    * ``--no-native-tool`` option is provided, forcing usage of the default profiler.
+    * When performing a dynamic attach to a process for profiling.
+
+* Iteration multiplexing to collect counters in single application run:
+  * Is incompatible with --no-native-tool
+  * Two options:
+    * kernel: Counters are collected in a round robin fashion for unique kernels.
+    * kernel_launch_params: Counters are collected in a round robin fashion for unique kernels having the exact same launch parameters.
+
+### Changed
+
+* Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
+  * If the ROCprofiler-SDK ``rocpd`` public library is not available, will fall back to ``csv`` format
+
+* Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-tool-library-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool and not the library.
+
+### Resolved issues
+
+* Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations of the kernel to profile and not which dispatch ids to profile.
+
+* The meaning of --dispatch option in analyze is still the same which is which dispatch ids to analyze
+
+* Fix the functioning of --dispatch option to act as 1-based index and ensure that correct kernel iterations are being profiled
+
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
 ### Added
@@ -24,6 +54,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Analysis configs YAMLs are now managed with the new config management workflow in `tools/config_management/`.
 
 * `amdsmi` python API is used instead of `amd-smi` CLI to query GPU specifications.
+
+* Empty cells replaced with `N/A` for unavailable metrics in analysis.
+
 
 ### Removed
 

@@ -501,7 +501,7 @@ Panel Config:
       per normalization unit.
     Translation Misses: The total number of translation requests that missed in the
       UTCL1 due to translation not being present in the cache, per normalization unit.
-    Permission Misses: |-
+    Permission Misses: >-
       The total number of translation requests that missed in the UTCL1 due
       to a permission error, per normalization unit. This is unused and expected
       to be zero in most configurations for modern CDNA\u2122 accelerators.
