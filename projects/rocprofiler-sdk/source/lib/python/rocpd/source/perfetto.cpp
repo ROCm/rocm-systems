@@ -78,38 +78,6 @@ get_hash_id(Tp&& _val)
 
 }  // namespace
 
-PerfettoTrackGenerator::PerfettoTrackGenerator()
-: track_counter_(0)
-, this_pid_track_(++track_counter_, ::perfetto::Track{})
-{}
-
-const ::perfetto::Track&
-PerfettoTrackGenerator::get_this_pid_track() const
-{
-    return this_pid_track_;
-}
-
-const ::perfetto::Track&
-PerfettoTrackGenerator::get_perfetto_track(pid_t pid, std::string_view name) const
-{
-    std::pair<pid_t, std::string> key(pid, name);
-    auto                          it = tracks_.find(key);
-    if(it != tracks_.end())
-    {
-        return it->second;
-    }
-
-    auto element =
-        tracks_.emplace(std::move(key), ::perfetto::Track{++track_counter_, this_pid_track_});
-    return element.first->second;
-}
-
-const ::perfetto::Track&
-PerfettoTrackGenerator::get_perfetto_track(std::string_view name) const
-{
-    return get_perfetto_track(std::numeric_limits<pid_t>::max(), name);
-}
-
 PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3* conn)
 : config{output_cfg}
 , connection{conn}
@@ -241,8 +209,10 @@ write_perfetto(
     namespace sdk    = ::rocprofiler::sdk;
     namespace common = ::rocprofiler::common;
 
-    static auto orig_process_track = ::perfetto::ProcessTrack::Current();
-    static auto orig_process_desc  = orig_process_track.Serialize();
+    static auto     orig_process_track = ::perfetto::ProcessTrack::Current();
+    static auto     orig_process_desc  = orig_process_track.Serialize();
+    static uint64_t global_flow_index  = 0;
+    static uint64_t global_track_index = 0;
 
     auto*          conn             = perfetto_session.connection;
     const auto&    tracing_session  = perfetto_session.tracing_session;
@@ -251,8 +221,7 @@ write_perfetto(
     const uint64_t this_pid_init_ns = process.init;
     auto           command_line     = ::rocprofiler::sdk::parse::tokenize(process.command, " ");
 
-    PerfettoTrackGenerator track_generator;
-    auto                   this_pid_track = track_generator.get_this_pid_track();
+    auto this_pid_track = ::perfetto::Track::Global(++global_track_index);
 
     common::consume_args(schema_version);
 
@@ -339,7 +308,6 @@ write_perfetto(
             fmt::format(
                 "SELECT * FROM region_args WHERE guid='{}' AND id={}", process.guid, region_id));
     };
-    uint64_t global_flow_index = 0;
 
     {
         for(auto ditr : memory_copy_gen)
@@ -381,7 +349,7 @@ write_perfetto(
             auto is_main_thread = (static_cast<uint64_t>(itr.tid) == this_pid);
             auto _idx           = (is_main_thread) ? 0 : ++nthrn;
             thread_indexes.emplace(itr.tid, _idx);
-            auto _track = track_generator.get_perfetto_track(itr.tid);
+            auto _track = ::perfetto::Track::Global(++global_track_index);
             auto _desc  = _track.Serialize();
             if(is_main_thread)
                 _desc.set_name(fmt::format("{}", ::basename(command_line.front().c_str())));
@@ -398,7 +366,7 @@ write_perfetto(
 
             thread_tracks.emplace(itr.tid, _track);
 
-            auto _sampling_track = track_generator.get_perfetto_track(itr.tid, "sampling");
+            auto _sampling_track = ::perfetto::Track::Global(++global_track_index);
             auto _sampling_desc  = _sampling_track.Serialize();
             _sampling_desc.set_name(fmt::format("THREAD {} (S) {}", _idx, itr.tid));
             ::perfetto::TrackEvent::SetTrackDescriptor(_sampling_track, _sampling_desc);
@@ -425,7 +393,7 @@ write_perfetto(
             else
                 _namess << "(UNK)";
 
-            auto _track = track_generator.get_perfetto_track(_namess.str());
+            auto _track = ::perfetto::Track::Global(++global_track_index);
             auto _desc  = _track.Serialize();
             _desc.set_name(_namess.str());
 
@@ -449,7 +417,7 @@ write_perfetto(
                     << "] QUEUE [" << nqueue++ << "] ";
             _namess << agent_index_info.type;
 
-            auto _track = track_generator.get_perfetto_track(_namess.str());
+            auto _track = ::perfetto::Track::Global(++global_track_index);
             auto _desc  = _track.Serialize();
             _desc.set_name(_namess.str());
 
@@ -465,7 +433,7 @@ write_perfetto(
 
         auto _name = fmt::format("STREAM [{}]", stream_id);
 
-        auto _track = track_generator.get_perfetto_track(_name);
+        auto _track = ::perfetto::Track::Global(++global_track_index);
         auto _desc  = _track.Serialize();
         _desc.set_name(_name);
 
