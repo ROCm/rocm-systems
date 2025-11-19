@@ -1383,8 +1383,14 @@ class ROCMHealthCheck:
 
         def check_device_atomic_ops(gpu_line):
             """Check atomic operations for a single GPU device"""
-            # Extract PCI address (e.g., "01:00.0")
-            pci_address = gpu_line.split()[0]
+            # Extract PCI address using regex (e.g., "01:00.0")
+            pci_match = re.match(r'^([0-9a-f]{2}:[0-9a-f]{2}\.[0-9a-f])', gpu_line.strip())
+
+            if not pci_match:
+                self.logger.warning(f"!!! Could not extract PCI address from line: {gpu_line}")
+                return None, "check_failed", f"Invalid format: Could not extract PCI address"
+
+            pci_address = pci_match.group(1)
 
             # Get atomic operations info using grep to filter relevant lines
             stdout_detail, stderr_detail, ret_detail = run_command(
@@ -1446,7 +1452,8 @@ class ROCMHealthCheck:
         for gpu_line in gpu_devices:
             pci_address, status_type, status_msg = check_device_atomic_ops(gpu_line)
             atomic_ops_status.append(status_msg)
-            check_pcie_atomic_routing_capability(pci_address)
+            if pci_address is not None:
+                check_pcie_atomic_routing_capability(pci_address)
 
             if status_type == "enabled":
                 devices_with_atomics += 1
