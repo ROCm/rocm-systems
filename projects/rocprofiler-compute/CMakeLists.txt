@@ -4,15 +4,15 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 set(CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 message(STATUS "ROCM_PATH: $ENV{ROCM_PATH}")
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR AND CMAKE_CURRENT_SOURCE_DIR
-                                                  STREQUAL CMAKE_SOURCE_DIR)
-  set(MSG "")
-  message(
-    STATUS "Warning! Building from the source directory is not recommended")
-  message(
-    STATUS "If unintended, please remove 'CMakeCache.txt' and 'CMakeFiles'")
-  message(STATUS "and build from a separate directory")
-  message(FATAL_ERROR "In-source build")
+if(
+    CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
+    AND CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
+)
+    set(MSG "")
+    message(STATUS "Warning! Building from the source directory is not recommended")
+    message(STATUS "If unintended, please remove 'CMakeCache.txt' and 'CMakeFiles'")
+    message(STATUS "and build from a separate directory")
+    message(FATAL_ERROR "In-source build")
 endif()
 
 # System info
@@ -154,7 +154,6 @@ configure_file(
 
 # Thera mods
 if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
-<<<<<<< HEAD
     list(APPEND CMAKE_MESSAGE_INDENT "  ")
     message(STATUS "Using thera-specific modulefile modification")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
@@ -164,16 +163,6 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
         ${mod_additions}
     )
     list(POP_BACK CMAKE_MESSAGE_INDENT)
-=======
-  list(APPEND CMAKE_MESSAGE_INDENT "  ")
-  message(STATUS "Using thera-specific modulefile modification")
-  file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
-  file(
-    APPEND
-    ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
-    ${mod_additions})
-  list(POP_BACK CMAKE_MESSAGE_INDENT)
->>>>>>> 7e4a58c120 (Fixed formatting)
 endif()
 
 # Setup testing collateral
@@ -181,12 +170,8 @@ endif()
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
 set(CMAKE_HIP_FLAGS_RELEASE "-O2")
 if(${ENABLE_TESTS})
-<<<<<<< HEAD
     enable_language("C" "HIP")
     add_subdirectory(tests)
-=======
-  add_subdirectory(tests)
->>>>>>> 7e4a58c120 (Fixed formatting)
 endif()
 message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
 
@@ -325,23 +310,6 @@ add_test(
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 set_tests_properties(
-<<<<<<< HEAD
-    test_profile_kernel_execution
-    test_profile_dispatch
-    test_profile_mem
-    test_profile_join
-    test_profile_sort
-    test_profile_misc
-    test_profile_path
-    test_profile_roofline
-    test_profile_section
-    test_profile_pc_sampling
-    test_profile_sets_func
-    test_profile_live_attach_detach
-    test_profile_iteration_multiplexing
-    PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
-)
-=======
   test_profile_kernel_execution
   test_profile_dispatch
   test_profile_mem
@@ -350,9 +318,12 @@ set_tests_properties(
   test_profile_misc
   test_profile_path
   test_profile_roofline
+    test_profile_section
+    test_profile_pc_sampling
+    test_profile_sets_func
+    test_profile_live_attach_detach
   test_profile_iteration_multiplexing
-  PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1)
->>>>>>> 7e4a58c120 (Fixed formatting)
+  PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800)
 
 # ---------------------------
 # analysis command tests
@@ -463,7 +434,6 @@ if(${ENABLE_COVERAGE})
             ${CMAKE_BINARY_DIR}/coverage.xml
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-<<<<<<< HEAD
     set_tests_properties(
         generate_coverage_report
         PROPERTIES
@@ -472,12 +442,6 @@ if(${ENABLE_COVERAGE})
             ENVIRONMENT "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage"
             TIMEOUT 600
     )
-=======
-  set_tests_properties(
-    generate_coverage_report
-    PROPERTIES DEPENDS "${ALL_TESTS_STRING}" LABELS "coverage" ENVIRONMENT
-               "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage")
->>>>>>> 7e4a58c120 (Fixed formatting)
 endif()
 
 # -------------------
@@ -501,7 +465,6 @@ install(
   COMPONENT main)
 # support files and version info
 install(
-<<<<<<< HEAD
     FILES
         src/argparser.py
         src/config.py
@@ -511,12 +474,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
 )
-=======
-  FILES src/argparser.py src/config.py src/rocprof_compute_base.py
-        src/roofline.py VERSION VERSION.sha
-  DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-  COMPONENT main)
->>>>>>> 7e4a58c120 (Fixed formatting)
 # src/rocprof_compute_analyze
 install(
   DIRECTORY src/rocprof_compute_analyze
