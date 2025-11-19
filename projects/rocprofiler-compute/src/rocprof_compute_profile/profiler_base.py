@@ -27,6 +27,8 @@ import argparse
 import csv
 import shlex
 import shutil
+import sys
+import tempfile
 import time
 from abc import abstractmethod
 from pathlib import Path
@@ -67,9 +69,7 @@ class RocProfCompute_Base:
     def get_args(self) -> argparse.Namespace:
         return self.__args
 
-    def get_profiler_options(
-        self, fname: str, soc: OmniSoC_Base
-    ) -> Union[list[str], dict[str, Any]]:
+    def get_profiler_options(self) -> Union[list[str], dict[str, Any]]:
         """Fetch any version specific arguments required by profiler"""
         # assume no SoC specific options and return empty list by default
         return []
@@ -415,6 +415,58 @@ class RocProfCompute_Base:
         total_runs = len(input_files)
         total_profiling_time = 0.0
 
+        native_tool_path = None
+        # Native counter collection tool is only compatible with
+        # rocprofiler-sdk public API for ROCm version >= 7.x.x
+        # Do not use native tool in attach
+        # mode until we figure out how multiple tools can attach
+        # TODO: Figure out how multiple tools can attach
+        if (
+            self.__profiler == "rocprofiler-sdk"
+            and not args.no_native_tool
+            and int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
+            and not args.attach_pid
+        ):
+            # Use native counter collection tool
+            native_tool_path = str(
+                Path(sys.argv[0]).resolve().parents[2]
+                / "lib"
+                / "rocprofiler-compute"
+                / "librocprofiler-compute-tool.so"
+            )
+            if not Path(native_tool_path).is_file():
+                # Build native counter collection tool if not exists
+                native_tool_path = str(
+                    Path(
+                        tempfile.mkdtemp(prefix="rocprofiler-compute-tool-", dir="/tmp")
+                    )
+                    / "librocprofiler-compute-tool.so"
+                )
+                link_libraries = ("rocprofiler-sdk",)
+                build_command = (
+                    # Create shared object
+                    "hipcc -shared -fPIC "
+                    # Link with dependant libraries
+                    + " ".join(f"-l{lib}" for lib in link_libraries)
+                    + " "
+                    # Compliler flags
+                    "-std=c++17 -W -Wall -Wextra -Wshadow -O2 "
+                    # rocprofiler sdk library path
+                    f"-L {str(Path(args.rocprofiler_sdk_tool_path).parent.parent)} "
+                    # native tool source files (tool.cpp and helper.cpp)
+                    f"{str(Path(__file__).parent.parent)}/"
+                    "lib/rocprofiler_compute_tool.cpp "
+                    f"{str(Path(__file__).parent.parent)}/"
+                    "lib/helper.cpp "
+                    # temporary shared object for native tool
+                    f"-o {native_tool_path}"
+                )
+                console_debug(f"Building native tool using command: {build_command}")
+                success, output = capture_subprocess_output(shlex.split(build_command))
+                console_debug(f"Build output: {output}")
+                if not success:
+                    console_error("Failed to build native counter collection tool.")
+
         for i, fname in enumerate(input_files):
             run_number = i + 1
 
@@ -465,7 +517,10 @@ class RocProfCompute_Base:
                     console_debug(output)
 
             console_log("profiling", f"Current input file: {fname}")
-            options = self.get_profiler_options(str(fname), self._soc)
+            if self.__profiler == "rocprofiler-sdk":
+                options = self.get_profiler_options(native_tool_path=native_tool_path)
+            else:
+                options = self.get_profiler_options()
             start_time = time.time()
             if self.__profiler == "rocprofv3" or self.__profiler == "rocprofiler-sdk":
                 # Only 1-run case is permitted for attach/detach
@@ -502,6 +557,10 @@ class RocProfCompute_Base:
             else:
                 console_error("Profiler not supported")
 
+        # Delete temporary native tool if created
+        if native_tool_path and native_tool_path.startswith("/tmp"):
+            shutil.rmtree(Path(native_tool_path).parent, ignore_errors=True)
+
         # PC sampling data is only collected when block "21" is specified
         if not "21" in args.filter_blocks:
             console_warning(
@@ -514,14 +573,13 @@ class RocProfCompute_Base:
         console_log(f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]")
 
         start_time = time.time()
+        # No native tool for pc sampling
+        options = self.get_profiler_options()
         pc_sampling_prof(
+            profiler_options=options,
             method=args.pc_sampling_method,
             interval=args.pc_sampling_interval,
             workload_dir=args.path,
-            appcmd=shlex.split(
-                args.remaining
-            ),  # FIXME: the right solution is applying it when argparsing once!
-            rocprofiler_sdk_library_path=args.rocprofiler_sdk_library_path,
         )
         end_time = time.time()
 

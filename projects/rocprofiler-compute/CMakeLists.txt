@@ -1,4 +1,8 @@
-cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+
+# Set cmake_prefix_path for searching, ROCM_PATH if avail otherwise default to general rocm install path
+set(CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
+message(STATUS "ROCM_PATH: $ENV{ROCM_PATH}")
 
 if(
     CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
@@ -36,7 +40,7 @@ string(
 project(
     rocprofiler-compute
     VERSION ${ROCPROFCOMPUTE_VERSION}
-    LANGUAGES C
+    LANGUAGES CXX
     DESCRIPTION
         "A kernel-level profiling tool for machine learning/HPC workloads running on AMD MI GPUs"
     HOMEPAGE_URL
@@ -283,10 +287,19 @@ add_test(
 )
 
 add_test(
-    NAME test_profile_roofline
+    NAME test_profile_roofline_1
     COMMAND
-        ${Python3_EXECUTABLE} -m pytest -m roofline
-        --junitxml=tests/test_profile_roofline.xml ${COV_OPTION}
+        ${Python3_EXECUTABLE} -m pytest -m roofline_1
+        --junitxml=tests/test_profile_roofline_1.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
+add_test(
+    NAME test_profile_roofline_2
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -m roofline_2
+        --junitxml=tests/test_profile_roofline_2.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
 )
@@ -335,7 +348,8 @@ set_tests_properties(
     test_profile_sort
     test_profile_misc
     test_profile_path
-    test_profile_roofline
+    test_profile_roofline_1
+    test_profile_roofline_2
     test_profile_section
     test_profile_pc_sampling
     test_profile_sets_func
@@ -441,7 +455,8 @@ if(${ENABLE_COVERAGE})
         test_profile_sort
         test_profile_misc
         test_profile_path
-        test_profile_roofline
+        test_profile_roofline_1
+        test_profile_roofline_2
         test_profile_section
         test_profile_sets_func
         test_analyze_commands
@@ -470,6 +485,11 @@ if(${ENABLE_COVERAGE})
             TIMEOUT 600
     )
 endif()
+
+# -------------------
+# Setup tool library
+# -------------------
+add_subdirectory(src/lib)
 
 # ---------
 # Install
@@ -563,6 +583,12 @@ install(
     COMPONENT main
 )
 
+#install librocprofiler-compute-tool.so
+install(
+    TARGETS rocprofiler-compute-tool
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
+)
+
 # top-level symlink for bin/rocprof-compute
 install(
     CODE
@@ -590,21 +616,25 @@ add_custom_target(
 add_custom_target(
     standalonebinary
     # Change working directory to src
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/src
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    # Install nuitka
+    COMMAND ${Python3_EXECUTABLE} -m pip install nuitka
+    # Install patchelf
+    COMMAND ${Python3_EXECUTABLE} -m pip install patchelf
     # Check nuitka
     COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i nuitka > /dev/null 2>&1
     # Check patchelf
     COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i patchelf > /dev/null 2>&1
     # Create VERSION.sha file
-    COMMAND git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD > VERSION.sha
+    COMMAND git rev-parse HEAD > VERSION.sha
     # Build standalone binary
     # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution
-    # and fork
-    # bombs as explained in
+    # and fork bombs as explained in
     # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
     COMMAND
         ${Python3_EXECUTABLE} -m nuitka --mode=onefile --no-deployment-flag=self-execution
         --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
+        --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp
         --include-package=dash_svg --include-package-data=dash_svg
         --include-package=dash_bootstrap_components
         --include-package-data=dash_bootstrap_components --include-package=plotly
@@ -615,7 +645,7 @@ add_custom_target(
         --include-package-data=rocprof_compute_profile
         --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
         --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
-        --include-package=utils --include-package-data=utils rocprof-compute
+        --include-package=utils --include-package-data=utils src/rocprof-compute
     # Remove library rpath from executable
     COMMAND patchelf --remove-rpath rocprof-compute.bin
     # Move to build directory
