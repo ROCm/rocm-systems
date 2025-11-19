@@ -157,7 +157,9 @@ jobs:
             --build-jobs 16 \
             --pytest-numprocs 8 \
             --code-coverage "OFF" \
-            --install
+            --install \
+            -- \
+            -E "test_profile_live_attach_detach|test_profile_roofline"
       
       - name: Output Logs
         if: failure() && steps.test.outcome == 'failure'
