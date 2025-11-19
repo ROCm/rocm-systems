@@ -88,10 +88,12 @@ if ( ENABLE_ASAN_PACKAGING )
   # ASAN Package requires only asan component with libraries and license file
   set (CPACK_COMPONENTS_ALL asan )
   set( COMP_TYPE "asan" )
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan )
 else()
   set (CPACK_PACKAGE_NAME ${AQLPROFILE_NAME})
   set (CPACK_COMPONENTS_ALL runtime)
   set( COMP_TYPE "runtime" )
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
   # Add tests component if INSTALL_TESTS is enabled
   if(AQLPROFILE_INSTALL_TESTS)
     list(APPEND CPACK_COMPONENTS_ALL tests)
