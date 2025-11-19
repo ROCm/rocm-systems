@@ -202,57 +202,61 @@ Profile types:
 Sampling mode
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-Sampling uses statistical call-stack sampling through periodic software interrupts per thread, as described in :doc:`Sampling the call stack <../how-to/sampling-call-stack>`_.
+Sampling uses statistical call-stack sampling through periodic software interrupts per thread, as described in :doc:`Sampling the call stack <../how-to/sampling-call-stack>`.
 
 Sampling types:
 
 1. **CPU-Time sampling** (default)
-   - Enabled using ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--cputime`` (rocprof-sys-sample), ``--sample-cputime`` (rocprof-sys-run). The sampling can be controlled using:
-     - ``ROCPROFSYS_SAMPLING_CPUTIME_FREQ``
-     - ``ROCPROFSYS_SAMPLING_CPUTIME_DELAY``
-     - ``ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL``
+
+* Enabled using ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--cputime`` (rocprof-sys-sample), ``--sample-cputime`` (rocprof-sys-run). The sampling can be controlled using:
+
+  * ``ROCPROFSYS_SAMPLING_CPUTIME_FREQ``
+  * ``ROCPROFSYS_SAMPLING_CPUTIME_DELAY``
+  * ``ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL``
 
 2. **Real-Time sampling**
-   - Enabled using ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--realtime`` (rocprof-sys-sample), ``--sample-realtime`` (rocprof-sys-run). The sampling can be controlled using:
-     - ``ROCPROFSYS_SAMPLING_REALTIME_FREQ``
-     - ``ROCPROFSYS_SAMPLING_REALTIME_DELAY``
-     - ``ROCPROFSYS_SAMPLING_REALTIME_SIGNAL``
+
+* Enabled using ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--realtime`` (rocprof-sys-sample), ``--sample-realtime`` (rocprof-sys-run). The sampling can be controlled using:
+
+  * ``ROCPROFSYS_SAMPLING_REALTIME_FREQ``
+  * ``ROCPROFSYS_SAMPLING_REALTIME_DELAY``
+  * ``ROCPROFSYS_SAMPLING_REALTIME_SIGNAL``
 
 3. **Overflow sampling**
-   - Enabled using ``ROCPROFSYS_SAMPLING_OVERFLOW=ON`` or ``--sample-overflow`` (rocprof-sys-run). It requires Linux ``perf`` support (``/proc/sys/kernel/perf_event_paranoid <= 2``) as described in :ref:`rocprof-sys_papi_events`.
-   The sampling can be controlled using:
-     - ``ROCPROFSYS_SAMPLING_OVERFLOW_FREQ``
-     - ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``
-     - ``ROCPROFSYS_SAMPLING_OVERFLOW_SIGNAL``
-     - ``ROCPROFSYS_SAMPLING_OVERFLOW_TIDS``
+
+* Enabled using ``ROCPROFSYS_SAMPLING_OVERFLOW=ON`` or ``--sample-overflow`` (rocprof-sys-run). It requires Linux ``perf`` support (``/proc/sys/kernel/perf_event_paranoid <= 2``) as described in :ref:`rocprof-sys_papi_events`. The sampling can be controlled using:
+
+  * ``ROCPROFSYS_SAMPLING_OVERFLOW_FREQ``
+  * ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``
+  * ``ROCPROFSYS_SAMPLING_OVERFLOW_SIGNAL``
+  * ``ROCPROFSYS_SAMPLING_OVERFLOW_TIDS``
 
 4. **Process sampling**
-   - Enabled via ``ROCPROFSYS_USE_PROCESS_SAMPLING=ON`` (default ON). The sampling can be controlled via:
-     - ``ROCPROFSYS_PROCESS_SAMPLING_FREQ``
-     - ``ROCPROFSYS_SAMPLING_CPUS``
-     - ``ROCPROFSYS_SAMPLING_GPUS``
+
+* Enabled using ``ROCPROFSYS_USE_PROCESS_SAMPLING=ON`` (default ON). The sampling can be controlled using:
+
+  * ``ROCPROFSYS_PROCESS_SAMPLING_FREQ``
+  * ``ROCPROFSYS_SAMPLING_CPUS``
+  * ``ROCPROFSYS_SAMPLING_GPUS``
 
 .. note:: If sampling is enabled but no specific type is selected, CPU-time sampling is used by default.
 
 To enable sampling:
 
 1. Use ``rocprof-sys-sample`` (auto-enables sampling).
-2. Set ``ROCPROFSYS_USE_SAMPLING=ON``.
-3. Set ``ROCPROFSYS_MODE=sampling``. 
-4. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``. 
-5. Use ``-M sampling`` or ``--mode sampling`` with ``rocprof-sys-instrument``. 
-Use of ``rocprof-sys-sample`` is **recommended** over ``rocprof-sys-instrument -M sampling`` when binary instrumentation is not necessary. For more details, see :doc:`Sampling the call stack <../how-to/sampling-call-stack>`.
+2. Set ``ROCPROFSYS_USE_SAMPLING=ON`` and ``ROCPROFSYS_MODE=sampling``. 
+3. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``. 
+4. Use ``-M sampling`` or ``--mode sampling`` with ``rocprof-sys-instrument``. Use of ``rocprof-sys-sample`` is **recommended** over ``rocprof-sys-instrument -M sampling`` when binary instrumentation is not necessary. For more details, see :doc:`Sampling the call stack <../how-to/sampling-call-stack>`.
 
-Causal Mode
+Causal mode
 ^^^^^^^^^^^^^^^^^^^^^^^^
-
-Causal profiling quantifies the potential impact of optimizations in parallel code and predicts where efforts should be focused as described in :doc:``Performing causal profiling <../how-to/performing-causal-profiling>`.
-This mode can also be enabled via: ``ROCPROFSYS_USE_CAUSAL=true`` or ``ROCPROFSYS_MODE=causal``.
+Causal profiling quantifies the potential impact of optimizations in parallel code and predicts where efforts should be focused as described in :doc:`Performing causal profiling <../how-to/performing-causal-profiling>`.
+This mode can be enabled using: ``ROCPROFSYS_USE_CAUSAL=true`` or ``ROCPROFSYS_MODE=causal``.
 
 Coverage mode
--------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
-Coverage mode tracks which parts of your code are executed during a run. It uses binary instrumentation to record function and/or basic block execution. This mode can be enabled via ``rocprof-sys-instrument -M coverage``.
+Coverage mode tracks which parts of your code are executed during a run. It uses binary instrumentation to record function and/or basic block execution. This mode can be enabled using: ``rocprof-sys-instrument -M coverage``.
 
 Granularity options:
 

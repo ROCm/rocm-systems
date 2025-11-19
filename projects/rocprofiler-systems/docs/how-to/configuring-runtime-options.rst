@@ -181,9 +181,9 @@ PAPI components from different namespaces:
    installed with the prefix ``rocprof-sys-`` with
    underscores replaced with hyphens, for example ``papi_avail`` becomes ``rocprof-sys-papi-avail``.
 
-There are two distinct approaches for collecting PAPI-based hardware counters, each with different characteristics and use cases.
+There are two distinct approaches for collecting PAPI-based hardware counters, each with different characteristics and use cases:
 
-1. Instrumentation-based collection: Uses function instrumentation system to collect PAPI counters at function entry and exit points. This works with profiling mode via ``ROCPROFSYS_TIMEMORY_COMPONENTS``:
+1. **Instrumentation-based collection:** Uses function instrumentation system to collect PAPI counters at function entry and exit points. This works with profiling mode via ``ROCPROFSYS_TIMEMORY_COMPONENTS``:
 
 **Example 1: Using ``papi_array`` for a fixed list of events**
 
@@ -213,6 +213,7 @@ There are two distinct approaches for collecting PAPI-based hardware counters, e
 2. Sampling-based collection: Periodically interrupts program execution to capture hardware counters along with call stack information. This works with the sampling mode.
 
 .. code-block:: shell 
+   
    # Enable sampling mode (required)
    export ROCPROFSYS_USE_SAMPLING=ON
 
