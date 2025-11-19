@@ -1,0 +1,187 @@
+################################################################################
+# FINDROCm Package Configuration File
+# 
+# This file is used by CMake's find_package() command to locate the FINDROCm cmake
+# configuration and configure the necessary paths and components.
+#
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+################################################################################
+
+@PACKAGE_INIT@
+
+# Package version information
+set(FINDROCM_VERSION "@PROJECT_VERSION@")
+set(FINDROCM_VERSION_MAJOR "@PROJECT_VERSION_MAJOR@")
+set(FINDROCM_VERSION_MINOR "@PROJECT_VERSION_MINOR@")
+set(FINDROCM_VERSION_PATCH "@PROJECT_VERSION_PATCH@")
+
+# Installation paths
+set_and_check(FINDROCM_PREFIX "@PACKAGE_CMAKE_INSTALL_PREFIX@")
+set_and_check(FINDROCM_LIB_DIR "@PACKAGE_CMAKE_INSTALL_LIBDIR@")
+set_and_check(FINDROCM_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set_and_check(FINDROCM_BIN_DIR "@PACKAGE_CMAKE_INSTALL_BINDIR@")
+
+# ROCm path (if set during build)
+set(FINDROCM_ROCM_PATH "@ROCM_PATH@")
+
+# List of available components that were built
+set(FINDROCM_AVAILABLE_COMPONENTS "@FINDROCM_AVAILABLE_COMPONENTS@")
+
+# Convert to list
+string(REPLACE " " ";" FINDROCM_AVAILABLE_COMPONENTS_LIST "${FINDROCM_AVAILABLE_COMPONENTS}")
+
+################################################################################
+# Component-specific find_package calls
+################################################################################
+
+# This function attempts to find individual ROCm component packages
+function(FINDROCm_find_component component)
+    # Map component names to their package names
+    set(package_name "${component}")
+    
+    # Some components have different package names
+    if(component STREQUAL "rocr-runtime")
+        set(package_name "hsa-runtime64")
+    endif()
+    
+    # Try to find the component package
+    find_package(${package_name} QUIET CONFIG
+        PATHS 
+	    "${FINDROCM_PREFIX}"
+	    "${FINDROCM_LIB_DIR}/cmake/${package_name}"
+	    "${FINDROCM_LIB_DIR}/cmake/${component}"
+	    "${FINDROCM_ROCM_PATH}"
+	    "${FINDROCM_ROCM_PATH}/lib/cmake/${package_name}"
+	    "${FINDROCM_ROCM_PATH}/lib/cmake/${component}"
+        NO_DEFAULT_PATH
+    )
+    
+    if(${package_name}_FOUND)
+	    set(FINDROCm_${component}_FOUND TRUE PARENT_SCOPE)
+        message(STATUS "ROCm Systems: Found component ${component} (${package_name})")
+    else()
+        # Try with standard find_package
+        find_package(${package_name} QUIET CONFIG)
+        if(${package_name}_FOUND)
+	    set(FINDROCm_${component}_FOUND TRUE PARENT_SCOPE)
+            message(STATUS "ROCm Systems: Found component ${component} (${package_name})")
+        else()
+	    set(FINDROCm_${component}_FOUND FALSE PARENT_SCOPE)
+	    if(FINDROCm_FIND_REQUIRED_${component})
+	        message(WARNING "FINDROCm: Required component ${component} not found")
+            endif()
+        endif()
+    endif()
+endfunction()
+
+################################################################################
+# Process requested components
+################################################################################
+
+# If no components were requested, assume all available components
+if(NOT FINDROCm_FIND_COMPONENTS)
+    set(FINDROCm_FIND_COMPONENTS ${FINDROCM_AVAILABLE_COMPONENTS_LIST})
+endif()
+
+# Find each requested component
+set(FINDROCm_FOUND_COMPONENTS "")
+set(FINDROCm_NOT_FOUND_COMPONENTS "")
+
+foreach(component ${FINDROCm_FIND_COMPONENTS})
+    # Check if component is available
+    list(FIND FINDROCM_AVAILABLE_COMPONENTS_LIST "${component}" component_index)
+    if(component_index EQUAL -1)
+	list(APPEND FINDROCm_NOT_FOUND_COMPONENTS "${component}")
+	set(FINDROCm_${component}_FOUND FALSE)
+	if(FINDROCm_FIND_REQUIRED_${component})
+	    message(FATAL_ERROR "FINDROCm: Required component '${component}' was not built. Available components: ${FINDROCM_AVAILABLE_COMPONENTS}")
+        else()
+	    message(STATUS "FINDROCm: Optional component '${component}' was not built")
+        endif()
+    else()
+        # Try to find the component
+	FINDROCm_find_component(${component})
+	if(FINDROCm_${component}_FOUND)
+	    list(APPEND FINDROCm_FOUND_COMPONENTS "${component}")
+        else()
+	    list(APPEND FINDROCm_NOT_FOUND_COMPONENTS "${component}")
+        endif()
+    endif()
+endforeach()
+
+################################################################################
+# Summary and status
+################################################################################
+
+# Check if all required components were found
+set(FINDROCm_FOUND TRUE)
+foreach(component ${FINDROCm_FIND_COMPONENTS})
+    if(FINDROCm_FIND_REQUIRED_${component} AND NOT FINDROCm_${component}_FOUND)
+	set(FINDROCm_FOUND FALSE)
+        break()
+    endif()
+endforeach()
+
+# Report what was found
+if(FINDROCm_FOUND)
+    message(STATUS "FINDROCm found: ${FINDROCM_VERSION}")
+    message(STATUS "  Installation prefix: ${FINDROCM_PREFIX}")
+    message(STATUS "  Found components: ${FINDROCm_FOUND_COMPONENTS}")
+    if(FINDROCmrocm_NOT_FOUND_COMPONENTS)
+        message(STATUS "  Not found (optional): ${FINDROCm_NOT_FOUND_COMPONENTS}")
+    endif()
+endif()
+
+################################################################################
+# Provide helper variables for test applications
+################################################################################
+
+# Set common variables that test applications might need
+set(FINDROCM_LIBRARIES "")
+set(FINDROCM_INCLUDE_DIRS "${FINDROCM_INCLUDE_DIR}")
+
+# Add component-specific libraries if they were found
+foreach(component ${FINDROCm_FOUND_COMPONENTS})
+    # Construct potential library names
+    set(lib_name "${component}")
+    
+    # Add to libraries list if target exists
+    if(TARGET ${lib_name})
+	list(APPEND FINDROCM_LIBRARIES ${lib_name})
+    elseif(TARGET ${lib_name}64)
+	list(APPEND FINDROCM_LIBRARIES ${lib_name}64)
+    endif()
+endforeach()
+
+# Remove duplicates
+list(REMOVE_DUPLICATES FINDROCM_INCLUDE_DIRS)
+if(FINDROCM_LIBRARIES)
+    list(REMOVE_DUPLICATES FINDROCM_LIBRARIES)
+endif()
+
+################################################################################
+# Compatibility check
+################################################################################
+
+check_required_components(FINDROCm)
+
+################################################################################
+# Usage information (printed only in verbose mode)
+################################################################################
+
+if(FINDROCm_FIND_VERBOSE OR FINDROCM_VERBOSE)
+    message(STATUS "")
+    message(STATUS "FINDROCm Configuration Summary:")
+    message(STATUS "  Version:              ${FINDROCM_VERSION}")
+    message(STATUS "  Installation prefix:  ${FINDROCM_PREFIX}")
+    message(STATUS "  Library directory:    ${FINDROCM_LIB_DIR}")
+    message(STATUS "  Include directory:    ${FINDROCM_INCLUDE_DIR}")
+    message(STATUS "  Binary directory:     ${FINDROCM_BIN_DIR}")
+    message(STATUS "  ROCm path:            ${FINDROCM_ROCM_PATH}")
+    message(STATUS "  Available components: ${FINDROCM_AVAILABLE_COMPONENTS}")
+    message(STATUS "  Found components:     ${FINDROCm_FOUND_COMPONENTS}")
+    message(STATUS "")
+endif()
+
+
