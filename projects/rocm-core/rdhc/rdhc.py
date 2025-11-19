@@ -1361,12 +1361,28 @@ class ROCMHealthCheck:
         gpu_devices = stdout.strip().split('\n')
         self.logger.info(f"----Found {len(gpu_devices)} AMD GPU device(s)")
 
-        atomic_ops_status = []
-        devices_with_atomics = 0
-        devices_without_atomics = 0
-        check_failed_devices = 0
+        def parse_atomic_details(stdout_detail, pci_address):
+            """Parse atomic operations details from lspci output"""
+            atomic_cap_found = False
+            atomic_enabled = False
 
-        for gpu_line in gpu_devices:
+            for line in stdout_detail.strip().split('\n'):
+                line = line.strip()
+
+                if "AtomicOpsCap:" in line:
+                    atomic_cap_found = True
+                    self.logger.debug(f"------Device {pci_address}: {line}")
+
+                if "AtomicOpsCtl:" in line:
+                    # Check if ReqEn+ (Request Enable is set)
+                    if "ReqEn+" in line:
+                        atomic_enabled = True
+                    self.logger.debug(f"------Device {pci_address}: {line}")
+
+            return atomic_cap_found, atomic_enabled
+
+        def check_device_atomic_ops(gpu_line):
+            """Check atomic operations for a single GPU device"""
             # Extract PCI address (e.g., "01:00.0")
             pci_address = gpu_line.split()[0]
 
@@ -1379,47 +1395,65 @@ class ROCMHealthCheck:
             if ret_detail != 0 or not stdout_detail.strip():
                 self.logger.warning(f"!!! Failed to get atomic operations info for device {pci_address}")
                 self.logger.warning(f"!!! Try running the test with 'sudo -E' ")
-                check_failed_devices += 1
-                atomic_ops_status.append(f"{pci_address}: Check failed")
-                continue
+                return pci_address, "check_failed", f"{pci_address}: Check failed"
 
             # Parse AtomicOpsCap and AtomicOpsCtl
-            atomic_cap_found = False
-            atomic_enabled = False
-            cap_details = ""
-            ctl_details = ""
-
-            for line in stdout_detail.strip().split('\n'):
-                line = line.strip()
-
-                if "AtomicOpsCap:" in line:
-                    atomic_cap_found = True
-                    cap_details = line
-                    self.logger.debug(f"------Device {pci_address}: {line}")
-
-                if "AtomicOpsCtl:" in line:
-                    ctl_details = line
-                    # Check if ReqEn+ (Request Enable is set)
-                    if "ReqEn+" in line:
-                        atomic_enabled = True
-                    self.logger.debug(f"------Device {pci_address}: {line}")
+            atomic_cap_found, atomic_enabled = parse_atomic_details(stdout_detail, pci_address)
 
             # Determine device status
             if atomic_cap_found and atomic_enabled:
-                devices_with_atomics += 1
                 status_msg = f"{pci_address}: Supported and Enabled"
-                atomic_ops_status.append(status_msg)
                 self.logger.info(f"------{status_msg}")
+                return pci_address, "enabled", status_msg
             elif atomic_cap_found and not atomic_enabled:
-                devices_without_atomics += 1
                 status_msg = f"{pci_address}: Supported but NOT Enabled (ReqEn-)"
-                atomic_ops_status.append(status_msg)
                 self.logger.warning(f"!!! {status_msg}")
+                return pci_address, "disabled", status_msg
             else:
-                check_failed_devices += 1
                 status_msg = f"{pci_address}: Capability not found or unclear"
-                atomic_ops_status.append(status_msg)
                 self.logger.warning(f"!!! {status_msg}")
+                return pci_address, "check_failed", status_msg
+
+        def check_pcie_atomic_routing_capability(pci_address):
+            """Check PCIe generation and lane configuration for atomic routing"""
+
+            stdout, stderr, ret_code = run_command(
+                f"lspci -vvv -s {pci_address} | grep -E 'LnkCap:|LnkSta:'",
+                shell=True
+            )
+
+            if ret_code == 0 and stdout.strip():
+                self.logger.debug(f"------PCIe Link Capabilities for {pci_address}:")
+                for line in stdout.strip().split('\n'):
+                    self.logger.info(f"--------{line.strip()}")
+
+                    # Check for PCIe Gen4/Gen5 which have better atomic support
+                    if "LnkSta" in line and "Speed" in line:
+                        if "16GT/s" in line:  # PCIe Gen4
+                            self.logger.info(f"------Device {pci_address}: PCIe Gen4 (16GT/s) - Good atomic routing capability")
+                        elif "32GT/s" in line:  # PCIe Gen5
+                            self.logger.info(f"------Device {pci_address}: PCIe Gen5 (32GT/s) - Excellent atomic routing capability")
+                        elif "8GT/s" in line:  # PCIe Gen3
+                            self.logger.warning(f"!!! Device {pci_address}: PCIe Gen3 (8GT/s) - Limited atomic routing capability")
+
+
+        atomic_ops_status = []
+        devices_with_atomics = 0
+        devices_without_atomics = 0
+        check_failed_devices = 0
+
+        # Check atomic operations for each GPU device
+        for gpu_line in gpu_devices:
+            pci_address, status_type, status_msg = check_device_atomic_ops(gpu_line)
+            atomic_ops_status.append(status_msg)
+            check_pcie_atomic_routing_capability(pci_address)
+
+            if status_type == "enabled":
+                devices_with_atomics += 1
+            elif status_type == "disabled":
+                devices_without_atomics += 1
+            else:  # check_failed
+                check_failed_devices += 1
 
         # Log summary
         self.logger.info(f"----Atomic operations summary:")
@@ -1432,7 +1466,7 @@ class ROCMHealthCheck:
         if devices_without_atomics > 0:
             return TestStatus.FAIL.value, f"Atomic operations not enabled for {devices_without_atomics} device(s). Details: {'; '.join(atomic_ops_status)}"
         elif check_failed_devices > 0:
-            return TestStatus.PASS.value, f"Atomic operations check completed with {check_failed_devices} warning(s). Details: {'; '.join(atomic_ops_status)}"
+            return TestStatus.FAIL.value, f"Atomic operations check completed with {check_failed_devices} warning(s). Details: {'; '.join(atomic_ops_status)}"
         else:
             return TestStatus.PASS.value, f"Atomic operations supported and enabled on all {devices_with_atomics} GPU device(s)."
 
@@ -1922,6 +1956,17 @@ def main():
                                         "\n"+
                                         "# Specify a directory for temp files and logs (default: /tmp/rdhc/)\n" +
                                         "sudo -E ./rdhc.py -d /home/user/rdhc-dir/\n" +
+                                        "\n"+
+                                        "NOTE for Ubuntu 24.04 (Python 3.12) users:\n" +
+                                        "Due to enhanced security policies, you must use a virtual environment:\n" +
+                                        "  # Create and activate virtual environment (one-time setup)\n" +
+                                        "  python3 -m venv ~/rdhc-venv\n" +
+                                        "  source ~/rdhc-venv/bin/activate\n" +
+                                        "  pip3 install -r requirements.txt\n" +
+                                        "\n" +
+                                        "  # Run the tool (use --preserve-env=PATH instead of -E)\n" +
+                                        "  sudo --preserve-env=PATH ./rdhc.py\n" +
+                                        "  sudo --preserve-env=PATH ./rdhc.py --all\n" +
                                         " ",
                                     )
 
