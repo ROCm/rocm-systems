@@ -256,7 +256,7 @@ def parse_args(args=None):
     ctest_args += ["--repeat"] + repeat_args if len(repeat_args) > 0 else []
 
     if cdash_args.pytest_numprocs:
-        ctest_args += f"-DPYTEST_NUMPROCS={args.pytest_numprocs}"
+        ctest_args += f"-DPYTEST_NUMPROCS={str(args.pytest_numprocs)}"
 
     return [cdash_args, cmake_args, ctest_args]
 
