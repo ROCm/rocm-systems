@@ -114,11 +114,16 @@ class RocprofTUIApp(App):
         self.recent_dirs = self.recent_dirs[:5]
         self._save_recent_dirs()
 
+    def on_recent_selected(self, selected_dir: Optional[str]) -> None:
+        if selected_dir:
+            self.main_view.selected_path = Path(selected_dir)
+            self.main_view.run_analysis()
+
     @on(Button.Pressed, "#menu-open-workload")
     @work
     async def pick_directory(self) -> None:
         if opened := await self.push_screen_wait(SelectDirectory()):
-            self.add_recent_dir(str(opened))
+            self.add_recent_dir(str(object=opened))
             self.main_view.selected_path = opened
             self.query_one("#file-dropdown", DropdownMenu).add_class("hidden")
             self.main_view.run_analysis()
