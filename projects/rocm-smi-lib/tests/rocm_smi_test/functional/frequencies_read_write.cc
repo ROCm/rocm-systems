@@ -54,6 +54,7 @@
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi_test/functional/frequencies_read_write.h"
 #include "rocm_smi_test/test_common.h"
 
@@ -103,6 +104,17 @@ void TestFrequenciesReadWrite::Run(void) {
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
+
+    // Check and wake the device in runtime suspend
+    bool is_suspended = false;
+    ret = amd::smi::check_runtime_pm_status(dv_ind, &is_suspended);
+    if (ret == RSMI_STATUS_SUCCESS && is_suspended) {
+      ret = amd::smi::wake_device(dv_ind);
+      if (ret != RSMI_STATUS_SUCCESS) {
+        std::cout << "Failed to wake device, cannot read clock frequencies" << std::endl;
+        CHK_ERR_ASRT(ret)
+      }
+    }
 
     for (uint32_t clk = RSMI_CLK_TYPE_FIRST; clk <= RSMI_CLK_TYPE_LAST; ++clk) {
       rsmi_clk = (rsmi_clk_type)clk;
