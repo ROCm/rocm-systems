@@ -49,6 +49,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `amdsmi` python API is used instead of `amd-smi` CLI to query GPU specifications.
 
+* Empty cells replaced with `N/A` for unavailable metrics in analysis.
+
+
 ### Removed
 
 * Removed `database` mode from ROCm Compute Profiler in favor of other visualization methods, rather than Grafana and MongoDB integration, such as the upcoming Analysis DB-based Visualizer.
