@@ -111,7 +111,9 @@ def flatten_rocpd_yaml_input_file(input, **kwargs) -> list:
 
                 # Determine working directory for relative paths
                 cwd = (
-                    base_dir if base_dir is not None else rocpd_meta.get("path", os.getcwd())
+                    base_dir
+                    if base_dir is not None
+                    else rocpd_meta.get("path", os.getcwd())
                 )
 
                 # Get database file list from YAML
