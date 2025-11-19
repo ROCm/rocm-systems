@@ -54,7 +54,10 @@ class MenuButton(Button):
         super().__init__(label, *args, **kwargs)
         self.menu_id = menu_id
 
-    def on_click(self) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id != self.id:
+            return
+
         self.is_open = not self.is_open
         dropdown = self.app.query_one(f"#{self.menu_id}", DropdownMenu)
 
@@ -86,10 +89,14 @@ class MenuBar(Container):
             self.notify("No recent directories found", severity="warning")
             return
 
+        # Close the dropdown
+        self.query_one("#file-dropdown", DropdownMenu).add_class("hidden")
+        menu_button = self.query_one("#menu-file", MenuButton)
+        menu_button.is_open = False
+
         def on_recent_selected(selected_dir: Optional[str]) -> None:
             if selected_dir:
                 self.parent_main_view.selected_path = Path(selected_dir)
-                self.query_one("#file-dropdown", DropdownMenu).add_class("hidden")
                 self.parent_main_view.run_analysis()
 
         self.app.push_screen(

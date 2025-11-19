@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+from textual import on
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
@@ -49,15 +50,26 @@ class RecentDirectoriesScreen(ModalScreen):
                 yield Button("Select", variant="primary", id="select-recent")
                 yield Button("Close", variant="default", id="close-recent")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "close-recent":
-            self.dismiss()
-        elif event.button.id == "select-recent":
-            list_view = self.query_one("#recent-list", ListView)
-            if list_view.highlighted_child:
-                selected_dir = self.recent_dirs[list_view.index or 0]
-                self.dismiss(selected_dir)
+    def on_mount(self) -> None:
+        list_view = self.query_one("#recent-list", ListView)
+        list_view.focus()
+
+    @on(Button.Pressed, "#close-recent")
+    def close_modal(self) -> None:
+        """Close the modal without selection."""
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#select-recent")
+    def select_directory(self) -> None:
+        """Select the highlighted directory."""
+
+        list_view = self.query_one("#recent-list", ListView)
+        if list_view.highlighted_child:
+            selected_dir = self.recent_dirs[list_view.index or 0]
+            self.dismiss(selected_dir)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Handle double-click or Enter on list item."""
+
         selected_dir = self.recent_dirs[event.list_view.index or 0]
         self.dismiss(selected_dir)
