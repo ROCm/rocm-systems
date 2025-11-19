@@ -60,7 +60,7 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
 {
     threading::clear_callbacks();
 
-    if(get_state() < State::Finalized)
+    if(get_state() < State::Finalized && !is_child_process())
     {
         if(config::settings_are_configured())
         {
