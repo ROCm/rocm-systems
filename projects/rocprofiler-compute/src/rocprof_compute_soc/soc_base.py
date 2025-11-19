@@ -51,9 +51,7 @@ from utils.utils import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
-    detect_rocprof,
     get_panel_alias,
-    get_submodules,
     is_tcc_channel_counter,
     mibench,
     parse_sets_yaml,
@@ -409,55 +407,35 @@ class OmniSoC_Base:
 
     def get_rocprof_supported_counters(self) -> set[str]:
         args = self.get_args()
-        rocprof_cmd = detect_rocprof(args)
-
-        if rocprof_cmd != "rocprofiler-sdk":
-            console_warning(
-                "rocprofv3 interface is deprecated and will be removed "
-                "in a future release."
-            )
-
         rocprof_counters: set[str] = set()
 
-        if not (
-            str(rocprof_cmd).endswith("rocprofv3")
-            or str(rocprof_cmd) == "rocprofiler-sdk"
-        ):
-            console_error(
-                f"Incompatible profiler: {rocprof_cmd}. "
-                "Supported profilers include: "
-                f"{get_submodules('rocprof_compute_profile')}"
+        # Point to counter definition
+        old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
+        os.environ["ROCPROFILER_METRICS_PATH"] = str(
+            config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
+        )
+        sys.path.append(
+            str(
+                Path(args.rocprofiler_sdk_tool_path).parents[1]
+                / "python3/site-packages"
             )
+        )
+        from rocprofv3 import avail
 
-            # Point to counter definition
-            old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
-            os.environ["ROCPROFILER_METRICS_PATH"] = str(
-                config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
-            )
-            sys.path.append(
-                str(
-                    Path(self.get_args().rocprofiler_sdk_library_path).parent
-                    / "python3/site-packages"
-                )
-            )
-            from rocprofv3 import avail
-
-            avail.loadLibrary.libname = str(
-                Path(args.rocprofiler_sdk_library_path).parent
-                / "rocprofiler-sdk"
-                / "librocprofv3-list-avail.so"
-            )
-            counters = avail.get_counters()
-            rocprof_counters = {
-                counter.name
-                for counter in counters[list(counters.keys())[0]]
-                if hasattr(counter, "block") or hasattr(counter, "expression")
-            }
-            # Reset env. var.
-            if old_rocprofiler_metrics_path is None:
-                del os.environ["ROCPROFILER_METRICS_PATH"]
-            else:
-                os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
+        avail.loadLibrary.libname = str(
+            Path(args.rocprofiler_sdk_tool_path).parent / "librocprofv3-list-avail.so"
+        )
+        counters = avail.get_counters()
+        rocprof_counters = {
+            counter.name
+            for counter in counters[list(counters.keys())[0]]
+            if hasattr(counter, "block") or hasattr(counter, "expression")
+        }
+        # Reset env. var.
+        if old_rocprofiler_metrics_path is None:
+            del os.environ["ROCPROFILER_METRICS_PATH"]
+        else:
+            os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
 
         return rocprof_counters
 
