@@ -201,7 +201,7 @@ def parse_cdash_args(args):
         "--repeat-until-pass", help="<N> for --repeat until-pass:<N>", default=3, type=int
     )
     parser.add_argument(
-        "--pytest-numprocs", help="<N> for -DPYTEST_NUMPROCS=<N>", default=None, type=str
+        "--pytest-numprocs", help="<N> for -DPYTEST_NUMPROCS=<N>", default=None, type=int
     )
     parser.add_argument(
         "--repeat-until-fail",
@@ -256,7 +256,7 @@ def parse_args(args=None):
     ctest_args += ["--repeat"] + repeat_args if len(repeat_args) > 0 else []
 
     if cdash_args.pytest_numprocs:
-        ctest_args += f"-DPYTEST_NUMPROCS={str(args.pytest_numprocs)}"
+        ctest_args += f"-DPYTEST_NUMPROCS={cdash_args.pytest_numprocs}"
 
     return [cdash_args, cmake_args, ctest_args]
 
