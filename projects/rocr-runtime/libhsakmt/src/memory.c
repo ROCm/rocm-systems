@@ -35,6 +35,7 @@
 
 #include <amdgpu.h>
 #include <amdgpu_drm.h>
+#include <xf86drm.h>
 
 #include "fmm.h"
 
@@ -1034,4 +1035,31 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
 	}
 
 	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandle,
+  						HsaMemoryObjectHandle MemoryHandle, HSAint32* fd, HSAuint64* cpu_addr)
+{
+  amdgpu_device_handle devhandle = (amdgpu_device_handle)DeviceHandle;
+  int renderFd = amdgpu_device_get_fd(devhandle);
+  if (renderFd < 0) return HSAKMT_STATUS_ERROR;
+
+  uint32_t gem_handle = 0;
+  int ret = amdgpu_bo_export((amdgpu_bo_handle)MemoryHandle, amdgpu_bo_handle_type_kms, &gem_handle);
+  if (ret) {
+  		return HSAKMT_STATUS_ERROR;
+  }
+
+  union drm_amdgpu_gem_mmap args;
+  memset(&args, 0, sizeof(args));
+  /* Query the buffer address (args.addr_ptr).
+   * The kernel driver ignores the offset and size parameters. */
+  args.in.handle = gem_handle;
+  ret = drmCommandWriteRead(renderFd, DRM_AMDGPU_GEM_MMAP, &args, sizeof(args));
+  if (ret) {
+    return HSAKMT_STATUS_ERROR;
+  }
+  *fd = (HSAint32)renderFd;
+  *cpu_addr = (HSAuint64)args.out.addr_ptr;
+  return HSAKMT_STATUS_SUCCESS;
 }

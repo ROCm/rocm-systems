@@ -90,14 +90,20 @@ namespace AMD {
 
 #if defined(__linux__)
 static_assert(
+<<<<<<< HEAD
     (sizeof(core::ShareableHandle::handle) >= sizeof(amdgpu_bo_handle)) &&
         (alignof(core::ShareableHandle::handle) >= alignof(amdgpu_bo_handle)),
     "ShareableHandle cannot store a amdgpu_bo_handle");
 #endif
+=======
+    (sizeof(core::ShareableHandle::handle) >= sizeof(HsaMemoryObjectHandle)) &&
+        (alignof(core::ShareableHandle::handle) >= alignof(HsaMemoryObjectHandle)),
+    "ShareableHandle cannot store a HsaMemoryObjectHandle");
+>>>>>>> 90286a82c740 (Use thunk device handle instead of drm inside agent)
 
 namespace {
 
-__forceinline HsaMemoryMapFlags drm_perm(hsa_access_permission_t perm) {
+__forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
   switch (perm) {
   case HSA_ACCESS_PERMISSION_RO:
     return HSA_MEMORY_ACCESS_RO;
@@ -478,15 +484,15 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
 #if defined(__linux__)
   auto &gpu_agent = static_cast<GpuAgent &>(agent);
   HsaExternalHandleDesc desc;
-  desc.device_handle = (HsaAMDGPUDeviceHandle)gpu_agent.libDrmDev();
-  desc.fd = (HSAint32)dmabuf_fd;
+  desc.device_handle = gpu_agent.libThunkDev();
+  desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
   desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
   HsaMemoryImportResult res;
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryImport(&desc, &res));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
-  handle.handle = (uint64_t)res.buf_handle;
+  handle.handle = reinterpret_cast<uint64_t>(res.buf_handle);
 #else
   assert(!"Unimplemented!");
 #endif
@@ -498,8 +504,9 @@ hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
                             hsa_access_permission_t perms) {
 #if defined(__linux__)
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, offset, size,
-                                     reinterpret_cast<HSAuint64>(mem), drm_perm(perms)));
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, reinterpret_cast<HSAuint64>(offset),
+                                     reinterpret_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
+                                     mem_perm(perms)));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
@@ -513,7 +520,7 @@ hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
                               size_t offset, size_t size) {
 #if defined(__linux__)
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, offset, size,
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, (HSAuint64)offset, (HSAuint64)size,
                                      reinterpret_cast<HSAuint64>(mem)));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
