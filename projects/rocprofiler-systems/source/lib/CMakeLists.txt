@@ -16,6 +16,14 @@ set(ROCPROFSYS_LIB_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}")
 
 # ------------------------------------------------------------------------------#
 #
+# rocpd library
+#
+# ------------------------------------------------------------------------------#
+
+add_subdirectory(rocpd)
+
+# ------------------------------------------------------------------------------#
+#
 # rocprofiler-systems interface library
 #
 # ------------------------------------------------------------------------------#
@@ -40,7 +48,6 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-elfutils>
@@ -52,8 +59,11 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libgcc-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
+        $<BUILD_INTERFACE:rocpd-library>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
 )
+
+add_dependencies(rocprofiler-systems-interface-library rocpd-library)
 
 # ------------------------------------------------------------------------------#
 #

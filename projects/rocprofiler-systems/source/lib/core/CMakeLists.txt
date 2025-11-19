@@ -97,7 +97,7 @@ target_sources(
 add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
-add_subdirectory(rocpd)
+# add_subdirectory(rocpd)
 add_subdirectory(trace_cache)
 
 target_include_directories(
