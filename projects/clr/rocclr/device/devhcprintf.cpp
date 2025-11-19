@@ -256,19 +256,28 @@ void handlePrintf(uint64_t* output, const uint64_t* input, uint64_t len) {
 // delimited by character ','.
 bool populateFormatStringHashMap(const std::vector<device::PrintfInfo>& printfInfo,
                                  std::map<uint64_t, std::string>& strMap) {
-  for (auto it : printfInfo) {
-    auto Delim = it.fmtString_.find_first_of(',');
+  for (auto const& it : printfInfo) {
+    auto Delim = it.fmtString_.find(',');
+ 
     auto HashStr = it.fmtString_.substr(0, Delim);
-
-    static_assert(sizeof(long long) == sizeof(uint64_t), "unexpected long long type width");
-    auto HashVal = std::strtoull(HashStr.c_str(), NULL, 16);
-    if (strMap.find(HashVal) != strMap.end()) {
+    auto FmtStr  = it.fmtString_.substr(Delim + 1);
+ 
+    auto HashVal = std::strtoull(HashStr.c_str(), nullptr, 16);
+ 
+    auto existing = strMap.find(HashVal);
+    if (existing != strMap.end()) {
+      if (existing->second == FmtStr) {
+        // Same hash, same format string -> harmless duplicate, ignore.
+        continue;
+      }
+      // Same hash, *different* format string -> real collision.
       LogError("Hash value collision detected, printf buffer ill formed");
       return false;
     }
-    strMap[HashVal] = it.fmtString_.substr(Delim + 1, it.fmtString_.size());
+ 
+    strMap[HashVal] = FmtStr;
   }
-
+ 
   return true;
 }
 
