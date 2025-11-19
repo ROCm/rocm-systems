@@ -131,17 +131,25 @@ std::string TestContext::getCurrentArch() {
 
 std::string TestContext::getMatchingConfigFile(std::string config_dir) {
   std::string configFileToUse = "";
+  std::string spirvConfigFile = "";
   if (isLinux() && isAmd()) {
     std::string cur_arch = getCurrentArch();
     LogPrintf("The arch present: %s", cur_arch.c_str());
     configFileToUse = config_dir + "/config_" + getConfig().platform + "_" + getConfig().os + "_" +
                       cur_arch + ".json";
+    spirvConfigFile = config_dir + "/config_" + getConfig().platform + "_" + getConfig().os +
+      "_amdgcnspirv" + ".json";
   } else {
     configFileToUse =
         config_dir + "/config_" + getConfig().platform + "_" + getConfig().os + ".json";
+    spirvConfigFile = configFileToUse;
   }
   if (fs::exists(configFileToUse)) {
+    LogPrintf("%s", "Using device config");
     return configFileToUse;
+  } else if (fs::exists(spirvConfigFile)) {
+    LogPrintf("%s", "Using spv config");
+    return spirvConfigFile;
   }
   return "";
 }

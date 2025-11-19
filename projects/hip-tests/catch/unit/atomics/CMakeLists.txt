@@ -30,9 +30,7 @@ if(HIP_PLATFORM MATCHES "amd")
       atomicMin_system.cc
       atomicMax.cc
       atomicMax_system.cc
-      safeAtomicMin.cc
       unsafeAtomicMin.cc
-      safeAtomicMax.cc
       unsafeAtomicMax.cc
       __hip_atomic_fetch_min.cc
       __hip_atomic_fetch_max.cc
@@ -41,7 +39,6 @@ if(HIP_PLATFORM MATCHES "amd")
       sequential_consistency.cc
       atomicAdd.cc
       atomicAdd_system.cc
-      unsafeAtomicAdd.cc
       safeAtomicAdd.cc
       atomicSub.cc
       atomicSub_system.cc
@@ -58,6 +55,15 @@ if(HIP_PLATFORM MATCHES "amd")
       atomicInc.cc
       atomicDec.cc
     )
+
+  if(NOT ENABLE_SPIRV)
+    set(SPIRV_INCOMPATIBLE_TESTS
+      safeAtomicMin.cc
+      safeAtomicMax.cc
+      unsafeAtomicAdd.cc
+    )
+    set(TEST_SRC ${TEST_SRC} ${SPIRV_INCOMPATIBLE_TESTS})
+  endif()
 
   hip_add_exe_to_target(NAME AtomicsTest
                         TEST_SRC ${TEST_SRC}

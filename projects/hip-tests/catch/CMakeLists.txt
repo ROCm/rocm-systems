@@ -8,10 +8,17 @@ project(hiptests)
 
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
+option(ENABLE_SPIRV "Option to enable SPIRV mode" OFF)
 
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 if (TEST_CLOCK_CYCLE)
     add_definitions(-DTEST_CLOCK_CYCLE)
+endif()
+
+if(ENABLE_SPIRV)
+    message(STATUS "hip-tests will be built using SPIRV offload arch, Warp size: ${SPIRV_WARP_SIZE}")
+    set(OFFLOAD_ARCH_STR "--offload-arch=amdgcnspirv")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 endif()
 
 # flag to generate standalone exe per src file.

@@ -46,6 +46,16 @@ $ ctest # run tests
 
 HIP catch tests are built under the folder `$HIP_TESTS_DIR/build`.
 
+### Providing offload arch string
+
+HIP tests can be built for a specific arch, users can pass `-DOFFLOAD_ARCH_STR="--offload-arch=gfx90a"` along with the cmake config command.
+
+### SPIR-V mode
+
+HIP tests can be built with SPIRV offload arch, to enable it users can pass `-DENABLE_SPIRV=ON` to cmake config command.
+
+A special note about SPIRV tests, all the arch specific skip tests will be skipped.
+
 ### Build HIP Catch2 standalone test
 
 HIP Catch2 supports building standalone tests, for example,
