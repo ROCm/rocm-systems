@@ -45,8 +45,8 @@ float BasicAPIStats::getLowCoverageLimit() const { return 40.f; }
 
 float BasicAPIStats::getMediumCoverageLimit() const { return 80.f; }
 
-void generateXMLReportFiles(std::vector<HipAPI>& hip_apis,
-                            std::vector<HipAPIGroup>& hip_api_groups) {
+void generateXMLReportFiles(std::vector<HipAPI>& hip_apis, std::vector<HipAPIGroup>& hip_api_groups,
+                            const std::string& work_directory) {
   BasicAPIStats basic_stats{hip_api_groups};
 
   std::cout << "Total number of HIP API calls: " << basic_stats.total_number_of_api_calls
@@ -67,7 +67,7 @@ void generateXMLReportFiles(std::vector<HipAPI>& hip_apis,
   for the additional 3rd party library that implements XML file CRUD operations.
   */
   std::fstream coverage_report;
-  std::string report_file_name{"CoverageReport.xml"};
+  std::string report_file_name{work_directory + "/CoverageReport.xml"};
   coverage_report.open(report_file_name, std::ios::out);
 
   time_t now{time(nullptr)};
@@ -120,15 +120,15 @@ void generateXMLReportFiles(std::vector<HipAPI>& hip_apis,
 void generateHTMLReportFiles(std::vector<HipAPI>& hip_apis,
                              std::vector<HipAPIGroup>& hip_api_groups,
                              std::string tests_root_directory, std::string hipApiHeaderFile,
-                             std::string hip_rtc_header_file) {
+                             std::string hip_rtc_header_file, const std::string& work_directory) {
   BasicAPIStats basic_stats{hip_api_groups};
 
   std::fstream coverage_report;
   // Main HTML report file.
-  std::string report_file_name{"./coverageReportHTML/CoverageReport.html"};
+  std::string report_file_name{work_directory + "/coverageReportHTML/CoverageReport.html"};
   // Directories used to store generated HTML files.
-  std::string test_modules_directory{"./coverageReportHTML/testModules"};
-  std::string test_apis_directory{"./coverageReportHTML/testAPIs"};
+  std::string test_modules_directory{work_directory + "/coverageReportHTML/testModules"};
+  std::string test_apis_directory{work_directory + "/coverageReportHTML/testAPIs"};
   std::filesystem::create_directories(test_modules_directory);
   std::filesystem::create_directories(test_apis_directory);
 

@@ -76,7 +76,6 @@ class HipAPI {
  private:
   std::string api_name;
   std::string file_restriction;
-  int number_of_calls;
   bool deprecated;
   std::string api_group_name;
   std::vector<FileOccurrence> file_occurrences;
