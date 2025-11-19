@@ -110,7 +110,7 @@ struct counter_storage
                     scope::config _scope = scope::get_default()) const;
 
     static void write(counter_storage_type* storage, const std::string& metric_name,
-                      std::string metric_description);
+                      const std::string& metric_description);
 };
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

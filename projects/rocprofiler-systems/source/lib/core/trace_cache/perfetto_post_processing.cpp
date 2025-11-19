@@ -23,6 +23,8 @@
 #include "core/trace_cache/perfetto_post_processing.hpp"
 #include "common.hpp"
 #include "core/agent_manager.hpp"
+#include "core/common_types.hpp"
+#include "core/gpu_metrics.hpp"
 #include "library/tracing.hpp"
 #include "perfetto.hpp"
 #include "rocprofiler-sdk/fwd.h"
@@ -47,73 +49,6 @@ namespace trace_cache
 {
 namespace
 {
-
-bool&
-get_perfetto_initialized()
-{
-    static bool _initialized = false;
-    return _initialized;
-}
-
-void
-initialize_perfetto()
-{
-    static std::mutex           init_mutex;
-    std::lock_guard<std::mutex> lock(init_mutex);
-    if(!get_perfetto_initialized())
-    {
-        auto args               = ::perfetto::TracingInitArgs{};
-        args.backends           = ::perfetto::kInProcessBackend;
-        args.shmem_size_hint_kb = config::get_perfetto_shmem_size_hint();
-
-        ::perfetto::Tracing::Initialize(args);
-        ::perfetto::TrackEvent::Register();  // Only register once globally!
-
-        get_perfetto_initialized() = true;
-    }
-}
-
-#if ROCPROFSYS_USE_ROCM > 0
-rocprofiler_sdk::function_args_t
-process_arguments_string(const std::string& arg_str)
-{
-    rocprofiler_sdk::function_args_t args;
-    const std::string                delimiter = ";;";
-
-    auto split = [](const std::string& str, const std::string& _delimiter) {
-        std::vector<std::string> tokens;
-        size_t                   start = 0;
-        size_t                   end   = str.find(_delimiter);
-
-        while(end != std::string::npos)
-        {
-            tokens.push_back(str.substr(start, end - start));
-            start = end + _delimiter.length();
-            end   = str.find(_delimiter, start);
-        }
-
-        return tokens;
-    };
-
-    auto tokens = split(arg_str, delimiter);
-
-    // Ensure the number of tokens is a multiple of 4
-    if(tokens.size() % 4 != 0)
-    {
-        throw std::invalid_argument("Malformed argument string.");
-    }
-
-    for(auto it = tokens.begin(); it != tokens.end(); it += 4)
-    {
-        rocprofiler_sdk::argument_info arg = { static_cast<uint32_t>(std::stoi(*it)),
-                                               *(it + 1), *(it + 2), *(it + 3) };
-        args.push_back(arg);
-    }
-
-    return args;
-}
-#endif
-
 struct annotation_entry
 {
     const char*                                                             key;
@@ -124,8 +59,6 @@ void
 annotate_perfetto(::perfetto::EventContext&            ctx,
                   const std::vector<annotation_entry>& annotations)
 {
-    if(!config::get_perfetto_annotations()) return;
-
     for(const auto& ann : annotations)
     {
         std::visit(
@@ -156,7 +89,7 @@ get_track(CategoryT, std::string name, uint64_t hash_arg)
 
 template <typename Category>
 void
-write_track_data(const struct backtrace_region_sample& _sample)
+write_track_data(const struct backtrace_region_sample& _sample, bool use_annotations)
 {
     auto _track_name = _sample.track_name;
     auto _thread_id  = _sample.thread_id;
@@ -165,6 +98,8 @@ write_track_data(const struct backtrace_region_sample& _sample)
     auto _track = get_track(Category{}, _track_name, _thread_id);
 
     auto add_annotations = [&](::perfetto::EventContext& ctx) {
+        if(!use_annotations) return;
+
         std::vector<annotation_entry> annotations = {
             { "begin_ns", _sample.start_timestamp }, { "end_ns", _sample.end_timestamp }
         };
@@ -204,12 +139,9 @@ perfetto_post_processing::perfetto_post_processing(metadata_registry& metadata,
 , m_agent_manager(agent_mngr)
 , m_tmp_file(nullptr)
 , m_tracing_session(nullptr)
+, m_use_annotations(config::get_perfetto_annotations())
 {
-    if(get_caching_perfetto())
-    {
-        initialize_perfetto();
-        setup_perfetto();
-    }
+    setup_perfetto();
 }
 
 perfetto_post_processing::~perfetto_post_processing()
@@ -219,6 +151,20 @@ perfetto_post_processing::~perfetto_post_processing()
         stop_session();
         m_tracing_session.reset();
     }
+}
+
+void
+perfetto_post_processing::initialize_perfetto()
+{
+    static std::mutex           init_mutex;
+    std::lock_guard<std::mutex> lock(init_mutex);
+
+    auto args               = ::perfetto::TracingInitArgs{};
+    args.backends           = ::perfetto::kInProcessBackend;
+    args.shmem_size_hint_kb = config::get_perfetto_shmem_size_hint();
+
+    ::perfetto::Tracing::Initialize(args);
+    ::perfetto::TrackEvent::Register();  // Only register once globally!
 }
 
 void
@@ -288,53 +234,53 @@ perfetto_post_processing::stop_session()
     m_tracing_session->StopBlocking();
 }
 
-void
-perfetto_post_processing::post_process(bool& _perfetto_output_error)
+char_vec_t
+perfetto_post_processing::get_session_data()
 {
-    using char_vec_t = std::vector<char>;
+    auto _data = char_vec_t{};
+    if(m_tmp_file && *m_tmp_file)
+    {
+        m_tmp_file->close();
+        FILE* _fdata = ::fopen(m_tmp_file->filename.c_str(), "rb");
 
+        if(!_fdata)
+        {
+            ROCPROFSYS_VERBOSE(-1,
+                               "Error! perfetto temp trace file '%s' could not be read",
+                               m_tmp_file->filename.c_str());
+            return char_vec_t{ m_tracing_session->ReadTraceBlocking() };
+        }
+
+        ::fseek(_fdata, 0, SEEK_END);
+        size_t _fnum_elem = ::ftell(_fdata);
+        ::fseek(_fdata, 0, SEEK_SET);
+
+        _data.resize(_fnum_elem, '\0');
+        auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
+        ::fclose(_fdata);
+
+        ROCPROFSYS_CI_THROW(
+            _fnum_read != _fnum_elem,
+            "Error! read %zu elements from perfetto trace file '%s'. Expected %zu\n",
+            _fnum_read, m_tmp_file->filename.c_str(), _fnum_elem);
+    }
+    else
+    {
+        _data = char_vec_t{ m_tracing_session->ReadTraceBlocking() };
+    }
+
+    return _data;
+}
+
+void
+perfetto_post_processing::flush(bool& _perfetto_output_error)
+{
     if(!m_tracing_session) return;
 
     stop_session();
 
-    auto _get_session_data = [this]() {
-        auto _data = char_vec_t{};
-        if(m_tmp_file && *m_tmp_file)
-        {
-            m_tmp_file->close();
-            FILE* _fdata = ::fopen(m_tmp_file->filename.c_str(), "rb");
-
-            if(!_fdata)
-            {
-                ROCPROFSYS_VERBOSE(
-                    -1, "Error! perfetto temp trace file '%s' could not be read",
-                    m_tmp_file->filename.c_str());
-                return char_vec_t{ m_tracing_session->ReadTraceBlocking() };
-            }
-
-            ::fseek(_fdata, 0, SEEK_END);
-            size_t _fnum_elem = ::ftell(_fdata);
-            ::fseek(_fdata, 0, SEEK_SET);
-
-            _data.resize(_fnum_elem, '\0');
-            auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
-            ::fclose(_fdata);
-
-            ROCPROFSYS_CI_THROW(
-                _fnum_read != _fnum_elem,
-                "Error! read %zu elements from perfetto trace file '%s'. Expected %zu\n",
-                _fnum_read, m_tmp_file->filename.c_str(), _fnum_elem);
-        }
-        else
-        {
-            _data = char_vec_t{ m_tracing_session->ReadTraceBlocking() };
-        }
-
-        return _data;
-    };
-
     auto trace_data = char_vec_t{};
-    trace_data      = _get_session_data();
+    trace_data      = get_session_data();
 
     auto output_dir = filepath::dirname(config::get_perfetto_output_filename());
     auto _filename =
@@ -390,6 +336,10 @@ perfetto_post_processing::post_process(bool& _perfetto_output_error)
 postprocessing_callback
 perfetto_post_processing::get_kernel_dispatch_callback() const
 {
+    static auto _track_desc = [](uint64_t _device_id_v, uint64_t _queue_id_v) {
+        return JOIN("", "GPU Kernel Dispatch [", _device_id_v, "] Queue ", _queue_id_v);
+    };
+
     return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {
 #if ROCPROFSYS_USE_ROCM > 0
         auto _kds = static_cast<const struct kernel_dispatch_sample&>(parsed);
@@ -410,16 +360,13 @@ perfetto_post_processing::get_kernel_dispatch_callback() const
 
         auto kernel_name = tim::demangle(kernel_symbol->kernel_name);
 
-        auto _track_desc = [](uint64_t _device_id_v, uint64_t _queue_id_v) {
-            return JOIN("", "GPU Kernel Dispatch [", _device_id_v, "] Queue ",
-                        _queue_id_v);
-        };
-
         const auto _track =
             tracing::get_perfetto_track(category::rocm_kernel_dispatch{}, _track_desc,
                                         _agent_device_id, _queue_id_handle);
 
         auto add_annotations = [&](::perfetto::EventContext ctx) {
+            if(!m_use_annotations) return;
+
             annotate_perfetto(
                 ctx, { { "begin_ns", _beg_ts },
                        { "end_ns", _end_ts },
@@ -482,6 +429,8 @@ perfetto_post_processing::get_memory_copy_callback() const
             category::rocm_memory_copy{}, _track_desc, _dst_agent_log_node_id, _thrd_id);
 
         auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
+            if(!m_use_annotations) return;
+
             annotate_perfetto(ctx, { { "begin_ns", _beg_ts },
                                      { "end_ns", _end_ts },
                                      { "corr_id", _corr_id },
@@ -502,7 +451,7 @@ perfetto_post_processing::get_memory_copy_callback() const
     };
 }
 
-#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
+#if (ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
 postprocessing_callback
 perfetto_post_processing::get_memory_allocate_callback() const
 {
@@ -552,6 +501,8 @@ perfetto_post_processing::get_memory_allocate_callback() const
                                             _agent_logical_node_id, _thrd_id);
 
             auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
+                if(!m_use_annotations) return;
+
                 annotate_perfetto(ctx, { { "begin_ns", _beg_ts },
                                          { "end_ns", _end_ts },
                                          { "corr_id", _corr_id },
@@ -575,7 +526,6 @@ postprocessing_callback
 perfetto_post_processing::get_region_callback() const
 {
     return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {
-#if ROCPROFSYS_USE_ROCM > 0
         auto _rs = static_cast<const struct region_sample&>(parsed);
 
         auto _corr_id  = _rs.correlation_id_internal;
@@ -587,6 +537,8 @@ perfetto_post_processing::get_region_callback() const
         auto args = process_arguments_string(_rs.args_str);
 
         auto add_annotations = [&](::perfetto::EventContext ctx) {
+            if(!m_use_annotations) return;
+
             std::vector<annotation_entry> annotations = { { "begin_ns", _beg_ts },
                                                           { "corr_id", _corr_id } };
             for(const auto& arg : args)
@@ -618,7 +570,6 @@ perfetto_post_processing::get_region_callback() const
                                   ::perfetto::Flow::ProcessScoped(_corr_id),
                                   add_annotations);
         tracing::pop_perfetto_ts(category::rocm{}, _name.c_str(), _end_ts);
-#endif
     };
 }
 
@@ -725,8 +676,8 @@ perfetto_post_processing::get_backtrace_sample_callback() const
         auto _bts = static_cast<const struct backtrace_region_sample&>(parsed);
 
         (_bts.category == trait::name<category::timer_sampling>::value)
-            ? write_track_data<category::timer_sampling>(_bts)
-            : write_track_data<category::overflow_sampling>(_bts);
+            ? write_track_data<category::timer_sampling>(_bts, m_use_annotations)
+            : write_track_data<category::overflow_sampling>(_bts, m_use_annotations);
     };
 }
 
@@ -873,72 +824,25 @@ perfetto_post_processing::get_amd_smi_sample_callback() const
     using amd_smi_mem_track   = perfetto_counter_track<category::amd_smi_memory_usage>;
     using amd_smi_vcn_track   = perfetto_counter_track<category::amd_smi_vcn_activity>;
     using amd_smi_jpeg_track  = perfetto_counter_track<category::amd_smi_jpeg_activity>;
+    using amd_smi_xgmi_link_width_track =
+        perfetto_counter_track<category::amd_smi_xgmi_link_width>;
+    using amd_smi_xgmi_link_speed_track =
+        perfetto_counter_track<category::amd_smi_xgmi_link_speed>;
+    using amd_smi_xgmi_read_track =
+        perfetto_counter_track<category::amd_smi_xgmi_read_data>;
+    using amd_smi_xgmi_write_track =
+        perfetto_counter_track<category::amd_smi_xgmi_write_data>;
+    using amd_smi_pcie_link_width_track =
+        perfetto_counter_track<category::amd_smi_pcie_link_width>;
+    using amd_smi_pcie_link_speed_track =
+        perfetto_counter_track<category::amd_smi_pcie_link_speed>;
+    using amd_smi_pcie_bandwidth_acc_track =
+        perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
+    using amd_smi_pcie_bandwidth_inst_track =
+        perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
 
-    struct xcp_metrics_t
-    {
-        std::vector<uint16_t> vcn_busy;
-        std::vector<uint16_t> jpeg_busy;
-    };
-
-    auto deserialize_xcp_metrics = [](const std::vector<uint8_t>& serialized_data,
-                                      bool& _is_vcn_supported, bool& _is_jpeg_supported,
-                                      std::vector<xcp_metrics_t>& result) {
-        if(serialized_data.size() < 5)
-        {
-            throw std::runtime_error("Invalid serialized data: insufficient header size");
-        }
-
-        size_t offset = 0;
-
-        _is_vcn_supported   = static_cast<bool>(serialized_data[offset++]);
-        _is_jpeg_supported  = static_cast<bool>(serialized_data[offset++]);
-        uint8_t chunk_count = serialized_data[offset++];
-        uint8_t vcn_count   = serialized_data[offset++];
-        uint8_t jpeg_count  = serialized_data[offset++];
-
-        constexpr size_t elem_size  = sizeof(uint16_t) / sizeof(uint8_t);
-        const size_t     chunk_size = (vcn_count + jpeg_count) * elem_size;
-
-        const size_t expected_size = 5 + (chunk_count * chunk_size);
-        if(serialized_data.size() != expected_size)
-        {
-            throw std::runtime_error("Invalid serialized data: size mismatch");
-        }
-
-        auto deserialize_uint16_array = [](const std::vector<uint8_t>& data,
-                                           size_t& _offset, int array_size) {
-            std::vector<uint16_t> _result;
-            _result.reserve(array_size);
-
-            for(int i = 0; i < array_size; ++i)
-            {
-                if(_offset + 1 >= data.size())
-                {
-                    throw std::runtime_error(
-                        "Invalid serialized data: unexpected end of data");
-                }
-
-                uint16_t value = static_cast<uint16_t>(data[_offset]) |
-                                 (static_cast<uint16_t>(data[_offset + 1]) << 8);
-                _result.push_back(value);
-                _offset += 2;
-            }
-
-            return _result;
-        };
-
-        result.reserve(chunk_count);
-
-        for(size_t count = 0; count < chunk_count; ++count)
-        {
-            xcp_metrics_t entry;
-            entry.vcn_busy = deserialize_uint16_array(serialized_data, offset, vcn_count);
-            entry.jpeg_busy =
-                deserialize_uint16_array(serialized_data, offset, jpeg_count);
-
-            result.emplace_back(std::move(entry));
-        }
-    };
+    // Use the shared gpu_metrics_t from core/gpu_metrics.hpp
+    using gpu_metrics_t = gpu::gpu_metrics_t;
 
     return [&](const storage_parsed_type_base& parsed) {
         auto _amd_smi = static_cast<const struct amd_smi_sample&>(parsed);
@@ -951,6 +855,8 @@ perfetto_post_processing::get_amd_smi_sample_callback() const
         bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
         bool is_vcn_enabled  = settings_bits.test(static_cast<int>(pos::vcn_activity));
         bool is_jpeg_enabled = settings_bits.test(static_cast<int>(pos::jpeg_activity));
+        bool is_xgmi_enabled = settings_bits.test(static_cast<int>(pos::xgmi));
+        bool is_pcie_enabled = settings_bits.test(static_cast<int>(pos::pcie));
 
         auto _ts        = _amd_smi.timestamp;
         auto _device_id = _amd_smi.device_id;
@@ -1012,85 +918,229 @@ perfetto_post_processing::get_amd_smi_sample_callback() const
                           _ts, mem_mb);
         }
 
-        if(is_vcn_enabled || is_jpeg_enabled)
-        {
-            std::vector<xcp_metrics_t> xcp_metrics;
-            bool is_vcn_activity_supported, is_jpeg_activity_supported;
-            deserialize_xcp_metrics(_amd_smi.xcp_activity, is_vcn_activity_supported,
-                                    is_jpeg_activity_supported, xcp_metrics);
+        if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled)
+            return;
 
-            auto generate_track_key = [](uint32_t _dev_idx, size_t _xcp_idx,
-                                         size_t _clk_idx) {
-                return (static_cast<uint64_t>(_dev_idx) << 16) |
-                       (static_cast<uint64_t>(_xcp_idx) << 8) |
-                       static_cast<uint64_t>(_clk_idx);
+        gpu_metrics_t                   gpu_metrics;
+        gpu::gpu_metrics_capabilities_t capabilities;
+        gpu::deserialize_gpu_metrics(_amd_smi.gpu_activity, gpu_metrics, is_vcn_enabled,
+                                     is_jpeg_enabled, is_xgmi_enabled, is_pcie_enabled,
+                                     capabilities);
+
+        // Helper lambda to insert VCN/JPEG activity metrics
+        auto insert_decode_vector_metrics = [&](auto category, bool _is_enabled,
+                                                const std::vector<uint16_t>& data,
+                                                std::optional<size_t>        _idx =
+                                                    std::nullopt) {
+            if(!_is_enabled) return;
+
+            using Category = std::decay_t<decltype(category)>;
+
+            for(size_t i = 0; i < data.size(); ++i)
+            {
+                const auto value = data[i];
+                if(value == std::numeric_limits<uint16_t>::max()) continue;
+
+                std::string track_name;
+                if(_idx.has_value())
+                {
+                    // Per-XCP format
+                    track_name = JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'),
+                                      trait::name<Category>::value,
+                                      JOIN("", "XCP_", _idx.value(), ": [",
+                                           (i < 10 ? "0" : ""), i, ']'),
+                                      "(S)");
+                }
+                else
+                {
+                    // Device-level format
+                    track_name = JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'),
+                                      trait::name<Category>::value,
+                                      JOIN("", "[", (i < 10 ? "0" : ""), i, ']'), "(S)");
+                }
+
+                auto generate_track_key = [](uint32_t _dev_idx, size_t _xcp_idx,
+                                             size_t _clk_idx) {
+                    return (static_cast<uint64_t>(_dev_idx) << 16) |
+                           (static_cast<uint64_t>(_xcp_idx) << 8) |
+                           static_cast<uint64_t>(_clk_idx);
+                };
+
+                auto unique_key = generate_track_key(_device_id, _idx.value_or(0), i);
+
+                if constexpr(std::is_same_v<Category, category::amd_smi_vcn_activity>)
+                {
+                    if(!amd_smi_vcn_track::exists(unique_key))
+                    {
+                        amd_smi_vcn_track::emplace(unique_key, track_name, "%");
+                    }
+                    TRACE_COUNTER("device_vcn_activity",
+                                  amd_smi_vcn_track::at(unique_key, 0), _ts,
+                                  static_cast<double>(value));
+                }
+                else if constexpr(std::is_same_v<Category,
+                                                 category::amd_smi_jpeg_activity>)
+                {
+                    if(!amd_smi_jpeg_track::exists(unique_key))
+                    {
+                        amd_smi_jpeg_track::emplace(unique_key, track_name, "%");
+                    }
+                    TRACE_COUNTER("device_jpeg_activity",
+                                  amd_smi_jpeg_track::at(unique_key, 0), _ts,
+                                  static_cast<double>(value));
+                }
+            }
+        };
+
+        auto insert_xgmi_vector_metrics = [&](auto category, bool _is_enabled,
+                                              const std::vector<uint64_t>& data) {
+            if(!_is_enabled) return;
+
+            using Category = std::decay_t<decltype(category)>;
+
+            for(size_t i = 0; i < data.size(); ++i)
+            {
+                const auto value = data[i];
+                if(value == std::numeric_limits<uint64_t>::max()) continue;
+
+                std::string track_name =
+                    JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'),
+                         trait::name<Category>::value, JOIN("", "[", i, ']'), "(S)");
+
+                auto unique_key = (_device_id << 8) | i;
+
+                if constexpr(std::is_same_v<Category, category::amd_smi_xgmi_read_data>)
+                {
+                    if(!amd_smi_xgmi_read_track::exists(unique_key))
+                    {
+                        amd_smi_xgmi_read_track::emplace(unique_key, track_name, "bytes");
+                    }
+                    TRACE_COUNTER("device_xgmi_read_data",
+                                  amd_smi_xgmi_read_track::at(unique_key, 0), _ts,
+                                  static_cast<double>(value));
+                }
+                else if constexpr(std::is_same_v<Category,
+                                                 category::amd_smi_xgmi_write_data>)
+                {
+                    if(!amd_smi_xgmi_write_track::exists(unique_key))
+                    {
+                        amd_smi_xgmi_write_track::emplace(unique_key, track_name,
+                                                          "bytes");
+                    }
+                    TRACE_COUNTER("device_xgmi_write_data",
+                                  amd_smi_xgmi_write_track::at(unique_key, 0), _ts,
+                                  static_cast<double>(value));
+                }
+            }
+        };
+
+        // Insert VCN activity metrics
+        if(capabilities.flags.vcn_is_device_level_only)
+        {
+            insert_decode_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
+                                         gpu_metrics.vcn_activity, std::nullopt);
+        }
+        else
+        {
+            for(size_t xcp = 0; xcp < gpu_metrics.vcn_busy.size(); ++xcp)
+            {
+                insert_decode_vector_metrics(category::amd_smi_vcn_activity{},
+                                             is_vcn_enabled, gpu_metrics.vcn_busy[xcp],
+                                             xcp);
+            }
+        }
+
+        // Insert JPEG activity metrics
+        if(capabilities.flags.jpeg_is_device_level_only)
+        {
+            insert_decode_vector_metrics(category::amd_smi_jpeg_activity{},
+                                         is_jpeg_enabled, gpu_metrics.jpeg_activity,
+                                         std::nullopt);
+        }
+        else
+        {
+            for(size_t xcp = 0; xcp < gpu_metrics.jpeg_busy.size(); ++xcp)
+            {
+                insert_decode_vector_metrics(category::amd_smi_jpeg_activity{},
+                                             is_jpeg_enabled, gpu_metrics.jpeg_busy[xcp],
+                                             xcp);
+            }
+        }
+
+        // Insert XGMI metrics
+        if(is_xgmi_enabled)
+        {
+            auto make_track_name = [&](const char* metric) {
+                return JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'), metric, "(S)");
             };
 
-            if(is_vcn_enabled && !xcp_metrics.empty())
+            if(!amd_smi_xgmi_link_width_track::exists(_device_id))
             {
-                for(size_t xcp_idx = 0; xcp_idx < xcp_metrics.size(); ++xcp_idx)
-                {
-                    for(size_t clk = 0; clk < xcp_metrics[xcp_idx].vcn_busy.size(); ++clk)
-                    {
-                        auto val = xcp_metrics[xcp_idx].vcn_busy[clk];
-                        if(val == std::numeric_limits<uint16_t>::max()) continue;
-
-                        // WiP: Create track name pattern matching the one seen in
-                        // amd_smi.cpp
-                        auto track_name =
-                            (xcp_metrics.size() == 1)
-                                ? JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'),
-                                       "VCN Activity",
-                                       JOIN("", "[", (clk < 10 ? "0" : ""), clk, ']'),
-                                       "(S)")
-                                : JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'),
-                                       "VCN Activity",
-                                       JOIN("", "XCP_", xcp_idx, ": [",
-                                            (clk < 10 ? "0" : ""), clk, ']'),
-                                       "(S)");
-
-                        auto unique_key = generate_track_key(_device_id, xcp_idx, clk);
-                        if(!amd_smi_vcn_track::exists(unique_key))
-                        {
-                            amd_smi_vcn_track::emplace(unique_key, track_name, "%");
-                        }
-                        TRACE_COUNTER("device_vcn_activity",
-                                      amd_smi_vcn_track::at(unique_key, 0), _ts, val);
-                    }
-                }
+                amd_smi_xgmi_link_width_track::emplace(
+                    _device_id, make_track_name("XGMI Link Width"), "");
             }
+            TRACE_COUNTER("device_xgmi_link_width",
+                          amd_smi_xgmi_link_width_track::at(_device_id, 0), _ts,
+                          static_cast<double>(gpu_metrics.xgmi_link_width));
 
-            if(is_jpeg_enabled && !xcp_metrics.empty())
+            if(!amd_smi_xgmi_link_speed_track::exists(_device_id))
             {
-                for(size_t xcp_idx = 0; xcp_idx < xcp_metrics.size(); ++xcp_idx)
-                {
-                    for(size_t clk = 0; clk < xcp_metrics[xcp_idx].jpeg_busy.size();
-                        ++clk)
-                    {
-                        auto val = xcp_metrics[xcp_idx].jpeg_busy[clk];
-                        if(val == std::numeric_limits<uint16_t>::max()) continue;
-
-                        auto track_name =
-                            (xcp_metrics.size() == 1)
-                                ? JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'),
-                                       "JPEG Activity",
-                                       JOIN("", "[", (clk < 10 ? "0" : ""), clk, ']'),
-                                       "(S)")
-                                : JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'),
-                                       "JPEG Activity",
-                                       JOIN("", "XCP_", xcp_idx, ": [",
-                                            (clk < 10 ? "0" : ""), clk, ']'),
-                                       "(S)");
-                        auto unique_key = generate_track_key(_device_id, xcp_idx, clk);
-                        if(!amd_smi_jpeg_track::exists(unique_key))
-                        {
-                            amd_smi_jpeg_track::emplace(unique_key, track_name, "%");
-                        }
-                        TRACE_COUNTER("device_jpeg_activity",
-                                      amd_smi_jpeg_track::at(unique_key, 0), _ts, val);
-                    }
-                }
+                amd_smi_xgmi_link_speed_track::emplace(
+                    _device_id, make_track_name("XGMI Link Speed"), "MT/s");
             }
+            TRACE_COUNTER("device_xgmi_link_speed",
+                          amd_smi_xgmi_link_speed_track::at(_device_id, 0), _ts,
+                          static_cast<double>(gpu_metrics.xgmi_link_speed));
+
+            insert_xgmi_vector_metrics(category::amd_smi_xgmi_read_data{},
+                                       is_xgmi_enabled, gpu_metrics.xgmi_read_data_acc);
+
+            insert_xgmi_vector_metrics(category::amd_smi_xgmi_write_data{},
+                                       is_xgmi_enabled, gpu_metrics.xgmi_write_data_acc);
+        }
+
+        // Insert PCIe metrics
+        if(is_pcie_enabled)
+        {
+            auto make_track_name = [&](const char* metric) {
+                return JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'), metric, "(S)");
+            };
+
+            if(!amd_smi_pcie_link_width_track::exists(_device_id))
+            {
+                amd_smi_pcie_link_width_track::emplace(
+                    _device_id, make_track_name("PCIe Link Width"), "");
+            }
+            TRACE_COUNTER("device_pcie_link_width",
+                          amd_smi_pcie_link_width_track::at(_device_id, 0), _ts,
+                          static_cast<double>(gpu_metrics.pcie_link_width));
+
+            if(!amd_smi_pcie_link_speed_track::exists(_device_id))
+            {
+                amd_smi_pcie_link_speed_track::emplace(
+                    _device_id, make_track_name("PCIe Link Speed"), "MT/s");
+            }
+            TRACE_COUNTER("device_pcie_link_speed",
+                          amd_smi_pcie_link_speed_track::at(_device_id, 0), _ts,
+                          static_cast<double>(gpu_metrics.pcie_link_speed));
+
+            if(!amd_smi_pcie_bandwidth_acc_track::exists(_device_id))
+            {
+                amd_smi_pcie_bandwidth_acc_track::emplace(
+                    _device_id, make_track_name("PCIe Bandwidth Acc"), "bytes");
+            }
+            TRACE_COUNTER("device_pcie_bandwidth_acc",
+                          amd_smi_pcie_bandwidth_acc_track::at(_device_id, 0), _ts,
+                          static_cast<double>(gpu_metrics.pcie_bandwidth_acc));
+
+            if(!amd_smi_pcie_bandwidth_inst_track::exists(_device_id))
+            {
+                amd_smi_pcie_bandwidth_inst_track::emplace(
+                    _device_id, make_track_name("PCIe Bandwidth Inst"), "bytes");
+            }
+            TRACE_COUNTER("device_pcie_bandwidth_inst",
+                          amd_smi_pcie_bandwidth_inst_track::at(_device_id, 0), _ts,
+                          static_cast<double>(gpu_metrics.pcie_bandwidth_inst));
         }
     };
 }
@@ -1114,6 +1164,8 @@ perfetto_post_processing::get_in_time_sample_callback() const
 
         auto _track = get_track(category::kokkos{}, _track_name, _track_uuid);
         auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
+            if(!m_use_annotations) return;
+
             annotate_perfetto(ctx, { { "timestamp_ns", _timestamp },
                                      { "event_type", _event_type },
                                      { "target", _target } });
@@ -1130,16 +1182,15 @@ perfetto_post_processing::register_parser_callback(
     [[maybe_unused]] storage_parser& parser)
 {
 #if ROCPROFSYS_USE_ROCM > 0
-    if(!get_caching_perfetto())
-    {
-        return;
-    }
-    parser.register_type_callback(entry_type::region, get_region_callback());
     parser.register_type_callback(entry_type::kernel_dispatch,
                                   get_kernel_dispatch_callback());
     parser.register_type_callback(entry_type::memory_copy, get_memory_copy_callback());
+#    if (ROCPROFILER_VERSION >= 600)
     parser.register_type_callback(entry_type::memory_alloc,
                                   get_memory_allocate_callback());
+#    endif
+#endif
+    parser.register_type_callback(entry_type::region, get_region_callback());
     parser.register_type_callback(entry_type::cpu_freq_sample,
                                   get_cpu_freq_sample_callback());
     parser.register_type_callback(entry_type::amd_smi_sample,
@@ -1152,7 +1203,6 @@ perfetto_post_processing::register_parser_callback(
                                   get_in_time_sample_callback());
 
     ROCPROFSYS_DEBUG("Buffer parser callbacks are registered..");
-#endif
 }
 
 }  // namespace trace_cache

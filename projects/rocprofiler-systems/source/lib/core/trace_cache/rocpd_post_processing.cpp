@@ -23,6 +23,7 @@
 #include "trace_cache/rocpd_post_processing.hpp"
 #include "agent_manager.hpp"
 #include "config.hpp"
+#include "core/common_types.hpp"
 #include "debug.hpp"
 #include "gpu_metrics.hpp"
 #include "library/thread_info.hpp"
@@ -56,7 +57,7 @@ auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
     return code_object.agent_id.handle;
 #    else
     return code_object.rocp_agent.handle;
@@ -164,7 +165,7 @@ rocpd_post_processing::get_memory_copy_callback() const
     };
 }
 
-#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
+#if (ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600)
 postprocessing_callback
 rocpd_post_processing::get_memory_allocate_callback() const
 {
@@ -258,52 +259,7 @@ rocpd_post_processing::get_memory_allocate_callback() const
 postprocessing_callback
 rocpd_post_processing::get_region_callback() const
 {
-    [[maybe_unused]] auto parse_args = []([[maybe_unused]] const std::string& arg_str) {
-#if ROCPROFSYS_USE_ROCM > 0
-        rocprofiler_sdk::function_args_t args;
-        const std::string                delimiter = ";;";
-
-        auto split = [](const std::string& str, const std::string& _delimiter) {
-            std::vector<std::string> tokens;
-            size_t                   start = 0;
-            size_t                   end   = str.find(_delimiter);
-
-            while(end != std::string::npos)
-            {
-                tokens.push_back(str.substr(start, end - start));
-                start = end + _delimiter.length();
-                end   = str.find(_delimiter, start);
-            }
-
-            return tokens;
-        };
-
-        if(arg_str.empty())
-        {
-            return args;
-        }
-
-        auto tokens = split(arg_str, delimiter);
-
-        // Ensure the number of tokens is a multiple of 4
-        if(tokens.size() % 4 != 0)
-        {
-            throw std::invalid_argument("Malformed argument string.");
-        }
-
-        for(auto it = tokens.begin(); it != tokens.end(); it += 4)
-        {
-            rocprofiler_sdk::argument_info arg = { static_cast<uint32_t>(std::stoi(*it)),
-                                                   *(it + 1), *(it + 2), *(it + 3) };
-            args.push_back(arg);
-        }
-
-        return args;
-#endif
-    };
-
     return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {
-#if ROCPROFSYS_USE_ROCM > 0
         auto  _rs            = static_cast<const struct region_sample&>(parsed);
         auto  data_processor = get_data_processor();
         auto& n_info         = node_info::get_instance();
@@ -322,7 +278,7 @@ rocpd_post_processing::get_region_callback() const
             data_processor->insert_event(category_primary_key, stack_id, parent_stack_id,
                                          correlation_id, _rs.call_stack.c_str());
 
-        auto args = parse_args(_rs.args_str);
+        auto args = process_arguments_string(_rs.args_str);
         for(const auto& arg : args)
         {
             data_processor->insert_args(event_primary_key, arg.arg_number,
@@ -333,7 +289,6 @@ rocpd_post_processing::get_region_callback() const
         data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
                                       _rs.start_timestamp, _rs.end_timestamp,
                                       name_primary_key, event_primary_key);
-#endif
     };
 }
 
@@ -706,7 +661,7 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
     parser.register_type_callback(entry_type::kernel_dispatch,
                                   get_kernel_dispatch_callback());
     parser.register_type_callback(entry_type::memory_copy, get_memory_copy_callback());
-#    if(ROCPROFILER_VERSION >= 600)
+#    if (ROCPROFILER_VERSION >= 600)
     parser.register_type_callback(entry_type::memory_alloc,
                                   get_memory_allocate_callback());
 #    endif

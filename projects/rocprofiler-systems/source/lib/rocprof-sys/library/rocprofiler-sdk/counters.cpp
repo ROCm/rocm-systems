@@ -181,7 +181,7 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
 
 void
 counter_storage::write(counter_storage_type* storage, const std::string& metric_name,
-                       std::string metric_description)
+                       const std::string& metric_description)
 {
     if(!trait::runtime_enabled<counter_data_tracker>::get())
     {

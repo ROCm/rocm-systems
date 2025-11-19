@@ -34,6 +34,8 @@ namespace rocprofsys
 {
 namespace trace_cache
 {
+using char_vec_t = std::vector<char>;
+
 class perfetto_post_processing
 {
 public:
@@ -43,19 +45,20 @@ public:
     ~perfetto_post_processing();
 
     void register_parser_callback(storage_parser& parser);
-
     void setup_perfetto();
 
     void start_session();
     void stop_session();
-    void post_process(bool& _perfetto_output_error);
+    void flush(bool& _perfetto_output_error);
+
+    static void initialize_perfetto();
 
 private:
-    // void post_process_metadata();
+    char_vec_t get_session_data();
 
     postprocessing_callback get_kernel_dispatch_callback() const;
     postprocessing_callback get_memory_copy_callback() const;
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     postprocessing_callback get_memory_allocate_callback() const;
 #endif
     postprocessing_callback get_region_callback() const;
@@ -71,6 +74,7 @@ private:
     ::perfetto::TraceConfig                     m_session_config;
     std::shared_ptr<tmp_file>                   m_tmp_file{ nullptr };
     std::unique_ptr<::perfetto::TracingSession> m_tracing_session{ nullptr };
+    bool                                        m_use_annotations{ false };
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

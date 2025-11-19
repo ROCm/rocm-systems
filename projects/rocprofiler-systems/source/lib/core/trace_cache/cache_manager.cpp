@@ -156,18 +156,14 @@ cache_manager::post_process_bulk()
             shutdown();
         }
 
+        auto _cache_files = get_cache_files();
+
         if(get_use_rocpd() || get_caching_perfetto())
         {
-            ROCPROFSYS_PRINT(
-                "Generating rocpd with collected data. This may take a while..\n");
-
-            auto _cache_files = get_cache_files();
-            
-            std::vector<std::thread> rocpd_threads;
-            ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-
             if(get_caching_perfetto())
             {
+                perfetto_post_processing::initialize_perfetto();
+
                 for(const auto& [pid, files] : _cache_files)
                 {
                     if(!files.buff_storage.empty() && !files.metadata.empty())
@@ -202,13 +198,27 @@ cache_manager::post_process_bulk()
                         _parser.consume_storage();
 
                         bool _perfetto_error = false;
-                        _perfetto_post_processing.post_process(_perfetto_error);
+                        _perfetto_post_processing.flush(_perfetto_error);
+
+                        if(_perfetto_error)
+                        {
+                            ROCPROFSYS_WARNING(0,
+                                               "Perfetto trace generation failed for "
+                                               "process: %d\n",
+                                               pid);
+                        }
                     }
                 }
             }
 
             if(get_use_rocpd())
             {
+                ROCPROFSYS_PRINT(
+                    "Generating rocpd with collected data. This may take a while..\n");
+
+                std::vector<std::thread> rocpd_threads;
+                ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+
                 rocpd_threads.emplace_back([this]() {
                     auto                  pid  = getpid();
                     auto                  ppid = get_root_process_id();
@@ -251,19 +261,14 @@ cache_manager::post_process_bulk()
                             _post_processing.register_parser_callback(_parser);
                             _post_processing.post_process_metadata();
                             _parser.consume_storage();
-                            std::remove(files.metadata.c_str());  // Remove metadata file
                         });
                     }
                 }
-            }
 
-            for(auto& thread : rocpd_threads)
-            {
-                thread.join();
-            }
-            if(get_caching_perfetto())
-            {
-                clear_cache_files();
+                for(auto& thread : rocpd_threads)
+                {
+                    thread.join();
+                }
             }
         }
 
