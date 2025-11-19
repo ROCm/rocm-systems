@@ -28,9 +28,9 @@ import signal
 import sys
 import time
 
-ROCPROFV3_ATTACH_DIR = os.path.dirname(os.path.realpath(__file__))
-ROCM_DIR = os.path.dirname(ROCPROFV3_ATTACH_DIR)
-ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-attach.so"
+ROCPROF_ATTACH_DIR = os.path.dirname(os.path.realpath(__file__))
+ROCM_DIR = os.path.dirname(ROCPROF_ATTACH_DIR)
+ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk-rocattach.so"
 
 
 def main(
@@ -41,7 +41,7 @@ def main(
     duration=os.environ.get("ROCPROF_ATTACH_DURATION", None),
 ):
     if pid is None:
-        raise RuntimeError("rocprofv3_attach called with no PID specified")
+        raise RuntimeError("rocprof_attach called with no PID specified")
 
     print(f"Attaching to PID {pid} using library {attach_library}")
 

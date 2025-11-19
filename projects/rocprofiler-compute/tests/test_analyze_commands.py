@@ -26,7 +26,7 @@
 import os
 import shutil
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
@@ -1379,6 +1379,42 @@ def test_update_functions_coverage():
     assert result[0].isupper()
 
 
+def test_metric_evaluation_no_valid_data():
+    """Test emetric evaluation with no valid data"""
+    import numpy as np
+
+    from utils.parser import MetricEvaluator
+
+    metric_evaluator = MetricEvaluator({}, {}, {})
+    with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
+        # Test when eval returns None
+        mock_eval.return_value = None
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        # Test when eval returns NaN
+        mock_eval.return_value = np.nan
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        # Test when eval raises an exception
+        mock_eval.side_effect = TypeError("Mock exception")
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        mock_eval.side_effect = NameError("empirical_peak")
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        mock_eval.side_effect = KeyError("Some KeyError")
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        with patch("sys.exit"):
+            mock_eval.side_effect = AttributeError("Some AttributeError")
+            assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        mock_eval.side_effect = AttributeError(
+            "'NoneType' object has no attribute 'get'"
+        )
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+
 @pytest.fixture
 def sample_time_data():
     return pd.DataFrame({
@@ -1626,3 +1662,29 @@ def test_edge_cases_and_error_handling():
     result = convert_time_columns(mixed_case_df, "ms")
     assert result.loc[0, "Unit"] == "ms"
     assert result.loc[1, "Unit"] == "ms"
+
+
+@pytest.mark.iteration_multiplexing
+def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
+    workload = "tests/workloads/vcopy_iteration_multiplexing/MI350"
+    workload_dir = test_utils.setup_workload_dir(workload)
+
+    # Test with dispatch filtering
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--dispatch",
+        "0",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 1
+
+    # Test without dispatch filtering
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
