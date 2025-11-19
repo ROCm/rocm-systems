@@ -2074,28 +2074,28 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                       buffer_service_config{tool::get_config().memory_allocation_trace,
                                             ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
                                             get_buffers().memory_allocation_trace},
-                      buffer_service_config{tool::get_config().kfd_trace,
+                      buffer_service_config{tool::get_config().kfd_page_migration_trace,
                                             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
                                             get_buffers().kfd_trace},
-                      buffer_service_config{tool::get_config().kfd_trace,
+                      buffer_service_config{tool::get_config().kfd_page_mapping_trace,
                                             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
                                             get_buffers().kfd_trace},
-                      buffer_service_config{tool::get_config().kfd_trace,
+                      buffer_service_config{tool::get_config().kfd_queue_trace,
                                             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
                                             get_buffers().kfd_trace},
-                      buffer_service_config{tool::get_config().kfd_trace,
+                      buffer_service_config{tool::get_config().kfd_page_mapping_trace,
                                             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
                                             get_buffers().kfd_trace},
-                      buffer_service_config{tool::get_config().kfd_trace,
+                      buffer_service_config{tool::get_config().kfd_any_trace(),
                                             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
                                             get_buffers().kfd_trace},
-                      buffer_service_config{tool::get_config().kfd_trace,
+                      buffer_service_config{tool::get_config().kfd_page_migration_trace,
                                             ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
                                             get_buffers().kfd_trace},
-                      buffer_service_config{tool::get_config().kfd_trace,
+                      buffer_service_config{tool::get_config().kfd_page_mapping_trace,
                                             ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
                                             get_buffers().kfd_trace},
-                      buffer_service_config{tool::get_config().kfd_trace,
+                      buffer_service_config{tool::get_config().kfd_queue_trace,
                                             ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
                                             get_buffers().kfd_trace},
                       buffer_service_config{tool::get_config().rocdecode_api_trace,
@@ -2697,7 +2697,7 @@ generate_output(cleanup_mode _cleanup_mode)
     auto rccl_output = tool::rccl_buffered_output_t{tool::get_config().rccl_api_trace};
     auto memory_allocation_output =
         tool::memory_allocation_buffered_output_t{tool::get_config().memory_allocation_trace};
-    auto kfd_output = tool::kfd_buffered_output_t{tool::get_config().kfd_trace};
+    auto kfd_output = tool::kfd_buffered_output_t{tool::get_config().kfd_any_trace()};
     auto counters_records_output =
         tool::counter_records_buffered_output_t{tool::get_config().counter_collection};
     auto pc_sampling_host_trap_output =
