@@ -70,7 +70,7 @@ def generate_ctest_dashboard_script(args, source_dir, binary_dir):
         f"CMAKE_PREFIX_PATH:PATH={os.environ.get('ROCM_PATH', '/opt/rocm')}",
         "ENABLE_TESTS:BOOL=ON",
         "INSTALL_TESTS:BOOL=ON",
-        f"ENABLE_COVERAGE:BOOL={args.code_coverage}",
+        "ENABLE_COVERAGE:BOOL=ON",
         f"PYTEST_NUMPROCS:STRING={args.pytest_numprocs}",
     ]
 
@@ -112,7 +112,7 @@ set(CTEST_CMAKE_GENERATOR "Unix Makefiles")
 set(CTEST_BUILD_CONFIGURATION "Release")
 
 # Config CMake command with all required options
-set(CTEST_CONFIGURE_COMMAND "cmake -B ${{CTEST_BINARY_DIRECTORY}} ${{CTEST_SOURCE_DIRECTORY}} -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH={os.environ.get("ROCM_PATH", "/opt/rocm")} -DENABLE_TESTS=ON -DINSTALL_TESTS=ON -DENABLE_COVERAGE={args.code_coverage} -DPYTEST_NUMPROCS={args.pytest_numprocs}")
+set(CTEST_CONFIGURE_COMMAND "cmake -B ${{CTEST_BINARY_DIRECTORY}} ${{CTEST_SOURCE_DIRECTORY}} -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH={os.environ.get("ROCM_PATH", "/opt/rocm")} -DENABLE_TESTS=ON -DINSTALL_TESTS=ON -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS={args.pytest_numprocs}")
 
 message(STATUS "CMake configure command: ${{CTEST_CONFIGURE_COMMAND}}")
 
@@ -300,25 +300,11 @@ def main():
         default=4,
         help="Number of parallel processes for pytest",
     )
-    parser.add_argument(
-        "--code-coverage",
-        type=str,
-        default="OFF",
-        help="Enable/disable code coverage",
-    )
-
-    parser.add_argument(
-        "--ctest-args",
-        type=str,
-        default="",
-        help="Commma separated list of ctest args to provide",
-    )
 
     args, unknown = parser.parse_known_args()
 
     args.cmake_args = []
-    if args.ctest_args:
-        args.ctest_args = args.ctest_args.split(',')
+    args.ctest_args = []
 
     is_monorepo, monorepo_root, project_root = detect_repo_structure()
 
