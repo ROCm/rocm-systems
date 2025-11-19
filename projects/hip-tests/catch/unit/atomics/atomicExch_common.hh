@@ -1,3 +1,4 @@
+
 /*
 Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
 
@@ -296,7 +297,7 @@ class AtomicExch
 
   void ValidateResults(std::vector<T>& old_vals) const {
     bool failure = false;
-    std::vector<std::pair<T>> missingValues;
+    std::vector<std::pair<T, T>> missingValues;
 
     INFO("Validating results for AtomicExch with "
          << (use_shared_mem ? "shared memory" : "global memory") << " and scope "
@@ -307,16 +308,16 @@ class AtomicExch
 
     for (auto i = 0u; i < old_vals.size(); ++i) {
       if (i != old_vals[i]) {
-        missingValues.push_back(i, old_vals[i]);
+        missingValues.emplace_back(i, old_vals[i]);
         failure = true;
       }
     }
 
     if (failure) {
-      INFO("Found (" << missingValues.size() << "/" << old_vals.size() + ") unexpected values");
+      UNSCOPED_INFO("Found (" << missingValues.size() << "/" << old_vals.size() << ") unexpected values");
 
       for (auto& val_pair : missingValues) {
-        INFO("Expected value: " << val_pair.first << " got: " << val_pair.second);
+        UNSCOPED_INFO("Expected value: " << val_pair.first << " got: " << val_pair.second);
       }
       REQUIRE(false);
     }
