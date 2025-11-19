@@ -4585,6 +4585,8 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     amdsmi_status_t status2 = smi_amdgpu_get_power_cap(gpu_device, 0, &power_limit);
     if (status2 == AMDSMI_STATUS_SUCCESS) {
         info->power_limit = power_limit;
+    } else if (status2 == AMDSMI_STATUS_NOT_SUPPORTED) {
+        status = AMDSMI_STATUS_SUCCESS;
     }
 
     // Returning status from amdsmi_get_gpu_metrics_info() which should return SUCCESS
