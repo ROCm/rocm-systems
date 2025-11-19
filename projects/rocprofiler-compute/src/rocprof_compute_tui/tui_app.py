@@ -37,12 +37,12 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Button, Footer, Header
-from textual_fspicker import SelectDirectory
 
 import config
 from rocprof_compute_tui.config import APP_TITLE
 from rocprof_compute_tui.views.main_view import MainView
-from rocprof_compute_tui.widgets.menu_bar.menu_bar import DropdownMenu
+from rocprof_compute_tui.widgets.directory_picker import DirectoryPicker
+from rocprof_compute_tui.widgets.menu_bar.menu_bar import DropdownMenu, MenuButton
 from utils.specs import generate_machine_specs
 from utils.utils import get_version
 
@@ -122,11 +122,26 @@ class RocprofTUIApp(App):
     @on(Button.Pressed, "#menu-open-workload")
     @work
     async def pick_directory(self) -> None:
-        if opened := await self.push_screen_wait(SelectDirectory()):
-            self.add_recent_dir(str(object=opened))
-            self.main_view.selected_path = opened
-            self.query_one("#file-dropdown", DropdownMenu).add_class("hidden")
-            self.main_view.run_analysis()
+        """Open directory picker with custom implementation."""
+        # Close the dropdown first
+        dropdown = self.query_one("#file-dropdown", DropdownMenu)
+        dropdown.add_class("hidden")
+        menu_button = self.query_one("#menu-file", MenuButton)
+        menu_button.is_open = False
+
+        # Open custom directory picker
+        try:
+            picker = DirectoryPicker()
+            if opened := await self.push_screen_wait(picker):
+                self.log(f"Directory selected: {opened}")
+                self.add_recent_dir(str(opened))
+                self.main_view.selected_path = opened
+                self.main_view.run_analysis()
+            else:
+                self.log("Directory selection cancelled")
+        except Exception as e:
+            self.log(f"Error in directory picker: {e}")
+            self.notify(f"Error opening directory picker: {e}", severity="error")
 
 
 def run_tui(
