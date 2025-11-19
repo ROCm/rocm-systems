@@ -39,6 +39,9 @@ Profiling with ROCm Compute Profiler yields the following benefits.
 * :ref:`Standalone roofline <standalone-roofline>`: Isolate a subset of built-in
   metrics or build your own profiling configuration.
 
+* :ref:`Iteration multiplexing <iteration-multiplexing>`: Collect a large number of
+  performance counters with minimal profiling overhead.
+
 Run ``rocprof-compute profile -h`` for more details. See
 :ref:`Basic usage <modes-profile>`.
 
@@ -655,3 +658,104 @@ plot.
    :align: center
    :alt: Sample ROCm Compute Profiler roofline output
    :width: 800
+
+
+.. _iteration-multiplexing:
+
+Iteration Multiplexing
+========================
+
+To reduce profiling overhead when collecting a large number of performance counters,
+ROCm Compute Profiler supports iteration multiplexing. This technique divides the
+total set of requested performance counters into smaller subsets that can be collected
+over multiple iterations of the kernel execution. Each iteration collects a different
+subset of counters, and the results are later combined to provide a comprehensive view
+of the performance metrics.
+
+Usage
+-----
+
+To enable iteration multiplexing in ROCm Compute Profiler, use the
+``--iteration-multiplexing`` option in your profiling command. You can optionally specify
+the policy for multiplexing. The available policies are:
+
+* ``kernel`` 
+   The counters are divided based on the kernels being executed. Each kernel call
+   for a particular kernel collects a different subset of counters.
+* ``kernel_launch_params``
+   The counters are divided based on both the kernels and their launch parameters.
+   This allows for more granular control over counter collection. Each unique combination of kernel and launch
+   parameters collects a different subset of counters.
+
+By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_launch_params`` policy.
+
+.. note::
+
+  * Do not use ``--no-native-tool`` with ``--iteration-multiplexing``.
+   Iteration multiplexing is only supported when using ROCm Compute Profiler with
+   the native counter collection tool. Ensure that ``--no-native-tool`` is not used in your profiling command.
+
+  * Ensure that your workload runs for enough iterations to cover all counter subsets. 
+   When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)  
+   or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy), 
+   specified in the workload should be sufficient to cover all subsets of counters. If the number of iterations 
+   is too low, some counters may not be collected.
+
+  * Launch paramaters for ``kernel_launch_params`` policy.
+   Launch parameters refer to the following paramaters.
+      - Grid size
+      - Workgroup size
+      - LDS size
+
+The following example demonstrates how to use iteration multiplexing with the
+``vcopy`` workload:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name vcopy --iteration-multiplexing kernel -- ./vcopy -i 20 -n 1048576 -b 256
+
+   ...
+   [INFO] Rocprofiler-Compute version: 3.3.1
+   [INFO] Profiler choice: rocprofiler-sdk
+   [INFO] Path: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200
+   [INFO] Target: MI200
+   [INFO] Command: ./vcopy -i 20 -n 1048576 -b 256
+   [INFO] Kernel Selection: None
+   [INFO] Dispatch Selection: None
+   [INFO] Filtered sections: All
+   [INFO] 
+   [INFO] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   [INFO] Collecting Performance Counters
+   [INFO] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   [INFO] 
+   [INFO] Using native counter collection tool: /tmp/rocprofiler-compute-tool-hlz4fagh/librocprofiler-compute-tool.so
+   [INFO] Iteration multiplexing: kernel
+   [INFO] [profiling] Current input files: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQC_ICACHE_INFLIGHT_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_IFETCH_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_LDS.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_SMEM.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_VMEM.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_LEVEL_WAVES.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_0.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_1.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_10.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_11.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_12.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_2.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_3.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_4.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_5.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_6.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_7.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_8.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_9.txt
+   [INFO]   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.0.0 (1.0.0)
+   [INFO]   |-> [rocprofiler-sdk] [rocprofiler-compute] [create_tool_data] Logging counter collection to: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/out/pmc_1/counter_collection_dc877c12.csv
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.205097 139710715580160 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.393942 sec
+   [INFO]   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.205260 139710715580160 simple_timer.cpp:55] [rocprofv3] './vcopy -i 20 -n 1048576 -b 256' ::     0.000000 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.320658 139710715580160 tool.cpp:2420] HSA version 8.20.0 initialized (instance=0)
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.541811 139710715580160 simple_timer.cpp:55] [rocprofv3] './vcopy -i 20 -n 1048576 -b 256' ::     0.336552 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.551750 139710715580160 generateRocpd.cpp:582] writing SQL database for process 2606306 on node 1574819130
+   [INFO]   |-> [rocprofiler-sdk] E20251106 22:30:29.552127 139710715580160 generateRocpd.cpp:605] Opened result file: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/out/pmc_1/MI200-1/2606306_results.db (UUID=ab2345e4-7f3e-4f7c-8f6d-1c9e4f5b6c7d)
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.584905 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.016552 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.585113 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.000200 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.586186 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001069 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.592977 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.006506 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.791895 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     2.198912 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.792565 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.000645 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.792572 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000002 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.795306 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.002731 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.795311 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.795313 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.795315 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.795405 139710715580160 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000089 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.796398 139710715580160 simple_timer.cpp:55] SQLite3 generation :: total                    ::     2.244648 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.797844 139710715580160 simple_timer.cpp:55] [rocprofv3] output generation ::     2.254739 sec
+   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.800089 139710715580160 simple_timer.cpp:55] [rocprofv3] tool finalization ::     2.258250 sec
+   [INFO]   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   [INFO]   |-> [rocprofiler-sdk] vcopy testing on GCD 0
+   [INFO]   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   ...

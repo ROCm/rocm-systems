@@ -45,6 +45,10 @@ class Gfx9Factory : public Pm4Factory {
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 
   static void Print(const GpuBlockInfo* block_info);
+  const uint32_t* spm_block_delay_global[AQLPROFILE_BLOCKS_NUMBER];
+  const uint32_t* spm_block_delay_se[AQLPROFILE_BLOCKS_NUMBER];
+  void InitSpmBlockDelay(GpuBlockInfo* block_info);
+  size_t cu_block_delay_table_size;
 };
 
 // Mi100 factory class
@@ -60,6 +64,9 @@ class Mi100Factory : public Gfx9Factory {
 
  protected:
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
+
+ private:
+  void InitSpmBlockDelayTable();
 };
 
 }  // namespace aql_profile

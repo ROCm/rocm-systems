@@ -74,6 +74,11 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         # Create folder pointed by ROCPROF_OUTPUT_PATH
         Path(options["ROCPROF_OUTPUT_PATH"]).mkdir(parents=True, exist_ok=True)
 
+        if args.iteration_multiplexing:
+            options.update({
+                "ROCPROF_ITERATION_MULTIPLEXING": args.iteration_multiplexing,
+            })
+
         if args.attach_pid:
             # In attach mode, tools are provided using ROCP_TOOL_LIBRARIES
             # instead of LD_PRELOAD.

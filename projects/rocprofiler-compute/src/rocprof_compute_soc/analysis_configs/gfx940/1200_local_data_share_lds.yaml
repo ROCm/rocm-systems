@@ -140,7 +140,7 @@ Panel Config:
       unit.
     Unaligned Stall: The total number of cycles spent in the LDS scheduler due to
       stalls from non-dword aligned addresses per normalization unit.
-    Mem Violations: |-
+    Mem Violations: >-
       The total number of out-of-bounds accesses made to the LDS, per normalization
       unit. This is unused and expected to be zero in most configurations for
       modern CDNA\u2122 accelerators.

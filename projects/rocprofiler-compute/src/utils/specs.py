@@ -73,14 +73,30 @@ VERSION_LOC: list[str] = [
 
 
 def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
+    supported_gpu_arch = mi_gpu_specs.get_gpu_series_dict()
+    unsupported_gpu_arch: set[str] = set()
+
     for idx1, line_text in enumerate(rocminfo_lines):
         gpu_arch = search(
             r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", line_text
         )
-        if gpu_arch and gpu_arch in mi_gpu_specs.get_gpu_series_dict():
+        if not gpu_arch:
+            continue
+
+        if gpu_arch in supported_gpu_arch:
             return (gpu_arch, idx1)
 
-    console_error("Cannot find a supported arch in rocminfo")
+        if gpu_arch not in unsupported_gpu_arch:
+            unsupported_gpu_arch.add(gpu_arch)
+            console_warning(
+                "Detected GPU architecture: "
+                f"{gpu_arch} is currently NOT supported by the profile mode."
+            )
+
+    if unsupported_gpu_arch:
+        console_log(f"Supported architectures: {list(supported_gpu_arch.keys())}")
+
+    console_error("Cannot find a supported arch in rocminfo.")
 
 
 def detect_gpu_chip_id(rocminfo_lines: list[str]) -> Optional[str]:

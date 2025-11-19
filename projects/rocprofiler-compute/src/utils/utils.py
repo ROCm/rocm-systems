@@ -685,7 +685,7 @@ def parse_text(text_file: str) -> list[str]:
 
 
 def run_prof(
-    fname: str,
+    fnames: Union[list[str], str],
     profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
     workload_dir: str,
     mspec: Any,  # noqa: ANN401
@@ -693,9 +693,28 @@ def run_prof(
     format_rocprof_output: str,
     retain_rocpd_output: bool = False,
 ) -> None:
-    fpath = Path(fname)
+    multiple_files = isinstance(fnames, list)
+    if multiple_files and (
+        (
+            isinstance(profiler_options, dict)
+            and profiler_options.get("ROCPROF_ITERATION_MULTIPLEXING") is None
+        )
+        or (
+            isinstance(profiler_options, list)
+            and "--iteration-multiplexing" not in profiler_options
+        )
+    ):
+        console_error(
+            "Multiple pmc files detected but ROCPROF_ITERATION_MULTIPLEXING is not set."
+        )
+        return
+
+    fpath = Path(fnames[0]) if multiple_files else Path(fnames)
     fbase = fpath.stem
-    console_debug(f"pmc file: {fpath.name}")
+    if multiple_files:
+        console_debug(f"pmc files: {', '.join([Path(fname).name for fname in fnames])}")
+    else:
+        console_debug(f"pmc file: {fpath.name}")
 
     is_mode_live_attach = (
         isinstance(profiler_options, list) and "--pid" in profiler_options
@@ -707,10 +726,21 @@ def run_prof(
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
         options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
-        options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_text(fname))}"
+        if multiple_files:
+            options["ROCPROF_COUNTERS"] = ", ".join([
+                f"pmc: {' '.join(parse_text(fname))}" for fname in fnames
+            ])
+        else:
+            options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_text(fnames))}"
         options["ROCPROF_AGENT_INDEX"] = "absolute"
     else:
-        default_options = ["-i", fname]
+        if multiple_files:
+            console_error(
+                "Multiple pmc files detected but rocprofv3 does not "
+                "support multiple input files."
+            )
+            return
+        default_options = ["-i", fnames]
         options = default_options + cast(list[str], profiler_options)
         options = ["-A", "absolute"] + options
 
@@ -725,11 +755,13 @@ def run_prof(
     ) as file:
         counter_defs = yaml.safe_load(file)
     # Extra counter definitions
-    if Path(fname).with_suffix(".yaml").exists():
-        with open(Path(fname).with_suffix(".yaml")) as file:
-            counter_defs["rocprofiler-sdk"]["counters"].extend(
-                yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
-            )
+    for fname in fnames if multiple_files else [fnames]:
+        if Path(fname).with_suffix(".yaml").exists():
+            with open(Path(fname).with_suffix(".yaml")) as file:
+                counter_defs["rocprofiler-sdk"]["counters"].extend(
+                    yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
+                )
+    # TODO: Write counter definitions to a user specified path
     # Write counter definitions to a temporary file
     tmpfile_path = (
         Path(tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp"))
@@ -756,6 +788,9 @@ def run_prof(
         new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
 
     time_1 = time.time()
+
+    output_path = Path(workload_dir + "/out/pmc_1")
+    output_path.mkdir(parents=True, exist_ok=True)
 
     if rocprof_cmd == "rocprofiler-sdk":
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
@@ -1438,6 +1473,118 @@ def reverse_multi_index_df_pmc(
 
     # Return the list of DataFrames and the column levels
     return dfs, coll_levels
+
+
+def merge_counters_iteration_multiplex(
+    df_multi_index: pd.DataFrame,
+    policy: str,
+) -> pd.DataFrame:
+    """
+    For iteration multiplexing, this merges counter values for the kernel collected
+    over multiple iterations.
+    """
+    non_counter_column_index = [
+        "Dispatch_ID",
+        "GPU_ID",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+        "Scratch_Per_Workitem",
+        "Arch_VGPR",
+        "Accum_VGPR",
+        "SGPR",
+        "Kernel_Name",
+        "Start_Timestamp",
+        "End_Timestamp",
+        "Kernel_ID",
+    ]
+
+    expired_column_index = [
+        "Dispatch_ID",
+    ]
+
+    result_dfs: list[pd.DataFrame] = []
+
+    # TODO: will need to optimize to avoid this conversion to single index format
+    # and do merge directly on multi-index dataframe
+    dfs, coll_levels = reverse_multi_index_df_pmc(df_multi_index)
+
+    for df in dfs:
+        kernel_name_column_name = "Kernel_Name"
+        if "Kernel_Name" not in df and "Name" in df:
+            kernel_name_column_name = "Name"
+
+        # Find the values in Kernel_Name that occur more than once
+        unique_occurences = (
+            df.groupby(kernel_name_column_name)
+            if policy == "kernel"
+            else df.groupby(
+                [
+                    kernel_name_column_name,
+                    "Grid_Size",
+                    "Workgroup_Size",
+                    "LDS_Per_Workgroup",
+                ],
+                as_index=False,
+            )
+        )
+
+        # Define a list to store the merged rows
+        result_data: list[dict[str, Any]] = []
+
+        pd.set_option("display.max_columns", None)
+
+        for name, group in unique_occurences:
+            # Create a dictionary to store the merged row for the current group
+            merged_row: dict[str, Any] = {}
+
+            # Process non-counter columns
+            for col in [
+                col
+                for col in non_counter_column_index
+                if col not in expired_column_index
+            ]:
+                if col == "End_Timestamp":
+                    # For End_Timestamp, calculate the median delta time
+                    delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
+                    median_delta_time = delta_time.median()
+                    merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
+                    merged_row["Median_Time"] = median_delta_time
+                    merged_row["Mean_Time"] = delta_time.mean()
+                elif pd.api.types.is_numeric_dtype(group[col]):
+                    # For other non-counter numeric columns, take the median value
+                    merged_row[col] = group[col].median()
+                    if pd.api.types.is_integer_dtype(group[col]):
+                        merged_row[col] = merged_row[col].astype(int)
+                else:
+                    # For other non-counter columns, take the first occurrence (0th row)
+                    merged_row[col] = group.iloc[0][col]
+
+            # Process counter columns (assumed to be all columns not in
+            # non_counter_column_index)
+            counter_columns = [
+                col for col in group.columns if col not in non_counter_column_index
+            ]
+            for counter_col in counter_columns:
+                # for counter columns, take the first non-none (or non-nan) value
+                current_valid_counter_group = group[group[counter_col].notna()]
+                first_valid_value = (
+                    current_valid_counter_group.iloc[0][counter_col]
+                    if len(current_valid_counter_group) > 0
+                    else None
+                )
+                merged_row[counter_col] = first_valid_value
+
+            merged_row["Count"] = group["Dispatch_ID"].nunique()
+
+            # Append the merged row to the result list
+            result_data.append(merged_row)
+
+        # Create a new DataFrame from the merged rows
+        result_dfs.append(pd.DataFrame(result_data))
+
+    final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
+    return final_df
 
 
 def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFrame:
