@@ -139,8 +139,8 @@ static void test_group_partition(unsigned int tileSz) {
     // out-of-bounds error and still evaluate failure case.
     numTiles = (numTiles == 0) ? 1 : numTiles;
 
-    for (int i = 0; i < numTiles; i++) {
-      expectedResult[i] = expectedSum;
+    for (int j = 0; j < numTiles; j++) {
+      expectedResult[j] = expectedSum;
     }
 
     int* dResult = NULL;
@@ -198,13 +198,13 @@ static void test_shfl_down() {
 
     HIPCHECK(hipHostMalloc(&hPtr, arrSize));
     // Fill up the array
-    for (int i = 0; i < WAVE_SIZE; i++) {
-      hPtr[i] = rand() % 1000;
+    for (int j = 0; j < WAVE_SIZE; j++) {
+      hPtr[j] = rand() % 1000;
     }
 
     int* cpuResultsArr = (int*)malloc(group_size_in_bytes);
-    for (int i = 0; i < group_size; i++) {
-      cpuResultsArr[i] = (i + lane_delta >= group_size) ? hPtr[i] : hPtr[i + lane_delta];
+    for (int j = 0; j < group_size; j++) {
+      cpuResultsArr[j] = (j + lane_delta >= group_size) ? hPtr[j] : hPtr[j + lane_delta];
     }
     // printf("Array passed to GPU for computation\n");
     // printResultsCoalescedGroupsShflDown(hPtr, WAVE_SIZE);

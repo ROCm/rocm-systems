@@ -61,9 +61,9 @@ TEST_CASE("Unit_hipEventElapsedTime_NullCheck") {
   HIP_CHECK(hipEventCreate(&start));
   HIP_CHECK(hipEventCreate(&end));
 
-  float tms = 1.0f;
   HIP_ASSERT(hipEventElapsedTime(nullptr, start, end) == hipErrorInvalidValue);
 #ifndef __HIP_PLATFORM_NVIDIA__
+  float tms = 1.0f;
   // On NVCC platform API throws seg fault hence skipping
   HIP_ASSERT(hipEventElapsedTime(&tms, nullptr, end) == hipErrorInvalidHandle);
   HIP_ASSERT(hipEventElapsedTime(&tms, start, nullptr) == hipErrorInvalidHandle);

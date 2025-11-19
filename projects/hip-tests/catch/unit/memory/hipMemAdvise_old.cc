@@ -813,8 +813,6 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst", "[multigpu]") {
           "Hence skipping the test.\n");
     }
     int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 64;
-    int *Hmm1 = NULL, DataMismatch = 0;
-    hipStream_t strm;
     HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))));
     // Initializing memory
     for (int i = 0; i < NumElms; ++i) {
@@ -824,6 +822,9 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst", "[multigpu]") {
     dim3 dimBlock(blockSize, 1, 1);
     dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
 #if HT_AMD
+    int *Hmm1 = NULL, DataMismatch = 0;
+    hipStream_t strm;
+
     SECTION("Launch Kernel on all other gpus") {
       // launching kernel from each one of the gpus
       for (int i = 1; i < Ngpus; ++i) {

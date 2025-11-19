@@ -23,7 +23,6 @@ __device__ static void* dev_mem_glob;
 __device__ struct deviceAllocFunc allocfunc{&deviceAlloc, &deviceWrite, &deviceFree};
 __device__ class derivedAlloc classalloc;
 constexpr auto num_threads = 5;
-static bool thread_results[num_threads];
 __device__ static void* dev_ptr[num_threads][GRIDSIZE];
 
 /**
@@ -434,6 +433,7 @@ template <typename T> static bool TestMemoryAccessInAllThread(int test_type, int
  * Local function: Launch kerAlloc<<<>>>
  */
 template <typename T> static void runTestMemoryAccessInAllThread(int test_type, int thread_idx) {
+  static bool thread_results[num_threads];
   thread_results[thread_idx] = TestMemoryAccessInAllThread<T>(test_type, thread_idx);
 }
 
@@ -1459,6 +1459,8 @@ TEST_CASE("Unit_deviceAllocation_New_MulKernels_MulThreads") {
  * Scenario: This test validates device allocation malloc, access and free
  * in a single kernel launched using threads.
  */
+static bool thread_results[num_threads];
+
 TEST_CASE("Unit_deviceAllocation_Malloc_SingKernels_MulThreads") {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));

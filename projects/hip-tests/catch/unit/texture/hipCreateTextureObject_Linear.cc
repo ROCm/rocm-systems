@@ -59,7 +59,6 @@ TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
   constexpr int xsize = 32;
   hipResourceDesc resDesc;
   hipTextureDesc texDesc;
-  hipResourceViewDesc resViewDesc;
   hipTextureObject_t texObj;
   hipDeviceProp_t devProp;
 
@@ -109,6 +108,8 @@ TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
 
   SECTION("hipResourceTypeLinear and valid resource view descriptor") {
 #if HT_AMD
+    hipResourceViewDesc resViewDesc;
+
     // Populate resource descriptor
     resDesc.res.linear.devPtr = texBuf;
     resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);

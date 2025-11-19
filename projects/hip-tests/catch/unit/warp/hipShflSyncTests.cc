@@ -20,6 +20,10 @@ THE SOFTWARE.
 #include "warp_common.hh"
 #include <hip_test_common.hh>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 69 // suppress integer truncation warning
+#endif
+
 template <typename T> __global__ void shfl_1(T* Input, T* Output) {
   int tid = threadIdx.x;
   // Creates groups consisting of every fourth thread.

@@ -54,7 +54,6 @@ THE SOFTWARE.
  * - HIP_VERSION >= 5.6
  */
 
-constexpr size_t size = 1 << 12;
 enum fnType { normal, object };
 
 TEST_CASE("Unit_hipGraphAddKernelNode_Negative") {
@@ -139,6 +138,8 @@ TEST_CASE("Unit_hipGraphAddKernelNode_Negative") {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 #if HT_AMD
+constexpr size_t size = 1 << 12;
+
 static __global__ void Add(int* A_d, int* B_d, int* C_d) {
   size_t tx = (blockIdx.x * blockDim.x + threadIdx.x);
   C_d[tx] = A_d[tx] + B_d[tx];

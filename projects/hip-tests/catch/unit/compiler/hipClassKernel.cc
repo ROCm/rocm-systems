@@ -126,9 +126,9 @@ __global__ void sizeVirtualClassKernel(bool* result_ecd, refStructSizes structSi
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   result_ecd[tid] = (structSizes.sizeOftestSizeDV == sizeof(testSizeDV)) &&
                     (structSizes.sizeOftestSizeDerivedDV == sizeof(testSizeDerivedDV)) &&
-                    (structSizes.sizeOftestSizeVirtDer = sizeof(testSizeVirtDer)) &&
-                    (structSizes.sizeOftestSizeVirtDerPack = sizeof(testSizeVirtDerPack)) &&
-                    (structSizes.sizeOftestSizeDerMulti = sizeof(testSizeDerMulti));
+                    (structSizes.sizeOftestSizeVirtDer == sizeof(testSizeVirtDer)) &&
+                    (structSizes.sizeOftestSizeVirtDerPack == sizeof(testSizeVirtDerPack)) &&
+                    (structSizes.sizeOftestSizeDerMulti == sizeof(testSizeDerMulti));
 }
 
 TEST_CASE("Unit_hipClassKernel_Virtual") {

@@ -54,7 +54,7 @@ TEST_CASE("Unit_kernel_chkConstantViaKernel") {
   int *A, *B, *Ad;
   A = new int[LEN];
   B = new int[LEN];
-  for (unsigned i = 0; i < LEN; i++) {
+  for (int i = 0; i < LEN; i++) {
     A[i] = -1 * i;
     B[i] = 0;
   }

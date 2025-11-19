@@ -20,6 +20,9 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip_test_defgroups.hh>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
 /**
  * @addtogroup hipMemsetD2D8Async hipMemsetD2D8Async
  * @{
@@ -137,7 +140,7 @@ TEST_CASE("Unit_hipMemsetD2D8Async_NegTsts") {
   HIP_CHECK(
       hipMemAllocPitch(&A_d, &devPitch, width, numH, 4 * sizeof(char)));
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D8Async(NULL, devPitch, memsetval, numW, numH, stream),
+    HIP_CHECK_ERROR(hipMemsetD2D8Async(0, devPitch, memsetval, numW, numH, stream),
                     hipErrorInvalidValue);
   }
   SECTION("OutOfBound destination") {

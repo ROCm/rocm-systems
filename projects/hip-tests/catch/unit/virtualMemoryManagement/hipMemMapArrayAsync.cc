@@ -100,7 +100,7 @@ TEST_CASE("Unit_hipMemMapArrayAsync_Positive_Basic") {
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 
   map_info_list.memOperationType = hipMemOperationTypeUnmap;
-  map_info_list.memHandle.memHandle = NULL;
+  map_info_list.memHandle.memHandle = 0;
   HIP_CHECK(hipMemMapArrayAsync(&map_info_list, 1, stream.stream()));
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 

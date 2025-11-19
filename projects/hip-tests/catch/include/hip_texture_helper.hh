@@ -42,7 +42,10 @@ template<typename T>
 typename std::enable_if<sizeof(T) / sizeof(decltype(T::x)) == 4, T>::type
 inline __host__ __device__ operator-(const T &a, const T &b)
 {
-  return {a.x - b.x, a.y - b.y, a.z - b.z,  a.w - b.w};
+  return {static_cast<decltype(T::x)>(a.x - b.x), 
+          static_cast<decltype(T::x)>(a.y - b.y), 
+          static_cast<decltype(T::x)>(a.z - b.z), 
+          static_cast<decltype(T::x)>(a.w - b.w)};
 }
 
 template<typename T>

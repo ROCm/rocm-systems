@@ -55,6 +55,7 @@ class functorBlockSizeToDynamicSMemSize {
 
  public:
   explicit functorBlockSizeToDynamicSMemSize(int n) : myconst(n) {}
+  __host__ __device__
   int operator()(int blocksize) const { return (static_cast<size_t>(blocksize * myconst)); }
 };
 
@@ -158,7 +159,7 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor") {
 TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda") {
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
-  auto testFunc = [](const int blockSize) {
+  auto testFunc = [] __host__ __device__ (const int blockSize) {
     return (static_cast<size_t>(blockSize * SHARED_MEM_CONST));
   };
   // Get current device property
@@ -174,7 +175,7 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda") {
   // Test again by passing the lamda function directly
   ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(
       &minGridSize, &blockSize, f1,
-      [](const int blockSize) { return (static_cast<size_t>(blockSize * SHARED_MEM_CONST)); }, 0,
+      [] __host__ __device__ (const int blockSize) { return (static_cast<size_t>(blockSize * SHARED_MEM_CONST)); }, 0,
       0);
   REQUIRE(ret == hipSuccess);
   REQUIRE(minGridSize > 0);

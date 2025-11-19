@@ -242,7 +242,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemoryPeerDevice") {
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
-    hipDeviceCanAccessPeer(&canAccessPeer, 0, 1);
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeToSymbol_GlobalMemory(true, false);
     } else {
@@ -263,7 +263,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice",
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
-    hipDeviceCanAccessPeer(&canAccessPeer, 0, 1);
+    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeToSymbol_GlobalMemory(true, true);
     } else {

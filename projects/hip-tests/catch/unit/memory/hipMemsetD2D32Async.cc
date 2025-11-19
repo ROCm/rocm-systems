@@ -42,6 +42,10 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
+
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 68 // suppress implicit conversion warning
+#endif
 TEST_CASE("Unit_hipMemsetD2D32Async_BasicFunctional") {
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;
@@ -131,7 +135,7 @@ TEST_CASE("Unit_hipMemsetD2D32Async_NegTsts") {
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, width, numH, sizeof(int)));
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D32Async(NULL, devPitch, memsetval, numW, numH, stream),
+    HIP_CHECK_ERROR(hipMemsetD2D32Async(0, devPitch, memsetval, numW, numH, stream),
                     hipErrorInvalidValue);
   }
   SECTION("OutOfBound destination") {

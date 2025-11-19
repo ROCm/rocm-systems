@@ -183,14 +183,14 @@ static void test_shfl_up() {
 
     HIPCHECK(hipHostMalloc(&hPtr, arrSize));
     // Fill up the array
-    for (int i = 0; i < WAVE_SIZE; i++) {
-      hPtr[i] = rand() % 1000;
+    for (int j = 0; j < WAVE_SIZE; j++) {
+      hPtr[j] = rand() % 1000;
     }
     // printResults(hPtr, WAVE_SIZE);
 
     int* cpuResultsArr = (int*)malloc(group_size_in_bytes);
-    for (int i = 0; i < group_size; i++) {
-      cpuResultsArr[i] = (i <= (lane_delta - 1)) ? hPtr[i] : hPtr[i - lane_delta];
+    for (int j = 0; j < group_size; j++) {
+      cpuResultsArr[j] = (j <= (lane_delta - 1)) ? hPtr[j] : hPtr[j - lane_delta];
     }
 
     // printf("Printing cpu results arr\n");

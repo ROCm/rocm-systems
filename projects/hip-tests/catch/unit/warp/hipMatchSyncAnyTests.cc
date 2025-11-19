@@ -20,6 +20,10 @@ THE SOFTWARE.
 #include "warp_common.hh"
 #include <hip_test_common.hh>
 
+#ifdef __HIP_PLATFORM_NVIDIA__
+#pragma nv_diag_suppress 69 // suppress integer truncation warning
+#endif
+
 template <typename T> __global__ void matchAny_1(T* Input, unsigned long long* Output) {
   auto tid = threadIdx.x;
   Output[tid] = __match_any_sync(AllThreads, Input[tid]);
