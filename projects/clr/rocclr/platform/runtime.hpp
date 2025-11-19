@@ -62,16 +62,18 @@ class Runtime : AllStatic {
 /*@}*/
 
 class RuntimeTearDown : public HeapObject {
-  typedef std::function<void()> TearDownCallback;
-  static std::vector<ReferenceCountedObject*> external_;
-  static std::vector<std::pair<std::string, TearDownCallback>> tear_down_funcs_;
-
  public:
+  using TearDownCallback = std::function<void()>;
+
   RuntimeTearDown() {}
   ~RuntimeTearDown();
 
   static void RegisterObject(ReferenceCountedObject* obj);
   static void RegisterTearDownCallback(const std::string& msg, TearDownCallback func);
+
+ private:
+  static std::vector<ReferenceCountedObject*> external_;
+  static std::vector<std::pair<std::string, TearDownCallback>> tear_down_funcs_;
 };
 
 }  // namespace amd

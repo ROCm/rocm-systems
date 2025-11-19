@@ -361,10 +361,10 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
   return hipSuccess;
 }
 
-//==================================================================================================
+// =================================================================================================
 hipError_t StatCO::removeAllFatBinaries() {
   amd::ScopedLock lock(sclock_);
-  
+
   module_to_hostModule_.clear();
   module_to_hostFunctions_.clear();
   module_to_hostVars_.clear();
@@ -374,29 +374,30 @@ hipError_t StatCO::removeAllFatBinaries() {
   }
   vars_.clear();
 
-  // Cleanup managed vars
-  for (auto& [_, managedVars] : managedVars_) {
-    for (auto& managedVar : managedVars) {
+  // Cleanup managed vars.
+  for (auto& [_, managed_vars] : managedVars_) {
+    for (auto& managed_var : managed_vars) {
       hipError_t err = hipSuccess;
       for (auto dev : g_devices) {
         DeviceVar* dvar = nullptr;
-        err = managedVar->getDeviceVarPtr(&dvar, dev->deviceId());
+        err = managed_var->getDeviceVarPtr(&dvar, dev->deviceId());
         if (err == hipSuccess && dvar != nullptr) {
-          // free also deletes the device ptr
+          // Free also deletes the device ptr.
           err = ihipFree(dvar->device_ptr());
           assert(err == hipSuccess);
         }
       }
-      if (managedVar->getAllocFlag()) {  // check if it is a managed or host alloc
-        err = ihipFree(*(static_cast<void**>(managedVar->getManagedVarPtr())));
+      // Check if it is a managed or host alloc.
+      if (managed_var->getAllocFlag()) {
+        err = ihipFree(*(static_cast<void**>(managed_var->getManagedVarPtr())));
         assert(err == hipSuccess);
       } else {
-        void** pointer = static_cast<void**>(managedVar->getManagedVarPtr());
-        amd::Os::releaseMemory(*pointer, managedVar->getSize());
+        void** pointer = static_cast<void**>(managed_var->getManagedVarPtr());
+        amd::Os::releaseMemory(*pointer, managed_var->getSize());
       }
-      delete managedVar;
+      delete managed_var;
     }
-    managedVars.clear();
+    managed_vars.clear();
   }
   managedVars_.clear();
 
