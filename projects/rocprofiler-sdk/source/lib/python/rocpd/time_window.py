@@ -177,6 +177,9 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
         bounds_min, bounds_max = get_min_max_time(connection)
         # bounds_min /= 1.0e9
         # bounds_max /= 1.0e9
+        if bounds_min is None and bounds_max is None:
+            print(f"#  {label:>8} data is empty")
+            return 0
         delta = bounds_max - bounds_min
         print(
             f"# {label:>8} time bounds: {bounds_min} : {bounds_max} nsec (delta={delta} nsec)"
@@ -258,6 +261,12 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
 
     upd_delta = dump_min_max("Windowed")
 
+    if upd_delta == 0:
+        raise ValueError(
+            "ERROR: Time windowing resulted in no data. "
+            "Consider adjusting your start/end boundaries or time range."
+        )
+
     reduction = (1.0 - (upd_delta / orig_delta)) * 100.0
     print(f"# Time windowing reduced the duration by {reduction:6.2f}%")
 
@@ -319,7 +328,13 @@ def add_args(parser: ArgumentParser):
                     ret[itr] = val
 
         if ret and input is not None:
-            apply_time_window(input, **ret)
+            import sys
+
+            try:
+                apply_time_window(input, **ret)
+            except ValueError as e:
+                print(f"Time window: {e}")
+                sys.exit(1)
 
         return ret
 
