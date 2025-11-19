@@ -26,7 +26,7 @@
 import os
 import shutil
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
@@ -1377,6 +1377,42 @@ def test_update_functions_coverage():
     result = update_normal_unit_string("(Prefix + $normUnit)", "per_wave")
     assert "per wave" in result.lower()
     assert result[0].isupper()
+
+
+def test_metric_evaluation_no_valid_data():
+    """Test emetric evaluation with no valid data"""
+    import numpy as np
+
+    from utils.parser import MetricEvaluator
+
+    metric_evaluator = MetricEvaluator({}, {}, {})
+    with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
+        # Test when eval returns None
+        mock_eval.return_value = None
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        # Test when eval returns NaN
+        mock_eval.return_value = np.nan
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        # Test when eval raises an exception
+        mock_eval.side_effect = TypeError("Mock exception")
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        mock_eval.side_effect = NameError("empirical_peak")
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        mock_eval.side_effect = KeyError("Some KeyError")
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        with patch("sys.exit"):
+            mock_eval.side_effect = AttributeError("Some AttributeError")
+            assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+        mock_eval.side_effect = AttributeError(
+            "'NoneType' object has no attribute 'get'"
+        )
+        assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
 
 @pytest.fixture
