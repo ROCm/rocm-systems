@@ -210,7 +210,7 @@ There are two distinct approaches for collecting PAPI-based hardware counters, e
    export ROCPROFSYS_PAPI_EVENTS="perf::INSTRUCTIONS,perf::CACHE-REFERENCES,perf::CACHE-MISSES"
    
 
-2. Sampling-based collection: Periodically interrupts program execution to capture hardware counters along with call stack information. This works with sampling mode.
+2. Sampling-based collection: Periodically interrupts program execution to capture hardware counters along with call stack information. This works with the sampling mode.
 
 .. code-block:: shell 
    # Enable sampling mode (required)
