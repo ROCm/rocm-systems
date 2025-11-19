@@ -166,7 +166,7 @@ def to_avg(
         else:
             return float(a)
     elif isinstance(a, str):
-        if not a:
+        if not a or a == "N/A":
             return np.nan
         return float(a)
     else:
@@ -347,29 +347,27 @@ class MetricEvaluator:
             )
 
             if eval_result is None or np.isnan(eval_result).any():
-                return ""
+                return "N/A"
             else:
                 return eval_result
 
         except (TypeError, NameError, KeyError) as exception:
             if "empirical_peak" in str(exception):
-                console_warning(
-                    f"Missing empirical peak data: {exception}. Using empty value."
-                )
-                return ""
+                console_warning(f"Missing empirical peak data: {exception}.")
+                return "N/A"
             else:
                 console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
-                return ""
+                return "N/A"
 
         except AttributeError as attribute_error:
             if str(attribute_error) == "'NoneType' object has no attribute 'get'":
                 console_warning(
                     f"Failed to evaluate expression '{expr}': {attribute_error}."
                 )
-                return ""
+                return "N/A"
             else:
                 console_error("analysis", str(attribute_error))
-                return ""
+                return "N/A"
 
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:

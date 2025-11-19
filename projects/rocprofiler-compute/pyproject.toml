@@ -103,7 +103,8 @@ markers = [
     "sets_perf",
     "pc_sampling",
     "live_attach_detach",
-    "roofline",
+    "roofline_1",
+    "roofline_2",
     "path",
     "sci_notion",
 ]
