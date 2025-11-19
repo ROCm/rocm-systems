@@ -504,18 +504,24 @@ public:
     MemoryPool* default_mem_pool_;  //!< Default memory pool for this device
     MemoryPool* current_mem_pool_;
     MemoryPool* graph_mem_pool_;    //!< Memory pool, associated with graphs for this device
+    MemoryPool* current_managed_mem_pool_;  //!< Memory pool for managed allocations
+    MemoryPool* default_managed_mem_pool_;  //!< Memory pool for managed allocations
 
     std::set<MemoryPool*> mem_pools_;
 
-  public:
-    Device(amd::Context* ctx, int devId): context_(ctx),
-        deviceId_(devId),
-         flags_(hipDeviceScheduleSpin),
-        isActive_(false),
-        default_mem_pool_(nullptr),
-        current_mem_pool_(nullptr),
-        graph_mem_pool_(nullptr)
-        { assert(ctx != nullptr); }
+   public:
+    Device(amd::Context* ctx, int devId)
+        : context_(ctx),
+          deviceId_(devId),
+          flags_(hipDeviceScheduleSpin),
+          isActive_(false),
+          default_mem_pool_(nullptr),
+          current_mem_pool_(nullptr),
+          graph_mem_pool_(nullptr),
+          default_managed_mem_pool_(nullptr),
+          current_managed_mem_pool_(nullptr) {
+      assert(ctx != nullptr);
+    }
     ~Device();
 
     bool Create();
@@ -578,6 +584,15 @@ public:
 
     /// Get the graph memory pool on the device
     MemoryPool* GetGraphMemoryPool() const { return graph_mem_pool_; }
+
+    /// Set managed memory pool on the device
+    void SetCurrentManagedMemoryPool(MemoryPool* pool) { current_managed_mem_pool_ = pool; }
+
+    /// Get managed memory pool on the device
+    MemoryPool* GetCurrentManagedMemoryPool() const { return current_managed_mem_pool_; }
+
+    /// Get default managed memory pool on the device
+    MemoryPool* GetDefaultManagedMemoryPool() const { return default_managed_mem_pool_; }
 
     /// Add memory pool to the device
     void AddMemoryPool(MemoryPool* pool);

@@ -2068,3 +2068,11 @@ hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* 
   return hip::GetHipDispatchTable()->hipKernelGetParamInfo_fn(kernel, paramIndex, paramOffset,
                                                               paramSize);
 }
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
+                            hipMemPool_t pool) {
+  return hip::GetHipDispatchTable()->hipMemSetMemPool_fn(location, type, pool);
+}
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type) {
+  return hip::GetHipDispatchTable()->hipMemGetMemPool_fn(pool, location, type);
+}
