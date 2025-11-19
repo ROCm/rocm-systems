@@ -290,6 +290,13 @@ class AtomicExch
  public:
   void LaunchKernel(const unsigned int shared_mem_size, const hipStream_t stream, T* const mem,
                     T* const old_vals, const T base_val, const AtomicExchParams& p) const {
+
+     UNSCOPED_INFO("Atomic exchange parameters\nblocks: "
+         << p.blocks.x << " threads: " << p.threads.x << " num_devices: "
+         << p.num_devices << " kernel count: " << p.kernel_count << " width: " << p.width
+         << " pitch: " << p.pitch << " host_thread_count: " << p.host_thread_count
+         << " allocation type: " << static_cast<int>(p.alloc_type));
+
     atomic_exch_kernel<T, use_shared_mem, scope, memory_scope>
         <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem, old_vals, p.width, p.pitch,
                                                            base_val);
@@ -304,11 +311,6 @@ class AtomicExch
          << (scope == AtomicScopes::device
                  ? "device"
                  : (scope == AtomicScopes::system ? "system" : "builtin")));
-    INFO("Atomic exchange parameters\n"
-         << " blocks: " << p.blocks << " threads: " << p.threads << " num_devices: "
-         << p.num_devices << " kernel count: " << p.kernel_count << " width: " << p.width
-         << " pitch: " << p.pitch << " host_thread_count: " << p.host_thread_count
-         << " allocation type: " << static_cast<int>(p.allocation_type));
     std::sort(old_vals.begin(), old_vals.end());
 
     for (auto i = 0u; i < old_vals.size(); ++i) {
