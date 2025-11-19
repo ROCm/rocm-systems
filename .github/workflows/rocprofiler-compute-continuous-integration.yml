@@ -91,10 +91,13 @@ jobs:
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ]; then
             MODE=Nightly
+            EXCLUDED_TESTS=""
           else
             MODE=Continuous
+            EXCLUDED_TESTS="test_profile_live_attach_detach|test_profile_roofline"
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
+          echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
 
           if [ '${{ matrix.system.os-release }}' = '24.04']; then
             CODE_NAME=noble
@@ -157,9 +160,8 @@ jobs:
             --build-jobs 16 \
             --pytest-numprocs 8 \
             --code-coverage "OFF" \
-            --install \
-            -- \
-            -E "test_profile_live_attach_detach|test_profile_roofline"
+            --ctest-args "-E${{ steps.setup_env.outputs.excluded_tests }}" \
+            --install
       
       - name: Output Logs
         if: failure() && steps.test.outcome == 'failure'

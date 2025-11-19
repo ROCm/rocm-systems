@@ -307,10 +307,18 @@ def main():
         help="Enable/disable code coverage",
     )
 
+    parser.add_argument(
+        "--ctest-args",
+        type=str,
+        default="",
+        help="Commma separated list of ctest args to provide",
+    )
+
     args, unknown = parser.parse_known_args()
 
     args.cmake_args = []
-    args.ctest_args = []
+    if args.ctest_args:
+        args.ctest_args = args.ctest_args.split(',')
 
     is_monorepo, monorepo_root, project_root = detect_repo_structure()
 
