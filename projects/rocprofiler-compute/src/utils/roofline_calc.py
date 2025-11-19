@@ -866,62 +866,41 @@ def construct_roof(
 ) -> dict[str, list[Union[list[float], float, None]]]:
     workload_dir = roofline_parameters.get("workload_dir")
 
-    # Normalize workload_dir to always be a list
+    # Normalize workload_dir to extract base directory
     if isinstance(workload_dir, list):
-        workload_dirs = [
-            (item[0] if isinstance(item, (list, tuple)) else item)
-            for item in workload_dir
-        ]
+        base_dir = (
+            workload_dir[0][0]
+            if isinstance(workload_dir[0], (list, tuple))
+            else workload_dir[0]
+        )
     else:
-        workload_dirs = [workload_dir]
+        base_dir = workload_dir
 
-    # Initialize combined benchmark data dictionary
+    benchmark_results = Path(base_dir) / "roofline.csv"
+
+    # Initialize benchmark data dictionary from roofline.csv
     benchmark_data: dict[str, list[str]] = {}
     headers: list[str] = []
 
-    # Process each workload directory and merge data
-    for base_dir in workload_dirs:
-        benchmark_results = Path(base_dir) / "roofline.csv"
+    try:
+        with open(benchmark_results) as csvfile:
+            csv_reader = csv.reader(csvfile, delimiter=",")
+            row_count = 0
 
-        # Note: CSV validation is done earlier in validate_roofline_csv()
-        # before this function is called. This assumes CSV is already validated.
-        try:
-            with open(benchmark_results) as csvfile:
-                csv_reader = csv.reader(csvfile, delimiter=",")
-                row_count = 0
-
-                for row in csv_reader:
-                    row.pop(0)  # Remove first column (Device ID)
-                    if row_count == 0:
-                        if not headers:
-                            headers = row
-                            for header in headers:
-                                benchmark_data[header] = []
-                        else:
-                            if row != headers:
-                                console_warning(
-                                    f"Header mismatch in {benchmark_results}. "
-                                    f"Expected {headers}, got {row}. "
-                                    "Skipping this file."
-                                )
-                                break
-                    else:
-                        for i, key in enumerate(headers):
-                            benchmark_data[key].append(row[i])
-                    row_count += 1
-        except Exception as e:
-            console_error(
-                "roofline",
-                f"Failed to read benchmark results from {base_dir}: {e}",
-                exit=False,
-            )
-            continue  # Skip this directory and continue with the next one
-
-    # If no data was collected, return empty graph points
-    if not benchmark_data:
+            for row in csv_reader:
+                row.pop(0)  # Remove first column (Device ID)
+                if row_count == 0:
+                    headers = row
+                    for header in headers:
+                        benchmark_data[header] = []
+                else:
+                    for i, key in enumerate(headers):
+                        benchmark_data[key].append(row[i])
+                row_count += 1
+    except Exception as e:
         console_error(
             "roofline",
-            "No benchmark data collected from any workload directory",
+            f"Failed to read benchmark results from {base_dir}: {e}",
             exit=False,
         )
         return GraphPoints.empty().__dict__
