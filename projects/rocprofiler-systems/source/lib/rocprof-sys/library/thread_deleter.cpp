@@ -46,7 +46,6 @@ thread_deleter<void>::operator()() const
         auto _tid = _info->index_data->sequent_value;
 
         if(!is_child_process()) component::pthread_create_gotcha::shutdown(_tid);
-
         set_thread_state(ThreadState::Completed);
 
         if(get_state() < State::Finalized && !is_child_process() && _tid == 0)

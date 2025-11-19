@@ -31,6 +31,7 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/defines.hpp"
+#include "core/gpu_metrics.hpp"
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 
@@ -70,6 +71,14 @@ post_process();
 
 void set_state(State);
 
+// Fork handling - cleanup AMD SMI state in child process
+void
+postfork_child_cleanup();
+
+// Fork handling - reinitialize AMD SMI state in parent process
+void
+postfork_parent_reinit();
+
 struct settings
 {
     bool busy          = true;
@@ -78,6 +87,8 @@ struct settings
     bool mem_usage     = true;
     bool vcn_activity  = true;
     bool jpeg_activity = true;
+    bool xgmi          = true;
+    bool pcie          = true;
 };
 
 struct data
@@ -93,11 +104,8 @@ struct data
     using mem_usage_t = uint64_t;
     using temp_t      = int64_t;
 
-    struct xcp_metrics_t
-    {
-        std::vector<uint16_t> vcn_busy;
-        std::vector<uint16_t> jpeg_busy;
-    };
+    // Use the shared gpu_metrics_t from core/gpu_metrics.hpp
+    using gpu_metrics_t = rocprofsys::gpu::gpu_metrics_t;
 
     ROCPROFSYS_DEFAULT_OBJECT(data)
 
@@ -112,7 +120,7 @@ struct data
     timestamp_t                m_ts          = 0;
     temp_t                     m_temp        = 0;
     mem_usage_t                m_mem_usage   = 0;
-    std::vector<xcp_metrics_t> m_xcp_metrics = {};
+    std::vector<gpu_metrics_t> m_gpu_metrics = {};
 #if ROCPROFSYS_USE_ROCM > 0
     amdsmi_engine_usage_t m_busy_perc = {};
     amdsmi_power_info_t   m_power     = {};
@@ -133,6 +141,7 @@ private:
     friend void rocprofsys::amd_smi::sample();
     friend void rocprofsys::amd_smi::shutdown();
     friend void rocprofsys::amd_smi::post_process();
+    friend void rocprofsys::amd_smi::postfork_child_cleanup();
 
     static size_t                        device_count;
     static std::set<uint32_t>            device_list;
@@ -167,6 +176,14 @@ post_process()
 
 inline void
 set_state(State)
+{}
+
+inline void
+postfork_child_cleanup()
+{}
+
+inline void
+postfork_parent_reinit()
 {}
 #endif
 }  // namespace amd_smi
