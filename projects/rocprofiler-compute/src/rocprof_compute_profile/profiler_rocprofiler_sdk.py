@@ -83,7 +83,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             options.pop("LD_PRELOAD", None)
 
             rocprofiler_attach_tool_path = str(
-                Path(args.rocprofiler_sdk_tool_path).parent
+                Path(args.rocprofiler_sdk_tool_path).parent.parent
                 / "librocprofiler-sdk-rocattach.so"
             )
             options.update({
