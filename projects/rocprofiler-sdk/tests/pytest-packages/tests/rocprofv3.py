@@ -296,7 +296,7 @@ def _perform_csv_json_match(csv_row, json_row, mapping, json_data):
 
         assert str(csv_value) == str(
             json_value
-        ), f"Mismatch for {csv_key}: CSV={csv_value} JSON={json_value} JSON_INFO={json_info}"
+        ), f"Mismatch for {csv_key}: CSV={csv_value} JSON={json_value}"
 
 
 def test_csv_data(
