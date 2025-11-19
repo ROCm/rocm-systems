@@ -41,8 +41,9 @@ add_test(
     NAME rocprofv3-test-roctx-pause-resume-nested-tracing-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --kernel-trace
-        --selected-regions-ref-count -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-nested-trace -o
-        out --output-format json --log-level info -- $<TARGET_FILE:roctx-pause-resume>)
+        --selected-regions-ref-count --selected-regions -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-nested-trace -o out --output-format json
+        --log-level info -- $<TARGET_FILE:roctx-pause-resume>)
 
 set_tests_properties(
     rocprofv3-test-roctx-pause-resume-nested-tracing-execute

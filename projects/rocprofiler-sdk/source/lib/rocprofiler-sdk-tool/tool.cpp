@@ -584,7 +584,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 ROCP_INFO_IF(_data->args.roctxProfilerPause.tid !=
                              static_cast<rocprofiler_thread_id_t>(getpid()))
-                    << fmt::format("roctxProfilerResume(tid={}) invoked on thread {}. rocprofv3 "
+                    << fmt::format("roctxProfilerPause(tid={}) invoked on thread {}. rocprofv3 "
                                    "does not support thread-local pause/resume (only global "
                                    "pause/resume). Use tid=0 or only call from main thread ({}).",
                                    _data->args.roctxProfilerPause.tid,
@@ -594,17 +594,19 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
             // if using the selected regions reference counting, only pause when the count goes to
             // zero
-            auto _ref_count =
-                (tool::get_config().selected_regions_ref_count) ? pause_resume_count-- : int64_t{0};
+            int64_t _ref_count = 0;
 
-            if(tool::get_config().selected_regions && _first_pause_resume && _ref_count < 0 &&
-               _active_contexts == 0)
+            if(!_first_pause_resume)
+            {
+                _ref_count = (tool::get_config().selected_regions_ref_count) ? --pause_resume_count
+                                                                             : int64_t{0};
+            }
+            else if(_first_pause_resume && tool::get_config().selected_regions &&
+                    tool::get_config().selected_regions_ref_count)
             {
                 ROCP_CI_LOG(INFO)
                     << "first call to roctxProfilerPause ignored for selected regions profiling "
                        "with the selected regions reference counting mode enabled";
-                // increment so that it doesn't trigger else if(_ref_count != 0) block below
-                _ref_count = ++pause_resume_count;
             }
 
             // only pause if there are active contexts and the ref count is zero
@@ -619,7 +621,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     }
                 }
             }
-            else if(_ref_count != 0)
+            else if(_ref_count < 0)
             {
                 ROCP_WARNING << fmt::format(
                     "roctxProfilerPause called multiple times without matching "
@@ -646,12 +648,11 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                    getpid());
             }
 
-            // if using the selected regions reference counting, only pause when the count goes to
-            // zero
+            // if using the selected regions reference counting, only resume when the count goes to
+            // positive (was zero)
             auto _ref_count =
-                (tool::get_config().selected_regions_ref_count) ? ++pause_resume_count : int64_t{0};
-
-            // only resume if there are no active contexts and the ref count is zero
+                (tool::get_config().selected_regions_ref_count) ? pause_resume_count++ : int64_t{0};
+            // only resume if there are no active contexts and the ref count was zero
             if(_active_contexts == 0 && _ref_count == 0)
             {
                 for(auto ctx : *ctxs)
@@ -662,7 +663,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     }
                 }
             }
-            else if(_ref_count != 0)
+            else if(_ref_count < 0)
             {
                 ROCP_WARNING << fmt::format(
                     "roctxProfilerResume called multiple times without matching "
@@ -2444,7 +2445,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         if(handle_consecutive_kernels)
         {
             // TODO: Fix DeviceThreadTracer to handle remaining thread traces before stopping
-            // contex so the following call can function correctly with marker trace:
+            // contexts so the following call can function correctly with marker trace:
             // create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
 
             // Use user data pointer to dispatch id to communicate dispatch ID to shader callback
