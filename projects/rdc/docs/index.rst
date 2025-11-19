@@ -16,7 +16,11 @@ Here are the main RDC features:
 * Integration with third-party tools
 * Open source
 
-The code is open and hosted at `<https://github.com/ROCm/rdc>`_.
+The code is open and hosted at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rdc>`_.
+
+.. note::
+
+  The RDC repository for ROCm 7.0 and earlier is located at `<https://github.com/ROCm/rdc>`_.
 
 .. grid:: 2
   :gutter: 3

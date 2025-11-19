@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 6fab5d65a552483bcfa1f6ccaaabf699c8188c1e # 2025-11-06 commit
+          ref: eb8f187ff47eb6af9cd5aaa0b8d9a04b06b12796 # 2025-11-15 commit
 
       - name: Install python deps
         run: |
@@ -66,7 +66,6 @@ jobs:
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
           # rm ./TheRock/patches/amd-mainline/rocm-systems/*.patch
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0008-Find-bundled-libelf.patch
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
 
 
@@ -110,7 +109,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           aws-region: us-east-2
-          role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
 
       - name: Post Build Upload
         if: always()

@@ -158,7 +158,7 @@ TEST_CASE("Unit_hipSetValidDevices_Negative_Length_Lessthan_DeviceArrSize") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipSetValidDevices_Positive_Basic") {
+TEST_CASE("Unit_hipSetValidDevices_Positive_Basic", "[multigpu]") {
   int totalDevices = HipTest::getDeviceCount();
   if (totalDevices < 2) {
     HipTest::HIP_SKIP_TEST("This test requires 2 or more GPUs. Skipping.");
