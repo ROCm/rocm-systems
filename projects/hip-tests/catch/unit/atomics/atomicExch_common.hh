@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
 #include <hip/hip_cooperative_groups.h>
+#include <algorithm>
 
 enum class AtomicScopes { device, system, builtin };
 
@@ -303,7 +304,8 @@ class AtomicExch
   }
 
   void ValidateResults(std::vector<T>& old_vals) const {
-    bool failure = false;
+    int firstFailure = -1;
+    int lastFailure = -1;
     std::vector<std::pair<T, T>> missingValues;
 
     INFO("Validating results for AtomicExch with "
@@ -316,12 +318,14 @@ class AtomicExch
     for (auto i = 0u; i < old_vals.size(); ++i) {
       if (i != old_vals[i]) {
         missingValues.emplace_back(i, old_vals[i]);
-        failure = true;
+        firstFailure = std::min(firstFailure, i);
+        lastFailure = std::max(lastFailure, i);
       }
     }
 
-    if (failure) {
+    if (firstFailure != -1) {
       UNSCOPED_INFO("Found (" << missingValues.size() << "/" << old_vals.size() << ") unexpected values");
+      UNSCOPED_INFO("Unexpected values are found in the range (" << firstFailure << "-" << lastFailure << ")");
 
       for (auto& val_pair : missingValues) {
         UNSCOPED_INFO("Expected value: " << val_pair.first << " got: " << val_pair.second);
