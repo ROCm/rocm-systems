@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/debug.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
@@ -70,7 +71,7 @@ public:
                          m_filename.c_str());
 
         std::ifstream ifs(m_filename, std::ios::binary);
-        if(!ifs)
+        if(!ifs.good())
         {
             std::stringstream ss;
             ss << "Error opening file for reading: " << m_filename << "\n";
@@ -91,6 +92,14 @@ public:
 
         while(!ifs.eof())
         {
+            if(!ifs.good())
+            {
+                ROCPROFSYS_WARNING(0,
+                                   "Stream not in good state, stopping parse. File: %s\n",
+                                   m_filename.c_str());
+                break;
+            }
+
             ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
 
             if(header.sample_size == 0 || ifs.eof())
@@ -98,7 +107,7 @@ public:
                 continue;
             }
 
-            if(__builtin_expect(header.sample_size > last_capacity, 0))
+            if(ROCPROFSYS_UNLIKELY(header.sample_size > last_capacity))
             {
                 sample.reserve(header.sample_size);
                 last_capacity = sample.capacity();

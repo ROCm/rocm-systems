@@ -23,6 +23,11 @@
 #pragma once
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
+
+#if ROCPROFSYS_USE_ROCM > 0
+#    include <rocprofiler-sdk/version.h>
+#endif
+
 #include <vector>
 
 namespace rocprofsys

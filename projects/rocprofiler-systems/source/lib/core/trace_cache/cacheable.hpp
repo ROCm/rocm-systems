@@ -24,8 +24,6 @@
 #include "core/trace_cache/cache_type_traits.hpp"
 #include "library/runtime.hpp"
 
-#include <timemory/units.hpp>
-
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -49,8 +47,9 @@ struct cacheable_t
     cacheable_t() = default;
 };
 
-constexpr size_t buffer_size              = 100 * tim::units::megabyte;
-constexpr size_t flush_threshold          = 80 * tim::units::megabyte;
+constexpr size_t MByte                    = 1024 * 1024;
+constexpr size_t buffer_size              = 100 * MByte;
+constexpr size_t flush_threshold          = 80 * MByte;
 constexpr auto   CACHE_FILE_FLUSH_TIMEOUT = 10ms;
 
 constexpr auto ABSOLUTE   = "ABS";

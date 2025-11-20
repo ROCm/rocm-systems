@@ -52,6 +52,13 @@ flush_worker_t::flush_worker_t(worker_function_t            worker_function,
 void
 flush_worker_t::start(const pid_t& current_pid)
 {
+    if(m_worker_synchronization->is_running)
+    {
+        std::stringstream _ss;
+        _ss << "Flush worker is already running";
+        throw std::runtime_error(_ss.str());
+    }
+
     m_ofs = std::ofstream{ m_filepath, std::ios::binary | std::ios::out };
 
     if(!m_ofs.good())

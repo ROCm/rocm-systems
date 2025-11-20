@@ -25,6 +25,7 @@
 #include "core/trace_cache/cacheable.hpp"
 
 #include "common/defines.h"
+#include "core/debug.hpp"
 
 #include <cassert>
 #include <condition_variable>
@@ -115,9 +116,11 @@ public:
     {
         if(m_worker == nullptr)
         {
-            throw std::runtime_error("Worker is null unable to start buffered storage.");
+            throw std::runtime_error(
+                "Worker is null - unable to start buffered storage.");
         }
-        if(m_worker_synchronization && m_worker_synchronization->is_running)
+
+        if(is_running())
         {
             return;
         }
@@ -127,12 +130,14 @@ public:
 
     void shutdown(const pid_t& current_pid = getpid())
     {
-        if(m_worker_synchronization == nullptr || m_worker == nullptr)
+        if(m_worker == nullptr)
         {
+            throw std::runtime_error(
+                "Worker is null - unable to shutdown buffered storage.");
             return;
         }
 
-        if(!m_worker_synchronization->is_running)
+        if(!is_running())
         {
             return;
         }
@@ -143,7 +148,7 @@ public:
     template <typename Type>
     auto store(const Type& value)
     {
-        if(!is_running())
+        if(m_worker == nullptr || !is_running())
         {
             throw std::runtime_error(
                 "Trying to use buffered storage while it is not running");
@@ -168,7 +173,8 @@ public:
 
     ROCPROFSYS_INLINE bool is_running() const
     {
-        return m_worker_synchronization->is_running;
+        return m_worker_synchronization != nullptr &&
+               m_worker_synchronization->is_running;
     }
 
 private:
@@ -209,6 +215,9 @@ private:
         {
             ROCPROFSYS_WARNING(1, "Error flushing buffered storage to file for pid: %d",
                                m_worker_synchronization->origin_pid);
+            ROCPROFSYS_CI_THROW(true,
+                                "Error flushing buffered storage to file for pid: %d",
+                                m_worker_synchronization->origin_pid);
         }
     }
 
