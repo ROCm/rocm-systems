@@ -41,6 +41,7 @@
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/gpu.hpp"
+#include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
@@ -127,7 +128,7 @@ metadata_initialize_smi_tracks(size_t gpu_id)
         }
     };
 
-    if(gpu::is_vcn_activity_supported(gpu_id))
+    if(gpu::vcn_is_device_level_only(gpu_id))
     {
         add_vcn_track(std::nullopt);
     }
@@ -139,7 +140,7 @@ metadata_initialize_smi_tracks(size_t gpu_id)
         }
     }
 
-    if(gpu::is_jpeg_activity_supported(gpu_id))
+    if(gpu::jpeg_is_device_level_only(gpu_id))
     {
         add_jpeg_track(std::nullopt);
     }
@@ -150,6 +151,49 @@ metadata_initialize_smi_tracks(size_t gpu_id)
             add_jpeg_track(xcp);
         }
     }
+
+    // Add XGMI tracks using specific categories for each metric type
+    trace_cache::get_metadata_registry().add_track(
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_xgmi_link_width>(
+              gpu_id),
+          thread_id, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_xgmi_link_speed>(
+              gpu_id),
+          thread_id, "{}" });
+
+    for(size_t i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i)
+    {
+        auto read_name =
+            trace_cache::info::annotate_with_device_id<category::amd_smi_xgmi_read_data>(
+                gpu_id, std::nullopt, i);
+        trace_cache::get_metadata_registry().add_track(
+            { read_name.c_str(), thread_id, "{}" });
+
+        auto write_name =
+            trace_cache::info::annotate_with_device_id<category::amd_smi_xgmi_write_data>(
+                gpu_id, std::nullopt, i);
+        trace_cache::get_metadata_registry().add_track(
+            { write_name.c_str(), thread_id, "{}" });
+    }
+
+    // Add PCIe tracks using specific categories for each metric
+    trace_cache::get_metadata_registry().add_track(
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_pcie_link_width>(
+              gpu_id),
+          thread_id, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_pcie_link_speed>(
+              gpu_id),
+          thread_id, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { trace_cache::info::annotate_with_device_id<
+              category::amd_smi_pcie_bandwidth_acc>(gpu_id),
+          thread_id, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { trace_cache::info::annotate_with_device_id<
+              category::amd_smi_pcie_bandwidth_inst>(gpu_id),
+          thread_id, "{}" });
 }
 
 void
@@ -250,7 +294,7 @@ metadata_initialize_smi_pmc(size_t gpu_id)
         }
     };
 
-    if(gpu::is_vcn_activity_supported(gpu_id))
+    if(gpu::vcn_is_device_level_only(gpu_id))
     {
         add_vcn_pmc(std::nullopt);
     }
@@ -262,7 +306,7 @@ metadata_initialize_smi_pmc(size_t gpu_id)
         }
     }
 
-    if(gpu::is_jpeg_activity_supported(gpu_id))
+    if(gpu::jpeg_is_device_level_only(gpu_id))
     {
         add_jpeg_pmc(std::nullopt);
     }
@@ -273,6 +317,75 @@ metadata_initialize_smi_pmc(size_t gpu_id)
             add_jpeg_pmc(xcp);
         }
     }
+
+    // Add XGMI PMC info using specific categories for each metric type
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_xgmi_link_width>::value, "XgmiLinkWidth",
+          trait::name<category::amd_smi_xgmi_link_width>::description, LONG_DESCRIPTION,
+          COMPONENT, "bits", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+          0 });
+
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_xgmi_link_speed>::value, "XgmiLinkSpeed",
+          trait::name<category::amd_smi_xgmi_link_speed>::description, LONG_DESCRIPTION,
+          COMPONENT, "GT/s", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+          0 });
+
+    for(size_t i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i)
+    {
+        std::stringstream read_name_ss, read_symbol_ss;
+        read_name_ss << trait::name<category::amd_smi_xgmi_read_data>::value << "_" << i;
+        read_symbol_ss << "XgmiRead_" << i;
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              read_name_ss.str(), read_symbol_ss.str(),
+              trait::name<category::amd_smi_xgmi_read_data>::description,
+              LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+              EXPRESSION, 0, 0 });
+
+        std::stringstream write_name_ss, write_symbol_ss;
+        write_name_ss << trait::name<category::amd_smi_xgmi_write_data>::value << "_"
+                      << i;
+        write_symbol_ss << "XgmiWrite_" << i;
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              write_name_ss.str(), write_symbol_ss.str(),
+              trait::name<category::amd_smi_xgmi_write_data>::description,
+              LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+              EXPRESSION, 0, 0 });
+    }
+
+    // Add PCIe PMC info using specific categories for each metric
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_pcie_link_width>::value, "PcieLinkWidth",
+          trait::name<category::amd_smi_pcie_link_width>::description, LONG_DESCRIPTION,
+          COMPONENT, "", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_pcie_link_speed>::value, "PcieLinkSpeed",
+          trait::name<category::amd_smi_pcie_link_speed>::description, LONG_DESCRIPTION,
+          COMPONENT, "GT/s", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+          0 });
+
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_pcie_bandwidth_acc>::value, "PcieBwAcc",
+          trait::name<category::amd_smi_pcie_bandwidth_acc>::description,
+          LONG_DESCRIPTION, COMPONENT, "MB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+          EXPRESSION, 0, 0 });
+
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_pcie_bandwidth_inst>::value, "PcieBwInst",
+          trait::name<category::amd_smi_pcie_bandwidth_inst>::description,
+          LONG_DESCRIPTION, COMPONENT, "MB/s", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+          EXPRESSION, 0, 0 });
 }
 
 auto&
@@ -335,70 +448,21 @@ get_state()
 }
 
 std::vector<uint8_t>
-serialize_xcp_metrics(const bool& use_vcn_activity, const bool& use_jpeg_activity,
-                      const amdsmi_gpu_metrics_t& gpu_metrics)
+serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
+                      const gpu::gpu_metrics_capabilities_t& capabilities)
 {
-    // Chunk:
-    // <vcn_data_0>..<vcn_data_[vcn_count]> // lower and higher byte
-    // <jpeg_data_0>..<jpeg_data_[jpeg_count]> // lower and higher byte
+    // Get settings for this device
+    auto settings = get_settings(device_id);
 
-    // Serialized:
-    // <is_vcn_supported>
-    // <is_jpeg_supported>
-    // <xcp_count>
-    // <vcn_count>
-    // <jpeg_count>
-    // Chunk_0
-    // ...
-    // Chunk_[xcp_count]
+    // Convert amd_smi::settings to gpu::gpu_metrics_settings_t
+    gpu::gpu_metrics_settings_t gpu_settings;
+    gpu_settings.vcn_activity  = settings.vcn_activity;
+    gpu_settings.jpeg_activity = settings.jpeg_activity;
+    gpu_settings.xgmi          = settings.xgmi;
+    gpu_settings.pcie          = settings.pcie;
 
-    constexpr uint8_t vcn_count          = AMDSMI_MAX_NUM_VCN;
-    constexpr uint8_t jpeg_count         = AMDSMI_MAX_NUM_JPEG;
-    constexpr uint8_t xcp_count          = AMDSMI_MAX_NUM_XCP;
-    constexpr size_t  elem_size          = sizeof(uint16_t) / sizeof(uint8_t);
-    constexpr uint8_t vector_size_header = sizeof(uint8_t);
-    constexpr uint8_t serialized_data_headers =
-        5 * vector_size_header;  // is_vcn_supported + is_jpeg_supported + xcp_count +
-                                 // vcn_count + jpeg_count
-    constexpr size_t chunk_size = ((vcn_count + jpeg_count) * elem_size);
-
-    auto serialize_uint16_array = [](std::vector<uint8_t>& data, const uint16_t* arr,
-                                     int array_size) {
-        for(int i = 0; i < array_size; ++i)
-        {
-            data.push_back(static_cast<uint8_t>(arr[i] & 0xFF));
-            data.push_back(static_cast<uint8_t>((arr[i] >> 8) & 0xFF));
-        }
-    };
-
-    std::vector<uint8_t> result;
-
-    const bool   is_vcn_jpeg_supported = (use_vcn_activity || use_jpeg_activity);
-    const size_t chunk_count           = is_vcn_jpeg_supported ? 1 : xcp_count;
-    const size_t total_size = serialized_data_headers + (chunk_count * chunk_size);
-
-    result.reserve(total_size);
-
-    result.push_back((uint8_t) use_vcn_activity);
-    result.push_back((uint8_t) use_jpeg_activity);
-    result.push_back(chunk_count);
-    result.push_back(vcn_count);
-    result.push_back(jpeg_count);
-
-    for(size_t count = 0; count < chunk_count; ++count)
-    {
-        const auto* vcn_data =
-            (is_vcn_jpeg_supported ? gpu_metrics.vcn_activity
-                                   : gpu_metrics.xcp_stats[count].vcn_busy);
-        const auto* jpeg_data =
-            (is_vcn_jpeg_supported ? gpu_metrics.jpeg_activity
-                                   : gpu_metrics.xcp_stats[count].jpeg_busy);
-
-        serialize_uint16_array(result, vcn_data, vcn_count);
-        serialize_uint16_array(result, jpeg_data, jpeg_count);
-    }
-
-    return result;
+    // Use the shared serialization function
+    return gpu::serialize_gpu_metrics(metrics, capabilities, gpu_settings);
 }
 
 size_t
@@ -425,6 +489,12 @@ serialize_settings(uint32_t _device_id)
     settings_bits.set(
         static_cast<int>(trace_cache::amd_smi_sample::settings_positions::jpeg_activity),
         settings.jpeg_activity);
+    settings_bits.set(
+        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::xgmi),
+        settings.xgmi);
+    settings_bits.set(
+        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::pcie),
+        settings.pcie);
     return settings_bits.to_ulong();
 }
 
@@ -446,7 +516,7 @@ data::sample(uint32_t _device_id)
     auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
     assert(_timestamp < std::numeric_limits<int64_t>::max());
     amdsmi_gpu_metrics_t _gpu_metrics;
-    bool                 _vcn_or_jpeg_activity_enabled = false;
+    bool                 _gpu_metrics_needed = false;
 
     auto _state = get_state().load();
 
@@ -487,68 +557,153 @@ data::sample(uint32_t _device_id)
 #endif
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).mem_usage, amdsmi_get_gpu_memory_usage,
                           sample_handle, AMDSMI_MEM_TYPE_VRAM, &m_mem_usage);
-    _vcn_or_jpeg_activity_enabled =
-        get_settings(m_dev_id).vcn_activity || get_settings(m_dev_id).jpeg_activity;
-    ROCPROFSYS_AMDSMI_GET(_vcn_or_jpeg_activity_enabled, amdsmi_get_gpu_metrics_info,
-                          sample_handle, &_gpu_metrics);
 
-    // Process metrics if either VCN or JPEG activity is enabled
-    if(_vcn_or_jpeg_activity_enabled)
+    // Check if GPU metrics are needed for VCN, JPEG, XGMI, or PCIe
+    _gpu_metrics_needed = get_settings(m_dev_id).vcn_activity ||
+                          get_settings(m_dev_id).jpeg_activity ||
+                          get_settings(m_dev_id).xgmi || get_settings(m_dev_id).pcie;
+
+    ROCPROFSYS_AMDSMI_GET(_gpu_metrics_needed, amdsmi_get_gpu_metrics_info, sample_handle,
+                          &_gpu_metrics);
+
+    // Determine if basic metrics are enabled
+    bool _basic_metrics_enabled =
+        get_settings(m_dev_id).busy || get_settings(m_dev_id).temp ||
+        get_settings(m_dev_id).power || get_settings(m_dev_id).mem_usage;
+
+    // Process GPU metrics if needed
+    if(_gpu_metrics_needed || _basic_metrics_enabled)
     {
-        // Helper lambda to fill busy metrics from a source array
-        auto fill_busy_metrics = [](auto& dest, const auto& src) {
-            for(const auto& val : src)
-            {
-                if(val != UINT16_MAX) dest.push_back(val);
-            }
-        };
+        gpu_metrics_t                   metrics;
+        bool                            has_data = false;
+        gpu::gpu_metrics_capabilities_t capabilities;
 
-        if(gpu::is_vcn_activity_supported(m_dev_id) &&
-           gpu::is_jpeg_activity_supported(m_dev_id))
+        if(_gpu_metrics_needed)
         {
-            // Both VCN and JPEG are supported - create one entry with both metrics
-            xcp_metrics_t metrics;
-            fill_busy_metrics(metrics.vcn_busy, _gpu_metrics.vcn_activity);
-            fill_busy_metrics(metrics.jpeg_busy, _gpu_metrics.jpeg_activity);
-            if(!metrics.vcn_busy.empty() || !metrics.jpeg_busy.empty())
-                m_xcp_metrics.push_back(metrics);
-        }
-        else if(gpu::is_vcn_activity_supported(m_dev_id))
-        {
-            // Only VCN is supported
-            xcp_metrics_t metrics;
-            fill_busy_metrics(metrics.vcn_busy, _gpu_metrics.vcn_activity);
-            if(!metrics.vcn_busy.empty()) m_xcp_metrics.push_back(metrics);
-        }
-        else if(gpu::is_jpeg_activity_supported(m_dev_id))
-        {
-            // Only JPEG is supported
-            xcp_metrics_t metrics;
-            fill_busy_metrics(metrics.jpeg_busy, _gpu_metrics.jpeg_activity);
-            if(!metrics.jpeg_busy.empty()) m_xcp_metrics.push_back(metrics);
-        }
-        else
-        {
-            // Neither is supported - use XCP stats
-            // Each XCP gets one entry with both its VCN and JPEG metrics
-            for(const auto& xcp : _gpu_metrics.xcp_stats)
+            capabilities.flags.vcn_is_device_level_only =
+                gpu::vcn_is_device_level_only(m_dev_id);
+            capabilities.flags.jpeg_is_device_level_only =
+                gpu::jpeg_is_device_level_only(m_dev_id);
+
+            // Helper lambda to filter max uint values (unsupported) - returns 0 if max,
+            // otherwise the value
+            auto filter_max_uint_value = [](const auto& value) {
+                using ValueType = std::decay_t<decltype(value)>;
+                return (value == std::numeric_limits<ValueType>::max()) ? ValueType{ 0 }
+                                                                        : value;
+            };
+
+            auto fill_gpu_metrics = [](auto& dest, const auto& src, auto max_val) {
+                for(const auto& val : src)
+                {
+                    if(val != max_val) dest.push_back(val);
+                }
+            };
+
+            if(get_settings(m_dev_id).vcn_activity)
             {
-                xcp_metrics_t metrics;
-                fill_busy_metrics(metrics.vcn_busy, xcp.vcn_busy);
-                fill_busy_metrics(metrics.jpeg_busy, xcp.jpeg_busy);
-                if(!metrics.vcn_busy.empty() || !metrics.jpeg_busy.empty())
-                    m_xcp_metrics.push_back(metrics);
+                if(capabilities.flags.vcn_is_device_level_only)
+                {
+                    fill_gpu_metrics(metrics.vcn_activity, _gpu_metrics.vcn_activity,
+                                     UINT16_MAX);
+                    if(!metrics.vcn_activity.empty()) has_data = true;
+                }
+                else
+                {
+                    for(const auto& xcp : _gpu_metrics.xcp_stats)
+                    {
+                        std::vector<uint16_t> xcp_vcn_data;
+                        fill_gpu_metrics(xcp_vcn_data, xcp.vcn_busy, UINT16_MAX);
+                        if(!xcp_vcn_data.empty())
+                        {
+                            metrics.vcn_busy.push_back(std::move(xcp_vcn_data));
+                            has_data = true;
+                        }
+                    }
+                }
             }
+
+            if(get_settings(m_dev_id).jpeg_activity)
+            {
+                if(capabilities.flags.jpeg_is_device_level_only)
+                {
+                    fill_gpu_metrics(metrics.jpeg_activity, _gpu_metrics.jpeg_activity,
+                                     UINT16_MAX);
+                    if(!metrics.jpeg_activity.empty()) has_data = true;
+                }
+                else
+                {
+                    for(const auto& xcp : _gpu_metrics.xcp_stats)
+                    {
+                        std::vector<uint16_t> xcp_jpeg_data;
+                        fill_gpu_metrics(xcp_jpeg_data, xcp.jpeg_busy, UINT16_MAX);
+                        if(!xcp_jpeg_data.empty())
+                        {
+                            metrics.jpeg_busy.push_back(std::move(xcp_jpeg_data));
+                            has_data = true;
+                        }
+                    }
+                }
+            }
+
+            // Process XGMI metrics if enabled
+            if(get_settings(m_dev_id).xgmi)
+            {
+                // Filter scalar values - returns 0 if unsupported (max value)
+                metrics.xgmi_link_width =
+                    filter_max_uint_value(_gpu_metrics.xgmi_link_width);
+                metrics.xgmi_link_speed =
+                    filter_max_uint_value(_gpu_metrics.xgmi_link_speed);
+
+                // Vector values filtered by fill_gpu_metrics
+                fill_gpu_metrics(metrics.xgmi_read_data_acc,
+                                 _gpu_metrics.xgmi_read_data_acc, UINT64_MAX);
+                fill_gpu_metrics(metrics.xgmi_write_data_acc,
+                                 _gpu_metrics.xgmi_write_data_acc, UINT64_MAX);
+
+                if(metrics.xgmi_link_width != 0 || metrics.xgmi_link_speed != 0 ||
+                   !metrics.xgmi_read_data_acc.empty() ||
+                   !metrics.xgmi_write_data_acc.empty())
+                {
+                    has_data = true;
+                }
+            }
+
+            // Process PCIe metrics if enabled
+            if(get_settings(m_dev_id).pcie)
+            {
+                // Filter scalar values - returns 0 if unsupported (max value)
+                metrics.pcie_link_width =
+                    filter_max_uint_value(_gpu_metrics.pcie_link_width);
+                metrics.pcie_link_speed =
+                    filter_max_uint_value(_gpu_metrics.pcie_link_speed);
+                metrics.pcie_bandwidth_acc =
+                    filter_max_uint_value(_gpu_metrics.pcie_bandwidth_acc);
+                metrics.pcie_bandwidth_inst =
+                    filter_max_uint_value(_gpu_metrics.pcie_bandwidth_inst);
+
+                if(metrics.pcie_link_width != 0 || metrics.pcie_link_speed != 0 ||
+                   metrics.pcie_bandwidth_acc != 0 || metrics.pcie_bandwidth_inst != 0)
+                {
+                    has_data = true;
+                }
+            }
+        }
+
+        // Store samples if basic metrics are enabled OR if there's advanced metric data
+        if(_basic_metrics_enabled || has_data)
+        {
+            trace_cache::get_buffer_storage().store(
+                trace_cache::entry_type::amd_smi_sample, serialize_settings(m_dev_id),
+                _device_id, _timestamp, m_busy_perc.gfx_activity,
+                m_busy_perc.umc_activity, m_busy_perc.mm_activity,
+                m_power.current_socket_power, m_temp, m_mem_usage,
+                serialize_gpu_metrics(m_dev_id, metrics, capabilities));
+
+            if(has_data) m_gpu_metrics.push_back(metrics);
         }
     }
 #undef ROCPROFSYS_AMDSMI_GET
-
-    trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::amd_smi_sample, serialize_settings(m_dev_id), _device_id,
-        _timestamp, m_busy_perc.gfx_activity, m_busy_perc.umc_activity,
-        m_busy_perc.mm_activity, m_power.current_socket_power, m_temp, m_mem_usage,
-        serialize_xcp_metrics(gpu::is_vcn_activity_supported(m_dev_id),
-                              gpu::is_jpeg_activity_supported(m_dev_id), _gpu_metrics));
 }
 
 void
@@ -741,25 +896,28 @@ data::post_process(uint32_t _dev_id)
             }
             if(_settings.vcn_activity)
             {
-                if(itr.m_xcp_metrics.empty())
+                if(itr.m_gpu_metrics.empty())
                 {
                     ROCPROFSYS_VERBOSE(
                         1, "No VCN activity data collected from device %u\n", _dev_id);
                 }
-                else if(gpu::is_vcn_activity_supported(_dev_id))
+                else if(gpu::vcn_is_device_level_only(_dev_id))
                 {
-                    // For VCN activity, use simple indexing
-                    for(std::size_t i = 0; i < std::size(itr.m_xcp_metrics[0].vcn_busy);
-                        ++i)
+                    // For VCN activity supported: use vcn_activity vector
+                    for(std::size_t i = 0;
+                        i < std::size(itr.m_gpu_metrics[0].vcn_activity); ++i)
                         counter_track::emplace(_dev_id, addendum_blk(i, "VCN Activity"),
                                                "%");
                 }
                 else
                 {
-                    for(std::size_t xcp = 0; xcp < std::size(itr.m_xcp_metrics); ++xcp)
+                    // For VCN activity NOT supported: use vcn_busy vector with per-XCP
+                    // organization
+                    for(size_t xcp = 0; xcp < itr.m_gpu_metrics[0].vcn_busy.size(); ++xcp)
                     {
-                        for(std::size_t i = 0;
-                            i < std::size(itr.m_xcp_metrics[xcp].vcn_busy); ++i)
+                        // Loop through each XCP's VCN busy values
+                        for(size_t i = 0; i < itr.m_gpu_metrics[0].vcn_busy[xcp].size();
+                            ++i)
                         {
                             counter_track::emplace(
                                 _dev_id, addendum_blk(i, "VCN Activity", xcp), "%");
@@ -769,27 +927,71 @@ data::post_process(uint32_t _dev_id)
             }
             if(_settings.jpeg_activity)
             {
-                if(itr.m_xcp_metrics.empty())
+                if(itr.m_gpu_metrics.empty())
                 {
                     ROCPROFSYS_VERBOSE(
                         1, "No JPEG activity data collected from device %u\n", _dev_id);
                 }
-                else if(gpu::is_jpeg_activity_supported(_dev_id))
+                else if(gpu::jpeg_is_device_level_only(_dev_id))
                 {
-                    for(std::size_t i = 0; i < std::size(itr.m_xcp_metrics[0].jpeg_busy);
-                        ++i)
+                    // For JPEG activity supported: use jpeg_activity vector
+                    for(std::size_t i = 0;
+                        i < std::size(itr.m_gpu_metrics[0].jpeg_activity); ++i)
                         counter_track::emplace(_dev_id, addendum_blk(i, "JPEG Activity"),
                                                "%");
                 }
                 else
                 {
-                    for(std::size_t xcp = 0; xcp < std::size(itr.m_xcp_metrics); ++xcp)
+                    // For JPEG activity NOT supported: use jpeg_busy vector with per-XCP
+                    // organization
+                    for(size_t xcp = 0; xcp < itr.m_gpu_metrics[0].jpeg_busy.size();
+                        ++xcp)
                     {
-                        for(std::size_t i = 0;
-                            i < std::size(itr.m_xcp_metrics[xcp].jpeg_busy); ++i)
+                        // Loop through each XCP's JPEG busy values
+                        for(size_t i = 0; i < itr.m_gpu_metrics[0].jpeg_busy[xcp].size();
+                            ++i)
+                        {
                             counter_track::emplace(
                                 _dev_id, addendum_blk(i, "JPEG Activity", xcp), "%");
+                        }
                     }
+                }
+            }
+            if(_settings.xgmi)
+            {
+                if(itr.m_gpu_metrics.empty())
+                {
+                    ROCPROFSYS_VERBOSE(
+                        1, "No XGMI activity data collected from device %u\n", _dev_id);
+                }
+                else
+                {
+                    counter_track::emplace(_dev_id, addendum("XGMI Link Width"), "bits");
+                    counter_track::emplace(_dev_id, addendum("XGMI Link Speed"), "GT/s");
+                    for(std::size_t i = 0;
+                        i < std::size(itr.m_gpu_metrics[0].xgmi_read_data_acc); ++i)
+                        counter_track::emplace(_dev_id, addendum_blk(i, "XGMI Read Data"),
+                                               "KB");
+                    for(std::size_t i = 0;
+                        i < std::size(itr.m_gpu_metrics[0].xgmi_write_data_acc); ++i)
+                        counter_track::emplace(_dev_id,
+                                               addendum_blk(i, "XGMI Write Data"), "KB");
+                }
+            }
+            if(_settings.pcie)
+            {
+                if(itr.m_gpu_metrics.empty())
+                {
+                    ROCPROFSYS_VERBOSE(
+                        1, "No PCIe activity data collected from device %u\n", _dev_id);
+                }
+                else
+                {
+                    counter_track::emplace(_dev_id, addendum("PCIe Link Width"), "");
+                    counter_track::emplace(_dev_id, addendum("PCIe Link Speed"), "GT/s");
+                    counter_track::emplace(_dev_id, addendum("PCIe Bandwidth Acc"), "MB");
+                    counter_track::emplace(_dev_id, addendum("PCIe Bandwidth Inst"),
+                                           "MB/s");
                 }
             }
         };
@@ -822,32 +1024,97 @@ data::post_process(uint32_t _dev_id)
                               counter_track::at(_dev_id, track_index++), _ts, _usage);
             }
 
-            if(_settings.vcn_activity && !itr.m_xcp_metrics.empty())
+            if(_settings.vcn_activity && !itr.m_gpu_metrics.empty())
             {
-                // Iterate over all XCPs and their VCN busy/activity values
-                for(const auto& metrics : itr.m_xcp_metrics)
+                if(gpu::vcn_is_device_level_only(_dev_id))
                 {
-                    for(const auto& vcn_val : metrics.vcn_busy)
+                    // Device-level VCN activity
+                    for(const auto& vcn_val : itr.m_gpu_metrics[0].vcn_activity)
                     {
                         TRACE_COUNTER("device_vcn_activity",
                                       counter_track::at(_dev_id, track_index++), _ts,
                                       vcn_val);
                     }
                 }
+                else
+                {
+                    // XCP-level VCN busy (per-XCP organization)
+                    for(const auto& xcp_data : itr.m_gpu_metrics[0].vcn_busy)
+                    {
+                        for(const auto& vcn_val : xcp_data)
+                        {
+                            TRACE_COUNTER("device_vcn_activity",
+                                          counter_track::at(_dev_id, track_index++), _ts,
+                                          vcn_val);
+                        }
+                    }
+                }
             }
 
-            if(_settings.jpeg_activity && !itr.m_xcp_metrics.empty())
+            if(_settings.jpeg_activity && !itr.m_gpu_metrics.empty())
             {
-                // Iterate over all XCPs and their JPEG busy/activity values
-                for(const auto& metrics : itr.m_xcp_metrics)
+                if(gpu::jpeg_is_device_level_only(_dev_id))
                 {
-                    for(const auto& jpeg_val : metrics.jpeg_busy)
+                    // Device-level JPEG activity
+                    for(const auto& jpeg_val : itr.m_gpu_metrics[0].jpeg_activity)
                     {
                         TRACE_COUNTER("device_jpeg_activity",
                                       counter_track::at(_dev_id, track_index++), _ts,
                                       jpeg_val);
                     }
                 }
+                else
+                {
+                    // XCP-level JPEG busy (per-XCP organization)
+                    for(const auto& xcp_data : itr.m_gpu_metrics[0].jpeg_busy)
+                    {
+                        for(const auto& jpeg_val : xcp_data)
+                        {
+                            TRACE_COUNTER("device_jpeg_activity",
+                                          counter_track::at(_dev_id, track_index++), _ts,
+                                          jpeg_val);
+                        }
+                    }
+                }
+            }
+
+            if(_settings.xgmi && !itr.m_gpu_metrics.empty())
+            {
+                TRACE_COUNTER("device_xgmi_link_width",
+                              counter_track::at(_dev_id, track_index++), _ts,
+                              itr.m_gpu_metrics[0].xgmi_link_width);
+                TRACE_COUNTER("device_xgmi_link_speed",
+                              counter_track::at(_dev_id, track_index++), _ts,
+                              itr.m_gpu_metrics[0].xgmi_link_speed);
+                for(const auto& read_val : itr.m_gpu_metrics[0].xgmi_read_data_acc)
+                {
+                    TRACE_COUNTER("device_xgmi_read_data",
+                                  counter_track::at(_dev_id, track_index++), _ts,
+                                  read_val);
+                }
+
+                for(const auto& write_val : itr.m_gpu_metrics[0].xgmi_write_data_acc)
+                {
+                    TRACE_COUNTER("device_xgmi_write_data",
+                                  counter_track::at(_dev_id, track_index++), _ts,
+                                  write_val);
+                }
+            }
+
+            if(_settings.pcie && !itr.m_gpu_metrics.empty())
+            {
+                TRACE_COUNTER("device_pcie_link_width",
+                              counter_track::at(_dev_id, track_index++), _ts,
+                              itr.m_gpu_metrics[0].pcie_link_width);
+                TRACE_COUNTER("device_pcie_link_speed",
+                              counter_track::at(_dev_id, track_index++), _ts,
+                              itr.m_gpu_metrics[0].pcie_link_speed);
+                TRACE_COUNTER("device_pcie_bandwidth_acc",
+                              counter_track::at(_dev_id, track_index++), _ts,
+                              itr.m_gpu_metrics[0].pcie_bandwidth_acc);
+                TRACE_COUNTER("device_pcie_bandwidth_inst",
+                              counter_track::at(_dev_id, track_index++), _ts,
+                              itr.m_gpu_metrics[0].pcie_bandwidth_inst);
             }
         };
 
@@ -951,6 +1218,8 @@ setup()
                     key_pair_t{ "mem_usage", get_settings(itr).mem_usage },
                     key_pair_t{ "vcn_activity", get_settings(itr).vcn_activity },
                     key_pair_t{ "jpeg_activity", get_settings(itr).jpeg_activity },
+                    key_pair_t{ "xgmi", get_settings(itr).xgmi },
+                    key_pair_t{ "pcie", get_settings(itr).pcie },
                 };
 
                 // Initialize all metrics to false

@@ -124,6 +124,18 @@ is_link(const std::string& _path) ROCPROFSYS_INTERNAL_API;
 inline std::string
 readlink(const std::string& _path) ROCPROFSYS_INTERNAL_API;
 
+inline std::string
+get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
+
+inline std::string
+get_internal_libpath(const std::string& _lib) ROCPROFSYS_INTERNAL_API;
+
+inline std::string
+get_internal_script_path() ROCPROFSYS_INTERNAL_API;
+
+inline std::string
+get_internal_libdir() ROCPROFSYS_INTERNAL_API;
+
 struct ROCPROFSYS_INTERNAL_API path_type
 {
     enum path_type_e
@@ -411,6 +423,41 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
 
     return std::string{};
 }
+
+std::string
+get_rocprofsys_root()
+{
+    auto _exe_rp  = realpath("/proc/self/exe");
+    auto _exe_dir = dirname(_exe_rp);
+    if(_exe_dir.empty()) _exe_dir = "./";
+    return rocprofsys::common::join('/', _exe_dir, "..");
+}
+
+std::string
+get_internal_libpath(const std::string& _lib)
+{
+    auto _root = get_rocprofsys_root();
+    for(const auto* libdir : { "lib", "lib64" })
+    {
+        auto _candidate = rocprofsys::common::join('/', _root, libdir, _lib);
+        if(exists(_candidate)) return _candidate;
+    }
+    return rocprofsys::common::join('/', _root, "lib", _lib);
+}
+
+std::string
+get_internal_script_path()
+{
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join('/', _root, "libexec", "rocprofiler-systems");
+}
+
+std::string
+get_internal_libdir()
+{
+    return rocprofsys::common::join('/', get_rocprofsys_root(), "lib");
+}
+
 }  // namespace path
 }  // namespace common
 }  // namespace rocprofsys

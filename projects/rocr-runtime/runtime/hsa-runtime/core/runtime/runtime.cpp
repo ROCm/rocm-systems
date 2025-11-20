@@ -2326,7 +2326,7 @@ Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
 
-  thread_ = os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
+  asyncInfo->control.thread_ = os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
   if (!asyncInfo->control.thread_)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to initialize async handler thread");
 
@@ -2389,7 +2389,7 @@ hsa_status_t Runtime::Load() {
   }
 
   asyncSignals_.reset(new AsyncEventsInfo(false));
-  asyncExceptions_.reset(new AsyncEventsInfo(true));
+  asyncExceptions_.reset(new AsyncEventsInfo(g_use_interrupt_wait));
 
   // Setup system clock frequency for the first time.
   if (sys_clock_freq_ == 0) {
@@ -3707,18 +3707,6 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
   }
 
   for (auto mappedHandleIt : mappedHandles) {
-    /* Need to remove the default CPU mapping that was added in MappedHandle constructor.
-    * We remove it before calling RemoveAccess(). Otherwise we would unnecessarily call mmap(..,PROT_NONE,..)
-    * and then later call munmap.
-    */
-    auto cpu_agent = static_cast<AMD::GpuAgent*>(mappedHandleIt.second->agentOwner())->GetNearestCpuAgent();
-    auto cpu_agent_it = mappedHandleIt.second->allowed_agents.find(cpu_agent);
-    if (cpu_agent_it != mappedHandleIt.second->allowed_agents.end()) {
-      if (munmap(cpu_agent_it->second.va, cpu_agent_it->second.size) != 0) {
-        return HSA_STATUS_ERROR;
-      }
-    }
-
     // Remove access from all agents that were allowed access
     for (auto agentPermsIt = mappedHandleIt.second->allowed_agents.begin();
               agentPermsIt != mappedHandleIt.second->allowed_agents.end();) {
