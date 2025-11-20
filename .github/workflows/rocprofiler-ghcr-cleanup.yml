@@ -25,4 +25,4 @@ jobs:
         with:
           package: rocprofiler-${{ matrix.os }}
           older-than: 7 days
-          dry-run: false
+          dry-run: ${{ github.event_name == 'pull_request' }}
