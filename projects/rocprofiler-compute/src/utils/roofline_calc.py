@@ -101,7 +101,7 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
     ],  # Unsupported:
 }
 
-PEAK_OPS_DATATYPES = ["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"]
+PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]
 MFMA_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
 CACHE_HIERARCHY = ["HBM", "L2", "L1", "LDS"]
 
