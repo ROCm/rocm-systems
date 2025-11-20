@@ -40,162 +40,89 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-namespace
-{
-constexpr auto CACHE_FILE_FLUSH_TIMEOUT = 10ms;
-constexpr auto NUM_OF_THREADS           = 1;
-}  // namespace
+flush_worker_t::flush_worker_t(worker_function_t            worker_function,
+                               worker_synchronization_ptr_t worker_synchronization_ptr,
+                               std::string                  filepath)
 
-buffer_storage::buffer_storage()
-{
-    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    m_thread_pool = std::make_unique<PTL::ThreadPool>(NUM_OF_THREADS);
-    m_thread_pool->initialize_threadpool(NUM_OF_THREADS);
-
-    m_task_group = std::make_unique<PTL::TaskGroup<void>>(m_thread_pool.get());
-}
+: m_worker_function(std::move(worker_function))
+, m_worker_synchronization(std::move(worker_synchronization_ptr))
+, m_filepath(std::move(filepath))
+{}
 
 void
-buffer_storage::start_flushing_thread(pid_t _pid)
+flush_worker_t::start(const pid_t& current_pid)
 {
+    if(m_worker_synchronization->is_running)
+    {
+        std::stringstream _ss;
+        _ss << "Flush worker is already running";
+        throw std::runtime_error(_ss.str());
+    }
+
+    m_ofs = std::ofstream{ m_filepath, std::ios::binary | std::ios::out };
+
+    if(!m_ofs.good())
+    {
+        std::stringstream _ss;
+        _ss << "Error opening file for writing: " << m_filepath;
+        throw std::runtime_error(_ss.str());
+    }
+
+    m_worker_synchronization->origin_pid = current_pid;
+    m_worker_synchronization->is_running = true;
+
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    m_task_group->exec([this, _pid]() {
-        auto filepath = get_buffered_storage_filename(get_root_process_id(), getpid());
-        std::ofstream _ofs(filepath, std::ios::binary | std::ios::out);
 
-        if(!_ofs)
-        {
-            std::stringstream _ss;
-            _ss << "Error opening file for writing: " << filepath;
-            throw std::runtime_error(_ss.str());
-        }
-
-        auto execute_flush = [&](std::ofstream& ofs, bool force = false) {
-            size_t _head, _tail;
-            {
-                std::lock_guard guard{ m_mutex };
-                _head = m_head;
-                _tail = m_tail;
-
-                if(_head == _tail)
-                {
-                    return;
-                }
-
-                auto used_space =
-                    m_head > m_tail ? (m_head - m_tail) : (buffer_size - m_tail + m_head);
-                if(!force && used_space < flush_threshold)
-                {
-                    return;
-                }
-                m_tail = m_head;
-            }
-
-            if(_head > _tail)
-            {
-                ofs.write(reinterpret_cast<const char*>(m_buffer->data() + _tail),
-                          _head - _tail);
-            }
-            else
-            {
-                ofs.write(reinterpret_cast<const char*>(m_buffer->data() + _tail),
-                          buffer_size - _tail);
-                ofs.write(reinterpret_cast<const char*>(m_buffer->data()), _head);
-            }
-        };
-
-        m_created_process = _pid;
+    m_flushing_thread = std::make_unique<std::thread>([&]() {
         std::mutex _shutdown_condition_mutex;
-        while(m_running)
+        while(m_worker_synchronization->is_running)
         {
-            execute_flush(_ofs);
+            m_worker_function(m_ofs, false);
             std::unique_lock _lock{ _shutdown_condition_mutex };
-            m_shutdown_condition.wait_for(
-                _lock, std::chrono::milliseconds(CACHE_FILE_FLUSH_TIMEOUT),
-                [&]() { return !m_running; });
+            m_worker_synchronization->is_running_condition.wait_for(
+                _lock, CACHE_FILE_FLUSH_TIMEOUT,
+                [&]() { return !m_worker_synchronization->is_running; });
         }
 
-        execute_flush(_ofs, true);
-        _ofs.close();
-        m_exit_finished = true;
-        m_exit_condition.notify_one();
+        m_worker_function(m_ofs, true);
+        m_ofs.close();
+        m_worker_synchronization->exit_finished = true;
+        m_worker_synchronization->exit_finished_condition.notify_one();
     });
 }
-
-buffer_storage::~buffer_storage()
-{
-    shutdown();
-    if(m_thread_pool && m_thread_pool->is_alive())
-    {
-        m_thread_pool->destroy_threadpool();
-    }
-}
-
 void
-buffer_storage::shutdown()
+flush_worker_t::stop(const pid_t& current_pid)
 {
-    if(!m_running)
+    const bool flushing_thread_exist = m_flushing_thread != nullptr;
+    const bool worker_is_running =
+        m_worker_synchronization != nullptr && m_worker_synchronization->is_running;
+
+    if(flushing_thread_exist && worker_is_running)
     {
-        return;
-    }
+        ROCPROFSYS_DEBUG("Buffer storage shutting down..\n");
+        m_worker_synchronization->is_running = false;
+        m_worker_synchronization->is_running_condition.notify_all();
 
-    ROCPROFSYS_DEBUG("Buffer storage shutting down..");
-    m_running = false;
-    m_shutdown_condition.notify_all();
-
-    if(m_created_process != getpid())
-    {
-        ROCPROFSYS_DEBUG(
-            "Buffer storage is not created in same process as shutting down..");
-        return;
-    }
-
-    std::mutex       _exit_mutex;
-    std::unique_lock _exit_lock{ _exit_mutex };
-    m_exit_condition.wait(_exit_lock, [&]() { return m_exit_finished; });
-
-    if(m_thread_pool && m_thread_pool->is_alive())
-    {
-        m_thread_pool->destroy_threadpool();
-    }
-}
-
-void
-buffer_storage::fragment_memory()
-{
-    auto* _data = m_buffer->data();
-    memset(_data + m_head, 0xFFFF, buffer_size - m_head);
-    *reinterpret_cast<entry_type*>(_data + m_head) = entry_type::fragmented_space;
-
-    size_t remaining_bytes = buffer_size - m_head - minimal_fragmented_memory_size;
-    *reinterpret_cast<size_t*>(_data + m_head + sizeof(entry_type)) = remaining_bytes;
-    m_head                                                          = 0;
-}
-
-uint8_t*
-buffer_storage::reserve_memory_space(size_t len)
-{
-    size_t _size;
-    {
-        std::lock_guard scope{ m_mutex };
-
-        if((m_head + len + minimal_fragmented_memory_size) > buffer_size)
+        const bool thread_is_created_in_this_process =
+            current_pid == m_worker_synchronization->origin_pid;
+        if(!thread_is_created_in_this_process)
         {
-            fragment_memory();
+            ROCPROFSYS_DEBUG(
+                "Buffer storage is not created in same process as shutting down..\n");
+            return;
         }
-        _size  = m_head;
-        m_head = m_head + len;
+
+        std::mutex       _exit_mutex;
+        std::unique_lock _exit_lock{ _exit_mutex };
+        m_worker_synchronization->exit_finished_condition.wait(
+            _exit_lock, [&]() { return m_worker_synchronization->exit_finished.load(); });
+
+        if(m_flushing_thread->joinable())
+        {
+            m_flushing_thread->join();
+            m_flushing_thread.reset();
+        }
     }
-
-    auto* _result = m_buffer->data() + _size;
-    memset(_result, 0, len);
-    return _result;
-}
-
-bool
-buffer_storage::is_running() const
-{
-    return m_running;
 }
 
 }  // namespace trace_cache

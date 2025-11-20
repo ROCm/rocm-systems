@@ -25,44 +25,44 @@
 #include "core/node_info.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
-#include "core/trace_cache/storage_parser.hpp"
+#include "core/trace_cache/sample_processor.hpp"
+
+#include "trace_cache/sample_type.hpp"
 
 namespace rocprofsys
 {
 namespace trace_cache
 {
 
-class rocpd_post_processing
+class rocpd_processor_t : public processor_t<rocpd_processor_t>
 {
 public:
-    rocpd_post_processing(metadata_registry& metadata, agent_manager& agent_mngr, int pid,
-                          int ppid);
+    rocpd_processor_t(const std::shared_ptr<metadata_registry>& metadata,
+                      const std::shared_ptr<agent_manager>& agent_mngr, int pid,
+                      int ppid);
 
-    void register_parser_callback(storage_parser& parser);
-    void post_process_metadata();
+    void prepare_for_processing();
+    void finalize_processing();
 
-    std::shared_ptr<rocpd::data_processor> get_data_processor() const;
+    void handle(const kernel_dispatch_sample& sample);
+    void handle(const memory_copy_sample& sample);
+    void handle(const memory_allocate_sample& sample);
+    void handle(const region_sample& sample);
+    void handle(const in_time_sample& sample);
+    void handle(const pmc_event_with_sample& sample);
+    void handle(const amd_smi_sample& sample);
+    void handle(const cpu_freq_sample& sample);
+    void handle(const backtrace_region_sample& sample);
 
 private:
     using primary_key = size_t;
 
-    inline void rocpd_insert_thread_id(info::thread& t_info, const node_info& n_info,
-                                       const info::process& process_info) const;
+    void        post_process_metadata();
+    inline void insert_thread_id(info::thread& t_info, const node_info& n_info,
+                                 const info::process& process_info);
 
-    postprocessing_callback get_kernel_dispatch_callback() const;
-    postprocessing_callback get_memory_copy_callback() const;
-#if(ROCPROFILER_VERSION >= 600)
-    postprocessing_callback get_memory_allocate_callback() const;
-#endif
-    postprocessing_callback get_region_callback() const;
-    postprocessing_callback get_in_time_sample_callback() const;
-    postprocessing_callback get_pmc_event_with_sample_callback() const;
-    postprocessing_callback get_amd_smi_sample_callback() const;
-    postprocessing_callback get_cpu_freq_sample_callback() const;
-    postprocessing_callback get_backtrace_sample_callback() const;
-
-    metadata_registry&                     m_metadata;
-    agent_manager&                         m_agent_manager;
+    std::shared_ptr<metadata_registry>     m_metadata;
+    std::shared_ptr<agent_manager>         m_agent_manager;
     std::shared_ptr<rocpd::data_processor> m_data_processor;
 };
 
