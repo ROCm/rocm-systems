@@ -41,7 +41,7 @@ void ScatterGetBw(size_t count, int typesize, double sec, double* algBw, double*
   *busBw = baseBw * factor;
 }
 
-testResult_t ScatterRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+testResult_t ScatterRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
   if (deviceImpl == 0) {
     int nRanks;
     NCCLCHECK(ncclCommCount(comm, &nRanks));
@@ -119,7 +119,11 @@ testResult_t ScatterRunTest(struct threadArgs* args, int root, ncclDataType_t ty
   return testSuccess;
 }
 
-struct testEngine scatterEngine = {
-  .getBuffSize = ScatterGetBuffSize,
-  .runTest = ScatterRunTest
+struct testEngine ncclTestEngine = {
+  ScatterGetBuffSize,
+  ScatterRunTest
 };
+// struct testEngine scatterEngine = {
+//   .getBuffSize = ScatterGetBuffSize,
+//   .runTest = ScatterRunTest
+// };

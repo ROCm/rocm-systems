@@ -13,7 +13,7 @@
 #include "vector_types.h"
 #endif
 
-#pragma weak ncclAlltoAll
+#pragma weak ncclAllToAll
 
 void AlltoAllGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
   *paramcount = (count/nranks) & -(16/eltSize);
@@ -267,16 +267,16 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
 #endif
 #endif
 
-testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
   if (deviceImpl == 0) {
     char* sptr = (char*)sendbuff + sendoffset;
     char* rptr = (char*)recvbuff + recvoffset;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
     if (test_ncclVersion >= NCCL_VERSION(2,28,0)) {
-      NCCLCHECK(ncclAlltoAll(sptr, rptr, count, type, comm, stream));
+      NCCLCHECK(ncclAllToAll(sptr, rptr, count, type, comm, stream));
       return testSuccess;
     }
-    // fall-through to send/recv implementation if ncclAlltoAll is not available
+    // fall-through to send/recv implementation if ncclAllToAll is not available
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,7,0)
     int nRanks;
@@ -352,10 +352,13 @@ testResult_t AlltoAllRunTest(struct threadArgs* args, int root, ncclDataType_t t
   }
   return testSuccess;
 }
-
-struct testEngine alltoAllEngine = {
+struct testEngine ncclTestEngine = {
   AlltoAllGetBuffSize,
   AlltoAllRunTest
 };
+// struct testEngine alltoAllEngine = {
+//   AlltoAllGetBuffSize,
+//   AlltoAllRunTest
+// };
 
 #pragma weak ncclTestEngine=alltoAllEngine

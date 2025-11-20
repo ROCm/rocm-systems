@@ -46,7 +46,7 @@ void HyperCubeGetBw(size_t count, int typesize, double sec, double* algBw, doubl
   *busBw = baseBw * factor;
 }
 
-testResult_t HyperCubeRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+testResult_t HyperCubeRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
   if (deviceImpl == 0) {
     char* sbuff = ((char*)sendbuff) + sendoffset;
     char* rbuff = ((char*)recvbuff) + recvoffset;
@@ -114,8 +114,13 @@ testResult_t HyperCubeRunTest(struct threadArgs* args, int root, ncclDataType_t 
 
   return testSuccess;
 }
-
-struct testEngine hyperCubeEngine = {
-  .getBuffSize = HyperCubeGetBuffSize,
-  .runTest = HyperCubeRunTest
+struct testEngine ncclTestEngine = {
+  HyperCubeGetBuffSize,
+  HyperCubeRunTest
 };
+
+// struct testEngine hyperCubeEngine = {
+//   .getBuffSize = HyperCubeGetBuffSize,
+//   .runTest = HyperCubeRunTest
+// };
+// #pragma weak ncclTestEngine=hyperCubeEngine

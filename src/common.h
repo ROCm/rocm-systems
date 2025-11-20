@@ -111,7 +111,9 @@ struct testColl {
       ncclRedOp_t op, int root, int rep, int in_place);
   void (*getBw)(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks);
   testResult_t (*runColl)(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
-      size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int implIndex);
+      size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int implIndex, void* bias);
+  testResult_t (*getAlgoProtoChannels)(ncclComm_t comm, size_t count, ncclDataType_t type, int* algo, int* proto, int* nchannels);
+
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -395,6 +397,7 @@ static int ncclstringtomtype (char *str) {
 
 extern int is_main_proc;
 extern thread_local int is_main_thread;
+#define PRINT if (is_main_thread) printf
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 template <typename F>

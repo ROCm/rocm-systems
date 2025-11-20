@@ -48,7 +48,7 @@ void ReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* 
   *busBw = baseBw;
 }
 
-testResult_t ReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+testResult_t ReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
   if (deviceImpl == 0) {
     char* sptr = (char*)sendbuff + sendoffset;
     char* rptr = (char*)recvbuff + recvoffset;
@@ -122,7 +122,12 @@ if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_op
   return testSuccess;
 }
 
-struct testEngine reduceEngine = {
-  .getBuffSize = ReduceGetBuffSize,
-  .runTest = ReduceRunTest
+struct testEngine ncclTestEngine = {
+  ReduceGetBuffSize,
+  ReduceRunTest
 };
+
+// struct testEngine reduceEngine = {
+//   .getBuffSize = ReduceGetBuffSize,
+//   .runTest = ReduceRunTest
+// };

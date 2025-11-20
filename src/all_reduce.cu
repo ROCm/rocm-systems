@@ -469,7 +469,7 @@ __global__ void allReduceMultimemVectorizedKernel(ncclWindow_t sendwin, size_t s
 }
 #endif
 
-testResult_t AllReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl) {
+testResult_t AllReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl,  void* bias = nullptr) {
 
   char* sptr = (char*)sendbuff + sendoffset;
   char* rptr = (char*)recvbuff + recvoffset;
@@ -553,12 +553,17 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine allReduceEngine = {
-  .getBuffSize = AllReduceGetBuffSize,
-  .runTest = AllReduceRunTest,
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-  .getDevCommRequirements = AllReduceGetDevCommRequirements
-#endif
+struct testEngine ncclTestEngine = {
+  AllReduceGetBuffSize,
+  AllReduceRunTest
 };
+
+// struct testEngine allReduceEngine = {
+//   .getBuffSize = AllReduceGetBuffSize,
+//   .runTest = AllReduceRunTest,
+// #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+//   .getDevCommRequirements = AllReduceGetDevCommRequirements
+// #endif
+// };
 
 #pragma weak ncclTestEngine=allReduceEngine

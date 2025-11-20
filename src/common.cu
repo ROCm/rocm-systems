@@ -259,6 +259,8 @@ void Reporter::writeFile() {
 
 bool Reporter::isMainThread() { return is_main_thread == 1; }
 
+#define NUM_BLOCKS 32
+
 enum output_file_type_t {
   JSON_FILE_OUTPUT,
   UNSPECIFIED_FILE_OUTPUT
@@ -715,7 +717,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       TESTCHECK(args->collTest->runColl(
             (void*)(in_place ? recvBuff : sendBuff), in_place ? args->sendInplaceOffset*rank : 0,
             (void*)recvBuff, in_place ? args->recvInplaceOffset*rank : 0,
-            count, type, op, root, args->comms[i], args->streams[i], 0));
+            count, type, op, root, args->comms[i], args->streams[i], 0, bias));
     } else {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
       void* sendwin = args->sendRegHandles[i];
@@ -724,7 +726,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       TESTCHECK(args->collTest->runColl(
             (void*)(in_place ? recvwin : sendwin), shift + in_place ? args->sendInplaceOffset*rank : 0,
             (void*)recvwin, shift + in_place ? args->recvInplaceOffset*rank : 0,
-            count, type, op, root, (ncclComm_t)(args->devComms+i), args->streams[i], deviceImpl));
+            count, type, op, root, (ncclComm_t)(args->devComms+i), args->streams[i], deviceImpl, bias));
 #endif
     }
 
@@ -1661,6 +1663,10 @@ testResult_t run() {
       PRINT("%s", lines+MAX_LINE*p);
     free(lines);
   }
+  MPI_Allreduce(MPI_IN_PLACE, &maxMem, 1, MPI_LONG, MPI_MIN, MPI_COMM_WORLD);
+#else
+  PRINT("%s", line);
+#endif
 
   // Reserve 1GiB of memory for each 16GiB installed, but limit to a max of 4GiB
   const size_t GB = (1ULL << 30);
@@ -1692,8 +1698,8 @@ testResult_t run() {
 
   ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)ncclProcs*nGpus*nThreads);
 
-  char* envstr = getenv("NCCL_TESTS_DEVICE");
-  int gpu0 = envstr ? atoi(envstr) : -1;
+  // char* envstr = getenv("NCCL_TESTS_DEVICE");
+  // int gpu0 = envstr ? atoi(envstr) : -1;
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = ((gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i)%numDevices;
     CUDACHECK(cudaSetDevice(gpus[i]));
