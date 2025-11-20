@@ -1326,59 +1326,59 @@ def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
     return target_binary
 
 
-def mibench(args: argparse.Namespace, mspec: Any) -> None:  # noqa: ANN401
-    """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
-    console_log("roofline", "No roofline data found. Generating...")
+# def mibench(args: argparse.Namespace, mspec: Any) -> None:  # noqa: ANN401
+#     """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
+#     console_log("roofline", "No roofline data found. Generating...")
 
-    distro_map = {
-        "platform:el8": "rhel8",
-        "15.6": "sles15sp6",
-        "22.04": "ubuntu22_04",
-        "azurelinux": "azurelinux3",
-    }
+#     distro_map = {
+#         "platform:el8": "rhel8",
+#         "15.6": "sles15sp6",
+#         "22.04": "ubuntu22_04",
+#         "azurelinux": "azurelinux3",
+#     }
 
-    binary_paths: list[str] = []
+#     binary_paths: list[str] = []
 
-    target_binary = detect_roofline(mspec)
-    if target_binary["distro"] == "override":
-        binary_paths.append(target_binary["path"])
-    else:
-        # check two potential locations for roofline binaries due to differences in
-        # development usage vs formal install
-        potential_paths = [
-            config.rocprof_compute_home / "utils" / "rooflines" / "roofline",
-            config.rocprof_compute_home.parent.parent / "bin" / "roofline",
-        ]
+#     target_binary = detect_roofline(mspec)
+#     if target_binary["distro"] == "override":
+#         binary_paths.append(target_binary["path"])
+#     else:
+#         # check two potential locations for roofline binaries due to differences in
+#         # development usage vs formal install
+#         potential_paths = [
+#             config.rocprof_compute_home / "utils" / "rooflines" / "roofline",
+#             config.rocprof_compute_home.parent.parent / "bin" / "roofline",
+#         ]
 
-        for directory in potential_paths:
-            path_to_binary = (
-                f"{directory}-{distro_map[target_binary['distro']]}"
-                f"-rocm{target_binary['rocm_ver']}"
-            )
-            binary_paths.append(path_to_binary)
+#         for directory in potential_paths:
+#             path_to_binary = (
+#                 f"{directory}-{distro_map[target_binary['distro']]}"
+#                 f"-rocm{target_binary['rocm_ver']}"
+#             )
+#             binary_paths.append(path_to_binary)
 
-    # Distro is valid but cant find rocm ver
-    found = False
-    for binary_path in binary_paths:
-        if Path(binary_path).exists():
-            found = True
-            path_to_binary = binary_path
-            break
+#     # Distro is valid but cant find rocm ver
+#     found = False
+#     for binary_path in binary_paths:
+#         if Path(binary_path).exists():
+#             found = True
+#             path_to_binary = binary_path
+#             break
 
-    if not found:
-        console_error("roofline", f"Unable to locate expected binary ({binary_paths}).")
+#     if not found:
+#         console_error("roofline", f"Unable to locate expected binary ({binary_paths}).")
 
-    my_args = [
-        path_to_binary,
-        "-o",
-        f"{args.path}/roofline.csv",
-        "-d",
-        str(args.device),
-    ]
-    if args.quiet:
-        my_args += "--quiet"
+#     my_args = [
+#         path_to_binary,
+#         "-o",
+#         f"{args.path}/roofline.csv",
+#         "-d",
+#         str(args.device),
+#     ]
+#     if args.quiet:
+#         my_args += "--quiet"
 
-    subprocess.run(my_args, check=True)
+#     subprocess.run(my_args, check=True)
 
 
 def get_submodules(package_name: str) -> list[str]:

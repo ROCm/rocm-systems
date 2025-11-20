@@ -53,9 +53,9 @@ from utils.utils import (
     convert_metric_id_to_panel_info,
     get_panel_alias,
     is_tcc_channel_counter,
-    mibench,
     parse_sets_yaml,
 )
+from utils import benchmark
 
 
 class OmniSoC_Base:
@@ -680,7 +680,9 @@ class OmniSoC_Base:
                 "roofline", f"Checking for roofline.csv in {self.get_args().path}"
             )
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
-                mibench(self.get_args(), self._mspec)
+                result = benchmark.run_on_devices([self.get_args().device])
+                benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+
             self.roofline_obj.post_processing()
 
     @abstractmethod
