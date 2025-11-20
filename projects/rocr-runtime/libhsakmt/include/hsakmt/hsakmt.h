@@ -1271,17 +1271,12 @@ hsaKmtModelEnabled(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtMemoryImport(
+hsaKmtHandleImport(
     const HsaExternalHandleDesc* ImportDesc,
-    HsaMemoryImportResult* ImportResult
+    HsaHandleImportResult* ImportResult,
+    HsaHandleImportFlags* Flags
 );
 
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtMemoryExport(
-    const HsaExternalHandleDesc* ExportDesc,
-    HsaMemoryExportResult* ExportResult
-);
 
 HSAKMT_STATUS
 HSAKMTAPI
@@ -1312,16 +1307,9 @@ hsaKmtMemoryCpuMap(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtMemoryCpuUnmap(
-    HsaMemoryObjectHandle Handle
-);
-
-HSAKMT_STATUS
-HSAKMTAPI
 hsaKmtMemHandleFree(
     HsaMemoryObjectHandle Handle
 );
-
 
 HSAKMT_STATUS
 HSAKMTAPI
@@ -1330,34 +1318,6 @@ hsaKmtMemoryGetCpuAddr(
   HsaMemoryObjectHandle MemoryHandle,
   HSAint32* fd, // OUT
   HSAuint64* cpu_addr // OUT
-);
-
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtMemoryGetInfo(
-    HsaMemoryObjectHandle MemoryHandle, //IN 
-    HsaMemoryInfo* Info // OUT 
-);
-
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtMemorySetMetadata(
-    HsaMemoryObjectHandle MemoryHandle, //IN 
-    const HsaMemoryMetaData* data // OUT 
-);
-
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtGpuDeviceGetFd(
-  HsaAMDGPUDeviceHandle DeviceHandle,
-  HSAint32* fd
-);
-
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtQueryShareableHandle(
-  HsaMemoryObjectHandle buf_handle,
-  HSAuint32* shareablehandle
 );
 
 HSAKMT_STATUS

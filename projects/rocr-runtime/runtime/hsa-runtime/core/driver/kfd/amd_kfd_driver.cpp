@@ -487,8 +487,10 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
   desc.device_handle = gpu_agent.libThunkDev();
   desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
   desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
-  HsaMemoryImportResult res;
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryImport(&desc, &res));
+  desc.metadata = 0;
+  HsaHandleImportFlags hflags = {0};
+  HsaHandleImportResult res;
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }

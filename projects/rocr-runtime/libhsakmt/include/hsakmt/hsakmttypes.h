@@ -1537,25 +1537,6 @@ typedef enum _HsaMemoryMapFlags {
     HSA_MEMORY_ACCESS_RW   = 3
 } HsaMemoryMapFlags;
 
-typedef struct _HsaMemoryMetaData {
-    HSAuint32 flags;
-    union 
-    {
-         HSAuint64 tiling_info;
-         HSAuint64 swizzle_info;
-    };
-    HSAuint32 size_metadata;
-    HSAuint32 umd_metadata[64];
-} HsaMemoryMetaData;
-
-typedef struct _HsaMemoryInfo {
-    HSAuint64 alloc_size;
-    HSAuint64 phys_alignment;
-    HSAuint32 preferred_heap;
-    HSAuint64 alloc_flags;
-    HsaMemoryMetaData metadata; 
-} HsaMemoryInfo;
-
 typedef enum _HsaExternalHandleType{
     HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME = 0,
     HSA_EXTERNAL_HANDLE_KMS     = 1,
@@ -1566,18 +1547,27 @@ typedef struct _HsaExternalHandleDesc {
     HsaAMDGPUDeviceHandle device_handle; // GPU device handle (used for import only)
     HSAint32 fd;                        // dmabuf fd
     HsaExternalHandleType type;         // handle type
-    HsaMemoryObjectHandle mem_handle;   // memory handle (used for export only)
+    HSAuint32 metadata;                //  Used for IPC handles 
 } HsaExternalHandleDesc;
 
-typedef struct _HsaMemoryImportResult {
+typedef struct _HsaHandleImportResult {
     HsaMemoryObjectHandle buf_handle;
     HSAuint64 alloc_size;
-} HsaMemoryImportResult;
+    HSAuint32 metadata; // Used for IPC handles
+} HsaHandleImportResult;
 
 typedef struct _HsaMemoryExportResult {
     HSAint32 fd; // dmabuf fd 
 } HsaMemoryExportResult;
 
+typedef struct _HsaHandleImportFlags {
+    struct {
+        unsigned int IPCHandle      : 1; // Handle type is IPC
+        unsigned int SysMem         : 1; // Memory type is System Memory
+        unsigned int UpdateMetadata : 1; // Update metadata with IPC handle
+        unsigned int Reserved       : 29;
+    } ui32; 
+} HsaHandleImportFlags;
 
 #ifdef __cplusplus
 }   //extern "C"

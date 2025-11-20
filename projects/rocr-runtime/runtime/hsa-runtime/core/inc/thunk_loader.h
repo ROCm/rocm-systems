@@ -336,8 +336,9 @@ class ThunkLoader {
                                       void* MemoryAddress, \
                                       HSAuint64 SizeInBytes, \
                                       uint64_t* SharedMemoryHandle);
-    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryImport))(const HsaExternalHandleDesc* ImportDesc, \
-                                      HsaMemoryImportResult *ImportResult);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaExternalHandleDesc* ImportDesc, \
+                                      HsaHandleImportResult* ImportResult, \
+                                      HsaHandleImportFlags* flags);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaMap))(HsaMemoryObjectHandle Handle, \
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
@@ -354,11 +355,8 @@ class ThunkLoader {
                                       HSAuint64* cpu_addr);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryCpuMap))(HsaMemoryObjectHandle Handle, \
                                       void** out_cpu_ptr);
-    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueryShareableHandle))(HsaMemoryObjectHandle Handle, \
-                                      HSAuint32* shareablehandle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtResetMetadata))(HsaMemoryObjectHandle Handle);
 
->>>>>>> c38bcebd3607 (Update IPC functions with new thunk calls)
     /* drm API */
     typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
                                       uint32_t *major_version, \
@@ -506,24 +504,14 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtModelEnabled)* HSAKMT_PFN(hsaKmtModelEnabled);
     HSAKMT_DEF(hsaKmtQueueRingDoorbell)* HSAKMT_PFN(hsaKmtQueueRingDoorbell);
     HSAKMT_DEF(hsaKmtAisReadWriteFile)* HSAKMT_PFN(hsaKmtAisReadWriteFile);
-<<<<<<< HEAD
     HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);
-=======
-    HSAKMT_DEF(hsaKmtMemoryImport)* HSAKMT_PFN(hsaKmtMemoryImport);
+    HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
     HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
     HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);
     HSAKMT_DEF(hsaKmtMemHandleFree)* HSAKMT_PFN(hsaKmtMemHandleFree);
-<<<<<<< HEAD
->>>>>>> 56f9955068d8 (SWDEV-558848 - Move DRM calls to thunk for better abstraction)
-=======
     HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)* HSAKMT_PFN(hsaKmtMemoryGetCpuAddr);
-<<<<<<< HEAD
->>>>>>> 90286a82c740 (Use thunk device handle instead of drm inside agent)
-=======
     HSAKMT_DEF(hsaKmtMemoryCpuMap)* HSAKMT_PFN(hsaKmtMemoryCpuMap);
-    HSAKMT_DEF(hsaKmtQueryShareableHandle)* HSAKMT_PFN(hsaKmtQueryShareableHandle);
     HSAKMT_DEF(hsaKmtResetMetadata)* HSAKMT_PFN(hsaKmtResetMetadata);
->>>>>>> c38bcebd3607 (Update IPC functions with new thunk calls)
 
     DRM_DEF(amdgpu_device_initialize)* DRM_PFN(amdgpu_device_initialize);
     DRM_DEF(amdgpu_device_deinitialize)* DRM_PFN(amdgpu_device_deinitialize);

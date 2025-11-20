@@ -942,8 +942,8 @@ hsaKmtGetMemoryHandle(void* va, void* MemoryAddress, HSAuint64 SizeInBytes,
 
 	return HSAKMT_STATUS_NOT_SUPPORTED;
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryImport(const HsaExternalHandleDesc* import_desc,
-    					HsaMemoryImportResult* import_res)
+HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_desc,
+    					HsaHandleImportResult* import_res, HsaHandleImportFlags* flags)
 {
 	CHECK_KFD_OPEN();
 	amdgpu_device_handle devhandle =  (amdgpu_device_handle)import_desc->device_handle;
@@ -964,6 +964,30 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryImport(const HsaExternalHandleDesc* import_d
 	int ret = amdgpu_bo_import(devhandle, type, import_desc->fd, &res);
 	if (ret) {
 		return HSAKMT_STATUS_ERROR;
+	}
+
+	if (flags->ui32.IPCHandle) {
+		//query buffer object for pre existing metadata
+    	struct amdgpu_bo_info info = {0};
+		ret = amdgpu_bo_query_info(res.buf_handle, &info);
+		if (ret) {
+			return HSAKMT_STATUS_INVALID_HANDLE;
+		}
+		uint32_t metadata = info.metadata.umd_metadata[0];
+		uint32_t size_metadata = info.metadata.size_metadata;
+		if (flags->ui32.UpdateMetadata && !flags->ui32.SysMem) {
+			if (!!size_metadata) { // return pre-exisiting metadata
+				import_res->metadata = (HSAuint32)metadata; 
+			} else {
+    			struct amdgpu_bo_metadata buf_info = {0};
+    			buf_info.size_metadata = sizeof(HSAuint32);
+    			buf_info.umd_metadata[0] = (uint32_t)import_desc->metadata;
+    			amdgpu_bo_set_metadata(res.buf_handle, &buf_info);
+			}
+		} else if (import_desc->metadata != metadata) {
+			import_res->metadata = (HSAuint32)metadata;
+			return HSAKMT_STATUS_INVALID_PARAMETER;
+		}  	
 	}
 
 	import_res->buf_handle = (HsaMemoryObjectHandle)res.buf_handle;
@@ -1072,23 +1096,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
   	*fd = (HSAint32)renderFd;
   	*cpu_addr = (HSAuint64)args.out.addr_ptr;
   	return HSAKMT_STATUS_SUCCESS;
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtQueryShareableHandle(HsaMemoryObjectHandle buf_handle,
-  						HSAuint32* shareablehandle)
-{
-	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)buf_handle;
-	//query buffer object for pre existing metadata
-    struct amdgpu_bo_info info = {0};
-    if (!amdgpu_bo_query_info(drmhandle, &info) && !!info.metadata.size_metadata) {
-    	*shareablehandle = info.metadata.umd_metadata[0];
-    } else {
-    	struct amdgpu_bo_metadata buf_info = {0};
-    	buf_info.size_metadata = sizeof(HSAuint32);
-    	buf_info.umd_metadata[0] = *shareablehandle;
-    	amdgpu_bo_set_metadata(drmhandle, &buf_info);
-	}
-	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtResetMetadata(HsaMemoryObjectHandle buf_handle) {

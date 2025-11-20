@@ -1411,28 +1411,22 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
       handle->handle[7] = rand();
 
-      HsaExternalHandleDesc desc;
-      desc.device_handle = agent_->libThunkDev();
-      desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
-      desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
-      HsaMemoryImportResult res;
-      HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryImport(&desc, &res));
-      if (status == HSAKMT_STATUS_ERROR) {
-        return HSA_STATUS_ERROR;
-      }
-
-      HSAuint32 metadata = {0};
-      status = HSAKMT_CALL(hsaKmtQueryShareableHandle(res.buf_handle, &metadata));
-      if (status == HSAKMT_STATUS_ERROR) {
-        return HSA_STATUS_ERROR;
-      }
-
-      if (!!metadata) {
-        handle->handle[7] = metadata;
-      } else {
-        allocation_map_[ptr].thunk_bo = res.buf_handle;
-      }
+    HsaExternalHandleDesc desc;
+    desc.device_handle = agent_->libThunkDev();
+    desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
+    desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
+    HsaHandleImportFlags hflags;
+    hflags.ui32.IPCHandle = 1;
+    hflags.ui32.SysMem = handle->handle[3];
+    hflags.ui32.UpdateMetadata = 1;
+    HsaHandleImportResult res;
+    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
+    if (status == HSAKMT_STATUS_ERROR) {
+      close(dmabuf_fd);
+      return HSA_STATUS_ERROR;
     }
+    handle->handle[7] = res.metadata;
+    allocation_map_[ptr].thunk_bo = res.buf_handle;
 #else
     assert(!"Unimplemented!");
 #endif
@@ -1485,7 +1479,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
 int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
                              unsigned int numNodes, HSAuint32 *nodes,
-                             void **importAddress, HSAuint64 *importSize, bool isDmabufSysmem) {
+                             void **importAddress, HSAuint64 *importSize, bool isDmabufSysmem,
+                             uint32_t shared_handle) {
     int dmabuf_fd = -1, socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     assert(socket_fd > -1 && "DMA buffer could not be imported for IPC!");
     if (socket_fd == -1) return -1;
@@ -1549,15 +1544,22 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       desc.device_handle = agent->libThunkDev();
       desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
       desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
-      HsaMemoryImportResult res;
-      HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryImport(&desc, &res));
-      if (status == HSAKMT_STATUS_ERROR) {
-        return HSA_STATUS_ERROR;
+      desc.metadata = reinterpret_cast<HSAuint32>(shared_handle);
+      HsaHandleImportFlags hflags;
+      hflags.ui32.IPCHandle = 1;
+      hflags.ui32.SysMem = isDmabufSysmem;
+      hflags.ui32.UpdateMetadata = 0;
+      HsaHandleImportResult res;
+      HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
+      if (status != HSAKMT_STATUS_SUCCESS) {
+        fprintf(stderr, "IPC Client Import: Invalid IPC handle! %u and %u\n", shared_handle, res.metadata);
+        close(dmabuf_fd);
+        return -1;
       }
 
       // Store the buffer object handle in allocation map for later use
-      if (err == HSAKMT_STATUS_SUCCESS) {
-        std::lock_guard<std::shared_mutex> lock(memory_lock_);
+      if (status == HSAKMT_STATUS_SUCCESS) {
+        ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
         allocation_map_[*importAddress] =
             AllocationRegion(nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
         allocation_map_[*importAddress].thunk_bo = res.buf_handle;
@@ -1596,33 +1598,17 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes, bool isSysMem) {
 
       int ret = ipc_dmabuf_supported_ ? IPCClientImport(importHandle.handle[2], dmaBufFDHandle, numNodes,
-                                                        nodes, &importAddress, &importSize, isSysMem) :
+                                                        nodes, &importAddress, &importSize, isSysMem,
+                                                        importHandle.handle[7]) :
                                                         HSAKMT_CALL(hsaKmtRegisterSharedHandle(
                                                         reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
                                                         &importAddress, &importSize
                                                         ));
 
-      if (ret) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      if (ipc_dmabuf_supported_ && !isSysMem) {
-#if defined(__linux__)
-        if (!thunkLoader()->IsDXG()) {
-          // use the bo from the allocation map
-          // Only check metadata for GPU memory
-          HSAuint32 metadata = {0};
-          HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtQueryShareableHandle(allocation_map_[importAddress].thunk_bo, &metadata));
-          if (status == HSAKMT_STATUS_ERROR) {
-            return HSA_STATUS_ERROR;
-          }
-          // Validate metadata for IPC handle
-          if (ret || reinterpret_cast<uint32_t>(metadata) != importHandle.handle[7]) {
-              fprintf(stderr, "IPC Attach: Invalid IPC handle! %u and %u\n", importHandle.handle[7], metadata);
-              return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-          }
-        }
-#else
-        assert(!"Unimplemented!");
-#endif
+      if (ret) {
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       }
+      
       return HSA_STATUS_SUCCESS;
     };
 
@@ -1678,7 +1664,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       HSAKMT_CALL(hsaKmtMemHandleFree(bo));
       return HSA_STATUS_ERROR;
     };
-
+    
     // Create a shared cpu access pointer for user
     void *cpuPtr;
     HsaMemoryObjectHandle bo = allocation_map_[importAddress].thunk_bo;
@@ -2461,7 +2447,7 @@ void Runtime::Unload() {
   // Close IPC socket server
   if (ipc_sock_server_conns_.size())
     IPCClientImport(getpid(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
-                    0, NULL, NULL, NULL, false);
+                    0, NULL, NULL, NULL, false, 0);
 
   svm_profile_.reset(nullptr);
 
