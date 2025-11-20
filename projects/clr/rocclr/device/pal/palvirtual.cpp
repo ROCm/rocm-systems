@@ -2330,7 +2330,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 
     pal::Memory* phys_pal_mem = dev().getGpuMemory(phys_mem_obj);
     phymem_igpu_mem = phys_pal_mem->iMem();
-    phys_offset = phys_pal_mem->virtualAddress() - phymem_igpu_mem->Desc().gpuVirtAddr;
+    phys_offset = phys_pal_mem->offset();
   } else {
     vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
   }
