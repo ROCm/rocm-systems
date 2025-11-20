@@ -31,9 +31,9 @@ module_param(debug_enable, bool, 0644);
 MODULE_PARM_DESC(debug_enable, "Enable debug output (default: true)");
 EXPORT_SYMBOL(debug_enable);
 
-static int timer_period_ms = 100;
+static int timer_period_ms = 20;
 module_param(timer_period_ms, int, 0644);
-MODULE_PARM_DESC(timer_period_ms, "Timer period in milliseconds (default: 100)");
+MODULE_PARM_DESC(timer_period_ms, "Timer period in milliseconds (default: 20)");
 
 /* Forward declarations for PMU callbacks */
 static int amdgpu_pmu_event_init(struct perf_event *event);
@@ -223,6 +223,67 @@ reschedule:
     hrtimer_forward_now(timer, pmu->timer_period);
     return HRTIMER_RESTART;
 }
+
+/* Start background polling timer - called when first measurement becomes active */
+void amdgpu_pmu_start_timer(void)
+{
+    struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
+
+    pmu_info("amdgpu_pmu_start_timer() called\n");
+
+    if (!pmu) {
+        pmu_err("Cannot start timer: PMU not initialized\n");
+        return;
+    }
+
+    /* Start timer if not already running */
+    if (!hrtimer_active(&pmu->timer)) {
+        hrtimer_start(&pmu->timer, pmu->timer_period, HRTIMER_MODE_REL);
+        pmu_info("Started background polling timer (period=%d ms)\n", timer_period_ms);
+    } else {
+        pmu_info("Timer already active, not starting again\n");
+    }
+}
+EXPORT_SYMBOL(amdgpu_pmu_start_timer);
+
+/* Stop background polling timer if no active measurements - called when last measurement stops */
+void amdgpu_pmu_stop_timer_if_idle(void)
+{
+    struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
+    struct aql_perf_session *session;
+
+    pmu_info("amdgpu_pmu_stop_timer_if_idle() called\n");
+
+    if (!pmu) {
+        pmu_err("Cannot stop timer: PMU not initialized\n");
+        return;
+    }
+
+    /* Check if there are any active measurements */
+    session = aql_pmu_get_session();
+    if (!session) {
+        /* No session, safe to stop timer */
+        if (hrtimer_active(&pmu->timer)) {
+            hrtimer_cancel(&pmu->timer);
+            pmu_info("Stopped background polling timer (no session)\n");
+        }
+        return;
+    }
+
+    /* If no active GPUs, stop the timer */
+    if (atomic_read(&session->active_gpu_count) == 0) {
+        if (hrtimer_active(&pmu->timer)) {
+            hrtimer_cancel(&pmu->timer);
+            pmu_info("Stopped background polling timer (no active measurements)\n");
+        }
+    } else {
+        pmu_info("Timer still needed (%d active measurements)\n",
+                 atomic_read(&session->active_gpu_count));
+    }
+
+    aql_pmu_put_session(session);
+}
+EXPORT_SYMBOL(amdgpu_pmu_stop_timer_if_idle);
 
 /* Find free event slot */
 int amdgpu_pmu_get_event_idx(struct amdgpu_pmu *pmu)
@@ -434,7 +495,6 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
 /* PMU callback: Add event to PMU */
 static int amdgpu_pmu_add(struct perf_event *event, int flags)
 {
-    struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
     struct hw_perf_event *hwc = &event->hw;
 
     pmu_debug("add: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
@@ -449,12 +509,7 @@ static int amdgpu_pmu_add(struct perf_event *event, int flags)
                 return ret;
             }
             hwc->state = 0;
-
-            /* Start background polling timer if not already running */
-            if (pmu && !hrtimer_active(&pmu->timer)) {
-                hrtimer_start(&pmu->timer, pmu->timer_period, HRTIMER_MODE_REL);
-                pmu_info("Started background polling timer (period=%d ms)\n", timer_period_ms);
-            }
+            /* Timer will be started by aql_perf_measurement_start() after measurement becomes active */
         } else {
             hwc->state = PERF_HES_STOPPED;
         }
@@ -479,7 +534,7 @@ static void amdgpu_pmu_del(struct perf_event *event, int flags)
 {
     struct hw_perf_event *hwc = &event->hw;
 
-    pmu_debug("del: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
+    pmu_info("del: ENTRY - config=0x%llx, flags=0x%x\n", event->attr.config, flags);
 
     /* Check if this is an AQL hardware event */
     if (hwc->config_base != 0) {
@@ -519,7 +574,6 @@ static void amdgpu_pmu_del(struct perf_event *event, int flags)
 /* PMU callback: Start event */
 static void amdgpu_pmu_start(struct perf_event *event, int flags)
 {
-    struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
     struct hw_perf_event *hwc = &event->hw;
 
     pmu_info("start: ENTRY - config=0x%llx, flags=0x%x, hwc->config_base=0x%lx\n",
@@ -537,12 +591,7 @@ static void amdgpu_pmu_start(struct perf_event *event, int flags)
         if (aql_pmu_event_start(event) == 0) {
             hwc->state = 0;
             pmu_debug("start: Started AQL hardware event config=0x%llx successfully\n", event->attr.config);
-
-            /* Start background polling timer if not already running */
-            if (pmu && !hrtimer_active(&pmu->timer)) {
-                hrtimer_start(&pmu->timer, pmu->timer_period, HRTIMER_MODE_REL);
-                pmu_info("Started background polling timer (period=%d ms)\n", timer_period_ms);
-            }
+            /* Timer will be started by aql_perf_measurement_start() after measurement becomes active */
         } else {
             pmu_err("start: Failed to start AQL hardware event config=0x%llx\n", event->attr.config);
             hwc->state = PERF_HES_STOPPED;

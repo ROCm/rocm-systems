@@ -79,6 +79,8 @@ enum hrtimer_restart amdgpu_pmu_timer_handler(struct hrtimer *timer);
 void amdgpu_pmu_update_counters(struct amdgpu_pmu *pmu);
 int amdgpu_pmu_get_event_idx(struct amdgpu_pmu *pmu);
 void amdgpu_pmu_free_event_idx(struct amdgpu_pmu *pmu, int idx);
+void amdgpu_pmu_start_timer(void);
+void amdgpu_pmu_stop_timer_if_idle(void);
 
 /* Event utility functions */
 const char *amdgpu_pmu_get_event_name(u64 config);

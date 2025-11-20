@@ -669,12 +669,10 @@ int aql_perf_measurement_start(struct aql_measurement *measurement)
         /* Cleanup PM4 buffer */
         pm4_buffer_destroy(pm4_buffer);
 
-        /* Wait for START packet to complete on GPU before reading baseline.
-         * The START packet needs to configure GRBM, enable perfmon, set SQ control,
-         * and configure counter registers. Reading too early would give an incorrect
-         * baseline before the counter is fully enabled. */
-        msleep(10);
-        aql_info("[PMU] Session %llu: Waited for START packet completion", session->session_id);
+        /* KFD ioctl is synchronous - START packet has completed by this point.
+         * The GPU has configured GRBM, enabled perfmon, set SQ control,
+         * and configured counter registers. Safe to read baseline now. */
+        aql_info("[PMU] Session %llu: START packet completed", session->session_id);
 
         aql_info("[PMU] Session %llu: Started measurement for GPU %u (owns_counter=true)",
                  session->session_id, measurement->gpu_id);
@@ -687,6 +685,10 @@ int aql_perf_measurement_start(struct aql_measurement *measurement)
     spin_lock_irqsave(&session->measurement_lock, flags);
     measurement->state = MEASUREMENT_ACTIVE;
     spin_unlock_irqrestore(&session->measurement_lock, flags);
+
+    /* Start background polling timer now that measurement is active.
+     * This ensures timer only polls after measurements are ready. */
+    amdgpu_pmu_start_timer();
 
     /* Read initial counter value for delta tracking.
      * GPU counters don't reset on START, so we need to track the baseline. */
@@ -802,6 +804,9 @@ int aql_perf_measurement_stop(struct aql_measurement *measurement)
     measurement->state = MEASUREMENT_IDLE;
     atomic_dec(&session->active_gpu_count);
     spin_unlock_irqrestore(&session->measurement_lock, flags);
+
+    /* Stop timer if no more active measurements */
+    amdgpu_pmu_stop_timer_if_idle();
 
     mutex_unlock(&session->session_mutex);
     return 0;
