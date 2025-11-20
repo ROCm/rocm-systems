@@ -101,7 +101,7 @@ hipError_t IPCEvent::synchronize() {
 
 // ================================================================================================
 hipError_t IPCEvent::streamWait(hip::Stream* stream, uint flags) {
-  int offset = ipc_evt_.ipc_shmem_->read_index;
+  int offset = ipc_evt_.ipc_shmem_->read_index % IPC_SIGNALS_PER_EVENT;
   hipError_t status =
       ihipStreamOperation(reinterpret_cast<hipStream_t>(stream), ROCCLR_COMMAND_STREAM_WAIT_VALUE,
                           &(ipc_evt_.ipc_shmem_->signal[offset]), 0, 1, 1, sizeof(uint32_t));
