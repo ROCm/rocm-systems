@@ -110,14 +110,9 @@ main(int argc, char** argv)
         close(pid2link[0]);
         close(pid2link[1]);
 
-        const char* extra_env[] = {
-            "ROCPROFILER_REGISTER_LOG_LEVEL=trace",
-            "ROCPROFILER_LOG_LEVEL=trace",
-            nullptr,  // array is null terminated per exec() convention
-        };
         // Child process
         std::cout << "child executing " << argv[1] << std::endl;
-        int ret = execle(argv[1], argv[1], nullptr, extra_env);
+        int ret = execl(argv[1], argv[1], nullptr);
         if(ret == -1)
         {
             std::cout << "error in execl(), errno=" << errno << std::endl;
@@ -127,16 +122,16 @@ main(int argc, char** argv)
     else
     {
         // Wait a small amount of time for child processes to start executing
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
         setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[2], true);
-        // setenv("ROCATTACH_LOG_LEVEL", "trace", true);
+        setenv("ROCATTACH_LOG_LEVEL", "trace", true);
 
         ROCATTACH_CALL(rocattach_attach(pid1));
         ROCATTACH_CALL(rocattach_attach(pid2));
 
         // Wait a small amount of time for child processes to continue executing
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
 
         ROCATTACH_CALL(rocattach_detach(pid1));
         ROCATTACH_CALL(rocattach_detach(pid2));
@@ -170,13 +165,24 @@ main(int argc, char** argv)
         close(pid1link[0]);
         close(pid2link[0]);
 
-        std::cout << pid1sstream.str() << std::endl;
-        std::cout << pid2sstream.str() << std::endl;
+        std::cout << "\n\n===== Test app 1 output PID " << pid1 << " =====\n\n"
+                  << pid1sstream.str() << std::endl;
+        std::cout << "\n\n===== Test app 2 output PID " << pid2 << " =====\n\n"
+                  << pid2sstream.str() << std::endl;
 
         // CMake pass regex search doesn't handle multiline searches, so main has to verify instead.
         const char c_tool_output[] = "Test C tool (priority=0) is using rocprofiler-sdk v";
-        if(pid1sstream.str().find(c_tool_output) != std::string::npos &&
-           pid2sstream.str().find(c_tool_output) != std::string::npos)
+        const bool foundinpid1     = pid1sstream.str().find(c_tool_output) != std::string::npos;
+        const bool foundinpid2     = pid2sstream.str().find(c_tool_output) != std::string::npos;
+        if(!foundinpid1)
+        {
+            std::cout << "Fail: Could not find C tool output in pid 1 output" << std::endl;
+        }
+        if(!foundinpid2)
+        {
+            std::cout << "Fail: Could not find C tool output in pid 2 output" << std::endl;
+        }
+        if(foundinpid1 && foundinpid2)
         {
             std::cout << "C tool was loaded in both processes." << std::endl;
         }

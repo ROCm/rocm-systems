@@ -345,7 +345,7 @@ teardown(int pid)
     }
 
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting detachment to pid " << pid;
-    session->detach();
+    status = session->detach();
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Detachment failed from pid " << pid;
@@ -405,6 +405,8 @@ rocattach_detach(int pid)
     }
     else
     {
+        ROCP_INFO << "[rocprofiler-sdk-rocattach] rocattach_detach received pid=0, detaching from "
+                     "ALL sessions";
         std::vector<int> pids;
         {
             auto lg = rocprofiler::rocattach::get_sessions_lock_guard();
@@ -425,18 +427,18 @@ rocattach_detach(int pid)
 rocattach_status_t
 rocattach_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
 {
-    if(major) *major = ROCATTACH_VERSION_MAJOR;
-    if(minor) *minor = ROCATTACH_VERSION_MINOR;
-    if(patch) *patch = ROCATTACH_VERSION_PATCH;
+    *CHECK_NOTNULL(major) = ROCATTACH_VERSION_MAJOR;
+    *CHECK_NOTNULL(minor) = ROCATTACH_VERSION_MINOR;
+    *CHECK_NOTNULL(patch) = ROCATTACH_VERSION_PATCH;
     return ROCATTACH_STATUS_SUCCESS;
 }
 
 rocattach_status_t
 rocattach_get_version_triplet(rocattach_version_triplet_t* info)
 {
-    *info = {.major = ROCATTACH_VERSION_MAJOR,
-             .minor = ROCATTACH_VERSION_MINOR,
-             .patch = ROCATTACH_VERSION_PATCH};
+    *CHECK_NOTNULL(info) = {.major = ROCATTACH_VERSION_MAJOR,
+                            .minor = ROCATTACH_VERSION_MINOR,
+                            .patch = ROCATTACH_VERSION_PATCH};
     return ROCATTACH_STATUS_SUCCESS;
 }
 

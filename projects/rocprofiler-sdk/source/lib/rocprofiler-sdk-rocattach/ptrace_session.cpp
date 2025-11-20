@@ -291,11 +291,15 @@ PTraceSession::ptrace_signal_handler_func(
             auto sig = WSTOPSIG(status);
             ROCP_TRACE << "[rocprofiler-sdk-rocattach] process " << _pid << " stopped by signal "
                        << sig;
-            // If we were expecting a breakpoint, change state to signal the update, otherwise
-            // continue forward it to the process
+            // If the signal is SIGTRAP (5) AND we were expecting a breakpoint, change state to
+            // signal the update, otherwise continue forward it to the process. NOTE: If our
+            // injection causes a SIGSEGV, we can technically recover by handling the signal and
+            // restoring the code, which would allow the user code to continue normally. For now,
+            // this will crash the user app.
             ptrace_session_signal_handler_state_t expected_state =
                 PTRACE_SIGNAL_HANDLER_STATE_WAITING_FOR_BREAKPOINT;
-            if(_state.compare_exchange_strong(expected_state, PTRACE_SIGNAL_HANDLER_STATE_ATTACHED))
+            if(sig == SIGTRAP &&
+               _state.compare_exchange_strong(expected_state, PTRACE_SIGNAL_HANDLER_STATE_ATTACHED))
             {
                 ROCP_TRACE << "[rocprofiler-sdk-rocattach] process " << _pid
                            << " hit expected breakpoint.";
