@@ -10,7 +10,6 @@ on:
 
 jobs:
   cleanup-rocprofiler-images:
-    needs: prepare_matrix_ci
     runs-on: ubuntu-latest
     permissions:
       contents: read
