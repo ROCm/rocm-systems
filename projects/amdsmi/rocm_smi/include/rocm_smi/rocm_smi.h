@@ -1475,6 +1475,22 @@ typedef enum {
 } rsmi_reg_type_t;
 
 /**
+ * @brief PTL (Peak Tops Limiter) data format types
+ * These correspond to the hardware data types used in matrix operations.
+ * Only F8 and XF32 are always supported at full performance. From the remaining
+ * five types, only two can be supported at peak performance simultaneously.
+ *
+ */
+typedef enum {
+    RSMI_PTL_DATA_FORMAT_I8 = 0x0,        //!< Integer 8-bit format
+    RSMI_PTL_DATA_FORMAT_F16 = 0x1,       //!< Float 16-bit format
+    RSMI_PTL_DATA_FORMAT_BF16 = 0x2,      //!< Brain Float 16-bit format
+    RSMI_PTL_DATA_FORMAT_F32 = 0x3,       //!< Float 32-bit format
+    RSMI_PTL_DATA_FORMAT_F64 = 0x4,       //!< Float 64-bit format
+    RSMI_PTL_DATA_FORMAT_INVALID = 0xFFFFFFFF  //!< Invalid format
+} rsmi_ptl_data_format_t;
+
+/**
  * @brief This structure holds error counts.
  */
 typedef struct {
@@ -5599,6 +5615,96 @@ rsmi_dev_metrics_header_info_get(uint32_t dv_ind, metrics_table_header_t* header
  */
 rsmi_status_t
 rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value);
+
+/**
+ *  @brief Check if ptl enabled for device
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a bool in which
+ *  the status will stored
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] enabled a pointer to bool to which the status will be stored
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
+ *
+ */
+rsmi_status_t
+rsmi_get_gpu_ptl_state(uint32_t dv_ind, bool* enabled);
+
+/**
+ *  @brief Set PTL enable/disable state
+ *
+ *  @ingroup tagPTL
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function enables or disables PTL (Peak Tops Limiter) operation.
+ *  Use rsmi_set_gpu_ptl_enable_with_formats()
+ *  for more control over the preferred data formats when enabling.
+ *
+ *  @param[in] processor_handle Device to configure
+ *
+ *  @param[in] enable Boolean flag: true to enable PTL with default formats,
+ *  false to disable PTL
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+rsmi_status_t
+rsmi_set_gpu_ptl_state(uint32_t dv_ind, bool enabled);
+
+/**
+ *  @brief Get ptl data formats
+ *
+ *  @details Given a device index @p dv_ind and string pointers to store ptl data
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] format a pointer to data format to which the raw format string will be stored
+ * 
+ *  @param[in] len the length of the caller provided buffer @p name.
+ * 
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
+ *
+ */
+rsmi_status_t
+rsmi_dev_read_ptl_format(uint32_t dv_ind, char* format, size_t len);
+
+/**
+ *  @brief Set ptl data formats
+ *
+ *  @details Given a device index @p dv_ind and raw string poitner in which to set ptl format
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] format string pointer format to set ptl level to
+ * 
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
+ *
+ */
+rsmi_status_t
+rsmi_dev_write_ptl_format(uint32_t dv_ind, const char* format);
+
+/**
+ *  @brief Get supported ptl formats
+ *
+ *  @details Given a device index @p dv_ind and string pointer return supported ptl formats
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] supported string pointer to return supported ptl formats
+ * 
+ *  @param[in] len the length of the caller provided buffer @p name.
+ * 
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
+ *
+ */
+rsmi_status_t
+rsmi_dev_read_ptl_supported(uint32_t dv_ind, char* supported, size_t length);
 
 /**
  *  @brief Get the log from the GPU metrics associated with the device

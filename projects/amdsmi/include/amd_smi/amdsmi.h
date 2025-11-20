@@ -2169,6 +2169,22 @@ typedef struct {
     uint64_t            reserved[6];
 } amdsmi_npm_info_t;
 
+/**
+ * @brief PTL (Peak Tops Limiter) data format types
+ * These correspond to the hardware data types used in matrix operations.
+ * Only F8 and XF32 are always supported at full performance. From the remaining
+ * five types, only two can be supported at peak performance simultaneously.
+ *
+ */
+typedef enum {
+    AMDSMI_PTL_DATA_FORMAT_I8 = 0x0,        //!< Integer 8-bit format
+    AMDSMI_PTL_DATA_FORMAT_F16 = 0x1,       //!< Float 16-bit format
+    AMDSMI_PTL_DATA_FORMAT_BF16 = 0x2,      //!< Brain Float 16-bit format
+    AMDSMI_PTL_DATA_FORMAT_F32 = 0x3,       //!< Float 32-bit format
+    AMDSMI_PTL_DATA_FORMAT_F64 = 0x4,       //!< Float 64-bit format
+    AMDSMI_PTL_DATA_FORMAT_INVALID = 0xFFFFFFFF  //!< Invalid format
+} amdsmi_ptl_data_format_t;
+
 #ifdef ENABLE_ESMI_LIB
 
 /**
@@ -6607,6 +6623,109 @@ amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *
 amdsmi_status_t amdsmi_gpu_driver_reload(void);
 
 /** @} End tagDriverControl */
+
+/*****************************************************************************/
+/** @defgroup tagPTL Peak Tops Limiter
+ *  @{
+ */
+
+/**
+ *  @brief Get PTL enable/disable state
+ *
+ *  @ingroup tagPTL
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function retrieves whether PTL (Peak Tops Limiter) is currently
+ *  enabled or disabled for the specified processor. This is a simple state query
+ *  that returns the current PTL operational state without detailed configuration.
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] enabled Pointer to boolean that will be set to true if PTL is 
+ *  enabled, false if PTL is disabled
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, 
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if PTL is not supported on this device,
+ *          non-zero on other failures
+ */
+amdsmi_status_t
+amdsmi_get_gpu_ptl_state(amdsmi_processor_handle processor_handle, bool *enabled);
+
+/**
+ *  @brief Set PTL enable/disable state
+ *
+ *  @ingroup tagPTL
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function enables or disables PTL (Peak Tops Limiter) operation.
+ *  Use amdsmi_set_gpu_ptl_enable_with_formats()
+ *  for more control over the preferred data formats when enabling.
+ *
+ *  @param[in] processor_handle Device to configure
+ *
+ *  @param[in] enable Boolean flag: true to enable PTL with default formats,
+ *  false to disable PTL
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_gpu_ptl_state(amdsmi_processor_handle processor_handle, bool enable);
+
+/**
+ *  @brief Get PTL (Peak Tops Limiter) formats for the processor
+ *
+ *  @ingroup tagPTL
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function retrieves the current PTL fromats
+ *  for the specified processor. PTL constrains the product to never deliver more 
+ *  than a specified TOPS/second. 
+ *
+ *  @param[in] processor_handle Device which to query
+*
+ *  @param[out] data_format1 Pointer to first preferred data format that receives peak performance
+ *
+ *  @param[out] data_format2 Pointer to second preferred data format that receives peak performance
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, 
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if PTL is not supported on this device,
+ *          non-zero on other failures
+ */
+amdsmi_status_t
+amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
+                        amdsmi_ptl_data_format_t *data_format1,
+                        amdsmi_ptl_data_format_t *data_format2);
+
+/**
+ *  @brief Set PTL with specified preferred data formats
+ *
+ *  @ingroup tagPTL
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function sets PTL with the specified preferred data format pair.
+ *  PTL must be enabled first before calling this function using amdsmi_set_gpu_ptl_state.
+ *  The two specified formats will receive accurate performance monitoring and peak 
+ *  performance. F8 and XF32 formats always receive peak performance regardless of this setting.
+ *
+ *  @param[in] processor_handle Device to configure
+ *
+ *  @param[in] data_format1 First preferred data format (must be from the limited set:
+ *  I8, F16, BF16, F32, F64)
+ *
+ *  @param[in] data_format2 Second preferred data format (must be from the limited set:
+ *  I8, F16, BF16, F32, F64, and different from data_format1)
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, 
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if PTL is not supported on this device,
+ *          non-zero on other failures 
+ **/
+amdsmi_status_t
+amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
+                          amdsmi_ptl_data_format_t data_format1,
+                          amdsmi_ptl_data_format_t data_format2);
 
 #ifdef ENABLE_ESMI_LIB
 
