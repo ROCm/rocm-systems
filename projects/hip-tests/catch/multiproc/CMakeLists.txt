@@ -18,15 +18,23 @@ set(TEST_SRC
 )
 
 if(UNIX)
+if (HIP_PLATFORM MATCHES "amd")
   add_custom_target(dummy_kernel.code
                       COMMAND ${CMAKE_HIP_COMPILER}
                       --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
                       -o ${CMAKE_CURRENT_BINARY_DIR}/../multiproc/dummy_kernel.code
                       -I${HIP_INCLUDE_DIR}
                       -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-    set_property(GLOBAL APPEND PROPERTY
-                 G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code)
+else()
+	add_custom_target(dummy_kernel.code
+	            COMMAND ${CMAKE_CXX_COMPILER}
+	            --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
+	            -o ${CMAKE_CURRENT_BINARY_DIR}/../multiproc/dummy_kernel.code
+	            -I${HIP_INCLUDE_DIR}
+	            -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 endif()
+set_property(GLOBAL APPEND PROPERTY
+              G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code)
 
 # the last argument linker libraries is required for this test but optional to the function
 if(HIP_PLATFORM MATCHES "nvidia")
@@ -46,5 +54,5 @@ elseif(HIP_PLATFORM MATCHES "amd")
 endif()
 
 if(UNIX)
-  add_dependencies(build_tests dummy_kernel.code)
+	#  add_dependencies(build_tests dummy_kernel.code)
 endif()

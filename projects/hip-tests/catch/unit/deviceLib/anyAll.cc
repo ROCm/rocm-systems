@@ -25,8 +25,9 @@ THE SOFTWARE.
 
 __global__ void warpvote(int* device_any, int* device_all, int pshift) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  device_any[threadIdx.x >> pshift] = __any(tid - 77);
-  device_all[threadIdx.x >> pshift] = __all(tid - 77);
+  unsigned mask = __activemask();
+  device_any[threadIdx.x >> pshift] = __any_sync(mask, tid - 77);
+  device_all[threadIdx.x >> pshift] = __all_sync(mask, tid - 77);
 }
 
 

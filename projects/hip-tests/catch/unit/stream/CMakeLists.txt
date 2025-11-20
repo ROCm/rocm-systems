@@ -20,10 +20,10 @@ set(TEST_SRC
     hipStreamGetDevice.cc
     hipStreamLegacy_Ext.cc
     hipStreamLegacy_compiler_options.cc
-    # hipStreamGetId.cc
-    # hipStreamSetGetAttributes.cc
+    hipStreamGetId.cc
+    hipStreamSetGetAttributes.cc
     # TODO renable it TheRock is not finding it
-    # hipStreamCopyAttributes.cc
+    hipStreamCopyAttributes.cc
   )
 
 if(HIP_PLATFORM MATCHES "amd")
