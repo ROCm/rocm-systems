@@ -143,4 +143,3 @@ jobs:
           tags: |
             ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-systems-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}
-
