@@ -20,12 +20,33 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(data_storage_sources ${CMAKE_CURRENT_LIST_DIR}/database.cpp)
+cmake_minimum_required(VERSION 3.20)
+project(rocstorage-library)
 
-set(data_storage_headers
-    ${CMAKE_CURRENT_LIST_DIR}/database.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/insert_query_builders.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/table_insert_query.hpp
-)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-target_sources(rocpd-library PRIVATE ${data_storage_sources} ${data_storage_headers})
+add_subdirectory(source)
+
+set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_MODULE_PATH})
+
+include(rocm)
+include(sqlite3)
+include(rocprofiler-sdk-rocpd)
+
+target_link_libraries(rocstorage PRIVATE $<BUILD_INTERFACE:rocstorage-sqlite3>)
+
+if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
+    target_link_libraries(rocstorage PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd)
+
+    target_compile_definitions(
+        rocstorage
+        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
+    )
+else()
+    target_include_directories(rocstorage PUBLIC ${CMAKE_BINARY_DIR})
+
+    target_compile_definitions(
+        rocstorage
+        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
+    )
+endif()

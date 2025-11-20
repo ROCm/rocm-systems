@@ -26,7 +26,7 @@
 #include <memory>
 #include <stdexcept>
 
-namespace rocpd
+namespace rocstorage
 {
 data_processor::data_processor(std::shared_ptr<data_storage::database> database)
 : _database(std::move(database))
@@ -588,4 +588,4 @@ data_processor::flush()
     _database->flush();
 }
 
-}  // namespace rocpd
+}  // namespace rocstorage

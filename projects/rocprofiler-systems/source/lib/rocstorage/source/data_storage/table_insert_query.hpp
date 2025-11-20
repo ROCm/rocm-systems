@@ -1,4 +1,3 @@
-
 // MIT License
 //
 // Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -22,63 +21,34 @@
 // SOFTWARE.
 
 #pragma once
-#include <optional>
-#include <string>
-#include <type_traits>
 
-namespace rocpd
+#include "insert_query_builders.hpp"
+
+namespace rocstorage
 {
-namespace common
+namespace data_storage
 {
-namespace traits
+namespace queries
 {
 
-namespace
+struct table_insert_query
 {
-template <typename T>
-struct is_string_literal_impl : std::false_type
-{};
+    table_insert_query()
+    : _query_columns_builder{ _ss }
+    {}
 
-template <>
-struct is_string_literal_impl<std::string_view> : std::true_type
-{};
+    query_builders::query_columns_builder& set_table_name(const std::string& tableName)
+    {
+        _ss.str("");
+        _ss << "INSERT INTO " << tableName << " ";
+        return _query_columns_builder;
+    }
 
-template <>
-struct is_string_literal_impl<const char*> : std::true_type
-{};
+private:
+    std::stringstream                     _ss;
+    query_builders::query_columns_builder _query_columns_builder;
+};
 
-template <>
-struct is_string_literal_impl<char*> : std::true_type
-{};
-
-template <>
-struct is_string_literal_impl<std::string> : std::true_type
-{};
-
-template <typename T>
-inline constexpr bool is_string_literal_impl_v = is_string_literal_impl<T>::value;
-
-}  // namespace
-
-template <typename T>
-constexpr bool
-is_string_literal()
-{
-    using Tp = std::decay_t<T>;
-    return is_string_literal_impl_v<Tp>;
-}
-
-template <typename T>
-struct is_optional : std::false_type
-{};
-
-template <typename T>
-struct is_optional<std::optional<T>> : std::true_type
-{};
-
-template <typename T>
-inline constexpr bool is_optional_v = is_optional<T>::value;
-
-}  // namespace traits
-}  // namespace common
-}  // namespace rocpd
+}  // namespace queries
+}  // namespace data_storage
+}  // namespace rocstorage

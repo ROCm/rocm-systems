@@ -27,8 +27,6 @@
 # ----------------------------------------------------------------------------------------#
 
 function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES)
-    target_compile_definitions(rocpd-library INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=0)
-
     set(SCHEMA_FILES
         "rocpd_tables.sql"
         "rocpd_views.sql"
@@ -56,9 +54,10 @@ function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES)
         configure_file("${TEMPLATE_FILE}" "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp" @ONLY)
     endforeach()
 
-    message(STATUS "[rocpd-library] Generating schema headers in ${SCHEMA_BINARY_DIR}")
-
-    target_include_directories(rocpd-library PUBLIC ${CMAKE_BINARY_DIR})
+    message(
+        STATUS
+        "[rocstorage-library] Generating schema headers in ${SCHEMA_BINARY_DIR}"
+    )
 endfunction()
 
 set(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD
@@ -67,20 +66,21 @@ set(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD
     "Use schema from rocprofiler-sdk-rocpd library"
     FORCE
 )
+
 find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
 
 if(rocprofiler-sdk-rocpd_FOUND)
-    set(ROCPROFSYS_ROCPD_HAS_SQL_H FALSE)
+    set(ROCPD_HAS_SQL_H FALSE)
 
     if(rocprofiler-sdk-rocpd_INCLUDE_DIR)
         set(_INCLUDE_PATH "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd")
         message(STATUS "${_INCLUDE_PATH}/sql.h")
         if(EXISTS "${_INCLUDE_PATH}/sql.h")
-            set(ROCPROFSYS_ROCPD_HAS_SQL_H TRUE)
+            set(ROCPD_HAS_SQL_H TRUE)
         endif()
     endif()
 
-    if(ROCPROFSYS_ROCPD_HAS_SQL_H)
+    if(ROCPD_HAS_SQL_H)
         set(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD
             ON
             CACHE BOOL
@@ -88,32 +88,23 @@ if(rocprofiler-sdk-rocpd_FOUND)
             FORCE
         )
 
-        target_compile_definitions(
-            rocpd-library
-            PUBLIC $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
-        )
-
         message(
             STATUS
-            "[rocpd-library] rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
+            "[rocstorage-library] rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
         )
     else()
         message(
             STATUS
-            "[rocpd-library] rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
+            "[rocstorage-library] rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
         )
     endif()
 else()
     message(
         STATUS
-        "[rocpd-library] rocprofiler-sdk-rocpd not found - using local schema files"
+        "[rocstorage-library] rocprofiler-sdk-rocpd not found - using local schema files"
     )
 endif()
 
 if(NOT USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
     rocpd_configure_rocpd_schema_files()
-    target_compile_definitions(
-        rocpd-library
-        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
-    )
 endif()

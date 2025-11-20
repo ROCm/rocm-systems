@@ -20,12 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(common_headers
-    ${CMAKE_CURRENT_LIST_DIR}/traits.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/directory.hpp
-)
+set(rocstorage_sources ${CMAKE_CURRENT_LIST_DIR}/data_processor.cpp)
+set(rocstorage_headers ${CMAKE_CURRENT_LIST_DIR}/data_processor.hpp)
 
-target_sources(rocpd-library PUBLIC ${common_headers})
-
-get_filename_component(ROCPD_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR} DIRECTORY)
-target_include_directories(rocpd-library PUBLIC ${ROCPD_SOURCE_DIR})
+add_library(rocstorage ${rocstorage_sources} ${rocstorage_headers})
+add_subdirectory(common)
+add_subdirectory(data_storage)

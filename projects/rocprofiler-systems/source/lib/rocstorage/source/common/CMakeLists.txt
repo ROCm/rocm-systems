@@ -20,29 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.20)
-project(rocpd)
+set(common_headers
+    ${CMAKE_CURRENT_LIST_DIR}/traits.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/directory.hpp
+)
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+target_sources(rocstorage PUBLIC ${common_headers})
 
-set(rocpd_sources ${CMAKE_CURRENT_LIST_DIR}/data_processor.cpp)
-set(rocpd_headers ${CMAKE_CURRENT_LIST_DIR}/data_processor.hpp)
-
-add_library(rocpd-library ${rocpd_sources} ${rocpd_headers})
-add_subdirectory(common)
-add_subdirectory(data_storage)
-
-set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_MODULE_PATH})
-
-include(rocm)
-include(sqlite3)
-include(rocprofiler-sdk-rocpd)
-
-target_link_libraries(rocpd-library PRIVATE $<BUILD_INTERFACE:rocpd-sqlite3>)
-
-if(rocprofiler-sdk-rocpd_FOUND)
-    target_link_libraries(
-        rocpd-library
-        PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-    )
-endif()
+get_filename_component(ROCSTORAGE_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR} DIRECTORY)
+target_include_directories(rocstorage PUBLIC ${ROCSTORAGE_SOURCE_DIR})

@@ -55,7 +55,7 @@ if(ROCPD_BUILD_SQLITE3)
     find_program(MAKE_COMMAND NAMES make gmake PATH_SUFFIXES bin REQUIRED)
 
     ExternalProject_Add(
-        rocpd-sqlite3-build
+        rocstorage-sqlite3-build
         SOURCE_DIR ${sqlite3_source_SOURCE_DIR}
         PREFIX ${PROJECT_BINARY_DIR}/external/sqlite/build
         BUILD_IN_SOURCE 0
@@ -71,29 +71,32 @@ if(ROCPD_BUILD_SQLITE3)
         LOG_INSTALL ON
     )
 
-    add_library(rocpd-sqlite3-static STATIC IMPORTED GLOBAL)
+    add_library(rocstorage-sqlite3-static STATIC IMPORTED GLOBAL)
     set_target_properties(
-        rocpd-sqlite3-static
+        rocstorage-sqlite3-static
         PROPERTIES
             IMPORTED_LOCATION ${SQLITE3_LIB_FILE}
             INTERFACE_INCLUDE_DIRECTORIES ${SQLITE3_INCLUDE_DIR}
     )
 
-    add_dependencies(rocpd-sqlite3-static rocpd-sqlite3-build)
+    add_dependencies(rocstorage-sqlite3-static rocstorage-sqlite3-build)
 
-    add_library(rocpd-sqlite3 INTERFACE)
-    target_link_libraries(rocpd-sqlite3 INTERFACE rocpd-sqlite3-static ${CMAKE_DL_LIBS})
+    add_library(rocstorage-sqlite3 INTERFACE)
+    target_link_libraries(
+        rocstorage-sqlite3
+        INTERFACE rocstorage-sqlite3-static ${CMAKE_DL_LIBS}
+    )
 
     target_include_directories(
-        rocpd-sqlite3
+        rocstorage-sqlite3
         SYSTEM
         INTERFACE $<BUILD_INTERFACE:${SQLITE3_INCLUDE_DIR}>
     )
 
     message(STATUS "SQLite3 will be installed to: ${SQLITE3_INSTALL_DIR}")
 else()
-    message(STATUS "[rocpd-library] Using system SQLite3 library")
+    message(STATUS "[rocstorage-library] Using system SQLite3 library")
     find_package(SQLite3 REQUIRED)
-    add_library(rocpd-sqlite3 INTERFACE)
-    target_link_libraries(rocpd-sqlite3 INTERFACE SQLite::SQLite3)
+    add_library(rocstorage-sqlite3 INTERFACE)
+    target_link_libraries(rocstorage-sqlite3 INTERFACE SQLite::SQLite3)
 endif()

@@ -60,10 +60,10 @@ namespace
 void
 create_directory_for_database_file(const std::string& db_file)
 {
-    auto _db_dirname = rocpd::common::dirname(db_file);
-    if(!rocpd::common::direxists(_db_dirname))
+    auto _db_dirname = rocstorage::common::dirname(db_file);
+    if(!rocstorage::common::direxists(_db_dirname))
     {
-        rocpd::common::makedir(_db_dirname);
+        rocstorage::common::makedir(_db_dirname);
     }
 }
 
@@ -153,7 +153,7 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
 
 }  // namespace
 
-namespace rocpd
+namespace rocstorage
 {
 namespace data_storage
 {
@@ -234,4 +234,4 @@ database::flush()
 }
 
 }  // namespace data_storage
-}  // namespace rocpd
+}  // namespace rocstorage

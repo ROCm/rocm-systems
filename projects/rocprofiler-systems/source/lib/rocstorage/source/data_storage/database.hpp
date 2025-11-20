@@ -31,7 +31,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace rocpd
+namespace rocstorage
 {
 namespace data_storage
 {
@@ -203,4 +203,4 @@ private:
 };
 
 }  // namespace data_storage
-}  // namespace rocpd
+}  // namespace rocstorage

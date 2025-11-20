@@ -31,7 +31,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace rocpd
+namespace rocstorage
 {
 struct data_processor
 {
@@ -243,4 +243,4 @@ private:
     std::string _uuid{};
 };
 
-}  // namespace rocpd
+}  // namespace rocstorage

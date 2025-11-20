@@ -28,7 +28,7 @@
 #include <string>
 #include <type_traits>
 
-namespace rocpd
+namespace rocstorage
 {
 namespace data_storage
 {
@@ -120,4 +120,4 @@ private:
 }  // namespace query_builders
 }  // namespace queries
 }  // namespace data_storage
-}  // namespace rocpd
+}  // namespace rocstorage

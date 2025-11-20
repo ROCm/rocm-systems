@@ -29,7 +29,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace rocpd
+namespace rocstorage
 {
 namespace common
 {
@@ -82,4 +82,4 @@ makedir(const std::string& path)
 }
 
 }  // namespace common
-}  // namespace rocpd
+}  // namespace rocstorage
