@@ -25,6 +25,7 @@
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "version_read.h"
+#include "../test_common.h"
 
 TestVersionRead::TestVersionRead() : TestBase() {
   set_title("AMDSMI Version Read Test");
@@ -66,7 +67,9 @@ void TestVersionRead::Run(void) {
     return;
   }
 
+  DISPLAY_AMDSMI_API("amdsmi_get_lib_version", "");
   err = amdsmi_get_lib_version(&ver);
+  DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
   CHK_ERR_ASRT(err)
 
   ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF &&

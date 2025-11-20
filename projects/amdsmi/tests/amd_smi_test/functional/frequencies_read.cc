@@ -100,19 +100,19 @@ void TestFrequenciesRead::Run(void) {
   for (uint32_t x = 0; x < num_iterations(); ++x) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
       auto freq_output = [&](amdsmi_clk_type_t t, const char *name) {
+        DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu="+std::to_string(i));
         err =  amdsmi_get_clk_freq(processor_handles_[i], t, &f);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
         if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-          std::cout << "\t**Get " << name <<
-                               ": Not supported on this machine" << std::endl;
           // Verify api support checking functionality is working
+          DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu="+std::to_string(i));
           err =  amdsmi_get_clk_freq(processor_handles_[i], t, nullptr);
+          DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
           ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
           return;
         }
 
         if (err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
-          std::cout << "\t**Get " << name <<
-                               ": Not implemented on this machine" << std::endl;
           return;
         }
 
@@ -129,7 +129,9 @@ void TestFrequenciesRead::Run(void) {
           std::cout << f.num_supported << std::endl;
           print_frequencies(&f);
           // Verify api support checking functionality is working
+          DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu="+std::to_string(i));
           err =  amdsmi_get_clk_freq(processor_handles_[i], t, nullptr);
+          DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
           ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
         }
       };
@@ -142,16 +144,16 @@ void TestFrequenciesRead::Run(void) {
       freq_output(AMDSMI_CLK_TYPE_DCEF, "Display Controller Engine Clock");
       freq_output(AMDSMI_CLK_TYPE_SOC, "SOC Clock");
 
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(i));
       err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], &b);
+      DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine"
-                                                              << std::endl;
         // Verify api support checking functionality is working
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(i));
         err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
       } else if (err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
-          std::cout << "\t**Get PCIE Bandwidth "
-                    << ": Not implemented on this machine" << std::endl;
       } else {
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
@@ -160,14 +162,11 @@ void TestFrequenciesRead::Run(void) {
           print_frequencies(&b.transfer_rate, b.lanes);
           // Verify api support checking functionality is working
           // NOTE:  We expect AMDSMI_STATUS_NOT_SUPPORTED, if rsmi_pcie_bandwidth_t* is NULL
+          DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(i));
           err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
+          DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
           if (err != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
               ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-          }
-          else {
-              auto status_string("");
-              amdsmi_status_code_to_string(err, &status_string);
-              std::cout << "\t\t** amdsmi_get_gpu_pci_bandwidth(): " << status_string << "\n";
           }
         }
       }

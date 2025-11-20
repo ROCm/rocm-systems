@@ -28,6 +28,7 @@
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "mutual_exclusion.h"
+#include "../test_common.h"
 
 #define  AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
 
@@ -65,7 +66,9 @@ void TestMutualExclusion::SetUp(void) {
 
     // AMD_SMI_INIT_FLAG_RESRV_TEST1 tells rsmi to fail immediately
     // if it can't get the mutex instead of waiting.
+    DISPLAY_AMDSMI_API("amdsmi__INIT_FLAG_RESRV_TEST1", "");
     ret = amdsmi_init(AMD_SMI_INIT_FLAG_RESRV_TEST1);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
     }
@@ -75,7 +78,9 @@ void TestMutualExclusion::SetUp(void) {
   } else {
     sleep(1);  // Let the sleeper process get through amdsmi_init() before
               // this one goes, so it doesn't fail.
+    DISPLAY_AMDSMI_API("amdsmi__INIT_FLAG_RESRV_TEST1", "");
     ret = amdsmi_init(AMD_SMI_INIT_FLAG_RESRV_TEST1);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
     }
@@ -170,61 +175,111 @@ void TestMutualExclusion::Run(void) {
     std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl; \
   } \
 }
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_id", "0");
     ret = amdsmi_get_gpu_id(processor_handles_[0], &dmy_ui16);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
 
     // vendor_id, unique_id
     amdsmi_asic_info_t asic_info;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_asic_info", "0");
     ret = amdsmi_get_gpu_asic_info(processor_handles_[0], &asic_info);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
     // device name, brand, serial_number
     amdsmi_board_info_t board_info;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_board_info", "0");
     ret = amdsmi_get_gpu_board_info(processor_handles_[0], &board_info);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vendor_name", "0");
     ret = amdsmi_get_gpu_vendor_name(processor_handles_[0], dmy_str, 10);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_vendor", "0");
     ret = amdsmi_get_gpu_vram_vendor(processor_handles_[0], dmy_str, 10);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_subsystem_id", "0");
     ret = amdsmi_get_gpu_subsystem_id(processor_handles_[0], &dmy_ui16);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_bdf_id", "0");
     ret = amdsmi_get_gpu_bdf_id(processor_handles_[0], &dmy_ui64);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_throughput", "0");
     ret = amdsmi_get_gpu_pci_throughput(processor_handles_[0], &dmy_ui64, &dmy_ui64, &dmy_ui64);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "0");
     ret =  amdsmi_get_gpu_pci_replay_counter(processor_handles_[0], &dmy_ui64);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_pci_bandwidth", "0");
     ret =  amdsmi_set_gpu_pci_bandwidth(processor_handles_[0], 0);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "0");
     ret = amdsmi_get_gpu_fan_rpms(processor_handles_[0], dmy_ui32, &dmy_i64);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed", "0");
     ret = amdsmi_get_gpu_fan_speed(processor_handles_[0], 0, &dmy_i64);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_max", "0");
     ret = amdsmi_get_gpu_fan_speed_max(processor_handles_[0], 0, &dmy_ui64);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_temp_metric", "0");
     ret =  amdsmi_get_temp_metric(processor_handles_[0], AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMP_CURRENT, &dmy_i64);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_reset_gpu_fan", "0");
     ret = amdsmi_reset_gpu_fan(processor_handles_[0], 0);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fan_speed", "0");
     ret = amdsmi_set_gpu_fan_speed(processor_handles_[0], dmy_ui32, 0);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "0");
     ret = amdsmi_get_gpu_perf_level(processor_handles_[0], &dmy_perf_lvl);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_overdrive_level", "0");
     ret = amdsmi_get_gpu_overdrive_level(processor_handles_[0], &dmy_ui32);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "0");
     ret =  amdsmi_get_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, &dmy_freqs);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_info", "0");
     ret =  amdsmi_get_gpu_od_volt_info(processor_handles_[0], &dmy_od_volt);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_curve_regions", "0");
     ret =  amdsmi_get_gpu_od_volt_curve_regions(processor_handles_[0], &dmy_ui32, &dmy_vlt_reg);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "0");
     ret =  amdsmi_set_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, 0);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count", "0");
     ret =  amdsmi_get_gpu_ecc_count(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_err_cnt);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "0");
     ret =  amdsmi_get_gpu_ecc_enabled(processor_handles_[0], &dmy_ui64);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_status", "0");
     ret =  amdsmi_get_gpu_ecc_status(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_ras_err_st);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
     /* Other functions holding device mutexes. Listed for reference.

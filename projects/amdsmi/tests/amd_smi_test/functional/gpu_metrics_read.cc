@@ -86,22 +86,18 @@ void TestGpuMetricsRead::Run(void) {
         std::cout << "\t**GPU METRICS: Using static struct (Backwards Compatibility):\n";
     }
     amdsmi_gpu_metrics_t smu = {};
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu="+std::to_string(i));
     err =  amdsmi_get_gpu_metrics_info(processor_handles_[i], &smu);
-    const char *status_string;
-    amdsmi_status_code_to_string(err, &status_string);
-    std::cout << "\t\t** amdsmi_get_gpu_metrics_info(): " << status_string
-    << "\n";
+    DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
     if (err != AMDSMI_STATUS_SUCCESS) {
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        IF_VERB(STANDARD) {
-          std::cout << "\t**" <<
-          "Not supported on this machine" << std::endl;
-          continue;
-        }
+        continue;
       }
     } else {
       auto temp_xcd_counter_value = uint16_t(0);
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_xcd_counter", "gpu="+std::to_string(i));
       auto ret_xcd = amdsmi_get_gpu_xcd_counter(processor_handles_[i], &temp_xcd_counter_value);
+      DISPLAY_AMDSMI_STATUS(ret_xcd, AMDSMI_STATUS_SUCCESS);
       IF_VERB(STANDARD) {
         std::cout << "\t\t** amdsmi_get_gpu_xcd_counter(): "
                   << smi_amdgpu_get_status_string(ret_xcd, false)
@@ -406,14 +402,18 @@ void TestGpuMetricsRead::Run(void) {
           constexpr uint16_t kMAX_ITER_TEST = 10;
           amdsmi_gpu_metrics_t gpu_metrics_check = {};
           for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-              amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
+              DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu="+std::to_string(i));
+              auto ret = amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
+              DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
               std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: "
                         << gpu_metrics_check.firmware_timestamp << "\n";
           }
 
           std::cout << "\n";
           for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-              amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
+              DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu="+std::to_string(i));
+              auto ret = amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
+              DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
               std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: "
                         << gpu_metrics_check.system_clock_counter << "\n";
           }
@@ -425,12 +425,9 @@ void TestGpuMetricsRead::Run(void) {
     }
 
     // Verify api support checking functionality is working
-    err =  amdsmi_get_gpu_metrics_info(processor_handles_[i], nullptr);
-    if (err !=AMDSMI_STATUS_INVAL) {
-      DISPLAY_AMDSMI_ERR(err);
-    }
-    amdsmi_status_code_to_string(err, &status_string);
-    std::cout << "\t\t** amdsmi_get_gpu_metrics_info(nullptr check): " << status_string << "\n";
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu="+std::to_string(i));
+    err = amdsmi_get_gpu_metrics_info(processor_handles_[i], nullptr);
+    DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 }

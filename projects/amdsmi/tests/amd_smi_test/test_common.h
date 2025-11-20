@@ -26,6 +26,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <iomanip>
 
 #include "amd_smi/amdsmi.h"
 
@@ -50,29 +51,55 @@ const std::string GetVoltSensorNameStr(amdsmi_voltage_type_t st);
 void DumpMonitorInfo(const TestBase *test);
 #endif
 
-#define DISPLAY_AMDSMI_ERR(RET) { \
-  if ((RET) != AMDSMI_STATUS_SUCCESS) { \
-    const char *err_str; \
-    std::cout << "\t===> ERROR: AMDSMI call returned " << (RET) << std::endl; \
-    amdsmi_status_code_to_string((RET), &err_str); \
-    std::cout << "\t===> (" << err_str << ")" << std::endl; \
-    std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                  std::endl; \
-  } \
+#define DISPLAY_AMDSMI_API(FUNC_NAME, STR) { \
+  std::cout << "\t### " << (FUNC_NAME) << "(" << (STR) << ")" << std::endl; \
 }
-
-#define CHK_ERR_RET(RET) { \
-  DISPLAY_AMDSMI_ERR(RET) \
-  if ((RET) != AMDSMI_STATUS_SUCCESS) { \
-    return (RET); \
+static amdsmi_status_t NotSupportedErrorCodes[] = {
+    AMDSMI_STATUS_NOT_SUPPORTED,
+    AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
+    AMDSMI_STATUS_NO_HSMP_MSG_SUP
+};
+#define DISPLAY_AMDSMI_STATUS(RET, ...) { \
+  amdsmi_status_t retExpected[] = {__VA_ARGS__}; \
+  int numRetExpected = sizeof(retExpected) / sizeof(retExpected[0]); \
+  amdsmi_status_t RET_EXPECTED = retExpected[0]; \
+  auto it = std::find(std::begin(retExpected), std::end(retExpected), (RET)); \
+  if (it != std::end(retExpected)) { \
+    RET_EXPECTED = (RET); \
   } \
-}
-#define CHK_AMDSMI_PERM_ERR(RET) { \
-    if ((RET) == AMDSMI_STATUS_NO_PERM) { \
-      std::cout << "This command requires root access." << std::endl; \
+  if ((RET) != RET_EXPECTED) { \
+    const char *_err; \
+    std::string err_str; \
+    size_t pos; \
+    amdsmi_status_code_to_string((RET), &_err); \
+    err_str = std::string(_err); \
+    std::string status_str = !err_str.empty() ? err_str : "Unknown"; \
+    pos = status_str.find(":"); \
+    if (pos != std::string::npos) status_str = status_str.substr(0, pos); \
+    amdsmi_status_code_to_string(RET_EXPECTED, &_err); \
+    err_str = std::string(_err); \
+    std::string status_expected_str = !err_str.empty() ? err_str : "Unknown"; \
+    pos = status_expected_str.find(":"); \
+    if (pos != std::string::npos) status_expected_str = status_expected_str.substr(0, pos); \
+    auto it = std::find(std::begin(NotSupportedErrorCodes),std::end(NotSupportedErrorCodes), (RET)); \
+    if (it != std::end(NotSupportedErrorCodes)) { \
+      std::cout << "\t===> AMDSMI API Returned " << (RET) << ", " << status_str << std::endl; \
     } else { \
-      DISPLAY_AMDSMI_ERR(RET) \
+      std::string start_dir = std::string(__FILE__); \
+      pos = start_dir.find("tests/amd_smi_test"); \
+      if (pos != std::string::npos) start_dir = start_dir.substr(pos); \
+      std::cout << "\t===> TEST FAILURE." << std::endl; \
+      std::cout << "\t===> ERROR: AMDSMI API Returned " << std::setfill(' ') << std::setw(2) << (RET) << ", " << status_str << std::endl; \
+      if (numRetExpected == 1) \
+      std::cout << "\t===>                   Expected " << std::setfill(' ') << std::setw(2) << RET_EXPECTED << ", " << status_expected_str << std::endl; \
+      else { \
+        std::cout << "\t===>                   Expected One of"; \
+        for (int i=0; i<numRetExpected; ++i) std::cout << " " << retExpected[i]; \
+        std::cout << std::endl; \
+      } \
+      std::cout << "\t===> " << start_dir << ":" << std::dec << __LINE__ << std::endl; \
     } \
+  } \
 }
 
 #endif  // TESTS_AMD_SMI_TEST_TEST_COMMON_H_

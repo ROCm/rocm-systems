@@ -78,23 +78,23 @@ void TestErrCntRead::Run(void) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
       PrintDeviceHeader(processor_handles_[i]);
 
-      err =  amdsmi_get_gpu_ecc_enabled(processor_handles_[i], &enabled_mask);
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "gpu="+std::to_string(i));
+      err = amdsmi_get_gpu_ecc_enabled(processor_handles_[i], &enabled_mask);
+      DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        IF_VERB(STANDARD) {
-          std::cout <<
-            "\t**Error Count Enabled Mask get is not supported on this machine"
-                                                                   << std::endl;
-        }
         // Verify api support checking functionality is working
-        err =  amdsmi_get_gpu_ecc_enabled(processor_handles_[i], nullptr);
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "gpu="+std::to_string(i));
+        err = amdsmi_get_gpu_ecc_enabled(processor_handles_[i], nullptr);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
-
         continue;
       } else {
         CHK_ERR_ASRT(err)
 
         // Verify api support checking functionality is working
-        err =  amdsmi_get_gpu_ecc_enabled(processor_handles_[i], nullptr);
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "gpu="+std::to_string(i));
+        err = amdsmi_get_gpu_ecc_enabled(processor_handles_[i], nullptr);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
         IF_VERB(STANDARD) {
@@ -104,8 +104,10 @@ void TestErrCntRead::Run(void) {
       }
       for (uint32_t b = AMDSMI_GPU_BLOCK_FIRST;
                                             b <= AMDSMI_GPU_BLOCK_LAST; b = b*2) {
-        err =  amdsmi_get_gpu_ecc_status(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_status", "gpu="+std::to_string(i));
+        err = amdsmi_get_gpu_ecc_status(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                                                     &err_state);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
           std::cout << "\t**Error Count status for " <<
@@ -113,11 +115,15 @@ void TestErrCntRead::Run(void) {
                    " block: " << GetErrStateNameStr(err_state) << std::endl;
         }
         // Verify api support checking functionality is working
-        err =  amdsmi_get_gpu_ecc_status(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_status", "gpu="+std::to_string(i));
+        err = amdsmi_get_gpu_ecc_status(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                                                        nullptr);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
-        err =  amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b), &ec);
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count", "gpu="+std::to_string(i));
+        err = amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b), &ec);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
 
         if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
           IF_VERB(STANDARD) {
@@ -126,8 +132,10 @@ void TestErrCntRead::Run(void) {
                           ": Not supported for this device or error accessing file" << std::endl;
           }
           // Verify api support checking functionality is working
-          err =  amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
+          DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count", "gpu="+std::to_string(i));
+          err = amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                                                        nullptr);
+          DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
           ASSERT_TRUE(err == AMDSMI_STATUS_NOT_SUPPORTED);
 
         } else {
@@ -142,8 +150,10 @@ void TestErrCntRead::Run(void) {
                                                                    << std::endl;
             }
             // Verify api support checking functionality is working
-            err =  amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
+            DISPLAY_AMDSMI_API("", "gpu="+std::to_string(i));
+            err = amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                                                        nullptr);
+            DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
             ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
         }
       }

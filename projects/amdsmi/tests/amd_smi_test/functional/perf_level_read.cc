@@ -29,6 +29,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "perf_level_read.h"
+#include "../test_common.h"
 
 TestPerfLevelRead::TestPerfLevelRead() : TestBase() {
   set_title("AMDSMI Performance Level Read Test");
@@ -74,7 +75,9 @@ void TestPerfLevelRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(processor_handles_[i]);
 
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu="+std::to_string(i));
     err = amdsmi_get_gpu_perf_level(processor_handles_[i], &pfl);
+    DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       std::cout << "\t**Performance Level: Not Supported" << std::endl;
       ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
@@ -86,7 +89,9 @@ void TestPerfLevelRead::Run(void) {
       }
     }
     // Verify api support checking functionality is working
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu="+std::to_string(i));
     err = amdsmi_get_gpu_perf_level(processor_handles_[i], nullptr);
+    DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 }

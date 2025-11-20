@@ -27,6 +27,7 @@
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "fan_read_write.h"
+#include "../test_common.h"
 
 TestFanReadWrite::TestFanReadWrite() : TestBase() {
   set_title("AMDSMI Fan Read/Write Test");
@@ -75,12 +76,10 @@ void TestFanReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_fan_speed(processor_handles_[dv_ind], 0, &orig_speed);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-       IF_VERB(STANDARD) {
-          std::cout << "\t**" <<  ": " <<
-                             "Not supported on this machine" << std::endl;
-        }
         return;
     } else {
         CHK_ERR_ASRT(ret)
@@ -95,7 +94,9 @@ void TestFanReadWrite::Run(void) {
       return;
     }
 
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_max", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_fan_speed_max(processor_handles_[dv_ind], 0, &max_speed);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     new_speed = static_cast<int64_t>(1.1F * static_cast<float>(orig_speed));
@@ -111,18 +112,21 @@ void TestFanReadWrite::Run(void) {
       std::cout << "Setting fan speed to " << new_speed << std::endl;
     }
 
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fan_speed", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_set_gpu_fan_speed(processor_handles_[dv_ind], 0, new_speed);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
 
     // When you can read fan speed, it is not always can set fan speed.
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "***System fan set is not supported." << std::endl;
       continue;
     }
     CHK_ERR_ASRT(ret)
 
     sleep(4);
 
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_fan_speed(processor_handles_[dv_ind], 0, &cur_speed);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
@@ -145,12 +149,16 @@ void TestFanReadWrite::Run(void) {
       std::cout << "Resetting fan control to auto..." << std::endl;
     }
 
+    DISPLAY_AMDSMI_API("amdsmi_reset_gpu_fan", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_reset_gpu_fan(processor_handles_[dv_ind], 0);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     sleep(3);
 
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_fan_speed(processor_handles_[dv_ind], 0, &cur_speed);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
