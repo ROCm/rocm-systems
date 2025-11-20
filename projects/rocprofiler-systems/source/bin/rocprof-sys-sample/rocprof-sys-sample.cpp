@@ -22,8 +22,6 @@
 
 #include "rocprof-sys-sample.hpp"
 
-#include <algorithm>
-#include <iostream>
 #include <string_view>
 #include <unistd.h>
 

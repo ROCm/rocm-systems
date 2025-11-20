@@ -22,10 +22,9 @@
 
 #include "rocprof-sys-sample.hpp"
 
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
-#include "common/setup.hpp"
+#include "common/path.hpp"
 
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
@@ -34,7 +33,6 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -45,7 +43,9 @@
 #include <vector>
 
 namespace color = tim::log::color;
+namespace path  = rocprofsys::common::path;
 using namespace timemory::join;
+using rocprofsys::common::remove_env;
 using tim::get_env;
 using tim::log::monochrome;
 using tim::log::stream;
@@ -53,8 +53,8 @@ using tim::log::stream;
 namespace
 {
 int  verbose          = 0;
-auto updated_envs     = std::set<std::string_view>{};
-auto original_envs    = std::set<std::string>{};
+auto updated_envs     = std::unordered_set<std::string_view>{};
+auto original_envs    = std::unordered_set<std::string>{};
 auto clock_id_choices = []() {
     auto clock_name = [](std::string _v) {
         constexpr auto _clock_prefix = std::string_view{ "clock_" };
@@ -90,15 +90,6 @@ auto clock_id_choices = []() {
 }();
 }  // namespace
 
-std::string
-get_realpath(const std::string& _v)
-{
-    auto* _tmp = realpath(_v.c_str(), nullptr);
-    auto  _ret = std::string{ _tmp };
-    free(_tmp);
-    return _ret;
-}
-
 void
 print_command(const std::vector<char*>& _argv)
 {
@@ -122,10 +113,10 @@ get_initial_environment()
         }
     }
 
-    auto _dl_libpath   = get_realpath(get_internal_libpath("librocprof-sys-dl.so"));
-    auto _omni_libpath = get_realpath(get_internal_libpath("librocprof-sys.so"));
-    auto _libexecpath  = get_realpath(get_internal_script_path());
-    auto _rootpath     = get_realpath(get_rocprofsys_root());
+    auto _dl_libpath = path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
+    auto _omni_libpath = path::realpath(path::get_internal_libpath("librocprof-sys.so"));
+    auto _libexecpath  = path::realpath(path::get_internal_script_path());
+    auto _rootpath     = path::realpath(path::get_rocprofsys_root());
 
     update_env(_env, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
     update_env(_env, "LD_PRELOAD", _dl_libpath, UPD_APPEND);
@@ -144,36 +135,6 @@ get_initial_environment()
     update_env(_env, "ROCPROFSYS_USE_SAMPLING", (_mode != "causal"));
 
     return _env;
-}
-
-std::string
-get_rocprofsys_root(void)
-{
-    char*       _tmp = realpath("/proc/self/exe", nullptr);
-    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
-
-    if(_tmp) free(_tmp);
-
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-
-    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
-
-    return rocprofsys::common::join("/", _dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
 }
 
 void
@@ -282,22 +243,6 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
         strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
 }
 
-void
-remove_env(std::vector<char*>& _environ, std::string_view _env_var)
-{
-    auto _key   = join("", _env_var, "=");
-    auto _match = [&_key](auto itr) { return std::string_view{ itr }.find(_key) == 0; };
-
-    _environ.erase(std::remove_if(_environ.begin(), _environ.end(), _match),
-                   _environ.end());
-
-    for(const auto& itr : original_envs)
-    {
-        if(std::string_view{ itr }.find(_key) == 0)
-            _environ.emplace_back(strdup(itr.c_str()));
-    }
-}
-
 std::vector<char*>
 parse_args(int argc, char** argv, std::vector<char*>& _env)
 {
@@ -305,7 +250,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     using parser_err_t = typename parser_t::result_type;
 
     auto help_check = [](parser_t& p, int _argc, char** _argv) {
-        std::set<std::string> help_args = { "-h", "--help", "-?" };
+        std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
         return (p.exists("help") || _argc == 1 ||
                 (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
     };
@@ -327,10 +272,8 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         exit(_pec);
     };
 
-    auto* _dl_libpath =
-        realpath(get_internal_libpath("librocprof-sys-dl.so").c_str(), nullptr);
-    auto* _omni_libpath =
-        realpath(get_internal_libpath("librocprof-sys.so").c_str(), nullptr);
+    auto _dl_libpath = path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
+    auto _omni_libpath = path::realpath(path::get_internal_libpath("librocprof-sys.so"));
 
     auto parser = parser_t(argv[0]);
 
@@ -810,7 +753,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                remove_env(_env, "KOKKOS_TOOLS_LIBS");
+                remove_env(_env, "KOKKOS_TOOLS_LIBS", original_envs);
         });
 
     parser.start_group("HARDWARE COUNTER OPTIONS", "See also: rocprof-sys-avail -H");
@@ -874,9 +817,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     if(parser.exists("profile") && parser.exists("flat-profile"))
         throw std::runtime_error(
             "Error! '--profile' argument conflicts with '--flat-profile' argument");
-
-    free(_dl_libpath);
-    free(_omni_libpath);
 
     return _outv;
 }
