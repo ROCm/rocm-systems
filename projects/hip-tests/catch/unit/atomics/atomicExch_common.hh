@@ -318,8 +318,8 @@ class AtomicExch
     for (auto i = 0u; i < old_vals.size(); ++i) {
       if (i != old_vals[i]) {
         missingValues.emplace_back(i, old_vals[i]);
-        firstFailure = std::min(firstFailure, i);
-        lastFailure = std::max(lastFailure, i);
+        firstFailure = std::min(firstFailure, static_cast<int>(i));
+        lastFailure = std::max(lastFailure, static_cast<int>(i));
       }
     }
 
