@@ -53,7 +53,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyHtoAAsync_Basic", "", char, int, float) {
   HIP_CHECK(hipFreeArray(dst_array));
 }
 
-TEST_CASE("Unit_hipMemcpyHtoAAsync_Negative") {
+TEST_CASE("Unit_hipMemcpyHtoAAsync_Negative", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t dst_array = nullptr;
@@ -104,7 +104,7 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams") {
+TEST_CASE("Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams", "[memory]") {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
   return;
@@ -166,7 +166,7 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice", "[multigpu]") {
+TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice", "[multigpu][memory]") {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
   return;
@@ -204,7 +204,7 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice", "[multigpu]") {
 #endif
 }
 
-TEST_CASE("UnitHipMemcpyHtoAAsync_Capture") {
+TEST_CASE("UnitHipMemcpyHtoAAsync_Capture", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   auto host_src = std::make_unique<std::vector<int>>(N);

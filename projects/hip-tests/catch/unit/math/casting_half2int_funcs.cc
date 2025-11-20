@@ -413,7 +413,7 @@ CAST_KERNEL_DEF(__half_as_short, short, Float16)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___half_as_short_Accuracy_Positive") {
+TEST_CASE("Unit_Device___half_as_short_Accuracy_Positive", "[math]") {
   short (*ref)(Float16) = type2_as_type1_ref<short, Float16>;
   CastUnaryHalfPrecisionTest(__half_as_short_kernel, ref, EqValidatorBuilderFactory<short>());
 }
@@ -433,7 +433,7 @@ CAST_KERNEL_DEF(__half_as_ushort, unsigned short, Float16)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___half_as_ushort_Accuracy_Positive") {
+TEST_CASE("Unit_Device___half_as_ushort_Accuracy_Positive", "[math]") {
   unsigned short (*ref)(Float16) = type2_as_type1_ref<unsigned short, Float16>;
   CastUnaryHalfPrecisionTest(__half_as_ushort_kernel, ref,
                              EqValidatorBuilderFactory<unsigned short>());

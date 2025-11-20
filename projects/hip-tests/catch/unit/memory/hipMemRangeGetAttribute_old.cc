@@ -83,7 +83,7 @@ static int HmmAttrPrint() {
 // hipMemRangeGetAttribute api by passing possible extreme values.
 // Curently the only way to test if count param working properly is to verify
 // the first parameter of hipMemRangeGetAttribute() api has value 1 stored
-TEST_CASE("Unit_hipMemRangeGetAttribute_TstCountParam") {
+TEST_CASE("Unit_hipMemRangeGetAttribute_TstCountParam", "[memory]") {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
 #if HT_AMD
@@ -145,7 +145,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_TstCountParam") {
 
 /* The following Test Case does negative tests on hipMemRangeGetAttribute()*/
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_NegativeTests") {
+TEST_CASE("Unit_hipMemRangeGetAttribute_NegativeTests", "[memory]") {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     int MEM_SIZE = 4096, RND_NUM = 9999;
@@ -221,7 +221,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_NegativeTests") {
 
 /* This test case checks the behavior of hipMemRangeGetAttribute()  with
    AccessedBy flag is consistent with cuda's counter part*/
-TEST_CASE("Unit_hipMemRangeGetAttribute_AccessedBy1") {
+TEST_CASE("Unit_hipMemRangeGetAttribute_AccessedBy1", "[memory]") {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0, *Hmm = NULL, MEM_SZ = 4096, RND_NUM = 999;
@@ -281,7 +281,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_AccessedBy1") {
    hipMemRangeGetAttribute() api for the full size(4*PageSz).*/
 /* Need to discuss the difference in behavior w.r.t cuda*/
 
-TEST_CASE("Unit_hipMemRangeGetAttribte_3") {
+TEST_CASE("Unit_hipMemRangeGetAttribte_3", "[memory]") {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0, *Hmm = NULL, MEM_SZ = 4096 * 4, RND_NUM = 999;
@@ -317,7 +317,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribte_3") {
    by hipMemAdvise() but being probed using hipMemRangeGetAttribute() should
    not result in a crash*/
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_4") {
+TEST_CASE("Unit_hipMemRangeGetAttribute_4", "[memory]") {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, PageSz = 4096, Ngpus, RND_NUM = 999;
@@ -365,7 +365,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_4") {
    Allocate Hmm memory --> hipMemPrefetchAsync() to device 0 and then
    probe LastPrefetchLocation attribute using hipMemRangeGetAttribute*/
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_PrefetchAndGtAttr") {
+TEST_CASE("Unit_hipMemRangeGetAttribute_PrefetchAndGtAttr", "[memory]") {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0, *Hmm = NULL, RND_NUM = 999;

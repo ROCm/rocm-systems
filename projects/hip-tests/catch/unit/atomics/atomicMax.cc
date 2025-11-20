@@ -191,7 +191,7 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses", "
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_Negative_Parameters_RTC") {
+TEST_CASE("Unit_atomicMax_Negative_Parameters_RTC", "[atomic]") {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicMax_int, kAtomicMax_uint, kAtomicMax_ulong,

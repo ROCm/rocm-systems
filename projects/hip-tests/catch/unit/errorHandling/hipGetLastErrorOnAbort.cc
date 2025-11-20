@@ -45,7 +45,7 @@ static __global__ void squareKernel(int* arr) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations") {
+TEST_CASE("Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations", "[device]") {
   DISABLE_CORE_DUMPS();
 
   int* devMem = nullptr;
@@ -102,7 +102,7 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations") {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoDevices", "[multigpu]") {
+TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoDevices", "[multigpu][device]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -170,7 +170,7 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoDevices", "[multigpu]") {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoStreams") {
+TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoStreams", "[device]") {
   DISABLE_CORE_DUMPS();
 
   int* devMem = nullptr;

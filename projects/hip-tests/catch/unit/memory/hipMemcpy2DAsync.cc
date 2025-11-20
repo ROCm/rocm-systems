@@ -27,7 +27,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Basic", "[multigpu]") {
+TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Basic", "[multigpu][memory]") {
   using namespace std::placeholders;
 
   constexpr bool async = true;
@@ -63,7 +63,7 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Basic", "[multigpu]") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior") {
+TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior", "[memory]") {
   CHECK_IMAGE_SUPPORT
   using namespace std::placeholders;
 
@@ -99,14 +99,14 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Parameters") {
+TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Parameters", "[memory]") {
   CHECK_IMAGE_SUPPORT
   using namespace std::placeholders;
   constexpr bool async = true;
   Memcpy2DZeroWidthHeight<async>(std::bind(hipMemcpy2DAsync, _1, _2, _3, _4, _5, _6, _7, nullptr));
 }
 
-TEST_CASE("Unit_hipMemcpy2DAsync_Negative_Parameters") {
+TEST_CASE("Unit_hipMemcpy2DAsync_Negative_Parameters", "[memory]") {
   CHECK_IMAGE_SUPPORT
   constexpr size_t cols = 128;
   constexpr size_t rows = 128;

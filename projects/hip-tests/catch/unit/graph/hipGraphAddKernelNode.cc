@@ -57,7 +57,7 @@ THE SOFTWARE.
 constexpr size_t size = 1 << 12;
 enum fnType { normal, object };
 
-TEST_CASE("Unit_hipGraphAddKernelNode_Negative") {
+TEST_CASE("Unit_hipGraphAddKernelNode_Negative", "[graph]") {
   constexpr int N = 1024;
   size_t NElem{N};
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -233,7 +233,7 @@ static void kernelFnChange(int* A_d, int* A_h, int* B_d, int* B_h, int* C_d, int
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph") {
+TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph", "[graph]") {
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
   HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, size, false);
@@ -304,7 +304,7 @@ TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph") {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_kernelFnUpdate") {
+TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_kernelFnUpdate", "[graph]") {
   size_t maxBlocks = 512;
   int *A_d, *B_d, *C_d;  // Device pointers
   int *A_h, *B_h, *C_h;  // Host Pointers
@@ -332,7 +332,7 @@ TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_kernelFnUpdate") {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph") {
+TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph", "[graph]") {
   int *A_d, *B_d, *C_d;  // Device pointers
   int *A_h, *B_h, *C_h;  // Host Pointers
   HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, size, false);
@@ -409,7 +409,7 @@ TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph") {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_streamCapture") {
+TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_streamCapture", "[graph]") {
   size_t maxBlocks = 512;
   size_t Nbytes = sizeof(int) * maxBlocks;
 

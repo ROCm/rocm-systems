@@ -480,7 +480,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_H2H-H2D-D2H-H2PinMem", "[multigpu]", int,
 /*
 This testcase verifies the multi thread scenario
 */
-TEST_CASE("Unit_hipMemcpy_MultiThreadWithSerialization") {
+TEST_CASE("Unit_hipMemcpy_MultiThreadWithSerialization", "[memory]") {
   HIP_CHECK(hipDeviceReset());
 
   // Simplest cases: serialize the threads, and also used pinned memory:

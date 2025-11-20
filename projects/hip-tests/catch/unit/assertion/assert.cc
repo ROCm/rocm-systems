@@ -93,7 +93,7 @@ template <bool should_abort> void LaunchAssertKernel() {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Assert_Positive_Basic_KernelPass") {
+TEST_CASE("Unit_Assert_Positive_Basic_KernelPass", "[assert]") {
   try_and_catch_abort(&LaunchAssertKernel<false>);
   REQUIRE(abort_raised_flag == 0);
 }
@@ -114,7 +114,7 @@ TEST_CASE("Unit_Assert_Positive_Basic_KernelPass") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Assert_Positive_Basic_KernelFail") {
+TEST_CASE("Unit_Assert_Positive_Basic_KernelFail", "[assert]") {
   try_and_catch_abort(&LaunchAssertKernel<true>);
 #if HT_AMD
   REQUIRE(abort_raised_flag == 1);

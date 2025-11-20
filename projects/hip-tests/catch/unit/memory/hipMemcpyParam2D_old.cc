@@ -192,7 +192,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2D_multiDevice-H2D-D2H", "[hipMemcpyParam
 /*
  * This testcase verifies the extent validation scenarios
  */
-TEST_CASE("Unit_hipMemcpyParam2D_ExtentValidation") {
+TEST_CASE("Unit_hipMemcpyParam2D_ExtentValidation", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   // Allocating memory and Initializing the data
@@ -252,7 +252,7 @@ TEST_CASE("Unit_hipMemcpyParam2D_ExtentValidation") {
 /*
  * This testcase verifies the negative scenarios
  */
-TEST_CASE("Unit_hipMemcpyParam2D_Negative") {
+TEST_CASE("Unit_hipMemcpyParam2D_Negative", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));

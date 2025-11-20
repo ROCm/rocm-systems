@@ -291,7 +291,7 @@ TEMPLATE_TEST_CASE("Unit_Device_make_Complex_Host_Positive", "", hipFloatComplex
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_make_hipComplex_Device_Positive") {
+TEST_CASE("Unit_Device_make_hipComplex_Device_Positive", "[math]") {
   float input_r = GENERATE(-0.25, 0, 0.25);
   float input_i = GENERATE(-1.75, 0, 1.75);
 
@@ -319,7 +319,7 @@ TEST_CASE("Unit_Device_make_hipComplex_Device_Positive") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_make_hipComplex_Host_Positive") {
+TEST_CASE("Unit_Device_make_hipComplex_Host_Positive", "[math]") {
   float input_r = GENERATE(-0.25, 0, 0.25);
   float input_i = GENERATE(-1.75, 0, 1.75);
 

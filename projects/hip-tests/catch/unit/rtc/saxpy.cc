@@ -27,7 +27,7 @@ void saxpy(float a, float* x, float* y, float* out, size_t n)
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_saxpy") {
+TEST_CASE("Unit_hiprtc_saxpy", "[compiler]") {
   using namespace std;
   hiprtcProgram prog;
   hiprtcCreateProgram(&prog,       // prog

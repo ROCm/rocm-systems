@@ -51,7 +51,7 @@ constexpr size_t N = 1000000;
 * ------------------------
 * - HIP_VERSION >= 6.2
 */
-TEST_CASE("Unit_hipGraphInstantiateWithParams_Negative") {
+TEST_CASE("Unit_hipGraphInstantiateWithParams_Negative", "[graph]") {
   SECTION("Passing nullptr pGraphExec") {
     hipGraph_t graph;
     hipGraphInstantiateParams params;
@@ -255,7 +255,7 @@ void GraphInstantiateWithParams_StreamCapture() {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGraphInstantiateWithParams_DependencyGraph") {
+TEST_CASE("Unit_hipGraphInstantiateWithParams_DependencyGraph", "[graph]") {
   GraphInstantiateWithParams_DependencyGraph();
 }
 
@@ -273,7 +273,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithParams_DependencyGraph") {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGraphInstantiateWithParams_StreamCapture") {
+TEST_CASE("Unit_hipGraphInstantiateWithParams_StreamCapture", "[graph]") {
   GraphInstantiateWithParams_StreamCapture();
 }
 

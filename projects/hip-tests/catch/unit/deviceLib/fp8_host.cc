@@ -32,7 +32,7 @@ THE SOFTWARE.
  * Both FNUZ and OCP types are supported on host
  */
 
-TEST_CASE("Unit_fp8_ocp_bool_host") {
+TEST_CASE("Unit_fp8_ocp_bool_host", "[device_lib]") {
   // clang-format off
   std::vector<float> fvals{-10.0f, -1.0f, -0.0f,  0.0f, 1.0f, 10.0f};
   std::vector<bool> tvals   {true,  true, false, false, true,  true};
@@ -62,7 +62,7 @@ TEST_CASE("Unit_fp8_ocp_bool_host") {
 }
 
 // test to check we are putting in data correctly in vector types
-TEST_CASE("Unit_all_fp8_ocp_vector_cvt") {
+TEST_CASE("Unit_all_fp8_ocp_vector_cvt", "[device_lib]") {
   float2 in2{1.0f, 2.0f};
   float4 in4{3.0f, 4.0f, 5.0f, 6.0f};
 
@@ -454,7 +454,7 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_correctness", "", float, double) {
 }
 
 // Check the orientation encoded is correct
-TEST_CASE("Unit_fp8_ocp_vector_basic_conversions") {
+TEST_CASE("Unit_fp8_ocp_vector_basic_conversions", "[device_lib]") {
   float f1 = 1.0f;
   float2 f2 = {1.0f, 2.0f};
   float4 f4 = {1.0f, 2.0f, 3.0f, 4.0f};
@@ -595,7 +595,7 @@ TEST_CASE("Unit_fp8_ocp_vector_basic_conversions") {
 }
 
 
-TEST_CASE("Unit_fp8_fnuz_bool_host") {
+TEST_CASE("Unit_fp8_fnuz_bool_host", "[device_lib]") {
   // clang-format off
   std::vector<float> fvals{-10.0f, -1.0f, -0.0f,  0.0f, 1.0f, 10.0f};
   std::vector<bool> tvals   {true,  true, false, false, true,  true};
@@ -625,7 +625,7 @@ TEST_CASE("Unit_fp8_fnuz_bool_host") {
 }
 
 // test to check we are putting in data correctly in vector types
-TEST_CASE("Unit_all_fp8_fnuz_vector_cvt") {
+TEST_CASE("Unit_all_fp8_fnuz_vector_cvt", "[device_lib]") {
   float2 in2{1.0f, 2.0f};
   float4 in4{3.0f, 4.0f, 5.0f, 6.0f};
 
@@ -1072,7 +1072,7 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness", "", float, double) {
 }
 
 // Check the orientation encoded is correct
-TEST_CASE("Unit_fp8_fnuz_vector_basic_conversions") {
+TEST_CASE("Unit_fp8_fnuz_vector_basic_conversions", "[device_lib]") {
   float f1 = 1.0f;
   float2 f2 = {1.0f, 2.0f};
   float4 f4 = {1.0f, 2.0f, 3.0f, 4.0f};

@@ -130,7 +130,7 @@ hipExtent generateExtent(AllocationApi api) {
 }
 
 
-TEST_CASE("Unit_hipMalloc3D_ValidatePitch") {
+TEST_CASE("Unit_hipMalloc3D_ValidatePitch", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   hipPitchedPtr hipPitchedPtr;
@@ -141,7 +141,7 @@ TEST_CASE("Unit_hipMalloc3D_ValidatePitch") {
   HIP_CHECK(hipFree(hipPitchedPtr.ptr));
 }
 
-TEST_CASE("Unit_hipMemAllocPitch_ValidatePitch") {
+TEST_CASE("Unit_hipMemAllocPitch_ValidatePitch", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   size_t pitch = 0;
@@ -162,7 +162,7 @@ TEST_CASE("Unit_hipMemAllocPitch_ValidatePitch") {
   HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)));
 }
 
-TEST_CASE("Unit_hipMallocPitch_ValidatePitch") {
+TEST_CASE("Unit_hipMallocPitch_ValidatePitch", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   size_t pitch = 0;
@@ -173,7 +173,7 @@ TEST_CASE("Unit_hipMallocPitch_ValidatePitch") {
   HIP_CHECK(hipFree(ptr));
 }
 
-TEST_CASE("Unit_hipMalloc3D_Negative") {
+TEST_CASE("Unit_hipMalloc3D_Negative", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   SECTION("Invalid ptr") {
@@ -211,7 +211,7 @@ TEST_CASE("Unit_hipMalloc3D_Negative") {
 #endif
 }
 
-TEST_CASE("Unit_hipMallocPitch_Negative") {
+TEST_CASE("Unit_hipMallocPitch_Negative", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   size_t pitch = 0;
@@ -238,7 +238,7 @@ TEST_CASE("Unit_hipMallocPitch_Negative") {
   }
 }
 
-TEST_CASE("Unit_hipMallocPitch_Zero_Dims") {
+TEST_CASE("Unit_hipMallocPitch_Zero_Dims", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   void* ptr = nullptr;
@@ -255,7 +255,7 @@ TEST_CASE("Unit_hipMallocPitch_Zero_Dims") {
   }
 }
 
-TEST_CASE("Unit_hipMemAllocPitch_Negative") {
+TEST_CASE("Unit_hipMemAllocPitch_Negative", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   size_t pitch = 0;
@@ -459,7 +459,7 @@ scenario by launching threads in parallel on multiple GPUs
 and verifies the hipMallocPitch API with small and big chunks data
 */
 
-TEST_CASE("Unit_hipMallocPitch_MultiThread", "[multigpu]") {
+TEST_CASE("Unit_hipMallocPitch_MultiThread", "[multigpu][memory]") {
   CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;

@@ -36,177 +36,177 @@ HIPRTC supported compiler option idividually.
 */
 // SINGLE COMPILER OPTION TESTING
 const char** null = {};
-TEST_CASE("Unit_hiprtcGpuArchComplrOptnTst") {
+TEST_CASE("Unit_hiprtcGpuArchComplrOptnTst", "[compiler]") {
   INFO("Testing '--gpu-architecture=gfx906:sramecc+:xnack-' compiler opt")
   REQUIRE(check_architecture(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcGpuRdcComplrOptnTst") {
+TEST_CASE("Unit_hiprtcGpuRdcComplrOptnTst", "[compiler]") {
   INFO("Testing '-fgpu-rdc' compiler option")
   REQUIRE(check_rdc(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledDenormalsComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledDenormalsComplrOptnTst", "[compiler]") {
   INFO("Testing '-fgpu-flush-denormals-to-zero' compiler option")
   REQUIRE(check_denormals_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledDenormalsComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledDenormalsComplrOptnTst", "[compiler]") {
   INFO("Testing '-fno-gpu-flush-denormals-to-zero' compiler option")
   REQUIRE(check_denormals_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcOff_ffpContractComplrOptnTst") {
+TEST_CASE("Unit_hiprtcOff_ffpContractComplrOptnTst", "[compiler]") {
   INFO("Testing '-ffp-contract=off' compiler option")
   REQUIRE(check_ffp_contract_off(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcOnffpContractComplrOptnTst") {
+TEST_CASE("Unit_hiprtcOnffpContractComplrOptnTst", "[compiler]") {
   INFO("Testing '-ffp-contract=on' compiler option")
   REQUIRE(check_ffp_contract_on(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcFastffpContractComplrOptnTst") {
+TEST_CASE("Unit_hiprtcFastffpContractComplrOptnTst", "[compiler]") {
   INFO("Testing '-ffp-contract=fast' compiler option")
   REQUIRE(check_ffp_contract_fast(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledFastMathComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledFastMathComplrOptnTst", "[compiler]") {
   INFO("Testing '-ffast-math' compiler option")
   REQUIRE(check_fast_math_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledFastMathComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledFastMathComplrOptnTst", "[compiler]") {
   INFO("Testing '-fno-fast-math' compiler option")
   REQUIRE(check_fast_math_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledSlpVectorizeComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledSlpVectorizeComplrOptnTst", "[compiler]") {
   INFO("Testing '-fslp-vectorize' compiler option")
   REQUIRE(check_slp_vectorize_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledSlpVectorizeComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledSlpVectorizeComplrOptnTst", "[compiler]") {
   INFO("Testing '-fno-slp-vectorize' compiler option")
   REQUIRE(check_slp_vectorize_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDefineMacroComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDefineMacroComplrOptnTst", "[compiler]") {
   INFO("Testing '-D' compiler option")
   REQUIRE(check_macro(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcUndefMacroComplrOptnTst") {
+TEST_CASE("Unit_hiprtcUndefMacroComplrOptnTst", "[compiler]") {
   INFO("Testing '-U' compiler option")
   REQUIRE(check_undef_macro(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcHeaderDirectoryComplrOptnTst") {
+TEST_CASE("Unit_hiprtcHeaderDirectoryComplrOptnTst", "[compiler]") {
   INFO("Testing '-I' compiler option")
   REQUIRE(check_header_dir(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcWarningComplrOptnTst") {
+TEST_CASE("Unit_hiprtcWarningComplrOptnTst", "[compiler]") {
   INFO("Testing '-w' compiler option")
   REQUIRE(check_warning(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcRpassInlineComplrOptnTst") {
+TEST_CASE("Unit_hiprtcRpassInlineComplrOptnTst", "[compiler]") {
   INFO("Testing '-Rpass=inline' compiler option")
   REQUIRE(check_Rpass_inline(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledConversionErrComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledConversionErrComplrOptnTst", "[compiler]") {
   INFO("Testing '-Werror=conversion' compiler option")
   REQUIRE(check_conversionerror_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledConversionErrComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledConversionErrComplrOptnTst", "[compiler]") {
   INFO("Testing '-Wno-error=conversion' compiler option")
   REQUIRE(check_conversionerror_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledConversionWarningComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledConversionWarningComplrOptnTst", "[compiler]") {
   INFO("Testing '-Wconversion' compiler option")
   REQUIRE(check_conversionwarning_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledConversionWarningComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledConversionWarningComplrOptnTst", "[compiler]") {
   INFO("Testing '-Wno-conversion' compiler option")
   REQUIRE(check_conversionwarning_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcGpuMaxThreadPerBlockComplrOptnTst") {
+TEST_CASE("Unit_hiprtcGpuMaxThreadPerBlockComplrOptnTst", "[compiler]") {
   INFO("Testing '--gpu-max-threads-per-block=n' compiler option")
   REQUIRE(check_max_thread(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledUnsafeAtomicComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledUnsafeAtomicComplrOptnTst", "[compiler]") {
   INFO("Testing '-munsafe-fp-atomics' compiler option")
   REQUIRE(check_unsafe_atomic_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledUnsafeAtomicComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledUnsafeAtomicComplrOptnTst", "[compiler]") {
   INFO("Testing '-mno-unsafe-fp-atomics' compiler option")
   REQUIRE(check_unsafe_atomic_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledInfiniteNumComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledInfiniteNumComplrOptnTst", "[compiler]") {
   INFO("Testing '-fhonor-infinities' compiler option")
   REQUIRE(check_infinite_num_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledInfiniteNumComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledInfiniteNumComplrOptnTst", "[compiler]") {
   INFO("Testing '-fno-honor-infinities' compiler option")
   REQUIRE(check_infinite_num_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledNANComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledNANComplrOptnTst", "[compiler]") {
   INFO("Testing '-fhonor-nans' compiler option")
   REQUIRE(check_NAN_num_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledNANComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledNANComplrOptnTst", "[compiler]") {
   INFO("Testing '-fno-honor-nans' compiler option")
   REQUIRE(check_NAN_num_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledFiniteMathComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledFiniteMathComplrOptnTst", "[compiler]") {
   INFO("Testing '-ffinite-math-only' compiler option")
   REQUIRE(check_finite_math_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledFiniteMathComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledFiniteMathComplrOptnTst", "[compiler]") {
   INFO("Testing '-fno-finite-math-only' compiler option")
   REQUIRE(check_finite_math_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledAssociativeMathComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledAssociativeMathComplrOptnTst", "[compiler]") {
   INFO("Testing '-fassociative-math' compiler option")
   REQUIRE(check_associative_math_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledAssociativeMathComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledAssociativeMathComplrOptnTst", "[compiler]") {
   INFO("Testing '-fno-associative-math' compiler option")
   REQUIRE(check_associative_math_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledSignedZerosComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledSignedZerosComplrOptnTst", "[compiler]") {
   INFO("Testing '-fsigned-zeros' compiler option")
   REQUIRE(check_signed_zeros_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledSignedZerosComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledSignedZerosComplrOptnTst", "[compiler]") {
   INFO("Testing '-fno-signed-zeros' compiler option")
   REQUIRE(check_signed_zeros_disabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcEnabledTrappingMathComplrOptnTst") {
+TEST_CASE("Unit_hiprtcEnabledTrappingMathComplrOptnTst", "[compiler]") {
   INFO("Testing '-ftrapping-math' compiler option")
   REQUIRE(check_trapping_math_enabled(null, -1, -1, -1));
 }
 
-TEST_CASE("Unit_hiprtcDisabledTrappingMathComplrOptnTst") {
+TEST_CASE("Unit_hiprtcDisabledTrappingMathComplrOptnTst", "[compiler]") {
   INFO("Testing '-fno-trapping-math' compiler option")
   REQUIRE(check_trapping_math_disabled(null, -1, -1, -1));
 }
@@ -217,7 +217,7 @@ a combination of HIPRTC supported compiler options which a retrieved from
 RtcConfig.jason file.
 */
 
-TEST_CASE("Unit_hiprtcCombiComplrOptnTst") {
+TEST_CASE("Unit_hiprtcCombiComplrOptnTst", "[compiler]") {
   // COMBINATION COMPILER OPTIONS
   std::vector<std::string> CombiCompOptions = get_combi_string_vec();
   int TotalCombos = CombiCompOptions.size();

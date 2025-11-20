@@ -44,7 +44,7 @@ static void hipUserObjectCreate_Functional_1(void* object, void destroyObj(void*
   HIP_CHECK(hipUserObjectRelease(hObject));
 }
 
-TEST_CASE("Unit_hipUserObjectCreate_Functional_1") {
+TEST_CASE("Unit_hipUserObjectCreate_Functional_1", "[graph]") {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -78,7 +78,7 @@ static void hipUserObjectCreate_Functional_2(void* object, void destroyObj(void*
   HIP_CHECK(hipUserObjectRelease(hObject, refCount));
 }
 
-TEST_CASE("Unit_hipUserObjectCreate_Functional_2") {
+TEST_CASE("Unit_hipUserObjectCreate_Functional_2", "[graph]") {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -112,7 +112,7 @@ static void hipUserObjectCreate_Functional_3(void* object, void destroyObj(void*
   HIP_CHECK(hipUserObjectRelease(hObject));
 }
 
-TEST_CASE("Unit_hipUserObjectCreate_Functional_3") {
+TEST_CASE("Unit_hipUserObjectCreate_Functional_3", "[graph]") {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -149,7 +149,7 @@ static void hipUserObjectCreate_Functional_4(void* object, void destroyObj(void*
   HIP_CHECK(hipUserObjectRelease(hObject, refCount + refCountRetain));
 }
 
-TEST_CASE("Unit_hipUserObjectCreate_Functional_4") {
+TEST_CASE("Unit_hipUserObjectCreate_Functional_4", "[graph]") {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -181,7 +181,7 @@ TEST_CASE("Unit_hipUserObjectCreate_Functional_4") {
  5) Pass initialRefcount as INT_MAX
  6) Pass flag other than hipUserObjectNoDestructorSync
  */
-TEST_CASE("Unit_hipUserObjectCreate_Negative") {
+TEST_CASE("Unit_hipUserObjectCreate_Negative", "[graph]") {
   int* object = new int();
   REQUIRE(object != nullptr);
 
@@ -222,7 +222,7 @@ TEST_CASE("Unit_hipUserObjectCreate_Negative") {
   }
 }
 
-TEST_CASE("Unit_hipUserObj_Negative_Test") {
+TEST_CASE("Unit_hipUserObj_Negative_Test", "[graph]") {
   int* object = new int();
   REQUIRE(object != nullptr);
 

@@ -45,7 +45,7 @@ const uint32_t kApiNumber{1024};
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipApiName_Positive_Basic") {
+TEST_CASE("Unit_hipApiName_Positive_Basic", "[callback]") {
   std::vector<std::string> hip_api_names;
 
   for (uint32_t i = 0; i < kApiNumber; ++i) {
@@ -73,7 +73,7 @@ TEST_CASE("Unit_hipApiName_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipApiName_Negative_ReservedIds") {
+TEST_CASE("Unit_hipApiName_Negative_ReservedIds", "[callback]") {
   REQUIRE_THAT(hipApiName(std::numeric_limits<uint32_t>::min()), Catch::Equals(kUnknownApi));
   REQUIRE_THAT(hipApiName(std::numeric_limits<uint32_t>::max()), Catch::Equals(kUnknownApi));
 }

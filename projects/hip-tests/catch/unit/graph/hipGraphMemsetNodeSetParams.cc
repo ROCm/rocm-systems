@@ -122,7 +122,7 @@ TEMPLATE_TEST_CASE("Unit_hipGraphMemsetNodeSetParams_Positive_Basic", "", uint8_
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemsetNodeSetParams_Negative_Parameters") {
+TEST_CASE("Unit_hipGraphMemsetNodeSetParams_Negative_Parameters", "[graph]") {
   using namespace std::placeholders;
 
   hipGraph_t graph = nullptr;

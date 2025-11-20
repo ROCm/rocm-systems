@@ -337,7 +337,7 @@ __global__ void generate_my_kernel() { static_assert(func()); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_VectorConstexpr_SanityCheck_Basic_host_device", "") {
+TEST_CASE("Unit_VectorConstexpr_SanityCheck_Basic_host_device", "[vector_types]") {
   generate_my_kernel<<<1, 1>>>();
   static_assert(func());
 }
@@ -429,7 +429,7 @@ __global__ void check_alignment_device() { check_alignment(); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Vector_alignment_check", "") {
+TEST_CASE("Unit_Vector_alignment_check", "[vector_types]") {
   check_alignment_device<<<1, 1>>>();
   check_alignment();
 }
@@ -522,7 +522,7 @@ __global__ void check_size_device() { check_size(); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Vector_size_check", "") {
+TEST_CASE("Unit_Vector_size_check", "[vector_types]") {
   check_size_device<<<1, 1>>>();
   check_size();
 }

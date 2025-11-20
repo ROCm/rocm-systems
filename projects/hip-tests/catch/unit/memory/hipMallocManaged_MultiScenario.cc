@@ -73,7 +73,7 @@ void HostKernelDouble(float* Hmm, float* hPtr, size_t n) {
 /*
    This testcase verifies the concurrent access of hipMallocManaged Memory on host and device.
  */
-TEST_CASE("Unit_hipMallocManaged_HostDeviceConcurrent") {
+TEST_CASE("Unit_hipMallocManaged_HostDeviceConcurrent", "[memory]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -109,7 +109,7 @@ TEST_CASE("Unit_hipMallocManaged_HostDeviceConcurrent") {
 // Equal parts of Hmm is accessed and
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
-TEST_CASE("Unit_hipMallocManaged_MultiChunkSingleDevice") {
+TEST_CASE("Unit_hipMallocManaged_MultiChunkSingleDevice", "[memory]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -161,7 +161,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiChunkSingleDevice") {
 // Equal parts of Hmm is accessed on available gpus and
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
-TEST_CASE("Unit_hipMallocManaged_MultiChunkMultiDevice", "[multigpu]") {
+TEST_CASE("Unit_hipMallocManaged_MultiChunkMultiDevice", "[multigpu][memory]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -217,7 +217,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiChunkMultiDevice", "[multigpu]") {
 }
 
 // The following tests oversubscription hipMallocManaged() api
-TEST_CASE("Unit_hipMallocManaged_OverSubscription") {
+TEST_CASE("Unit_hipMallocManaged_OverSubscription", "[memory]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -244,7 +244,7 @@ TEST_CASE("Unit_hipMallocManaged_OverSubscription") {
 
 // The following test does negative testing of hipMallocManaged() api
 // by passing invalid values and check if the behavior is as expected
-TEST_CASE("Unit_hipMallocManaged_Negative") {
+TEST_CASE("Unit_hipMallocManaged_Negative", "[memory]") {
   void* A;
   size_t total = 0, free = 0;
   HIP_CHECK(hipMemGetInfo(&free, &total));

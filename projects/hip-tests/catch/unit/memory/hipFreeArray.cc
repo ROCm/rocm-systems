@@ -46,7 +46,7 @@ TEMPLATE_TEST_CASE("Unit_hipFreeArray_DifferentSizes", "", uchar2, char, ushort,
   HIP_CHECK(hipFreeArray(arrayPtr));
 }
 
-TEST_CASE("Unit_hipFreeArray_NegativeArray") {
+TEST_CASE("Unit_hipFreeArray_NegativeArray", "[memory]") {
 #if HT_NVIDIA
   HIP_CHECK(hipFreeArray(nullptr));
 #else
@@ -54,7 +54,7 @@ TEST_CASE("Unit_hipFreeArray_NegativeArray") {
 #endif
 }
 
-TEST_CASE("Unit_hipFreeArray_DoubleFree") {
+TEST_CASE("Unit_hipFreeArray_DoubleFree", "[memory]") {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-120");
   return;

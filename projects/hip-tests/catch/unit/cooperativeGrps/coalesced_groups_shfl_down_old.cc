@@ -237,7 +237,7 @@ static void test_shfl_down() {
 }
 
 
-TEST_CASE("Unit_coalesced_groups_shfl_down") {
+TEST_CASE("Unit_coalesced_groups_shfl_down", "[cooperativeLaunch]") {
   // Use default device for validating the test
   int deviceId;
   ASSERT_EQUAL(hipGetDevice(&deviceId), hipSuccess);

@@ -77,7 +77,7 @@ template <typename T> static void doMemsetTest(allocType mallocType, memType mem
  * test 2 async hipMemset's on the same memory at different offsets
  */
 
-TEST_CASE("Unit_hipMemsetASyncMulti") {
+TEST_CASE("Unit_hipMemsetASyncMulti", "[memory]") {
   allocType mallocType = GENERATE(allocType::hostMalloc, allocType::deviceMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memType mem_type = memType::hipMemsetD8;
@@ -118,7 +118,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemsetDASyncMulti", "", int8_t, int16_t, uint32_t) {
 /*
  * test 2 async hipMemset2D's on the same memory at different offsets
  */
-TEST_CASE("Unit_hipMemset2DASyncMulti") {
+TEST_CASE("Unit_hipMemset2DASyncMulti", "[memory]") {
 #if HT_AMD
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127");
   return;
@@ -140,7 +140,7 @@ TEST_CASE("Unit_hipMemset2DASyncMulti") {
 /*
  * test 2 async hipMemset3D's on the same memory at different offsets
  */
-TEST_CASE("Unit_hipMemset3DASyncMulti") {
+TEST_CASE("Unit_hipMemset3DASyncMulti", "[memory]") {
 #if HT_AMD
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127");
   return;

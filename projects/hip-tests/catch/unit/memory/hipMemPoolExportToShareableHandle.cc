@@ -70,7 +70,7 @@ static void fill_data(std::vector<int>& A_h, std::vector<int>& B_h, std::vector<
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolExportToShareableHandle_SameProc") {
+TEST_CASE("Unit_hipMemPoolExportToShareableHandle_SameProc", "[memory]") {
   hipMemPoolPtrExportData ptrExp;
   hipShareableHdl sharedHandle;
   std::vector<int> A_h(DATA_SIZE), B_h(DATA_SIZE), C_h(DATA_SIZE);
@@ -130,7 +130,7 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_SameProc") {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldUseHdl") {
+TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldUseHdl", "[memory]") {
   std::vector<int> A_h(DATA_SIZE), B_h(DATA_SIZE), C_h(DATA_SIZE);
   fill_data(A_h, B_h, C_h);
   int fd[2], fdSig[2];
@@ -237,7 +237,7 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldUseHdl") {
  *    - HIP_VERSION >= 6.2
  */
 #if HT_AMD
-TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess") {
+TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess", "[memory]") {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
@@ -340,7 +340,7 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess") {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl") {
+TEST_CASE("Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl", "[memory]") {
   std::vector<int> A_h(DATA_SIZE), B_h(DATA_SIZE), C_h(DATA_SIZE);
   fill_data(A_h, B_h, C_h);
   int fd[2], fdSig[2], fdpid[2];
@@ -457,7 +457,7 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl") {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolExportToShareableHandle_Negative") {
+TEST_CASE("Unit_hipMemPoolExportToShareableHandle_Negative", "[memory]") {
   hipShareableHdl sharedHandle;
   hipMemPoolProps pool_props{};
   hipMemPool_t mempoolPfd, mempoolwoPfd;

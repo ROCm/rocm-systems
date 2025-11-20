@@ -166,7 +166,7 @@ TEMPLATE_TEST_CASE("Unit_ChannelDescriptor_Positive_FormatNone", "", long long, 
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_ChannelDescriptor_Positive_16BitFloatingPoint") {
+TEST_CASE("Unit_ChannelDescriptor_Positive_16BitFloatingPoint", "[texture]") {
   int size = static_cast<int>(sizeof(unsigned short) * 8);
   hipChannelFormatKind kind = hipChannelFormatKindFloat;
   hipChannelFormatDesc channel_desc{};

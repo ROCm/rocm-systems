@@ -51,7 +51,7 @@ static constexpr size_t Nbytes = N * sizeof(int);
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipGetLastError_Positive_Basic") {
+TEST_CASE("Unit_hipGetLastError_Positive_Basic", "[device]") {
   HIP_CHECK(hipGetLastError());
   HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipGetLastError_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipGetLastError_Positive_Threaded") {
+TEST_CASE("Unit_hipGetLastError_Positive_Threaded", "[device]") {
   class HipGetLastErrorThreadedTest : public ThreadedZigZagTest<HipGetLastErrorThreadedTest> {
    public:
     void TestPart2() { REQUIRE_THREAD(hipMalloc(nullptr, 1) == hipErrorInvalidValue); }
@@ -94,7 +94,7 @@ TEST_CASE("Unit_hipGetLastError_Positive_Threaded") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipMemcpyPeerAsync", "[multigpu]") {
+TEST_CASE("Unit_hipGetLastError_with_hipMemcpyPeerAsync", "[multigpu][device]") {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -154,7 +154,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipMemcpyPeerAsync", "[multigpu]") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipMemcpyDtoHAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipMemcpyDtoHAsync", "[device]") {
   int *A_d, *B_d, *A_h;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -192,7 +192,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipMemcpyDtoHAsync") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGetLastError_with_hipMemcpyParam2DAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipMemcpyParam2DAsync", "[device]") {
   CHECK_IMAGE_SUPPORT
 
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr};
@@ -245,7 +245,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipMemcpyParam2DAsync") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipDrvMemcpy3DAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipDrvMemcpy3DAsync", "[device]") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
@@ -269,7 +269,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipDrvMemcpy3DAsync") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipMemcpy3DAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipMemcpy3DAsync", "[device]") {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{10}, height{10}, depth{10};
@@ -324,7 +324,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipMemcpy3DAsync") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipMemcpy2D_To_From_ArrayAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipMemcpy2D_To_From_ArrayAsync", "[device]") {
   int* hData = reinterpret_cast<int*>(malloc(WIDTH));
   REQUIRE(hData != nullptr);
   memset(hData, 0, WIDTH);
@@ -364,7 +364,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipMemcpy2D_To_From_ArrayAsync") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipStreamAttachMemAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipStreamAttachMemAsync", "[device]") {
   void* d_memory{nullptr};
   HIP_CHECK(hipGetLastError());
   HIP_CHECK_ERROR(hipMemPrefetchAsync(reinterpret_cast<void*>(d_memory), 0, hipMemAttachHost, 0),
@@ -385,7 +385,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipStreamAttachMemAsync") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipWaitExternalSemaphoresAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipWaitExternalSemaphoresAsync", "[device]") {
   hipExternalSemaphoreWaitParams wait_params = {};
   wait_params.params.fence.value = 1;
 
@@ -408,7 +408,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipWaitExternalSemaphoresAsync") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipSignalExternalSemaphoresAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipSignalExternalSemaphoresAsync", "[device]") {
   hipExternalSemaphoreSignalParams signal_params = {};
   signal_params.params.fence.value = 1;
 
@@ -431,7 +431,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipSignalExternalSemaphoresAsync") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipMemPrefetchAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipMemPrefetchAsync", "[device]") {
   HIP_CHECK(hipGetLastError());
   HIP_CHECK_ERROR(hipMemPrefetchAsync(nullptr, 1024, 0), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
@@ -451,7 +451,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipMemPrefetchAsync") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipMemcpy2DAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipMemcpy2DAsync", "[device]") {
   CHECK_IMAGE_SUPPORT
 
   int *A_h{nullptr}, *A_d{nullptr};
@@ -503,7 +503,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipMemcpy2DAsync") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipMemsetAsync") {
+TEST_CASE("Unit_hipGetLastError_with_hipMemsetAsync", "[device]") {
   int* A_d;
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   REQUIRE(A_d != nullptr);
@@ -532,7 +532,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipMemsetAsync") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_with_MemCpyAsync") {
+TEST_CASE("Unit_hipGetLastError_with_MemCpyAsync", "[device]") {
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
 
@@ -582,7 +582,7 @@ static void thread_wait_func(int sleep_time) {
   HIP_CHECK(hipGetLastError());
 }
 
-TEST_CASE("Unit_hipGetLastError_with_MemCpyAsync_thread") {
+TEST_CASE("Unit_hipGetLastError_with_MemCpyAsync_thread", "[device]") {
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
 
@@ -632,7 +632,7 @@ TEST_CASE("Unit_hipGetLastError_with_MemCpyAsync_thread") {
  *  - HIP_VERSION >= 5.3
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipGraphAddMemcpyNode1D") {
+TEST_CASE("Unit_hipGetLastError_with_hipGraphAddMemcpyNode1D", "[device]") {
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
   int *A_d, *B_d, *C_d;
@@ -713,7 +713,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipGraphAddMemcpyNode1D") {
  *  - HIP_VERSION >= 5.3
  */
 
-TEST_CASE("Unit_hipGetLastError_with_hipStreamBegin_EndCapture") {
+TEST_CASE("Unit_hipGetLastError_with_hipStreamBegin_EndCapture", "[device]") {
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
 
@@ -761,7 +761,7 @@ TEST_CASE("Unit_hipGetLastError_with_hipStreamBegin_EndCapture") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_error_check_with_hipGraphCreate") {
+TEST_CASE("Unit_hipGetLastError_error_check_with_hipGraphCreate", "[device]") {
   hipGraph_t graph;
   hipError_t ret;
 
@@ -785,7 +785,7 @@ TEST_CASE("Unit_hipGetLastError_error_check_with_hipGraphCreate") {
  */
 
 #if HT_NVIDIA
-TEST_CASE("Unit_hipGetLastError_success_before_hipGetLastError") {
+TEST_CASE("Unit_hipGetLastError_success_before_hipGetLastError", "[device]") {
   hipGraph_t graph;
   hipStream_t stream;
 
@@ -814,7 +814,7 @@ TEST_CASE("Unit_hipGetLastError_success_before_hipGetLastError") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGetLastError_success_before_hipGetLastError_check_again") {
+TEST_CASE("Unit_hipGetLastError_success_before_hipGetLastError_check_again", "[device]") {
   int value = 0;
   hipGraph_t graph;
 
@@ -842,7 +842,7 @@ TEST_CASE("Unit_hipGetLastError_success_before_hipGetLastError_check_again") {
 
 static void __global__ devideKernl(int* i, int x, int y) { *i = x / (x - y); }
 
-TEST_CASE("Unit_hipGetLastError_with_Kernel_divide_by_zero") {
+TEST_CASE("Unit_hipGetLastError_with_Kernel_divide_by_zero", "[device]") {
   int* i_d;
   int i = 9;
   HIP_CHECK(hipMalloc(&i_d, sizeof(int)));
@@ -878,7 +878,7 @@ TEST_CASE("Unit_hipGetLastError_with_Kernel_divide_by_zero") {
 
 static void __global__ incrementKernl(int* i) { *i += 1; }
 
-TEST_CASE("Unit_hipGetLastError_with_Kernel_Invalid_Configuration") {
+TEST_CASE("Unit_hipGetLastError_with_Kernel_Invalid_Configuration", "[device]") {
   int* i_d;
   HIP_CHECK(hipMalloc(&i_d, sizeof(int)));
   REQUIRE(i_d != nullptr);
@@ -941,7 +941,7 @@ TEST_CASE("Unit_hipGetLastError_with_Kernel_Invalid_Configuration") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGetLastError_With_Chk_Updated_Status") {
+TEST_CASE("Unit_hipGetLastError_With_Chk_Updated_Status", "[device]") {
     hipGraph_t graph;
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
@@ -961,7 +961,7 @@ TEST_CASE("Unit_hipGetLastError_With_Chk_Updated_Status") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGetLastError_Chk_Along_hipPeekAtLastError") {
+TEST_CASE("Unit_hipGetLastError_Chk_Along_hipPeekAtLastError", "[device]") {
     hipGraph_t graph;
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
@@ -984,7 +984,7 @@ TEST_CASE("Unit_hipGetLastError_Chk_Along_hipPeekAtLastError") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGetLastError_Error_Combinations") {
+TEST_CASE("Unit_hipGetLastError_Error_Combinations", "[device]") {
   int value = 0;
   hipGraph_t graph;
   SECTION("A case with Error-Error") {
@@ -1045,7 +1045,7 @@ static void thread_func() {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGetLastError_With_Thread") {
+TEST_CASE("Unit_hipGetLastError_With_Thread", "[device]") {
   hipGraph_t graph;
     int *A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
@@ -1067,7 +1067,7 @@ TEST_CASE("Unit_hipGetLastError_With_Thread") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGetLastError_MultiProcess") {
+TEST_CASE("Unit_hipGetLastError_MultiProcess", "[device]") {
   hipGraph_t graph;
     int *A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
@@ -1096,7 +1096,7 @@ static void __global__ emptyKernl() { }
 // Below test failed on NVIDIA due to error mismatch produced by the Invalid Kernel config.
 // For more details please check the ticket SWDEV-501851 comments.
 #if HT_AMD
-TEST_CASE("Unit_hipGetLastError_Kernel_Invalid_Config") {
+TEST_CASE("Unit_hipGetLastError_Kernel_Invalid_Config", "[device]") {
   hipError_t ret;
     hipLaunchKernelGGL(emptyKernl, dim3(0), dim3(0), 0, 0);
     int* A_d;

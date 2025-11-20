@@ -65,7 +65,7 @@ std::vector<int> GetDevicesWithAdviseSupport() {
   return supported_devices;
 }
 
-TEST_CASE("Unit_hipMemAdvise_Set_Unset_Basic") {
+TEST_CASE("Unit_hipMemAdvise_Set_Unset_Basic", "[memory]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
@@ -95,7 +95,7 @@ TEST_CASE("Unit_hipMemAdvise_Set_Unset_Basic") {
   SECTION("hipMemAdviseSetPreferredLocation") { SetUnset(hipMemAdviseSetPreferredLocation); }
 }
 
-TEST_CASE("Unit_hipMemAdvise_No_Flag_Interference") {
+TEST_CASE("Unit_hipMemAdvise_No_Flag_Interference", "[memory]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
@@ -123,7 +123,7 @@ TEST_CASE("Unit_hipMemAdvise_No_Flag_Interference") {
   }
 }
 
-TEST_CASE("Unit_hipMemAdvise_Rounding") {
+TEST_CASE("Unit_hipMemAdvise_Rounding", "[memory]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
@@ -155,7 +155,7 @@ TEST_CASE("Unit_hipMemAdvise_Rounding") {
           static_cast<int>(attribute));
 }
 
-TEST_CASE("Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch") {
+TEST_CASE("Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch", "[memory]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
@@ -181,7 +181,7 @@ TEST_CASE("Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemAdvise_Read_Write_After_Advise", "[multigpu]") {
+TEST_CASE("Unit_hipMemAdvise_Read_Write_After_Advise", "[multigpu][memory]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
@@ -225,7 +225,7 @@ TEST_CASE("Unit_hipMemAdvise_Read_Write_After_Advise", "[multigpu]") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemAdvise_Prefetch_After_Advise") {
+TEST_CASE("Unit_hipMemAdvise_Prefetch_After_Advise", "[memory]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
@@ -256,7 +256,7 @@ TEST_CASE("Unit_hipMemAdvise_Prefetch_After_Advise") {
   REQUIRE((advice == hipMemAdviseSetReadMostly ? 1 : device) == attribute);
 }
 
-TEST_CASE("Unit_hipMemAdvise_AccessedBy_All_Devices") {
+TEST_CASE("Unit_hipMemAdvise_AccessedBy_All_Devices", "[memory]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
@@ -276,7 +276,7 @@ TEST_CASE("Unit_hipMemAdvise_AccessedBy_All_Devices") {
   REQUIRE_THAT(accessed_by, Catch::Matchers::Equals(supported_devices));
 }
 
-TEST_CASE("Unit_hipMemAdvise_Negative_Parameters") {
+TEST_CASE("Unit_hipMemAdvise_Negative_Parameters", "[memory]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");

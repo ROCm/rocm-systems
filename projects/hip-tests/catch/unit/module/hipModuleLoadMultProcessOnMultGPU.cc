@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipModuleLoad_MultProcess_MultGPU", "[multigpu]") {
+TEST_CASE("Unit_hipModuleLoad_MultProcess_MultGPU", "[multigpu][module]") {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);

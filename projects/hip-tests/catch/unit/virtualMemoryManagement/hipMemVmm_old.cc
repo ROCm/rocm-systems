@@ -34,7 +34,7 @@ THE SOFTWARE.
 /*
     This testcase verifies HIP Mem VMM API basic scenario - supported on all devices
  */
-TEST_CASE("Unit_hipMemVmm_Basic") {
+TEST_CASE("Unit_hipMemVmm_Basic", "[vmm]") {
   CTX_CREATE();
   int vmm = 0;
   HIP_CHECK(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0));

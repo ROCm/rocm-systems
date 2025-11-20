@@ -304,7 +304,7 @@ static void UpdateStreamCaptureDependenciesAdd(hipStream_t stream,
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamSetCaptureDependencies_Positive_Functional") {
+TEST_CASE("Unit_hipStreamSetCaptureDependencies_Positive_Functional", "[graph]") {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -331,7 +331,7 @@ TEST_CASE("Unit_hipStreamSetCaptureDependencies_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamAddCaptureDependencies_Positive_Functional") {
+TEST_CASE("Unit_hipStreamAddCaptureDependencies_Positive_Functional", "[graph]") {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -354,7 +354,7 @@ TEST_CASE("Unit_hipStreamAddCaptureDependencies_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters") {
+TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters", "[graph]") {
   hipGraph_t graph{nullptr};
 
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
@@ -391,7 +391,7 @@ TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters") {
+TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters", "[graph]") {
   const int Nbytes = 100;
   hipGraph_t capInfoGraph{nullptr};
   hipGraph_t graph{nullptr};

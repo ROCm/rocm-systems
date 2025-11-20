@@ -59,7 +59,7 @@ __global__ void test_gws(int* buf, size_t buf_size, long* tmp_buf, long* result)
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernel_Basic") {
+TEST_CASE("Unit_hipLaunchCooperativeKernel_Basic", "[cooperativeLaunch]") {
   // Use default device for validating the test
   int device;
   int *A_h, *A_d;

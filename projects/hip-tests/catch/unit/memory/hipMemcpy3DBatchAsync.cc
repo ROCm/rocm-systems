@@ -363,7 +363,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps", "", char,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpy3DBatchAsync_NegativeTests") {
+TEST_CASE("Unit_hipMemcpy3DBatchAsync_NegativeTests", "[memory]") {
   CHECK_IMAGE_SUPPORT
   const int numOps = 2;
   hipStream_t stream = NULL;

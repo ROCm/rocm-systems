@@ -109,7 +109,7 @@ Allocates the memory using hipHostMalloc API
 Launches the kernel and performs vector addition.
 validates thes result.
 */
-TEST_CASE("Unit_hipHostMalloc_Basic") {
+TEST_CASE("Unit_hipHostMalloc_Basic", "[memory]") {
   static constexpr auto LEN{1024 * 1024};
   static constexpr auto SIZE{LEN * sizeof(float)};
 
@@ -163,7 +163,7 @@ TEST_CASE("Unit_hipHostMalloc_Basic") {
 This testcase verifies the hipHostMalloc API by passing nullptr
 to the pointer variable
 */
-TEST_CASE("Unit_hipHostMalloc_Negative") {
+TEST_CASE("Unit_hipHostMalloc_Negative", "[memory]") {
 #if HT_AMD
   {
     // Stimulate error condition:
@@ -182,7 +182,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE("Unit_hipHostMalloc_NonCoherent") {
+TEST_CASE("Unit_hipHostMalloc_NonCoherent", "[memory]") {
   int* A = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocNonCoherent));
   const char* ptrType = "non-coherent";
@@ -200,7 +200,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE("Unit_hipHostMalloc_Coherent") {
+TEST_CASE("Unit_hipHostMalloc_Coherent", "[memory]") {
   int* A = nullptr;
   if (hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocCoherent) == hipSuccess) {
     const char* ptrType = "coherent";
@@ -226,7 +226,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE("Unit_hipHostMalloc_Default") {
+TEST_CASE("Unit_hipHostMalloc_Default", "[memory]") {
   int* A = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes));
   const char* ptrType = "default";
@@ -236,7 +236,7 @@ TEST_CASE("Unit_hipHostMalloc_Default") {
   HIP_CHECK(hipFreeHost(A));
 }
 
-TEST_CASE("Unit_hipHostGetDevicePointer_NullCheck") {
+TEST_CASE("Unit_hipHostGetDevicePointer_NullCheck", "[memory]") {
   int* d_a;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&d_a), sizeof(int)));
 
@@ -252,7 +252,7 @@ This testcase verifies the hipHostMalloc API by
 2. Allocating more memory than the total GPU memory and accessing the memory
    in a device function.
 */
-TEST_CASE("Unit_hipHostMalloc_AllocateMoreThanAvailGPUMemory") {
+TEST_CASE("Unit_hipHostMalloc_AllocateMoreThanAvailGPUMemory", "[memory]") {
   char* A = nullptr;
   size_t maxGpuMem = 0, availableMem = 0;
   // Get available GPU memory and total GPU memory
@@ -275,7 +275,7 @@ TEST_CASE("Unit_hipHostMalloc_AllocateMoreThanAvailGPUMemory") {
 }
 
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory") {
+TEST_CASE("Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory", "[memory]") {
   char* A = nullptr;
   size_t maxGpuMem = 0, availableMem = 0;
   // Get available GPU memory and total GPU memory
@@ -305,7 +305,7 @@ TEST_CASE("Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory") {
 }
 #endif
 
-TEST_CASE("Unit_hipHostMalloc_Capture") {
+TEST_CASE("Unit_hipHostMalloc_Capture", "[memory]") {
   int* host_ptr = nullptr;
   hipError_t capture_error = hipSuccess;
 

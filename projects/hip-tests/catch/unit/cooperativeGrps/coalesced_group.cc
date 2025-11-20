@@ -134,7 +134,7 @@ static uint64_t get_active_mask(unsigned int test_case, size_t warp_size) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Coalesced_Group_Getters_Positive_Basic") {
+TEST_CASE("Unit_Coalesced_Group_Getters_Positive_Basic", "[cooperativeLaunch]") {
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));
@@ -222,7 +222,7 @@ TEST_CASE("Unit_Coalesced_Group_Getters_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic") {
+TEST_CASE("Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic", "[cooperativeLaunch]") {
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));
@@ -312,7 +312,7 @@ TEST_CASE("Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic") {
+TEST_CASE("Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic", "[cooperativeLaunch]") {
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));

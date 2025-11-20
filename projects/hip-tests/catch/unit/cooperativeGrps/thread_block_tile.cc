@@ -120,7 +120,7 @@ template <bool dynamic, size_t... tile_sizes> void BlockPartitionGettersBasicTes
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Tile_Getters_Positive_Basic") {
+TEST_CASE("Unit_Thread_Block_Tile_Getters_Positive_Basic", "[cooperativeLaunch]") {
   BlockPartitionGettersBasicTest<false, 2, 4, 8, 16, 32>();
 }
 
@@ -137,7 +137,7 @@ TEST_CASE("Unit_Thread_Block_Tile_Getters_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Tile_Dynamic_Getters_Positive_Basic") {
+TEST_CASE("Unit_Thread_Block_Tile_Dynamic_Getters_Positive_Basic", "[cooperativeLaunch]") {
   BlockPartitionGettersBasicTest<true, 2, 4, 8, 16, 32>();
 }
 

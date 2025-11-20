@@ -103,7 +103,7 @@ int get_flags() {
                   hipHostMallocPortable | hipHostMallocMapped | hipHostMallocWriteCombined);
 }
 
-TEST_CASE("Unit_hipHostAlloc_Positive") {
+TEST_CASE("Unit_hipHostAlloc_Positive", "[memory]") {
   int* host_memory = nullptr;
   int flags = get_flags();
 
@@ -114,7 +114,7 @@ TEST_CASE("Unit_hipHostAlloc_Positive") {
   HIP_CHECK(hipFreeHost(host_memory));
 }
 
-TEST_CASE("Unit_hipHostAlloc_DataValidation") {
+TEST_CASE("Unit_hipHostAlloc_DataValidation", "[memory]") {
   int validation_number = 10;
   int* host_memory = nullptr;
   int* device_memory = nullptr;
@@ -145,7 +145,7 @@ TEST_CASE("Unit_hipHostAlloc_DataValidation") {
   HIP_CHECK(hipFreeHost(host_memory));
 }
 
-TEST_CASE("Unit_hipHostAlloc_Negative") {
+TEST_CASE("Unit_hipHostAlloc_Negative", "[memory]") {
   int* host_memory = nullptr;
   int flags = get_flags();
 
@@ -179,7 +179,7 @@ TEST_CASE("Unit_hipHostAlloc_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipHostAlloc_Basic") {
+TEST_CASE("Unit_hipHostAlloc_Basic", "[memory]") {
   static constexpr auto LEN{1024 * 1024};
   static constexpr auto SIZE{LEN * sizeof(float)};
 
@@ -237,7 +237,7 @@ TEST_CASE("Unit_hipHostAlloc_Basic") {
  * using different synchronization techniquies
  * validates the result.
  */
-TEST_CASE("Unit_hipHostAlloc_Default") {
+TEST_CASE("Unit_hipHostAlloc_Default", "[memory]") {
   int* A = nullptr;
   HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocDefault));
   std::string kPtrType{"default"};
@@ -262,7 +262,7 @@ TEST_CASE("Unit_hipHostAlloc_Default") {
  *  - HIP_VERSION >= 6.3
  */
 #if HT_AMD
-TEST_CASE("Unit_hipHostAlloc_Negative_NonCoherent") {
+TEST_CASE("Unit_hipHostAlloc_Negative_NonCoherent", "[memory]") {
   int* A = nullptr;
   REQUIRE(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocNonCoherent) ==
           hipErrorInvalidValue);
@@ -285,7 +285,7 @@ TEST_CASE("Unit_hipHostAlloc_Negative_NonCoherent") {
  *  - HIP_VERSION >= 6.3
  */
 #if HT_AMD
-TEST_CASE("Unit_hipHostAlloc_Negative_Coherent") {
+TEST_CASE("Unit_hipHostAlloc_Negative_Coherent", "[memory]") {
   int* A = nullptr;
   REQUIRE(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocCoherent) ==
           hipErrorInvalidValue);
@@ -308,7 +308,7 @@ TEST_CASE("Unit_hipHostAlloc_Negative_Coherent") {
  *  - HIP_VERSION >= 6.3
  */
 #if HT_AMD
-TEST_CASE("Unit_hipHostAlloc_Negative_NumaUser") {
+TEST_CASE("Unit_hipHostAlloc_Negative_NumaUser", "[memory]") {
   int* A = nullptr;
   REQUIRE(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocNumaUser) ==
           hipErrorInvalidValue);
@@ -329,7 +329,7 @@ TEST_CASE("Unit_hipHostAlloc_Negative_NumaUser") {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory") {
+TEST_CASE("Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory", "[memory]") {
   char* A = nullptr;
   size_t maxGpuMem = 0, availableMem = 0;
   // Get available GPU memory and total GPU memory
@@ -366,7 +366,7 @@ TEST_CASE("Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipHostAlloc_ArgValidation") {
+TEST_CASE("Unit_hipHostAlloc_ArgValidation", "[memory]") {
   constexpr size_t allocSize = 1000;
   char* ptr;
 
@@ -387,7 +387,7 @@ TEST_CASE("Unit_hipHostAlloc_ArgValidation") {
   }
 }
 
-TEST_CASE("Unit_hipHostAlloc_Capture") {
+TEST_CASE("Unit_hipHostAlloc_Capture", "[memory]") {
   int* host_memory = nullptr;
   int flags = get_flags();
 

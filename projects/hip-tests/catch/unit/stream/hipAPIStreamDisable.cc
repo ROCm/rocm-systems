@@ -43,7 +43,7 @@ __global__ void nKernel(float* y) {
 /**
  * Validate basic multistream functionalities
  */
-TEST_CASE("Unit_hipStreamCreate_MultistreamBasicFunctionalities") {
+TEST_CASE("Unit_hipStreamCreate_MultistreamBasicFunctionalities", "[stream]") {
   hipStream_t streams[NUM_STREAMS];
   float *data[NUM_STREAMS], *yd, *xd;
   float y = 1.0f, x = 1.0f;

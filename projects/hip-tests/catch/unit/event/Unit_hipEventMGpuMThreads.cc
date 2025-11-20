@@ -204,7 +204,7 @@ void testEventMGpuMThreads(int nThreads = 1) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventMGpuMThreads_1") { testEventMGpuMThreads(1); }
+TEST_CASE("Unit_hipEventMGpuMThreads_1", "[event]") { testEventMGpuMThreads(1); }
 
 /**
  * Test Description
@@ -217,7 +217,7 @@ TEST_CASE("Unit_hipEventMGpuMThreads_1") { testEventMGpuMThreads(1); }
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventMGpuMThreads_2", "[multigpu]") {
+TEST_CASE("Unit_hipEventMGpuMThreads_2", "[multigpu][event]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
@@ -238,7 +238,7 @@ TEST_CASE("Unit_hipEventMGpuMThreads_2", "[multigpu]") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventMGpuMThreads_3", "[multigpu]") {
+TEST_CASE("Unit_hipEventMGpuMThreads_3", "[multigpu][event]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {

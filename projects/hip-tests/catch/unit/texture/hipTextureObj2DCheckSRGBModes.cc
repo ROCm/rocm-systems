@@ -152,7 +152,7 @@ line1:
   REQUIRE(result);
 }
 
-TEST_CASE("Unit_hipTextureObj2DCheckRGBAModes") {
+TEST_CASE("Unit_hipTextureObj2DCheckRGBAModes", "[texture]") {
   CHECK_IMAGE_SUPPORT
   (void) hipGetLastError();  // Prevent negative tests affecting this
 
@@ -198,7 +198,7 @@ TEST_CASE("Unit_hipTextureObj2DCheckRGBAModes") {
 }
 
 
-TEST_CASE("Unit_hipTextureObj2DCheckSRGBAModes") {
+TEST_CASE("Unit_hipTextureObj2DCheckSRGBAModes", "[texture]") {
   CHECK_IMAGE_SUPPORT
 
   SECTION("SRGBA 2D hipAddressModeClamp, hipFilterModePoint, regularCoords") {

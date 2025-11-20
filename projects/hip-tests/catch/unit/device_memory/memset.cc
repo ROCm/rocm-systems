@@ -141,7 +141,7 @@ TEMPLATE_TEST_CASE("Unit_Device_memset_Positive", "", char, int, unsigned int, l
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_memset_Negative_Parameters_RTC") {
+TEST_CASE("Unit_Device_memset_Negative_Parameters_RTC", "[memory]") {
   hiprtcProgram program{};
 
   const auto program_source = kMemsetParam;

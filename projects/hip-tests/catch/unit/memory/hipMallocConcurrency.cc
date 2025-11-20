@@ -220,7 +220,7 @@ static void threadFunc(int gpu) {
 
 
 /* Performs Argument Validation of api */
-TEST_CASE("Unit_hipMalloc_ArgumentValidation") {
+TEST_CASE("Unit_hipMalloc_ArgumentValidation", "[memory]") {
   int* ptr{nullptr};
 
   SECTION("hipMalloc() when size(0)") {
@@ -245,7 +245,7 @@ TEST_CASE("Unit_hipMalloc_ArgumentValidation") {
  * Regress hipMalloc()/hipFree() in loop for bigger chunks and
  * smaller chunks of memory allocation
  */
-TEST_CASE("Unit_hipMalloc_LoopRegressionAllocFreeCycles") {
+TEST_CASE("Unit_hipMalloc_LoopRegressionAllocFreeCycles", "[memory]") {
   int devCnt = 0;
 
   // Get GPU count
@@ -262,7 +262,7 @@ TEST_CASE("Unit_hipMalloc_LoopRegressionAllocFreeCycles") {
  * continuously, stores it for later use and then frees it at later point
  * of time.
  */
-TEST_CASE("Unit_hipMalloc_AllocateAndPoolBuffers") {
+TEST_CASE("Unit_hipMalloc_AllocateAndPoolBuffers", "[memory]") {
   size_t avail{0}, tot{0};
   bool ret{false};
   hipError_t err{};
@@ -303,7 +303,7 @@ TEST_CASE("Unit_hipMalloc_AllocateAndPoolBuffers") {
  * Exercise hipMalloc() api parellely on all gpus from
  * multiple threads and regress the api.
  */
-TEST_CASE("Unit_hipMalloc_Multithreaded_MultiGPU", "[multigpu]") {
+TEST_CASE("Unit_hipMalloc_Multithreaded_MultiGPU", "[multigpu][memory]") {
   std::vector<std::thread> threadlist;
   int devCnt;
 

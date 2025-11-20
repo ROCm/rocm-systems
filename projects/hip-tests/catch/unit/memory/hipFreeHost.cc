@@ -34,7 +34,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipFreeHost_InvalidMemory") {
+TEST_CASE("Unit_hipFreeHost_InvalidMemory", "[memory]") {
   SECTION("Nullptr") { HIP_CHECK(hipFreeHost(nullptr)); }
 
   SECTION("Invalid ptr") {
@@ -72,7 +72,7 @@ TEST_CASE("Unit_hipFreeHost_InvalidMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipFreeHost_DoubleFree") {
+TEST_CASE("Unit_hipFreeHost_DoubleFree", "[memory]") {
   void* ptr = NULL;
   size_t ptr_size = 1024;
 
@@ -92,7 +92,7 @@ TEST_CASE("Unit_hipFreeHost_DoubleFree") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipFreeHost_Multithreading") {
+TEST_CASE("Unit_hipFreeHost_Multithreading", "[memory]") {
   std::vector<unsigned long*> ptrs(10);
   size_t ptr_size = 1024;
 
@@ -115,7 +115,7 @@ TEST_CASE("Unit_hipFreeHost_Multithreading") {
   HIP_CHECK_THREAD_FINALIZE();
 }
 
-TEST_CASE("Unit_hipFreeHost_Capture") {
+TEST_CASE("Unit_hipFreeHost_Capture", "[memory]") {
   void* ptr = nullptr;
   constexpr size_t kPtrSize = 1024;
 

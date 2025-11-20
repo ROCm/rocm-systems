@@ -39,7 +39,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipCreateSurfaceObject_Negative_Parameters") {
+TEST_CASE("Unit_hipCreateSurfaceObject_Negative_Parameters", "[texture]") {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array;

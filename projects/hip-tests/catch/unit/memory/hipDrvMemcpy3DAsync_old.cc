@@ -485,7 +485,7 @@ TEMPLATE_TEST_CASE("Unit_hipDrvMemcpy3DAsync_MultipleDataTypes", "", uint8_t, in
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_HosttoDevice") {
+TEST_CASE("Unit_hipDrvMemcpy3DAsync_HosttoDevice", "[memory]") {
   CHECK_IMAGE_SUPPORT
   DrvMemcpy3DAsync<float> memcpy3d_D2H_float(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d_D2H_float.HostDevice_DrvMemcpy3DAsync();
@@ -504,7 +504,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_HosttoDevice") {
  */
 
 #if HT_NVIDIA
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Negative") {
+TEST_CASE("Unit_hipDrvMemcpy3DAsync_Negative", "[memory]") {
   DrvMemcpy3DAsync<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d.NegativeTests();
 }
@@ -523,7 +523,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Negative") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_ExtentValidation") {
+TEST_CASE("Unit_hipDrvMemcpy3DAsync_ExtentValidation", "[memory]") {
   CHECK_IMAGE_SUPPORT
   DrvMemcpy3DAsync<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d.Extent_Validation();
@@ -542,7 +542,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_ExtentValidation") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
+TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu][memory]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -567,8 +567,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
-          "[multigpu]") {
+TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange", "[multigpu][memory]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -596,8 +595,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test",
-          "[multigpu]") {
+TEST_CASE("Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test", "[multigpu][memory]") {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;

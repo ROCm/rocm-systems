@@ -43,7 +43,7 @@ void initMemPoolProps() {
    This testcase verifies HIP Mem Pool API basic scenario - supported on all devices
  */
 
-TEST_CASE("Unit_hipMemPoolApi_Basic") {
+TEST_CASE("Unit_hipMemPoolApi_Basic", "[memory]") {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -97,7 +97,7 @@ TEST_CASE("Unit_hipMemPoolApi_Basic") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
+TEST_CASE("Unit_hipMemPoolApi_BasicAlloc", "[memory]") {
   int mem_pool_support = 0;
   HIP_CHECK(hipSetDevice(0));
 
@@ -188,7 +188,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
   HIP_CHECK(hipHostFree(notified));
 }
 
-TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
+TEST_CASE("Unit_hipMemPoolApi_BasicTrim", "[memory]") {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -276,7 +276,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
   HIP_CHECK(hipHostFree(notified));
 }
 
-TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
+TEST_CASE("Unit_hipMemPoolApi_BasicReuse", "[memory]") {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -351,7 +351,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
   HIP_CHECK(hipHostFree(notified));
 }
 
-TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
+TEST_CASE("Unit_hipMemPoolApi_Opportunistic", "[memory]") {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -508,7 +508,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
   HIP_CHECK(hipHostFree(notified2));
 }
 
-TEST_CASE("Unit_hipMemPoolApi_Default") {
+TEST_CASE("Unit_hipMemPoolApi_Default", "[memory]") {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {

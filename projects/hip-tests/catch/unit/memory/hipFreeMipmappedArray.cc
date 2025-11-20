@@ -84,7 +84,7 @@ TEMPLATE_TEST_CASE("Unit_hipFreeMipmappedArrayImplicitSyncArray", "", char, floa
   }
 }
 
-TEST_CASE("Unit_hipFreeMipmappedArray_Negative_Nullptr") {
+TEST_CASE("Unit_hipFreeMipmappedArray_Negative_Nullptr", "[memory]") {
 #if HT_AMD
   HIP_CHECK_ERROR(hipFreeMipmappedArray(nullptr), hipErrorInvalidValue);
 #else

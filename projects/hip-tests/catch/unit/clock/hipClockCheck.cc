@@ -292,7 +292,7 @@ int getClockRate(int& max_clock_rate) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipClock64_Positive_Basic") {
+TEST_CASE("Unit_hipClock64_Positive_Basic", "[device]") {
   HIP_CHECK(hipSetDevice(0));
 
   int max_clock_rate;
@@ -343,7 +343,7 @@ TEST_CASE("Unit_hipClock64_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipClock_Positive_Basic") {
+TEST_CASE("Unit_hipClock_Positive_Basic", "[device]") {
   HIP_CHECK(hipSetDevice(0));
 
   int max_clock_rate;
@@ -392,7 +392,7 @@ TEST_CASE("Unit_hipClock_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipWallClock64_Positive_Basic") {
+TEST_CASE("Unit_hipWallClock64_Positive_Basic", "[device]") {
   HIP_CHECK(hipSetDevice(0));
   int clock_rate = 0;  // in kHz
   HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeWallClockRate, 0));

@@ -42,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetLimit_NegTst") {
+TEST_CASE("Unit_hipDeviceGetLimit_NegTst", "[device]") {
   size_t Value = 0;
 
   SECTION("NULL check") {
@@ -65,7 +65,7 @@ TEST_CASE("Unit_hipDeviceGetLimit_NegTst") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetLimit_CheckValidityOfOutputVal") {
+TEST_CASE("Unit_hipDeviceGetLimit_CheckValidityOfOutputVal", "[device]") {
   size_t Value = 0;
 
   REQUIRE(hipDeviceGetLimit(&Value, hipLimitMallocHeapSize) == hipSuccess);

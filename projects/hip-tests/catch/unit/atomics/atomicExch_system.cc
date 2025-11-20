@@ -206,7 +206,7 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs",
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicExch_system_Negative_Parameters_RTC") {
+TEST_CASE("Unit_atomicExch_system_Negative_Parameters_RTC", "[atomic]") {
   hiprtcProgram program{};
 
   const auto program_source =

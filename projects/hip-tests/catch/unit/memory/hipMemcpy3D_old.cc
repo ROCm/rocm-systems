@@ -565,7 +565,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3D_Basic", "[hipMemcpy3D]", int, unsigned int,
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipMemcpy3D_ExtentValidation") {
+TEST_CASE("Unit_hipMemcpy3D_ExtentValidation", "[memory]") {
   CHECK_IMAGE_SUPPORT
   Memcpy3D<int> memcpy3d(width, height, depth, hipChannelFormatKindSigned);
   memcpy3d.Extent_Validation();
@@ -583,7 +583,7 @@ TEST_CASE("Unit_hipMemcpy3D_ExtentValidation") {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipMemcpy3D_multiDevice-Negative") {
+TEST_CASE("Unit_hipMemcpy3D_multiDevice-Negative", "[memory]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -609,7 +609,7 @@ TEST_CASE("Unit_hipMemcpy3D_multiDevice-Negative") {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipMemcpy3D_multiDevice-OnPeerDevice", "[multigpu]") {
+TEST_CASE("Unit_hipMemcpy3D_multiDevice-OnPeerDevice", "[multigpu][memory]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -644,7 +644,7 @@ TEST_CASE("Unit_hipMemcpy3D_multiDevice-OnPeerDevice", "[multigpu]") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy3D_multiDevice_Basic_Size_Test", "[multigpu]") {
+TEST_CASE("Unit_hipMemcpy3D_multiDevice_Basic_Size_Test", "[multigpu][memory]") {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;

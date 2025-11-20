@@ -124,7 +124,7 @@ __global__ void coalesced_group_tiled_partition_thread_rank_getter(uint64_t* act
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic") {
+TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic", "[cooperativeLaunch]") {
   const auto tile_size = GenerateTileSizes();
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensions();

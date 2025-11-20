@@ -75,7 +75,7 @@ static void MallocMipmappedArray_DiffSizes(int gpu) {
   }
 }
 
-TEST_CASE("Unit_hipMallocMipmappedArray_DiffSizes") {
+TEST_CASE("Unit_hipMallocMipmappedArray_DiffSizes", "[memory]") {
   MallocMipmappedArray_DiffSizes(0);
   HIP_CHECK_THREAD_FINALIZE();
 }
@@ -85,7 +85,7 @@ This testcase verifies the hipMallocMipmappedArray API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipMallocMipmappedArray API with small and big chunks data
 */
-TEST_CASE("Unit_hipMallocMipmappedArray_MultiThread", "[multigpu]") {
+TEST_CASE("Unit_hipMallocMipmappedArray_MultiThread", "[multigpu][memory]") {
   std::vector<std::thread> threadlist;
   int devCnt = 0;
   devCnt = HipTest::getDeviceCount();
@@ -185,7 +185,7 @@ hipExtent makeMipmappedExtent(unsigned int flag, size_t s) {
 }
 
 // Providing the array pointer as nullptr should return an error
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NullArrayPtr") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NullArrayPtr", "[memory]") {
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
   unsigned int numLevels = 1;
   constexpr size_t s = 6;
@@ -197,7 +197,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NullArrayPtr") {
 }
 
 // Providing the description pointer as nullptr should return an error
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NullDescPtr") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NullDescPtr", "[memory]") {
   constexpr size_t s = 6;  // 6 to keep cubemap happy
   unsigned int numLevels = 1;
   hipMipmappedArray_t array;
@@ -210,7 +210,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NullDescPtr") {
 }
 
 // Zero width arrays are not allowed
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_ZeroWidth") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_ZeroWidth", "[memory]") {
   constexpr size_t s = 6;  // 6 to keep cubemap happy
   unsigned int numLevels = 1;
   hipMipmappedArray_t array;
@@ -223,7 +223,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_ZeroWidth") {
 }
 
 // Zero height arrays are only allowed for 1D arrays and layered arrays
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_ZeroHeight") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_ZeroHeight", "[memory]") {
   constexpr size_t s = 6;  // 6 to keep cubemap happy
   unsigned int numLevels = 1;
   hipMipmappedArray_t array;
@@ -241,7 +241,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_ZeroHeight") {
   }
 }
 
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_InvalidFlags") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_InvalidFlags", "[memory]") {
   constexpr size_t s = 6;  // 6 to keep cubemap happy
   unsigned int numLevels = 1;
   hipMipmappedArray_t array;
@@ -282,13 +282,13 @@ void testInvalidDescriptionMipmapped(hipChannelFormatDesc desc) {
       expectedError, hipErrorNotSupported);
 }
 
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_InvalidFormat") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_InvalidFormat", "[memory]") {
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
   desc.f = GENERATE(hipChannelFormatKindNone, 0xBEEF);
   testInvalidDescriptionMipmapped(desc);
 }
 
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_BadChannelLayout") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_BadChannelLayout", "[memory]") {
   const int bits = GENERATE(8, 16, 32);
   const hipChannelFormatKind formatKind =
       GENERATE(hipChannelFormatKindSigned, hipChannelFormatKindUnsigned, hipChannelFormatKindFloat);
@@ -309,7 +309,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_BadChannelLayout") {
   testInvalidDescriptionMipmapped(desc);
 }
 
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_8BitFloat") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_8BitFloat", "[memory]") {
   hipChannelFormatDesc desc = GENERATE(hipCreateChannelDesc(8, 0, 0, 0, hipChannelFormatKindFloat),
                                        hipCreateChannelDesc(8, 8, 0, 0, hipChannelFormatKindFloat),
                                        hipCreateChannelDesc(8, 8, 8, 8, hipChannelFormatKindFloat));
@@ -317,7 +317,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_8BitFloat") {
   testInvalidDescriptionMipmapped(desc);
 }
 
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_DifferentChannelSizes") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_DifferentChannelSizes", "[memory]") {
   const int bitsX = GENERATE(8, 16, 32);
   const int bitsY = GENERATE(8, 16, 32);
   const int bitsZ = GENERATE(8, 16, 32);
@@ -340,7 +340,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_DifferentChannelSizes") {
   testInvalidDescriptionMipmapped(desc);
 }
 
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_BadChannelSize") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_BadChannelSize", "[memory]") {
   const int badBits = GENERATE(-1, 0, 10, 100);
   const hipChannelFormatKind formatKind =
       GENERATE(hipChannelFormatKindSigned, hipChannelFormatKindUnsigned, hipChannelFormatKindFloat);
@@ -353,7 +353,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_BadChannelSize") {
 
 
 // hipMallocMipmappedArray should handle the max numeric value gracefully.
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NumericLimit") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NumericLimit", "[memory]") {
   hipMipmappedArray_t arrayPtr;
   unsigned int numLevels = 1;
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
@@ -384,7 +384,7 @@ TEMPLATE_TEST_CASE("Unit_hipMallocMipmappedArray_Negative_Non2DTextureGather", "
                   hipErrorInvalidValue);
 }
 
-TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NumLevels") {
+TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NumLevels", "[memory]") {
   hipMipmappedArray_t array;
   constexpr size_t size = 6;
   unsigned int numLevels = floor(log2(size)) + 2;
@@ -401,7 +401,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NumLevels") {
 #endif
 }
 
-TEST_CASE("Unit_hipGetMipmappedArrayLevel_Negative") {
+TEST_CASE("Unit_hipGetMipmappedArrayLevel_Negative", "[memory]") {
   constexpr size_t s = 6;
   unsigned int numLevels = 1;
   hipMipmappedArray_t array;

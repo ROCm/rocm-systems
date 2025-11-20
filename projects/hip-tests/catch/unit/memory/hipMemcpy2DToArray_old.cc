@@ -41,7 +41,7 @@ static constexpr auto NUM_H{10};
  *         --> A_h host variable
  *         and verifying A_h with Phi
  */
-TEST_CASE("Unit_hipMemcpy2DToArray_Basic") {
+TEST_CASE("Unit_hipMemcpy2DToArray_Basic", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -68,7 +68,7 @@ TEST_CASE("Unit_hipMemcpy2DToArray_Basic") {
 /*
  * This testcase verifies the extent validation scenarios
  */
-TEST_CASE("Unit_hipMemcpy2DToArray_ExtentValidation") {
+TEST_CASE("Unit_hipMemcpy2DToArray_ExtentValidation", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -125,7 +125,7 @@ TEST_CASE("Unit_hipMemcpy2DToArray_ExtentValidation") {
  *         --> A_h host variable
  *         and verifying A_h with PinnedMem[0](i.e., 10)
  */
-TEST_CASE("Unit_hipMemcpy2DToArray_PinnedMemSameGPU") {
+TEST_CASE("Unit_hipMemcpy2DToArray_PinnedMemSameGPU", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -164,7 +164,7 @@ TEST_CASE("Unit_hipMemcpy2DToArray_PinnedMemSameGPU") {
  *         --> A_h host variable
  *         and verifying A_h with E_h[0]+i(i.e., 10+i)
  */
-TEST_CASE("Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu", "[multigpu]") {
+TEST_CASE("Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu", "[multigpu][memory]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -218,8 +218,7 @@ TEST_CASE("Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu", "[multigpu]") {
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE("Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange",
-          "[multigpu]") {
+TEST_CASE("Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange", "[multigpu][memory]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -258,7 +257,7 @@ TEST_CASE("Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange",
 }
 /* This testcase verifies the negative scenarios
  */
-TEST_CASE("Unit_hipMemcpy2DToArray_Negative") {
+TEST_CASE("Unit_hipMemcpy2DToArray_Negative", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));

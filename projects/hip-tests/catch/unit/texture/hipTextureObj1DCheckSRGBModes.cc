@@ -171,7 +171,7 @@ line1:
   REQUIRE(result);
 }
 
-TEST_CASE("Unit_hipTextureObj1DCheckRGBAModes - array") {
+TEST_CASE("Unit_hipTextureObj1DCheckRGBAModes - array", "[texture]") {
   CHECK_IMAGE_SUPPORT
 
   SECTION("RGBA 1D hipAddressModeClamp, hipFilterModePoint, hipResourceTypeArray, regularCoords") {
@@ -227,7 +227,7 @@ TEST_CASE("Unit_hipTextureObj1DCheckRGBAModes - array") {
 }
 
 
-TEST_CASE("Unit_hipTextureObj1DCheckSRGBAModes - array") {
+TEST_CASE("Unit_hipTextureObj1DCheckSRGBAModes - array", "[texture]") {
   CHECK_IMAGE_SUPPORT
 
   SECTION("SRGBA 1D hipAddressModeClamp, hipFilterModePoint, hipResourceTypeArray, regularCoords") {
@@ -286,7 +286,7 @@ TEST_CASE("Unit_hipTextureObj1DCheckSRGBAModes - array") {
 #endif
 }
 
-TEST_CASE("Unit_hipTextureObj1DCheckRGBAModes - buffer") {
+TEST_CASE("Unit_hipTextureObj1DCheckRGBAModes - buffer", "[texture]") {
   CHECK_IMAGE_SUPPORT
 
   SECTION("RGBA 1D hipAddressModeClamp, hipFilterModePoint, hipResourceTypeLinear, regularCoords") {
@@ -299,7 +299,7 @@ TEST_CASE("Unit_hipTextureObj1DCheckRGBAModes - buffer") {
   }
 }
 
-TEST_CASE("Unit_hipTextureObj1DCheckSRGBAModes - buffer") {
+TEST_CASE("Unit_hipTextureObj1DCheckSRGBAModes - buffer", "[texture]") {
   CHECK_IMAGE_SUPPORT
 
   SECTION(

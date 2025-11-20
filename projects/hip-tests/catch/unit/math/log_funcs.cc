@@ -58,7 +58,7 @@ MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(log, 1, 1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_log_logf_Negative_RTC") { NegativeTestRTCWrapper<4>(kLog); }
+TEST_CASE("Unit_Device_log_logf_Negative_RTC", "[math]") { NegativeTestRTCWrapper<4>(kLog); }
 
 /**
  * Test Description
@@ -88,7 +88,7 @@ MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(log2, 1, 1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_log2_log2f_Negative_RTC") { NegativeTestRTCWrapper<4>(kLog2); }
+TEST_CASE("Unit_Device_log2_log2f_Negative_RTC", "[math]") { NegativeTestRTCWrapper<4>(kLog2); }
 
 /**
  * Test Description
@@ -119,7 +119,7 @@ MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(log10, 2, 1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_log10_log10f_Negative_RTC") { NegativeTestRTCWrapper<4>(kLog10); }
+TEST_CASE("Unit_Device_log10_log10f_Negative_RTC", "[math]") { NegativeTestRTCWrapper<4>(kLog10); }
 
 /**
  * Test Description
@@ -149,7 +149,7 @@ MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(log1p, 1, 1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_log1p_log1pf_Negative_RTC") { NegativeTestRTCWrapper<4>(kLog1p); }
+TEST_CASE("Unit_Device_log1p_log1pf_Negative_RTC", "[math]") { NegativeTestRTCWrapper<4>(kLog1p); }
 
 /**
  * Test Description
@@ -179,7 +179,7 @@ MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(logb, 0, 0)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_logb_logbf_Negative_RTC") { NegativeTestRTCWrapper<4>(kLogb); }
+TEST_CASE("Unit_Device_logb_logbf_Negative_RTC", "[math]") { NegativeTestRTCWrapper<4>(kLogb); }
 
 
 template <typename T>
@@ -221,7 +221,7 @@ template <typename T> int ilogb_ref(T arg) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_ilogbf_Accuracy_Positive") {
+TEST_CASE("Unit_Device_ilogbf_Accuracy_Positive", "[math]") {
   UnarySinglePrecisionTest(ilogb_kernel<float>, ilogb_ref<double>,
                            EqValidatorBuilderFactory<int>());
 }
@@ -240,7 +240,7 @@ TEST_CASE("Unit_Device_ilogbf_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_ilogb_Accuracy_Positive") {
+TEST_CASE("Unit_Device_ilogb_Accuracy_Positive", "[math]") {
   UnaryDoublePrecisionTest(ilogb_kernel<double>, ilogb_ref<long double>,
                            EqValidatorBuilderFactory<int>());
 }
@@ -257,7 +257,7 @@ TEST_CASE("Unit_Device_ilogb_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_ilogb_ilogbf_Negative_RTC") { NegativeTestRTCWrapper<4>(kIlogb); }
+TEST_CASE("Unit_Device_ilogb_ilogbf_Negative_RTC", "[math]") { NegativeTestRTCWrapper<4>(kIlogb); }
 
 /**
  * End doxygen group MathTest.

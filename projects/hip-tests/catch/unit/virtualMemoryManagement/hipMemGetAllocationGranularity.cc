@@ -58,7 +58,7 @@ void getGranularity(size_t* granularity, hipMemAllocationGranularity_flags optio
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemGetAllocationGranularity_MinGranularity") {
+TEST_CASE("Unit_hipMemGetAllocationGranularity_MinGranularity", "[vmm]") {
   HIP_CHECK(hipFree(0));
   size_t granularity = 0;
   hipDevice_t device;
@@ -79,7 +79,7 @@ TEST_CASE("Unit_hipMemGetAllocationGranularity_MinGranularity") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemGetAllocationGranularity_RecommendedGranularity") {
+TEST_CASE("Unit_hipMemGetAllocationGranularity_RecommendedGranularity", "[vmm]") {
   HIP_CHECK(hipFree(0));
   size_t granularity = 0;
   hipDevice_t device;
@@ -100,7 +100,7 @@ TEST_CASE("Unit_hipMemGetAllocationGranularity_RecommendedGranularity") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemGetAllocationGranularity_AllGPUs") {
+TEST_CASE("Unit_hipMemGetAllocationGranularity_AllGPUs", "[vmm]") {
   HIP_CHECK(hipFree(0));
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -124,7 +124,7 @@ TEST_CASE("Unit_hipMemGetAllocationGranularity_AllGPUs") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemGetAllocationGranularity_NegativeTests") {
+TEST_CASE("Unit_hipMemGetAllocationGranularity_NegativeTests", "[vmm]") {
   HIP_CHECK(hipFree(0));
   size_t granularity = 0;
   hipDevice_t device;
@@ -176,7 +176,7 @@ TEST_CASE("Unit_hipMemGetAllocationGranularity_NegativeTests") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemGetAllocationGranularity_Capture") {
+TEST_CASE("Unit_hipMemGetAllocationGranularity_Capture", "[vmm]") {
   CTX_CREATE();
 
   size_t granularity = 0;

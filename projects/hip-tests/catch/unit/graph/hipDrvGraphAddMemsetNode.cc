@@ -116,7 +116,7 @@ TEMPLATE_TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Positive_Basic", "", uint8_t, 
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Negative_Parameters") {
+TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Negative_Parameters", "[graph]") {
   using namespace std::placeholders;
 
   HIP_CHECK(hipInit(0));
@@ -162,7 +162,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D") {
+TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D", "[graph]") {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -249,7 +249,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D") {
+TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D", "[graph]") {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -330,7 +330,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D") {
+TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D", "[graph]") {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -424,7 +424,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D") {
+TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D", "[graph]") {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -511,7 +511,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D") {
+TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D", "[graph]") {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -594,7 +594,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocManaged") {
+TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocManaged", "[graph]") {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;

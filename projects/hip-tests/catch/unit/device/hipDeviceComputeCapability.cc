@@ -46,7 +46,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceComputeCapability_Negative") {
+TEST_CASE("Unit_hipDeviceComputeCapability_Negative", "[device]") {
   int major, minor, numDevices;
   hipDevice_t device;
 
@@ -88,7 +88,7 @@ TEST_CASE("Unit_hipDeviceComputeCapability_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceComputeCapability_ValidateVersion") {
+TEST_CASE("Unit_hipDeviceComputeCapability_ValidateVersion", "[device]") {
   int major, minor;
   hipDevice_t device;
   int numDevices = -1;

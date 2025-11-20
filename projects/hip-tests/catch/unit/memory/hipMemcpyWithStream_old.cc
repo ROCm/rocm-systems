@@ -512,28 +512,27 @@ void TestkindHtoH(void) {
 }
 
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestWithOneStream") { TestwithOnestream(); }
+TEST_CASE("Unit_hipMemcpyWithStream_TestWithOneStream", "[memory]") { TestwithOnestream(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestwithTwoStream") { TestwithTwoStream(); }
+TEST_CASE("Unit_hipMemcpyWithStream_TestwithTwoStream", "[memory]") { TestwithTwoStream(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoH") { TestkindDtoH(); }
+TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoH", "[memory]") { TestkindDtoH(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindHtoH") { TestkindHtoH(); }
+TEST_CASE("Unit_hipMemcpyWithStream_TestkindHtoH", "[memory]") { TestkindHtoH(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoD", "[multigpu]") {
+TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoD", "[multigpu][memory]") {
   TestkindDtoD();
 }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream",
-          "[multigpu]") {
+TEST_CASE("Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream", "[multigpu][memory]") {
   TestOnMultiGPUwithOneStream();
 }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefault") { TestkindDefault(); }
+TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefault", "[memory]") { TestkindDefault(); }
 #ifndef __HIP_PLATFORM_NVIDIA__
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefaultForDtoD", "[multigpu]") {
+TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefaultForDtoD", "[multigpu][memory]") {
   TestkindDefaultForDtoD();
 }
 #endif
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestDtoDonSameDevice") { TestDtoDonSameDevice(); }
+TEST_CASE("Unit_hipMemcpyWithStream_TestDtoDonSameDevice", "[memory]") { TestDtoDonSameDevice(); }

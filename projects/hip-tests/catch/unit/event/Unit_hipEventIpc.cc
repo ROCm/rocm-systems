@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventIpc") {
+TEST_CASE("Unit_hipEventIpc", "[event]") {
   size_t N = 4 * 1024 * 1024;
   unsigned threadsPerBlock = 256;
   int iterations = 1;

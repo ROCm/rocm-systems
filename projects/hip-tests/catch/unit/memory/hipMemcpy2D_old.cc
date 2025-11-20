@@ -387,7 +387,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_multiDevice-D2D", "[multigpu]", int, float,
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy2D_SizeCheck") {
+TEST_CASE("Unit_hipMemcpy2D_SizeCheck", "[memory]") {
   CHECK_IMAGE_SUPPORT
   HIP_CHECK(hipSetDevice(0));
   int *A_h{nullptr}, *A_d{nullptr};
@@ -434,7 +434,7 @@ TEST_CASE("Unit_hipMemcpy2D_SizeCheck") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy2D_Negative") {
+TEST_CASE("Unit_hipMemcpy2D_Negative", "[memory]") {
   CHECK_IMAGE_SUPPORT
   HIP_CHECK(hipSetDevice(0));
   int *A_h{nullptr}, *A_d{nullptr};
@@ -525,7 +525,7 @@ static void hipMemcpy2D_Basic_Size_Test(size_t inc) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy2D_multiDevice_Basic_Size_Test", "[multigpu]") {
+TEST_CASE("Unit_hipMemcpy2D_multiDevice_Basic_Size_Test", "[multigpu][memory]") {
   CHECK_IMAGE_SUPPORT
   size_t input = 1 << 20;
   int numDevices = 0;

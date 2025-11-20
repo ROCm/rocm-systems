@@ -64,7 +64,7 @@ static __global__ void vector_square(int* A_d, size_t N_ELMTS) {
  * Scenario 1 and Scenario 3: Validate hipGraphRemoveDependencies
  * for manually created graph.
  */
-TEST_CASE("Unit_hipGraphRemoveDependencies_Func_Manual") {
+TEST_CASE("Unit_hipGraphRemoveDependencies_Func_Manual", "[graph]") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -192,7 +192,7 @@ TEST_CASE("Unit_hipGraphRemoveDependencies_Func_Manual") {
 /**
  * Scenario 2: Validate hipGraphRemoveDependencies for stream captured graph.
  */
-TEST_CASE("Unit_hipGraphRemoveDependencies_Func_StrmCapture") {
+TEST_CASE("Unit_hipGraphRemoveDependencies_Func_StrmCapture", "[graph]") {
   hipStream_t stream1, stream2, stream3;
   hipEvent_t forkStreamEvent, memsetEvent1, memsetEvent2;
   hipGraph_t graph;
@@ -266,7 +266,7 @@ TEST_CASE("Unit_hipGraphRemoveDependencies_Func_StrmCapture") {
  * Scenario 4: Dynamically modify dependencies in a graph using
  * hipGraphRemoveDependencies and verify the computation.
  */
-TEST_CASE("Unit_hipGraphRemoveDependencies_ChangeComputeFunc") {
+TEST_CASE("Unit_hipGraphRemoveDependencies_ChangeComputeFunc", "[graph]") {
   hipStream_t streamForGraph;
   HIP_CHECK(hipStreamCreate(&streamForGraph));
   constexpr size_t N = 1024;
@@ -365,7 +365,7 @@ TEST_CASE("Unit_hipGraphRemoveDependencies_ChangeComputeFunc") {
 /**
  * Scenario 5: Negative Tests
  */
-TEST_CASE("Unit_hipGraphRemoveDependencies_Negative") {
+TEST_CASE("Unit_hipGraphRemoveDependencies_Negative", "[graph]") {
   hipGraph_t graph{};
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event_start, event_end;

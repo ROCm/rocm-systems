@@ -320,7 +320,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2H_Functional", "", char, int,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpyBatchAsync_NegativeTsts") {
+TEST_CASE("Unit_hipMemcpyBatchAsync_NegativeTsts", "[memory]") {
   const size_t count = 2;
   size_t numAttrs = 0;
   size_t sizes[2];

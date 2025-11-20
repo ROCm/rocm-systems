@@ -58,7 +58,7 @@ static int HmmAttrPrint() {
 /* Test Scenario: Testing basic working of hipMemRangeGetAttributes()
    api with different flags */
 
-TEST_CASE("Unit_hipMemRangeGetAttributes_TstFlgs") {
+TEST_CASE("Unit_hipMemRangeGetAttributes_TstFlgs", "[memory]") {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -160,7 +160,7 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_TstFlgs") {
 }
 
 /* Test Scenario: Negative testing with hipMemRangeGetAttributes() api*/
-TEST_CASE("Unit_hipMemRangeGetAttributes_NegativeTst") {
+TEST_CASE("Unit_hipMemRangeGetAttributes_NegativeTst", "[memory]") {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;

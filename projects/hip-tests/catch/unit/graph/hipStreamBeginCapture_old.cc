@@ -181,7 +181,7 @@ bool CaptureStreamAndLaunchGraph(float* A_d, float* C_d, float* A_h, float* C_h,
  * Stream capture with different modes behave the same when supported/
  * safe apis are used in sequence.
  */
-TEST_CASE("Unit_hipStreamBeginCapture_BasicFunctional") {
+TEST_CASE("Unit_hipStreamBeginCapture_BasicFunctional", "[graph]") {
   float *A_d, *C_d;
   float *A_h, *C_h;
   size_t Nbytes = N * sizeof(float);
@@ -229,7 +229,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_BasicFunctional") {
 /**
  * Perform capture on hipStreamPerThread, launch the graph and verify results.
  */
-TEST_CASE("Unit_hipStreamBeginCapture_hipStreamPerThread") {
+TEST_CASE("Unit_hipStreamBeginCapture_hipStreamPerThread", "[graph]") {
   float *A_d, *C_d;
   float *A_h, *C_h;
   size_t Nbytes = N * sizeof(float);
@@ -276,7 +276,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_hipStreamPerThread") {
 /* Test verifies hipStreamBeginCapture API Negative scenarios.
  */
 
-TEST_CASE("Unit_hipStreamBeginCapture_Negative") {
+TEST_CASE("Unit_hipStreamBeginCapture_Negative", "[graph]") {
   hipError_t ret;
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreate(&stream));
@@ -300,7 +300,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipStreamBeginCapture_Basic") {
+TEST_CASE("Unit_hipStreamBeginCapture_Basic", "[graph]") {
   hipStream_t s1, s2, s3;
 
   HIP_CHECK(hipStreamCreate(&s1));
@@ -542,7 +542,7 @@ static void multithreadedTest(hipStreamCaptureMode mode) {
 }
 /* Test scenario 5.1
  */
-TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_defaultflag") {
+TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_defaultflag", "[graph]") {
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
@@ -552,7 +552,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_defaultflag") {
 }
 /* Test scenario 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_blockingflag") {
+TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_blockingflag", "[graph]") {
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreateWithFlags(&stream1, hipStreamNonBlocking));
   HIP_CHECK(hipStreamCreateWithFlags(&stream2, hipStreamNonBlocking));
@@ -562,7 +562,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_blockingflag") {
 }
 /* Test scenario 5.3
  */
-TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_diffflags") {
+TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_diffflags", "[graph]") {
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreateWithFlags(&stream1, hipStreamNonBlocking));
   HIP_CHECK(hipStreamCreateWithFlags(&stream2, hipStreamDefault));
@@ -572,7 +572,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_diffflags") {
 }
 /* Test scenario 5.4
  */
-TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_diffprio") {
+TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_diffprio", "[graph]") {
   hipStream_t stream1, stream2;
   int minPriority = 0, maxPriority = 0;
   HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority));
@@ -584,7 +584,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_InterStrmEventSync_diffprio") {
 }
 /* Test scenario 6.1
  */
-TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_defaultflag") {
+TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_defaultflag", "[graph]") {
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
@@ -594,7 +594,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_defaultflag") {
 }
 /* Test scenario 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_blockingflag") {
+TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_blockingflag", "[graph]") {
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreateWithFlags(&stream1, hipStreamNonBlocking));
   HIP_CHECK(hipStreamCreateWithFlags(&stream2, hipStreamNonBlocking));
@@ -604,7 +604,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_blockingflag") {
 }
 /* Test scenario 6.3
  */
-TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_diffflags") {
+TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_diffflags", "[graph]") {
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreateWithFlags(&stream1, hipStreamNonBlocking));
   HIP_CHECK(hipStreamCreateWithFlags(&stream2, hipStreamDefault));
@@ -614,7 +614,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_diffflags") {
 }
 /* Test scenario 6.4
  */
-TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_diffprio") {
+TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_diffprio", "[graph]") {
   hipStream_t stream1, stream2;
   int minPriority = 0, maxPriority = 0;
   HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority));
@@ -626,7 +626,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_diffprio") {
 }
 /* Test scenario 7
  */
-TEST_CASE("Unit_hipStreamBeginCapture_multiplestrms") {
+TEST_CASE("Unit_hipStreamBeginCapture_multiplestrms", "[graph]") {
   hipStream_t stream1, stream2, stream3;
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
@@ -694,7 +694,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_multiplestrms") {
 }
 /* Test scenario 8
  */
-TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_func") {
+TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_func", "[graph]") {
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
@@ -704,22 +704,22 @@ TEST_CASE("Unit_hipStreamBeginCapture_ColligatedStrmCapture_func") {
 }
 /* Test scenario 9.1
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Multithreaded_Global") {
+TEST_CASE("Unit_hipStreamBeginCapture_Multithreaded_Global", "[graph]") {
   multithreadedTest(hipStreamCaptureModeGlobal);
 }
 /* Test scenario 9.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Multithreaded_ThreadLocal") {
+TEST_CASE("Unit_hipStreamBeginCapture_Multithreaded_ThreadLocal", "[graph]") {
   multithreadedTest(hipStreamCaptureModeThreadLocal);
 }
 /* Test scenario 9.3
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Multithreaded_Relaxed") {
+TEST_CASE("Unit_hipStreamBeginCapture_Multithreaded_Relaxed", "[graph]") {
   multithreadedTest(hipStreamCaptureModeRelaxed);
 }
 /* Test scenario 10
  */
-TEST_CASE("Unit_hipStreamBeginCapture_CapturingFromWithinStrms") {
+TEST_CASE("Unit_hipStreamBeginCapture_CapturingFromWithinStrms", "[graph]") {
   hipGraph_t graph;
   hipStream_t stream1, stream2, stream3;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -779,7 +779,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_CapturingFromWithinStrms") {
 }
 /* Test scenario 11
  */
-TEST_CASE("Unit_hipStreamBeginCapture_DetectingInvalidCapture") {
+TEST_CASE("Unit_hipStreamBeginCapture_DetectingInvalidCapture", "[graph]") {
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
@@ -801,7 +801,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_DetectingInvalidCapture") {
 }
 /* Test scenario 12
  */
-TEST_CASE("Unit_hipStreamBeginCapture_CapturingMultGraphsFrom1Strm") {
+TEST_CASE("Unit_hipStreamBeginCapture_CapturingMultGraphsFrom1Strm", "[graph]") {
   hipStream_t stream1;
   HIP_CHECK(hipStreamCreate(&stream1));
   hipGraph_t graph[3];
@@ -849,7 +849,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_CapturingMultGraphsFrom1Strm") {
 #if HT_NVIDIA
 /* Test scenario 13
  */
-TEST_CASE("Unit_hipStreamBeginCapture_CheckingSyncDuringCapture") {
+TEST_CASE("Unit_hipStreamBeginCapture_CheckingSyncDuringCapture", "[graph]") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   SECTION("Synchronize stream during capture") {
@@ -893,7 +893,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_CheckingSyncDuringCapture") {
 #endif
 /* Test scenario 14
  */
-TEST_CASE("Unit_hipStreamBeginCapture_EndingCapturewhenCaptureInProgress") {
+TEST_CASE("Unit_hipStreamBeginCapture_EndingCapturewhenCaptureInProgress", "[graph]") {
   hipStream_t stream1, stream2;
   hipGraph_t graph;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -931,7 +931,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_EndingCapturewhenCaptureInProgress") {
 
 /* Test scenario 15
  */
-TEST_CASE("Unit_hipStreamBeginCapture_MultiGPU", "[multigpu]") {
+TEST_CASE("Unit_hipStreamBeginCapture_MultiGPU", "[multigpu][graph]") {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
@@ -991,7 +991,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_MultiGPU", "[multigpu]") {
 }
 /* Test scenario 16
  */
-TEST_CASE("Unit_hipStreamBeginCapture_nestedStreamCapture") {
+TEST_CASE("Unit_hipStreamBeginCapture_nestedStreamCapture", "[graph]") {
   hipGraph_t graph;
   hipStream_t stream1, stream2, stream3;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -1051,7 +1051,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_nestedStreamCapture") {
 }
 /* Test scenario 17
  */
-TEST_CASE("Unit_hipStreamBeginCapture_streamReuse") {
+TEST_CASE("Unit_hipStreamBeginCapture_streamReuse", "[graph]") {
   hipGraph_t graph1, graph2, graph3;
   hipStream_t stream1, stream2, stream3;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -1145,7 +1145,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_streamReuse") {
 
 /* Test scenario 18
  */
-TEST_CASE("Unit_hipStreamBeginCapture_captureComplexGraph") {
+TEST_CASE("Unit_hipStreamBeginCapture_captureComplexGraph", "[graph]") {
   hipGraph_t graph;
   hipStream_t stream1, stream2, stream3, stream4, stream5;
   // Stream and event create
@@ -1235,7 +1235,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_captureComplexGraph") {
 }
 /* Test scenario 19
  */
-TEST_CASE("Unit_hipStreamBeginCapture_captureEmptyStreams") {
+TEST_CASE("Unit_hipStreamBeginCapture_captureEmptyStreams", "[graph]") {
   hipGraph_t graph;
   hipStream_t stream1, stream2, stream3;
   // Stream and event create

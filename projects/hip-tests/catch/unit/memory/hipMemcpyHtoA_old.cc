@@ -142,7 +142,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyHtoA_multiDevice-PeerDeviceContext",
 /*
 This testcase verifies the negative scenarios of hipMemcpyHtoA API
 */
-TEST_CASE("Unit_hipMemcpyHtoA_Negative") {
+TEST_CASE("Unit_hipMemcpyHtoA_Negative", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -181,7 +181,7 @@ This is excluded for AMD as we have a bug already raised
 SWDEV-274683
 */
 #if HT_NVIDIA
-TEST_CASE("Unit_hipMemcpyHtoA_SizeCheck") {
+TEST_CASE("Unit_hipMemcpyHtoA_SizeCheck", "[memory]") {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));

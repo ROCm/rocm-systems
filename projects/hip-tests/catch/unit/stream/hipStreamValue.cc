@@ -469,7 +469,7 @@ DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64("NoMask_Nor",
 #undef DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64
 
 // Negative Tests
-TEST_CASE("Unit_hipStreamValue_Negative_InvalidMemory") {
+TEST_CASE("Unit_hipStreamValue_Negative_InvalidMemory", "[stream]") {
   if (!streamWaitValueSupported()) {
     HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
     return;
