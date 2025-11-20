@@ -44,6 +44,7 @@ rocprofiler_systems_add_test(
 rocprofiler_systems_add_test(
     NAME fork-hipMallocConcurrency
     TARGET hipMallocConcurrencyMproc
+    GPU ON
     REWRITE_ARGS -e -v 2 --print-instrumented modules -i 16
     RUNTIME_ARGS -e -v 1 --label file -i 16
     ENVIRONMENT
