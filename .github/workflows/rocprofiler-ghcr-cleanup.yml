@@ -1,4 +1,4 @@
-name: rocprofiler GHCR Package Cleanup for CI Images
+name: rocprofiler GHCR Package Cleanup
 
 on:
   workflow_dispatch:
@@ -15,10 +15,14 @@ jobs:
       contents: read
       packages: write
 
+    strategy:
+      matrix:
+        os: [ 'ubuntu', 'rhel', 'opensuse', 'debian' ]
+
     steps:
-      - name: Clean up GHCR rocprofiler-ubuntu Docker CI Images
+      - name: Clean up GHCR rocprofiler-${{ matrix.os }} Docker CI Images
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          package: rocprofiler-ubuntu
+          package: rocprofiler-${{ matrix.os }}
           older-than: 7 days
           dry-run: true
