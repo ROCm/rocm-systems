@@ -18,12 +18,23 @@ install_script = os.path.join(install_catch_tests, "script")
 
 modified_msg = """ 
 # File has been updated by hip-tests/catch folder for portability
-""" 
+"""
 ctest_current_str = """
 get_filename_component(FULL_FILE_PATH ${CMAKE_CURRENT_LIST_FILE} REALPATH)
 get_filename_component(CTEST_CURRENT_DIR ${FULL_FILE_PATH} DIRECTORY)
 get_filename_component(EXE_PATH ${CTEST_CURRENT_DIR}/.. REALPATH)
 """
+if os.name == 'posix':
+    library_path_str = """
+set(LIB_PATH ${EXE_PATH}/../../../lib)
+file(GLOB HIP_LIBS "${LIB_PATH}/libamdhip64*")
+if(HIP_LIBS)
+    set(LIB_PATH ${LIB_PATH} ${LIB_PATH}/rocm_sysdeps/lib)
+else()
+    set(LIB_PATH "/opt/rocm/lib")
+endif()
+"""
+    ctest_current_str  = ctest_current_str + library_path_str
 
 inc_cmake_pattern = "_include.cmake"
 ctesttest_pattern = "CTestTestfile.cmake"
@@ -72,6 +83,12 @@ def make_test_files_portable(filenames):
                 cwd_pattern = r"TEST_WORKING_DIR\s+\[==\[(.*?)\]==\]"
                 replace_cwd_pattern = r'TEST_WORKING_DIR  ${CTEST_CURRENT_DIR}'
                 modified_content = re.sub(cwd_pattern, replace_cwd_pattern, modified_content)
+                # 8 modify ld_library_path
+                if os.name == 'posix':
+                    lib_path_pattern = r"TEST_DL_PATHS\s+\[==\[(.*?)\]==\]"
+                    replace_lib_path_pattern = r'TEST_DL_PATHS  ${LIB_PATH}'
+                    modified_content = re.sub(lib_path_pattern, replace_lib_path_pattern, modified_content)
+
             filename = os.path.basename(filename)
             install_path = os.path.join(install_script, filename)
             # Write the modified content back to the file
