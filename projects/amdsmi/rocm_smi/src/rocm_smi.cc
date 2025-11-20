@@ -326,7 +326,6 @@ static rsmi_status_t set_dev_value(amd::smi::DevInfoTypes type,
   GET_DEV_FROM_INDX
 
   int ret = dev->writeDevInfo(type, val);
-  std::cout << ret << std::endl;
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
@@ -7952,7 +7951,7 @@ rsmi_get_gpu_ptl_state(uint32_t dv_ind, bool *enabled)
   if (val_str == "disabled")     { *enabled = false; return RSMI_STATUS_SUCCESS; }
 
   // unexpected value
-  return RSMI_STATUS_FILE_ERROR;
+  return RSMI_STATUS_UNEXPECTED_DATA;
   CATCH
 }
 
@@ -8011,6 +8010,7 @@ rsmi_dev_write_ptl_format(uint32_t dv_ind, const char* format)
      << " | format=" << format;
   LOG_TRACE(ss);
 
+  REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
   rsmi_status_t ret = set_dev_value(amd::smi::kDevPtlFormat, dv_ind, format);
   if (ret != RSMI_STATUS_SUCCESS) {
