@@ -980,7 +980,7 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_double_to_e8m0(
     __hip_internal::uint64_t as_int;
   } u{val};
 
-  // Shifts out mantisa bits from double dtype
+  // Shifts out mantissa bits from double dtype
   unsigned short double_exp =
       static_cast<unsigned short>((~hip_detail::double_sign_mask & u.as_int) >> 52);
   __hip_fp8_storage_t e8m0;
@@ -993,7 +993,7 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_double_to_e8m0(
         double_exp - 0x0380U;  // shift due to bias difference between double and single precision
   }
 
-  // If there is a mantisa and the exp wont overflow round up
+  // If there is a mantissa and the exp wont overflow round up
   if ((rounding == hipRoundPosInf) && (u.as_int & hip_detail::double_sig_mask) &&
       (!((u.as_int & ~hip_detail::double_sign_mask) < hip_detail::double_half_sig_bit)) &&
       (e8m0 < hip_detail::e8m0_NaN)) {
@@ -1015,10 +1015,10 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_float_to_e8m0(
     __hip_internal::uint32_t as_int;
   } u{val};
 
-  // Shifts out mantisa bits from float dtype
+  // Shifts out mantissa bits from float dtype
   __hip_fp8_storage_t e8m0 = static_cast<unsigned char>(u.as_int >> 23);
 
-  // If there is a mantisa and the exp wont overflow round up
+  // If there is a mantissa and the exp wont overflow round up
   if ((rounding == hipRoundPosInf) && (u.as_int & hip_detail::float_sig_mask) &&
       (!((u.as_int & ~hip_detail::float_sign_mask) < hip_detail::float_half_sig_bit)) &&
       (e8m0 < hip_detail::e8m0_NaN)) {
@@ -1036,10 +1036,10 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_float_to_e8m0(
 __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t
 __hip_cvt_bfloat16raw_to_e8m0(const __hip_bfloat16_raw hr, const __hip_saturation_t saturate,
                               const enum hipRoundMode rounding) {
-  // Shifts out mantisa bits from bf16 dtype
+  // Shifts out mantissa bits from bf16 dtype
   __hip_fp8_storage_t e8m0 = static_cast<unsigned char>(hr.x >> 7);
 
-  // If there is a mantisa and the exp wont overflow round up
+  // If there is a mantissa and the exp wont overflow round up
   if ((rounding == hipRoundPosInf) && (hr.x & hip_detail::bf16_sig_mask) &&
       (!((hr.x & ~hip_detail::bf16_sign_mask) < hip_detail::bf16_half_sig_bit)) &&
       (e8m0 < hip_detail::e8m0_NaN)) {
@@ -1059,10 +1059,8 @@ __hip_cvt_e8m0_to_bf16raw(const __hip_fp8_storage_t x) {
   switch (x) {
     case 0x00U:
       return __hip_bfloat16_raw{0x0040U};
-      break;
     case hip_detail::e8m0_NaN:
       return __hip_bfloat16_raw{hip_detail::bf16_NaN};
-      break;
     default:
       return __hip_bfloat16_raw{static_cast<unsigned short>(x << 7)};
   }

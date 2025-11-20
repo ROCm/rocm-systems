@@ -34,7 +34,7 @@ void host_cvt_bfloat16raw_to_e8m0(const std::vector<__hip_bfloat16>& in,
 
 __global__ void bfloat16raw_to_e8m0(const __hip_bfloat16* in, unsigned char* out, size_t size,
                                     __hip_saturation_t sat, hipRoundMode round) {
-  size_t tid = threadIdx.x + blockDim.x * threadIdx.y;
+  size_t tid = threadIdx.x + blockDim.x * blockIdx.x;
 
   if (tid < size) {
     out[tid] = __hip_cvt_bfloat16raw_to_e8m0(in[tid], sat, round);
@@ -121,7 +121,7 @@ void host_cvt_float_to_e8m0(const std::vector<float>& in, std::vector<unsigned c
 
 __global__ void float_to_e8m0_kernel(const float* in, unsigned char* out, size_t size,
                                      __hip_saturation_t sat, hipRoundMode round) {
-  size_t tid = threadIdx.x + blockDim.x * threadIdx.y;
+  size_t tid = threadIdx.x + blockDim.x * blockIdx.x;
 
   if (tid < size) {
     out[tid] = __hip_cvt_float_to_e8m0(in[tid], sat, round);
@@ -207,7 +207,7 @@ void host_cvt_double_to_e8m0(const std::vector<double>& in, std::vector<unsigned
 
 __global__ void double_to_e8m0_kernel(const double* in, unsigned char* out, size_t size,
                                       __hip_saturation_t sat, hipRoundMode round) {
-  size_t tid = threadIdx.x + blockDim.x * threadIdx.y;
+  size_t tid = threadIdx.x + blockDim.x * blockIdx.x;
 
   if (tid < size) {
     out[tid] = __hip_cvt_double_to_e8m0(in[tid], sat, round);
@@ -295,7 +295,7 @@ void host_cvt_e8m0_to_bf16raw(const std::vector<unsigned char>& in, std::vector<
 }
 
 __global__ void e8m0_to_bf16raw_kernel(const unsigned char* in, float* out, size_t size) {
-  size_t tid = threadIdx.x + blockDim.x * threadIdx.y;
+  size_t tid = threadIdx.x + blockDim.x * blockIdx.x;
 
   if (tid < size) {
     __hip_bfloat16 temp = __hip_cvt_e8m0_to_bf16raw(in[tid]);
