@@ -2367,7 +2367,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
     } else {
       // assert the vaddr_mem_obj is mapped and needs to be removed
-      amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
+      vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
       assert(vaddr_sub_obj != nullptr);
       assert(vcmd.ptr() == vaddr_sub_obj->getSvmPtr());
 
