@@ -25,4 +25,4 @@ jobs:
         with:
           package: rocprofiler-${{ matrix.os }}
           older-than: 7 days
-          dry-run: true
+          dry-run: false
