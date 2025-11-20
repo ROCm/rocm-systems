@@ -23,85 +23,21 @@
 #pragma once
 
 #include <rocstorage/data_storage/database.hpp>
+#include <rocstorage/data_storage/insert_statements.hpp>
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 
 namespace rocstorage
 {
 struct data_processor
 {
-    using insert_event_stmt =
-        std::function<void(const char*, size_t, size_t, size_t, size_t, const char*,
-                           const char*, const char*)>;
-    using insert_pmc_event_stmt =
-        std::function<void(const char*, size_t, size_t, double, const char*)>;
-    using insert_sample_stmt =
-        std::function<void(const char*, size_t, uint64_t, size_t, const char*)>;
-    using insert_region_stmt =
-        std::function<void(const char*, size_t, size_t, size_t, uint64_t, uint64_t,
-                           size_t, size_t, const char*)>;
-    using insert_kernel_dispatch_stmt       = std::function<void(
-        const char*, size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
-        uint64_t, uint64_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
-        size_t, size_t, size_t, const char*)>;
-    using insert_memory_copy_stmt           = std::function<void(
-        const char*, size_t, size_t, size_t, uint64_t, uint64_t, size_t, size_t, size_t,
-        size_t, size_t, size_t, size_t, size_t, size_t, size_t, const char*)>;
-    using insert_memory_alloc_stmt          = std::function<void(
-        const char*, size_t, size_t, size_t, size_t, const char*, const char*, uint64_t,
-        uint64_t, size_t, size_t, size_t, size_t, size_t, const char*)>;
-    using insert_memory_alloc_no_agent_stmt = std::function<void(
-        const char*, size_t, size_t, size_t, const char*, const char*, uint64_t, uint64_t,
-        size_t, size_t, size_t, size_t, size_t, const char*)>;
-    using insert_kernel_symbol_stmt =
-        std::function<void(size_t, const char*, size_t, size_t, uint64_t, const char*,
-                           const char*, uint64_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                           uint32_t, uint32_t, uint32_t, const char*)>;
-    using insert_code_object_stmt =
-        std::function<void(size_t, const char*, size_t, size_t, size_t, const char*,
-                           uint64_t, uint64_t, uint64_t, const char*, const char*)>;
-    using insert_args_stmt = std::function<void(const char*, size_t, size_t, const char*,
-                                                const char*, const char*, const char*)>;
-
-private:
-    struct track_name_map
-    {
-        size_t track_id;
-        size_t name_id;
-    };
-
-    struct pmc_identifier
-    {
-        size_t      agent_id;
-        std::string name;
-    };
-
-    struct pmc_identifier_hash
-    {
-        std::size_t operator()(const pmc_identifier& pmc) const noexcept
-        {
-            std::size_t h1 = std::hash<size_t>{}(pmc.agent_id);
-            std::size_t h2 = std::hash<std::string>{}(pmc.name);
-            return h1 ^ (h2 << 1);
-        }
-    };
-
-    struct pmc_identifier_equal
-    {
-        bool operator()(const pmc_identifier& lhs,
-                        const pmc_identifier& rhs) const noexcept
-        {
-            return lhs.agent_id == rhs.agent_id && lhs.name == rhs.name;
-        }
-    };
-
 public:
+    struct data_identifiers;
     explicit data_processor(std::shared_ptr<data_storage::database> database);
+    ~data_processor();
 
     data_processor()                                  = delete;
     data_processor(const data_processor&)             = delete;
@@ -208,39 +144,10 @@ public:
     void flush();
 
 private:
-    void initialize_pmc_event_stmt();
-    void initialize_event_stmt();
-    void initialize_sample_stmt();
-    void initialize_region_stmt();
-    void initialize_kernel_dispatch_stmt();
-    void initialize_memory_copy_stmt();
-    void initialize_kernel_symbol_stmt();
-    void initialize_code_object_stmt();
-    void initialize_metadata();
-    void initialize_args_stmt();
-    void initialize_memory_alloc_stmt();
-
-private:
-    std::shared_ptr<data_storage::database>         _database;
-    std::unordered_map<std::string, track_name_map> _tracks;
-    std::unordered_map<pmc_identifier, size_t, pmc_identifier_hash, pmc_identifier_equal>
-                                            _pmc_descriptor_map;
-    std::unordered_map<size_t, size_t>      _thread_id_map;
-    std::unordered_map<std::string, size_t> _string_map;
-
-    insert_event_stmt                 _insert_event_statement;
-    insert_pmc_event_stmt             _insert_pmc_event_statement;
-    insert_sample_stmt                _insert_sample_statement;
-    insert_region_stmt                _insert_region_statement;
-    insert_kernel_dispatch_stmt       _insert_kernel_dispatch_statement;
-    insert_memory_copy_stmt           _insert_memory_copy_statement;
-    insert_kernel_symbol_stmt         _insert_kernel_symbol_statement;
-    insert_code_object_stmt           _insert_code_object_statement;
-    insert_args_stmt                  _insert_args_statement;
-    insert_memory_alloc_stmt          _insert_memory_alloc_statement;
-    insert_memory_alloc_no_agent_stmt _insert_memory_alloc_no_agent_statement;
-
-    std::string _uuid{};
+    std::shared_ptr<data_storage::database>          m_database{ nullptr };
+    std::string                                      m_uuid{};
+    std::unique_ptr<data_storage::insert_statements> m_insert_statements{ nullptr };
+    std::unique_ptr<data_identifiers>                m_data_identifiers{ nullptr };
 };
 
 }  // namespace rocstorage

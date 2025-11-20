@@ -35,7 +35,6 @@ namespace rocstorage
 {
 namespace data_storage
 {
-static std::mutex _mutex;
 class database
 {
 public:
@@ -199,6 +198,7 @@ public:
 private:
     sqlite3*    _sqlite3_db{ nullptr };
     sqlite3*    _sqlite3_db_temp{ nullptr };
+    std::mutex  _mutex;
     std::string m_uuid;
 };
 
