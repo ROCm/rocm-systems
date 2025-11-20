@@ -1353,6 +1353,19 @@ hsaKmtGpuDeviceGetFd(
   HSAint32* fd
 );
 
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueryShareableHandle(
+  HsaMemoryObjectHandle buf_handle,
+  HSAuint32* shareablehandle
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtResetMetadata(
+  HsaMemoryObjectHandle buf_handle
+);
+
 #ifdef __cplusplus
 }   //extern "C"
 #endif

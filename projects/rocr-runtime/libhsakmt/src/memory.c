@@ -1037,29 +1037,63 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
+						void** out_cpu_ptr)
+{
+	int ret = amdgpu_bo_cpu_map((amdgpu_bo_handle)Handle, out_cpu_ptr);
+	if (ret) {
+		return HSAKMT_STATUS_ERROR;
+	}
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandle,
   						HsaMemoryObjectHandle MemoryHandle, HSAint32* fd, HSAuint64* cpu_addr)
 {
-  amdgpu_device_handle devhandle = (amdgpu_device_handle)DeviceHandle;
-  int renderFd = amdgpu_device_get_fd(devhandle);
-  if (renderFd < 0) return HSAKMT_STATUS_ERROR;
+  	amdgpu_device_handle devhandle = (amdgpu_device_handle)DeviceHandle;
+  	int renderFd = amdgpu_device_get_fd(devhandle);
+  	if (renderFd < 0) return HSAKMT_STATUS_ERROR;
 
-  uint32_t gem_handle = 0;
-  int ret = amdgpu_bo_export((amdgpu_bo_handle)MemoryHandle, amdgpu_bo_handle_type_kms, &gem_handle);
-  if (ret) {
-  		return HSAKMT_STATUS_ERROR;
-  }
+  	uint32_t gem_handle = 0;
+  	int ret = amdgpu_bo_export((amdgpu_bo_handle)MemoryHandle, amdgpu_bo_handle_type_kms, &gem_handle);
+  	if (ret) {
+  			return HSAKMT_STATUS_ERROR;
+  	}
 
-  union drm_amdgpu_gem_mmap args;
-  memset(&args, 0, sizeof(args));
-  /* Query the buffer address (args.addr_ptr).
-   * The kernel driver ignores the offset and size parameters. */
-  args.in.handle = gem_handle;
-  ret = drmCommandWriteRead(renderFd, DRM_AMDGPU_GEM_MMAP, &args, sizeof(args));
-  if (ret) {
-    return HSAKMT_STATUS_ERROR;
-  }
-  *fd = (HSAint32)renderFd;
-  *cpu_addr = (HSAuint64)args.out.addr_ptr;
-  return HSAKMT_STATUS_SUCCESS;
+  	union drm_amdgpu_gem_mmap args;
+  	memset(&args, 0, sizeof(args));
+  	/* Query the buffer address (args.addr_ptr).
+  	 * The kernel driver ignores the offset and size parameters. */
+  	args.in.handle = gem_handle;
+  	ret = drmCommandWriteRead(renderFd, DRM_AMDGPU_GEM_MMAP, &args, sizeof(args));
+  	if (ret) {
+  	  return HSAKMT_STATUS_ERROR;
+  	}
+  	*fd = (HSAint32)renderFd;
+  	*cpu_addr = (HSAuint64)args.out.addr_ptr;
+  	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtQueryShareableHandle(HsaMemoryObjectHandle buf_handle,
+  						HSAuint32* shareablehandle)
+{
+	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)buf_handle;
+	//query buffer object for pre existing metadata
+    struct amdgpu_bo_info info = {0};
+    if (!amdgpu_bo_query_info(drmhandle, &info) && !!info.metadata.size_metadata) {
+    	*shareablehandle = info.metadata.umd_metadata[0];
+    } else {
+    	struct amdgpu_bo_metadata buf_info = {0};
+    	buf_info.size_metadata = sizeof(HSAuint32);
+    	buf_info.umd_metadata[0] = *shareablehandle;
+    	amdgpu_bo_set_metadata(drmhandle, &buf_info);
+	}
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtResetMetadata(HsaMemoryObjectHandle buf_handle) {
+    struct amdgpu_bo_metadata zero_metadata = {0};
+    memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
+    amdgpu_bo_set_metadata((amdgpu_bo_handle)buf_handle, &zero_metadata);
+	return HSAKMT_STATUS_SUCCESS;
 }

@@ -404,6 +404,15 @@ namespace core {
       
       HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)*)dlsym(thunk_handle, "hsaKmtMemoryGetCpuAddr");
       if (HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) == NULL) goto ERROR;
+      
+      HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)dlsym(thunk_handle, "hsaKmtMemoryCpuMap");
+      if (HSAKMT_PFN(hsaKmtMemoryCpuMap) == NULL) goto ERROR;
+      
+      HSAKMT_PFN(hsaKmtQueryShareableHandle) = (HSAKMT_DEF(hsaKmtQueryShareableHandle)*)dlsym(thunk_handle, "hsaKmtQueryShareableHandle");
+      if (HSAKMT_PFN(hsaKmtQueryShareableHandle) == NULL) goto ERROR;
+      
+      HSAKMT_PFN(hsaKmtResetMetadata) = (HSAKMT_DEF(hsaKmtResetMetadata)*)dlsym(thunk_handle, "hsaKmtResetMetadata");
+      if (HSAKMT_PFN(hsaKmtResetMetadata) == NULL) goto ERROR;
 
       HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)dlsym(thunk_handle, "hsaKmtGetMemoryHandle");
       if (HSAKMT_PFN(hsaKmtGetMemoryHandle) == NULL) goto ERROR;
@@ -545,6 +554,9 @@ ERROR:
       HSAKMT_PFN(hsaKmtMemoryVaUnmap) = (HSAKMT_DEF(hsaKmtMemoryVaUnmap)*)(&hsaKmtMemoryVaUnmap);
       HSAKMT_PFN(hsaKmtMemHandleFree) = (HSAKMT_DEF(hsaKmtMemHandleFree)*)(&hsaKmtMemHandleFree);
       HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)*)(&hsaKmtMemoryGetCpuAddr);
+      HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)(&hsaKmtMemoryCpuMap);
+      HSAKMT_PFN(hsaKmtQueryShareableHandle) = (HSAKMT_DEF(hsaKmtQueryShareableHandle)*)(&hsaKmtQueryShareableHandle);
+      HSAKMT_PFN(hsaKmtResetMetadata) = (HSAKMT_DEF(hsaKmtResetMetadata)*)(&hsaKmtResetMetadata);
 
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)(&amdgpu_device_initialize);
       DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)(&amdgpu_device_deinitialize);
