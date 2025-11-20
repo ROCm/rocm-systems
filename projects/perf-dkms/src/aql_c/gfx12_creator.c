@@ -386,8 +386,11 @@ static block_info_t* create_gfx12_sq_block(void) {
     create_counter_reg_info(&counter_regs[7], mmSQ_PERFCOUNTER14_SELECT, mmSQ_PERFCOUNTER_CTRL,
                            mmSQ_PERFCOUNTER7_LO, 0);
 
-    /* Create dimensions for SQ block - SE dependent block */
-    /* Based on experiments: total dimensions multiply to 16 (4 SE × 2 SA × 2 WGP = 16) */
+    /* Create dimensions for SQ block - SE/SA/WGP dependent block
+     * SQ counters require 4 sub-instances per SA to match hardware layout.
+     * With instance_index = (wgp << 2), iterating wgp=0,1,2,3 gives
+     * instance_index = 0x00, 0x04, 0x08, 0x0c (matching aqlprofile).
+     * Total instances: 4 SE × 2 SA × 4 sub-instances = 32 */
     block->dimension_count = 3;
     block->dimensions = ALLOC_ARRAY(dimension_t, block->dimension_count);
     if (!block->dimensions) {
@@ -397,8 +400,7 @@ static block_info_t* create_gfx12_sq_block(void) {
     }
     block->dimensions[0] = (dimension_t){.size = GFX12_NUM_SE, .dim = HARDWARE_DIM_SE};
     block->dimensions[1] = (dimension_t){.size = GFX12_NUM_SA, .dim = HARDWARE_DIM_SA};
-    /* SQ block has 2 WGP per SA (not GFX12_NUM_WGP_PER_SA which is 4) */
-    block->dimensions[2] = (dimension_t){.size = 2, .dim = HARDWARE_DIM_WGP};
+    block->dimensions[2] = (dimension_t){.size = 4, .dim = HARDWARE_DIM_WGP};  /* 4 sub-instances per SA */
 
     block->name = "SQ";
     block->id = HW_IP_BLOCK_SQ;

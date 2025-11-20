@@ -393,7 +393,7 @@ int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
             /* Set GRBM index for specific location */
             ret =
                 pm4_set_grbm_index(buffer, arch->control_regs.grbm_gfx_index,
-                                   wgp << 2, /* instance_index */
+                                   wgp, /* instance_index - will be shifted in pm4_set_grbm_index */
                                    sa, se);
             if (ret < 0)
               return ret;

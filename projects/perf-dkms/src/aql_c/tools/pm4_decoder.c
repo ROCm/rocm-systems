@@ -665,16 +665,6 @@ static void decode_pm4_packet(const uint32_t* dwords, size_t num_dwords) {
 }
 
 /**
- * Convert dwords back to hex string
- */
-__attribute__((unused))
-static void dwords_to_hex_string(const uint32_t* dwords, size_t num_dwords) {
-    for (size_t i = 0; i < num_dwords; i++) {
-        printf("%08x", dwords[i]);
-    }
-}
-
-/**
  * Process multiple packets from a hex string (rebase mode)
  * Now also decodes and displays the rebased packets instead of just outputting hex
  */

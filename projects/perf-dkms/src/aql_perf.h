@@ -211,7 +211,8 @@ struct aql_measurement {
     struct perf_event *event;
     ktime_t start_time;
     enum measurement_state state;
-    uint64_t last_counter_value;
+    uint64_t start_counter_value;  /* Counter value when measurement started */
+    uint64_t last_counter_value;   /* Most recent counter value read */
 
     /* Allocated counter from block (NULL if not allocated) */
     counter_reg_info_t* allocated_counter;

@@ -31,9 +31,9 @@ module_param(debug_enable, bool, 0644);
 MODULE_PARM_DESC(debug_enable, "Enable debug output (default: true)");
 EXPORT_SYMBOL(debug_enable);
 
-static int timer_period_ms = 100;
+static int timer_period_ms = 20;
 module_param(timer_period_ms, int, 0644);
-MODULE_PARM_DESC(timer_period_ms, "Timer period in milliseconds (default: 100)");
+MODULE_PARM_DESC(timer_period_ms, "Timer period in milliseconds (default: 20)");
 
 /* Forward declarations for PMU callbacks */
 static int amdgpu_pmu_event_init(struct perf_event *event);
@@ -175,16 +175,99 @@ static const struct attribute_group *amdgpu_pmu_attr_groups[] = {
     NULL,
 };
 
-/* Timer handler - Legacy stub (not used with hardware-only mode) */
+/* Timer handler - Periodic polling for background counter refresh */
 enum hrtimer_restart amdgpu_pmu_timer_handler(struct hrtimer *timer)
 {
-    (void)timer; /* Unused in hardware-only mode */
+    struct amdgpu_pmu *pmu = container_of(timer, struct amdgpu_pmu, timer);
+    struct aql_perf_session *session;
+    unsigned long flags;
 
-    /* Hardware-only mode: timer not used */
-    pmu_debug("Timer handler called but not used in hardware-only mode\n");
+    pmu_debug("Timer handler fired - polling active measurements\n");
 
-    return HRTIMER_NORESTART;
+    /* Get AQL session to poll measurements */
+    session = aql_pmu_get_session();
+    if (!session) {
+        pmu_debug("Timer: No AQL session available\n");
+        goto reschedule;
+    }
+
+    /* Iterate through active measurements and trigger background reads */
+    spin_lock_irqsave(&session->measurement_lock, flags);
+    {
+        struct aql_measurement *measurement;
+        int polled_count = 0;
+
+        list_for_each_entry(measurement, &session->active_measurements, list) {
+            if (measurement->state == MEASUREMENT_ACTIVE) {
+                /* Trigger background read to refresh cache */
+                struct aql_work_item *work_item = aql_create_work_item(measurement, AQL_WORK_READ);
+                if (!IS_ERR(work_item)) {
+                    if (queue_work(measurement->work_queue, &work_item->work)) {
+                        polled_count++;
+                        pmu_debug("Timer: Scheduled read for GPU %u\n", measurement->gpu_id);
+                        pmu_info("Timer: ===== SCHEDULED READ for GPU %u =====\n", measurement->gpu_id);
+                    } else {
+                        kfree(work_item); /* Work already queued */
+                    }
+                }
+            }
+        }
+
+        pmu_debug("Timer: Polled %d active measurements\n", polled_count);
+    }
+    spin_unlock_irqrestore(&session->measurement_lock, flags);
+
+    aql_pmu_put_session(session);
+
+reschedule:
+    /* Reschedule timer for next period */
+    hrtimer_forward_now(timer, pmu->timer_period);
+    return HRTIMER_RESTART;
 }
+
+/* Start background polling timer - called when first measurement becomes active */
+void amdgpu_pmu_start_timer(void)
+{
+    struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
+
+    pmu_info("amdgpu_pmu_start_timer() called\n");
+
+    if (!pmu) {
+        pmu_err("Cannot start timer: PMU not initialized\n");
+        return;
+    }
+
+    /* Start timer if not already running */
+    if (!hrtimer_active(&pmu->timer)) {
+        hrtimer_start(&pmu->timer, pmu->timer_period, HRTIMER_MODE_REL);
+        pmu_info("Started background polling timer (period=%d ms)\n", timer_period_ms);
+    } else {
+        pmu_info("Timer already active, not starting again\n");
+    }
+}
+EXPORT_SYMBOL(amdgpu_pmu_start_timer);
+
+/* Stop background polling timer - called when measurement stops */
+void amdgpu_pmu_stop_timer_if_idle(void)
+{
+    struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
+
+    pmu_info("amdgpu_pmu_stop_timer_if_idle() called\n");
+
+    if (!pmu) {
+        pmu_err("Cannot stop timer: PMU not initialized\n");
+        return;
+    }
+
+    /* Just cancel the timer unconditionally.
+     * This is safe to call from atomic context (hrtimer_cancel handles it).
+     * Timer will be restarted when next measurement becomes active. */
+    if (hrtimer_active(&pmu->timer)) {
+        hrtimer_cancel(&pmu->timer);
+        pmu_info("Stopped background polling timer\n");
+    }
+}
+EXPORT_SYMBOL(amdgpu_pmu_stop_timer_if_idle);
 
 /* Find free event slot */
 int amdgpu_pmu_get_event_idx(struct amdgpu_pmu *pmu)
@@ -313,20 +396,20 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
         return -EINVAL;
     }
 
-    /* Map CPU ID to GPU ID using modulo for systems with more CPUs than GPUs */
-    {
-        int num_gpus = aql_pmu_get_gpu_count();
-        int gpu_id = (num_gpus > 0) ? (event->cpu % num_gpus) : 0;
-        pmu_debug("Mapping CPU %d to GPU %d (num_gpus=%d)\n",
-                  event->cpu, gpu_id, num_gpus);
-        /* Store GPU ID for later use in add/start/stop/read callbacks */
-        event->hw.idx = gpu_id;
+    /* Get actual GPU device ID for this event's CPU affinity */
+    uint32_t gpu_id = aql_pmu_get_gpu_id_for_event(event);
+    if (gpu_id == U32_MAX) {
+        pmu_err("Failed to map CPU %d to GPU\n", event->cpu);
+        return -ENODEV;
     }
+    pmu_debug("Mapped CPU %d to GPU %u\n", event->cpu, gpu_id);
+
+    /* Store GPU ID for later use (note: this is actual GPU device ID, not index) */
+    event->hw.idx = gpu_id;
 
     /* Extract and validate dimensions from config1 if specified */
     if (config1 != 0) {
         struct pmu_dimension_limits gpu_limits;
-        uint32_t gpu_id = event->hw.idx;
 
         pmu_extract_dimensions(config1, &dims);
         pmu_debug("Extracted dimensions: xcc=%u se=%u sa=%u wgp=%u cu=%u agg=%d valid=%d\n",
@@ -349,9 +432,12 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
                     gpu_limits.max_cu);
             return -EINVAL;
         }
+        pmu_debug("Dimension validation passed\n");
 
         /* Get counter definition and validate it supports requested dimensions */
+        pmu_debug("Looking up counter definition for config=0x%llx\n", config);
         counter = lookup_counter_by_id((counter_id_t)config);
+        pmu_debug("lookup_counter_by_id returned %p\n", counter);
         if (counter) {
             ret = pmu_validate_counter_dimensions(counter, &dims);
             if (ret != 0) {
@@ -361,11 +447,14 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
                         dims.xcc, dims.se, dims.sa, dims.wgp, dims.cu);
                 return ret;
             }
+            pmu_debug("Counter dimension validation passed\n");
         }
     }
 
     /* Initialize AQL hardware counter */
+    pmu_debug("About to call aql_pmu_event_init\n");
     ret = aql_pmu_event_init(event, dims.valid ? &dims : NULL);
+    pmu_debug("aql_pmu_event_init returned %d\n", ret);
     if (ret != 0) {
         pmu_err("AQL hardware counter initialization failed for config=0x%llx: %d\n",
                 config, ret);
@@ -380,6 +469,9 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
     }
     atomic64_inc(&pmu->hardware_events);
     atomic64_inc(&pmu->total_events);
+
+    /* Set destroy callback to properly cleanup when event is freed */
+    event->destroy = aql_pmu_event_destroy;
 
     return 0;
 }
@@ -401,6 +493,7 @@ static int amdgpu_pmu_add(struct perf_event *event, int flags)
                 return ret;
             }
             hwc->state = 0;
+            /* Timer will be started by aql_perf_measurement_start() after measurement becomes active */
         } else {
             hwc->state = PERF_HES_STOPPED;
         }
@@ -425,14 +518,35 @@ static void amdgpu_pmu_del(struct perf_event *event, int flags)
 {
     struct hw_perf_event *hwc = &event->hw;
 
-    pmu_debug("del: config=0x%llx, flags=0x%x\n", event->attr.config, flags);
+    pmu_info("del: ENTRY - config=0x%llx, flags=0x%x\n", event->attr.config, flags);
 
     /* Check if this is an AQL hardware event */
     if (hwc->config_base != 0) {
-        /* AQL hardware event - stop measurement */
-        if (flags & PERF_EF_UPDATE) {
-            amdgpu_pmu_read(event);
+        /* CRITICAL: del() can be called from atomic context (e.g., perf stat exit).
+         * We cannot do synchronous operations that sleep from atomic context.
+         * Check if we're in atomic context and handle accordingly. */
+        if (in_atomic() || irqs_disabled()) {
+            pmu_warn("del: Called from atomic context, reading cached value\n");
+
+            /* Read cached counter value - this is safe in atomic context because
+             * aql_pmu_event_read() just returns the cached value without sleeping */
+            uint64_t counter_value = aql_pmu_event_read(event);
+            local64_set(&event->count, counter_value);
+            pmu_info("del: Final cached counter value=%llu\n", counter_value);
+
+            /* Just mark as stopped - cleanup will happen in event_destroy */
+            hwc->state = PERF_HES_STOPPED | PERF_HES_UPTODATE;
+            pmu_debug("del: Removed AQL hardware event (atomic mode)\n");
+            return;
         }
+
+        /* Safe to do synchronous operations - read final count before stopping.
+         * For NO_INTERRUPT PMUs like ours, we must update the count here
+         * because perf stat won't explicitly call read(). */
+        pmu_debug("del: Reading final counter value before stop (synchronous)\n");
+        uint64_t counter_value = aql_pmu_event_read_sync(event);
+        local64_set(&event->count, counter_value);
+        pmu_info("del: Final counter value=%llu\n", counter_value);
 
         /* Stop the event but DON'T destroy it - the event may be re-added later.
          * Only event_destroy should free the measurement structure. */
@@ -468,6 +582,7 @@ static void amdgpu_pmu_start(struct perf_event *event, int flags)
         if (aql_pmu_event_start(event) == 0) {
             hwc->state = 0;
             pmu_debug("start: Started AQL hardware event config=0x%llx successfully\n", event->attr.config);
+            /* Timer will be started by aql_perf_measurement_start() after measurement becomes active */
         } else {
             pmu_err("start: Failed to start AQL hardware event config=0x%llx\n", event->attr.config);
             hwc->state = PERF_HES_STOPPED;
@@ -524,11 +639,15 @@ static void amdgpu_pmu_read(struct perf_event *event)
     if (hwc->config_base != 0) {
         pmu_info("read: Reading AQL hardware counter for config=0x%llx\n", event->attr.config);
         uint64_t counter_value = aql_pmu_event_read(event);
+        pmu_info("read: ========== SETTING event->count = %llu (0x%llx) ==========\n",
+                 counter_value, counter_value);
         local64_set(&event->count, counter_value);
         new_count = local64_read(&event->count);
         pmu_info("read: AQL counter read complete - old=%llu, new=%llu, delta=%lld\n",
                  (unsigned long long)old_count, (unsigned long long)new_count,
                  (long long)(new_count - old_count));
+        pmu_info("read: ========== FINAL event->count = %llu (0x%llx) ==========\n",
+                 new_count, new_count);
         return;
     }
 
@@ -742,12 +861,11 @@ static void __exit amdgpu_pmu_exit(void)
     pmu_info("Unloading PMU Stub module\n");
 
     if (pmu) {
-        /* Cleanup AQL integration first */
-        aql_pmu_cleanup();
-        pmu_info("AQL hardware acceleration disabled\n");
-
         /* Cancel timer */
         hrtimer_cancel(&pmu->timer);
+
+        aql_pmu_cleanup();
+        pmu_info("AQL hardware acceleration disabled\n");
 
         /* Unregister PMU */
         perf_pmu_unregister(&pmu->pmu);

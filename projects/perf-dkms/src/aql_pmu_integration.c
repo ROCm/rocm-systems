@@ -123,17 +123,32 @@ static bool aql_pmu_should_use_hardware(struct perf_event *event)
  *
  * Returns: GPU ID to use, or UINT32_MAX on error
  */
-static uint32_t aql_pmu_select_gpu(struct perf_event *event)
+/**
+ * aql_pmu_get_gpu_id_for_event_locked - Get actual GPU ID for a perf event (mutex must be held)
+ * @event: Perf event to map
+ *
+ * Internal version that assumes aql_pmu_mutex is already held by caller.
+ *
+ * Returns: GPU device ID (e.g., 7410), or U32_MAX on error
+ */
+static uint32_t aql_pmu_get_gpu_id_for_event_locked(struct perf_event *event)
 {
-    struct aql_perf_session *session = global_aql_session;
-    uint32_t cpu = event->cpu;
+    struct aql_perf_session *session;
+    uint32_t cpu;
     uint32_t gpu_id;
 
-    aql_debug("select_gpu: cpu=%d, num_gpus=%u",
+    if (!event) {
+        return U32_MAX;
+    }
+
+    session = global_aql_session;
+    cpu = event->cpu;
+
+    aql_debug("get_gpu_id_for_event: cpu=%d, num_gpus=%u",
               cpu, session ? session->num_gpus : 0);
 
     if (!session || session->num_gpus == 0) {
-        aql_err("select_gpu: no session or no GPUs");
+        aql_err("get_gpu_id_for_event: no session or no GPUs");
         return U32_MAX;
     }
 
@@ -174,6 +189,33 @@ static uint32_t aql_pmu_select_gpu(struct perf_event *event)
 }
 
 /**
+ * aql_pmu_get_gpu_id_for_event - Get actual GPU ID for a perf event (public API)
+ * @event: Perf event to map
+ *
+ * Maps the event's CPU affinity to an actual GPU device ID. This is the
+ * proper way to get a GPU ID from a perf_event, as it accounts for the
+ * AQL session's actual GPU IDs (which may not be sequential 0,1,2...).
+ *
+ * Returns: GPU device ID (e.g., 7410), or U32_MAX on error
+ */
+uint32_t aql_pmu_get_gpu_id_for_event(struct perf_event *event)
+{
+    uint32_t gpu_id;
+
+    mutex_lock(&aql_pmu_mutex);
+    gpu_id = aql_pmu_get_gpu_id_for_event_locked(event);
+    mutex_unlock(&aql_pmu_mutex);
+
+    return gpu_id;
+}
+
+/* Internal helper - calls locked version since we already hold mutex in event_init */
+static uint32_t aql_pmu_select_gpu(struct perf_event *event)
+{
+    return aql_pmu_get_gpu_id_for_event_locked(event);
+}
+
+/**
  * aql_pmu_event_init - Initialize event with AQL support
  * @event: Perf event to initialize
  *
@@ -184,20 +226,35 @@ int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coor
     struct aql_measurement *measurement;
     uint32_t gpu_id;
 
+    aql_debug("ENTRY: aql_pmu_event_init");
+
     if (!aql_pmu_should_use_hardware(event)) {
+        aql_debug("Not using hardware, returning -EOPNOTSUPP");
         return -EOPNOTSUPP; /* Use simulation instead */
     }
 
+    aql_debug("Before mutex_lock(&aql_pmu_mutex)");
     mutex_lock(&aql_pmu_mutex);
+    aql_debug("After mutex_lock(&aql_pmu_mutex), global_aql_session=%p", global_aql_session);
 
-    if (!global_aql_session || global_aql_session->state != SESSION_ACTIVE) {
-        aql_debug("AQL session not active, falling back to simulation");
+    if (!global_aql_session) {
+        aql_debug("Global AQL session is NULL, falling back to simulation");
         mutex_unlock(&aql_pmu_mutex);
         return -EOPNOTSUPP;
     }
 
+    aql_debug("About to check session state, session=%p", global_aql_session);
+    if (global_aql_session->state != SESSION_ACTIVE) {
+        aql_debug("AQL session state is %d (not active), falling back to simulation", global_aql_session->state);
+        mutex_unlock(&aql_pmu_mutex);
+        return -EOPNOTSUPP;
+    }
+    aql_debug("Session is active, state=%d", global_aql_session->state);
+
     /* Select GPU for this event */
+    aql_debug("Before aql_pmu_select_gpu");
     gpu_id = aql_pmu_select_gpu(event);
+    aql_debug("After aql_pmu_select_gpu, gpu_id=%u", gpu_id);
     if (gpu_id == U32_MAX) {
         aql_debug("No suitable GPU found for event, falling back to simulation");
         mutex_unlock(&aql_pmu_mutex);
@@ -205,7 +262,9 @@ int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coor
     }
 
     /* Create AQL measurement */
+    aql_debug("Before aql_perf_measurement_create for GPU %u", gpu_id);
     measurement = aql_perf_measurement_create(global_aql_session, gpu_id, event);
+    aql_debug("After aql_perf_measurement_create, measurement=%p", measurement);
     if (IS_ERR(measurement)) {
         aql_err("Failed to create AQL measurement: %ld", PTR_ERR(measurement));
         mutex_unlock(&aql_pmu_mutex);
@@ -215,10 +274,13 @@ int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coor
     /* Store dimension information in measurement if specified */
     if (dims && dims->valid) {
         measurement->target_dims = *dims;
-        measurement->dimension_specific = true;
+        /* If aggregate flag is set, aggregate across all dimensions.
+         * Otherwise, monitor only the specific dimension. */
         if (dims->aggregate) {
+            measurement->dimension_specific = false;  /* Aggregate mode */
             aql_debug("GPU %u: aggregate mode (all dimensions)", gpu_id);
         } else {
+            measurement->dimension_specific = true;   /* Dimension-specific mode */
             aql_debug("GPU %u: dimension-specific se=%u sa=%u wgp=%u",
                       gpu_id, dims->se, dims->sa, dims->wgp);
         }
@@ -335,6 +397,37 @@ uint64_t aql_pmu_event_read(struct perf_event *event)
     counter_value = aql_perf_measurement_read_atomic(measurement);
 
     aql_debug("GPU %u: read=%llu", measurement->gpu_id, counter_value);
+    aql_info("[PMU] ========== aql_pmu_event_read RETURNING: %llu (0x%llx) ==========",
+             counter_value, counter_value);
+
+    return counter_value;
+}
+
+/**
+ * aql_pmu_event_read_sync - Synchronously read AQL hardware counter
+ * @event: Perf event to read
+ *
+ * Performs a synchronous (blocking) read of the hardware counter.
+ * This waits for the actual hardware read to complete before returning.
+ * Use this for final reads (e.g., in del callback) where accuracy is critical.
+ *
+ * Returns: Current counter value
+ */
+uint64_t aql_pmu_event_read_sync(struct perf_event *event)
+{
+    struct aql_measurement *measurement;
+    uint64_t counter_value;
+
+    if (!event->hw.config_base) {
+        return 0;
+    }
+
+    measurement = (struct aql_measurement *)event->hw.config_base;
+
+    /* Use synchronous version to wait for actual hardware read */
+    counter_value = aql_perf_measurement_read(measurement);
+
+    aql_debug("GPU %u: read_sync=%llu", measurement->gpu_id, counter_value);
 
     return counter_value;
 }
