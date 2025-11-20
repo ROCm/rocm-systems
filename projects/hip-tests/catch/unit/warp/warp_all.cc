@@ -50,8 +50,9 @@ __global__ void kernel_all(uint64_t* const out, const uint64_t* const active_mas
   const auto grid = cg::this_grid();
   const auto warp = cg::tiled_partition(cg::this_thread_block(), warpSize);
 
+  unsigned mask = __activemask();
   int pred = MASK_SHIFT(predicate, warp.thread_rank());
-  out[grid.thread_rank()] = __all(pred);
+  out[grid.thread_rank()] = __all_sync(mask, pred);
 }
 
 class WarpAll : public WarpVoteTest<WarpAll, uint64_t> {

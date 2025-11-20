@@ -41,8 +41,9 @@ __global__ void kernel_any(uint64_t* const out, const uint64_t* const active_mas
   const auto grid = cg::this_grid();
   const auto warp = cg::tiled_partition(cg::this_thread_block(), warpSize);
 
+  unsigned mask = __activemask();
   int pred = MASK_SHIFT(predicate, warp.thread_rank());
-  out[grid.thread_rank()] = __any(pred);
+  out[grid.thread_rank()] = __any_sync(mask, pred);
 }
 
 class WarpAny : public WarpVoteTest<WarpAny, uint64_t> {

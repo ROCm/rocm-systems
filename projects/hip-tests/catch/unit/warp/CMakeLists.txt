@@ -1,8 +1,8 @@
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
-	# warp_ballot.cc
-	#warp_any.cc
-	#  warp_all.cc
+  warp_ballot.cc
+  warp_any.cc
+  warp_all.cc
   hipMatchSyncAllTests.cc
   hipMatchSyncAnyTests.cc
   hipShflSyncDownTests.cc

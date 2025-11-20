@@ -39,9 +39,10 @@ __global__ void kernel_ballot(uint64_t* const out, const uint64_t* const active_
 
   const auto grid = cg::this_grid();
   const auto warp = cg::tiled_partition(cg::this_thread_block(), warpSize);
+  unsigned mask = __activemask();
 
   int pred = MASK_SHIFT(predicate, warp.thread_rank());
-  out[grid.thread_rank()] = __ballot(pred);
+  out[grid.thread_rank()] = __ballot_sync(mask, pred);
 }
 
 class WarpBallot : public WarpVoteTest<WarpBallot, uint64_t> {

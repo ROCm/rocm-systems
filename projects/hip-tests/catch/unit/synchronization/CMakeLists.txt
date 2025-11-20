@@ -2,12 +2,12 @@
 set(TEST_SRC
     copy_coherency.cc
 )
-add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_CXX_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
-                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
-                  ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco
-                  -I${HIP_INCLUDE_DIR}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco)
+#add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_CXX_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+#                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
+#                  ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco
+#                  -I${HIP_INCLUDE_DIR}
+#                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+#set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco)
 # only for AMD
 if(HIP_PLATFORM MATCHES "amd")
 # There are problems in Windows: __hip_atomicsXXX() won't work as expected
@@ -24,5 +24,10 @@ hip_add_exe_to_target(NAME synchronizationTests
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS -std=c++14)
-add_dependencies(synchronizationTests memcpyInt.hsaco)
+	      message(STATUS "HIP PLATFORM IS ${HIP_PLATFORM}")
+if(HIP_PLATFORM MATCHES "nvidia")
+  set_target_properties(synchronizationTests PROPERTIES LINKER_LANGUAGE CUDA)
+  target_link_libraries(synchronizationTests cuda)
+endif()
+#add_dependencies(synchronizationTests memcpyInt.hsaco)
 
