@@ -626,7 +626,7 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT",
         "Metric for overflow sampling. Defaults to perf::PERF_COUNT_HW_CACHE_REFERENCES. "
-        "For full list of events see: rocprof-sys-avail -H -c overflow",
+        "For full list of events see: rocprof-sys-avail -H -c CPU -r overflow",
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 

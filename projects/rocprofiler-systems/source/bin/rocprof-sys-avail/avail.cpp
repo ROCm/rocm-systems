@@ -161,7 +161,6 @@ main(int argc, char** argv)
     }
     _category_options.emplace("hw_counters::CPU");
     _category_options.emplace("hw_counters::GPU");
-    _category_options.emplace("hw_counters::overflow");
 
     array_t<bool, TOTAL> options    = { false, false, false, false, false, false, false };
     array_t<string_t, TOTAL> fields = {};
@@ -1080,16 +1079,19 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     auto _rocm_events =
         (gpu_count > 0) ? rocprofsys::rocm::rocm_events() : hwcounter_info_t{};
 
-    // Filter PAPI events for overflow sampling (perf events matching PERF_COUNT pattern)
-    auto _overflow_events = hwcounter_info_t{};
+    // Tag overflow events by modifying both short and long descriptions upfront
     {
         namespace regex_const = ::std::regex_constants;
         auto _regex =
             std::regex{ "^(perf::|)PERF_COUNT_(HW|SW|HW_CACHE)_([A-Z_]+)(|:[A-Z]+)$",
                         regex_const::optimize };
-        for(const auto& itr : _papi_events)
+        for(auto& itr : _papi_events)
         {
-            if(std::regex_match(itr.symbol(), _regex)) _overflow_events.emplace_back(itr);
+            if(std::regex_match(itr.symbol(), _regex))
+            {
+                itr.short_description() += " (overflow event)";
+                itr.long_description() += " (overflow event)";
+            }
         }
     }
 
@@ -1099,7 +1101,6 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     };
     std::sort(_papi_events.begin(), _papi_events.end(), _sorter);
     std::sort(_rocm_events.begin(), _rocm_events.end(), _sorter);
-    std::sort(_overflow_events.begin(), _overflow_events.end(), _sorter);
 
     auto _process_counters = [](auto& _events_v, int32_t _offset_v) {
         for(auto& iitr : _events_v)
@@ -1110,11 +1111,10 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     int32_t _offset = 0;
     _offset += _process_counters(_papi_events, _offset);
     _offset += _process_counters(_rocm_events, _offset);
-    _offset += _process_counters(_overflow_events, _offset);
 
-    auto fields = std::vector<std::pair<std::string, hwcounter_info_t>>{
-        { "CPU", _papi_events }, { "GPU", _rocm_events }, { "overflow", _overflow_events }
-    };
+    auto fields =
+        std::vector<std::pair<std::string, hwcounter_info_t>>{ { "CPU", _papi_events },
+                                                               { "GPU", _rocm_events } };
     array_t<string_t, N> _labels = { "HARDWARE COUNTER", "DEVICE", "AVAILABLE", "SUMMARY",
                                      "DESCRIPTION" };
     array_t<bool, N>     _center = { false, true, true, false, false };
@@ -1188,7 +1188,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     {
         for(const auto& itr : fitr.second)
         {
-            width_type _w = { { (int64_t) itr.symbol().length(), (int64_t) 4, (int64_t) 6,
+            width_type _w = { { (int64_t) itr.symbol().length(), (int64_t) 8, (int64_t) 6,
                                 (int64_t) itr.short_description().length(),
                                 (int64_t) itr.long_description().length() } };
             for(auto& witr : _w)
