@@ -869,6 +869,7 @@ static uint64_t aql_aggregate_counter_instances(
     }
 
     aql_info("[PMU] Aggregated %u instances, total=%llu", num_instances, sum);
+    aql_info("[PMU] ========== AGGREGATION RESULT: %llu (0x%llx) ==========", sum, sum);
 
     return sum;
 }
@@ -1029,6 +1030,7 @@ static uint64_t read_compute_delta(struct aql_measurement *measurement, uint64_t
 
     aql_info("[PMU] READ_SYNC: GPU %u, delta=%llu (current=%llu - start=%llu)",
              measurement->gpu_id, delta, counter_value, measurement->start_counter_value);
+    aql_info("[PMU] ========== COMPUTED DELTA: %llu (0x%llx) ==========", delta, delta);
 
     return delta;
 }
@@ -1090,6 +1092,8 @@ uint64_t aql_perf_measurement_read(struct aql_measurement *measurement)
 
     aql_info("[PMU] READ_SYNC: GPU %u, absolute counter_value=%llu (dimension_specific=%d)",
              measurement->gpu_id, counter_value, measurement->dimension_specific);
+    aql_info("[PMU] ========== RAW COUNTER VALUE: %llu (0x%llx) ==========",
+             counter_value, counter_value);
 
     /* Update cached value with absolute counter value */
     measurement->last_counter_value = counter_value;
@@ -1206,6 +1210,8 @@ void aql_work_handler(struct work_struct *work)
 
             aql_info("[PMU] WORK_READ: GPU %u, updated cache: old=%llu (valid=%d) -> new=%llu (valid=1)",
                      measurement->gpu_id, old_cached, was_valid, counter_value);
+            aql_info("[PMU] ========== CACHED VALUE UPDATED: %llu (0x%llx) ==========",
+                     counter_value, counter_value);
             result = 0; /* Read operations always succeed if we get here */
         }
         break;

@@ -205,6 +205,7 @@ enum hrtimer_restart amdgpu_pmu_timer_handler(struct hrtimer *timer)
                     if (queue_work(measurement->work_queue, &work_item->work)) {
                         polled_count++;
                         pmu_debug("Timer: Scheduled read for GPU %u\n", measurement->gpu_id);
+                        pmu_info("Timer: ===== SCHEDULED READ for GPU %u =====\n", measurement->gpu_id);
                     } else {
                         kfree(work_item); /* Work already queued */
                     }
@@ -246,11 +247,10 @@ void amdgpu_pmu_start_timer(void)
 }
 EXPORT_SYMBOL(amdgpu_pmu_start_timer);
 
-/* Stop background polling timer if no active measurements - called when last measurement stops */
+/* Stop background polling timer - called when measurement stops */
 void amdgpu_pmu_stop_timer_if_idle(void)
 {
     struct amdgpu_pmu *pmu = amdgpu_pmu_instance;
-    struct aql_perf_session *session;
 
     pmu_info("amdgpu_pmu_stop_timer_if_idle() called\n");
 
@@ -259,29 +259,13 @@ void amdgpu_pmu_stop_timer_if_idle(void)
         return;
     }
 
-    /* Check if there are any active measurements */
-    session = aql_pmu_get_session();
-    if (!session) {
-        /* No session, safe to stop timer */
-        if (hrtimer_active(&pmu->timer)) {
-            hrtimer_cancel(&pmu->timer);
-            pmu_info("Stopped background polling timer (no session)\n");
-        }
-        return;
+    /* Just cancel the timer unconditionally.
+     * This is safe to call from atomic context (hrtimer_cancel handles it).
+     * Timer will be restarted when next measurement becomes active. */
+    if (hrtimer_active(&pmu->timer)) {
+        hrtimer_cancel(&pmu->timer);
+        pmu_info("Stopped background polling timer\n");
     }
-
-    /* If no active GPUs, stop the timer */
-    if (atomic_read(&session->active_gpu_count) == 0) {
-        if (hrtimer_active(&pmu->timer)) {
-            hrtimer_cancel(&pmu->timer);
-            pmu_info("Stopped background polling timer (no active measurements)\n");
-        }
-    } else {
-        pmu_info("Timer still needed (%d active measurements)\n",
-                 atomic_read(&session->active_gpu_count));
-    }
-
-    aql_pmu_put_session(session);
 }
 EXPORT_SYMBOL(amdgpu_pmu_stop_timer_if_idle);
 
@@ -542,7 +526,14 @@ static void amdgpu_pmu_del(struct perf_event *event, int flags)
          * We cannot do synchronous operations that sleep from atomic context.
          * Check if we're in atomic context and handle accordingly. */
         if (in_atomic() || irqs_disabled()) {
-            pmu_warn("del: Called from atomic context, skipping synchronous operations\n");
+            pmu_warn("del: Called from atomic context, reading cached value\n");
+
+            /* Read cached counter value - this is safe in atomic context because
+             * aql_pmu_event_read() just returns the cached value without sleeping */
+            uint64_t counter_value = aql_pmu_event_read(event);
+            local64_set(&event->count, counter_value);
+            pmu_info("del: Final cached counter value=%llu\n", counter_value);
+
             /* Just mark as stopped - cleanup will happen in event_destroy */
             hwc->state = PERF_HES_STOPPED | PERF_HES_UPTODATE;
             pmu_debug("del: Removed AQL hardware event (atomic mode)\n");
@@ -648,11 +639,15 @@ static void amdgpu_pmu_read(struct perf_event *event)
     if (hwc->config_base != 0) {
         pmu_info("read: Reading AQL hardware counter for config=0x%llx\n", event->attr.config);
         uint64_t counter_value = aql_pmu_event_read(event);
+        pmu_info("read: ========== SETTING event->count = %llu (0x%llx) ==========\n",
+                 counter_value, counter_value);
         local64_set(&event->count, counter_value);
         new_count = local64_read(&event->count);
         pmu_info("read: AQL counter read complete - old=%llu, new=%llu, delta=%lld\n",
                  (unsigned long long)old_count, (unsigned long long)new_count,
                  (long long)(new_count - old_count));
+        pmu_info("read: ========== FINAL event->count = %llu (0x%llx) ==========\n",
+                 new_count, new_count);
         return;
     }
 
@@ -866,12 +861,11 @@ static void __exit amdgpu_pmu_exit(void)
     pmu_info("Unloading PMU Stub module\n");
 
     if (pmu) {
-        /* Cleanup AQL integration first */
-        aql_pmu_cleanup();
-        pmu_info("AQL hardware acceleration disabled\n");
-
         /* Cancel timer */
         hrtimer_cancel(&pmu->timer);
+
+        aql_pmu_cleanup();
+        pmu_info("AQL hardware acceleration disabled\n");
 
         /* Unregister PMU */
         perf_pmu_unregister(&pmu->pmu);

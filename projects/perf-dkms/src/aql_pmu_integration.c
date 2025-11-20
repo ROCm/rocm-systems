@@ -397,6 +397,8 @@ uint64_t aql_pmu_event_read(struct perf_event *event)
     counter_value = aql_perf_measurement_read_atomic(measurement);
 
     aql_debug("GPU %u: read=%llu", measurement->gpu_id, counter_value);
+    aql_info("[PMU] ========== aql_pmu_event_read RETURNING: %llu (0x%llx) ==========",
+             counter_value, counter_value);
 
     return counter_value;
 }
