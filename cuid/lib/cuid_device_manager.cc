@@ -4,6 +4,7 @@
 #include "cuid_nic.h"
 #include "cuid_platform.h"
 #include "cuid.h"
+#include <iostream>
 
 
 amdcuid_status_t AmdCuidDeviceManager::init(amdcuid_device_type_set_t device_types) {
@@ -12,16 +13,21 @@ amdcuid_status_t AmdCuidDeviceManager::init(amdcuid_device_type_set_t device_typ
     if (device_types & AMDCUID_DEVICE_TYPE_SET_GPU) {
         std::vector<DevicePtr> gpus;
         amdcuid_status_t status = AmdCuidGpu::discover(gpus);
-        if (status != AMDCUID_STATUS_SUCCESS) return status;
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            return status;
+        }
         devices_.insert(devices_.end(), gpus.begin(), gpus.end());
     }
     if (device_types & AMDCUID_DEVICE_TYPE_SET_CPU) {
         std::vector<DevicePtr> cpus;
         amdcuid_status_t status = AmdCuidCpu::discover(cpus);
-        if (status != AMDCUID_STATUS_SUCCESS) return status;
-        devices_.insert(devices_.end(), cpus.begin(), cpus.end());
+        if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_UNSUPPORTED) {
+            return status;
+        }
+        if (status == AMDCUID_STATUS_SUCCESS) {
+            devices_.insert(devices_.end(), cpus.begin(), cpus.end());
+        }
     }
-    // TOOD: add more type
     initialized_ = true;
     return AMDCUID_STATUS_SUCCESS;
 }

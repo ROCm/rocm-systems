@@ -4,25 +4,24 @@
 #include "hmac.h"
 
 AMDCUID_HMAC::AMDCUID_HMAC(const std::string& key_file)
+    : ctx(nullptr), mac(nullptr), key(nullptr), key_len(0), valid(false)
 {
-    // set MAC as HMAC
     mac = EVP_MAC_fetch(NULL, "HMAC", NULL);
     if (!mac) {
         std::cerr << "Error creating EVP_MAC" << std::endl;
         return;
     }
 
-    // Create MAC context
     ctx = EVP_MAC_CTX_new(mac);
     if (!ctx) {
         EVP_MAC_free(mac);
+        mac = nullptr;
         std::cerr << "Error creating EVP_MAC_CTX" << std::endl;
         return;
     }
-    // Read key from file
+
     std::ifstream key_file_stream(key_file, std::ios::binary);
-    if (!key_file_stream.is_open())
-    {
+    if (!key_file_stream.is_open()) {
         std::cerr << "Error opening key file" << std::endl;
         return;
     }
@@ -32,16 +31,18 @@ AMDCUID_HMAC::AMDCUID_HMAC(const std::string& key_file)
     key = new uint8_t[key_len];
     key_file_stream.read(reinterpret_cast<char*>(key), key_len);
     key_file_stream.close();
+    
+    valid = true;
 }
 
 AMDCUID_HMAC::~AMDCUID_HMAC()
 {
-    EVP_MAC_CTX_free(ctx);
-    EVP_MAC_free(mac);
-    delete[] key;
+    if (ctx) EVP_MAC_CTX_free(ctx);
+    if (mac) EVP_MAC_free(mac);
+    if (key) delete[] key;
 }
 
-int AMDCUID_HMAC::generate_hmac_sha256(
+amdcuid_status_t AMDCUID_HMAC::generate_hmac_sha256(
     const uint8_t* data,
     size_t data_len,
     uint8_t* out_hash,
@@ -50,52 +51,47 @@ int AMDCUID_HMAC::generate_hmac_sha256(
 {
     if (!ctx) {
         std::cerr << "MAC context is not initialized" << std::endl;
-        // return 12 as the error code so that we can translate that directly to AMDCUID_STATUS_HMAC_ERROR later
-        return 12;
+        return AMDCUID_STATUS_HMAC_ERROR;
     }
 
-    // initialize MAC context with key; other params should have already been given earlier
+    OSSL_PARAM params[2];
+    const char* digest_name = "SHA256";
+    params[0] = OSSL_PARAM_construct_utf8_string("digest", const_cast<char*>(digest_name), 0);
+    params[1] = OSSL_PARAM_construct_end();
+
+    if (!EVP_MAC_CTX_set_params(ctx, params)) {
+        std::cerr << "Error setting HMAC digest algorithm" << std::endl;
+        return AMDCUID_STATUS_HMAC_ERROR;
+    }
+
     if (!EVP_MAC_init(ctx, reinterpret_cast<const unsigned char*>(key), key_len, NULL)) {
-        EVP_MAC_CTX_free(ctx);
-        EVP_MAC_free(mac);
         std::cerr << "Error initializing MAC context" << std::endl;
-        // return 12 as the error code so that we can translate that directly to AMDCUID_STATUS_HMAC_ERROR later
-        return 12;
+        return AMDCUID_STATUS_HMAC_ERROR;
     }
 
-    // update MAC with primary CUID as the message
     if (!EVP_MAC_update(ctx, reinterpret_cast<const unsigned char*>(data), data_len)) {
-        EVP_MAC_CTX_free(ctx);
-        EVP_MAC_free(mac);
         std::cerr << "Error updating MAC context" << std::endl;
-        // return 12 as the error code so that we can translate that directly to AMDCUID_STATUS_HMAC_ERROR later
-        return 12;
+        return AMDCUID_STATUS_HMAC_ERROR;
     }
 
-    // compute HMAC-SHA256 hash
     if (!EVP_MAC_final(ctx, reinterpret_cast<unsigned char*>(out_hash), out_len, EVP_MAX_MD_SIZE)) {
-        EVP_MAC_CTX_free(ctx);
-        EVP_MAC_free(mac);
         std::cerr << "Error finalizing MAC" << std::endl;
-        // return 12 as the error code so that we can translate that directly to AMDCUID_STATUS_HMAC_ERROR later
-        return 12;
+        return AMDCUID_STATUS_HMAC_ERROR;
     }
 
-    return 0;
+    return AMDCUID_STATUS_SUCCESS;
 }
 
-int AMDCUID_HMAC::set_hmac_algorithm(const EVP_MD* md)
+amdcuid_status_t AMDCUID_HMAC::set_hmac_algorithm(const EVP_MD* md)
 {
     if (!ctx) {
         std::cerr << "MAC context is not initialized" << std::endl;
-        return 12;
+        return AMDCUID_STATUS_HMAC_ERROR;
     }
-    // if not provided, use SHA256
     if (!md) {
         md = EVP_sha256();
     }
 
-    // set hash algorithm as md
     OSSL_PARAM params[2];
     const char* algorithm = EVP_MD_get0_name(md);
     params[0] = OSSL_PARAM_construct_utf8_string("digest", const_cast<char*>(algorithm), 0);
@@ -103,8 +99,8 @@ int AMDCUID_HMAC::set_hmac_algorithm(const EVP_MD* md)
 
     if (!EVP_MAC_CTX_set_params(ctx, params)) {
         std::cerr << "Error setting HMAC algorithm" << std::endl;
-        return 12;
+        return AMDCUID_STATUS_HMAC_ERROR;
     }
 
-    return 0;
+    return AMDCUID_STATUS_SUCCESS;
 }

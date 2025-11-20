@@ -12,6 +12,8 @@ set(CUID_SOURCES
     cuid_device_manager.cc
     cuid_cpu.cc
     cuid_gpu.cc
+    cuid_nic.cc
+    cuid_file.cc
     hmac.cc
     cuid_lib_loader.cc
     pci_util.cc
@@ -26,6 +28,7 @@ set(CUID_HEADERS
     cuid_gpu.h
     cuid_nic.h
     cuid_platform.h
+    cuid_file.h
     hmac.h
     cuid_lib_loader.h
     pci_util.h
