@@ -16,10 +16,9 @@ jobs:
       packages: write
 
     steps:
-      - name: Clean up GHCR rocprofiler Docker CI Images
+      - name: Clean up GHCR rocprofiler-ubuntu Docker CI Images
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          packages: rocprofiler-*
-          expand-packages: true
+          package: rocprofiler-ubuntu
           older-than: 7 days
           dry-run: true
