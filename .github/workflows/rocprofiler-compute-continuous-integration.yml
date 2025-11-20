@@ -161,8 +161,8 @@ jobs:
             -- \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DENABLE_TESTS= ON \
-            -DINSTALL_TESTS= ON \
+            -DENABLE_TESTS=ON \
+            -DINSTALL_TESTS=ON \
             -DPYTEST_NUMPROCS=8 \
             -- \
             -E "${{ steps.setup_env.outputs.excluded_tests }}"
