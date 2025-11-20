@@ -137,19 +137,14 @@ RuntimeTearDown::~RuntimeTearDown() {
 
 // =================================================================================================
 void RuntimeTearDown::RegisterObject(ReferenceCountedObject* obj) {
-  if (obj) {
-    external_.push_back(obj);
-    ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered external object: %p", obj);
-  }
+  external_.push_back(obj);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered external object: %p", obj);
 }
 
 // =================================================================================================
 void RuntimeTearDown::RegisterTearDownCallback(const std::string& msg, TearDownCallback func) {
-  if (func) {
-    tear_down_funcs_.emplace_back(msg, std::move(func));
-    ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered callback: %s",
-            msg.c_str());
-  }
+  tear_down_funcs_.emplace_back(msg, std::move(func));
+  ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered callback: %s", msg.c_str());
 }
 
 // =================================================================================================

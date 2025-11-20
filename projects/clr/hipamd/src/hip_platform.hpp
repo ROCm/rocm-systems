@@ -144,7 +144,6 @@ class PlatformState {
   std::unordered_map<hipModule_t, hip::DynCO*> dynCO_map_;
   hip::StatCO statCO_;  //!< Static Code object var
   bool initialized_{false};
-  std::atomic<bool> runtime_destroyed_{false};
   std::unordered_map<textureReference*, std::pair<hipModule_t, std::string>> texRef_map_;
 
   std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_;  //!< Unique File Desc Map

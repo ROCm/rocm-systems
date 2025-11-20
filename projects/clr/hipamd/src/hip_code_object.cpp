@@ -362,57 +362,59 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
 }
 
 // =================================================================================================
-hipError_t StatCO::removeAllFatBinaries() {
+void StatCO::RemoveAllFatBinaries() {
   amd::ScopedLock lock(sclock_);
 
+  // Clear mapping tables that associate modules with host-side constructs
   module_to_hostModule_.clear();
   module_to_hostFunctions_.clear();
   module_to_hostVars_.clear();
 
+  // Delete all registered variables and clear the container
   for (auto const& [_, var] : vars_) {
     delete var;
   }
   vars_.clear();
 
-  // Cleanup managed vars.
+  // Clean up managed variables - these require special handling for memory on each device
   for (auto& [_, managed_vars] : managedVars_) {
     for (auto& managed_var : managed_vars) {
-      hipError_t err = hipSuccess;
+      // Free device-specific allocations across all devices
       for (auto dev : g_devices) {
         DeviceVar* dvar = nullptr;
-        err = managed_var->getDeviceVarPtr(&dvar, dev->deviceId());
-        if (err == hipSuccess && dvar != nullptr) {
-          // Free also deletes the device ptr.
-          err = ihipFree(dvar->device_ptr());
+        if (managed_var->getDeviceVarPtr(&dvar, dev->deviceId()) == hipSuccess && dvar) {
+          // Free device memory (also deletes the device ptr)
+          [[maybe_unused]] hipError_t err = ihipFree(dvar->device_ptr());
           assert(err == hipSuccess);
         }
       }
-      // Check if it is a managed or host alloc.
+
+      // Free the managed memory allocation itself
+      void** managed_ptr = static_cast<void**>(managed_var->getManagedVarPtr());
       if (managed_var->getAllocFlag()) {
-        err = ihipFree(*(static_cast<void**>(managed_var->getManagedVarPtr())));
+        // Memory was allocated with ihipMallocManaged - use ihipFree
+        [[maybe_unused]] hipError_t err = ihipFree(*managed_ptr);
         assert(err == hipSuccess);
       } else {
-        void** pointer = static_cast<void**>(managed_var->getManagedVarPtr());
-        amd::Os::releaseMemory(*pointer, managed_var->getSize());
+        // Memory was allocated with OS-level allocator - use OS release
+        amd::Os::releaseMemory(*managed_ptr, managed_var->getSize());
       }
       delete managed_var;
     }
-    managed_vars.clear();
   }
   managedVars_.clear();
 
+  // Delete all registered functions and clear the container
   for (auto const& [_, func] : functions_) {
     delete func;
   }
   functions_.clear();
 
-  for (auto& [_, fb_info] : modules_) {
+  // Delete all fat binary info objects and clear the modules container
+  for (auto const& [_, fb_info] : modules_) {
     delete fb_info;
-    fb_info = nullptr;
   }
   modules_.clear();
-
-  return hipSuccess;
 }
 
 hipError_t StatCO::registerStatFunction(const void* hostFunction, Function* func) {
