@@ -697,6 +697,10 @@ void Tester::print(uint64_t size) {
     return;
   }
 
+  if (args.unified_msg_size) {
+    size *= (args.num_wgs * args.wg_size);
+  }
+
   /**
    * Calculate total amount of data transfered
    */

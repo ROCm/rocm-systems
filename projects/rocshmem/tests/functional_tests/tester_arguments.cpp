@@ -47,6 +47,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-a") {
       i++;
       algorithm = atoi(argv[i]);
+    } else if (arg == "-u") {
+      i++;
+      unified_msg_size = atoi(argv[i]);
     } else if (arg == "-z") {
       i++;
       wg_size = atoi(argv[i]);
@@ -86,6 +89,10 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       show_usage(argv[0]);
       exit(-1);
     }
+  }
+
+  if (unified_msg_size) {
+    max_msg_size = max_msg_size / (num_wgs * wg_size);
   }
 
   TestType type = (TestType)algorithm;
