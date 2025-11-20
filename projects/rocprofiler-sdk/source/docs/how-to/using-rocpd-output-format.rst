@@ -300,7 +300,7 @@ rocpd2otf2 - OTF2 export tool
 rocpd2pftrace - Perfetto trace export
 ++++++++++++++++++++++++++++++++++++++
 
-**Purpose:** To convert ``rocpd`` databases to Perfetto protocol buffer format for interactive visualization using the `Perfetto UI <ui.perfetto.dev>`_.
+**Purpose:** To convert ``rocpd`` databases to Perfetto protocol buffer format for interactive visualization using the `Perfetto UI <https://ui.perfetto.dev/>`_.
 
 **Location:** ``/opt/rocm/bin/rocpd2pftrace``
 
