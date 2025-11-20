@@ -381,7 +381,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
 #if defined(__linux__)
       if (!thunkLoader()->IsDXG()) {
         //clear metadata
-        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtResetMetadata(it->second.thunk_bo));
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
         if (status != HSAKMT_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR;
         }

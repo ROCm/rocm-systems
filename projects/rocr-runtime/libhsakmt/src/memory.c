@@ -1049,11 +1049,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
 {
 	CHECK_KFD_OPEN();
-	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
-	if (!drmhandle) {
-    	return HSAKMT_STATUS_ERROR;
+	// Reset metadata for the handle
+    struct amdgpu_bo_metadata zero_metadata = {0};
+    memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
+    int ret = amdgpu_bo_set_metadata((amdgpu_bo_handle)Handle, &zero_metadata);
+	if (ret) {
+		return HSAKMT_STATUS_ERROR;
 	}
-	int ret = amdgpu_bo_free(drmhandle);
+	ret = amdgpu_bo_free((amdgpu_bo_handle)Handle);
 	if (ret) {
 		return HSAKMT_STATUS_ERROR;
 	}
@@ -1096,11 +1099,4 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
   	*fd = (HSAint32)renderFd;
   	*cpu_addr = (HSAuint64)args.out.addr_ptr;
   	return HSAKMT_STATUS_SUCCESS;
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtResetMetadata(HsaMemoryObjectHandle buf_handle) {
-    struct amdgpu_bo_metadata zero_metadata = {0};
-    memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
-    amdgpu_bo_set_metadata((amdgpu_bo_handle)buf_handle, &zero_metadata);
-	return HSAKMT_STATUS_SUCCESS;
 }
