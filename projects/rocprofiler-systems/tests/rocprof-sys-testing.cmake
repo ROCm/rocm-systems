@@ -530,6 +530,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
         REWRITE
         REWRITE_RUN
         BASELINE
+        SYS_RUN
     )
         foreach(_TYPE PASS FAIL SKIP)
             list(APPEND _REGEX_OPTS "${_PREFIX}_${_TYPE}_REGEX")
@@ -548,8 +549,8 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
 
     cmake_parse_arguments(
         TEST
-        "SKIP_BASELINE;SKIP_SAMPLING;SKIP_REWRITE;SKIP_RUNTIME"
-        "NAME;TARGET;MPI;GPU;NUM_PROCS;SAMPLING_TIMEOUT;REWRITE_TIMEOUT;RUNTIME_TIMEOUT;WILL_FAIL;DISABLED"
+        "SKIP_BASELINE;SKIP_SAMPLING;SKIP_REWRITE;SKIP_RUNTIME;SKIP_SYS_RUN"
+        "NAME;TARGET;MPI;GPU;NUM_PROCS;SAMPLING_TIMEOUT;REWRITE_TIMEOUT;RUNTIME_TIMEOUT;SYS_RUN_TIMEOUT;WILL_FAIL;DISABLED"
         "${_KWARGS}"
         ${ARGN}
     )
@@ -561,6 +562,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
         REWRITE
         REWRITE_RUN
         BASELINE
+        SYS_RUN
     )
         if("${${_PREFIX}_FAIL_REGEX}" STREQUAL "")
             set(${_PREFIX}_FAIL_REGEX "(${ROCPROFSYS_ABORT_FAIL_REGEX})")
@@ -599,6 +601,10 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
 
     if(NOT TEST_SAMPLING_TIMEOUT)
         set(TEST_SAMPLING_TIMEOUT 120)
+    endif()
+
+    if(NOT TEST_SYS_RUN_TIMEOUT)
+        set(TEST_SYS_RUN_TIMEOUT 300)
     endif()
 
     if(NOT TEST_DISABLED)
@@ -711,6 +717,16 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
             )
         endif()
 
+        if(NOT TEST_SKIP_SYS_RUN)
+            add_test(
+                NAME ${TEST_NAME}-sys-run
+                COMMAND
+                    ${COMMAND_PREFIX} $<TARGET_FILE:rocprofiler-systems-run> --
+                    $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            )
+        endif()
+
         if(TEST ${TEST_NAME}-binary-rewrite-run)
             set_tests_properties(
                 ${TEST_NAME}-binary-rewrite-run
@@ -725,10 +741,17 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
             binary-rewrite
             binary-rewrite-run
             runtime-instrument
+            sys-run
         )
-            string(REGEX REPLACE "-run(-|/)" "\\1" _prefix "${TEST_NAME}-${_TEST}/")
+            string(
+                REGEX REPLACE
+                "rewrite-run(-|/)"
+                "rewrite\\1"
+                _prefix
+                "${TEST_NAME}-${_TEST}/"
+            )
             set(_labels "${_TEST}")
-            string(REPLACE "-run" "" _labels "${_TEST}")
+            string(REPLACE "rewrite-run" "rewrite" _labels "${_TEST}")
             if(TEST_TARGET)
                 list(APPEND _labels "${TEST_TARGET}")
             endif()
@@ -748,10 +771,12 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                 set(_timeout ${TEST_SAMPLING_TIMEOUT})
             elseif("${_TEST}" MATCHES "runtime-instrument")
                 set(_timeout ${TEST_RUNTIME_TIMEOUT})
+            elseif("${_TEST}" MATCHES "sys-run")
+                set(_timeout ${TEST_SYS_RUN_TIMEOUT})
             endif()
 
             set(_props)
-            if("${_TEST}" MATCHES "run|sampling|baseline")
+            if("${_TEST}" MATCHES "sys-run|sampling|baseline")
                 set(_props ${TEST_PROPERTIES})
                 if(NOT "RUN_SERIAL" IN_LIST _props)
                     list(APPEND _props RUN_SERIAL ON)
@@ -768,11 +793,17 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                 set(_REGEX_VAR BASELINE)
             elseif("${_TEST}" MATCHES "sampling")
                 set(_REGEX_VAR SAMPLING)
+            elseif("${_TEST}" MATCHES "sys-run")
+                set(_REGEX_VAR SYS_RUN)
             else()
                 set(_REGEX_VAR)
             endif()
 
-            if("${_TEST}" MATCHES "binary-rewrite-run|runtime-instrument|sampling")
+            if(
+                "${_TEST}"
+                    MATCHES
+                    "binary-rewrite-run|runtime-instrument|sampling|sys-run"
+            )
                 rocprofiler_systems_patch_sanitizer_environment(_environ)
             endif()
 
