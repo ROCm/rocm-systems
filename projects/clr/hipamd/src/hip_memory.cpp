@@ -460,7 +460,7 @@ bool IsHtoHMemcpyValid(void* dst, const void* src, hipMemcpyKind kind) {
 }
 
 // ================================================================================================
-hipError_t ihipMemcpy_validate_memory(amd::Memory* memObj, size_t sizeBytes) {
+hipError_t ihipMemcpy_validate_memory(amd::Memory* memObj, size_t sizeBytes, size_t offset) {
   // Validate Mem Access in case of VMM Memory
   if (!memObj->ValidateMemAccess(*hip::getCurrentDevice()->devices()[0], false)) {
     return hipErrorUnknown;
@@ -473,19 +473,20 @@ hipError_t ihipMemcpy_validate_memory(amd::Memory* memObj, size_t sizeBytes) {
   }
 
   // Size validation
-  if (sizeBytes > (memObj->getSize() - memObj->getOffset())) {
+  if (sizeBytes > (memObj->getSize() - offset)) {
     return hipErrorInvalidValue;
   }
   return hipSuccess;
 }
 
 // ================================================================================================
-hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, size_t sizeBytes) {
+hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, size_t sizeBytes,
+                                size_t dstOffset, size_t srcOffset) {
   hipError_t status;
 
-  status = ihipMemcpy_validate_memory(srcMemory, sizeBytes);
+  status = ihipMemcpy_validate_memory(srcMemory, sizeBytes, srcOffset);
   if (status != hipSuccess) return status;
-  status = ihipMemcpy_validate_memory(dstMemory, sizeBytes);
+  status = ihipMemcpy_validate_memory(dstMemory, sizeBytes, dstOffset);
   if (status != hipSuccess) return status;
 
   return hipSuccess;
@@ -560,7 +561,7 @@ class MemcpyCommandHelper {
 // ================================================================================================
 hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, const void* srcMemory,
                              size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
-                             bool isAsync) {
+                             size_t dstOffset, bool isAsync) {
   MemcpyCommandHelper helper(stream, isAsync);
 
   if (&stream.device() != dstMemory->GetDeviceById() &&
@@ -569,14 +570,14 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, con
   }
   command = new amd::WriteMemoryCommand(
       *helper.pStream(), CL_COMMAND_WRITE_BUFFER, helper.waitList(), *dstMemory->asBuffer(),
-      dstMemory->getOffset(), sizeBytes, srcMemory, 0, 0, helper.copyMetadata());
+      dstOffset, sizeBytes, srcMemory, 0, 0, helper.copyMetadata());
   return MemcpyCommandHelper::checkCommand(command);
 }
 
 // ================================================================================================
 hipError_t ihipMemcpyCommand(amd::Command*& command, void* dstMemory, amd::Memory* srcMemory,
                              size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
-                             bool isAsync) {
+                             size_t srcOffset, bool isAsync) {
   MemcpyCommandHelper helper(stream, isAsync);
 
   if (helper.queueDevice() != srcMemory->GetDeviceById() &&
@@ -584,7 +585,7 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, void* dstMemory, amd::Memor
     helper.switchStreamAndWait(stream, srcMemory->GetDeviceById()->context());
   }
   command = new amd::ReadMemoryCommand(*helper.pStream(), CL_COMMAND_READ_BUFFER, helper.waitList(),
-                                       *srcMemory->asBuffer(), srcMemory->getOffset(), sizeBytes,
+                                       *srcMemory->asBuffer(), srcOffset, sizeBytes,
                                        dstMemory, 0, 0, helper.copyMetadata());
   return MemcpyCommandHelper::checkCommand(command);
 }
@@ -592,7 +593,7 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, void* dstMemory, amd::Memor
 // ================================================================================================
 hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd::Memory* srcMemory,
                              size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
-                             bool isAsync) {
+                             size_t dstOffset, size_t srcOffset, bool isAsync) {
   MemcpyCommandHelper helper(stream, isAsync);
 
   hip::MemcpyType type = ihipGetMemcpyType(srcMemory, dstMemory, kind);
@@ -600,7 +601,7 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
     case hipCopyBufferP2P:
       command = new amd::CopyMemoryP2PCommand(
           stream, CL_COMMAND_COPY_BUFFER, helper.waitList(), *srcMemory->asBuffer(),
-          *dstMemory->asBuffer(), srcMemory->getOffset(), dstMemory->getOffset(), sizeBytes);
+          *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes);
       {
         hipError_t status = MemcpyCommandHelper::checkCommand(command);
         if (status != hipSuccess) {
@@ -635,7 +636,7 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
       }
       command = new amd::CopyMemoryCommand(
           *helper.pStream(), CL_COMMAND_COPY_BUFFER, helper.waitList(), *srcMemory->asBuffer(),
-          *dstMemory->asBuffer(), srcMemory->getOffset(), dstMemory->getOffset(), sizeBytes,
+          *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes,
           helper.copyMetadata());
       break;
     case hipHostToHost:
@@ -695,26 +696,26 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
     // wait at top level except for MT path
     isHostAsync &= AMD_DIRECT_DISPATCH ? true : false;
     if (dstDeviceMemory != nullptr) {
-      status = ihipMemcpy_validate_memory(dstDeviceMemory, sizeBytes);
+      status = ihipMemcpy_validate_memory(dstDeviceMemory, sizeBytes, dOffset);
       if (status != hipSuccess) {
         return status;
       }
       status =
-          ihipMemcpyCommand(command, dstDeviceMemory, src, sizeBytes, kind, stream, isHostAsync);
+          ihipMemcpyCommand(command, dstDeviceMemory, src, sizeBytes, kind, stream, dOffset, isHostAsync);
     } else {
-      status = ihipMemcpy_validate_memory(srcDeviceMemory, sizeBytes);
+      status = ihipMemcpy_validate_memory(srcDeviceMemory, sizeBytes, sOffset);
       if (status != hipSuccess) {
         return status;
       }
       status =
-          ihipMemcpyCommand(command, dst, srcDeviceMemory, sizeBytes, kind, stream, isHostAsync);
+          ihipMemcpyCommand(command, dst, srcDeviceMemory, sizeBytes, kind, stream, sOffset, isHostAsync);
     }
   } else {
     // Both are AMD memory
     hipMemoryType srcMemoryType = getMemoryType(srcDeviceMemory);
     hipMemoryType dstMemoryType = getMemoryType(dstDeviceMemory);
 
-    status = ihipMemcpy_validate(dstDeviceMemory, srcDeviceMemory, sizeBytes);
+    status = ihipMemcpy_validate(dstDeviceMemory, srcDeviceMemory, sizeBytes, dOffset, sOffset);
     if (status != hipSuccess) {
       return status;
     }
@@ -732,7 +733,7 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
       }
     }
     status = ihipMemcpyCommand(command, dstDeviceMemory, srcDeviceMemory, sizeBytes, kind, stream,
-                               isHostAsync);
+                               dOffset, sOffset, isHostAsync);
   }
 
   if (status != hipSuccess) {
