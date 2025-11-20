@@ -144,10 +144,3 @@ jobs:
             ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-systems-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Clean up GHCR Docker Images
-        uses: dataaxiom/ghcr-cleanup-action@v1
-        with:
-          packages: rocprofiler-*
-          expand-packages: true
-          older-than: 7 days
-          dry-run: true

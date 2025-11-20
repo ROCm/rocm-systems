@@ -1,0 +1,26 @@
+name: rocprofiler GHCR Package Cleanup for CI Images
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 6 * * *
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-ghcr-cleanup.yml'
+
+jobs:
+  cleanup-rocprofiler-images:
+    needs: prepare_matrix_ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Clean up GHCR rocprofiler Docker CI Images
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          packages: rocprofiler-*
+          expand-packages: true
+          older-than: 7 days
+          dry-run: true
