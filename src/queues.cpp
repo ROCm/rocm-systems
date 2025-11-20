@@ -30,7 +30,10 @@
 uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id) {
   uint32_t vgpr_size = 0x40000;
 
-  if (id.ui32.Major >= 11) {
+  uint32_t gfxv = HSA_GET_GFX_VERSION_FULL(id.ui32);
+  if( gfxv == 0x1100 || gfxv == 0x1101 ||
+    gfxv == 0x1151 ||
+    gfxv == 0x1200 || gfxv ==0x1201) {
     vgpr_size = 0x60000;
   }
 
