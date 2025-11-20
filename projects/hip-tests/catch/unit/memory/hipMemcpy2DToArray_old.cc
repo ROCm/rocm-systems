@@ -164,7 +164,7 @@ TEST_CASE("Unit_hipMemcpy2DToArray_PinnedMemSameGPU") {
  *         --> A_h host variable
  *         and verifying A_h with E_h[0]+i(i.e., 10+i)
  */
-TEST_CASE("Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu") {
+TEST_CASE("Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -218,7 +218,8 @@ TEST_CASE("Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu") {
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE("Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange") {
+TEST_CASE("Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange",
+          "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;

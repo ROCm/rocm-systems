@@ -119,35 +119,35 @@ set(AMD_GFX1200_SPEC_TEST_SRC
 # Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900  --offload-arch=gfx906"
 # having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
 if (0)
-add_custom_target(kerDevAllocMultCO.code
+  add_custom_target(kerDevAllocMultCO.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocMultCO.code
                   -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-add_custom_target(kerDevWriteMultCO.code
+  add_custom_target(kerDevWriteMultCO.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevWriteMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevWriteMultCO.code
                   -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-add_custom_target(kerDevFreeMultCO.code
+  add_custom_target(kerDevFreeMultCO.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevFreeMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevFreeMultCO.code
                   -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-add_custom_target(kerDevAllocSingleKer.code
+  add_custom_target(kerDevAllocSingleKer.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocSingleKer.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocSingleKer.code
                   -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocSingleKer.code)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevFreeMultCO.code)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevWriteMultCO.code)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocMultCO.code)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocSingleKer.code)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevFreeMultCO.code)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevWriteMultCO.code)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocMultCO.code)
 endif()
 # Accepted archs to compile this cmake file
 set(ACCEPTED_OFFLOAD_ARCHS gfx90a gfx942)
@@ -175,19 +175,19 @@ function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
 endfunction()  # CheckAcceptedArchs
 
 if(HIP_PLATFORM MATCHES "amd")
-    if (DEFINED OFFLOAD_ARCH_STR)
-      CheckAcceptedArchs(${OFFLOAD_ARCH_STR})
-    elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
-      CheckAcceptedArchs($ENV{HCC_AMDGPU_TARGET})
-    else()
-      set(ARCH_CHECK -1)
-      set(ARCH_GFX940 -1)
-      set(ARCH_GFX1200 -1)
-    endif()
-    set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
-    set_source_files_properties(bfloat16.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
-if(${ARCH_CHECK} GREATER_EQUAL 0)
-	set(TEST_SRC ${TEST_SRC} ${AMD_ARCH_SPEC_TEST_SRC})
+  if (DEFINED OFFLOAD_ARCH_STR)
+    CheckAcceptedArchs(${OFFLOAD_ARCH_STR})
+  elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
+    CheckAcceptedArchs($ENV{HCC_AMDGPU_TARGET})
+  else()
+    set(ARCH_CHECK -1)
+    set(ARCH_GFX940 -1)
+    set(ARCH_GFX1200 -1)
+  endif()
+  set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
+  set_source_files_properties(bfloat16.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
+  if(${ARCH_CHECK} GREATER_EQUAL 0)
+    set(TEST_SRC ${TEST_SRC} ${AMD_ARCH_SPEC_TEST_SRC})
     set_source_files_properties(AtomicAdd_Coherent_withunsafeflag.cc PROPERTIES COMPILE_OPTIONS "-munsafe-fp-atomics")
     set_source_files_properties(AtomicAdd_NonCoherent_withunsafeflag.cc PROPERTIES COMPILE_OPTIONS "-munsafe-fp-atomics")
     set_source_files_properties(AtomicAdd_Coherent_withnoUnsafeflag.cc PROPERTIES COMPILE_OPTIONS "-mno-unsafe-fp-atomics")
@@ -201,23 +201,23 @@ if(${ARCH_CHECK} GREATER_EQUAL 0)
     set_property(SOURCE ${AtomicAdd_files} PROPERTY COMPILE_FLAGS --save-temps)
     file(GLOB unsafeAtomicAdd_files *unsafeAtomicAdd_*_*.cc)
     set_property(SOURCE ${unsafeAtomicAdd_files} PROPERTY COMPILE_FLAGS --save-temps)
-endif()
-if(${ARCH_GFX940} GREATER_EQUAL 0)
-  set(TEST_SRC ${TEST_SRC} ${AMD_GFX940_SPEC_TEST_SRC})
-endif()
-if(${ARCH_GFX1200} GREATER_EQUAL 0)
-  set(TEST_SRC ${TEST_SRC} ${AMD_GFX1200_SPEC_TEST_SRC})
-endif()
-    hip_add_exe_to_target(NAME UnitDeviceTests
+  endif()
+  if(${ARCH_GFX940} GREATER_EQUAL 0)
+    set(TEST_SRC ${TEST_SRC} ${AMD_GFX940_SPEC_TEST_SRC})
+  endif()
+  if(${ARCH_GFX1200} GREATER_EQUAL 0)
+    set(TEST_SRC ${TEST_SRC} ${AMD_GFX1200_SPEC_TEST_SRC})
+  endif()
+  hip_add_exe_to_target(NAME UnitDeviceTests
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS hiprtc::hiprtc)
 elseif(HIP_PLATFORM MATCHES "nvidia")
-    hip_add_exe_to_target(NAME UnitDeviceTests
+  hip_add_exe_to_target(NAME UnitDeviceTests
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS --Wno-deprecated-declarations)
-set_target_properties(UnitDeviceTests PROPERTIES LINKER_LANGUAGE CUDA)
+  set_target_properties(UnitDeviceTests PROPERTIES LINKER_LANGUAGE CUDA)
   target_link_libraries(UnitDeviceTests cuda)
 endif()
 

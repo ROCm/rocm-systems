@@ -29,9 +29,9 @@ if(HIP_PLATFORM MATCHES "amd")
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
-    set_source_files_properties(printfFlagsNonHost.cc PROPERTIES COMPILE_OPTIONS "-mprintf-kind=buffered")
-    set_source_files_properties(printfSpecifiersNonHost.cc PROPERTIES COMPILE_OPTIONS "-mprintf-kind=buffered")
-    set_source_files_properties(printfNonHost.cc PROPERTIES COMPILE_OPTIONS "-mprintf-kind=buffered")
+  set_source_files_properties(printfFlagsNonHost.cc PROPERTIES COMPILE_OPTIONS "-mprintf-kind=buffered")
+  set_source_files_properties(printfSpecifiersNonHost.cc PROPERTIES COMPILE_OPTIONS "-mprintf-kind=buffered")
+  set_source_files_properties(printfNonHost.cc PROPERTIES COMPILE_OPTIONS "-mprintf-kind=buffered")
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -50,16 +50,16 @@ elseif (HIP_PLATFORM MATCHES "nvidia")
 endif()
 
 if(UNIX)
-file(GLOB NEGATIVE_TEST_SRC
+  file(GLOB NEGATIVE_TEST_SRC
       printf_negative_kernels.cc)
 
-file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
+  file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
 
-#add_test(NAME Unit_Printf_Negative
-#         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
-#         ./src ${HIP_PLATFORM} ${HIP_PATH}
-#         printf_negative_kernels.cc 11)
+  #add_test(NAME Unit_Printf_Negative
+  #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
+  #         ./src ${HIP_PLATFORM} ${HIP_PATH}
+  #         printf_negative_kernels.cc 11)
 endif()
 
 # Standalone exes
@@ -85,15 +85,15 @@ target_link_libraries(printfSpecifiers_exe hip::host hip::device)
 target_link_libraries(printfFlagsNonHost_exe hip::host hip::device)
 target_link_libraries(printfSpecifiersNonHost_exe hip::host hip::device)
 if (HIP_PLATFORM MATCHES "nvidia")
-set_target_properties(printfFlags_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  set_target_properties(printfFlags_exe PROPERTIES LINKER_LANGUAGE CUDA)
   target_link_libraries(printfFlags_exe cuda)
-set_target_properties(printfLength_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  set_target_properties(printfLength_exe PROPERTIES LINKER_LANGUAGE CUDA)
   target_link_libraries(printfLength_exe cuda)
-set_target_properties(printfSpecifiers_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  set_target_properties(printfSpecifiers_exe PROPERTIES LINKER_LANGUAGE CUDA)
   target_link_libraries(printfSpecifiers_exe cuda)
-set_target_properties(printfFlagsNonHost_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  set_target_properties(printfFlagsNonHost_exe PROPERTIES LINKER_LANGUAGE CUDA)
   target_link_libraries(printfFlagsNonHost_exe cuda)
-set_target_properties(printfSpecifiersNonHost_exe PROPERTIES LINKER_LANGUAGE CUDA)
+  set_target_properties(printfSpecifiersNonHost_exe PROPERTIES LINKER_LANGUAGE CUDA)
   target_link_libraries(printfSpecifiersNonHost_exe cuda)
 endif()
 

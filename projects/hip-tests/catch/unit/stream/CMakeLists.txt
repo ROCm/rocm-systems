@@ -29,7 +29,7 @@ set(TEST_SRC
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} hipStreamGetCUMask.cc hipStreamWithCUMask.cc
                hipStreamACb_MultiThread.cc hipStreamWaitEvent.cc
-	       hipStreamGetFlags_spt.cc
+        hipStreamGetFlags_spt.cc
                hipStreamGetPriority_spt.cc
                hipStreamQuery_spt.cc
                hipStreamSynchronize_spt.cc
@@ -44,10 +44,10 @@ else()
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
-        set_source_files_properties(hipStreamLegacy_compiler_options.cc PROPERTIES COMPILE_OPTIONS "-fgpu-default-stream=per-thread")
+  set_source_files_properties(hipStreamLegacy_compiler_options.cc PROPERTIES COMPILE_OPTIONS "-fgpu-default-stream=per-thread")
 endif()
 if(HIP_PLATFORM MATCHES "nvidia")
-        set_source_files_properties(hipStreamLegacy_compiler_options.cc PROPERTIES COMPILE_OPTIONS "--default-stream=per-thread")
+  set_source_files_properties(hipStreamLegacy_compiler_options.cc PROPERTIES COMPILE_OPTIONS "--default-stream=per-thread")
 endif()
 
 hip_add_exe_to_target(

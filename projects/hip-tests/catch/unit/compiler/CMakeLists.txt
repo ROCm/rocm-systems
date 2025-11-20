@@ -7,7 +7,7 @@ hip_add_exe_to_target(NAME CompilerTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 if (HIP_PLATFORM MATCHES "nvidia")
-	set_target_properties(CompilerTest PROPERTIES LINKER_LANGUAGE CUDA)
+  set_target_properties(CompilerTest PROPERTIES LINKER_LANGUAGE CUDA)
   target_link_libraries(CompilerTest cuda)
 endif()
 
@@ -22,7 +22,7 @@ if(HIP_PLATFORM MATCHES "amd")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-  set(OFFLOAD_ARCH_GENERIC_STR 
+  set(OFFLOAD_ARCH_GENERIC_STR
     --offload-arch=gfx9-generic
     --offload-arch=gfx9-4-generic:sramecc+:xnack-
     --offload-arch=gfx9-4-generic:sramecc-:xnack-
@@ -97,17 +97,17 @@ if(HIP_PLATFORM MATCHES "amd")
     add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnly)
     add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnlyCompressed)
   endif()
-if (HIP_PLATFORM MATCHES "nvidia")
-	set_target_properties(hipSquareGenericTarget PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(hipSquareGenericTarget cuda)
-	set_target_properties(hipSquareGenericTargetCompressed PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(hipSquareGenericTargetCompressed cuda)
-endif()
+  if (HIP_PLATFORM MATCHES "nvidia")
+    set_target_properties(hipSquareGenericTarget PROPERTIES LINKER_LANGUAGE CUDA)
+    target_link_libraries(hipSquareGenericTarget cuda)
+    set_target_properties(hipSquareGenericTargetCompressed PROPERTIES LINKER_LANGUAGE CUDA)
+    target_link_libraries(hipSquareGenericTargetCompressed cuda)
+  endif()
 
   # SWDEV-548807 skip building hipSpirvTest
   if(false)
     add_custom_target(hipSpirvTest ALL
-                    COMMAND ${CMAKE_CXX_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
+                    COMMAND ${CMAKE_HIP_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include

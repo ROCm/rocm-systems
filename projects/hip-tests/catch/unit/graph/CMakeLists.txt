@@ -185,23 +185,13 @@ if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
 
-# add_custom_target(add_Kernel.code COMMAND ${CMAKE_CXX_COMPILER}
-#   ${OFFLOAD_ARCH_LIST} ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
-#   -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
-#   -D__HIP_PLATFORM_NVIDIA__
-#   -I${HIP_INCLUDE_DIR}
-#   -I/usr/local/cuda/include/
-#   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-#
-# set_property(GLOBAL APPEND PROPERTY
-#              G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
-#
-# if (HIP_PLATFORM MATCHES "nvidia")
-#   set_target_properties(add_Kernel.code PROPERTIES LINKER_LANGUAGE CUDA)
-#
-#   # target_compile_definitions(add_Kernel.code PRIVATE __HIP_PLATFORM_NVIDIA__)
-#   # target_link_libraries(add_Kernel.code cuda)
-# endif()
+add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER}
+  --cuda-device-only ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+  -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
+  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+set_property(GLOBAL APPEND PROPERTY
+             G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
 
 hip_add_exe_to_target(NAME GraphsTest2
                       TEST_SRC ${TEST_SRC}
@@ -213,12 +203,12 @@ if (HIP_PLATFORM MATCHES "nvidia")
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
-  add_custom_target(hipMatMul COMMAND ${CMAKE_CXX_COMPILER}
-     ${OFFLOAD_ARCH_LIST}
-     ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
+  add_custom_target(hipMatMul COMMAND ${CMAKE_HIP_COMPILER}
+    --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
     -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/graph/hipMatMul.code
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/
-    -I${HIP_INCLUDE_DIR}
+    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   add_dependencies(build_tests hipMatMul)
   set_property(GLOBAL APPEND PROPERTY

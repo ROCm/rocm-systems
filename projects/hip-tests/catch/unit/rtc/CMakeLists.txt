@@ -42,7 +42,7 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_HEADER_FILES ${INSTALL_HEADER_FILE
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/saxpy.h)
 
 if(UNIX)
-   set(AMD_TEST_SRC ${AMD_TEST_SRC}
+  set(AMD_TEST_SRC ${AMD_TEST_SRC}
        RtcFunctions.cpp
        RtcUtility.cpp
        hiprtcComplrOptnTesting.cc)
@@ -53,8 +53,8 @@ if(HIP_PLATFORM MATCHES "nvidia")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS nvrtc)
-                    set_target_properties(RTC PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-                    target_link_libraries(RTC cuda)
+  set_target_properties(RTC PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(RTC cuda)
 elseif(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
   hip_add_exe_to_target(NAME RTC

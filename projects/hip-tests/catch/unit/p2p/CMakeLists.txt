@@ -24,8 +24,8 @@ hip_add_exe_to_target(NAME p2pTests
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 if(HIP_PLATFORM MATCHES "nvidia")
-	set_target_properties(p2pTests PROPERTIES LINKER_LANGUAGE CUDA)
+  set_target_properties(p2pTests PROPERTIES LINKER_LANGUAGE CUDA)
   target_link_libraries(p2pTests cuda)
-  endif()
+endif()
 
 add_dependencies(build_tests hipDeviceGetP2PAttribute_exe)

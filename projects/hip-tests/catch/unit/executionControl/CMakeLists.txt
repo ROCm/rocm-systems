@@ -7,15 +7,15 @@ set(TEST_SRC
 )
 
 if(HIP_PLATFORM MATCHES "amd")
-    set(TEST_SRC ${TEST_SRC}
+  set(TEST_SRC ${TEST_SRC}
         hipExtLaunchKernel.cc
         hipExtLaunchMultiKernelMultiDevice.cc
         launch_api.cc
         hipGetProcAddressLaunchCbExecCtrlApis.cc
     )
 else()
-    # These functions are currently unimplemented on AMD
-    set(TEST_SRC ${TEST_SRC}
+  # These functions are currently unimplemented on AMD
+  set(TEST_SRC ${TEST_SRC}
         hipFuncSetCacheConfig.cc
         hipFuncSetSharedMemConfig.cc
         hipFuncSetAttribute.cc
@@ -26,6 +26,6 @@ hip_add_exe_to_target(NAME ExecutionControlTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 if (HIP_PLATFORM MATCHES "nvidia")
-	set_target_properties(ExecutionControlTest PROPERTIES LINKER_LANGUAGE CUDA)
+  set_target_properties(ExecutionControlTest PROPERTIES LINKER_LANGUAGE CUDA)
   target_link_libraries(ExecutionControlTest cuda)
 endif()

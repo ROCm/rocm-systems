@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
+<<<<<<< HEAD
 if (HIP_PLATFORM MATCHES "nvidia")
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES 75)
@@ -12,6 +13,9 @@ enable_language(${GPGPU_LANGUAGE})
 message(STATUS "USING GPGPU_LANGUAGE ${GPGPU_LANGUAGE}")
 project(hiptests LANGUAGES C CXX ${GPGPU_LANGUAGE})                                         
 
+=======
+project(hiptests LANGUAGES C CXX HIP)                                         
+>>>>>>> b0d0373c081b48173e5c7ae8709f66e38c7045ec
 
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
@@ -26,8 +30,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
-set(CMAKE_SKIP_BUILD_RPATH FALSE)
-set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+set(CMAKE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib")
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 find_package(hip REQUIRED)
@@ -36,21 +39,32 @@ find_package(hiprtc)
 find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
-
 if (HIP_PLATFORM MATCHES "nvidia" )
 set(CMAKE_HIP_LINK_EXECUTABLE
   "<CMAKE_HIP_HOST_LINK_LAUNCHER> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>${__IMPLICIT_LINKS}")
 endif()
-
+# hip root dir is 3 levels down the hip-config.cmake file path
+set(HIP_PATH ${hip_DIR}/../../../)
+if(NOT DEFINED ROCM_PATH)
+    set(ROCM_PATH "/opt/rocm")
+    if(NOT EXISTS "${ROCM_PATH}")
+        set(ROCM_PATH ${HIP_PATH})
+    endif()
+endif()
 if(UNIX)
     find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
     find_program(GCC_EXEC gcc)
     find_program(GXX_EXEC g++)
 else() # Win32
-    find_program(LLVM_RC_EXEC llvm-rc)
+    find_program(LLVM_RC_EXEC NAMES llvm-rc llvm-rc.exe
+                 PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
 endif()
-
+find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
+             PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH}/llvm/bin)
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
+
+# used by clang to find hip
+set(HIP_PATH_OPT "--hip-path=${HIP_PATH}")
 
 if(TEST_CLOCK_CYCLE)
     add_definitions(-DTEST_CLOCK_CYCLE)
@@ -113,7 +127,9 @@ endif()
 find_package(Catch2 3.8.1 QUIET)
 if(Catch2_FOUND)
     message(STATUS "Catch2 v3.8.1 found: ${Catch2_DIR}")
-    set(CATCH_ADD_TESTS_SCRIPT ${Catch2_DIR}/CatchAddTests.cmake) # for packaging
+    # for packaging
+    set(CATCH_ADD_TESTS_SCRIPT ${Catch2_DIR}/CatchAddTests.cmake)
+    file(GLOB CATCH_LIBS "${Catch2_DIR}/../../*Catch2*")
 else()
     # Setup catch2 manually
     include(FetchContent)
@@ -124,7 +140,9 @@ else()
         URL_HASH SHA256=18b3f70ac80fccc340d8c6ff0f339b2ae64944782f8d2fca2bd705cf47cadb79
     )
     FetchContent_MakeAvailable(Catch2)
+    # for packaging
     set(CATCH_ADD_TESTS_SCRIPT ${Catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
+    set(CATCH_LIBS $<TARGET_FILE:Catch2>)
 endif()
 
 include(cmake/hip-tests.cmake)
@@ -153,12 +171,10 @@ endforeach()
 
 if (WIN32)
   configure_file(catchProp_in_rc.in ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc @ONLY)
-  cmake_path(SET LLVM_RC_PATH "${HIP_PATH}/../lc/bin/llvm-rc.exe")
-  cmake_path(SET LLVM_RC_PATH NORMALIZE "${LLVM_RC_PATH}")
 
   # generates the .res files to be used by executables to populate the properties
   # expects LC folder with clang, llvm-rc to be present one level up of HIP
-  execute_process(COMMAND ${LLVM_RC_PATH} ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc
+  execute_process(COMMAND ${LLVM_RC_EXEC} ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc
                   OUTPUT_VARIABLE RC_OUTPUT)
   set(PROP_RC ${CMAKE_CURRENT_BINARY_DIR})
   # When args to linker exceeds max chars.
@@ -169,7 +185,10 @@ if (WIN32)
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
-    add_compile_options(-std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter) # -Werror)
+    if(WIN32)
+        set(win_disable_warnings -Wno-ignored-attributes -Wno-microsoft-cast)
+    endif()
+    add_compile_options(${HIP_PATH_OPT} -std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings}) # -Werror)
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
@@ -249,9 +268,8 @@ if(WIN32)
     set(configToUse "config_amd_windows")
     set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
     set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
-    set(CLANG_CPP "${HIP_PATH}/../lc/bin/clang-cpp.exe")
 
-    set(cmd "${CLANG_CPP} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
+    set(cmd "${CLANG_CPP_EXEC} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
     message(${cmd})
     execute_process(COMMAND cmd.exe /C ${cmd}
     RESULT_VARIABLE json_result)
@@ -261,7 +279,7 @@ else()
     foreach(arch ${hip_gpu_arch_list})
         set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
         set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
-        set(cmd "${ROCM_PATH}/llvm/bin/clang-cpp -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
+        set(cmd "${CLANG_CPP_EXEC} -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
         message(${cmd})
         execute_process(COMMAND bash -c ${cmd}
         RESULT_VARIABLE json_result)
@@ -281,7 +299,6 @@ set(_subdirs ${_autogen} "subdirs(..)\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
 
 set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
-set(CATCH_ADD_TESTS_SCRIPT ${catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
      DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 file(COPY ${CATCH_ADD_TESTS_SCRIPT}
@@ -339,22 +356,6 @@ endif()
 
 # packaging the tests
 add_subdirectory(packaging)
-if(UNIX)
-    add_custom_command(
-        TARGET build_tests
-        POST_BUILD
-        COMMAND rm -rf *.deb *.rpm *.tar.gz
-        COMMAND cpack
-        COMMENT "Generating hip-catch test packages"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-else()
-    add_custom_command(
-        TARGET build_tests
-        POST_BUILD
-        COMMAND cpack
-        COMMENT "Generating hip-catch test packages"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-endif()
 
 # Doxygen documentation
 # check if doxygen is installed

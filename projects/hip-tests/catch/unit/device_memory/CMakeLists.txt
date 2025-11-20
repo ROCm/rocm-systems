@@ -42,26 +42,26 @@ elseif (HIP_PLATFORM MATCHES "nvidia")
                     TEST_SRC ${TEST_SRC}
                     TEST_TARGET_NAME build_tests
                     LINKER_LIBS ${LINKER_LIBS})
-	set_target_properties(DeviceMemoryTest PROPERTIES LINKER_LANGUAGE CUDA)
+  set_target_properties(DeviceMemoryTest PROPERTIES LINKER_LANGUAGE CUDA)
   target_link_libraries(DeviceMemoryTest cuda)
 endif()
 
 if(UNIX)
-file(GLOB NEGATIVE_TEST_SRC
+  file(GLOB NEGATIVE_TEST_SRC
      "memcpy_negative_kernels.cc"
      "memset_negative_kernels.cc"
     )
 
-file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
+  file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
 
-#add_test(NAME Unit_Device_memcpy_Negative
-#         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
-#         ./src ${HIP_PLATFORM} ${HIP_PATH}
-#         memcpy_negative_kernels.cc 4)
-#
-#add_test(NAME Unit_Device_memset_Negative
-#         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
-#         ./src ${HIP_PLATFORM} ${HIP_PATH}
-#         memset_negative_kernels.cc 4)
+  #add_test(NAME Unit_Device_memcpy_Negative
+  #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
+  #         ./src ${HIP_PLATFORM} ${HIP_PATH}
+  #         memcpy_negative_kernels.cc 4)
+  #
+  #add_test(NAME Unit_Device_memset_Negative
+  #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
+  #         ./src ${HIP_PLATFORM} ${HIP_PATH}
+  #         memset_negative_kernels.cc 4)
 endif()

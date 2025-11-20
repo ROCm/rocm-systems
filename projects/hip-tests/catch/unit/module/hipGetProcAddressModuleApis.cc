@@ -328,7 +328,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisLoadData") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
+TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels", "[multigpu]") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;

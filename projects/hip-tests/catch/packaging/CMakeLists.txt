@@ -79,65 +79,79 @@ file(WRITE ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/windows/CTestTestfile
      "${_autogen}\nsubdirs(${CATCH_BUILD_DIR})")
 
 if(NOT WIN32)
-set(INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/hip)
-set(CPACK_GENERATOR "TGZ;DEB;RPM" CACHE STRING "Linux package types for catch tests")
-set(CPACK_BINARY_DEB "ON")
-set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
-set(CPACK_DEBIAN_PACKAGE_PROVIDES "catch")
-set(CPACK_BINARY_RPM "ON")
-set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/opt")
-if (CPACK_PACKAGE_VERSION MATCHES "local" )
-  #If building locally default value will cause build failure
-  #DEBUG SYMBOL pacaking require SOURCE_DIR to be small
-  set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX ${CPACK_INSTALL_PREFIX})
-endif()
+  set(INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/hip)
+  execute_process(COMMAND rpmbuild --version
+                RESULT_VARIABLE rpm_found
+                OUTPUT_VARIABLE rpm_ver)
+  if (rpm_found EQUAL "0" AND NOT rpm_ver STREQUAL "")
+    set(CPACK_GENERATOR "TGZ;DEB;RPM" CACHE STRING "Linux package types for catch tests")
+  else()
+    # skip rpm on Rock since rpm build package not installed
+    set(CPACK_GENERATOR "TGZ;DEB" CACHE STRING "Linux package types for catch tests")
+  endif()
+  set(CPACK_BINARY_DEB "ON")
+  set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+  set(CPACK_DEBIAN_PACKAGE_PROVIDES "catch")
+  set(CPACK_BINARY_RPM "ON")
+  set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+  set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/opt")
+  if (CPACK_PACKAGE_VERSION MATCHES "local" )
+    #If building locally default value will cause build failure
+    #DEBUG SYMBOL pacaking require SOURCE_DIR to be small
+    set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX ${CPACK_INSTALL_PREFIX})
+  endif()
 
-if (DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-  set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-else()
-  set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
-endif()
+  if (DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+    set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+  else()
+    set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
+  endif()
 
-if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
-  set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
-else()
-  set(CPACK_RPM_PACKAGE_RELEASE "local")
-endif()
+  if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
+    set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
+  else()
+    set(CPACK_RPM_PACKAGE_RELEASE "local")
+  endif()
 
-execute_process( COMMAND rpm --eval %{?dist}
+  execute_process( COMMAND rpm --eval %{?dist}
                  RESULT_VARIABLE PROC_RESULT
                  OUTPUT_VARIABLE EVAL_RESULT
                  OUTPUT_STRIP_TRAILING_WHITESPACE )
-# Add os distribution tag to rpm package name . For deb package its set from build env
-if ( PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "" )
-  string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
-endif()
+  # Add os distribution tag to rpm package name . For deb package its set from build env
+  if ( PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "" )
+    string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
+  endif()
 
-set(CPACK_SOURCE_GENERATOR "TGZ")
-# Install license file
+  set(CPACK_SOURCE_GENERATOR "TGZ")
+  # Install license file
 
-set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/../LICENSE.md" )
-install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${INSTALL_DIR})
-set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+  set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/../LICENSE.md" )
+  install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${INSTALL_DIR})
+  set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 else()
-# windows packaging
-set(INSTALL_DIR .)
-set(CPACK_INSTALL_PREFIX "")
-set(CPACK_SYSTEM_NAME "")
-set(CPACK_GENERATOR "ZIP" CACHE STRING "Windows package types for catch tests")
-set(CPACK_TEST_ZIP "ON")
-set(CPACK_ZIP_TEST_PACKAGE_NAME "catch")
-set(CPACK_PKG_DIRS
+  # windows packaging
+  set(INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
+  set(CPACK_INSTALL_PREFIX "")
+  set(CPACK_SYSTEM_NAME "")
+  set(CPACK_GENERATOR "ZIP" CACHE STRING "Windows package types for catch tests")
+  set(CPACK_TEST_ZIP "ON")
+  set(CPACK_ZIP_TEST_PACKAGE_NAME "catch")
+  set(CPACK_PKG_DIRS
     ${CMAKE_BINARY_DIR}/_CPack_Packages/${CPACK_GENERATOR}/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME})
-set(INSTALL_DIR ${CPACK_PKG_DIRS})
+  #set(INSTALL_DIR ${CPACK_PKG_DIRS})
 endif()
 
 set(INSTALL_DIR_TESTS ${INSTALL_DIR}/${CATCH_BUILD_DIR})
 set(INSTALL_DIR_SCRIPT ${INSTALL_DIR}/${CATCH_BUILD_DIR}/script)
 set(INSTALL_DIR_SRC ${INSTALL_DIR}/${CATCH_BUILD_DIR}/src)
 set(INSTALL_DIR_HEADERS ${INSTALL_DIR}/${CATCH_BUILD_DIR}/headers)
+
+# install catch library
+foreach(CATCH_LIB ${CATCH_LIBS})
+  install(FILES ${CATCH_LIB} DESTINATION ${INSTALL_DIR_TESTS})
+endforeach()
+
 # install catch scripts
 foreach(CATCH_SCRIPT_FILE ${INSTALL_SCRIPT_FILES})
   install(FILES ${CATCH_SCRIPT_FILE} DESTINATION ${INSTALL_DIR_SCRIPT})
@@ -179,10 +193,13 @@ install(DIRECTORY
         DESTINATION ${INSTALL_DIR_TESTS})
 # workaround to make the built test binaries portable
 # CPACK_GENERATOR executes this packaging/CMakeLists.txt multiple times
-# there is no way to check which generator is being used. 
+# there is no way to check which generator is being used.
 # So had to be written in a config file for each generator to replace and execute
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/catch_package.cmake.in
                ${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake @ONLY)
+# called during cpack
 set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake")
+# called during install and cpack. But skipped in cpack step
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake")
 
 include(CPack)

@@ -213,7 +213,7 @@ storage_parser::consume_storage()
                            _amd_smi_sample.gfx_activity, _amd_smi_sample.umc_activity,
                            _amd_smi_sample.mm_activity, _amd_smi_sample.power,
                            _amd_smi_sample.temperature, _amd_smi_sample.mem_usage,
-                           _amd_smi_sample.xcp_activity);
+                           _amd_smi_sample.gpu_activity);
                 invoke_callbacks(header.type, _amd_smi_sample);
                 break;
             }

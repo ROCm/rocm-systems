@@ -19,7 +19,7 @@
 # THE SOFTWARE.
 
 if(CMAKE_BUILD_TYPE MATCHES "^Debug$")
-    add_definitions(-DHT_LOG_ENABLE)
+  add_definitions(-DHT_LOG_ENABLE)
 endif()
 
 set(MAIN_SRC
