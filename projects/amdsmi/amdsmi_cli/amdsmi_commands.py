@@ -7740,6 +7740,14 @@ class AMDSMICommands():
                 gfx_util = "N/A"
                 current_power = "N/A"
                 temperature = "N/A"
+
+            # If power is not available from GPU metrics, try power info API as fallback
+            if current_power == "N/A":
+                try:
+                    power_info = amdsmi_interface.amdsmi_get_power_info(processor)
+                    current_power = power_info['socket_power']
+                except amdsmi_exception.AmdSmiLibraryException:
+                    current_power = "N/A"
             gpu_info_dict.update({"mem_util": mem_util})
             gpu_info_dict.update({"gfx_util": gfx_util})
             gpu_info_dict.update({"temp": temperature})
@@ -7751,7 +7759,11 @@ class AMDSMICommands():
                 socket_power_limit = self.helpers.convert_SI_unit(power_cap_info['power_cap'], AMDSMIHelpers.SI_Unit.MICRO)
                 power_usage = {"current_power": current_power, "power_limit": socket_power_limit}
             except amdsmi_exception.AmdSmiLibraryException as e:
-                power_usage = "N/A"
+                # If power cap info is not available, still use current power if available
+                if current_power != "N/A":
+                    power_usage = {"current_power": current_power, "power_limit": 0}
+                else:
+                    power_usage = "N/A"
             gpu_info_dict.update({"power_usage": power_usage})
 
             # memory usage - Use APU-aware memory selection
