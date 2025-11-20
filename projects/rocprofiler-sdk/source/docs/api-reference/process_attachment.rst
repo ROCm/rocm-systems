@@ -79,7 +79,7 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines an attach and detach f
 - **attach(uint32_t pid)**: Main entry point for starting attachment to a process
    - Takes the target process ID as parameter
    - Initiates ptrace-based attachment sequence
-   - Custom tool libraries can be specified in a colon delimited list with the environment variable ROCP_TOOL_LIBRARIES
+   - Custom tool libraries can be specified in a colon delimited list with the environment variable ROCPROF_ATTACH_TOOL_LIBRARY
 
 - **detach(uint32_t pid)**: Entry point for detaching from the target process
    - Takes the target process ID as a parameter

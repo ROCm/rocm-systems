@@ -195,7 +195,7 @@ bool
 find_symbol(int target_pid, void*& addr, const std::string& library, const std::string& symbol)
 {
     auto searchname = std::stringstream{};
-    searchname << library << "::" << symbol;
+    searchname << target_pid << "::" << library << "::" << symbol;
     if(auto itr = m_target_symbol_addrs.find(searchname.str()); itr != m_target_symbol_addrs.end())
     {
         ROCP_TRACE << "[rocprofiler-sdk-rocattach] Found symbol for " << searchname.str() << " at "

@@ -117,7 +117,7 @@ def attach(
     if attach_tool_library is None:
         raise RuntimeError("rocprof-attach called with no tool libraries specified")
 
-    tool_libraries = attach_tool_library.split(":")
+    tool_libraries_tokens = attach_tool_library.split(":")
     for lib in tool_libraries_tokens:
         if not os.path.exists(lib):
             raise RuntimeError(f"rocprof-attach could not find tool library {lib}")
@@ -174,7 +174,7 @@ def attach(
     else:
         print(f"Attaching for {attach_duration_msec} msec...\n")
         sys.stdout.flush()
-        time.sleep(int(duration) / 1000)
+        time.sleep(int(attach_duration_msec) / 1000)
 
     detach()
 
