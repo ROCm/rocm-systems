@@ -24,17 +24,18 @@
 
 #include "common/defines.h"
 
+#include "common/join.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <timemory/utility/filepath.hpp>
 #include <type_traits>
 #include <unistd.h>
+#include <unordered_set>
 
 #if !defined(ROCPROFSYS_ENVIRON_LOG_NAME)
 #    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
@@ -83,6 +84,7 @@ inline namespace common
 {
 namespace
 {
+
 inline std::string
 get_env_impl(std::string_view env_id, std::string_view _default)
 {
@@ -179,6 +181,40 @@ struct ROCPROFSYS_INTERNAL_API env_config
         return setenv(env_name.c_str(), env_value.c_str(), override);
     }
 };
+
+inline void
+remove_env(std::vector<char*>& _environ, std::string_view _env_var,
+           const std::unordered_set<std::string>& _original_envs)
+{
+    auto key = join("", _env_var, "=");
+
+    auto match = [&key](auto itr) -> bool {
+        return itr && std::string_view{ itr }.find(key) == 0;
+    };
+
+    // Free memory for matching entries
+    for(auto& itr : _environ)
+    {
+        if(match(itr))
+        {
+            free(itr);
+            itr = nullptr;
+        }
+    }
+
+    // Remove null entries
+    _environ.erase(std::remove_if(_environ.begin(), _environ.end(), match),
+                   _environ.end());
+
+    // Restore from original_envs if previously existed
+    for(const auto& orig : _original_envs)
+    {
+        if(std::string_view{ orig.data(), orig.size() }.find(key) == 0)
+        {
+            _environ.emplace_back(strdup(orig.c_str()));
+        }
+    }
+}
 
 inline std::string
 discover_llvm_libdir_for_ompt(bool verbose = false)
