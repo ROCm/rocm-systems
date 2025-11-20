@@ -85,15 +85,9 @@ TEST_CASE("Unit_hipTexRefSetAddress_Negative") {
   HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
   HIP_CHECK(hipMalloc(&tex_buffer, sizeof(float)));
 
-#if HT_AMD
-  HIP_CHECK_ERROR(
-      hipTexRefSetAddress(&offset, nullptr, reinterpret_cast<hipDeviceptr_t>(tex_buffer), tex_size),
-      hipErrorInvalidValue);
-#else
   HIP_CHECK_ERROR(
       hipTexRefSetAddress(&offset, nullptr, reinterpret_cast<hipDeviceptr_t>(tex_buffer), tex_size),
       hipErrorInvalidResourceHandle);
-#endif
 
   HIP_CHECK(hipModuleUnload(module));
   HIP_CHECK(hipFree(tex_buffer));

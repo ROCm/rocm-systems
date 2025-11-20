@@ -1057,7 +1057,7 @@ hipError_t hipTexRefSetAddress(size_t* ByteOffset, textureReference* texRef, hip
   HIP_INIT_API(hipTexRefSetAddress, ByteOffset, texRef, dptr, bytes);
 
   if (texRef == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidResourceHandle);
   }
 
   hipDeviceptr_t refDevPtr = nullptr;
