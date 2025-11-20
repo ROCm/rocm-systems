@@ -217,11 +217,10 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
         if(ENABLE_ASAN_PACKAGING)
           string( FIND ${DEB_OVERRIDES_INSTALL_FILENM} "asan" OUT_VAR2)
           if(OUT_VAR2 EQUAL -1)
-            set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_OVERRIDES_INSTALL_FILENM}-asan" )
+            set( DEB_OVERRIDES_INSTALL_FILENM
+                 "${DEB_OVERRIDES_INSTALL_FILENM}-asan" CACHE STRING "Debian Package Lintian Override File Name" FORCE)
           endif()
         endif()
-        set( DEB_OVERRIDES_INSTALL_FILENM
-             "${DEB_OVERRIDES_INSTALL_FILENM}" CACHE STRING "Debian Package Lintian Override File Name" FORCE)
         # Configure the Lintian overrides file
         configure_file(
           "${CMAKE_SOURCE_DIR}/DEBIAN/overrides.in"
