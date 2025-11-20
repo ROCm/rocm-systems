@@ -134,5 +134,15 @@ bool GetInfo(mesa_glinterop_device_info& info, MESA_INTEROP_KIND Kind, const Dis
 bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_INTEROP_KIND Kind,
             const DisplayHandle display, const ContextHandle context);
 }  // namespace MesaInterop
+
+typedef bool (*PFNGLASSOCIATEFUNC)(Device* device, uint flags, void* gfxContext, void* glDevice);
+typedef bool (*PFNGLDISSOCIATEFUNC)(Device* device, void* gfxContext, void* glDevice);
+
+typedef struct {
+  PFNGLASSOCIATEFUNC glAssociate;
+  PFNGLDISSOCIATEFUNC glDissociate;
+} glinterop_funcs_t;
+
+extern glinterop_funcs_t gGlInteropFuncs;
 }  // namespace amd::roc
 
