@@ -953,23 +953,23 @@ __FP8_HOST_STATIC__ __hip_fp8x2_storage_t __hip_cvt_halfraw2_to_fp8x2(
 namespace hip_detail {
 
 constexpr __hip_fp8_storage_t e8m0_NaN = 0xFFU;
-constexpr std::uint16_t bf16_NaN = 0x7FFFU;
+constexpr __hip_internal::uint16_t bf16_NaN = 0x7FFFU;
 
-constexpr std::uint16_t bf16_sig_mask = 0x007FU;
-constexpr std::uint32_t float_sig_mask = 0x007FFFFFU;
-constexpr std::uint64_t double_sig_mask = 0x000FFFFFFFFFFFFFU;
+constexpr __hip_internal::uint16_t bf16_sig_mask = 0x007FU;
+constexpr __hip_internal::uint32_t float_sig_mask = 0x007FFFFFU;
+constexpr __hip_internal::uint64_t double_sig_mask = 0x000FFFFFFFFFFFFFU;
 
-constexpr std::uint16_t bf16_max_exp = 0x7F80U;
-constexpr std::uint32_t float_max_exp = 0x7F800000U;
-constexpr std::uint64_t double_max_exp = 0x7FF0000000000000U;
+constexpr __hip_internal::uint16_t bf16_max_exp = 0x7F80U;
+constexpr __hip_internal::uint32_t float_max_exp = 0x7F800000U;
+constexpr __hip_internal::uint64_t double_max_exp = 0x7FF0000000000000U;
 
-constexpr std::uint16_t bf16_sign_mask = 0x8000U;
-constexpr std::uint32_t float_sign_mask = 0x80000000U;
-constexpr std::uint64_t double_sign_mask = 0x8000000000000000U;
+constexpr __hip_internal::uint16_t bf16_sign_mask = 0x8000U;
+constexpr __hip_internal::uint32_t float_sign_mask = 0x80000000U;
+constexpr __hip_internal::uint64_t double_sign_mask = 0x8000000000000000U;
 
-constexpr std::uint16_t bf16_half_sig_bit = 0x0040U;
-constexpr std::uint32_t float_half_sig_bit = 0x00400000U;
-constexpr std::uint64_t double_half_sig_bit = 0x0008000000000000U;
+constexpr __hip_internal::uint16_t bf16_half_sig_bit = 0x0040U;
+constexpr __hip_internal::uint32_t float_half_sig_bit = 0x00400000U;
+constexpr __hip_internal::uint64_t double_half_sig_bit = 0x0008000000000000U;
 
 }  // namespace hip_detail
 
@@ -977,7 +977,7 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_double_to_e8m0(
     const double val, const __hip_saturation_t saturate, const enum hipRoundMode rounding) {
   union {
     double as_double;
-    std::uint64_t as_int;
+    __hip_internal::uint64_t as_int;
   } u{val};
 
   // Shifts out mantisa bits from double dtype
@@ -1012,7 +1012,7 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_float_to_e8m0(
     const float val, const __hip_saturation_t saturate, const enum hipRoundMode rounding) {
   union {
     float as_float;
-    std::uint32_t as_int;
+    __hip_internal::uint32_t as_int;
   } u{val};
 
   // Shifts out mantisa bits from float dtype

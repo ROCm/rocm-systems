@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -52,7 +52,7 @@ void device_cvt_bfloat16raw_to_e8m0(const std::vector<__hip_bfloat16>& in,
 
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(__hip_bfloat16) * in.size(), hipMemcpyHostToDevice));
 
-  bfloat16raw_to_e8m0<<<1024, 1024>>>(in_d, out_d, in.size(), sat, round);
+  bfloat16raw_to_e8m0<<<1, 1024>>>(in_d, out_d, in.size(), sat, round);
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
@@ -105,6 +105,7 @@ TEST_CASE("Unit__hip_cvt_bfloat16raw_to_e8m0") {
   }
 
   for (size_t i = 0; i < in.size(); ++i) {
+    INFO("out:" << out[i] << " exp:" << exp[i] << " for index:" << i);
     REQUIRE(out[i] == exp[i]);
   }
 }
@@ -137,7 +138,7 @@ void device_cvt_float_to_e8m0(const std::vector<float>& in, std::vector<unsigned
 
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice));
 
-  float_to_e8m0_kernel<<<1024, 1024>>>(in_d, out_d, in.size(), sat, round);
+  float_to_e8m0_kernel<<<1, 1024>>>(in_d, out_d, in.size(), sat, round);
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
@@ -190,6 +191,7 @@ TEST_CASE("Unit__hip_cvt_float_to_e8m0") {
   }
 
   for (size_t i = 0; i < in.size(); ++i) {
+    INFO("out:" << out[i] << " exp:" << exp[i] << " for index:" << i);
     REQUIRE(out[i] == exp[i]);
   }
 }
@@ -222,7 +224,7 @@ void device_cvt_double_to_e8m0(const std::vector<double>& in, std::vector<unsign
 
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(double) * in.size(), hipMemcpyHostToDevice));
 
-  double_to_e8m0_kernel<<<1024, 1024>>>(in_d, out_d, in.size(), sat, round);
+  double_to_e8m0_kernel<<<1, 1024>>>(in_d, out_d, in.size(), sat, round);
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
@@ -278,6 +280,7 @@ TEST_CASE("Unit__hip_cvt_double_to_e8m0") {
   }
 
   for (size_t i = 0; i < in.size(); ++i) {
+    INFO("out:" << out[i] << " exp:" << exp[i] << " for index:" << i);
     REQUIRE(out[i] == exp[i]);
   }
 }
@@ -309,7 +312,7 @@ void device_cvt_e8m0_to_bf16raw(const std::vector<unsigned char>& in, std::vecto
 
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(unsigned char) * in.size(), hipMemcpyHostToDevice));
 
-  e8m0_to_bf16raw_kernel<<<1024, 1024>>>(in_d, out_d, in.size());
+  e8m0_to_bf16raw_kernel<<<1, 1024>>>(in_d, out_d, in.size());
 
   HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
 }
@@ -330,6 +333,7 @@ TEST_CASE("Unit__hip_cvt_e8m0_to_bf16raw") {
   }
 
   for (size_t i = 0; i < in.size(); ++i) {
+    INFO("out:" << out[i] << " exp:" << exp[i] << " for index:" << i);
     if (std::isnan(exp[i])) {
       REQUIRE(std::isnan(out[i]));
     } else {
