@@ -97,7 +97,6 @@ target_sources(
 add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
-# add_subdirectory(rocpd)
 add_subdirectory(trace_cache)
 
 target_include_directories(
@@ -115,6 +114,12 @@ target_link_libraries(
     rocprofiler-systems-core-library
     PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library
 )
+
+target_link_libraries(
+    rocprofiler-systems-core-library
+    PRIVATE $<BUILD_INTERFACE:rocstorage>
+)
+
 target_link_libraries(
     rocprofiler-systems-core-library
     PRIVATE

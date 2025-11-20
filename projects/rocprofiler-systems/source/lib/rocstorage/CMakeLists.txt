@@ -20,12 +20,28 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.20)
-project(rocstorage-library)
-
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# TODO: Remove block below, this is for local development only
+# cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+# project(rocstorage)
+# set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_subdirectory(source)
+
+get_filename_component(ROCSTORAGE_BASE_DIR ${CMAKE_CURRENT_LIST_DIR} DIRECTORY)
+set(ROCSTORAGE_INCLUDE_DIR ${PROJECT_BINARY_DIR}/include)
+
+foreach(_HEADER ${rocstorage_public_headers})
+    string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/source/" "" _RELATIVE_PATH ${_HEADER})
+    set(_DEST_FILE "${ROCSTORAGE_INCLUDE_DIR}/rocstorage/${_RELATIVE_PATH}")
+    configure_file(${_HEADER} ${_DEST_FILE} COPYONLY)
+endforeach()
+
+target_include_directories(
+    rocstorage
+    PUBLIC
+        $<BUILD_INTERFACE:${ROCSTORAGE_INCLUDE_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_MODULE_PATH})
 
@@ -40,13 +56,13 @@ if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
 
     target_compile_definitions(
         rocstorage
-        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
+        PRIVATE $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
     )
 else()
-    target_include_directories(rocstorage PUBLIC ${CMAKE_BINARY_DIR})
+    target_include_directories(rocstorage PRIVATE ${CMAKE_BINARY_DIR})
 
     target_compile_definitions(
         rocstorage
-        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
+        PRIVATE $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
     )
 endif()

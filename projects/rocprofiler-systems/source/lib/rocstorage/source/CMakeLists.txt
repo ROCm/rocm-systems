@@ -21,8 +21,11 @@
 # SOFTWARE.
 
 set(rocstorage_sources ${CMAKE_CURRENT_LIST_DIR}/data_processor.cpp)
-set(rocstorage_headers ${CMAKE_CURRENT_LIST_DIR}/data_processor.hpp)
+set(rocstorage_public_headers ${CMAKE_CURRENT_LIST_DIR}/data_processor.hpp)
 
-add_library(rocstorage ${rocstorage_sources} ${rocstorage_headers})
+add_library(rocstorage STATIC ${rocstorage_sources})
 add_subdirectory(common)
 add_subdirectory(data_storage)
+
+target_sources(rocstorage PRIVATE ${rocstorage_public_headers})
+set(rocstorage_public_headers ${rocstorage_public_headers} PARENT_SCOPE)

@@ -20,10 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "data_processor.hpp"
-#include "data_storage/database.hpp"
-#include "data_storage/table_insert_query.hpp"
 #include <memory>
+#include <rocstorage/data_processor.hpp>
+#include <rocstorage/data_storage/database.hpp>
+#include <rocstorage/data_storage/table_insert_query.hpp>
 #include <stdexcept>
 
 namespace rocstorage

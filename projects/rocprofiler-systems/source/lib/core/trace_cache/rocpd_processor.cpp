@@ -21,16 +21,18 @@
 // SOFTWARE.
 
 #include "core/trace_cache/rocpd_processor.hpp"
+#include "common/md5sum.hpp"
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
-#include "core/rocpd/data_processor.hpp"
-#include "core/rocpd/data_storage/database.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/thread_info.hpp"
+
+#include <rocstorage/data_processor.hpp>
+#include <rocstorage/data_storage/database.hpp>
 
 #include <cstdint>
 #include <limits>
@@ -641,8 +643,11 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 : processor_t<rocpd_processor_t>()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
-, m_data_processor(std::make_shared<rocpd::data_processor>(
-      std::make_shared<rocpd::data_storage::database>(pid, ppid)))
+, m_data_processor(std::make_shared<rocstorage::data_processor>(
+      std::make_shared<rocstorage::data_storage::database>(
+          rocprofsys::get_database_absolute_path("rocpd", std::to_string(pid)),
+          rocprofsys::common::md5sum{ node_info::get_instance().id, pid, ppid }
+              .hexdigest())))
 {}
 
 void

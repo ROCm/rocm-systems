@@ -20,12 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(common_headers
+list(
+    APPEND rocstorage_public_headers
     ${CMAKE_CURRENT_LIST_DIR}/traits.hpp
     ${CMAKE_CURRENT_LIST_DIR}/directory.hpp
 )
 
-target_sources(rocstorage PUBLIC ${common_headers})
-
-get_filename_component(ROCSTORAGE_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR} DIRECTORY)
-target_include_directories(rocstorage PUBLIC ${ROCSTORAGE_SOURCE_DIR})
+set(rocstorage_public_headers ${rocstorage_public_headers} PARENT_SCOPE)

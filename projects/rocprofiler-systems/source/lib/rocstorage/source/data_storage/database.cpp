@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "database.hpp"
-#include "common/directory.hpp"
+#include <rocstorage/common/directory.hpp>
+#include <rocstorage/data_storage/database.hpp>
 
 #include <iostream>
 #include <regex>
