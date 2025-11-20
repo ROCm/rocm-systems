@@ -3910,6 +3910,12 @@ def amdsmi_get_power_info(processor_handle: processor_handle_t) -> Dict[str, cty
         "socket_power": power_info.socket_power,
         "current_socket_power": power_info.current_socket_power,
         "average_socket_power": power_info.average_socket_power,
+        "npu_power": power_info.npu_power,
+        "apu_power": power_info.apu_power,
+        "gfx_power": power_info.gfx_power,
+        "dGPU_power": power_info.dGPU_power,
+        "all_core_power": power_info.all_core_power,
+        "system_power": power_info.system_power,
         "gfx_voltage": power_info.gfx_voltage,
         "soc_voltage": power_info.soc_voltage,
         "mem_voltage": power_info.mem_voltage,
@@ -6882,7 +6888,6 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
         amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent))
     )
     return gpu_busy_percent.value
-
 
 # Memory Size Management Functions
 # Note: UMA carveout and TTM are kernel UAPI features (sysfs/modprobe.d), not libdrm.

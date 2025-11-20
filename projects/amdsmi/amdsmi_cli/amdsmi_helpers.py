@@ -2789,7 +2789,7 @@ class AMDSMIHelpers:
         if metric_version != "N/A" and num_partition == "N/A":
             # Workaround: Default to 1 for newer metric versions if num_partition is missing
             # (Confirmed with driver team; applies to GPU and partition metrics)
-            if not is_partition_metrics and metric_version >= 1.9:
+            if not is_partition_metrics and metric_version == 1.9:
                 num_partition = 1
             elif is_partition_metrics and metric_version >= 1.1:
                 num_partition = 1

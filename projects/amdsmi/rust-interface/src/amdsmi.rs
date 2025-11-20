@@ -2538,6 +2538,78 @@ pub fn amdsmi_get_gpu_metrics_info(
     Ok(pgpu_metrics)
 }
 
+// External function declaration for partition metrics (not in bindgen yet)
+extern "C" {
+    fn amdsmi_get_gpu_partition_metrics_info(
+        processor_handle: AmdsmiProcessorHandle,
+        pgpu_metrics: *mut AmdsmiGpuMetricsT,
+    ) -> AmdsmiStatusT;
+}
+
+/// Get the GPU partition metrics information of the device with the specified processor handle.
+///
+/// Given a processor handle `processor_handle`, this function returns the GPU partition metrics information
+/// for the specified processor. This provides XCP (Graphics Cluster Partition) specific metrics.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the processor for which the GPU partition metrics information is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiGpuMetricsT>` - Returns `Ok(AmdsmiGpuMetricsT)` containing the [`AmdsmiGpuMetricsT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example processor_handle, assuming the number of processors is greater than zero
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     // Retrieve the GPU partition metrics information
+///     match amdsmi_get_gpu_partition_metrics_info(processor_handle) {
+///         Ok(partition_metrics) => {
+///             println!("Number of partitions: {}", partition_metrics.num_partition);
+///             for (i, xcp_stat) in partition_metrics.xcp_stats.iter().enumerate() {
+///                 if i < partition_metrics.num_partition as usize {
+///                     println!("XCP[{}] metrics: {:?}", i, xcp_stat);
+///                 }
+///             }
+///         },
+///         Err(AmdsmiStatusT::AmdsmiStatusNotSupported) => println!("amdsmi_get_gpu_partition_metrics_info() not supported on this device"),
+///         Err(e) => panic!("Failed to get GPU partition metrics info: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_get_gpu_partition_metrics_info` call fails.
+pub fn amdsmi_get_gpu_partition_metrics_info(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiGpuMetricsT> {
+    let mut pgpu_metrics = MaybeUninit::<AmdsmiGpuMetricsT>::uninit();
+    let status = unsafe { amdsmi_get_gpu_partition_metrics_info(
+        processor_handle,
+        pgpu_metrics.as_mut_ptr()
+    ) };
+
+    if status != AmdsmiStatusT::AmdsmiStatusSuccess {
+        return Err(status);
+    }
+
+    let pgpu_metrics = unsafe { pgpu_metrics.assume_init() };
+    Ok(pgpu_metrics)
+}
+
 /// Get the GPU power management metrics information of the device with the specified processor handle.
 ///
 /// Given a processor handle `processor_handle`, this function returns the GPU power management metrics information

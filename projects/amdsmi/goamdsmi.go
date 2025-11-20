@@ -849,3 +849,158 @@ func GO_ttm_pages_limit_set(pages uint64) int32 {
 func GO_ttm_pages_limit_reset() int32 {
 	return int32(C.goamdsmi_ttm_pages_limit_reset())
 }
+
+// ``GO_gpu_metrics_info_supported`` checks if GPU metrics are supported for the specified GPU index.
+//
+// Input parameter: ``int``, GPU index.
+//
+// Output: ``bool``, returns true if GPU metrics are supported, false otherwise.
+//
+// Example:
+//
+//   import "github.com/ROCm/amdsmi"
+//
+//   if true == goamdsmi.GO_gpu_init() {
+//       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
+//       for i := 0; i < num_gpus; i++ {
+//           if goamdsmi.GO_gpu_metrics_info_supported(i) {
+//               // GPU metrics are supported for this device
+//           }
+//       }
+//   }
+func GO_gpu_metrics_info_supported(i int) bool {
+	return bool(C.goamdsmi_gpu_metrics_info_supported(C.uint32_t(i)))
+}
+
+// ``GO_gpu_metrics_header_info_get`` retrieves GPU metrics header information for the specified GPU index.
+//
+// Input parameter: ``int``, GPU index.
+//
+// Output: ``(uint16, uint8, uint8, bool)``, returns header_size, format_revision, content_revision, and success status.
+//
+// Example:
+//
+//   import "github.com/ROCm/amdsmi"
+//
+//   if true == goamdsmi.GO_gpu_init() {
+//       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
+//       for i := 0; i < num_gpus; i++ {
+//           size, format, content, success := goamdsmi.GO_gpu_metrics_header_info_get(i)
+//           if success {
+//               // Use header information
+//           }
+//       }
+//   }
+func GO_gpu_metrics_header_info_get(i int) (uint16, uint8, uint8, bool) {
+	var header_size C.uint16_t
+	var format_rev C.uint8_t
+	var content_rev C.uint8_t
+	
+	success := bool(C.goamdsmi_gpu_metrics_header_info_get(C.uint32_t(i), &header_size, &format_rev, &content_rev))
+	
+	return uint16(header_size), uint8(format_rev), uint8(content_rev), success
+}
+
+// ``GO_gpu_partition_metrics_info_supported`` checks if GPU partition metrics are supported for the specified GPU index.
+//
+// Input parameter: ``int``, GPU index.
+//
+// Output: ``bool``, returns true if GPU partition metrics are supported, false otherwise.
+//
+// Example:
+//
+//   import "github.com/ROCm/amdsmi"
+//
+//   if true == goamdsmi.GO_gpu_init() {
+//       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
+//       for i := 0; i < num_gpus; i++ {
+//           if goamdsmi.GO_gpu_partition_metrics_info_supported(i) {
+//               // GPU partition metrics are supported for this device
+//           }
+//       }
+//   }
+func GO_gpu_partition_metrics_info_supported(i int) bool {
+	return bool(C.goamdsmi_gpu_partition_metrics_info_supported(C.uint32_t(i)))
+}
+
+// ``GO_gpu_partition_metrics_header_info_get`` retrieves GPU partition metrics header information for the specified GPU index.
+//
+// Input parameter: ``int``, GPU index.
+//
+// Output: ``(uint32, uint16, uint8, uint8, bool)``, returns num_partitions, header_size, format_revision, content_revision, and success status.
+//
+// Example:
+//
+//   import "github.com/ROCm/amdsmi"
+//
+//   if true == goamdsmi.GO_gpu_init() {
+//       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
+//       for i := 0; i < num_gpus; i++ {
+//           partitions, size, format, content, success := goamdsmi.GO_gpu_partition_metrics_header_info_get(i)
+//           if success && partitions > 0 {
+//               // Use partition header information
+//           }
+//       }
+//   }
+func GO_gpu_partition_metrics_header_info_get(i int) (uint32, uint16, uint8, uint8, bool) {
+	var num_partitions C.uint32_t
+	var header_size C.uint16_t
+	var format_rev C.uint8_t
+	var content_rev C.uint8_t
+
+	success := bool(C.goamdsmi_gpu_partition_metrics_header_info_get(C.uint32_t(i), &num_partitions, &header_size, &format_rev, &content_rev))
+
+	return uint32(num_partitions), uint16(header_size), uint8(format_rev), uint8(content_rev), success
+}
+
+// ``GO_gpu_partition_xcp_utilization_get`` retrieves XCP partition utilization data for the specified GPU and partition index.
+//
+// Input parameters: ``int``, GPU index; ``int``, XCP partition index.
+//
+// Output: ``([]uint32, []uint64, bool)``, returns gfx_busy_inst array, gfx_busy_acc array, and success status.
+//
+// Example:
+//
+//   import "github.com/ROCm/amdsmi"
+//
+//   if true == goamdsmi.GO_gpu_init() {
+//       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
+//       for i := 0; i < num_gpus; i++ {
+//           partitions, _, _, _, success := goamdsmi.GO_gpu_partition_metrics_header_info_get(i)
+//           if success && partitions > 0 {
+//               for j := 0; j < int(partitions); j++ {
+//                   inst_util, acc_util, xcp_success := goamdsmi.GO_gpu_partition_xcp_utilization_get(i, j)
+//                   if xcp_success {
+//                       // Use XCP utilization data
+//                   }
+//               }
+//           }
+//       }
+//   }
+func GO_gpu_partition_xcp_utilization_get(gpu_index int, xcp_index int) ([]uint32, []uint64, bool) {
+	const MAX_NUM_XCC = 8  // AMDSMI_MAX_NUM_XCC
+
+	var gfx_busy_inst [MAX_NUM_XCC]C.uint32_t
+	var gfx_busy_acc [MAX_NUM_XCC]C.uint64_t
+
+	success := bool(C.goamdsmi_gpu_partition_xcp_utilization_get(
+		C.uint32_t(gpu_index),
+		C.uint32_t(xcp_index),
+		&gfx_busy_inst[0],
+		&gfx_busy_acc[0]))
+
+	if !success {
+		return nil, nil, false
+	}
+
+	// Convert C arrays to Go slices
+	inst_slice := make([]uint32, MAX_NUM_XCC)
+	acc_slice := make([]uint64, MAX_NUM_XCC)
+
+	for i := 0; i < MAX_NUM_XCC; i++ {
+		inst_slice[i] = uint32(gfx_busy_inst[i])
+		acc_slice[i] = uint64(gfx_busy_acc[i])
+	}
+
+	return inst_slice, acc_slice, true
+}

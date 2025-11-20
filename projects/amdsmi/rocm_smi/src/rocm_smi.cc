@@ -90,7 +90,7 @@ int present_reg_state(const char* fname, rsmi_reg_type_t reg_type, rsmi_name_val
                       uint32_t* kvnum);
 }  // namespace amd::smi
 
-static uint64_t get_multiplier_from_char(char units_char) {
+uint64_t get_multiplier_from_char(char units_char) {
   uint32_t multiplier = 0;
 
   switch (units_char) {

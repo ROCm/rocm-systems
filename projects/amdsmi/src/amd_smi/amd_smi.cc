@@ -5207,6 +5207,12 @@ amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,
   info->mem_voltage = get_std_num_limit<decltype(info->mem_voltage)>();
   info->power_limit = get_std_num_limit<decltype(info->power_limit)>();
   info->ubb_power = get_std_num_limit<decltype(info->ubb_power)>();
+  info->npu_power = get_std_num_limit<decltype(info->npu_power)>();
+  info->apu_power = get_std_num_limit<decltype(info->apu_power)>();
+  info->gfx_power = get_std_num_limit<decltype(info->gfx_power)>();
+  info->dGPU_power = get_std_num_limit<decltype(info->dGPU_power)>();
+  info->all_core_power = get_std_num_limit<decltype(info->all_core_power)>();
+  info->system_power = get_std_num_limit<decltype(info->system_power)>();
 
   amdsmi_gpu_metrics_t metrics = {};
   status = amdsmi_get_gpu_metrics_info(processor_handle, &metrics);
@@ -5221,6 +5227,19 @@ amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,
       info->soc_voltage = metrics.voltage_soc;
     if (metrics.voltage_mem != get_std_num_limit<decltype(metrics.voltage_mem)>())
       info->mem_voltage = metrics.voltage_mem;
+    if (metrics.average_npu_power != get_std_num_limit<decltype(metrics.average_npu_power)>())
+      info->npu_power = metrics.average_npu_power;
+    if (metrics.average_apu_power != get_std_num_limit<decltype(metrics.average_apu_power)>())
+      info->apu_power = metrics.average_apu_power;
+    if (metrics.average_gfx_power != get_std_num_limit<decltype(metrics.average_gfx_power)>())
+      info->gfx_power = metrics.average_gfx_power;
+    if (metrics.average_dgpu_power != get_std_num_limit<decltype(metrics.average_dgpu_power)>())
+      info->dGPU_power = metrics.average_dgpu_power;
+    if (metrics.average_sys_power != get_std_num_limit<decltype(metrics.average_sys_power)>())
+      info->system_power = metrics.average_sys_power;
+    if (metrics.average_all_core_power !=
+        get_std_num_limit<decltype(metrics.average_all_core_power)>())
+      info->all_core_power = metrics.average_all_core_power;
 
     /* store something in socket power */
     if (info->current_socket_power != get_std_num_limit<decltype(info->current_socket_power)>())

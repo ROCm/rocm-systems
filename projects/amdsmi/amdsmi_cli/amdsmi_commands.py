@@ -3199,6 +3199,12 @@ class AMDSMICommands:
             if args.power:
                 power_dict = {
                     "socket_power": "N/A",
+                              'npu_power': "N/A",
+                              'apu_power': 'N/A',
+                              'gfx_power': 'N/A',
+                              'dGPU_power': 'N/A',
+                              'all_core_power': 'N/A',
+                              'system_power': 'N/A',
                     "gfx_voltage": "N/A",
                     "soc_voltage": "N/A",
                     "mem_voltage": "N/A",
@@ -3222,6 +3228,12 @@ class AMDSMICommands:
                             )
 
                     power_dict["socket_power"] = power_info["socket_power"]
+                    power_dict['npu_power'] = power_info['npu_power']
+                    power_dict['apu_power'] = power_info['apu_power']
+                    power_dict['gfx_power'] = power_info['gfx_power']
+                    power_dict['dGPU_power'] = power_info['dGPU_power']
+                    power_dict['all_core_power'] = power_info['all_core_power']
+                    power_dict['system_power'] = power_info['system_power']
                     power_dict["gfx_voltage"] = power_info["gfx_voltage"]
                     power_dict["soc_voltage"] = power_info["soc_voltage"]
                     power_dict["mem_voltage"] = power_info["mem_voltage"]

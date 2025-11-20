@@ -631,3 +631,84 @@ int32_t goamdsmi_ttm_pages_limit_set(uint64_t pages);
  *
  */
 int32_t goamdsmi_ttm_pages_limit_reset(void);
+
+/**
+ *  @brief Go language stub to check if GPU metrics are supported
+ *
+ *  @details This function checks if the GPU metrics API is supported on the given device.
+ *  This should be called before attempting to retrieve GPU metrics.
+ *
+ *  @param[in] dv_ind device index
+ *
+ *  @retval ::bool true if supported, false otherwise
+ *
+ */
+bool goamdsmi_gpu_metrics_info_supported(uint32_t dv_ind);
+
+/**
+ *  @brief Go language stub to get GPU metrics header information
+ *
+ *  @details This function will call amdsmi_get_gpu_metrics_header_info()
+ *  to get the GPU metrics header information for the specified device.
+ *  The header contains structure size, format revision, and content revision.
+ *
+ *  @param[in] dv_ind device index
+ *  @param[out] header_size structure size from header
+ *  @param[out] format_rev format revision from header
+ *  @param[out] content_rev content revision from header
+ *
+ *  @retval ::bool true on success, false on failure
+ *
+ */
+bool goamdsmi_gpu_metrics_header_info_get(uint32_t dv_ind, uint16_t* header_size,
+                                          uint8_t* format_rev, uint8_t* content_rev);
+
+/**
+ *  @brief Go language stub to check if GPU partition metrics are supported
+ *
+ *  @details This function checks if the GPU partition metrics API is supported on the given device.
+ *  This should be called before attempting to retrieve GPU partition metrics.
+ *
+ *  @param[in] dv_ind device index
+ *
+ *  @retval ::bool true if supported, false otherwise
+ *
+ */
+bool goamdsmi_gpu_partition_metrics_info_supported(uint32_t dv_ind);
+
+/**
+ *  @brief Go language stub to get GPU partition metrics header information
+ *
+ *  @details This function will call amdsmi_get_gpu_partition_metrics_info()
+ *  to get the GPU partition metrics header information for the specified device.
+ *
+ *  @param[in] dv_ind device index
+ *  @param[out] num_partitions number of XCP partitions detected
+ *  @param[out] header_size structure size from header
+ *  @param[out] format_rev format revision from header
+ *  @param[out] content_rev content revision from header
+ *
+ *  @retval ::bool true on success, false on failure
+ *
+ */
+bool goamdsmi_gpu_partition_metrics_header_info_get(uint32_t dv_ind, uint32_t* num_partitions,
+                                                    uint16_t* header_size, uint8_t* format_rev,
+                                                    uint8_t* content_rev);
+
+/**
+ *  @brief Go language stub to get XCP partition utilization data
+ *
+ *  @details This function retrieves XCP partition specific utilization metrics
+ *  for a given device and partition index.
+ *
+ *  @param[in] dv_ind device index
+ *  @param[in] xcp_index XCP partition index (0 to num_partitions-1)
+ *  @param[out] gfx_busy_inst array of instantaneous GFX busy percentages (size AMDSMI_MAX_NUM_XCC)
+ *  @param[out] gfx_busy_acc array of accumulated GFX busy percentages (size AMDSMI_MAX_NUM_XCC)
+ *
+ *  @retval ::bool true on success, false on failure
+ *
+ */
+bool goamdsmi_gpu_partition_xcp_utilization_get(uint32_t dv_ind, uint32_t xcp_index,
+                                                uint32_t* gfx_busy_inst,
+                                                uint64_t* gfx_busy_acc);

@@ -1210,6 +1210,26 @@ typedef struct metrics_table_header_t metrics_table_header_t;
 #define RSMI_MAX_NUM_XCP 8
 
 /**
+ * @brief This should match kRSMI_MAX_NUM_L3_CACHES
+ */
+#define RSMI_MAX_NUM_L3_CACHES 2
+
+/**
+ * @brief This should match kRSMI_GC20_MAX_NUM_CORES
+ */
+#define RSMI_GC20_MAX_NUM_CORES 8
+
+/**
+ * @brief This should match kRSMI_MAX_NUM_CORES
+ */
+#define RSMI_MAX_NUM_CORES 16
+
+/**
+ * @brief This should match kRSMI_MAX_NUM_NPU_COLUMNS
+ */
+#define RSMI_MAX_NUM_NPU_COLUMNS 8
+
+/**
  * @brief The following structures hold the gpu statistics for a device.
  */
 struct amdgpu_xcp_metrics_t {
@@ -1273,7 +1293,7 @@ typedef struct {
   uint16_t average_mm_activity;   // UVD or VCN
 
   // Power (W) /Energy (15.259uJ per 1ns)
-  uint16_t average_socket_power;
+  uint32_t average_socket_power;  // v3 expands to 32 bit
   uint64_t energy_accumulator;  // v1 mod. (32->64)
 
   // Driver attached timestamp (in ns)
@@ -1447,6 +1467,121 @@ typedef struct {
   /* XGMI link status(up/down) */
   uint16_t xgmi_link_status[RSMI_MAX_NUM_XGMI_LINKS];
 
+  /*
+   * v2.0
+   */
+  /* Temperature */
+  //Removed from 2.0 - 2.4 because there are 16 in 3.0
+  //uint16_t			temperature_core[8]; // CPU core temperature on APUs
+  uint16_t temperature_l3[RSMI_MAX_NUM_L3_CACHES];
+
+  /* Power/Energy */
+  uint16_t average_cpu_power;
+  uint16_t average_soc_power;
+  uint32_t average_gfx_power;  // expanded to 32 bit in v3
+  //Removed from 2.0 - 2.4 because there are 16 in 3.0
+  //uint16_t average_core_power[8]; // CPU core power on APUs
+
+  /* Average clocks */
+  uint16_t average_fclk_frequency;
+  uint16_t average_vclk_frequency;
+  uint16_t average_dclk_frequency;
+
+  /* Current clocks */
+  uint16_t current_fclk;
+  uint16_t current_vclk;
+  uint16_t current_dclk;
+  //Removed from 2.0 - 2.4 because there are 16 in 3.0
+  //uint16_t current_coreclk[8]; // CPU core clocks
+  uint16_t current_l3clk[RSMI_MAX_NUM_L3_CACHES];
+
+  /*
+   * v2.3
+   */
+  /* Average Temperature */
+  uint16_t average_temperature_gfx; // average gfx temperature on APUs
+  uint16_t average_temperature_soc; // average soc temperature on APUs
+  uint16_t average_temperature_core[RSMI_MAX_NUM_CORES]; // average CPU core temperature on APUs
+  uint16_t average_temperature_l3[RSMI_MAX_NUM_L3_CACHES];
+
+  /*
+   * v2.4
+   */
+  /* Power/Voltage (unit: mV) */
+  uint16_t average_cpu_voltage;
+  uint16_t average_soc_voltage;
+  uint16_t average_gfx_voltage;
+
+  /* Power/Current (unit: mA) */
+  uint16_t average_cpu_current;
+  uint16_t average_soc_current;
+  uint16_t average_gfx_current;
+
+  /*
+   * v3.0
+   */
+  /* Temperature */
+  /* CPU core temperature on APUs */
+  uint16_t temperature_core[RSMI_MAX_NUM_CORES];
+  /* skin temperature on APUs */
+  uint16_t temperature_skin;
+
+  /* Utilization */
+  /* time filtered NPU per-column busy % [0-100] */
+  uint16_t average_npu_activity[RSMI_MAX_NUM_NPU_COLUMNS];
+  /* time filtered per-core C0 residency % [0-100]*/
+  uint16_t average_core_c0_activity[RSMI_MAX_NUM_CORES];
+  /* time filtered DRAM read bandwidth [MB/sec] */
+  uint16_t average_dram_reads;
+  /* time filtered DRAM write bandwidth [MB/sec] */
+  uint16_t average_dram_writes;
+  /* time filtered NPU read bandwidth [MB/sec] */
+  uint16_t average_npu_reads;
+  /* time filtered NPU write bandwidth [MB/sec] */
+  uint16_t average_npu_writes;
+
+  /* Power/Energy */
+  /* time filtered NPU power [mW] */
+  uint16_t average_npu_power;
+  /* time filtered APU power [mW] */
+  uint32_t average_apu_power;
+  /* time filtered dGPU power [mW] */
+  uint32_t average_dgpu_power;
+  /* time filtered sum of core power across all cores in the socket [mW] */
+  uint32_t average_all_core_power;
+  /* calculated core power [mW] */
+  uint16_t average_core_power[RSMI_MAX_NUM_CORES];
+  /* time filtered total system power [mW] */
+  uint16_t average_sys_power;
+  /* maximum IRM defined STAPM power limit [mW] */
+  uint16_t stapm_power_limit;
+  /* time filtered STAPM power limit [mW] */
+  uint16_t current_stapm_power_limit;
+
+  /* time filtered clocks [MHz] */
+  uint16_t average_vpeclk_frequency;
+  uint16_t average_npuclk_frequency;
+  uint16_t average_mpnpu_frequency;
+
+  /* Current clocks */
+  /* target core frequency [MHz] */
+  uint16_t current_coreclk[RSMI_MAX_NUM_CORES];
+  /* CCLK frequency limit enforced on classic cores [MHz] */
+  uint16_t current_core_maxfreq;
+  /* GFXCLK frequency limit enforced on GFX [MHz] */
+  uint16_t current_gfx_maxfreq;
+
+  /* Throttle Residency (ASIC dependent) */
+  uint32_t throttle_residency_prochot;
+  uint32_t throttle_residency_spl;
+  uint32_t throttle_residency_fppt;
+  uint32_t throttle_residency_sppt;
+  uint32_t throttle_residency_thm_core;
+  uint32_t throttle_residency_thm_gfx;
+  uint32_t throttle_residency_thm_soc;
+
+  /* Metrics table alpha filter time constant [us] */
+  uint32_t time_filter_alphavalue;
   /// \endcond
 } rsmi_gpu_metrics_t;
 
