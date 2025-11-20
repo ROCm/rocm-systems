@@ -17,6 +17,7 @@ set(CUID_SOURCES
     hmac.cc
     cuid_lib_loader.cc
     pci_util.cc
+    smbios_util.cc
 )
 
 set(CUID_HEADERS
@@ -32,6 +33,7 @@ set(CUID_HEADERS
     hmac.h
     cuid_lib_loader.h
     pci_util.h
+    smbios_util.h
 )
 
 add_library(cuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})

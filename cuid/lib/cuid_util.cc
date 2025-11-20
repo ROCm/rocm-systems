@@ -184,3 +184,36 @@ char* AmdCuidUtilities::get_cuid_as_string(const amdcuid *id) {
 
     return uuid_str;
 }
+
+amdcuid_status_t AmdCuidUtilities::uuid_string_to_uint8(const std::string& uuid_str, uint8_t* uuid) {
+    if (!uuid) {
+        return AMDCUID_STATUS_INVALID_ARGUMENT;
+    }
+
+    // UUID format: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (36 chars with hyphens)
+    // Remove hyphens and validate length
+    std::string hex_str;
+    for (char c : uuid_str) {
+        if (c != '-') {
+            if (!isxdigit(c)) {
+                std::cerr << "Invalid UUID format: non-hex character found" << std::endl;
+                return AMDCUID_STATUS_INVALID_ARGUMENT;
+            }
+            hex_str += c;
+        }
+    }
+
+    // UUID should be 128 bits = 32 hex characters
+    if (hex_str.length() != 32) {
+        std::cerr << "Invalid UUID length: expected 32 hex digits, got " << hex_str.length() << std::endl;
+        return AMDCUID_STATUS_INVALID_ARGUMENT;
+    }
+
+    // convert hex_str to uint8_t array
+    for (size_t i = 0; i < 16; ++i) {
+        std::string byte_str = hex_str.substr(i * 2, 2);
+        uuid[i] = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
+    }
+
+    return AMDCUID_STATUS_SUCCESS;
+}

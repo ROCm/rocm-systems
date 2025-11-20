@@ -45,6 +45,7 @@ namespace AmdCuidUtilities {
                                  uint8_t revision_id, uint16_t device_id, uint16_t vendor_id,
                                  uint8_t component_type, amdcuid* id);
     char* get_cuid_as_string(const amdcuid *id);
+    amdcuid_status_t uuid_string_to_uint8(const std::string& uuid_str, uint8_t* uuid);
 }
 
 #endif

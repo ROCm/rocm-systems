@@ -34,7 +34,7 @@ int main() {
         gpu_handles.resize(gpu_count);
         err = amdcuid_get_handles(
             AMDCUID_DEVICE_TYPE_SET_GPU,
-            gpu_count,
+            &gpu_count,
             gpu_handles.data(),
             &available_gpu_count);
         if (err != AMDCUID_STATUS_SUCCESS) {
