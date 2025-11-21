@@ -320,10 +320,24 @@ do
     VERSION_PATCH=$(echo ${VERSION} | sed 's/\./ /g' | awk '{print $3}')
     for ROCM_VERSION in ${ROCM_VERSIONS}
     do
+        # Parse ROCm version components
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_PATCH=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $3}')
-        if [ "${ROCM_PATCH}" = "0" ] || [ -z "${ROCM_PATCH}" ]; then
+
+        # Compute ROCM_VERSION_URL (for repo URLs) and normalize ROCM_PATCH
+        ROCM_VERSION_URL="${ROCM_VERSION}"
+        if [ -z "${ROCM_PATCH}" ]; then
+            ROCM_PATCH=0
+        elif [ "${ROCM_PATCH}" = "0" ]; then
+            ROCM_VERSION_URL="${ROCM_MAJOR}.${ROCM_MINOR}"
+        fi
+
+        # Compute ROCM_VERSN (numeric version for package names)
+        ROCM_VERSN=$(( ("${ROCM_MAJOR}"*10000)+("${ROCM_MINOR}"*100) + ("${ROCM_PATCH}")))
+
+        # Determine container tag
+        if [ "${ROCM_PATCH}" = "0" ]; then
             CONTAINER=${USER}/rocprofiler-systems:release-base-${DISTRO}-${VERSION}-rocm-${ROCM_MAJOR}.${ROCM_MINOR}
         else
             CONTAINER=${USER}/rocprofiler-systems:release-base-${DISTRO}-${VERSION}-rocm-${ROCM_VERSION}
@@ -339,11 +353,11 @@ do
                 *)
                     ;;
             esac
-            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "rhel" ]; then
             # use Rocky Linux as a base image for RHEL builds
             DISTRO_BASE_IMAGE=rockylinux/rockylinux
-            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "opensuse" ]; then
             DISTRO_IMAGE="opensuse/leap"
             if [[ "${VERSION_MAJOR}" -le 15 && "${VERSION_MINOR}" -le 5 ]]; then
@@ -351,7 +365,7 @@ do
             else
                 PERL_REPO="${VERSION_MAJOR}.${VERSION_MINOR}"
             fi
-            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         fi
         if [ "${PUSH}" -ne 0 ]; then
             docker push ${CONTAINER}
