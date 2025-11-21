@@ -198,7 +198,10 @@ def parse_cdash_args(args):
         "--submit-url", help="CDash submission site", default=SUBMIT_URL, type=str
     )
     parser.add_argument(
-        "--repeat-until-pass", help="<N> for --repeat until-pass:<N>", default=3, type=int
+        "--repeat-until-pass",
+        help="<N> for --repeat until-pass:<N>",
+        default=3,
+        type=int,
     )
     parser.add_argument(
         "--repeat-until-fail",
@@ -237,9 +240,7 @@ def parse_args(args=None):
     cdash_args = parse_cdash_args(input_args)
 
     if cdash_args.coverage:
-        cmake_args += [
-            "-DENABLE_COVERAGE=ON"
-        ]
+        cmake_args += ["-DENABLE_COVERAGE=ON"]
 
     def get_repeat_val(_param):
         _value = getattr(cdash_args, f"repeat_{_param}".replace("-", "_"))
