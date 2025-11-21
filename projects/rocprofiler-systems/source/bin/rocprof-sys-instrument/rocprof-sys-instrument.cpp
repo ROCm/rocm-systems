@@ -23,6 +23,7 @@
 #include "rocprof-sys-instrument.hpp"
 #include "common/defines.h"
 #include "common/join.hpp"
+#include "common/path.hpp"
 #include "dl/dl.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
@@ -43,7 +44,6 @@
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -159,6 +159,7 @@ namespace
 namespace process  = tim::process;  // NOLINT
 namespace signals  = tim::signals;
 namespace filepath = tim::filepath;
+namespace path     = rocprofsys::common::path;
 
 using signal_settings = tim::signals::signal_settings;
 using sys_signal      = tim::signals::sys_signal;
@@ -192,25 +193,17 @@ strset_t                                   print_formats        = { "txt", "json
 std::string                                modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
-std::string
-get_internal_libpath()
-{
-    auto _exe = std::string_view{ ::realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return rocprofsys::common::join("/", _dir, "..", "lib");
-}
-
-strvec_t lib_search_paths = tim::delimit(
-    JOIN(':', get_internal_libpath(), tim::get_env<std::string>("DYNINSTAPI_RT_LIB"),
-         tim::get_env<std::string>("DYNINST_REWRITER_PATHS"),
-         tim::get_env<std::string>("LD_LIBRARY_PATH")),
-    ":");
+strvec_t lib_search_paths =
+    tim::delimit(rocprofsys::join(':', path::get_internal_libdir(),
+                                  tim::get_env<std::string>("DYNINSTAPI_RT_LIB"),
+                                  tim::get_env<std::string>("DYNINST_REWRITER_PATHS"),
+                                  tim::get_env<std::string>("LD_LIBRARY_PATH")),
+                 ":");
 strvec_t bin_search_paths = tim::delimit(tim::get_env<std::string>("PATH"), ":");
 
 auto _dyn_api_rt_paths = tim::delimit(
-    JOIN(":", get_internal_libpath(), JOIN("/", get_internal_libpath(), "rocprofsys")),
+    rocprofsys::join(":", path::get_internal_libdir(),
+                     rocprofsys::join("/", path::get_internal_libdir(), "rocprofsys")),
     ":");
 
 std::string
@@ -233,9 +226,6 @@ is_file(std::string _name);
 
 bool
 is_directory(std::string _name);
-
-std::string
-get_realpath(const std::string&);
 
 std::string
 get_cwd();
@@ -334,10 +324,10 @@ main(int argc, char** argv)
                                  "::", "rocprofiler-systems root path: ", _omni_root);
     }
 
-    auto _omni_exe_path = get_realpath(get_absolute_exe_filepath(argv[0]));
+    auto _omni_exe_path = path::realpath(get_absolute_exe_filepath(argv[0]));
     if(!exists(_omni_exe_path))
         _omni_exe_path =
-            get_realpath(get_absolute_exe_filepath(rocprofsys_get_exe_realpath()));
+            path::realpath(get_absolute_exe_filepath(rocprofsys_get_exe_realpath()));
     bin_search_paths.emplace_back(filepath::dirname(_omni_exe_path));
 
     auto _omni_lib_path =
@@ -464,7 +454,7 @@ main(int argc, char** argv)
 
     if(_cmdc > 0 && !mutname.empty())
     {
-        auto resolved_mutname = get_realpath(get_absolute_filepath(mutname));
+        auto resolved_mutname = path::realpath(get_absolute_filepath(mutname));
         if(resolved_mutname != mutname)
         {
             mutname = resolved_mutname;
@@ -670,7 +660,7 @@ main(int argc, char** argv)
                     p.print_help(extra_help);
                     std::exit(EXIT_FAILURE);
                 }
-                keys.at(0) = get_realpath(get_absolute_filepath(keys.at(0)));
+                keys.at(0) = path::realpath(get_absolute_filepath(keys.at(0)));
                 mutname    = keys.at(0);
                 _cmdc      = keys.size();
                 _cmdv      = new char*[_cmdc];
@@ -1184,7 +1174,7 @@ main(int argc, char** argv)
                        !parser.exists("min-instructions") &&
                            !parser.exists("min-address-range-loop"));
 
-    auto _rocprofsys_exe_path = tim::dirname(::get_realpath("/proc/self/exe"));
+    auto _rocprofsys_exe_path = tim::dirname(path::realpath("/proc/self/exe"));
     verbprintf(4, "rocprof-sys exe path: %s\n", _rocprofsys_exe_path.c_str());
 
     if(_cmdv && _cmdv[0] && strlen(_cmdv[0]) > 0)
@@ -1232,7 +1222,7 @@ main(int argc, char** argv)
 
     if(binary_rewrite && outfile.empty())
     {
-        auto _is_local = (get_realpath(cmdv0) ==
+        auto _is_local = (path::realpath(cmdv0) ==
                           TIMEMORY_JOIN('/', get_cwd(), ::basename(cmdv0.c_str())));
         auto _cmd      = std::string{ ::basename(cmdv0.c_str()) };
         if(_cmd.find('.') == std::string::npos)
@@ -1481,8 +1471,8 @@ main(int argc, char** argv)
     image_t*                   app_image     = addr_space->getImage();
     std::vector<module_t*>*    app_modules   = app_image->getModules();
     std::vector<procedure_t*>* app_functions = app_image->getProcedures(include_uninstr);
-    std::set<module_t*>        modules       = {};
-    std::set<procedure_t*>     functions     = {};
+    std::unordered_set<module_t*>    modules = {};
+    std::unordered_set<procedure_t*> functions = {};
 
     if(app_modules) process_modules(*app_modules);
 
@@ -1655,7 +1645,7 @@ main(int argc, char** argv)
         for(auto _libname : _libnames)
         {
             ROCPROFSYS_ADD_LOG_ENTRY("Getting the absolute lib filepath to", _libname);
-            _libname = get_realpath(get_absolute_lib_filepath(_libname));
+            _libname = path::realpath(get_absolute_lib_filepath(_libname));
             _tried_libs += string_t("|") + _libname;
             verbprintf(1, "loading library: '%s'...\n", _libname.c_str());
             result = (addr_space->loadLibrary(_libname.c_str()) != nullptr);
@@ -2843,7 +2833,7 @@ exists(const std::string& name)
 bool
 is_file(std::string _name)
 {
-    _name = get_realpath(_name);
+    _name = path::realpath(_name);
     struct stat buffer;
     return (stat(_name.c_str(), &buffer) == 0 && S_ISREG(buffer.st_mode) != 0);
 }
@@ -2851,15 +2841,9 @@ is_file(std::string _name)
 bool
 is_directory(std::string _name)
 {
-    _name = get_realpath(_name);
+    _name = path::realpath(_name);
     struct stat buffer;
     return (stat(_name.c_str(), &buffer) == 0 && S_ISDIR(buffer.st_mode) != 0);
-}
-
-std::string
-get_realpath(const std::string& _f)
-{
-    return filepath::realpath(_f, nullptr, false);
 }
 
 std::string

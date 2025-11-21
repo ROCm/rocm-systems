@@ -623,11 +623,12 @@ configure_settings(bool _init)
         "the same signal (SIGRTMIN + 1)",
         SIGRTMIN + 1, "sampling", "advanced");
 
-    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT",
-                              "Metric for overflow sampling",
-                              std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" },
-                              "sampling", "hardware_counters")
-        ->set_choices(perf::get_config_choices());
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT",
+        "Metric for overflow sampling. Defaults to perf::PERF_COUNT_HW_CACHE_REFERENCES. "
+        "For full list of events see: rocprof-sys-avail -H -c CPU -r overflow",
+        std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
+        "hardware_counters");
 
     rocprofiler_sdk::config_settings(_config);
     amd_smi::config_settings(_config);
@@ -942,12 +943,18 @@ configure_settings(bool _init)
     {
         auto _papi_events = _config->find("ROCPROFSYS_PAPI_EVENTS");
         _add_rocprofsys_category(_papi_events);
-        std::vector<std::string> _papi_choices = {};
-        for(auto itr : tim::papi::available_events_info())
+        // Only enumerate PAPI events if the user has specified them
+        if(_papi_events->second->get_config_updated() ||
+           !_config->get_papi_events().empty())
         {
-            if(itr.available()) _papi_choices.emplace_back(itr.symbol());
+            std::vector<std::string> _papi_choices = {};
+            for(const auto& itr :
+                tim::papi::available_events_info({ "perf_event_uncore" }))
+            {
+                if(itr.available()) _papi_choices.emplace_back(itr.symbol());
+            }
+            _papi_events->second->set_choices(_papi_choices);
         }
-        _papi_events->second->set_choices(_papi_choices);
     }
 #else
     _config->find("ROCPROFSYS_PAPI_EVENTS")->second->set_hidden(true);

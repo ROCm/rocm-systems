@@ -162,6 +162,6 @@ Panel Config:
       the CPC-L2 interface was active doing any work.
     CPC-UTCL1 Stall: Percent of CPC busy cycles where the CPC was stalled by address
       translation
-    CPC-UTCL2 Utilization: |-
+    CPC-UTCL2 Utilization: >-
       Percent of total cycles counted by the CPC's L2 address translation
       interface where the CPC was busy doing address translation work.

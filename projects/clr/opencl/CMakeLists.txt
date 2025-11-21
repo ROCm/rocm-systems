@@ -28,6 +28,10 @@ if(ENABLE_ADDRESS_SANITIZER)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan")
 endif()
 
+if(NOT WIN32)
+  set(AMDOCL_INSTALL_LIBDIR ${PROJECT_NAME})
+endif()
+
 set(OPENCL_ICD_LOADER_HEADERS_DIR "${CMAKE_CURRENT_LIST_DIR}/khronos/headers/opencl2.2" CACHE PATH "")
 if(BUILD_ICD)
   add_subdirectory(khronos/icd)
@@ -96,11 +100,6 @@ if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
 endif()
 
 set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Package Installation path for OpenCL")
-#ROCM_PATH is needed to create symlink of libraries
-if(NOT DEFINED ROCM_PATH)
-  string(REPLACE "/opencl" "" ROCM_PATH ${CPACK_PACKAGING_INSTALL_PREFIX})
-endif()
-message (STATUS "ROCM Installation path(ROCM_PATH): ${ROCM_PATH}")
 
 configure_file(
   packaging/amdocl64.icd
