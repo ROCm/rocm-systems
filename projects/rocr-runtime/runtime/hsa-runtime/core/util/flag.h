@@ -261,7 +261,9 @@ class Flag {
     dev_mem_queue_buf_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_WAIT_ANY_DEBUG");
-    wait_any_ = (var == "1") ? true : false;
+    // FIX: Default to true (blocking/interrupt mode), allow disabling with "0"
+    // Previously defaulted to false, causing 100% CPU polling even with interrupt support
+    wait_any_ = (var == "0") ? false : true;
 
     /* hsa_signal_wait_relaxed abort timeout  */
     var = os::GetEnvVar("HSA_SIGNAL_WAIT_ABORT_TIMEOUT");
