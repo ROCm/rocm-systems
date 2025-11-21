@@ -69,6 +69,7 @@
 #include <linux/capability.h>
 #include <numeric>
 #include <ostream>
+#include <pwd.h>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -2577,11 +2578,35 @@ get_tmp_file(std::string _basename, std::string _ext)
         _existing_files.clear();
     });
 
+    // Get the current user's username to create isolated temporary directories
+    // for each user on multi-user systems. This prevents permission conflicts
+    // and directory collisions between different users.
+    auto get_username = []() -> std::string {
+        // Primary method: Query the password database using the real user ID.
+        // This is more secure and reliable than environment variables.
+        struct passwd* pw_entry = getpwuid(getuid());
+        if(pw_entry && pw_entry->pw_name)
+        {
+            return std::string(pw_entry->pw_name);
+        }
+
+        // Fallback: Use the USER environment variable if password database
+        // lookup fails (rare, but possible in some restricted environments)
+        const char* env_user = getenv("USER");
+        if(env_user)
+        {
+            return std::string(env_user);
+        }
+
+        // Last resort: Return a default value if both methods fail
+        return std::string{ "unknown" };
+    };
+
     auto _cfg          = settings::compose_filename_config{};
     _cfg.use_suffix    = true;
     _cfg.suffix        = "%pid%";
     _cfg.explicit_path = get_tmpdir();
-    _cfg.subdirectory  = JOIN('/', settings::output_path(), "%ppid%", "");
+    _cfg.subdirectory  = JOIN('/', get_username(), settings::output_path(), "%ppid%", "");
     auto _fname =
         settings::compose_output_filename(std::move(_basename), std::move(_ext), _cfg);
 
