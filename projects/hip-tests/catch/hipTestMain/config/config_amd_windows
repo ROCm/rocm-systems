@@ -788,6 +788,7 @@
         "Unit_hipModule_Functional",
         "Unit_hipModuleLoad_MultProcess_MultGPU",
         "Unit_Copy_Coherency",
+        "Unit_test_generic_target_only_in_regular_fatbin",
     #endif
         "=== Following tests disabled as it should be a local perf test",
         "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",
