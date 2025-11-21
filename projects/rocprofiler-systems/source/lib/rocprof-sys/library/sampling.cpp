@@ -32,6 +32,7 @@
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
+#include "library/amd_smi.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
 #include "library/components/backtrace_timestamp.hpp"
@@ -1835,6 +1836,19 @@ struct sampling_initialization
     }
 };
 }  // namespace
+void
+postfork_parent_reinit()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        amd_smi::postfork_parent_reinit();
+}
+
+void
+postfork_child_cleanup()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        amd_smi::postfork_child_cleanup();
+}
 }  // namespace sampling
 }  // namespace rocprofsys
 

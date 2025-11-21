@@ -27,7 +27,6 @@
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/state.hpp"
-#include "library/amd_smi.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
@@ -101,8 +100,7 @@ postfork_parent()
     // Reinitialize AMD SMI in parent process to get fresh device handles before
     // unblocking the shutdown/setup transition. AMD SMI device handles may be corrupted
     // after fork.
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::postfork_parent_reinit();
+    if(config::get_use_sampling()) sampling::postfork_parent_reinit();
 
     rocprofsys::categories::enable_categories(config::get_enabled_categories());
 
@@ -125,8 +123,7 @@ postfork_child()
     set_state(State::Finalized);
 
     // Clean up AMD SMI in child process before other shutdowns
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::postfork_child_cleanup();
+    if(config::get_use_sampling()) sampling::postfork_child_cleanup();
 
     settings::enabled() = false;
     settings::verbose() = -127;
