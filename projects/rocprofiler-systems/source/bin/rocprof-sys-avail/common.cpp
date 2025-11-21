@@ -459,8 +459,8 @@ filter_operations(const std::string& env_var_name, std::vector<std::string>& cho
         };
 
     std::string      base_name     = env_var_name;
-    constexpr size_t exclude_len   = 8;   // "_EXCLUDE"
-    constexpr size_t backtrace_len = 19;  // "_ANNOTATE_BACKTRACE"
+    constexpr size_t exclude_len   = sizeof("_EXCLUDE") - 1;
+    constexpr size_t backtrace_len = sizeof("_ANNOTATE_BACKTRACE") - 1;
 
     const size_t len = env_var_name.size();
 
