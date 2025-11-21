@@ -131,7 +131,6 @@ void TestMetricsCounterRead::Run(void) {
             case AMDSMI_COARSE_GRAIN_MEM_ACTIVITY:
               std::cout << "-> mem_activity: [" << utilization_counters[idx].fine_value_count << "]"
                         << "\n";
-              ;
               break;
 
             case AMDSMI_COARSE_DECODER_ACTIVITY:
@@ -181,7 +180,6 @@ void TestMetricsCounterRead::Run(void) {
             case AMDSMI_FINE_GRAIN_MEM_ACTIVITY:
               std::cout << "-> mem_activity: [" << utilization_counters[idx].fine_value_count << "]"
                         << "\n";
-              ;
               break;
 
             case AMDSMI_FINE_DECODER_ACTIVITY:

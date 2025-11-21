@@ -99,7 +99,6 @@ void TestPerfDeterminism::Run(void) {
 
       std::cout << "\t**Resetting performance determinism" << std::endl;
       err = amdsmi_set_gpu_perf_level(processor_handles_[i], AMDSMI_DEV_PERF_LEVEL_AUTO);
-      ;
       CHK_ERR_ASRT(err)
       ret = amdsmi_get_gpu_perf_level(processor_handles_[i], &pfl);
       CHK_ERR_ASRT(ret)
