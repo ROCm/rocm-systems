@@ -283,6 +283,7 @@ def info_pc_sampling(args):
 
 def listing(args, spm):
     from rocprofv3 import avail
+
     def print_agent_counter(counters):
         if len(counters) == 0:
             msg = "No {counter_type} counters supported".format(
@@ -333,7 +334,7 @@ def listing(args, spm):
 
 def info_pmc(args, spm):
     from rocprofv3 import avail
-    
+
     _args = None
     if spm:
         agent_counters = avail.get_spm_counters()

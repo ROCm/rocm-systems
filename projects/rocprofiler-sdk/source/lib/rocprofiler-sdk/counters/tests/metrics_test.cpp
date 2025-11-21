@@ -243,7 +243,7 @@ TEST(metrics, check_public_api_query)
 
         // Dimensions are now verified through the API call above
         EXPECT_EQ(info.spm_support, metric.spm());
-   
+
         for(size_t i = 0; i < info.dimensions_count; i++)
         {
             EXPECT_GT(info.dimensions[i]->instance_size, 0u);
