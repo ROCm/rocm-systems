@@ -804,7 +804,7 @@ hsa_status_t Device::iterateGpuMemoryPoolCallback(hsa_amd_memory_pool_t pool, vo
                                               &(dev->info_.virtualMemAllocGranularityRecommended_));
           if (stat != HSA_STATUS_SUCCESS) {
             LogPrintfError(
-                "Cannot query HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE info"
+                "Cannot query HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE info"
                 "failed with hsa_status: %d \n",
                 stat);
           }

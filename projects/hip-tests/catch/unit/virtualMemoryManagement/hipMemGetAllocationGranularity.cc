@@ -70,13 +70,13 @@ TEST_CASE("Unit_hipMemGetAllocationGranularity_AllGPUs") {
     size_t min_granularity = 0;
     size_t recommended_granularity = 0;
 
-    getGranularity(&min_granularity, hipMemAllocationGranularityMinimum, 0);
+    getGranularity(&min_granularity, hipMemAllocationGranularityMinimum, dev);
     REQUIRE(min_granularity >= 1024);
 
-    getGranularity(&recommended_granularity, hipMemAllocationGranularityRecommended, 0);
+    getGranularity(&recommended_granularity, hipMemAllocationGranularityRecommended, dev);
     REQUIRE(recommended_granularity >= 1024);
 
-    // Check the recommend_granularity is greater than or equal to the minimum
+    // Check the recommended_granularity is greater than or equal to the minimum
     REQUIRE(recommended_granularity >= min_granularity);
   }
 }
