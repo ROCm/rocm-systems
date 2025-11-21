@@ -215,7 +215,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
 
   MemoryPool(hip::Device* device, const hipMemPoolProps* props = nullptr, bool phys_mem = false)
       : VmHeapArray(device->devices()[0],
-                    [this]() -> amd::HostQueue& { return *device_->NullStream(); }),
+                    [this]() -> amd::HostQueue& { return *device_->NullStream(false); }),
         busy_heap_(device, *this),
         free_heap_(device, *this),
         lock_pool_ops_(true),
