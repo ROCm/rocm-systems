@@ -1,0 +1,16 @@
+curRPC
+DYNINSTversion
+DYNINSTobsCostLow
+DYNINSTglobalData
+DYNINSTinit
+DYNINSTos_init
+pcAtLastIRPC
+DYNINSTos_malloc
+DYNINSTos_free
+DYNINSTheap_useMalloc
+DYNINSTheap_mmapFdOpen
+DYNINSTheap_mmapFdClose
+DYNINSTgetMemoryMap
+DYNINSTstaticHeap_16M_textHeap_1
+DYNINSTstaticHeap_16M_anyHeap_1
+DYNINSTstaticHeap_32K_lowmemHeap_1

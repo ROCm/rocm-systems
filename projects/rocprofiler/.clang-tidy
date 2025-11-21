@@ -1,0 +1,30 @@
+---
+Checks: "-*,\
+misc-*,\
+-misc-incorrect-roundings,\
+-misc-macro-parentheses,\
+-misc-misplaced-widening-cast,\
+-misc-static-assert,\
+-misc-no-recursion,\
+-misc-non-private-member-variables-in-classes,\
+modernize-*,\
+-modernize-deprecated-headers,\
+-modernize-raw-string-literal,\
+-modernize-return-braced-init-list,\
+-modernize-use-transparent-functors,\
+-modernize-use-trailing-return-type,\
+-modernize-avoid-c-arrays,\
+-modernize-use-auto,\
+-modernize-concat-nested-namespaces,\
+-modernize-use-nodiscard,\
+performance-*,\
+readability-*,\
+-readability-function-size,\
+-readability-identifier-naming,\
+"
+CheckOptions:
+  - key:             readability-braces-around-statements.ShortStatementLines
+    value:           '2'
+  - key:             readability-implicit-bool-conversion.AllowPointerConditions
+    value:           '1'
+...

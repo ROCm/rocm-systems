@@ -1,0 +1,190 @@
+name: Build RDC
+
+on:
+  pull_request:
+    branches: [ 'dgalants/ci', 'amd-staging', 'amd-mainline' ]
+  workflow_dispatch:
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: RelWithDebInfo
+  ROCM_DIR: /opt/rocm
+  # Use vars for internal URLs
+  JOB_NAME: ${{ vars.JOB_NAME }}
+  AMDGPU_REPO_DEB: ${{ vars.AMDGPU_REPO_DEB }}
+  AMDGPU_REPO_URL: ${{ vars.AMDGPU_REPO_URL }}
+  ROCM_CI_URL: ${{ vars.ROCM_CI_URL }}
+  # Set env vars to values of config vars
+  env_var: ${{ vars.ENV_CONTEXT_VAR }}
+
+jobs:
+  build:
+    runs-on: lstt
+    container: rocm/rocm-build-ubuntu-22.04:6.3
+    outputs:
+      BUILD_NUM: ${{ steps.build_number.outputs.BUILD_NUM }}
+      TODAY: ${{ steps.build_number.outputs.TODAY }}
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up apt repos
+      run: |
+        test "$AMDGPU_REPO_URL" = "" && echo "Error! AMDGPU_REPO_URL is EMPTY!" && exit 1
+        cat /etc/os-release
+        apt update -y
+        # provides add-apt-repository and support for caching actions
+        apt install -y software-properties-common jq curl
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt install -y nodejs
+        add-apt-repository -y ppa:apt-fast/stable
+        apt update -y
+        apt install -y apt-fast
+        # provides amdgpu-repo
+        wget "$AMDGPU_REPO_URL/$AMDGPU_REPO_DEB"
+        apt-fast install -y "./$AMDGPU_REPO_DEB"
+
+    - name: Get latest build number
+      id: build_number
+      run: |
+        curl -Ls "${ROCM_CI_URL}/${JOB_NAME}/lastStableBuild/api/json?depth=1" -o /tmp/build_info.json
+        cat /tmp/build_info.json | jq '.actions[] | .buildsByBranchName."refs/remotes/origin/amd-mainline".buildNumber | select(. != null)' > /tmp/build_num.txt
+        BUILD_NUM="$(cat /tmp/build_num.txt)"
+        echo "BUILD_NUM=$BUILD_NUM" >> "$GITHUB_ENV"
+        echo "BUILD_NUM=$BUILD_NUM" >> "$GITHUB_OUTPUT"
+        amdgpu-repo --rocm-build="$JOB_NAME"/"$BUILD_NUM"
+        apt-fast update -y
+        # useful for date-based caches
+        TODAY="$(date +%Y_%m_%d)"
+        echo "TODAY=$TODAY" >> "$GITHUB_ENV"
+        echo "TODAY=$TODAY" >> "$GITHUB_OUTPUT"
+
+
+    - name: Get apt packages
+      run: |
+        apt install -y \
+          rocm-core \
+          amd-smi-lib \
+          rocm-developer-tools \
+          rocm-device-libs \
+          rocm-smi-lib \
+          rocprofiler-dev \
+          rocprofiler-plugins \
+          rocprofiler-register \
+          rocprofiler-sdk \
+          hip-dev \
+          hip-runtime-amd \
+          hipcc \
+          build-essential \
+          ccache \
+          cmake \
+          curl \
+          git \
+          gzip \
+          jq \
+          libcap-dev \
+          tar \
+          unzip \
+          wget \
+          zip \
+          zstd
+
+    - name: Cache .ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        # only create one cache per day to save time during upload
+        key: ${{ runner.os }}-ccache-${{ github.ref_name }}-${{ env.TODAY }}
+        restore-keys: |
+          ${{ runner.os }}-ccache-${{ github.ref_name }}-
+          ${{ runner.os }}-ccache-
+
+    - name: Build RDC
+      run: |
+        pwd
+        cmake \
+            -B build \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+            -DGRPC_DESIRED_VERSION=1.61.0 \
+            -DGRPC_ROOT=/usr/grpc \
+            -DBUILD_RUNTIME=ON \
+            -DGPU_TARGETS=gfx942 \
+            -DBUILD_PROFILER=ON \
+            -DBUILD_RVS=OFF \
+            -DBUILD_TESTS=ON \
+            -DCPACK_GENERATOR="DEB" \
+            -DCMAKE_INSTALL_PREFIX=${ROCM_DIR}
+        make -C build -j $(nproc)
+        make -C build -j $(nproc) package
+
+    - name: Install RDC
+      run: |
+        echo "pre: "
+        ls -lah /opt
+        make -C build -j $(nproc) install
+        echo "post: "
+        ls -lah /opt
+
+    # important to use v3 because v4 doesn't work with act:
+    # https://github.com/nektos/act/issues/329
+    - name: Package RDC
+      uses: actions/upload-artifact@v4
+      with:
+        name: rdc
+        path: build/rdc*.deb
+        if-no-files-found: error
+        retention-days: 5
+
+  test:
+    needs: build
+    runs-on: lstt
+    container: rocm/rocm-build-ubuntu-22.04:6.3
+
+    steps:
+    - name: Set up apt repos
+      run: |
+        cat /etc/os-release
+        apt update -y
+        # provides add-apt-repository and support for caching actions
+        apt install -y software-properties-common jq curl
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt install -y nodejs
+
+    - name: Package RDC
+      uses: actions/download-artifact@v4
+      with:
+        name: rdc
+        path: /opt/
+
+    - name: Test RDC installation
+      shell: bash
+      run: |
+        COUNT=$(find /opt/ -iname 'rdc*.deb' | wc -l)
+        test "$COUNT" -eq '2'
+        dpkg --force-all -i /opt/rdc*.deb
+        # confirm binaries are installed
+        find $ROCM_DIR/bin -maxdepth 1 -iname rdcd
+        find $ROCM_DIR/bin -maxdepth 1 -iname rdci
+        find $ROCM_DIR/share/rdc -iname rdctst
+        # confirm that libraries are installed
+        MISSING_LIBS=()
+        for lib in librdc.so librdc_bootstrap.so librdc_client.so; do
+          test -e "$ROCM_DIR/lib/$lib" || MISSING_LIBS+=("$lib")
+        done
+        for lib in librdc_rocr.so librdc_rocp.so; do
+          test -e "$ROCM_DIR/lib/rdc/$lib" || MISSING_LIBS+=("$lib")
+        done
+
+        if test "${#MISSING_LIBS[@]}" != "0"; then
+          echo "Missing libs found!"
+          for lib in "${MISSING_LIBS[@]}"; do
+            echo "- $lib"
+          done
+          exit 1
+        else
+          echo "No missing libs found!"
+        fi

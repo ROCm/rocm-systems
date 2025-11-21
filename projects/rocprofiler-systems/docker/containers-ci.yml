@@ -1,0 +1,25 @@
+# Supported OS combinations for continuous integration
+
+matrix:
+  # ubuntu
+  - distro: "ubuntu"
+    version: "22.04"
+  - distro: "ubuntu"
+    version: "24.04"
+  # debian
+  - distro: "debian"
+    version: "12"
+  # opensuse
+  - distro: "opensuse"
+    version: "15.5"
+  - distro: "opensuse"
+    version: "15.6"
+  # RHEL8
+  - distro: "rhel"
+    version: "8.10"
+  # RHEL9
+  - distro: "rhel"
+    version: "9"
+  # RHEL10
+  - distro: "rhel"
+    version: "10"

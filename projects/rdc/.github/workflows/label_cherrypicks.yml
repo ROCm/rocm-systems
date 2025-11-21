@@ -1,0 +1,42 @@
+# caution: this whole file was written using Claude 3.7 Sonnet
+name: Auto Label Cherry-Pick
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  add-label:
+    runs-on: lstt
+    container:
+      image: node:16-alpine
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Add label to cherry-pick PRs
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const baseBranch = pr.base.ref;
+
+            const isReleaseTarget = baseBranch.startsWith('release/');
+
+            if (isReleaseTarget) {
+              const labelToAdd = 'cherry-pick';
+
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  labels: [labelToAdd]
+                });
+                console.log("Added label ${labelToAdd} to PR #${pr.number}");
+              } catch (error) {
+                console.error("Error adding label: ${error.message}");
+              }
+            } else {
+              console.log("PR does not match criteria for automatic labeling");
+            }
+

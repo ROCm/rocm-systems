@@ -1,0 +1,20 @@
+{
+    "jobs": [
+        {
+            "kernel_include_regex": "copyD",
+            "kernel_exclude_regex": "",
+            "output_file": "out",
+            "output_format": [
+                "json"
+            ],
+            "truncate_kernels": true,
+            "advanced_thread_trace": true,
+            "att_target_cu": 1,
+            "att_shader_engine_mask": "0x11",
+            "att_simd_select": "0x3",
+            "att_buffer_size": "0x6000000",
+            "att_perfcounters": "SQ_WAVES:0x1 SQ_INSTS_VALU:0x3 SQ_INSTS_SALU",
+            "att_perfcounter_ctrl": 3
+        }
+    ]
+}

@@ -1,0 +1,130 @@
+name: TheRock CI
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+    inputs:
+      projects:
+        type: string
+        description: "Insert space-separated list of projects to test or 'all' to test all projects. ex: 'projects/clr projects/rocminfo'"
+
+permissions:
+  contents: read
+
+concurrency:
+  # A PR number if a pull request and otherwise the commit hash. This cancels
+  # queued and in-progress runs for the same PR (presubmit) or commit
+  # (postsubmit). The workflow name is prepended to avoid conflicts between
+  # different workflows.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    name: "Setup"
+    runs-on: ubuntu-24.04
+    env:
+      # The commit being checked out is the merge commit for a PR. Its first
+      # parent will be the tip of the base branch.
+      BASE_REF: HEAD^
+    outputs:
+      projects: ${{ steps.projects.outputs.projects }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+          fetch-depth: 2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic requests
+        
+      - name: Detect changed subtrees
+        id: detect
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python .github/scripts/pr_detect_changed_subtrees.py \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --config ".github/repos-config.json"
+
+      - name: Determine projects to run
+        id: projects
+        env:
+          SUBTREES: ${{ steps.detect.outputs.subtrees }}
+          PROJECTS: ${{ inputs.projects }}
+        run: |
+          python .github/scripts/therock_configure_ci.py
+
+  therock-ci-linux:
+    name: Linux (${{ matrix.projects.project_to_test }})
+    permissions:
+      contents: read
+      id-token: write
+    needs: setup
+    if: ${{ needs.setup.outputs.projects != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+    uses: ./.github/workflows/therock-ci-linux.yml
+    secrets: inherit
+    with:
+      cmake_options: ${{ matrix.projects.cmake_options }}
+      project_to_test: ${{ matrix.projects.project_to_test }}
+
+  therock-ci-windows:
+    name: Windows (${{ matrix.projects.project_to_test }})
+    permissions:
+      contents: read
+      id-token: write
+    needs: setup
+    if: ${{ needs.setup.outputs.projects != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+    uses: ./.github/workflows/therock-ci-windows.yml
+    secrets: inherit
+    with:
+      cmake_options: ${{ matrix.projects.cmake_options }}
+      project_to_test: ${{ matrix.projects.project_to_test }}
+
+  therock_ci_summary:
+    name: TheRock CI Summary
+    if: always()
+    needs:
+      - setup
+      - therock-ci-linux
+      - therock-ci-windows
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Output failed jobs
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "The following jobs failed: ${FAILED_JOBS}"
+            exit 1
+          fi

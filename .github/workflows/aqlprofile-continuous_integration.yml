@@ -1,0 +1,209 @@
+name: AqlProfile Continuous Integration
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'projects/aqlprofile/**'
+      - '!projects/aqlprofile/*.md'
+      - '!projects/aqlprofile/CODEOWNERS'
+      - '!projects/aqlprofile/source/docs/**'
+      - '.github/workflows/aqlprofile-continuous_integration.yml'
+  pull_request:
+    paths:
+      - 'projects/aqlprofile/**'
+      - '!projects/aqlprofile/*.md'
+      - '!projects/aqlprofile/CODEOWNERS'
+      - '!projects/aqlprofile/source/docs/**'
+      - '.github/workflows/aqlprofile-continuous_integration.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
+  PYTHON_VENV_PATH: "aqlprofile"
+  PYTHON_VENV_ACTIVATE: "aqlprofile/bin/activate"
+  navi3_EXCLUDE_TESTS_REGEX: ""
+  vega20_EXCLUDE_TESTS_REGEX: ""
+  mi200_EXCLUDE_TESTS_REGEX: ""
+  mi300_EXCLUDE_TESTS_REGEX: ""
+  mi300a_EXCLUDE_TESTS_REGEX: ""
+  mi325_EXCLUDE_TESTS_REGEX: ""
+  navi4_EXCLUDE_TESTS_REGEX: ""
+  navi3_EXCLUDE_LABEL_REGEX: ""
+  vega20_EXCLUDE_LABEL_REGEX: ""
+  mi200_EXCLUDE_LABEL_REGEX: ""
+  mi300_EXCLUDE_LABEL_REGEX: ""
+  mi300a_EXCLUDE_LABEL_REGEX: ""
+  mi325_EXCLUDE_LABEL_REGEX: ""
+  navi4_EXCLUDE_LABEL_REGEX: ""
+
+jobs:
+  core-deb:
+    name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        system: 
+          - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx120X' }
+          - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx110X' }
+          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+
+    runs-on: ${{ matrix.system.runner }}
+    container:
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      options: --privileged --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    # define this for containers
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GPU_RUNNER: ${{ matrix.system.gpu }}
+
+    steps:
+    - name: Install Latest Nightly ROCm
+      shell: bash
+      working-directory: /tmp
+      run: |
+        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+        ln -s -f /usr/bin/git /usr/local/bin/git
+
+    - uses: actions/checkout@v5
+      with:
+        sparse-checkout: projects/aqlprofile
+        set-safe-directory: true
+
+    - name: Install requirements
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        git config --global --add safe.directory '*'
+        apt-get update
+        apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+
+    - name: List Files
+      shell: bash
+      run: |
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
+        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
+        cat ${{ env.ROCM_PATH }}/.info/version
+        ls -la
+        pwd
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 30
+      shell: bash
+      run:
+        PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
+        LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
+        ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${{ matrix.system.runner }}"
+          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
+          -DCMAKE_CTEST_ARGUMENTS=""
+          -DAQLPROFILE_BUILD_TESTS=ON
+          -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
+          -S $(pwd)/projects/aqlprofile/dashboard.cmake
+
+  core-rpm:
+    name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        system: 
+          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'rhel-8.8', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'rhel-9.5', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'sles-15.6', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+
+    runs-on: ${{ matrix.system.runner }}
+    container:
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      options: --privileged --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    # define this for containers
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GPU_RUNNER: ${{ matrix.system.gpu }}
+
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        sparse-checkout: projects/aqlprofile
+        set-safe-directory: true
+
+    - name: Install Latest Nightly ROCm using TheRock Tarballs
+      shell: bash
+      working-directory: /tmp
+      run: |
+        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+
+
+    - name: Install requirements
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        git config --global --add safe.directory '*'
+        python3 -m venv ${{ env.PYTHON_VENV_PATH }}
+        source ${{ env.PYTHON_VENV_ACTIVATE }}
+        export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+        python3 -m pip install --upgrade pip
+        python3 -m pip install cmake
+
+    - name: List Files
+      shell: bash
+      run: |
+        source ${{ env.PYTHON_VENV_ACTIVATE }}
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
+        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
+        cat ${{ env.ROCM_PATH }}/.info/version
+        ls -la
+        pwd
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 30
+      shell: bash
+      run:
+        source ${{ env.PYTHON_VENV_ACTIVATE }}
+        PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
+        LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
+        ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" 
+          -DCTEST_SITE=${{ matrix.system.runner }}
+          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
+          -DCMAKE_CTEST_ARGUMENTS=""
+          -DAQLPROFILE_BUILD_TESTS=ON
+          -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
+          -S $(pwd)/projects/aqlprofile/dashboard.cmake

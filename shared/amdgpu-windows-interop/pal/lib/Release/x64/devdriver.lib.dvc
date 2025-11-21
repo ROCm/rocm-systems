@@ -1,0 +1,5 @@
+outs:
+- md5: 25a99e1ae065b735a3644ece1fc9c0c4
+  size: 2701484
+  hash: md5
+  path: devdriver.lib

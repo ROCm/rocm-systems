@@ -1,0 +1,22 @@
+"Sample_Timestamp","Exec_Mask","Dispatch_Id","Instruction","Instruction_Comment","Correlation_Id"
+54155306462675,65535,1,"s_waitcnt lgkmcnt(0)","/opt/rocm/include/hip/amd_detail/amd_hip_runtime.h:275",1
+54155306462715,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306462755,65535,1,"s_endpgm","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:45",1
+54155306462755,65535,1,"s_endpgm","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:45",1
+54155306462955,65535,1,"s_endpgm","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:45",1
+54155306463035,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306463235,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306463315,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306463515,65535,1,"s_endpgm","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:45",1
+54155306463755,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306463875,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306464075,65535,1,"v_mov_b32_e32 v2, s4","/opt/rocm/include/hip/amd_detail/amd_hip_runtime.h:275",1
+54155306464155,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306464155,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306464275,65535,1,"s_endpgm","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:45",1
+54155306464395,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306464515,65535,1,"s_waitcnt lgkmcnt(0)","/opt/rocm/include/hip/amd_detail/amd_hip_runtime.h:275",1
+54155306464555,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306464595,65535,1,"s_waitcnt vmcnt(0)","/opt/rocm-6.4.0/share/hip/samples/2_Cookbook/0_MatrixTranspose/MatrixTranspose.cpp:44",1
+54155306464595,65535,1,"v_mov_b32_e32 v2, s6","/opt/rocm/include/hip/amd_detail/amd_hip_runtime.h:275",1
+54155306464595,65535,1,"s_waitcnt lgkmcnt(0)","/opt/rocm/include/hip/amd_detail/amd_hip_runtime.h:275",1

@@ -1,0 +1,25 @@
+
+[tool.black]
+line-length = 90
+target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
+include = '\.py$'
+exclude = '''
+(
+  /(
+      \.eggs
+    | \.git
+    | \.github
+    | \.tox
+    | \.venv
+    | \.misc
+    | \.vscode
+    | \.cache
+    | \.pytest_cache
+    | dist
+    | external
+    | build
+    | build-release
+    | build-rocprofiler
+  )/
+)
+'''

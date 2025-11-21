@@ -1,0 +1,169 @@
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
+import os
+import subprocess
+import sys
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
+SRC = os.path.join(ROOT, "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
+
+rocprof_compute = SourceFileLoader(
+    "rocprof-compute", "src/rocprof-compute"
+).load_module()
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--call-binary",
+        action="store_true",
+        default=False,
+        help="Call standalone binary instead of main function during tests",
+    )
+
+    parser.addoption(
+        "--rocprofiler-sdk-library-path",
+        type=str,
+        default=str(
+            Path(os.getenv("ROCM_PATH", "/opt/rocm")) / "lib/librocprofiler-sdk.so"
+        ),
+        help="Path to the rocprofiler-sdk library",
+    )
+
+
+@pytest.fixture
+def binary_handler_profile_rocprof_compute(request):
+    def _handler(
+        config,
+        workload_dir,
+        options=[],
+        check_success=True,
+        roof=False,
+        app_name="app_1",
+        attach_detach_para=None,
+    ):
+        if request.config.getoption("--rocprofiler-sdk-library-path"):
+            options.extend(
+                [
+                    "--rocprofiler-sdk-library-path",
+                    request.config.getoption("--rocprofiler-sdk-library-path"),
+                ],
+            )
+        if request.config.getoption("--call-binary"):
+            baseline_opts = [
+                "build/rocprof-compute.bin",
+                "profile",
+                "-n",
+                app_name,
+                "-VVV",
+            ]
+            if not roof:
+                baseline_opts.append("--no-roof")
+
+            command_rocprof_compute = baseline_opts + options + ["--path", workload_dir]
+            if not attach_detach_para:
+                command_rocprof_compute = (
+                    command_rocprof_compute + ["--"] + config[app_name]
+                )
+            else:
+                command_rocprof_compute = command_rocprof_compute + [
+                    "--attach-pid",
+                    str(attach_detach_para["attach_pid"]),
+                ]
+                if attach_detach_para["attach-duration-msec"]:
+                    command_rocprof_compute = command_rocprof_compute + [
+                        "--attach-duration-msec",
+                        str(attach_detach_para["attach-duration-msec"]),
+                    ]
+
+            process = subprocess.run(
+                command_rocprof_compute,
+                text=True,
+            )
+            # verify run status
+            if check_success:
+                assert process.returncode == 0
+            return process.returncode
+        else:
+            baseline_opts = ["rocprof-compute", "profile", "-n", app_name, "-VVV"]
+            if not roof:
+                baseline_opts.append("--no-roof")
+
+            command_rocprof_compute = baseline_opts + options + ["--path", workload_dir]
+            if not attach_detach_para:
+                command_rocprof_compute = (
+                    command_rocprof_compute + ["--"] + config[app_name]
+                )
+            else:
+                command_rocprof_compute = command_rocprof_compute + [
+                    "--attach-pid",
+                    str(attach_detach_para["attach_pid"]),
+                ]
+                if attach_detach_para["attach-duration-msec"]:
+                    command_rocprof_compute = command_rocprof_compute + [
+                        "--attach-duration-msec",
+                        str(attach_detach_para["attach-duration-msec"]),
+                    ]
+
+            with pytest.raises(SystemExit) as e:
+                with patch(
+                    "sys.argv",
+                    command_rocprof_compute,
+                ):
+                    rocprof_compute.main()
+            # verify run status
+            if check_success:
+                assert e.value.code == 0
+            return e.value.code
+
+    return _handler
+
+
+@pytest.fixture
+def binary_handler_analyze_rocprof_compute(request):
+    def _handler(arguments):
+        if request.config.getoption("--call-binary"):
+            process = subprocess.run(
+                ["build/rocprof-compute.bin", *arguments],
+                text=True,
+            )
+            return process.returncode
+        else:
+            with pytest.raises(SystemExit) as e:
+                with patch(
+                    "sys.argv",
+                    ["rocprof-compute", *arguments],
+                ):
+                    rocprof_compute.main()
+            return e.value.code
+
+    return _handler

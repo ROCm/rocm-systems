@@ -1,0 +1,5 @@
+outs:
+- md5: 78c64bc9c07804300f848425908f3443
+  size: 16268
+  hash: md5
+  path: ddRpcShared.lib

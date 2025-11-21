@@ -1,0 +1,189 @@
+name: rocprofiler-systems Continuous Integration Containers
+run-name: ci-containers
+
+# nightly build
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 5 * * *
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/rocprofiler-systems-containers.yml'
+      - 'projects/rocprofiler-systems/docker/**'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-containers.yml'
+      - 'projects/rocprofiler-systems/docker/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  prepare_matrix_ci:
+    if: github.repository == 'ROCm/rocm-systems'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems/docker
+
+      - name: Output data for containers matrix
+        working-directory: projects/rocprofiler-systems/docker
+        id: generate_matrix_ci
+        run: |
+          MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
+          echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
+
+  rocprofiler-systems-ci:
+    needs: prepare_matrix_ci
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems/docker
+          submodules: recursive
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
+          password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}
+          
+      - name: Build CI Container (PR - No Push)
+        if: github.event_name == 'pull_request'
+        timeout-minutes: 45
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 60
+          timeout_minutes: 45
+          max_attempts: 3
+          command: |
+            pushd projects/rocprofiler-systems/docker
+            ./build-docker-ci.sh \
+              --distro ${{ matrix.distro }} \
+              --versions ${{ matrix.version }} \
+              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
+              --jobs 2 \
+              --elfutils-version 0.188 \
+              --boost-version 1.79.0
+            popd
+
+      - name: Build Base Container (Push)
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 45
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 60
+          timeout_minutes: 45
+          max_attempts: 3
+          command: |
+            pushd projects/rocprofiler-systems/docker
+            ./build-docker-ci.sh \
+              --distro ${{ matrix.distro }} \
+              --versions ${{ matrix.version }} \
+              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
+              --jobs 2 \
+              --elfutils-version 0.188 \
+              --boost-version 1.79.0 \
+              --push
+            popd
+
+  prepare_matrix_release:
+    if: github.repository == 'ROCm/rocm-systems'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_data: ${{ steps.generate_matrix_release.outputs.matrix_data }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+
+      - name: Output data for containers matrix
+        working-directory: projects/rocprofiler-systems/docker
+        id: generate_matrix_release
+        run: |
+          MATRIX_CONTENT=$(cat containers.yml | yq '.matrix' -I=0 -o=json)
+          echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
+          
+  rocprofiler-systems-release:
+    needs: prepare_matrix_release
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare_matrix_release.outputs.matrix_data) }}
+          
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
+          password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}
+
+      - name: Build Base Container (PR - No Push)
+        if: github.event_name == 'pull_request'
+        timeout-minutes: 45
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 60
+          timeout_minutes: 45
+          max_attempts: 3
+          command: |
+            pushd projects/rocprofiler-systems/docker
+            ./build-docker.sh \
+              --distro ${{ matrix.os-distro }} \
+              --versions ${{ matrix.os-version }} \
+              --rocm-versions ${{ matrix.rocm-version }} \
+              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
+            popd
+      
+      - name: Build Base Container (Push)
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 45
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 60
+          timeout_minutes: 45
+          max_attempts: 3
+          command: |
+            pushd projects/rocprofiler-systems/docker
+            ./build-docker.sh \
+              --distro ${{ matrix.os-distro }} \
+              --versions ${{ matrix.os-version }} \
+              --rocm-versions ${{ matrix.rocm-version }} \
+              --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
+              --push
+            popd

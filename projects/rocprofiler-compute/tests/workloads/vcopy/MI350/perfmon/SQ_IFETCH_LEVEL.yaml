@@ -1,0 +1,1925 @@
+SQ_IFETCH_LEVEL_ACCUM:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: accumulate(SQ_IFETCH_LEVEL, HIGH_RES)
+  description: SQ_IFETCH_LEVEL accumulation
+TCC_EA0_RDREQ[0]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_RDREQ on 0th XCC and 0th channel
+TCC_EA0_RDREQ[100]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_RDREQ on 6th XCC and 4th channel
+TCC_EA0_RDREQ[101]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_RDREQ on 6th XCC and 5th channel
+TCC_EA0_RDREQ[102]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_RDREQ on 6th XCC and 6th channel
+TCC_EA0_RDREQ[103]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_RDREQ on 6th XCC and 7th channel
+TCC_EA0_RDREQ[104]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_RDREQ on 6th XCC and 8th channel
+TCC_EA0_RDREQ[105]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_RDREQ on 6th XCC and 9th channel
+TCC_EA0_RDREQ[106]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_RDREQ on 6th XCC and 10th channel
+TCC_EA0_RDREQ[107]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_RDREQ on 6th XCC and 11th channel
+TCC_EA0_RDREQ[108]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_RDREQ on 6th XCC and 12th channel
+TCC_EA0_RDREQ[109]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_RDREQ on 6th XCC and 13th channel
+TCC_EA0_RDREQ[10]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_RDREQ on 0th XCC and 10th channel
+TCC_EA0_RDREQ[110]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_RDREQ on 6th XCC and 14th channel
+TCC_EA0_RDREQ[111]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_RDREQ on 6th XCC and 15th channel
+TCC_EA0_RDREQ[112]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_RDREQ on 7th XCC and 0th channel
+TCC_EA0_RDREQ[113]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_RDREQ on 7th XCC and 1th channel
+TCC_EA0_RDREQ[114]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_RDREQ on 7th XCC and 2th channel
+TCC_EA0_RDREQ[115]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_RDREQ on 7th XCC and 3th channel
+TCC_EA0_RDREQ[116]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_RDREQ on 7th XCC and 4th channel
+TCC_EA0_RDREQ[117]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_RDREQ on 7th XCC and 5th channel
+TCC_EA0_RDREQ[118]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_RDREQ on 7th XCC and 6th channel
+TCC_EA0_RDREQ[119]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_RDREQ on 7th XCC and 7th channel
+TCC_EA0_RDREQ[11]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_RDREQ on 0th XCC and 11th channel
+TCC_EA0_RDREQ[120]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_RDREQ on 7th XCC and 8th channel
+TCC_EA0_RDREQ[121]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_RDREQ on 7th XCC and 9th channel
+TCC_EA0_RDREQ[122]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_RDREQ on 7th XCC and 10th channel
+TCC_EA0_RDREQ[123]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_RDREQ on 7th XCC and 11th channel
+TCC_EA0_RDREQ[124]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_RDREQ on 7th XCC and 12th channel
+TCC_EA0_RDREQ[125]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_RDREQ on 7th XCC and 13th channel
+TCC_EA0_RDREQ[126]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_RDREQ on 7th XCC and 14th channel
+TCC_EA0_RDREQ[127]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_RDREQ on 7th XCC and 15th channel
+TCC_EA0_RDREQ[12]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_RDREQ on 0th XCC and 12th channel
+TCC_EA0_RDREQ[13]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_RDREQ on 0th XCC and 13th channel
+TCC_EA0_RDREQ[14]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_RDREQ on 0th XCC and 14th channel
+TCC_EA0_RDREQ[15]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_RDREQ on 0th XCC and 15th channel
+TCC_EA0_RDREQ[16]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_RDREQ on 1th XCC and 0th channel
+TCC_EA0_RDREQ[17]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_RDREQ on 1th XCC and 1th channel
+TCC_EA0_RDREQ[18]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_RDREQ on 1th XCC and 2th channel
+TCC_EA0_RDREQ[19]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_RDREQ on 1th XCC and 3th channel
+TCC_EA0_RDREQ[1]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_RDREQ on 0th XCC and 1th channel
+TCC_EA0_RDREQ[20]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_RDREQ on 1th XCC and 4th channel
+TCC_EA0_RDREQ[21]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_RDREQ on 1th XCC and 5th channel
+TCC_EA0_RDREQ[22]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_RDREQ on 1th XCC and 6th channel
+TCC_EA0_RDREQ[23]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_RDREQ on 1th XCC and 7th channel
+TCC_EA0_RDREQ[24]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_RDREQ on 1th XCC and 8th channel
+TCC_EA0_RDREQ[25]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_RDREQ on 1th XCC and 9th channel
+TCC_EA0_RDREQ[26]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_RDREQ on 1th XCC and 10th channel
+TCC_EA0_RDREQ[27]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_RDREQ on 1th XCC and 11th channel
+TCC_EA0_RDREQ[28]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_RDREQ on 1th XCC and 12th channel
+TCC_EA0_RDREQ[29]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_RDREQ on 1th XCC and 13th channel
+TCC_EA0_RDREQ[2]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_RDREQ on 0th XCC and 2th channel
+TCC_EA0_RDREQ[30]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_RDREQ on 1th XCC and 14th channel
+TCC_EA0_RDREQ[31]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_RDREQ on 1th XCC and 15th channel
+TCC_EA0_RDREQ[32]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_RDREQ on 2th XCC and 0th channel
+TCC_EA0_RDREQ[33]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_RDREQ on 2th XCC and 1th channel
+TCC_EA0_RDREQ[34]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_RDREQ on 2th XCC and 2th channel
+TCC_EA0_RDREQ[35]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_RDREQ on 2th XCC and 3th channel
+TCC_EA0_RDREQ[36]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_RDREQ on 2th XCC and 4th channel
+TCC_EA0_RDREQ[37]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_RDREQ on 2th XCC and 5th channel
+TCC_EA0_RDREQ[38]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_RDREQ on 2th XCC and 6th channel
+TCC_EA0_RDREQ[39]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_RDREQ on 2th XCC and 7th channel
+TCC_EA0_RDREQ[3]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_RDREQ on 0th XCC and 3th channel
+TCC_EA0_RDREQ[40]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_RDREQ on 2th XCC and 8th channel
+TCC_EA0_RDREQ[41]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_RDREQ on 2th XCC and 9th channel
+TCC_EA0_RDREQ[42]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_RDREQ on 2th XCC and 10th channel
+TCC_EA0_RDREQ[43]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_RDREQ on 2th XCC and 11th channel
+TCC_EA0_RDREQ[44]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_RDREQ on 2th XCC and 12th channel
+TCC_EA0_RDREQ[45]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_RDREQ on 2th XCC and 13th channel
+TCC_EA0_RDREQ[46]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_RDREQ on 2th XCC and 14th channel
+TCC_EA0_RDREQ[47]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_RDREQ on 2th XCC and 15th channel
+TCC_EA0_RDREQ[48]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_RDREQ on 3th XCC and 0th channel
+TCC_EA0_RDREQ[49]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_RDREQ on 3th XCC and 1th channel
+TCC_EA0_RDREQ[4]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_RDREQ on 0th XCC and 4th channel
+TCC_EA0_RDREQ[50]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_RDREQ on 3th XCC and 2th channel
+TCC_EA0_RDREQ[51]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_RDREQ on 3th XCC and 3th channel
+TCC_EA0_RDREQ[52]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_RDREQ on 3th XCC and 4th channel
+TCC_EA0_RDREQ[53]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_RDREQ on 3th XCC and 5th channel
+TCC_EA0_RDREQ[54]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_RDREQ on 3th XCC and 6th channel
+TCC_EA0_RDREQ[55]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_RDREQ on 3th XCC and 7th channel
+TCC_EA0_RDREQ[56]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_RDREQ on 3th XCC and 8th channel
+TCC_EA0_RDREQ[57]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_RDREQ on 3th XCC and 9th channel
+TCC_EA0_RDREQ[58]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_RDREQ on 3th XCC and 10th channel
+TCC_EA0_RDREQ[59]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_RDREQ on 3th XCC and 11th channel
+TCC_EA0_RDREQ[5]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_RDREQ on 0th XCC and 5th channel
+TCC_EA0_RDREQ[60]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_RDREQ on 3th XCC and 12th channel
+TCC_EA0_RDREQ[61]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_RDREQ on 3th XCC and 13th channel
+TCC_EA0_RDREQ[62]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_RDREQ on 3th XCC and 14th channel
+TCC_EA0_RDREQ[63]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_RDREQ on 3th XCC and 15th channel
+TCC_EA0_RDREQ[64]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_RDREQ on 4th XCC and 0th channel
+TCC_EA0_RDREQ[65]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_RDREQ on 4th XCC and 1th channel
+TCC_EA0_RDREQ[66]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_RDREQ on 4th XCC and 2th channel
+TCC_EA0_RDREQ[67]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_RDREQ on 4th XCC and 3th channel
+TCC_EA0_RDREQ[68]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_RDREQ on 4th XCC and 4th channel
+TCC_EA0_RDREQ[69]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_RDREQ on 4th XCC and 5th channel
+TCC_EA0_RDREQ[6]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_RDREQ on 0th XCC and 6th channel
+TCC_EA0_RDREQ[70]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_RDREQ on 4th XCC and 6th channel
+TCC_EA0_RDREQ[71]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_RDREQ on 4th XCC and 7th channel
+TCC_EA0_RDREQ[72]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_RDREQ on 4th XCC and 8th channel
+TCC_EA0_RDREQ[73]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_RDREQ on 4th XCC and 9th channel
+TCC_EA0_RDREQ[74]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_RDREQ on 4th XCC and 10th channel
+TCC_EA0_RDREQ[75]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_RDREQ on 4th XCC and 11th channel
+TCC_EA0_RDREQ[76]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_RDREQ on 4th XCC and 12th channel
+TCC_EA0_RDREQ[77]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_RDREQ on 4th XCC and 13th channel
+TCC_EA0_RDREQ[78]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_RDREQ on 4th XCC and 14th channel
+TCC_EA0_RDREQ[79]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_RDREQ on 4th XCC and 15th channel
+TCC_EA0_RDREQ[7]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_RDREQ on 0th XCC and 7th channel
+TCC_EA0_RDREQ[80]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_RDREQ on 5th XCC and 0th channel
+TCC_EA0_RDREQ[81]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_RDREQ on 5th XCC and 1th channel
+TCC_EA0_RDREQ[82]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_RDREQ on 5th XCC and 2th channel
+TCC_EA0_RDREQ[83]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_RDREQ on 5th XCC and 3th channel
+TCC_EA0_RDREQ[84]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_RDREQ on 5th XCC and 4th channel
+TCC_EA0_RDREQ[85]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_RDREQ on 5th XCC and 5th channel
+TCC_EA0_RDREQ[86]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_RDREQ on 5th XCC and 6th channel
+TCC_EA0_RDREQ[87]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_RDREQ on 5th XCC and 7th channel
+TCC_EA0_RDREQ[88]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_RDREQ on 5th XCC and 8th channel
+TCC_EA0_RDREQ[89]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_RDREQ on 5th XCC and 9th channel
+TCC_EA0_RDREQ[8]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_RDREQ on 0th XCC and 8th channel
+TCC_EA0_RDREQ[90]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_RDREQ on 5th XCC and 10th channel
+TCC_EA0_RDREQ[91]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_RDREQ on 5th XCC and 11th channel
+TCC_EA0_RDREQ[92]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_RDREQ on 5th XCC and 12th channel
+TCC_EA0_RDREQ[93]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_RDREQ on 5th XCC and 13th channel
+TCC_EA0_RDREQ[94]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_RDREQ on 5th XCC and 14th channel
+TCC_EA0_RDREQ[95]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_RDREQ on 5th XCC and 15th channel
+TCC_EA0_RDREQ[96]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_RDREQ on 6th XCC and 0th channel
+TCC_EA0_RDREQ[97]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_RDREQ on 6th XCC and 1th channel
+TCC_EA0_RDREQ[98]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_RDREQ on 6th XCC and 2th channel
+TCC_EA0_RDREQ[99]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_RDREQ on 6th XCC and 3th channel
+TCC_EA0_RDREQ[9]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_RDREQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_RDREQ on 0th XCC and 9th channel
+TCC_EA0_WRREQ_LEVEL[0]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 0th channel
+TCC_EA0_WRREQ_LEVEL[100]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 4th channel
+TCC_EA0_WRREQ_LEVEL[101]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 5th channel
+TCC_EA0_WRREQ_LEVEL[102]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 6th channel
+TCC_EA0_WRREQ_LEVEL[103]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 7th channel
+TCC_EA0_WRREQ_LEVEL[104]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 8th channel
+TCC_EA0_WRREQ_LEVEL[105]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 9th channel
+TCC_EA0_WRREQ_LEVEL[106]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 10th channel
+TCC_EA0_WRREQ_LEVEL[107]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 11th channel
+TCC_EA0_WRREQ_LEVEL[108]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 12th channel
+TCC_EA0_WRREQ_LEVEL[109]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 13th channel
+TCC_EA0_WRREQ_LEVEL[10]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 10th channel
+TCC_EA0_WRREQ_LEVEL[110]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 14th channel
+TCC_EA0_WRREQ_LEVEL[111]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 15th channel
+TCC_EA0_WRREQ_LEVEL[112]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 0th channel
+TCC_EA0_WRREQ_LEVEL[113]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 1th channel
+TCC_EA0_WRREQ_LEVEL[114]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 2th channel
+TCC_EA0_WRREQ_LEVEL[115]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 3th channel
+TCC_EA0_WRREQ_LEVEL[116]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 4th channel
+TCC_EA0_WRREQ_LEVEL[117]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 5th channel
+TCC_EA0_WRREQ_LEVEL[118]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 6th channel
+TCC_EA0_WRREQ_LEVEL[119]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 7th channel
+TCC_EA0_WRREQ_LEVEL[11]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 11th channel
+TCC_EA0_WRREQ_LEVEL[120]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 8th channel
+TCC_EA0_WRREQ_LEVEL[121]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 9th channel
+TCC_EA0_WRREQ_LEVEL[122]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 10th channel
+TCC_EA0_WRREQ_LEVEL[123]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 11th channel
+TCC_EA0_WRREQ_LEVEL[124]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 12th channel
+TCC_EA0_WRREQ_LEVEL[125]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 13th channel
+TCC_EA0_WRREQ_LEVEL[126]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 14th channel
+TCC_EA0_WRREQ_LEVEL[127]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_WRREQ_LEVEL on 7th XCC and 15th channel
+TCC_EA0_WRREQ_LEVEL[12]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 12th channel
+TCC_EA0_WRREQ_LEVEL[13]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 13th channel
+TCC_EA0_WRREQ_LEVEL[14]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 14th channel
+TCC_EA0_WRREQ_LEVEL[15]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 15th channel
+TCC_EA0_WRREQ_LEVEL[16]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 0th channel
+TCC_EA0_WRREQ_LEVEL[17]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 1th channel
+TCC_EA0_WRREQ_LEVEL[18]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 2th channel
+TCC_EA0_WRREQ_LEVEL[19]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 3th channel
+TCC_EA0_WRREQ_LEVEL[1]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 1th channel
+TCC_EA0_WRREQ_LEVEL[20]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 4th channel
+TCC_EA0_WRREQ_LEVEL[21]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 5th channel
+TCC_EA0_WRREQ_LEVEL[22]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 6th channel
+TCC_EA0_WRREQ_LEVEL[23]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 7th channel
+TCC_EA0_WRREQ_LEVEL[24]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 8th channel
+TCC_EA0_WRREQ_LEVEL[25]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 9th channel
+TCC_EA0_WRREQ_LEVEL[26]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 10th channel
+TCC_EA0_WRREQ_LEVEL[27]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 11th channel
+TCC_EA0_WRREQ_LEVEL[28]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 12th channel
+TCC_EA0_WRREQ_LEVEL[29]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 13th channel
+TCC_EA0_WRREQ_LEVEL[2]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 2th channel
+TCC_EA0_WRREQ_LEVEL[30]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 14th channel
+TCC_EA0_WRREQ_LEVEL[31]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_WRREQ_LEVEL on 1th XCC and 15th channel
+TCC_EA0_WRREQ_LEVEL[32]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 0th channel
+TCC_EA0_WRREQ_LEVEL[33]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 1th channel
+TCC_EA0_WRREQ_LEVEL[34]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 2th channel
+TCC_EA0_WRREQ_LEVEL[35]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 3th channel
+TCC_EA0_WRREQ_LEVEL[36]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 4th channel
+TCC_EA0_WRREQ_LEVEL[37]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 5th channel
+TCC_EA0_WRREQ_LEVEL[38]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 6th channel
+TCC_EA0_WRREQ_LEVEL[39]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 7th channel
+TCC_EA0_WRREQ_LEVEL[3]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 3th channel
+TCC_EA0_WRREQ_LEVEL[40]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 8th channel
+TCC_EA0_WRREQ_LEVEL[41]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 9th channel
+TCC_EA0_WRREQ_LEVEL[42]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 10th channel
+TCC_EA0_WRREQ_LEVEL[43]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 11th channel
+TCC_EA0_WRREQ_LEVEL[44]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 12th channel
+TCC_EA0_WRREQ_LEVEL[45]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 13th channel
+TCC_EA0_WRREQ_LEVEL[46]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 14th channel
+TCC_EA0_WRREQ_LEVEL[47]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_WRREQ_LEVEL on 2th XCC and 15th channel
+TCC_EA0_WRREQ_LEVEL[48]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 0th channel
+TCC_EA0_WRREQ_LEVEL[49]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 1th channel
+TCC_EA0_WRREQ_LEVEL[4]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 4th channel
+TCC_EA0_WRREQ_LEVEL[50]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 2th channel
+TCC_EA0_WRREQ_LEVEL[51]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 3th channel
+TCC_EA0_WRREQ_LEVEL[52]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 4th channel
+TCC_EA0_WRREQ_LEVEL[53]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 5th channel
+TCC_EA0_WRREQ_LEVEL[54]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 6th channel
+TCC_EA0_WRREQ_LEVEL[55]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 7th channel
+TCC_EA0_WRREQ_LEVEL[56]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 8th channel
+TCC_EA0_WRREQ_LEVEL[57]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 9th channel
+TCC_EA0_WRREQ_LEVEL[58]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 10th channel
+TCC_EA0_WRREQ_LEVEL[59]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 11th channel
+TCC_EA0_WRREQ_LEVEL[5]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 5th channel
+TCC_EA0_WRREQ_LEVEL[60]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 12th channel
+TCC_EA0_WRREQ_LEVEL[61]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 13th channel
+TCC_EA0_WRREQ_LEVEL[62]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 14th channel
+TCC_EA0_WRREQ_LEVEL[63]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_WRREQ_LEVEL on 3th XCC and 15th channel
+TCC_EA0_WRREQ_LEVEL[64]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 0th channel
+TCC_EA0_WRREQ_LEVEL[65]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 1th channel
+TCC_EA0_WRREQ_LEVEL[66]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 2th channel
+TCC_EA0_WRREQ_LEVEL[67]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 3th channel
+TCC_EA0_WRREQ_LEVEL[68]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 4th channel
+TCC_EA0_WRREQ_LEVEL[69]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 5th channel
+TCC_EA0_WRREQ_LEVEL[6]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 6th channel
+TCC_EA0_WRREQ_LEVEL[70]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 6th channel
+TCC_EA0_WRREQ_LEVEL[71]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 7th channel
+TCC_EA0_WRREQ_LEVEL[72]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 8th channel
+TCC_EA0_WRREQ_LEVEL[73]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 9th channel
+TCC_EA0_WRREQ_LEVEL[74]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 10th channel
+TCC_EA0_WRREQ_LEVEL[75]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 11th channel
+TCC_EA0_WRREQ_LEVEL[76]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 12th channel
+TCC_EA0_WRREQ_LEVEL[77]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 13th channel
+TCC_EA0_WRREQ_LEVEL[78]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 14th channel
+TCC_EA0_WRREQ_LEVEL[79]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_WRREQ_LEVEL on 4th XCC and 15th channel
+TCC_EA0_WRREQ_LEVEL[7]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 7th channel
+TCC_EA0_WRREQ_LEVEL[80]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 0th channel
+TCC_EA0_WRREQ_LEVEL[81]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 1th channel
+TCC_EA0_WRREQ_LEVEL[82]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 2th channel
+TCC_EA0_WRREQ_LEVEL[83]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 3th channel
+TCC_EA0_WRREQ_LEVEL[84]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 4th channel
+TCC_EA0_WRREQ_LEVEL[85]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 5th channel
+TCC_EA0_WRREQ_LEVEL[86]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 6th channel
+TCC_EA0_WRREQ_LEVEL[87]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 7th channel
+TCC_EA0_WRREQ_LEVEL[88]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 8th channel
+TCC_EA0_WRREQ_LEVEL[89]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 9th channel
+TCC_EA0_WRREQ_LEVEL[8]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 8th channel
+TCC_EA0_WRREQ_LEVEL[90]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 10th channel
+TCC_EA0_WRREQ_LEVEL[91]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 11th channel
+TCC_EA0_WRREQ_LEVEL[92]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 12th channel
+TCC_EA0_WRREQ_LEVEL[93]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 13th channel
+TCC_EA0_WRREQ_LEVEL[94]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 14th channel
+TCC_EA0_WRREQ_LEVEL[95]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_WRREQ_LEVEL on 5th XCC and 15th channel
+TCC_EA0_WRREQ_LEVEL[96]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 0th channel
+TCC_EA0_WRREQ_LEVEL[97]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 1th channel
+TCC_EA0_WRREQ_LEVEL[98]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 2th channel
+TCC_EA0_WRREQ_LEVEL[99]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_WRREQ_LEVEL on 6th XCC and 3th channel
+TCC_EA0_WRREQ_LEVEL[9]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_WRREQ_LEVEL,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_WRREQ_LEVEL on 0th XCC and 9th channel
+TCC_REQ[0]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])
+  description: TCC_REQ on 0th XCC and 0th channel
+TCC_REQ[100]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[4]])
+  description: TCC_REQ on 6th XCC and 4th channel
+TCC_REQ[101]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[5]])
+  description: TCC_REQ on 6th XCC and 5th channel
+TCC_REQ[102]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[6]])
+  description: TCC_REQ on 6th XCC and 6th channel
+TCC_REQ[103]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[7]])
+  description: TCC_REQ on 6th XCC and 7th channel
+TCC_REQ[104]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[8]])
+  description: TCC_REQ on 6th XCC and 8th channel
+TCC_REQ[105]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[9]])
+  description: TCC_REQ on 6th XCC and 9th channel
+TCC_REQ[106]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[10]])
+  description: TCC_REQ on 6th XCC and 10th channel
+TCC_REQ[107]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[11]])
+  description: TCC_REQ on 6th XCC and 11th channel
+TCC_REQ[108]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[12]])
+  description: TCC_REQ on 6th XCC and 12th channel
+TCC_REQ[109]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[13]])
+  description: TCC_REQ on 6th XCC and 13th channel
+TCC_REQ[10]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[10]])
+  description: TCC_REQ on 0th XCC and 10th channel
+TCC_REQ[110]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[14]])
+  description: TCC_REQ on 6th XCC and 14th channel
+TCC_REQ[111]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[15]])
+  description: TCC_REQ on 6th XCC and 15th channel
+TCC_REQ[112]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[0]])
+  description: TCC_REQ on 7th XCC and 0th channel
+TCC_REQ[113]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[1]])
+  description: TCC_REQ on 7th XCC and 1th channel
+TCC_REQ[114]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[2]])
+  description: TCC_REQ on 7th XCC and 2th channel
+TCC_REQ[115]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[3]])
+  description: TCC_REQ on 7th XCC and 3th channel
+TCC_REQ[116]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[4]])
+  description: TCC_REQ on 7th XCC and 4th channel
+TCC_REQ[117]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[5]])
+  description: TCC_REQ on 7th XCC and 5th channel
+TCC_REQ[118]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[6]])
+  description: TCC_REQ on 7th XCC and 6th channel
+TCC_REQ[119]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[7]])
+  description: TCC_REQ on 7th XCC and 7th channel
+TCC_REQ[11]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[11]])
+  description: TCC_REQ on 0th XCC and 11th channel
+TCC_REQ[120]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[8]])
+  description: TCC_REQ on 7th XCC and 8th channel
+TCC_REQ[121]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[9]])
+  description: TCC_REQ on 7th XCC and 9th channel
+TCC_REQ[122]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[10]])
+  description: TCC_REQ on 7th XCC and 10th channel
+TCC_REQ[123]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[11]])
+  description: TCC_REQ on 7th XCC and 11th channel
+TCC_REQ[124]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[12]])
+  description: TCC_REQ on 7th XCC and 12th channel
+TCC_REQ[125]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[13]])
+  description: TCC_REQ on 7th XCC and 13th channel
+TCC_REQ[126]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[14]])
+  description: TCC_REQ on 7th XCC and 14th channel
+TCC_REQ[127]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[15]])
+  description: TCC_REQ on 7th XCC and 15th channel
+TCC_REQ[12]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[12]])
+  description: TCC_REQ on 0th XCC and 12th channel
+TCC_REQ[13]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[13]])
+  description: TCC_REQ on 0th XCC and 13th channel
+TCC_REQ[14]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[14]])
+  description: TCC_REQ on 0th XCC and 14th channel
+TCC_REQ[15]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[15]])
+  description: TCC_REQ on 0th XCC and 15th channel
+TCC_REQ[16]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[0]])
+  description: TCC_REQ on 1th XCC and 0th channel
+TCC_REQ[17]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[1]])
+  description: TCC_REQ on 1th XCC and 1th channel
+TCC_REQ[18]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[2]])
+  description: TCC_REQ on 1th XCC and 2th channel
+TCC_REQ[19]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[3]])
+  description: TCC_REQ on 1th XCC and 3th channel
+TCC_REQ[1]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[1]])
+  description: TCC_REQ on 0th XCC and 1th channel
+TCC_REQ[20]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[4]])
+  description: TCC_REQ on 1th XCC and 4th channel
+TCC_REQ[21]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[5]])
+  description: TCC_REQ on 1th XCC and 5th channel
+TCC_REQ[22]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[6]])
+  description: TCC_REQ on 1th XCC and 6th channel
+TCC_REQ[23]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[7]])
+  description: TCC_REQ on 1th XCC and 7th channel
+TCC_REQ[24]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[8]])
+  description: TCC_REQ on 1th XCC and 8th channel
+TCC_REQ[25]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[9]])
+  description: TCC_REQ on 1th XCC and 9th channel
+TCC_REQ[26]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[10]])
+  description: TCC_REQ on 1th XCC and 10th channel
+TCC_REQ[27]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[11]])
+  description: TCC_REQ on 1th XCC and 11th channel
+TCC_REQ[28]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[12]])
+  description: TCC_REQ on 1th XCC and 12th channel
+TCC_REQ[29]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[13]])
+  description: TCC_REQ on 1th XCC and 13th channel
+TCC_REQ[2]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[2]])
+  description: TCC_REQ on 0th XCC and 2th channel
+TCC_REQ[30]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[14]])
+  description: TCC_REQ on 1th XCC and 14th channel
+TCC_REQ[31]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[15]])
+  description: TCC_REQ on 1th XCC and 15th channel
+TCC_REQ[32]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[0]])
+  description: TCC_REQ on 2th XCC and 0th channel
+TCC_REQ[33]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[1]])
+  description: TCC_REQ on 2th XCC and 1th channel
+TCC_REQ[34]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[2]])
+  description: TCC_REQ on 2th XCC and 2th channel
+TCC_REQ[35]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[3]])
+  description: TCC_REQ on 2th XCC and 3th channel
+TCC_REQ[36]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[4]])
+  description: TCC_REQ on 2th XCC and 4th channel
+TCC_REQ[37]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[5]])
+  description: TCC_REQ on 2th XCC and 5th channel
+TCC_REQ[38]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[6]])
+  description: TCC_REQ on 2th XCC and 6th channel
+TCC_REQ[39]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[7]])
+  description: TCC_REQ on 2th XCC and 7th channel
+TCC_REQ[3]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[3]])
+  description: TCC_REQ on 0th XCC and 3th channel
+TCC_REQ[40]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[8]])
+  description: TCC_REQ on 2th XCC and 8th channel
+TCC_REQ[41]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[9]])
+  description: TCC_REQ on 2th XCC and 9th channel
+TCC_REQ[42]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[10]])
+  description: TCC_REQ on 2th XCC and 10th channel
+TCC_REQ[43]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[11]])
+  description: TCC_REQ on 2th XCC and 11th channel
+TCC_REQ[44]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[12]])
+  description: TCC_REQ on 2th XCC and 12th channel
+TCC_REQ[45]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[13]])
+  description: TCC_REQ on 2th XCC and 13th channel
+TCC_REQ[46]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[14]])
+  description: TCC_REQ on 2th XCC and 14th channel
+TCC_REQ[47]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[15]])
+  description: TCC_REQ on 2th XCC and 15th channel
+TCC_REQ[48]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[0]])
+  description: TCC_REQ on 3th XCC and 0th channel
+TCC_REQ[49]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[1]])
+  description: TCC_REQ on 3th XCC and 1th channel
+TCC_REQ[4]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[4]])
+  description: TCC_REQ on 0th XCC and 4th channel
+TCC_REQ[50]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[2]])
+  description: TCC_REQ on 3th XCC and 2th channel
+TCC_REQ[51]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[3]])
+  description: TCC_REQ on 3th XCC and 3th channel
+TCC_REQ[52]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[4]])
+  description: TCC_REQ on 3th XCC and 4th channel
+TCC_REQ[53]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[5]])
+  description: TCC_REQ on 3th XCC and 5th channel
+TCC_REQ[54]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[6]])
+  description: TCC_REQ on 3th XCC and 6th channel
+TCC_REQ[55]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[7]])
+  description: TCC_REQ on 3th XCC and 7th channel
+TCC_REQ[56]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[8]])
+  description: TCC_REQ on 3th XCC and 8th channel
+TCC_REQ[57]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[9]])
+  description: TCC_REQ on 3th XCC and 9th channel
+TCC_REQ[58]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[10]])
+  description: TCC_REQ on 3th XCC and 10th channel
+TCC_REQ[59]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[11]])
+  description: TCC_REQ on 3th XCC and 11th channel
+TCC_REQ[5]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[5]])
+  description: TCC_REQ on 0th XCC and 5th channel
+TCC_REQ[60]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[12]])
+  description: TCC_REQ on 3th XCC and 12th channel
+TCC_REQ[61]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[13]])
+  description: TCC_REQ on 3th XCC and 13th channel
+TCC_REQ[62]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[14]])
+  description: TCC_REQ on 3th XCC and 14th channel
+TCC_REQ[63]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[15]])
+  description: TCC_REQ on 3th XCC and 15th channel
+TCC_REQ[64]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[0]])
+  description: TCC_REQ on 4th XCC and 0th channel
+TCC_REQ[65]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[1]])
+  description: TCC_REQ on 4th XCC and 1th channel
+TCC_REQ[66]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[2]])
+  description: TCC_REQ on 4th XCC and 2th channel
+TCC_REQ[67]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[3]])
+  description: TCC_REQ on 4th XCC and 3th channel
+TCC_REQ[68]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[4]])
+  description: TCC_REQ on 4th XCC and 4th channel
+TCC_REQ[69]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[5]])
+  description: TCC_REQ on 4th XCC and 5th channel
+TCC_REQ[6]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[6]])
+  description: TCC_REQ on 0th XCC and 6th channel
+TCC_REQ[70]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[6]])
+  description: TCC_REQ on 4th XCC and 6th channel
+TCC_REQ[71]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[7]])
+  description: TCC_REQ on 4th XCC and 7th channel
+TCC_REQ[72]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[8]])
+  description: TCC_REQ on 4th XCC and 8th channel
+TCC_REQ[73]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[9]])
+  description: TCC_REQ on 4th XCC and 9th channel
+TCC_REQ[74]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[10]])
+  description: TCC_REQ on 4th XCC and 10th channel
+TCC_REQ[75]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[11]])
+  description: TCC_REQ on 4th XCC and 11th channel
+TCC_REQ[76]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[12]])
+  description: TCC_REQ on 4th XCC and 12th channel
+TCC_REQ[77]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[13]])
+  description: TCC_REQ on 4th XCC and 13th channel
+TCC_REQ[78]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[14]])
+  description: TCC_REQ on 4th XCC and 14th channel
+TCC_REQ[79]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[15]])
+  description: TCC_REQ on 4th XCC and 15th channel
+TCC_REQ[7]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[7]])
+  description: TCC_REQ on 0th XCC and 7th channel
+TCC_REQ[80]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[0]])
+  description: TCC_REQ on 5th XCC and 0th channel
+TCC_REQ[81]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[1]])
+  description: TCC_REQ on 5th XCC and 1th channel
+TCC_REQ[82]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[2]])
+  description: TCC_REQ on 5th XCC and 2th channel
+TCC_REQ[83]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[3]])
+  description: TCC_REQ on 5th XCC and 3th channel
+TCC_REQ[84]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[4]])
+  description: TCC_REQ on 5th XCC and 4th channel
+TCC_REQ[85]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[5]])
+  description: TCC_REQ on 5th XCC and 5th channel
+TCC_REQ[86]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[6]])
+  description: TCC_REQ on 5th XCC and 6th channel
+TCC_REQ[87]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[7]])
+  description: TCC_REQ on 5th XCC and 7th channel
+TCC_REQ[88]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[8]])
+  description: TCC_REQ on 5th XCC and 8th channel
+TCC_REQ[89]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[9]])
+  description: TCC_REQ on 5th XCC and 9th channel
+TCC_REQ[8]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[8]])
+  description: TCC_REQ on 0th XCC and 8th channel
+TCC_REQ[90]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[10]])
+  description: TCC_REQ on 5th XCC and 10th channel
+TCC_REQ[91]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[11]])
+  description: TCC_REQ on 5th XCC and 11th channel
+TCC_REQ[92]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[12]])
+  description: TCC_REQ on 5th XCC and 12th channel
+TCC_REQ[93]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[13]])
+  description: TCC_REQ on 5th XCC and 13th channel
+TCC_REQ[94]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[14]])
+  description: TCC_REQ on 5th XCC and 14th channel
+TCC_REQ[95]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[15]])
+  description: TCC_REQ on 5th XCC and 15th channel
+TCC_REQ[96]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[0]])
+  description: TCC_REQ on 6th XCC and 0th channel
+TCC_REQ[97]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[1]])
+  description: TCC_REQ on 6th XCC and 1th channel
+TCC_REQ[98]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[2]])
+  description: TCC_REQ on 6th XCC and 2th channel
+TCC_REQ[99]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[3]])
+  description: TCC_REQ on 6th XCC and 3th channel
+TCC_REQ[9]:
+  architectures:
+    gfx950:
+      expression: select(TCC_REQ,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[9]])
+  description: TCC_REQ on 0th XCC and 9th channel

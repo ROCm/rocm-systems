@@ -1,0 +1,5 @@
+outs:
+- md5: 1370a8b4f3697241d7dac7d43aa9dd79
+  size: 46862
+  hash: md5
+  path: ddEventParser.lib

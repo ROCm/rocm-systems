@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+export PYTHONPATH=$(cd $(dirname ${BASH_SOURCE[0]})/../@CMAKE_INSTALL_PYTHONDIR@ && pwd):${PYTHONPATH}
+
+: ${PYTHON_EXECUTABLE:=@PYTHON_EXECUTABLE@}
+
+if [ ! -f ${PYTHON_EXECUTABLE} ]; then PYTHON_EXECUTABLE=$(basename ${PYTHON_EXECUTABLE}); fi
+
+set -e
+
+run-script()
+{
+    echo -e "\n##### ${PROJECT_NAME} :: executing '${@}'... #####\n"
+    eval $@
+}
+
+add_so_paths_to_ld_library_path()
+{
+    local python_name_version=$(basename ${PYTHON_EXECUTABLE})
+    local libdir=$(dirname $(dirname $PYTHON_EXECUTABLE))/lib/${python_name_version}/site-packages
+
+    if [ -d "$libdir" ]; then
+        local so_dirs=$(find "$libdir" -name "*.so" -type f -exec dirname {} \; 2>/dev/null | sort -u)
+
+        for dir in $so_dirs; do
+            if [ -d "$dir" ] && [[ ":$LD_LIBRARY_PATH:" != *":$dir:"* ]]; then
+                export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}${dir}"
+            fi
+        done
+    fi
+}
+
+OLD_LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
+add_so_paths_to_ld_library_path
+
+run-script ${PYTHON_EXECUTABLE} -m @SCRIPT_SUBMODULE@ "$(printf ' %q' "$@")"
+
+export LD_LIBRARY_PATH=${OLD_LD_LIBRARY_PATH}

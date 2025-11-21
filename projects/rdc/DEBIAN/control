@@ -1,0 +1,8 @@
+Package: rdc
+Architecture: amd64
+Maintainer: Advanced Micro Devices (AMD) <rdc.support@amd.com>
+Depends:
+Priority: optional
+Version: MODULE_VERSION
+Description: AMD Radeon Data Center
+ This package contains the Radeon Data Center tools.

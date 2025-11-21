@@ -1,0 +1,363 @@
+declare -A FILTER
+
+# Power management tests
+FILTER[pm]=\
+"KFDPMTest.SuspendWithActiveProcess:"\
+"KFDPMTest.SuspendWithIdleQueue:"\
+"KFDPMTest.SuspendWithIdleQueueAfterWork"
+
+
+# Core tests, used in scenarios like bringup
+# Software scheduler mode, i. e. non HWS mode
+FILTER[core_sws]=\
+"KFDQMTest.CreateDestroyCpQueue:"\
+"KFDQMTest.SubmitNopCpQueue:"\
+"KFDQMTest.SubmitPacketCpQueue:"\
+"KFDQMTest.AllCpQueues:"\
+"KFDQMTest.CreateDestroySdmaQueue:"\
+"KFDQMTest.SubmitNopSdmaQueue:"\
+"KFDQMTest.SubmitPacketSdmaQueue:"\
+"KFDQMTest.AllSdmaQueues:"\
+"KFDQMTest.AllXgmiSdmaQueues:"\
+"KFDQMTest.AllQueues:"\
+"KFDLocalMemoryTest.AccessLocalMem:"\
+"KFDEventTest.SignalEvent"
+
+# HWS mode
+FILTER[core]=\
+"${FILTER[core_sws]}:"\
+"KFDCWSRTest.BasicTest"
+
+# Permanent exclusions
+# These tests are included for debugging, but are not executed in normal execution on any ASIC:
+# FILTER[pm] need human intervention, so put it here. Developers can run them
+# manually through "-p pm" option.
+#
+# CU Masking Linear are not working correctly due to how the HW distributes work over CUs.
+# They are available for testing but are not currently expected to pass on CI/VI/AI.
+#
+# CU Masking Even is added here due to some non-obvious baseline measurements. Though
+# using wallclock to measure performance is always risky, there are just too many ASICs
+# where this test is failing. Ideally we'll get better CU Masking coverage via rocrtst
+#
+# The CheckZeroInitializationVram test is no longer expected to pass as KFD no longer
+# clears memory at allocation time.
+PERMANENT_BLACKLIST_ALL_ASICS=\
+"-${FILTER[pm]}:"\
+"KFDQMTest.BasicCuMaskingLinear:"\
+"KFDQMTest.BasicCuMaskingEven:"\
+"RDMATest.GPUDirect:"\
+"KFDLocalMemoryTest.CheckZeroInitializationVram"
+
+# This is the temporary blacklist for all ASICs. This is to be used when a test is failing consistently
+# on every ASIC (Kaveri, Carrizo, Hawaii, Tonga, Fiji, Polaris10, Polaris11 and Vega10 .
+# TODO means that a JIRA ticket needs to be created for this issue, as no documentation regarding
+# failures can be found
+# NOTE: If you update this alphabetical listing, add the corresponding JIRA ticket for reference
+#
+# KFDQMTest.GPUDoorbellWrite fails intermittently (KFD-318)
+# KFDQMTest.mGPUShareBO (KFD-334)
+# KFDHWSTest.* (SWDEV-193035)
+# KFDEvictTest.BurstyTest (ROCMOPS-464)
+# KFDEvictTest.BurstyTest (SWDEV-291256)
+# KFDEvictTest.BurstyTest (KFD-425)
+# KFDDBGTest.SuspendQueues (SWDEV-417850)
+# KFDDBGTest.HitAddressWatch (SWDEV-420281)
+TEMPORARY_BLACKLIST_ALL_ASICS=\
+"KFDQMTest.GPUDoorbellWrite:"\
+"KFDQMTest.mGPUShareBO:"\
+"KFDQMTest.SdmaEventInterrupt:"\
+"KFDMemoryTest.CacheInvalidateOnRemoteWrite:"\
+"KFDEvictTest.BurstyTest:"\
+"KFDHWSTest.*:"\
+"KFDSVMRangeTest.ReadOnlyRangeTest*:"\
+"KFDDBGTest.SuspendQueues:"\
+"KFDDBGTest.HitAddressWatch"
+
+BLACKLIST_ALL_ASICS=\
+"$PERMANENT_BLACKLIST_ALL_ASICS:"\
+"$TEMPORARY_BLACKLIST_ALL_ASICS"
+
+# SDMA-based tests (KFDIPCTest.BasicTest, KFDQM.*Sdma*, KFDMemoryTest.MMBench) are all
+# disabled on non-Hawaii due to SDMA instability - SWDEV-101666
+SDMA_BLACKLIST=\
+"KFDIPCTest.*:"\
+"KFDLocalMemoryTest.CheckZeroInitializationVram:"\
+"KFDMemoryTest.MemoryRegister:"\
+"KFDMemoryTest.MMBench:"\
+"KFDMemoryTest.SignalHandling:"\
+"KFDQMTest.AllQueues:"\
+"KFDQMTest.*Sdma*:"\
+"KFDQMTest.CreateQueueStressSingleThreaded:"\
+"KFDQMTest.GPUDoorbellWrite:"\
+"KFDQMTest.P2PTest:"\
+"KFDPerformanceTest.P2PBandWidthTest:"\
+"KFDPerformanceTest.P2POverheadTest"
+
+# Anything involving CP queue creation is failing on Kaveri. Separate them here for convenience (KFD-336)
+KV_QUEUE_BLACKLIST=\
+"KFDExceptionTest.AddressFault:"\
+"KFDExceptionTest.PermissionFault:"\
+"KFDLocalMemoryTest.*:"\
+"KFDEventTest.Signal*Event*:"\
+"KFDQMTest.CreateQueueStressSingleThreaded:"\
+"KFDQMTest.*CpQueue*:"\
+"KFDQMTest.*Dispatch*:"\
+"KFDQMTest.Atomics:"\
+"KFDQMTest.GPUDoorbellWrite"
+
+# KFDCWSRTest.BasicTest*: SWDEV-353206
+BLACKLIST_GFX10=\
+"KFDMemoryTest.DeviceHdpFlush:"\
+"KFDSVMEvictTest.*:"\
+"KFDCWSRTest.BasicTest*"
+
+BLACKLIST_GFX10_NV2X=\
+"$BLACKLIST_GFX10:"\
+"KFDPerfCountersTest.*"
+
+# KFDMemoryTest.FlatScratchAccess           - SWDEV-329877
+# KFDGWSTest.*: GFX11 will no longer use global wave sync
+BLACKLIST_GFX11=\
+"KFDQMTest.CreateAqlCpQueue:"\
+"KFDCWSRTest.InterruptRestore:"\
+"KFDPerfCountersTest.*:"\
+"KFDMemoryTest.FlatScratchAccess:"\
+"KFDGWSTest.*"
+
+BLACKLIST_GFX12=\
+"KFDQMTest.CreateAqlCpQueue:"\
+"KFDPerfCountersTest.*:"\
+"KFDMemoryTest.FlatScratchAccess:"\
+"KFDGWSTest.*"
+
+# KFDQMTest.CpuWriteCoherence fails. 0 dwordsAvailable (KFD-338)
+# KFDMemoryTest.MemoryRegister fails on SDMA queue creation (KFD-337)
+FILTER[kaveri]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$SDMA_BLACKLIST:"\
+"$KV_QUEUE_BLACKLIST:"\
+"KFDMemoryTest.MemoryRegister:"\
+"KFDQMTest.CpuWriteCoherence"
+
+# KFDLocalMemoryTest.BasicTest is failing intermittently (KFD-368)
+# KFDMemoryTest.BigSysBufferStressTest was failing intermittently on 4.9
+# and hangs when executed twice (KFD-312)
+# KFDQMTest.GPUDoorbellWrite fails on Hawaii. Could be HW-related (KFD-342)
+FILTER[hawaii]=\
+"$BLACKLIST_ALL_ASICS:"\
+"KFDLocalMemoryTest.BasicTest:"\
+"KFDMemoryTest.BigSysBufferStressTest:"\
+"KFDQMTest.GPUDoorbellWrite"
+
+FILTER[carrizo]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$SDMA_BLACKLIST:"\
+"KFDExceptionTest.PermissionFault"
+
+# KFDPerfCountersTest.*Trace fail (KFD-339)
+# KFDMemoryTest.QueryPointerInfo/MemoryRegister* (KFD-341)
+# The remaining tests listed here fail on map memory to GPU with a VA conflict (KFD-340)
+FILTER[tonga]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$SDMA_BLACKLIST:"\
+"KFDCWSRTest.BasicTest:"\
+"KFDPerfCountersTest.*:"\
+"KFDQMTest.OverSubscribeCpQueues"
+
+# Since Navi10 was merged, the PM4Event test takes 6min to run
+FILTER[fiji]=\
+"$BLACKLIST_ALL_ASICS:"\
+"KFDQMTest.PM4EventInterrupt:"\
+"$SDMA_BLACKLIST"
+
+FILTER[polaris10]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$SDMA_BLACKLIST"
+
+FILTER[polaris11]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$SDMA_BLACKLIST"
+
+FILTER[polaris12]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$SDMA_BLACKLIST"
+
+# KFDIPCTest.BasicTest (ROCMOPS-459) .CMABasicTest (ROCMOPS-460) .CrossMemoryAttachTest (ROCMOPS-461)
+# KFDQMTest.AllSdmaQueues (ROCMOPS-463)
+FILTER[vega10]=\
+"$BLACKLIST_ALL_ASICS:"\
+"KFDIPCTest.BasicTest:"\
+"KFDIPCTest.CMABasicTest:"\
+"KFDIPCTest.CrossMemoryAttachTest:"\
+"KFDQMTest.AllSdmaQueues"
+
+FILTER[vega12]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$SDMA_BLACKLIST"\
+
+FILTER[vega20]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$SDMA_BLACKLIST:"\
+"KFDQMTest.GPUDoorbellWrite"
+
+FILTER[raven_dgpuFallback]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$SDMA_BLACKLIST:"\
+"KFDEvictTest.*:"\
+"KFDMemoryTest.MemoryRegister:"\
+"KFDSVMRangeTest.BasicSystemMemTest:"\
+"KFDSVMRangeTest.BasicVramTest:"\
+"KFDSVMRangeTest.EvictSystemRangeTest:"\
+"KFDSVMRangeTest.PartialUnmapSysMemTest:"\
+"KFDSVMRangeTest.MigrateTest:"\
+"KFDSVMRangeTest.MigratePolicyTest:"\
+"KFDSVMRangeTest.MigrateGranularityTest:"\
+"KFDSVMRangeTest.MigrateLargeBufTest:"\
+"KFDSVMRangeTest.MultiThreadMigrationTest:"\
+"KFDSVMRangeTest.MigrateAccessInPlaceTest:"\
+"KFDSVMEvictTest.QueueTest"
+
+FILTER[raven]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$SDMA_BLACKLIST:"\
+"KFDEvictTest.*:"\
+"KFDSVMRangeTest.EvictSystemRangeTest:"\
+"KFDSVMRangeTest.PartialUnmapSysMemTest:"\
+"KFDSVMRangeTest.PrefetchTest:"\
+"KFDSVMRangeTest.MultiThreadMigrationTest:"\
+"KFDSVMEvictTest.QueueTest:"\
+"KFDQMTest.MultipleCpQueuesStressDispatch"
+
+FILTER[renoir]=\
+"$BLACKLIST_ALL_ASICS:"\
+"KFDEvictTest.*:"\
+"KFDMemoryTest.LargestSysBufferTest:"\
+"KFDMemoryTest.SignalHandling"
+
+# KFDExceptionTest.* (KFD-435)
+FILTER[arcturus]=\
+"$BLACKLIST_ALL_ASICS:"\
+"KFDExceptionTest.FaultStorm:"\
+"KFDNegativeTest.*"
+
+FILTER[aldebaran]=\
+"$BLACKLIST_ALL_ASICS:"\
+"KFDExceptionTest.FaultStorm:"\
+"KFDMemoryTest.PtraceAccess:"\
+"KFDMemoryTest.DeviceHdpFlush"
+
+FILTER[navi10]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX10:"\
+"KFDMemoryTest.MMBench"
+
+# Need to verify the following failed tests on another machine:
+# Exceptions not being received during exception tests
+# PerfCounters return HSAKMT_STATUS_INVALID_PARAMETER
+# P2PBandwidth failing (wait times out) on node-to-multiple-nodes by [push, NONE]
+FILTER[navi12]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX10:"\
+"KFDExceptionTest.*:"\
+"KFDPerfCountersTest.*:"\
+"KFDPerformanceTest.P2PBandWidthTest"
+
+FILTER[navi14]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX10"
+
+FILTER[sienna_cichlid]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX10_NV2X"
+
+FILTER[navy_flounder]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX10_NV2X"
+
+FILTER[dimgrey_cavefish]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX10_NV2X"
+
+FILTER[beige_goby]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX10_NV2X"
+
+FILTER[yellow_carp]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX10_NV2X"
+
+FILTER[gfx1100]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11"
+
+# SWDEV-384028
+FILTER[gfx1101]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11:"\
+"KFDExceptionTest.SdmaQueueException"
+
+FILTER[gfx1102]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11"
+
+FILTER[gfx1103]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11"
+
+FILTER[gfx1150]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11"
+
+FILTER[gfx1151]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11"
+
+FILTER[gfx1152]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11"
+
+FILTER[gfx1153]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11"
+
+FILTER[gfx1036]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX10_NV2X"
+
+FILTER[gfx942]=\
+"$BLACKLIST_ALL_ASICS:"\
+"KFDMemoryTest.LargestSysBufferTest:"\
+"KFDMemoryTest.BigSysBufferStressTest:"\
+"KFDMemoryTest.FlatScratchAccess:"\
+"KFDIPCTest.BasicTest:"\
+"KFDQMTest.QueueLatency"
+
+FILTER[gfx950]=\
+"$BLACKLIST_ALL_ASICS:"\
+"KFDMemoryTest.LargestSysBufferTest:"\
+"KFDMemoryTest.BigSysBufferStressTest:"\
+"KFDMemoryTest.FlatScratchAccess:"\
+"KFDIPCTest.BasicTest:"\
+"KFDQMTest.QueueLatency:"\
+"KFDEvictTest.*:"\
+"KFDSVMEvictTest.QueueTest*:"\
+"KFDGWSTest.Semaphore"
+
+FILTER[gfx1200]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX12"
+
+FILTER[gfx1201]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX12"
+
+FILTER[RHEL9]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11:"\
+"KFDQMTest.ExtendedCuMasking:"\
+"KFDEvictTest.QueueTest:"\
+"KFDPCSamplingTest.*"
+
+FILTER[upstream]=\
+"KFDIPCTest.*"

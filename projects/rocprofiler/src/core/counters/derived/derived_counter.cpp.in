@@ -1,0 +1,57 @@
+/* Copyright (c) 2022 Advanced Micro Devices, Inc.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
+
+#include "src/core/counters/derived/derived_counter.h"
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+
+namespace Counter {
+
+static std::atomic<uint64_t> COUNTER_COUNTER{0};
+
+DerivedCounter::DerivedCounter(std::string name, std::string description, std::string gpu_name)
+    : Counter(name, description, gpu_name) {
+  metric_id_ = COUNTER_COUNTER.fetch_add(1, std::memory_order_release);
+  addCounterToCounterMap();
+}
+
+DerivedCounter::~DerivedCounter() {
+  for (auto& it : counters_) delete it.second;
+  counters_.clear();
+}
+
+uint64_t DerivedCounter::getMetricId() { return metric_id_; }
+
+std::map<uint64_t, BasicCounter*>* DerivedCounter::getAllCounters() { return &counters_; }
+
+BasicCounter* DerivedCounter::getBasicCounterFromDerived(uint64_t counter_id) {
+  return counters_[counter_id];
+}
+
+void DerivedCounter::addBasicCounter(uint64_t counter_id, BasicCounter* counter) {
+  counters_.emplace(counter_id, counter);
+}
+
+@DERIVED_XML_PARSE_RESULT @
+
+}  // namespace Counter
+
+#pragma GCC diagnostic pop

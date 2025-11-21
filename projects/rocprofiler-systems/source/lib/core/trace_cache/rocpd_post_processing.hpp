@@ -1,0 +1,70 @@
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#pragma once
+#include "agent_manager.hpp"
+#include "core/node_info.hpp"
+#include "core/rocpd/data_processor.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
+#include "core/trace_cache/storage_parser.hpp"
+
+namespace rocprofsys
+{
+namespace trace_cache
+{
+
+class rocpd_post_processing
+{
+public:
+    rocpd_post_processing(metadata_registry& metadata, agent_manager& agent_mngr, int pid,
+                          int ppid);
+
+    void register_parser_callback(storage_parser& parser);
+    void post_process_metadata();
+
+    std::shared_ptr<rocpd::data_processor> get_data_processor() const;
+
+private:
+    using primary_key = size_t;
+
+    inline void rocpd_insert_thread_id(info::thread& t_info, const node_info& n_info,
+                                       const info::process& process_info) const;
+
+    postprocessing_callback get_kernel_dispatch_callback() const;
+    postprocessing_callback get_memory_copy_callback() const;
+#if(ROCPROFILER_VERSION >= 600)
+    postprocessing_callback get_memory_allocate_callback() const;
+#endif
+    postprocessing_callback get_region_callback() const;
+    postprocessing_callback get_in_time_sample_callback() const;
+    postprocessing_callback get_pmc_event_with_sample_callback() const;
+    postprocessing_callback get_amd_smi_sample_callback() const;
+    postprocessing_callback get_cpu_freq_sample_callback() const;
+    postprocessing_callback get_backtrace_sample_callback() const;
+
+    metadata_registry&                     m_metadata;
+    agent_manager&                         m_agent_manager;
+    std::shared_ptr<rocpd::data_processor> m_data_processor;
+};
+
+}  // namespace trace_cache
+}  // namespace rocprofsys

@@ -1,0 +1,544 @@
+name: rocprofiler-sdk Code Coverage
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+      - '!projects/rocprofiler-sdk/*.md'
+      - '!projects/rocprofiler-sdk/**/README.md'
+      - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
+  pull_request:
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+      - '!projects/rocprofiler-sdk/*.md'
+      - '!projects/rocprofiler-sdk/**/README.md'
+      - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
+  ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
+  GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
+  PATH: "/usr/bin:$PATH"
+  ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
+  ## A task should be assigned directly to fix the issue
+  ## Scratch memory tests need to be fixed for ROCm 7.0 release
+  navi3_EXCLUDE_TESTS_REGEX: ""
+  vega20_EXCLUDE_TESTS_REGEX: ""
+  mi200_EXCLUDE_TESTS_REGEX: ""
+  mi300_EXCLUDE_TESTS_REGEX: ""
+  mi300a_EXCLUDE_TESTS_REGEX: ""
+  mi325_EXCLUDE_TESTS_REGEX: ""
+  mi3xx_EXCLUDE_TESTS_REGEX: ""
+  navi4_EXCLUDE_TESTS_REGEX: ""
+  navi3_EXCLUDE_LABEL_REGEX: ""
+  vega20_EXCLUDE_LABEL_REGEX: ""
+  mi200_EXCLUDE_LABEL_REGEX: ""
+  mi300_EXCLUDE_LABEL_REGEX: ""
+  mi300a_EXCLUDE_LABEL_REGEX: ""
+  mi325_EXCLUDE_LABEL_REGEX: ""
+  mi3xx_EXCLUDE_LABEL_REGEX: ""
+  navi4_EXCLUDE_LABEL_REGEX: ""
+  GLOBAL_CMAKE_OPTIONS: ""
+  ENABLE_ROCR_BUILD: "true"
+  ENABLE_HIP_CLR_BUILD: "true"
+
+jobs:
+  code-coverage:
+    name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    strategy:
+      # fail-fast: false
+      matrix:
+        system:
+          - { gpu: 'mi300a', runner: 'rocprofiler-mi300a-dind', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
+
+    runs-on: ${{ matrix.system.runner }}
+    container:
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      options: --privileged --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+
+    # define this for containers
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GPU_RUNNER: ${{ matrix.system.runner }}
+      GCC_COMPILER_VERSION: 11
+      ROCPROFILER_PC_SAMPLING_BETA_ENABLED: 1
+
+    steps:
+    - name: Install Latest Nightly ROCm
+      shell: bash
+      working-directory: /tmp
+      run: |
+        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+
+    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
+      uses: actions/checkout@v5
+      with:
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          projects/aqlprofile
+          projects/rocprofiler-register
+          projects/rocr-runtime
+          projects/clr
+          projects/hip
+        submodules: false
+        set-safe-directory: true
+
+    - name: Compute submodule cache key
+      id: submods
+      shell: bash
+      run: |
+        git config --global --add safe.directory '*'
+        git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+        echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        # collect submodule paths for cache 'path'
+        git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+        { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+    - name: Restore submodule cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          .git/modules
+          ${{ steps.submods.outputs.paths }}
+        key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+        restore-keys: |
+          submods-${{ runner.os }}-
+          submods-
+
+    - name: Init/Update submodules
+      run: git submodule update --init --recursive --jobs 16
+
+    - name: Clone ROCDecode
+      uses: actions/checkout@v5
+      with:
+        repository: 'ROCm/rocDecode'
+        ref: 'release/rocm-rel-7.0'
+        set-safe-directory: true
+        path: 'rocDecode'
+
+    - name: Clone ROCJPEG
+      uses: actions/checkout@v5
+      with:
+        repository: 'ROCm/rocJPEG'
+        ref: 'release/rocm-rel-7.0'
+        set-safe-directory: true
+        path: 'rocJPEG'
+
+    - name: Load Existing XML Code Coverage
+      if: github.event_name == 'pull_request'
+      id: load-coverage
+      uses: actions/cache@v4
+      with:
+        key: ${{ github.event.pull_request.base.sha }}-codecov
+        path: .codecov/**
+
+    - name: Copy Existing XML Code Coverage
+      if: github.event_name == 'pull_request'
+      shell: bash
+      run: |
+        if [ -d .codecov ]; then cp -r .codecov .codecov.ref; fi
+
+    - name: Configure Env
+      shell: bash
+      run: |
+        echo "${PATH}:/usr/local/bin:${HOME}/.local/bin" >> $GITHUB_PATH
+        echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/lib:${HOME}/.local/lib" >> $GITHUB_ENV
+
+    - name: Install requirements
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        git config --global --add safe.directory '*'
+        apt-get update
+        apt-get install -y build-essential cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
+        python3 -m pip install -U --user -r requirements.txt
+          rm -rf \
+            ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
+            ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
+            ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* \
+            ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* \
+            ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx \
+            ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
+
+    - name: Sync gcov with compilers
+      timeout-minutes: 10
+      shell: bash
+      run:
+        apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }} &&
+        update-alternatives
+            --install /usr/bin/gcc  gcc  /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 500
+            --slave   /usr/bin/g++  g++  /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }}
+            --slave   /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
+
+    - name: List Files
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
+        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
+        cat ${{ env.ROCM_PATH }}/.info/version
+        ls -la
+
+    - name: Enable PC Sampling
+      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+          echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
+      with:
+        key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+        max-size: 2G
+        save: true
+
+    - name: Install Missing ROCm Dependencies
+      shell: bash
+      run: |
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        echo -e "Building & Installing ROCDecode..."
+        cmake -B build-rocdecode \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+          -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          ${GITHUB_WORKSPACE}/rocDecode
+        cmake --build build-rocdecode --target all --parallel 16
+        cmake --build build-rocdecode --target install
+        echo -e "ROCDecode Installed Successfully!"
+        echo -e "Building & Installing ROCJPEG..."
+        cmake -B build-rocjpeg \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+          -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          ${GITHUB_WORKSPACE}/rocJPEG
+        cmake --build build-rocjpeg --target all --parallel 16
+        cmake --build build-rocjpeg --target install
+        echo -e "ROCJPEG Installed Successfully!"
+
+    - name: Build and Install ROCProfiler-Register
+      shell: bash
+      working-directory: projects/rocprofiler-register
+      run: |
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        echo "Install ROCProfiler-Register"
+        cmake -B build-rocprofiler-register \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          .
+        cmake --build build-rocprofiler-register --target all --parallel 16
+        cmake --build build-rocprofiler-register --target install
+        echo "✅ ROCProfiler-Register Installation complete!"
+
+    - name: Build and Install ROCR-Runtime
+      if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
+      shell: bash
+      working-directory: projects/rocr-runtime
+      run: |
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        echo "Install ROCR-Runtime..."
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          .
+        cmake --build build --target all --parallel 16
+        cmake --build build --target install
+        echo "✅ ROCR-Runtime Installation complete!"
+
+    - name: Build and Install HIP
+      if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
+      shell: bash
+      working-directory: projects
+      run: |
+        export HIP_DIR=$PWD/hip
+        export CLR_DIR=$PWD/clr
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        echo "Install HIP..."
+        cd $CLR_DIR
+        cmake \
+          -DHIP_COMMON_DIR=$HIP_DIR \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DHIP_PLATFORM=amd \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DHIP_LLVM_ROOT=${{ env.ROCM_PATH }}/lib/llvm \
+          -DHIP_CATCH_TEST=0 \
+          -DCLR_BUILD_HIP=ON \
+          -DCLR_BUILD_OCL=ON \
+          -S $CLR_DIR \
+          -B build
+        cmake --build build --target all --parallel 16
+        cmake --build build --target install
+        echo "✅ HIP Installation complete!"
+
+    - name: Build and Install Aqlprofile
+      shell: bash
+      working-directory: projects/aqlprofile
+      run: |
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        echo "Install Aqlprofile..."
+        cmake -B build-aqlprofile \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          .
+        cmake --build build-aqlprofile --target all --parallel 16
+        cmake --build build-aqlprofile --target install
+        echo "✅ AQLProfile Installation complete!"
+
+    - name: Configure, Build, and Test (Total Code Coverage)
+      timeout-minutes: 30
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run:
+        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        python3 ./source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
+          --build-jobs 16
+          --site ${{ matrix.system.runner }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
+          --coverage all
+          --run-attempt ${{ github.run_attempt }}
+          --
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
+          -DPython3_EXECUTABLE=$(which python3)
+          ${{ env.GLOBAL_CMAKE_OPTIONS }}
+          --
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+
+    - name: Configure, Build, and Test (Tests Code Coverage)
+      timeout-minutes: 30
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run:
+        find build -type f | egrep '\.gcda$' | xargs rm &&
+        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        python3 ./source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-tests
+          --build-jobs 16
+          --site ${{ matrix.system.runner }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
+          --coverage tests
+          --run-attempt ${{ github.run_attempt }}
+          --
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
+          -DPython3_EXECUTABLE=$(which python3)
+          ${{ env.GLOBAL_CMAKE_OPTIONS }}
+          --
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+
+    - name: Configure, Build, and Test (Samples Code Coverage)
+      timeout-minutes: 30
+      working-directory: projects/rocprofiler-sdk
+      shell: bash
+      run:
+        find build -type f | egrep '\.gcda$' | xargs rm &&
+        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        python3 ./source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-samples
+          --build-jobs 16
+          --site ${{ matrix.system.runner }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
+          --coverage samples
+          --run-attempt ${{ github.run_attempt }}
+          --
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
+          -DPython3_EXECUTABLE=$(which python3)
+          ${{ env.GLOBAL_CMAKE_OPTIONS }}
+          --
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+
+    - name: Save XML Code Coverage
+      id: save-coverage
+      uses: actions/cache/save@v4
+      with:
+        key: ${{ github.sha }}-codecov
+        path: |
+          projects/rocprofiler-sdk/.codecov/*.xml
+
+    - id: generatereport
+      name: Generate Code Coverage Comment
+      if: github.event_name == 'pull_request'
+      timeout-minutes: 5
+      working-directory: projects/rocprofiler-sdk
+      shell: bash
+      run: |
+        echo "PWD: ${PWD}"
+        ls -la
+
+        for i in "all" "tests" "samples"; do
+            wkhtmltoimage --enable-local-file-access --quality 70 .codecov/${i}.html .codecov/${i}.png
+        done
+        ls -la .codecov
+        which -a git
+        git --version
+
+        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.ROCPROFILER_TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
+
+        echo -e "\n${PWD}:"
+        ls -la .
+
+        echo -e "\n.codecov:"
+        ls -la .codecov
+
+        get-base-md-contents() { cat .codecov/${1}.png.md; }
+        get-full-md-contents() { cat .codecov/${1}.png.md .codecov/${1}.md; }
+        cat << EOF > .codecov/report.md
+        # Code Coverage Report
+
+        ## Tests Only
+        $(get-base-md-contents tests)
+
+        ## Samples Only
+        $(get-base-md-contents samples)
+
+        ## Tests + Samples
+        $(get-base-md-contents all)
+
+        <!-- code-coverage-comment-identifier -->
+        EOF
+
+        echo 'CODECOVERAGE_REPORT<<EOF' > $GITHUB_OUTPUT
+        cat .codecov/report.md >> $GITHUB_OUTPUT
+        echo 'EOF' >> $GITHUB_OUTPUT
+
+    - name: Write Code Coverage Comment
+      if: github.event_name == 'pull_request'
+      timeout-minutes: 5
+      uses: actions/github-script@v6
+      env:
+        COMMENT_BODY: |
+          <details>
+          <summary><h2>Code Coverage Report</h2></summary>
+
+          <!-- Keep the empty line above to render markdown properly -->
+          ${{ steps.generatereport.outputs.CODECOVERAGE_REPORT }}
+          </details>
+      with:
+        github-token: ${{ secrets.ROCPROFILER_TOKEN }}
+        script: |
+          const commentIdentifier = '<!-- code-coverage-comment-identifier -->'; // Used to identify codecov comment
+            const commentBody = process.env.COMMENT_BODY;
+
+            // Fetch existing comments
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+
+            // Check for an existing comment
+            const existingComment = comments.find(comment => comment.body.includes(commentIdentifier));
+
+            if (existingComment) {
+              // Update the existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: commentBody,
+              });
+              core.info(`Updated comment with ID: ${existingComment.id}`);
+            } else {
+              // Create a new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: commentBody,
+              });
+              core.info('Created a new comment.');
+            }
+
+    - name: Archive Code Coverage Data
+      if: ${{ github.event_name == 'workflow_dispatch' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: code-coverage-details
+        path: |
+          ${{github.workspace}}/projects/rocprofiler-sdk/.codecov/*
+
+    - name: Verify Test Labels
+      timeout-minutes: 5
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        pushd build
+        #
+        # if following fails, there is a test that does not have
+        # a label identifying it as sample or test (unit or integration).
+        # Recommended labels are:
+        #   - samples
+        #   - unittests
+        #   - integration-tests
+        #
+        ctest -N -LE 'samples|tests' -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" -O ctest.mislabeled.log
+        grep 'Total Tests: 0' ctest.mislabeled.log
+        #
+        # if following fails, then there is overlap between the labels.
+        # A test cannot both be a sample and (unit/integration) test.
+        #
+        ctest -N -O ctest.all.log
+        ctest -N -O ctest.samples.log -L samples
+        ctest -N -O ctest.tests.log -L tests
+        NUM_ALL=$(grep 'Total Tests:' ctest.all.log | awk '{print $NF}')
+        NUM_SAMPLE=$(grep 'Total Tests:' ctest.samples.log | awk '{print $NF}')
+        NUM_TEST=$(grep 'Total Tests:' ctest.tests.log | awk '{print $NF}')
+        NUM_SUM=$((${NUM_SAMPLE} + ${NUM_TEST}))
+        echo "Total tests: ${NUM_ALL}"
+        echo "Total labeled tests: ${NUM_SUM}"
+        if [ ${NUM_ALL} != ${NUM_SUM} ]; then
+            echo "Test label overlap"
+            exit 1
+        fi
+        popd

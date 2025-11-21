@@ -1,0 +1,5 @@
+pmc:  GRBM_SPI_BUSY SPI_CSN_NUM_THREADGROUPS SPI_CSN_WAVE
+
+gpu:
+range:
+kernel:

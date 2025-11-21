@@ -1,0 +1,15 @@
+This package includes legacy version of ROCr Tools library. The use
+of this library is deprecatd and no longer supported.
+
+This library provides following services:
+
+  - Kernel dispatches via PM4 path
+  - Collection of Performance Counters
+    - The last ROCm release that supported CodeXL was 2.6
+    - Submission of Pm4 commands via AQL packets enables this functionality
+  - Support various Debugger related activities
+    - The last ROCm release that supported Debugger was 2.6
+
+Services other than kernel dispatches are AMD private i.e. are
+not defined by any specification.
+

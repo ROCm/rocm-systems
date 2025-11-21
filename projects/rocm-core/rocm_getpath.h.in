@@ -1,0 +1,56 @@
+//Copyright © Advanced Micro Devices, Inc., or its affiliates.
+//SPDX-License-Identifier: MIT
+
+#ifndef _ROCM_GETPATH_H_
+#define _ROCM_GETPATH_H_
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif  /* __cplusplus */
+
+#if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
+#define LIB_API_PUBLIC __declspec(dllexport)
+#define ATTRIBUTE_NON_NULL
+#else
+#define LIB_API_PUBLIC __attribute__((visibility("default")))
+#define ATTRIBUTE_NON_NULL __attribute__((nonnull))
+#endif
+
+/* Get Library Target Build Type */
+#cmakedefine01 BUILD_SHARED_LIBS
+
+/* Return Status Flag Definitions*/
+typedef enum {
+        PathSuccess=0,
+        PathWindowsNotSet = -993,
+        PathIncorrecPararmeters = -994,
+        PathValuesNotDefined = -995,
+        PathValuesTooLong = -996,
+        PathFailedToGetBase = -997,
+        PathLinuxRuntimeErrors = -998,
+        PathErrorMAX = -999               //This should always be last value in the enumerations
+} PathErrors_t;
+
+//  API for getting the ROCmInstallPath
+//  Return val :  PathErrors_t (API execution status)
+//  Argument1 (out) :  InstallPath (char** pointer which will return InstallPath found )
+//  Argument2 (out) :  InstallPathLen (Pointer to integer (size of InstallPath) returned)
+//  Usage :
+//      char *installPath=NULL;
+//      int installPathLen = 0;
+//      installStatus = getROCmInstallPath( &installPath, &installPathLen );
+//      if(installStatus !=PathSuccess ){  // error occured
+//	...
+//	}
+//      free(installPath); //caller must free allocated memory after usage.
+//    ...
+//  }
+LIB_API_PUBLIC PathErrors_t getROCmInstallPath(char **InstallPath, unsigned int *InstallPathLen) ATTRIBUTE_NON_NULL;
+
+#ifdef __cplusplus
+}  // end extern "C" block
+#endif
+
+#endif  //_ROCM_GETPATH_H_  header guard
+

@@ -1,0 +1,14 @@
+# all clear
+OCLImageCopyPartial
+
+# EPR 362715
+OCLCPUGuardPages
+
+OCLRegionDeviceQueries
+
+OCLDynamicBLines
+
+OCLAtomicCounter
+
+OCLGetQueueThreadID
+	

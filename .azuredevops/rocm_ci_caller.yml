@@ -1,0 +1,161 @@
+trigger: none  
+pr:  
+  branches:
+    include:
+      - develop
+      - release/rocm-rel-7.1
+      - release/rocm-rel-7.2
+  drafts: false
+
+variables:
+  - group: internal
+  - name: REPOSITORY_NAME
+    value: '$(Build.Repository.Name)'  
+  - name: HEAD_SHA
+    value: '$(system.pullRequest.sourceCommitId)'
+  - name: PR_NUM
+    value: '$(system.pullRequest.pullRequestNumber)' 
+  - name: PR_URL
+    value: '$(system.pullRequest.sourceRepositoryUri)/pull/$(PR_NUM)'
+  - name: BASE_REF
+    value: '$(system.pullRequest.TargetBranch)'
+  - name: EVENT_TYPE
+    value: 'pull_request'
+  - name: GH_PAT
+    value: '$(svc_acc_org_secret)'  
+
+jobs:  
+- job: Determine_Changes
+  displayName: 'Sparse Checkout & Check Changed Files'
+  pool: rocm-ci-caller
+  steps:
+    - script: |
+        echo "## Detecting file changes in PR #$(PR_NUM)"
+
+        git init repo_name
+        cd repo_name
+        git config core.sparseCheckout true
+
+        echo "projects/" > .git/info/sparse-checkout
+        echo "shared/" >> .git/info/sparse-checkout
+
+        git remote add origin https://github.com/$(REPOSITORY_NAME).git
+        git fetch --depth=250 origin $(BASE_REF)
+
+        git fetch --depth=250 origin $(HEAD_SHA)
+
+        git checkout FETCH_HEAD
+        
+        git diff --name-only origin/$(BASE_REF)...HEAD > ../changed_files.txt
+
+        echo "Changed files:"
+        cat ../changed_files.txt
+
+        MATCH_FOUND=false
+        WINDOWS_SKIP=true
+        while read file; do
+          if [[ "$file" == projects/* ]]; then
+            MATCH_FOUND=true
+          fi
+          if [[ "$file" == projects/clr/* || "$file" == projects/hip/* || "$file" == projects/hip-tests/* ]]; then
+            WINDOWS_SKIP=false
+          fi
+          if [[ "$file" == projects/hip/docs/* || \
+                "$file" == projects/rdc/docs/* || \
+                "$file" == projects/rocm-smi-lib/docs/* || \
+                "$file" == projects/rocminfo/docs/* || \
+                "$file" == projects/rocprofiler-compute/docs/* || \
+                "$file" == projects/rocprofiler-systems/docs/* || \
+                "$file" == projects/rocr-runtime/runtime/docs/* ]]; then
+            WINDOWS_SKIP=true
+            MATCH_FOUND=false
+          fi
+          if [[ "$MATCH_FOUND" == true && "$WINDOWS_SKIP" == false ]]; then
+            break
+          fi
+        done < ../changed_files.txt
+
+        echo "Match found: $MATCH_FOUND"
+        echo "##vso[task.setvariable variable=match_found;isOutput=true]$MATCH_FOUND"
+        echo "##vso[task.setvariable variable=windows_skip;isOutput=true]$WINDOWS_SKIP"
+      name: detectChanges
+      displayName: Detect path changes
+
+- job: Trigger_Pipeline 
+  displayName: 'Trigger Pipeline or Skip'
+  dependsOn: Determine_Changes
+  condition: succeeded()
+  pool: rocm-ci-caller
+  variables:
+    match_found: $[ dependencies.Determine_Changes.outputs['detectChanges.match_found'] ]
+    windows_skip: $[ dependencies.Determine_Changes.outputs['detectChanges.windows_skip'] ]
+  steps:
+    - checkout: none
+    
+    - script: |
+        echo "DEBUG: match_found = '$(match_found)'"
+      displayName: 'Debug match_found variable'
+
+    - script: |
+        echo "DEBUG: windows_skip = '$(windows_skip)'"
+      displayName: 'Debug windows_skip variable'
+
+    - script: |
+        echo "Changes outside monitored paths (clr, hip, hip-tests). Skipping WindowsCI - Internal."
+        echo "Sending success status for WindowsCI - Internal..."
+        export GH_TOKEN=$(GH_PAT)
+        gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
+          -f state=success \
+          -f context="WindowsCI - Internal" \
+          -f description="Windows PSDB skipped"
+      displayName: 'Skip WindowsCI - Internal'
+      condition: eq(variables.windows_skip, 'true')
+    
+    - script: |
+        rm -rf $(repo_name)
+        git clone $(gh_repo)
+      displayName: Checkout Code
+      condition: eq(variables.match_found, 'true')
+
+    - script: |
+        set -e  
+        echo "Calling jenkins_api.py for PR #$(PR_NUM)"
+        cd $(repo_name)
+        docker run \
+          -v "$PWD:/src" \
+          -w /src \
+          -e GH_TOKEN="$(svc_acc_org_secret)" \
+          -e svc_acc_org_secret="$(svc_acc_org_secret)" \
+          $(base_image) \
+          bash -c "echo 'Fetching PR title from GitHub API...' && \
+          echo 'repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM)' && \
+          export TITLE=\$(gh api repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM) | jq -r .title) && \
+          python3 jenkins_api.py \
+            -ghr '$(REPOSITORY_NAME)' \
+            -ghsha '$(HEAD_SHA)' \
+            -ghprn '$(PR_NUM)' \
+            -ghpru '$(PR_URL)' \
+            -ghprt \"\$TITLE\" \
+            -ghpat '$(GH_PAT)' \
+            -br   '$(BASE_REF)' \
+            -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
+      displayName: Invoke jenkins_api.py in Docker  
+      env:  
+        svc_acc_org_secret: $(svc_acc_org_secret)
+      condition: eq(variables.match_found, 'true')
+
+
+    - script: |
+        echo "Changes outside monitored paths. Skipping Jenkins trigger."
+        echo "Sending success status for PSDB..."
+        export GH_TOKEN=$(GH_PAT)
+        gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
+          -f state=success \
+          -f context="PSDB" \
+          -f description="PSDB skipped"
+        gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
+          -f state=success \
+          -f context="psdb-test" \
+          -f description="psdb-test skipped"
+      displayName: Send Skipped Status
+      condition: ne(variables.match_found, 'true')
