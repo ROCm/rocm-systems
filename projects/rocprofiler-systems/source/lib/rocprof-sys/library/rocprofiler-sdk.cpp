@@ -24,6 +24,7 @@
 #include "api.hpp"
 #include "common/synchronized.hpp"
 #include "core/common.hpp"
+#include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/containers/stable_vector.hpp"
 #include "core/debug.hpp"
@@ -593,20 +594,6 @@ cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* r
         get_mem_alloc_address(*record), stream_handle });
 }
 #endif
-
-std::string
-get_args_string(const function_args_t& args)
-{
-    std::string args_str;
-    std::for_each(args.begin(), args.end(), [&args_str](const argument_info& arg) {
-        const auto*       delimiter = ";;";
-        std::stringstream ss;
-        ss << arg.arg_number << delimiter << arg.arg_type << delimiter << arg.arg_name
-           << delimiter << arg.arg_value << delimiter;
-        args_str.append(ss.str());
-    });
-    return args_str;
-}
 
 template <typename CategoryT>
 void

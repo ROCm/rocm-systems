@@ -373,11 +373,12 @@ struct in_time_sample : cacheable_t
         type_identifier_t::in_time_sample;
 
     in_time_sample() = default;
-    in_time_sample(std::string _track_name, size_t _timestamp_ns,
-                   std::string _event_metadata, size_t _stack_id, size_t _parent_stack_id,
-                   size_t _correlation_id, std::string _call_stack,
-                   std::string _line_info)
-    : track_name(std::move(_track_name))
+    in_time_sample(size_t _category_enum_id, std::string _track_name,
+                   size_t _timestamp_ns, std::string _event_metadata, size_t _stack_id,
+                   size_t _parent_stack_id, size_t _correlation_id,
+                   std::string _call_stack, std::string _line_info)
+    : category_enum_id(_category_enum_id)
+    , track_name(std::move(_track_name))
     , timestamp_ns(_timestamp_ns)
     , event_metadata(std::move(_event_metadata))
     , stack_id(_stack_id)
@@ -387,6 +388,7 @@ struct in_time_sample : cacheable_t
     , line_info(std::move(_line_info))
     {}
 
+    size_t      category_enum_id;
     std::string track_name;
     size_t      timestamp_ns;
     std::string event_metadata;
@@ -413,20 +415,22 @@ inline in_time_sample
 deserialize(uint8_t*& buffer)
 {
     in_time_sample   item;
+    size_t           category_enum_id;
     std::string_view track_name_view, event_metadata_view, call_stack_view,
         line_info_view;
     uint64_t timestamp_ns, stack_id, parent_stack_id, correlation_id;
-    utility::parse_value(buffer, track_name_view, timestamp_ns, event_metadata_view,
-                         stack_id, parent_stack_id, correlation_id, call_stack_view,
-                         line_info_view);
-    item.track_name      = std::string(track_name_view);
-    item.timestamp_ns    = timestamp_ns;
-    item.event_metadata  = std::string(event_metadata_view);
-    item.stack_id        = stack_id;
-    item.parent_stack_id = parent_stack_id;
-    item.correlation_id  = correlation_id;
-    item.call_stack      = std::string(call_stack_view);
-    item.line_info       = std::string(line_info_view);
+    utility::parse_value(buffer, category_enum_id, track_name_view, timestamp_ns,
+                         event_metadata_view, stack_id, parent_stack_id, correlation_id,
+                         call_stack_view, line_info_view);
+    item.category_enum_id = category_enum_id;
+    item.track_name       = std::string(track_name_view);
+    item.timestamp_ns     = timestamp_ns;
+    item.event_metadata   = std::string(event_metadata_view);
+    item.stack_id         = stack_id;
+    item.parent_stack_id  = parent_stack_id;
+    item.correlation_id   = correlation_id;
+    item.call_stack       = std::string(call_stack_view);
+    item.line_info        = std::string(line_info_view);
     return item;
 }
 
@@ -435,10 +439,11 @@ inline size_t
 get_size(const in_time_sample& item)
 {
     return utility::get_size(
-        std::string_view(item.track_name), (uint64_t) item.timestamp_ns,
-        std::string_view(item.event_metadata), (uint64_t) item.stack_id,
-        (uint64_t) item.parent_stack_id, (uint64_t) item.correlation_id,
-        std::string_view(item.call_stack), std::string_view(item.line_info));
+        item.category_enum_id, std::string_view(item.track_name),
+        (uint64_t) item.timestamp_ns, std::string_view(item.event_metadata),
+        (uint64_t) item.stack_id, (uint64_t) item.parent_stack_id,
+        (uint64_t) item.correlation_id, std::string_view(item.call_stack),
+        std::string_view(item.line_info));
 }
 
 struct pmc_event_with_sample : in_time_sample
@@ -447,15 +452,15 @@ struct pmc_event_with_sample : in_time_sample
         type_identifier_t::pmc_event_with_sample;
 
     pmc_event_with_sample() = default;
-    pmc_event_with_sample(std::string _track_name, size_t _timestamp_ns,
-                          std::string _event_metadata, size_t _stack_id,
-                          size_t _parent_stack_id, size_t _correlation_id,
-                          std::string _call_stack, std::string _line_info,
-                          uint32_t _device_id, uint8_t _device_type,
-                          std::string _pmc_info_name, double _value)
-    : in_time_sample(std::move(_track_name), _timestamp_ns, std::move(_event_metadata),
-                     _stack_id, _parent_stack_id, _correlation_id, std::move(_call_stack),
-                     std::move(_line_info))
+    pmc_event_with_sample(size_t _category_enum_id, std::string _track_name,
+                          size_t _timestamp_ns, std::string _event_metadata,
+                          size_t _stack_id, size_t _parent_stack_id,
+                          size_t _correlation_id, std::string _call_stack,
+                          std::string _line_info, uint32_t _device_id,
+                          uint8_t _device_type, std::string _pmc_info_name, double _value)
+    : in_time_sample(_category_enum_id, std::move(_track_name), _timestamp_ns,
+                     std::move(_event_metadata), _stack_id, _parent_stack_id,
+                     _correlation_id, std::move(_call_stack), std::move(_line_info))
     , device_id(_device_id)
     , device_type(_device_type)
     , pmc_info_name(std::move(_pmc_info_name))
@@ -473,12 +478,12 @@ inline void
 serialize(uint8_t* buffer, const pmc_event_with_sample& item)
 {
     utility::store_value(
-        buffer, std::string_view(item.track_name), (uint64_t) item.timestamp_ns,
-        std::string_view(item.event_metadata), (uint64_t) item.stack_id,
-        (uint64_t) item.parent_stack_id, (uint64_t) item.correlation_id,
-        std::string_view(item.call_stack), std::string_view(item.line_info),
-        item.device_id, item.device_type, std::string_view(item.pmc_info_name),
-        item.value);
+        buffer, item.category_enum_id, std::string_view(item.track_name),
+        (uint64_t) item.timestamp_ns, std::string_view(item.event_metadata),
+        (uint64_t) item.stack_id, (uint64_t) item.parent_stack_id,
+        (uint64_t) item.correlation_id, std::string_view(item.call_stack),
+        std::string_view(item.line_info), item.device_id, item.device_type,
+        std::string_view(item.pmc_info_name), item.value);
 }
 
 template <>
@@ -486,22 +491,24 @@ inline pmc_event_with_sample
 deserialize(uint8_t*& buffer)
 {
     pmc_event_with_sample item;
+    size_t                category_enum_id;
     std::string_view      track_name_view, event_metadata_view, call_stack_view,
         line_info_view, pmc_info_name_view;
     uint64_t timestamp_ns, stack_id, parent_stack_id, correlation_id;
-    utility::parse_value(buffer, track_name_view, timestamp_ns, event_metadata_view,
-                         stack_id, parent_stack_id, correlation_id, call_stack_view,
-                         line_info_view, item.device_id, item.device_type,
-                         pmc_info_name_view, item.value);
-    item.track_name      = std::string(track_name_view);
-    item.timestamp_ns    = timestamp_ns;
-    item.event_metadata  = std::string(event_metadata_view);
-    item.stack_id        = stack_id;
-    item.parent_stack_id = parent_stack_id;
-    item.correlation_id  = correlation_id;
-    item.call_stack      = std::string(call_stack_view);
-    item.line_info       = std::string(line_info_view);
-    item.pmc_info_name   = std::string(pmc_info_name_view);
+    utility::parse_value(buffer, category_enum_id, track_name_view, timestamp_ns,
+                         event_metadata_view, stack_id, parent_stack_id, correlation_id,
+                         call_stack_view, line_info_view, item.device_id,
+                         item.device_type, pmc_info_name_view, item.value);
+    item.category_enum_id = category_enum_id;
+    item.track_name       = std::string(track_name_view);
+    item.timestamp_ns     = timestamp_ns;
+    item.event_metadata   = std::string(event_metadata_view);
+    item.stack_id         = stack_id;
+    item.parent_stack_id  = parent_stack_id;
+    item.correlation_id   = correlation_id;
+    item.call_stack       = std::string(call_stack_view);
+    item.line_info        = std::string(line_info_view);
+    item.pmc_info_name    = std::string(pmc_info_name_view);
     return item;
 }
 
@@ -510,12 +517,12 @@ inline size_t
 get_size(const pmc_event_with_sample& item)
 {
     return utility::get_size(
-        std::string_view(item.track_name), (uint64_t) item.timestamp_ns,
-        std::string_view(item.event_metadata), (uint64_t) item.stack_id,
-        (uint64_t) item.parent_stack_id, (uint64_t) item.correlation_id,
-        std::string_view(item.call_stack), std::string_view(item.line_info),
-        item.device_id, item.device_type, std::string_view(item.pmc_info_name),
-        item.value);
+        item.category_enum_id, std::string_view(item.track_name),
+        (uint64_t) item.timestamp_ns, std::string_view(item.event_metadata),
+        (uint64_t) item.stack_id, (uint64_t) item.parent_stack_id,
+        (uint64_t) item.correlation_id, std::string_view(item.call_stack),
+        std::string_view(item.line_info), item.device_id, item.device_type,
+        std::string_view(item.pmc_info_name), item.value);
 }
 
 struct amd_smi_sample : cacheable_t

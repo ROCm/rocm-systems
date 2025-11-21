@@ -152,7 +152,6 @@ public:
         ifs.close();
         ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system.\n",
                          m_filename.c_str());
-        std::remove(m_filename.c_str());
     }
 
 private:

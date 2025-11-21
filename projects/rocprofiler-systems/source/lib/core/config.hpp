@@ -367,6 +367,9 @@ get_database_absolute_path(std::string_view database_name, std::string_view tag)
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
 
+bool&
+get_caching_perfetto() ROCPROFSYS_HOT;
+
 struct tmp_file
 {
     tmp_file(std::string);

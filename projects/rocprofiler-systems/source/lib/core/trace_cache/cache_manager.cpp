@@ -23,6 +23,7 @@
 #include "cache_manager.hpp"
 
 #include "core/trace_cache/metadata_registry.hpp"
+#include "core/trace_cache/perfetto_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 
@@ -50,38 +51,116 @@ struct cache_files_t
     inline bool empty() const { return buff_storage.empty() || metadata.empty(); }
 };
 
+enum class processing_mode_t : uint8_t
+{
+    SEQUENTIAL,
+    PARALLEL,
+};
+
 struct enabled_formats_t
 {
-    bool rocpd = get_use_rocpd();
+    std::pair<processing_mode_t, bool> rocpd    = { processing_mode_t::PARALLEL,
+                                                    get_use_rocpd() };
+    std::pair<processing_mode_t, bool> perfetto = { processing_mode_t::SEQUENTIAL,
+                                                    get_use_perfetto() };
 
     void print() const
     {
-        constexpr std::pair<const char*, bool enabled_formats_t::*> formats[] = {
-            { "rocpd", &enabled_formats_t::rocpd },
-        };
+        if(!rocpd.second && !perfetto.second) return;
 
-        bool any_enabled = false;
-        for(const auto& fmt : formats)
-            any_enabled |= this->*(fmt.second);
-
-        if(!any_enabled) return;
-
-        bool              first = true;
         std::stringstream ss;
+        bool              first = true;
 
-        for(const auto& fmt : formats)
+        if(rocpd.second)
         {
-            if(this->*(fmt.second))
-            {
-                if(!first && sizeof(formats) > 1) ss << ", ";
-                ss << fmt.first;
-                first = false;
-            }
+            if(!first) ss << ", ";
+            ss << "rocpd";
+            first = false;
         }
+        if(perfetto.second)
+        {
+            if(!first) ss << ", ";
+            ss << "perfetto";
+            first = false;
+        }
+
         ROCPROFSYS_PRINT(
             "Generating [%s] format(s) with collected data from trace cache. This may "
             "take a while..\n",
             ss.str().c_str());
+
+        if(has_parallel_formats())
+        {
+            std::stringstream parallel_ss;
+            bool              first_parallel = true;
+            if(rocpd.second && rocpd.first == processing_mode_t::PARALLEL)
+            {
+                parallel_ss << "rocpd";
+                first_parallel = false;
+            }
+            if(perfetto.second && perfetto.first == processing_mode_t::PARALLEL)
+            {
+                if(!first_parallel) parallel_ss << ", ";
+                parallel_ss << "perfetto";
+            }
+            ROCPROFSYS_PRINT("  - Using parallel processing for: %s\n",
+                             parallel_ss.str().c_str());
+        }
+
+        if(has_sequential_formats())
+        {
+            std::stringstream sequential_ss;
+            bool              first_sequential = true;
+            if(rocpd.second && rocpd.first == processing_mode_t::SEQUENTIAL)
+            {
+                sequential_ss << "rocpd";
+                first_sequential = false;
+            }
+            if(perfetto.second && perfetto.first == processing_mode_t::SEQUENTIAL)
+            {
+                if(!first_sequential) sequential_ss << ", ";
+                sequential_ss << "perfetto";
+            }
+            ROCPROFSYS_PRINT("  - Using sequential processing for: %s\n",
+                             sequential_ss.str().c_str());
+        }
+    }
+
+    bool has_parallel_formats() const
+    {
+        return (rocpd.second && rocpd.first == processing_mode_t::PARALLEL) ||
+               (perfetto.second && perfetto.first == processing_mode_t::PARALLEL);
+    }
+
+    bool has_sequential_formats() const
+    {
+        return (rocpd.second && rocpd.first == processing_mode_t::SEQUENTIAL) ||
+               (perfetto.second && perfetto.first == processing_mode_t::SEQUENTIAL);
+    }
+
+    enabled_formats_t get_parallel_formats() const
+    {
+        enabled_formats_t parallel_formats;
+        parallel_formats.rocpd    = { processing_mode_t::PARALLEL,
+                                      rocpd.second &&
+                                          rocpd.first == processing_mode_t::PARALLEL };
+        parallel_formats.perfetto = { processing_mode_t::PARALLEL,
+                                      perfetto.second &&
+                                          perfetto.first == processing_mode_t::PARALLEL };
+        return parallel_formats;
+    }
+
+    enabled_formats_t get_sequential_formats() const
+    {
+        enabled_formats_t sequential_formats;
+        sequential_formats.rocpd    = { processing_mode_t::SEQUENTIAL,
+                                        rocpd.second &&
+                                            rocpd.first == processing_mode_t::SEQUENTIAL };
+        sequential_formats.perfetto = {
+            processing_mode_t::SEQUENTIAL,
+            perfetto.second && perfetto.first == processing_mode_t::SEQUENTIAL
+        };
+        return sequential_formats;
     }
 };
 
@@ -105,7 +184,8 @@ struct processor_config_t
 
 struct processor_storage_t
 {
-    std::shared_ptr<rocpd_processor_t> rocpd_processor{ nullptr };
+    std::shared_ptr<rocpd_processor_t>    rocpd_processor{ nullptr };
+    std::shared_ptr<perfetto_processor_t> perfetto_processor{ nullptr };
 };
 
 using directory_files_t    = std::vector<std::string>;
@@ -244,12 +324,19 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
                      const data::enabled_formats_t&                   _enabled_formats)
 {
     data::processor_storage_t processor_storage;
-    if(_enabled_formats.rocpd)
+    if(_enabled_formats.rocpd.second)
     {
         processor_storage.rocpd_processor = std::make_shared<rocpd_processor_t>(
             _processor_config->_metadata_registry, _processor_config->_agent_manager,
             _processor_config->_pid, _processor_config->_ppid);
         _type_processing->add_handler(*processor_storage.rocpd_processor);
+    }
+    if(_enabled_formats.perfetto.second)
+    {
+        processor_storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
+            _processor_config->_metadata_registry, _processor_config->_agent_manager,
+            _processor_config->_pid, _processor_config->_ppid);
+        _type_processing->add_handler(*processor_storage.perfetto_processor);
     }
     return processor_storage;
 }
@@ -321,6 +408,37 @@ multithreaded_processing(
     }
 }
 
+void
+sequential_processing(
+    const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
+    const data::enabled_formats_t&                                _enabled_formats)
+{
+    for(const auto& processor_config : _processor_configs)
+    {
+        process_buffered_storage(processor_config,
+                                 utility::get_buffered_storage_filename(
+                                     processor_config->_ppid, processor_config->_pid),
+                                 _enabled_formats);
+    }
+}
+
+void
+dispatch_processing(
+    const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
+    const data::enabled_formats_t&                                _enabled_formats)
+{
+    if(_enabled_formats.has_sequential_formats())
+    {
+        auto sequential_formats = _enabled_formats.get_sequential_formats();
+        sequential_processing(_processor_configs, sequential_formats);
+    }
+    if(_enabled_formats.has_parallel_formats())
+    {
+        auto parallel_formats = _enabled_formats.get_parallel_formats();
+        multithreaded_processing(_processor_configs, parallel_formats);
+    }
+}
+
 }  // namespace processing_utils
 
 cache_manager&
@@ -361,7 +479,7 @@ cache_manager::post_process_bulk()
         getpid(), root_pid, m_metadata,
         std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
 
-    processing_utils::multithreaded_processing(processor_configs, enabled_formats);
+    processing_utils::dispatch_processing(processor_configs, enabled_formats);
 
     filesystem_utils::clear_cache_files(cache_files);
 }
