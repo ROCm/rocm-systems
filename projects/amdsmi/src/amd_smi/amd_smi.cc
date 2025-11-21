@@ -5253,24 +5253,6 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
 
 // PTL
 
-// Split string at commas and return strings in vector
-std::vector<std::string> split_csv(const std::string& line) {
-  std::vector<std::string> out;
-  std::size_t start = 0;
-  while (start < line.size()) {
-    auto pos = line.find(',', start);
-    if (pos == std::string::npos) {
-        pos = line.size();
-    }
-    std::string token = amd::smi::trim(line.substr(start, pos - start));
-    if (!token.empty()) {
-        out.push_back(token);
-    }
-    start = pos + 1;
-  }
-  return out;
-}
-
 bool amdsmi_is_supported_format(
     const std::vector<amdsmi_ptl_data_format_t> &supported,
     amdsmi_ptl_data_format_t fmt) {
@@ -5353,7 +5335,7 @@ amdsmi_status_t amdsmi_read_supported_ptl_formats(
   }
 
   line = amd::smi::trim(line);
-  auto tokens = split_csv(line);
+  auto tokens = split_string(line, ',');
   if (tokens.empty()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
@@ -5402,7 +5384,7 @@ amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
     }
 
     line = amd::smi::trim(line);
-    auto tokens = split_csv(line);
+    auto tokens = split_string(line, ',');
     if (tokens.empty() || tokens.size() != 2) {
         return AMDSMI_STATUS_UNEXPECTED_SIZE;  // malformed sysfs content
     }

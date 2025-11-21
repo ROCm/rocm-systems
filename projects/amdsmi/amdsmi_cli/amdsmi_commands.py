@@ -724,6 +724,7 @@ class AMDSMICommands():
                 # PTL
                 try:
                     ptl_state = amdsmi_interface.amdsmi_get_gpu_ptl_state(args.gpu)
+                    ptl_state = "Enabled" if ptl_state else "Disabled"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     ptl_state = "N/A"
                     logging.debug("Failed to get PTL state for gpu %s | %s", gpu_id, e.get_error_info())
@@ -794,7 +795,7 @@ class AMDSMICommands():
                 limit_info['shutdown_vram_temperature'] = shutdown_temp_vram_limit
 
                 # PTL
-                limit_info['ptl_state'] = "Enabled" if ptl_state else "Disabled"
+                limit_info['ptl_state'] = ptl_state
                 limit_info['ptl_format'] = ptl_format
 
                 static_dict['limit'] = limit_info
