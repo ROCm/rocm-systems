@@ -38,13 +38,16 @@ RUN ROCM_MAJOR=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $1}') && 
         OS_VERSION_MAJOR=$(echo "$OS_VERSION" | cut -d'.' -f1) && \
         OS_VERSION_MINOR=$(echo "$OS_VERSION" | cut -d'.' -f2) && \
         ROCM_PATCH=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $3}') && \
-        if [ -z "${ROCM_PATCH}" ] || [ "${ROCM_PATCH}" = "0" ]; then \
+        ROCM_URL_VERSION="${ROCM_VERSION}" && \
+        if [ -z "${ROCM_PATCH}" ]; then \
+            ROCM_PATCH=0; \
+        elif [ "${ROCM_PATCH}" = "0" ]; then \
             ROCM_PATCH=0 && \
-            ROCM_VERSION=$(echo "${ROCM_VERSION}" | sed 's/\.0$//') \
-        ; fi && \
+            ROCM_URL_VERSION="${ROCM_MAJOR}.${ROCM_MINOR}"; \
+        fi && \
         ROCM_VERSN=$(( ("${ROCM_MAJOR}"*10000)+("${ROCM_MINOR}"*100) + ("${ROCM_PATCH}"))) && \
         zypper --non-interactive addrepo https://download.opensuse.org/repositories/devel:languages:perl/15.6/devel:languages:perl.repo && \
-        zypper --non-interactive --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/sle/${OS_VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm && \
+        zypper --non-interactive --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${ROCM_URL_VERSION}/sle/${OS_VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm && \
         zypper --non-interactive --gpg-auto-import-keys refresh && \
         zypper --non-interactive install -y rocm-dev rccl-devel libpciaccess0 && \
         zypper --non-interactive clean --all; \
