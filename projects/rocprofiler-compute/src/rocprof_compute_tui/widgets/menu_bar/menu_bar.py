@@ -22,8 +22,7 @@
 # THE SOFTWARE.
 ##############################################################################
 
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from textual import on
 from textual.app import ComposeResult
@@ -94,13 +93,8 @@ class MenuBar(Container):
         menu_button = self.query_one("#menu-file", MenuButton)
         menu_button.is_open = False
 
-        def on_recent_selected(selected_dir: Optional[str]) -> None:
-            if selected_dir:
-                self.parent_main_view.selected_path = Path(selected_dir)
-                self.parent_main_view.run_analysis()
-
         self.app.push_screen(
-            RecentDirectoriesScreen(self.app.recent_dirs), on_recent_selected
+            RecentDirectoriesScreen(self.app.recent_dirs), self.app.on_recent_selected
         )
 
     @on(Button.Pressed, "#menu-exit")
