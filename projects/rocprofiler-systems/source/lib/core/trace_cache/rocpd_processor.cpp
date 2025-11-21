@@ -643,7 +643,7 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 : processor_t<rocpd_processor_t>()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
-, m_data_processor(std::make_shared<rocstorage::data_processor>(
+, m_data_processor(std::make_shared<rocstorage::rocstorage_writer>(
       std::make_shared<rocstorage::data_storage::database>(
           rocprofsys::get_database_absolute_path("rocpd", std::to_string(pid)),
           rocprofsys::common::md5sum{ node_info::get_instance().id, pid, ppid }

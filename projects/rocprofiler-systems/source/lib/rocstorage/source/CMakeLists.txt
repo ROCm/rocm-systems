@@ -20,8 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(rocstorage_sources ${CMAKE_CURRENT_LIST_DIR}/data_processor.cpp)
-set(rocstorage_public_headers ${CMAKE_CURRENT_LIST_DIR}/data_processor.hpp)
+set(rocstorage_sources ${CMAKE_CURRENT_LIST_DIR}/rocstorage_writer.cpp)
+set(rocstorage_public_headers ${CMAKE_CURRENT_LIST_DIR}/rocstorage_writer.hpp)
 
 add_library(rocstorage STATIC ${rocstorage_sources})
 add_subdirectory(common)

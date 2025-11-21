@@ -62,9 +62,9 @@ private:
     inline void insert_thread_id(info::thread& t_info, const node_info& n_info,
                                  const info::process& process_info);
 
-    std::shared_ptr<metadata_registry>          m_metadata;
-    std::shared_ptr<agent_manager>              m_agent_manager;
-    std::shared_ptr<rocstorage::data_processor> m_data_processor;
+    std::shared_ptr<metadata_registry>             m_metadata;
+    std::shared_ptr<agent_manager>                 m_agent_manager;
+    std::shared_ptr<rocstorage::rocstorage_writer> m_data_processor;
 };
 
 }  // namespace trace_cache

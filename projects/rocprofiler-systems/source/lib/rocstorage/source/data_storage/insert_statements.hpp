@@ -36,7 +36,8 @@ namespace data_storage
 
 struct insert_statements
 {
-    insert_statements(std::shared_ptr<database> database, std::string uuid);
+    explicit insert_statements(std::shared_ptr<database> database, std::string uuid);
+    insert_statements()                                    = delete;
     insert_statements(const insert_statements&)            = delete;
     insert_statements(insert_statements&&)                 = delete;
     insert_statements& operator=(const insert_statements&) = delete;

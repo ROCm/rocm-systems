@@ -32,18 +32,17 @@
 
 namespace rocstorage
 {
-struct data_processor
+struct rocstorage_writer
 {
 public:
-    struct data_identifiers;
-    explicit data_processor(std::shared_ptr<data_storage::database> database);
-    ~data_processor();
+    explicit rocstorage_writer(std::shared_ptr<data_storage::database> database);
+    ~rocstorage_writer();
 
-    data_processor()                                  = delete;
-    data_processor(const data_processor&)             = delete;
-    data_processor& operator=(const data_processor&)  = delete;
-    data_processor(const data_processor&&)            = delete;
-    data_processor& operator=(const data_processor&&) = delete;
+    rocstorage_writer()                                     = delete;
+    rocstorage_writer(const rocstorage_writer&)             = delete;
+    rocstorage_writer& operator=(const rocstorage_writer&)  = delete;
+    rocstorage_writer(const rocstorage_writer&&)            = delete;
+    rocstorage_writer& operator=(const rocstorage_writer&&) = delete;
 
     size_t insert_string(const char* str);
 
@@ -144,6 +143,8 @@ public:
     void flush();
 
 private:
+    struct data_identifiers;
+
     std::shared_ptr<data_storage::database>          m_database{ nullptr };
     std::string                                      m_uuid{};
     std::unique_ptr<data_storage::insert_statements> m_insert_statements{ nullptr };

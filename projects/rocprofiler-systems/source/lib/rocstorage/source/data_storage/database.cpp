@@ -158,28 +158,33 @@ namespace rocstorage
 {
 namespace data_storage
 {
-database::database(const std::string& abs_db_path, const std::string& uuid)
+database::database(std::string db_path, std::string uuid)
+: m_db_path{ std::move(db_path) }
+, m_uuid{ std::move(uuid) }
 {
-    create_directory_for_database_file(abs_db_path);
-    std::cout << "Database: " << abs_db_path << std::endl;
+    create_directory_for_database_file(m_db_path);
+    std::cout << "<rocstorage> db uuid: " << m_uuid << ", path: " << m_db_path
+              << std::endl;
 
-    validate_sqlite3_result(sqlite3_open(":memory:", &_sqlite3_db_temp), "",
+    validate_sqlite3_result(sqlite3_open(":memory:", &m_sqlite3_inmemory), "",
                             "database open failed!");
-    validate_sqlite3_result(sqlite3_open(abs_db_path.c_str(), &_sqlite3_db), "",
-                            "database open failed!");
-    m_uuid = uuid;
 }
 
-database::~database()
+database::~database() { sqlite3_close(m_sqlite3_inmemory); }
+
+std::string
+database::get_uuid() const
 {
-    sqlite3_close(_sqlite3_db_temp);
-    sqlite3_close(_sqlite3_db);
+    return m_uuid;
 }
 
 void
 database::initialize_schema()
 {
-    const auto uuid = get_uuid();
+    if(m_initialized)
+    {
+        throw std::runtime_error("Database already initialized!");
+    }
 
     const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
         ROCPD_SQL_SCHEMA_ROCPD_TABLES, ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
@@ -189,7 +194,7 @@ database::initialize_schema()
 
     for(const auto& schema_kind : schema_kinds)
     {
-        const std::string query = get_schema_query(schema_kind, uuid);
+        const std::string query = get_schema_query(schema_kind, m_uuid);
 
         if(query.empty())
         {
@@ -198,40 +203,46 @@ database::initialize_schema()
             continue;
         }
 
-        validate_sqlite3_result(sqlite3_exec(_sqlite3_db_temp, query.c_str(), 0, 0, 0),
+        validate_sqlite3_result(sqlite3_exec(m_sqlite3_inmemory, query.c_str(), 0, 0, 0),
                                 query.c_str(),
                                 std::string("Invalid schema, init database failed!"));
     }
+
+    m_initialized = true;
 }
 
 void
 database::execute_query(const std::string& query)
 {
-    validate_sqlite3_result(sqlite3_exec(_sqlite3_db_temp, query.c_str(), 0, 0, 0),
+    validate_sqlite3_result(sqlite3_exec(m_sqlite3_inmemory, query.c_str(), 0, 0, 0),
                             "Failed to execute query - ", query);
-}
-
-std::string
-database::get_uuid()
-{
-    return m_uuid;
 }
 
 size_t
 database::get_last_insert_id() const
 {
-    return sqlite3_last_insert_rowid(_sqlite3_db_temp);
+    return sqlite3_last_insert_rowid(m_sqlite3_inmemory);
 }
 
 void
 database::flush()
 {
-    auto* backup = sqlite3_backup_init(_sqlite3_db, "main", _sqlite3_db_temp, "main");
+    if(m_flushed)
+    {
+        throw std::runtime_error("Database already flushed!");
+    }
+
+    sqlite3* out_db;
+    validate_sqlite3_result(sqlite3_open(m_db_path.c_str(), &out_db), "",
+                            "database open failed!");
+    auto* backup = sqlite3_backup_init(out_db, "main", m_sqlite3_inmemory, "main");
     if(backup)
     {
-        sqlite3_backup_step(backup, -1);  // Copy all pages
+        sqlite3_backup_step(backup, -1);
         sqlite3_backup_finish(backup);
     }
+    sqlite3_close(out_db);
+    m_flushed = true;
 }
 
 }  // namespace data_storage
