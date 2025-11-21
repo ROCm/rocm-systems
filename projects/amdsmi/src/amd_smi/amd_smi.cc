@@ -3818,7 +3818,7 @@ amdsmi_status_t amdsmi_get_xgmi_plpd(amdsmi_processor_handle processor_handle,
     memset(policy, 0, sizeof(*policy));
 
     // Use rsmi structure with correct size (32-byte description fields)
-    rsmi_dpm_policy_t rsmi_policy;
+    rsmi_dpm_policy_t rsmi_policy = {};
     amdsmi_status_t ret = rsmi_wrapper(rsmi_dev_xgmi_plpd_get, processor_handle, 0,
                     &rsmi_policy);
     
