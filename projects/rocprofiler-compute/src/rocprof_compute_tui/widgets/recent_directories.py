@@ -51,8 +51,9 @@ class RecentDirectoriesScreen(ModalScreen):
                 yield Button("Close", variant="default", id="close-recent")
 
     def on_mount(self) -> None:
-        list_view = self.query_one("#recent-list", ListView)
-        list_view.focus()
+        if self.recent_dirs:
+            list_view = self.query_one("#recent-list", ListView)
+            list_view.focus()
 
     @on(Button.Pressed, "#close-recent")
     def close_modal(self) -> None:
