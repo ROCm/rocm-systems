@@ -145,6 +145,10 @@ using tim::type_list;
 
 // these categories increment push/pop counts, which are used for sanity checks since
 // they should ALWAYS be popped if they were pushed
+// Note: There is a known imbalance in the push/pop counts for category::host when using
+//       OpenMP Tools (OMPT).
+//       In general, for known imbalances, add the SKIP_PUSH_POP_CHECK flag to the ctest
+//       to avoid the CI_THROW check.
 using tracing_count_categories_t =
     type_list<category::host, category::mpi, category::pthread, category::rocm_hip_api,
               category::rocm_hsa_api, category::rocm_rccl>;

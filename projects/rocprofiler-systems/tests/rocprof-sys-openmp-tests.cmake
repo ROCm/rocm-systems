@@ -112,14 +112,17 @@ endif()
 if(ROCPROFSYS_OMPVV_HOST_TESTS)
     foreach(HOST_TEST_NAME ${ROCPROFSYS_OMPVV_HOST_TESTS})
         rocprofiler_systems_add_test(
-            SKIP_RUNTIME
             NAME ${HOST_TEST_NAME}
             TARGET ${HOST_TEST_NAME}-exec
             LABELS "openmp;ompvv"
             REWRITE_ARGS
               -e -v 2 --instrument-loops
             RUNTIME_ARGS
-              -e -v 1 --label return args -E ^GOMP
+              -e -v 1 --label return args
+            # We do not receive the end of certain OMPT callbacks.
+            # This results in missing completion events for the underlying functions
+            # that belong to the tracked host category.
+            SKIP_PUSH_POP_CHECK
             SAMPLING_TIMEOUT 300
             REWRITE_TIMEOUT 300
             ENVIRONMENT
