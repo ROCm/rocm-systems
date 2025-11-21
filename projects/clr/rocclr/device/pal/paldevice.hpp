@@ -237,13 +237,13 @@ class Device : public NullDevice {
     int counter_;                    //!< Lock usage counter
     Pal::EngineType engineType_;     //!< Engine type
     uint32_t index_;                 //!< HW queue index for scratch buffer access
-    amd::Monitor queue_lock_;        //!< Queue lock for access
+    amd::RecursiveMonitor queue_lock_;        //!< Queue lock for access
     AqlPacketMgmt aql_packet_mgmt_;  //!< AQL packets management class for debugger support
     QueueRecycleInfo(const Device& dev)
         : counter_(1),
           engineType_(Pal::EngineTypeCompute),
           index_(0),
-          queue_lock_(true) /* Queue lock for sharing */,
+          queue_lock_() /* Queue lock for sharing */,
           aql_packet_mgmt_(dev) {}
 
     //! Returns the MQD's read_dispatch_id's address.
@@ -305,7 +305,7 @@ class Device : public NullDevice {
     size_t bufSize_;                  //!< Staged buffer size
     std::list<Memory*> freeBuffers_;  //!< The list of free buffers
     std::atomic<uint> acquiredCnt_;   //!< The total number of acquired buffers
-    amd::Monitor lock_;               //!< Stgaed buffer acquire/release lock
+    amd::RecursiveMonitor lock_;               //!< Stgaed buffer acquire/release lock
     const Device& gpuDevice_;         //!< GPU device object
   };
 
@@ -710,14 +710,14 @@ class Device : public NullDevice {
   static char* platformObj_;         //!< Memory allocated for PAL platform object
   static Pal::IPlatform* platform_;  //!< Pointer to the PAL platform object
 
-  mutable amd::Monitor lockAsyncOps_;  //!< Lock to serialise all async ops on this device
+  mutable amd::RecursiveMonitor lockAsyncOps_;  //!< Lock to serialise all async ops on this device
   //! Lock to serialise all async ops on initialization heap operation
-  mutable amd::Monitor lockForInitHeap_;
-  mutable amd::Monitor lockPAL_;          //!< Lock to serialise PAL access
-  mutable amd::Monitor vgpusAccess_;      //!< Lock to serialise virtual gpu list access
-  mutable amd::Monitor scratchAlloc_;     //!< Lock to serialise scratch allocation
-  mutable amd::Monitor mapCacheOps_;      //!< Lock to serialise cache for the map resources
-  mutable amd::Monitor lockResourceOps_;  //!< Lock to serialise resource access
+  mutable amd::RecursiveMonitor lockForInitHeap_;
+  mutable amd::RecursiveMonitor lockPAL_;          //!< Lock to serialise PAL access
+  mutable amd::RecursiveMonitor vgpusAccess_;      //!< Lock to serialise virtual gpu list access
+  mutable amd::RecursiveMonitor scratchAlloc_;     //!< Lock to serialise scratch allocation
+  mutable amd::RecursiveMonitor mapCacheOps_;      //!< Lock to serialise cache for the map resources
+  mutable amd::RecursiveMonitor lockResourceOps_;  //!< Lock to serialise resource access
   mutable std::mutex lockAllowAccess_;    //!< To serialize allow_access calls
   XferBuffers* xferRead_;                 //!< Transfer buffers read
   std::vector<amd::Memory*>* mapCache_;   //!< Map cache info structure

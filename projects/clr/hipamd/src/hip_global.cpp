@@ -102,7 +102,7 @@ DeviceVar::~DeviceVar() {
 
 // Device Functions
 DeviceFunc::DeviceFunc(std::string name, hipModule_t hmod)
-    : dflock_("function lock"), name_(name), kernel_(nullptr) {
+    : name_(name), kernel_(nullptr) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
 
   const amd::Symbol* symbol = program->findSymbol(name.c_str());

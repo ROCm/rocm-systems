@@ -218,7 +218,6 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
                     [this]() -> amd::HostQueue& { return *device_->NullStream(); }),
         busy_heap_(device, *this),
         free_heap_(device, *this),
-        lock_pool_ops_(true),
         device_(device),
         shared_(nullptr),
         max_total_size_(0) {
@@ -349,7 +348,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   } state_;
 
   hipMemPoolProps properties_;  //!< Properties of the memory pool
-  amd::Monitor lock_pool_ops_;  //!< Access to the pool must be lock protected
+  amd::RecursiveMonitor lock_pool_ops_;  //!< Access to the pool must be lock protected
   std::map<hip::Device*, hipMemAccessFlags>
       access_map_;  //!< Map of access to the pool from devices
 

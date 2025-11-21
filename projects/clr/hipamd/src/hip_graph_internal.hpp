@@ -813,8 +813,8 @@ class Graph {
 class GraphExec : public amd::ReferenceCountedObject, public Graph {
  public:
   static std::unordered_set<GraphExec*> graphExecSet_;
-  static amd::Monitor graphExecSetLock_;
-  static amd::Monitor graphExecStreamCreateLock_;
+  static amd::RecursiveMonitor graphExecSetLock_;
+  static amd::RecursiveMonitor graphExecStreamCreateLock_;
   GraphExec(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
     amd::ScopedLock lock(graphExecSetLock_);

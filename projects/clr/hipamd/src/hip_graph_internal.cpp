@@ -63,10 +63,10 @@ amd::Monitor Graph::graphSetLock_{};
 std::unordered_set<GraphExec*> GraphExec::graphExecSet_;
 // Guards global exec graph set
 // we have graphExec object as part of child graph and we need recursive lock
-amd::Monitor GraphExec::graphExecSetLock_(true);
+amd::RecursiveMonitor GraphExec::graphExecSetLock_;
 // Serialize the creation of internal streams from multiple threads, ensuring that each stream is
 // mapped to different HSA queues.
-amd::Monitor GraphExec::graphExecStreamCreateLock_(true);
+amd::RecursiveMonitor GraphExec::graphExecStreamCreateLock_;
 std::unordered_set<UserObject*> UserObject::ObjectSet_;
 // Guards global user object
 amd::Monitor UserObject::UserObjectLock_{};

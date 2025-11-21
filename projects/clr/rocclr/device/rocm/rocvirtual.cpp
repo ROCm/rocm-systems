@@ -2030,6 +2030,7 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
   while (current != nullptr) {
     if (current->profilingInfo().enabled_) {
       if (!current->data().empty()) {
+
         for (auto i = 0; i < current->data().size(); i++) {
           // Since this is a valid command to get a timestamp, we use the
           // timestamp provided by the runtime (saved in the data())

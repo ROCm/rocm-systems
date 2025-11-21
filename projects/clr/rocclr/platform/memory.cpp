@@ -97,7 +97,6 @@ Memory::Memory(Context& context, Type type, Flags flags, size_t size, void* svmP
       svmHostAddress_(svmPtr),
       resOffset_(0),
       flagsEx_(0),
-      lockMemoryOps_(true),
       alignment_(alignment) /* Memory Ops Lock */ {
   svmPtrCommited_ = (flags & CL_MEM_SVM_FINE_GRAIN_BUFFER) ? true : false;
   canBeCached_ = true;
@@ -121,8 +120,7 @@ Memory::Memory(Memory& parent, Flags flags, size_t origin, size_t size, Type typ
       mapCount_(0),
       svmHostAddress_(parent.getSvmPtr()),
       resOffset_(0),
-      flagsEx_(0),
-      lockMemoryOps_(true) /* Memory Ops Lock */ {
+      flagsEx_(0) {
   svmPtrCommited_ = parent.isSvmPtrCommited();
   canBeCached_ = true;
   parent_->retain();
@@ -1516,7 +1514,7 @@ void Image::Format::formatColor(const void* colorRGBA, void* colorFormat) const 
   }
 }
 
-Monitor SvmBuffer::AllocatedLock_ ROCCLR_INIT_PRIORITY(101)("Guards SVM allocation list");
+Monitor SvmBuffer::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
 std::map<uintptr_t, uintptr_t> SvmBuffer::Allocated_ ROCCLR_INIT_PRIORITY(101);
 
 void SvmBuffer::Add(uintptr_t k, uintptr_t v) {

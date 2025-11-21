@@ -87,7 +87,7 @@ static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessReadWri
 
 namespace amd {
 
-amd::Monitor Device::lockP2P_("Lock P2P ON/OFF");
+amd::RecursiveMonitor Device::lockP2P_;
 std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
   constexpr amd::Isa::Feature NONE = amd::Isa::Feature::Unsupported;
   constexpr amd::Isa::Feature ANY = amd::Isa::Feature::Any;
@@ -346,7 +346,7 @@ AppProfile Device::appProfile_;
 
 Context* Device::glb_ctx_ = nullptr;
 // P2P Staging Lock
-Monitor Device::p2p_stage_ops_(true);
+RecursiveMonitor Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
 cl_int Device::gpu_error_ = CL_SUCCESS;
@@ -797,7 +797,7 @@ bool Device::create(const Isa& isa) {
   assert(!vaCacheAccess_ && !vaCacheMap_);
   isa_ = &isa;
   // VA Cache Ops Lock
-  vaCacheAccess_ = new amd::Monitor(true);
+  vaCacheAccess_ = new amd::RecursiveMonitor();
   if (nullptr == vaCacheAccess_) {
     return false;
   }

@@ -546,7 +546,7 @@ class MemorySubAllocator : public amd::HeapObject {
   GpuMemoryReference* Allocate(Pal::gpusize size, Pal::gpusize alignment,
                                const Pal::IGpuMemory* reserved_va, Pal::gpusize* offset);
   //! Free suballocation
-  bool Free(amd::Monitor* monitor, GpuMemoryReference* mem_ref, Pal::gpusize offset);
+  bool Free(amd::MonitorBase* monitor, GpuMemoryReference* mem_ref, Pal::gpusize offset);
 
  protected:
   //! Allocate new chunk of memory

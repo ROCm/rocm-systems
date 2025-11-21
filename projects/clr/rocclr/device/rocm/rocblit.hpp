@@ -502,7 +502,7 @@ class KernelBlitManager : public DmaBlitManager {
   //! Batch memory ops- Submits batch of streamWaits and streamWrite operations.
   virtual bool batchMemOps(const void* paramArray, size_t paramSize, uint32_t count) const;
 
-  virtual amd::Monitor* lockXfer() const { return &lockXferOps_; }
+  virtual amd::MonitorBase* lockXfer() const { return &lockXferOps_; }
 
   virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
                         uint heap_size, uint number_of_initial_blocks) const;
@@ -577,7 +577,7 @@ class KernelBlitManager : public DmaBlitManager {
   amd::Program* program_;             //!< GPU program object
   amd::Kernel* kernels_[BlitTotal];   //!< GPU kernels for blit
   size_t xferBufferSize_;             //!< Transfer buffer size
-  mutable amd::Monitor lockXferOps_;  //!< Lock transfer operation
+  mutable amd::RecursiveMonitor lockXferOps_;  //!< Lock transfer operation
 };
 
 static const char* BlitName[KernelBlitManager::BlitTotal] = {

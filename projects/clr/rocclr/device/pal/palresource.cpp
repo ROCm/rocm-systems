@@ -2209,7 +2209,7 @@ GpuMemoryReference* MemorySubAllocator::Allocate(Pal::gpusize size, Pal::gpusize
 }
 
 // ================================================================================================
-bool MemorySubAllocator::Free(amd::Monitor* monitor, GpuMemoryReference* ref, Pal::gpusize offset) {
+bool MemorySubAllocator::Free(amd::MonitorBase* monitor, GpuMemoryReference* ref, Pal::gpusize offset) {
   bool release_mem = false;
   {
     amd::ScopedLock l(monitor);

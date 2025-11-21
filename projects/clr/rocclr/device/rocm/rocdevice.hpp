@@ -75,7 +75,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
-  amd::Monitor lock_;     //!< Signal lock for update
+  amd::RecursiveMonitor lock_;     //!< Signal lock for update
 
   typedef union {
     struct {
@@ -91,16 +91,14 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   ProfilingSignal()
       : ts_(nullptr),
-        engine_(HwQueueEngine::Compute),
-        lock_(true) /* Signal Ops Lock */
-  {
+        engine_(HwQueueEngine::Compute) {
     signal_.handle = 0;
     flags_.data_ = 0;
     flags_.done_ = true;
   }
 
   virtual ~ProfilingSignal();
-  amd::Monitor& LockSignalOps() { return lock_; }
+  amd::RecursiveMonitor& LockSignalOps() { return lock_; }
 };
 
 class Sampler : public device::Sampler {
@@ -494,7 +492,7 @@ class Device : public NullDevice {
   void updateFreeMemory(size_t size, bool free);
 
   //! Returns the lock object for the virtual gpus list
-  amd::Monitor& vgpusAccess() const { return vgpusAccess_; }
+  amd::RecursiveMonitor& vgpusAccess() const { return vgpusAccess_; }
 
   typedef std::vector<VirtualGPU*> VirtualGPUs;
   //! Returns the list of all virtual GPUs running on this device
@@ -582,7 +580,7 @@ class Device : public NullDevice {
 
   static hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table;
 
-  amd::Monitor* mapCacheOps_;            //!< Lock to serialise cache for the map resources
+  amd::RecursiveMonitor* mapCacheOps_;            //!< Lock to serialise cache for the map resources
   std::vector<amd::Memory*>* mapCache_;  //!< Map cache info structure
 
   bool populateOCLDeviceConstants();
@@ -612,7 +610,7 @@ class Device : public NullDevice {
   VirtualGPU* xferQueue_;  //!< Transfer queue, created on demand
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
-  mutable amd::Monitor vgpusAccess_;  //!< Lock to serialise virtual gpu list access
+  mutable amd::RecursiveMonitor vgpusAccess_;  //!< Lock to serialise virtual gpu list access
   bool hsa_exclusive_gpu_access_;  //!< TRUE if current device was moved into exclusive GPU access
                                    //!< mode
   static address mg_sync_;         //!< MGPU grid launch sync memory (SVM location)
