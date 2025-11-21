@@ -19,6 +19,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * kernel: Counters are collected in a round robin fashion for unique kernels.
     * kernel_launch_params: Counters are collected in a round robin fashion for unique kernels having the exact same launch parameters.
 
+* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
