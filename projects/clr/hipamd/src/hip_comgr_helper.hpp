@@ -128,7 +128,7 @@ struct LinkArguments {
 class RTCProgram {
  protected:
   // Lock and control variables
-  static amd::RecursiveMonitor lock_;
+  static amd::Monitor lock_;
   static std::once_flag initialized_;
 
   RTCProgram(std::string name);

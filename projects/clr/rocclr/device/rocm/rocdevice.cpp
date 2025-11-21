@@ -669,7 +669,7 @@ bool Device::create() {
   }
 
   // Map Cache Lock
-  mapCacheOps_ = new amd::RecursiveMonitor();
+  mapCacheOps_ = new amd::Monitor();
   if (nullptr == mapCacheOps_) {
     return false;
   }

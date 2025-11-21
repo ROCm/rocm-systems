@@ -2146,7 +2146,7 @@ bool Program::getGlobalVarFromCodeObj(std::vector<std::string>* var_names) const
 }
 
 // Init Fini Launch Lock
-amd::RecursiveMonitor Program::initFiniLock_;
+amd::Monitor Program::initFiniLock_;
 
 bool Program::runInitFiniKernel(const std::vector<const Kernel*>& kernels) const {
   amd::HostQueue* queue = nullptr;

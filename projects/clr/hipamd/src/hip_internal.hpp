@@ -481,7 +481,7 @@ public:
   /// HIP Device class
   class Device : public amd::ReferenceCountedObject {
     // Device lock
-    amd::RecursiveMonitor lock_;
+    amd::Monitor lock_;
     // Guards device stream set
     std::shared_mutex streamSetLock;
     std::unordered_set<hip::Stream*> streamSet;

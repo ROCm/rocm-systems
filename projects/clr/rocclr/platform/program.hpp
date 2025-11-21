@@ -114,7 +114,7 @@ class Program : public RuntimeObject {
 
   std::string programLog_;  //!< Log for parsing options, etc.
 
-  RecursiveMonitor programLock_;  //!< Lock to protect program data structure
+  Monitor programLock_;  //!< Lock to protect program data structure
 
  protected:
   //! Destroy this program.

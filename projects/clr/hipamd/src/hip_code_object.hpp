@@ -99,7 +99,7 @@ class CodeObject {
 // Dynamic Code Object
 class DynCO : public CodeObject {
   // Guards Dynamic Code object
-  amd::RecursiveMonitor dclock_;
+  amd::Monitor dclock_;
 
  public:
   DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr) {}
@@ -146,7 +146,7 @@ class DynCO : public CodeObject {
 // Static Code Object
 class StatCO : public CodeObject {
   // Guards Static Code object
-  amd::RecursiveMonitor sclock_;
+  amd::Monitor sclock_;
 
  public:
   StatCO();

@@ -348,7 +348,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   } state_;
 
   hipMemPoolProps properties_;  //!< Properties of the memory pool
-  amd::RecursiveMonitor lock_pool_ops_;  //!< Access to the pool must be lock protected
+  amd::Monitor lock_pool_ops_;  //!< Access to the pool must be lock protected
   std::map<hip::Device*, hipMemAccessFlags>
       access_map_;  //!< Map of access to the pool from devices
 

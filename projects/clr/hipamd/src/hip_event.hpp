@@ -145,7 +145,7 @@ class Event {
     command.retain();
   }
 
-  amd::RecursiveMonitor& lock() { return lock_; }
+  amd::Monitor& lock() { return lock_; }
   const int deviceId() const { return device_id_; }
   void setDeviceId(int id) { device_id_ = id; }
   amd::Event* event() { return event_; }
@@ -170,7 +170,7 @@ class Event {
   virtual int64_t time(bool getStartTs) const;
 
  protected:
-  amd::RecursiveMonitor lock_;
+  amd::Monitor lock_;
   hip::Stream* stream_;
   amd::Event* event_;
   int device_id_;

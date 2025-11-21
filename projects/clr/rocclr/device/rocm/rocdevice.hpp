@@ -75,7 +75,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
-  amd::RecursiveMonitor lock_;     //!< Signal lock for update
+  amd::Monitor lock_;     //!< Signal lock for update
 
   typedef union {
     struct {
@@ -98,7 +98,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   }
 
   virtual ~ProfilingSignal();
-  amd::RecursiveMonitor& LockSignalOps() { return lock_; }
+  amd::Monitor& LockSignalOps() { return lock_; }
 };
 
 class Sampler : public device::Sampler {
@@ -580,7 +580,7 @@ class Device : public NullDevice {
 
   static hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table;
 
-  amd::RecursiveMonitor* mapCacheOps_;            //!< Lock to serialise cache for the map resources
+  amd::Monitor* mapCacheOps_;            //!< Lock to serialise cache for the map resources
   std::vector<amd::Memory*>* mapCache_;  //!< Map cache info structure
 
   bool populateOCLDeviceConstants();

@@ -167,7 +167,7 @@ class VmHeap {
   uint64_t mapped_size_ = 0;            //!< Size of mapped memory
   uint64_t max_mapped_size_ = 0;        //!< Max size of mapped memory in this heap
   bool created_ = false;                //!< Used for deferred VM heap allocation
-  amd::RecursiveMonitor lock_;          //!< Lock to serialise heap accesses
+  amd::Monitor lock_;          //!< Lock to serialise heap accesses
   Device* device_;                      //!< Device that owns this heap
   GetQueueFunc get_vm_queue_;           //!< Queue for VM operations
 

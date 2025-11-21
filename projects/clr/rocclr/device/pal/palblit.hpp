@@ -518,7 +518,7 @@ class KernelBlitManager : public DmaBlitManager {
   amd::Kernel* kernels_[BlitTotal];           //!< GPU kernels for blit
   amd::Memory* xferBuffers_[MaxXferBuffers];  //!< Transfer buffers for images
   size_t xferBufferSize_;                     //!< Transfer buffer size
-  mutable amd::RecursiveMonitor lockXferOps_;          //!< Lock transfer operation
+  mutable amd::Monitor lockXferOps_;          //!< Lock transfer operation
 };
 
 static const char* BlitName[KernelBlitManager::BlitTotal] = {
