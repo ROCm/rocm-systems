@@ -65,7 +65,7 @@ class RecentDirectoriesScreen(ModalScreen):
         """Select the highlighted directory."""
 
         list_view = self.query_one("#recent-list", ListView)
-        if list_view.highlighted_child:
+        if list_view and list_view.highlighted_child:
             selected_dir = self.recent_dirs[list_view.index or 0]
             self.dismiss(selected_dir)
 

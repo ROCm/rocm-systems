@@ -115,9 +115,13 @@ class RocprofTUIApp(App):
         self._save_recent_dirs()
 
     def on_recent_selected(self, selected_dir: Optional[str]) -> None:
-        if selected_dir:
+        if not selected_dir:
+            return
+
+        if Path(selected_dir) != self.main_view.selected_path:
             self.main_view.selected_path = Path(selected_dir)
-            self.main_view.run_analysis()
+
+        self.main_view.run_analysis()
 
     @on(Button.Pressed, "#menu-open-workload")
     @work
