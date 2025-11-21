@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
     std::cout << "Usage: " << argv[0] << " <hip-include-dir> <catch-test-dir> [work-dir]\n\n"
               << "Arguments:\n\n"
               << "  hip-include-dir   Path to the directory containing HIP headers.\n"
-              << "                    Example: <project-root>/projects/hip/include\n\n"
+              << "                    Example: <project-root>/projects/hip/include\n"
               << "  catch-test-dir    Path to the directory containing HIP Catch2 tests.\n"
               << "                    Example: <project-root>/projects/hip-tests/catch2\n"
               << "  work-dir          (Optional) Path to the working directory.\n" 
