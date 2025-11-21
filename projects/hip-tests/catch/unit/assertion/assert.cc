@@ -58,7 +58,7 @@ bool isAbortOnErrorEnabled() {
       return true;
     }
   }
-  return true;
+  return false;
 }
 
 /**
