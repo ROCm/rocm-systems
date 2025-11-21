@@ -114,11 +114,9 @@ def merge_docs_rst_as_default(descs: dict, docs_file: Path) -> dict:
     for section, metrics in descs.items():
         docs_section = docs.get(section) or {}
         for metric_name, d in metrics.items():
-            # If panel didn't explicitly provide rst, inherit from docs
-            if not d.get("rst"):
-                doc_entry = docs_section.get(metric_name) or {}
-                if doc_entry.get("rst"):
-                    d["rst"] = doc_entry["rst"]
+            doc_entry = docs_section.get(metric_name) or {}
+            if doc_entry.get("rst"):
+                d["rst"] = doc_entry["rst"]
     return descs
 
 
@@ -129,10 +127,6 @@ def merge_units_as_default(descs: dict, docs_file: Path, per_arch_file: Path) ->
       2) else from docs file,
       3) else leave as-is (missing).
     """
-    per_arch: dict = {}
-    if per_arch_file.exists():
-        with open(per_arch_file, "r", encoding="utf-8") as f:
-            per_arch = yaml.safe_load(f) or {}
 
     docs: dict = {}
     if docs_file.exists():
@@ -140,18 +134,11 @@ def merge_units_as_default(descs: dict, docs_file: Path, per_arch_file: Path) ->
             docs = yaml.safe_load(f) or {}
 
     for section, metrics in descs.items():
-        psec = per_arch.get(section) or {}
         dsec = docs.get(section) or {}
         for metric, data in metrics.items():
-            # Only fill if panel did NOT explicitly set unit
-            if "unit" not in data or data["unit"] is None:
-                unit = None
-                if metric in psec and isinstance(psec[metric], dict):
-                    unit = psec[metric].get("unit")
-                if unit is None and metric in dsec and isinstance(dsec[metric], dict):
-                    unit = dsec[metric].get("unit")
-                if unit is not None:
-                    data["unit"] = unit
+            doc_entry = dsec.get(metric)
+            if doc_entry and "unit" in doc_entry:
+                data["unit"] = doc_entry["unit"]
     return descs
 
 
@@ -403,7 +390,7 @@ def sync_arch(
     update_per_arch_metrics_file(arch_name, descriptions, per_arch_metrics_dir)
 
     # 5) Only when latest: update docs, but overwrite 'rst' only for overrides
-    if is_latest:
+    if is_latest and (panel_rst_overrides or panel_unit_overrides):
         if not update_docs_metrics_file(
             descriptions,
             docs_metrics_file,

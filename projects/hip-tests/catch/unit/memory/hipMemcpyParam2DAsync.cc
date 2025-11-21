@@ -27,7 +27,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic") {
+TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic", "[multigpu]") {
   using namespace std::placeholders;
 
   constexpr bool async = true;

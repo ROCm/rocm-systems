@@ -1,0 +1,68 @@
+# Variables of the form ${<variable>} are substituted, currently the following
+# list is supported:
+#   - ${branch} (or {branch}) the name of the current branch
+#   - ${url} (or {url}) github url of the current project
+#   - ${project:<project_name>} base url of the documentation of <project_name>
+#     based on intersphinx_mapping.
+# These comments will also be removed.
+defaults:
+  numbered: false
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: install/install.md
+    title: Library and CLI tool installation
+  - file: install/build.md
+    title: Build from source
+
+- caption: How to
+  entries:
+  - file: how-to/amdsmi-cpp-lib.md
+    title: C++ library usage
+  - file: how-to/amdsmi-py-lib.md
+    title: Python library usage
+  - file: how-to/amdsmi-go-lib.md
+    title: Go library usage
+  - file: how-to/amdsmi-cli-tool.md
+    title: CLI tool usage
+  - file: how-to/setup-docker-container.md
+    title: Use AMD SMI in a Docker container
+
+- caption: Reference
+  entries:
+  - file: reference/amdsmi-cpp-api.md
+    title: C++ API
+    entries:
+    - file: doxygen/docBin/html/topics
+      title: Modules
+    - file: doxygen/docBin/html/files
+      title: Files
+    - file: doxygen/docBin/html/globals
+      title: Globals
+    - file: doxygen/docBin/html/annotated
+      title: Data structures
+    - file: doxygen/docBin/html/functions_data_fields
+      title: Data fields
+  - file: reference/amdsmi-py-api.md
+    title: Python API
+  - file: reference/amdsmi-go-api.md
+    title: Go API
+  - file: reference/changelog.md
+    title: Changelog
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/ras.md
+
+- caption: Tutorials
+  entries:
+  - url: https://github.com/ROCm/amdsmi/tree/${branch}/example
+    title: AMD SMI examples (GitHub)
+  - url: https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html
+    title: AMD SMI CLI walkthrough
+
+- caption: About
+  entries:
+  - file: license.md
+

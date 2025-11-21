@@ -312,7 +312,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
-          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
+          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH \
           python3 ./source/scripts/run-ci.py \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
@@ -359,7 +359,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
           CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" tests
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
@@ -375,7 +375,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
           ls -la
           ls -la ./build
@@ -390,7 +390,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
           CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
           cmake --build build-samples-deb --target all --parallel 16
@@ -834,6 +834,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run:
         sudo sysctl -w vm.mmap_rnd_bits=28;
+        export PATH="$HOME/.local/bin:$PATH";
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
           --build-jobs 16

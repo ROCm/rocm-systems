@@ -56,6 +56,29 @@ rocprofiler_systems_add_test(
 
 rocprofiler_systems_add_test(
     SKIP_RUNTIME
+    NAME "mpi-perfetto-merge"
+    TARGET mpi-example
+    MPI ON
+    NUM_PROCS 2
+    LABELS "perfetto-merge"
+    REWRITE_ARGS
+        -e
+        -v
+        2
+        --label
+        file
+        line
+        --min-instructions
+        0
+    ENVIRONMENT "${_base_environment};ROCPROFSYS_VERBOSE=1"
+    REWRITE_RUN_PASS_REGEX
+        "Successfully executed: .+rocprof-sys-merge-output.sh.*"
+    REWRITE_RUN_FAIL_REGEX
+        "Script not found|Failed to execute|ROCPROFSYS_ABORT_FAIL_REGEX"
+)
+
+rocprofiler_systems_add_test(
+    SKIP_RUNTIME
     NAME "mpi-flat-mpip"
     TARGET mpi-example
     MPI ON

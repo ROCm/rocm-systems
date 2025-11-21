@@ -42,7 +42,7 @@ TEST_CASE("Unit_hipModuleLaunchKernel_Positive_Parameters") {
   ModuleLaunchKernelPositiveParameters<hipModuleLaunchKernelWrapper>();
 }
 
-TEST_CASE("Unit_hipModuleLaunchKernel_Negative_Parameters") {
+TEST_CASE("Unit_hipModuleLaunchKernel_Negative_Parameters", "[multigpu]") {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelNegativeParameters<hipModuleLaunchKernelWrapper>();
 }
