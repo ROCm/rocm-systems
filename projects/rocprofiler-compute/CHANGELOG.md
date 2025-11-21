@@ -2,8 +2,6 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-## Unreleased
-
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
 ### Added
@@ -16,6 +14,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Adds support for per kernel metrics analysis.
   * Adds support for dispatch timeline analysis.
   * Shows duration as median in addition to mean in kernel view.
+
+* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
 
 ### Changed
 
