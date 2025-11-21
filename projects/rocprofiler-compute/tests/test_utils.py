@@ -8670,3 +8670,123 @@ def test_get_gpu_memory_partition():
         ):
             partition = get_gpu_memory_partition()
             assert partition == "N/A"
+
+
+# =============================================================================
+# TESTS FOR ITERATION MULTIPLEXING
+# =============================================================================
+
+
+def test_merge_counters_iteration_multiplex():
+    """Test merge_counters_iteration_multiplex with sample DataFrame."""
+    import pandas as pd
+
+    import utils.utils as utils_mod
+
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 512, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, 200, 300],
+        ("file1", "Counter2"): [400, 500, 600],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    # For "kernel" policy
+    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel")
+    column_headers = [headers[1] for headers in result.columns.tolist()]
+
+    assert isinstance(result, pd.DataFrame)
+    assert "Mean_Time" in column_headers
+    assert "Median_Time" in column_headers
+    assert len(result) == 1  # Only one unique kernel_name 'kernel_a'
+
+    # For "kernel_launch_params" policy
+    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    column_headers = [headers[1] for headers in result.columns.tolist()]
+
+    assert isinstance(result, pd.DataFrame)
+    assert "Mean_Time" in column_headers
+    assert "Median_Time" in column_headers
+    assert len(result) == 2
+
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 32],
+        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, 200, 300],
+        ("file1", "Counter2"): [400, 500, 600],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    column_headers = [headers[1] for headers in result.columns.tolist()]
+
+    assert isinstance(result, pd.DataFrame)
+    assert "Mean_Time" in column_headers
+    assert "Median_Time" in column_headers
+    assert len(result) == 3
+
+    # Test multi_kernel
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 512],
+        ("file1", "Workgroup_Size"): [64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_b", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, 200, 300],
+        ("file1", "Counter2"): [400, 500, 600],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    # For "kernel" policy
+    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel")
+    column_headers = [headers[1] for headers in result.columns.tolist()]
+
+    assert isinstance(result, pd.DataFrame)
+    assert "Mean_Time" in column_headers
+    assert "Median_Time" in column_headers
+    assert len(result) == 2
+
+    # For "kernel_launch_params" policy
+    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    column_headers = [headers[1] for headers in result.columns.tolist()]
+
+    assert isinstance(result, pd.DataFrame)
+    assert "Mean_Time" in column_headers
+    assert "Median_Time" in column_headers
+    assert len(result) == 3

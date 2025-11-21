@@ -1662,3 +1662,29 @@ def test_edge_cases_and_error_handling():
     result = convert_time_columns(mixed_case_df, "ms")
     assert result.loc[0, "Unit"] == "ms"
     assert result.loc[1, "Unit"] == "ms"
+
+
+@pytest.mark.iteration_multiplexing
+def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
+    workload = "tests/workloads/vcopy_iteration_multiplexing/MI350"
+    workload_dir = test_utils.setup_workload_dir(workload)
+
+    # Test with dispatch filtering
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--dispatch",
+        "0",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 1
+
+    # Test without dispatch filtering
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)

@@ -369,6 +369,10 @@ class MetricEvaluator:
                 console_error("analysis", str(attribute_error))
                 return "N/A"
 
+        except pd.errors.IntCastingNaNError as exception:
+            console_warning(f"Missing data: {exception}. Using empty value.")
+            return ""
+
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
     """
