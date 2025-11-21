@@ -1067,8 +1067,6 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
   sysfs_path += kDevAttribNameMap.at(type);
   switch (type) {
     case kDevGPUMClk:
-    case kDevSocPstate:
-    case kDevXgmiPlpd:
     case kDevProcessIsolation:
     case kDevShaderClean:
     case kDevDCEFClk:
@@ -1082,6 +1080,9 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevComputePartition:
     case kDevMemoryPartition:
     case kDevXcpConfig:
+      return writeDevInfoStr(type, val, true);
+    case kDevSocPstate:
+    case kDevXgmiPlpd:
       return writeDevInfoStr(type, val, true);
 
     default:
