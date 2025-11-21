@@ -22,14 +22,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import argparse
+import glob
+import multiprocessing
 import os
 import re
-import sys
-import glob
-import socket
 import shutil
-import argparse
-import multiprocessing
+import socket
+import sys
 
 
 def which(cmd, require):
