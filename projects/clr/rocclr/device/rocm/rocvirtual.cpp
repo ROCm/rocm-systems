@@ -1104,7 +1104,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernarg_address,
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->completion_signal,
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2,
-          Hsa::queue_load_read_index_scacquire(gpu_queue_), index);
+          0, index);
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
 
@@ -1320,7 +1320,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
               reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->kernarg_address,
               reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->completion_signal,
               reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2,
-              Hsa::queue_load_read_index_scacquire(gpu_queue_), index);
+              0, index);
         }
       }
     }
@@ -1429,7 +1429,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   }
 
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
-  uint64_t read = Hsa::queue_load_read_index_relaxed(gpu_queue_);
+  uint64_t read = 0;
 
   fence_dirty_ = true;
   auto cache_state = extractAqlBits(packetHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
@@ -1534,7 +1534,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   }
 
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
-  uint64_t read = Hsa::queue_load_read_index_relaxed(gpu_queue_);
+  uint64_t read = 0;
 
   TrackQueueProgress(barrier_value_packet_, index);
 
