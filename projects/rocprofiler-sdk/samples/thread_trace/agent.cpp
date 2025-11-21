@@ -73,7 +73,7 @@ namespace
 constexpr uint64_t TARGET_CU   = 1;           // CU (gfx9) or WGP (gfx10+)
 constexpr uint64_t SHADER_MASK = 0x1;         // Only enable SE=0
 constexpr uint64_t BUFFER_SIZE = 0x10000000;  // 256MB
-};                                            // namespace
+};  // namespace
 
 namespace Results
 {

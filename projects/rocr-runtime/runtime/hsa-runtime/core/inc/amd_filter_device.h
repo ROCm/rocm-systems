@@ -212,7 +212,7 @@ class RvdFilter {
 
 };  // End of class RvdFilter
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr
 
 #endif  // header guard - HSA_RUNTIME_CORE_INC_AMD_FILTER_DEVICE_H_

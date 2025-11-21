@@ -28,23 +28,23 @@
 
 class AqlQueue : public BaseQueue {
  public:
-    AqlQueue();
-    virtual ~AqlQueue();
+  AqlQueue();
+  virtual ~AqlQueue();
 
-    // @brief Updates queue write pointer and sets the queue doorbell to the queue write pointer
-    virtual void SubmitPacket();
+  // @brief Updates queue write pointer and sets the queue doorbell to the queue write pointer
+  virtual void SubmitPacket();
 
-    // @return Read pointer in dwords
-    virtual unsigned int Rptr();
-    // @return Write pointer in dwords
-    virtual unsigned int Wptr();
-    // @return Expected m_Resources.Queue_read_ptr when all packets are consumed
-    virtual unsigned int RptrWhenConsumed();
+  // @return Read pointer in dwords
+  virtual unsigned int Rptr();
+  // @return Write pointer in dwords
+  virtual unsigned int Wptr();
+  // @return Expected m_Resources.Queue_read_ptr when all packets are consumed
+  virtual unsigned int RptrWhenConsumed();
 
  protected:
-    virtual PACKETTYPE PacketTypeSupported() { return PACKETTYPE_AQL; }
+  virtual PACKETTYPE PacketTypeSupported() { return PACKETTYPE_AQL; }
 
-    virtual _HSA_QUEUE_TYPE GetQueueType() { return HSA_QUEUE_COMPUTE_AQL; }
+  virtual _HSA_QUEUE_TYPE GetQueueType() { return HSA_QUEUE_COMPUTE_AQL; }
 };
 
 #endif  // __KFD_AQL_QUEUE__H__

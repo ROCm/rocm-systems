@@ -41,14 +41,12 @@ struct scope_destructor
     ///
     /// \brief Provides a utility to perform an operation when exiting a scope.
     template <typename FuncT, typename InitT = void (*)()>
-    scope_destructor(
-        FuncT&& _fini,
-        InitT&& _init = []() {});
+    scope_destructor(FuncT&& _fini, InitT&& _init = []() {});
 
     ~scope_destructor() { m_functor(); }
 
     // delete copy operations
-    scope_destructor(const scope_destructor&) = delete;
+    scope_destructor(const scope_destructor&)            = delete;
     scope_destructor& operator=(const scope_destructor&) = delete;
 
     // allow move operations

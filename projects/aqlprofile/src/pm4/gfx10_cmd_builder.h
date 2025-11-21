@@ -40,7 +40,7 @@ class Gfx10CmdBuilder : public CmdBuilder {
   }
 
  public:
-  Gfx10CmdBuilder(const reg_base_offset_table* _table) : CmdBuilder(_table){};
+  Gfx10CmdBuilder(const reg_base_offset_table* _table) : CmdBuilder(_table) {};
   static constexpr bool IsPrivilegedConfigReg(uint32_t addr) {
     return ((addr >= CONFIG_SPACE_START) && (addr <= CONFIG_SPACE_END));
   }

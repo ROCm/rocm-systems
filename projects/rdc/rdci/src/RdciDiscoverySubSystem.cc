@@ -19,6 +19,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#include "RdciDiscoverySubSystem.h"
+
 #include <getopt.h>
 #include <unistd.h>
 
@@ -26,7 +28,6 @@ THE SOFTWARE.
 #include <iomanip>
 #include <set>
 
-#include "RdciDiscoverySubSystem.h"
 #include "rdc/rdc.h"
 #include "rdc/rdc_private.h"
 #include "rdc_lib/RdcException.h"
@@ -93,14 +94,11 @@ void RdciDiscoverySubSystem::show_help() const {
   std::cout << " discovery -- Used to discover and identify GPUs "
             << "and their attributes, as well as server version information.\n\n";
   std::cout << "Usage\n";
-  std::cout << "    rdci discovery [--host <IP/FQDN>:port] [--json]"
-            << " [-u] -l -v\n";
+  std::cout << "    rdci discovery [--host <IP/FQDN>:port] [--json]" << " [-u] -l -v\n";
   std::cout << "\nFlags:\n";
   show_common_usage();
-  std::cout << "  --json                         "
-            << "Output using json.\n";
-  std::cout << "  -l  --list                     list GPU discovered"
-            << " on the system\n";
+  std::cout << "  --json                         " << "Output using json.\n";
+  std::cout << "  -l  --list                     list GPU discovered" << " on the system\n";
   std::cout << "  -i  --gpu-instance             list GPU discovered"
             << " on the system with partitions\n";
   std::cout << "  -v  --version                  Display version information of the"
@@ -128,8 +126,7 @@ void RdciDiscoverySubSystem::show_attributes() {
     std::cout << "\"gpus\" : [";
   } else {
     std::cout << count << " GPUs found.\n";
-    std::cout << "------------------------------------------------"
-              << "-----------------\n";
+    std::cout << "------------------------------------------------" << "-----------------\n";
     std::cout << "GPU Index\t Device Information\n";
   }
   for (uint32_t i = 0; i < count; i++) {
@@ -151,8 +148,7 @@ void RdciDiscoverySubSystem::show_attributes() {
   if (is_json_output()) {
     std::cout << ']';
   } else {
-    std::cout << "------------------------------------------------"
-              << "-----------------\n";
+    std::cout << "------------------------------------------------" << "-----------------\n";
   }
 }
 
@@ -213,12 +209,9 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
                 << attribute.device_name << std::setw(8) << phys_xcc_str << std::setw(8)
                 << phys_decoder_str << std::endl;
     } else {
-      std::cout << "{\"gpu_index\": \"" << i << "\", "
-                << "\"device_name\": \"" << attribute.device_name << "\", "
-                << "\"physical\": {"
-                << "\"xcc\": \"" << phys_xcc_str << "\", "
-                << "\"decoder\": \"" << phys_decoder_str << "\" "
-                << "}";
+      std::cout << "{\"gpu_index\": \"" << i << "\", " << "\"device_name\": \""
+                << attribute.device_name << "\", " << "\"physical\": {" << "\"xcc\": \""
+                << phys_xcc_str << "\", " << "\"decoder\": \"" << phys_decoder_str << "\" " << "}";
     }
 
     uint16_t num_partition = 0;
@@ -264,9 +257,8 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
         } else {
           std::string decoder_shared =
               (part_decoder.num_partitions_share_resource > 1) ? "true" : "false";
-          std::cout << "{\"instance_index\": \"" << instance_str << "\", "
-                    << "\"xcc\": \"" << part_xcc_str << "\", "
-                    << "\"decoder\": \"" << part_decoder_str << "\", "
+          std::cout << "{\"instance_index\": \"" << instance_str << "\", " << "\"xcc\": \""
+                    << part_xcc_str << "\", " << "\"decoder\": \"" << part_decoder_str << "\", "
                     << "\"decoder_shared\": " << decoder_shared << "}";
 
           if (pid != num_partition - 1) {
@@ -312,14 +304,12 @@ void RdciDiscoverySubSystem::show_version() {
   if (is_json_output()) {
     std::cout << "\"version\" : ";
     std::cout << '{';
-    std::cout << "\"rdcd\": "
-              << "\"" << rdcdv.version << "\", ";
-    std::cout << "\"amdsmi_lib\": "
-              << "\"" << smiv.version << "\"";
+    std::cout << "\"rdcd\": " << "\"" << rdcdv.version << "\", ";
+    std::cout << "\"amdsmi_lib\": " << "\"" << smiv.version << "\"";
     std::cout << '}';
   } else {
-    std::cout << "RDCD : " << rdcdv.version << "  |  "
-              << "AMDSMI Library : " << smiv.version << std::endl;
+    std::cout << "RDCD : " << rdcdv.version << "  |  " << "AMDSMI Library : " << smiv.version
+              << std::endl;
   }
 
   return;

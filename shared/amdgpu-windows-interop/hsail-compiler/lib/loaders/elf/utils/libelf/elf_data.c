@@ -33,156 +33,151 @@
 
 LIBELF_VCSID("$Id: elf_data.c 1765 2011-08-22 05:59:05Z jkoshy $");
 
-Elf_Data *
-elf_getdata(Elf_Scn *s, Elf_Data *d)
-{
-	Elf *e;
-	size_t fsz, msz, count;
-	int elfclass, elftype;
-	unsigned int sh_type;
-	uint64_t sh_align, sh_offset, sh_size;
-	int (*xlate)(char *_d, size_t _dsz, char *_s, size_t _c, int _swap);
+Elf_Data *elf_getdata(Elf_Scn *s, Elf_Data *d) {
+  Elf *e;
+  size_t fsz, msz, count;
+  int elfclass, elftype;
+  unsigned int sh_type;
+  uint64_t sh_align, sh_offset, sh_size;
+  int (*xlate)(char *_d, size_t _dsz, char *_s, size_t _c, int _swap);
 
-	if (s == NULL || (e = s->s_elf) == NULL ||
-	    (d != NULL && s != d->d_scn)) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (s == NULL || (e = s->s_elf) == NULL || (d != NULL && s != d->d_scn)) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	assert(e->e_kind == ELF_K_ELF);
+  assert(e->e_kind == ELF_K_ELF);
 
-	if (d == NULL && (d = STAILQ_FIRST(&s->s_data)) != NULL)
-		return (d);
+  if (d == NULL && (d = STAILQ_FIRST(&s->s_data)) != NULL)
+    return (d);
 
-	if (d != NULL)
-		return (STAILQ_NEXT(d, d_next));
+  if (d != NULL)
+    return (STAILQ_NEXT(d, d_next));
 
-	if (e->e_rawfile == NULL) {
-		/*
-		 * In the ELF_C_WRITE case, there is no source that
-		 * can provide data for the section.
-		 */
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (e->e_rawfile == NULL) {
+    /*
+     * In the ELF_C_WRITE case, there is no source that
+     * can provide data for the section.
+     */
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	elfclass = e->e_class;
+  elfclass = e->e_class;
 
-	assert(elfclass == ELFCLASS32 || elfclass == ELFCLASS64);
+  assert(elfclass == ELFCLASS32 || elfclass == ELFCLASS64);
 
-	if (elfclass == ELFCLASS32) {
-		sh_type   = s->s_shdr.s_shdr32.sh_type;
-		sh_offset = (uint64_t) s->s_shdr.s_shdr32.sh_offset;
-		sh_size   = (uint64_t) s->s_shdr.s_shdr32.sh_size;
-		sh_align  = (uint64_t) s->s_shdr.s_shdr32.sh_addralign;
-	} else {
-		sh_type   = s->s_shdr.s_shdr64.sh_type;
-		sh_offset = s->s_shdr.s_shdr64.sh_offset;
-		sh_size   = s->s_shdr.s_shdr64.sh_size;
-		sh_align  = s->s_shdr.s_shdr64.sh_addralign;
-	}
+  if (elfclass == ELFCLASS32) {
+    sh_type = s->s_shdr.s_shdr32.sh_type;
+    sh_offset = (uint64_t)s->s_shdr.s_shdr32.sh_offset;
+    sh_size = (uint64_t)s->s_shdr.s_shdr32.sh_size;
+    sh_align = (uint64_t)s->s_shdr.s_shdr32.sh_addralign;
+  } else {
+    sh_type = s->s_shdr.s_shdr64.sh_type;
+    sh_offset = s->s_shdr.s_shdr64.sh_offset;
+    sh_size = s->s_shdr.s_shdr64.sh_size;
+    sh_align = s->s_shdr.s_shdr64.sh_addralign;
+  }
 
-	if (sh_type == SHT_NULL) {
-		LIBELF_SET_ERROR(SECTION, 0);
-		return (NULL);
-	}
+  if (sh_type == SHT_NULL) {
+    LIBELF_SET_ERROR(SECTION, 0);
+    return (NULL);
+  }
 
-	if ((elftype = _libelf_xlate_shtype(sh_type)) < ELF_T_FIRST ||
-	    elftype > ELF_T_LAST || (sh_type != SHT_NOBITS &&
-	    sh_offset + sh_size > (uint64_t) e->e_rawsize)) {
-		LIBELF_SET_ERROR(SECTION, 0);
-		return (NULL);
-	}
+  if ((elftype = _libelf_xlate_shtype(sh_type)) < ELF_T_FIRST ||
+      elftype > ELF_T_LAST ||
+      (sh_type != SHT_NOBITS && sh_offset + sh_size > (uint64_t)e->e_rawsize)) {
+    LIBELF_SET_ERROR(SECTION, 0);
+    return (NULL);
+  }
 
-	if ((fsz = (elfclass == ELFCLASS32 ? elf32_fsize : elf64_fsize)
-            (elftype, (size_t) 1, e->e_version)) == 0) {
-		LIBELF_SET_ERROR(UNIMPL, 0);
-		return (NULL);
-	}
+  if ((fsz = (elfclass == ELFCLASS32 ? elf32_fsize : elf64_fsize)(
+           elftype, (size_t)1, e->e_version)) == 0) {
+    LIBELF_SET_ERROR(UNIMPL, 0);
+    return (NULL);
+  }
 
-	if (sh_size % fsz) {
-		LIBELF_SET_ERROR(SECTION, 0);
-		return (NULL);
-	}
+  if (sh_size % fsz) {
+    LIBELF_SET_ERROR(SECTION, 0);
+    return (NULL);
+  }
 
-	count = sh_size / fsz;
+  count = sh_size / fsz;
 
-	msz = _libelf_msize(elftype, elfclass, e->e_version);
+  msz = _libelf_msize(elftype, elfclass, e->e_version);
 
-	assert(msz > 0);
+  assert(msz > 0);
 
-	if ((d = _libelf_allocate_data(s)) == NULL)
-		return (NULL);
+  if ((d = _libelf_allocate_data(s)) == NULL)
+    return (NULL);
 
-	d->d_buf     = NULL;
-	d->d_off     = 0;
-	d->d_align   = sh_align;
-	d->d_size    = msz * count;
-	d->d_type    = elftype;
-	d->d_version = e->e_version;
+  d->d_buf = NULL;
+  d->d_off = 0;
+  d->d_align = sh_align;
+  d->d_size = msz * count;
+  d->d_type = elftype;
+  d->d_version = e->e_version;
 
-	if (sh_type == SHT_NOBITS || sh_size == 0) {
-	        STAILQ_INSERT_TAIL(&s->s_data, d, d_next);
-		return (d);
-        }
+  if (sh_type == SHT_NOBITS || sh_size == 0) {
+    STAILQ_INSERT_TAIL(&s->s_data, d, d_next);
+    return (d);
+  }
 
-	if ((d->d_buf = e->e_mem.alloc(msz*count)) == NULL) {
-		(void) _libelf_release_data(d);
-		LIBELF_SET_ERROR(RESOURCE, 0);
-		return (NULL);
-	}
+  if ((d->d_buf = e->e_mem.alloc(msz * count)) == NULL) {
+    (void)_libelf_release_data(d);
+    LIBELF_SET_ERROR(RESOURCE, 0);
+    return (NULL);
+  }
 
-	d->d_flags  |= LIBELF_F_DATA_MALLOCED;
+  d->d_flags |= LIBELF_F_DATA_MALLOCED;
 
-	xlate = _libelf_get_translator(elftype, ELF_TOMEMORY, elfclass);
-	if (!(*xlate)(d->d_buf, d->d_size, e->e_rawfile + sh_offset, count,
-	    e->e_byteorder != LIBELF_PRIVATE(byteorder))) {
-		_libelf_release_data(d);
-		LIBELF_SET_ERROR(DATA, 0);
-		return (NULL);
-	}
+  xlate = _libelf_get_translator(elftype, ELF_TOMEMORY, elfclass);
+  if (!(*xlate)(d->d_buf, d->d_size, e->e_rawfile + sh_offset, count,
+                e->e_byteorder != LIBELF_PRIVATE(byteorder))) {
+    _libelf_release_data(d);
+    LIBELF_SET_ERROR(DATA, 0);
+    return (NULL);
+  }
 
-	STAILQ_INSERT_TAIL(&s->s_data, d, d_next);
+  STAILQ_INSERT_TAIL(&s->s_data, d, d_next);
 
-	return (d);
+  return (d);
 }
 
-Elf_Data *
-elf_newdata(Elf_Scn *s)
-{
-	Elf *e;
-	Elf_Data *d;
+Elf_Data *elf_newdata(Elf_Scn *s) {
+  Elf *e;
+  Elf_Data *d;
 
-	if (s == NULL || (e = s->s_elf) == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (s == NULL || (e = s->s_elf) == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	assert(e->e_kind == ELF_K_ELF);
+  assert(e->e_kind == ELF_K_ELF);
 
-	/*
-	 * elf_newdata() has to append a data descriptor, so
-	 * bring in existing section data if not already present.
-	 */
-	if (e->e_rawfile && s->s_size > 0 && STAILQ_EMPTY(&s->s_data))
-		if (elf_getdata(s, NULL) == NULL)
-			return (NULL);
+  /*
+   * elf_newdata() has to append a data descriptor, so
+   * bring in existing section data if not already present.
+   */
+  if (e->e_rawfile && s->s_size > 0 && STAILQ_EMPTY(&s->s_data))
+    if (elf_getdata(s, NULL) == NULL)
+      return (NULL);
 
-	if ((d = _libelf_allocate_data(s)) == NULL)
-		return (NULL);
+  if ((d = _libelf_allocate_data(s)) == NULL)
+    return (NULL);
 
-	STAILQ_INSERT_TAIL(&s->s_data, d, d_next);
+  STAILQ_INSERT_TAIL(&s->s_data, d, d_next);
 
-	d->d_align = 1;
-	d->d_buf = NULL;
-	d->d_off = (uint64_t) ~0;
-	d->d_size = 0;
-	d->d_type = ELF_T_BYTE;
-	d->d_version = LIBELF_PRIVATE(version);
+  d->d_align = 1;
+  d->d_buf = NULL;
+  d->d_off = (uint64_t)~0;
+  d->d_size = 0;
+  d->d_type = ELF_T_BYTE;
+  d->d_version = LIBELF_PRIVATE(version);
 
-	(void) elf_flagscn(s, ELF_C_SET, ELF_F_DIRTY);
+  (void)elf_flagscn(s, ELF_C_SET, ELF_F_DIRTY);
 
-	return (d);
+  return (d);
 }
 
 /*
@@ -190,65 +185,61 @@ elf_newdata(Elf_Scn *s)
  * `s'.
  */
 
-Elf_Data *
-elf_rawdata(Elf_Scn *s, Elf_Data *d)
-{
-	Elf *e;
-	int elf_class;
-	uint32_t sh_type;
-	uint64_t sh_align, sh_offset, sh_size;
+Elf_Data *elf_rawdata(Elf_Scn *s, Elf_Data *d) {
+  Elf *e;
+  int elf_class;
+  uint32_t sh_type;
+  uint64_t sh_align, sh_offset, sh_size;
 
-	if (s == NULL || (e = s->s_elf) == NULL || e->e_rawfile == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (s == NULL || (e = s->s_elf) == NULL || e->e_rawfile == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	assert(e->e_kind == ELF_K_ELF);
+  assert(e->e_kind == ELF_K_ELF);
 
-	if (d == NULL && (d = STAILQ_FIRST(&s->s_rawdata)) != NULL)
-		return (d);
+  if (d == NULL && (d = STAILQ_FIRST(&s->s_rawdata)) != NULL)
+    return (d);
 
-	if (d != NULL)
-		return (STAILQ_NEXT(d, d_next));
+  if (d != NULL)
+    return (STAILQ_NEXT(d, d_next));
 
-	elf_class = e->e_class;
+  elf_class = e->e_class;
 
-	assert(elf_class == ELFCLASS32 || elf_class == ELFCLASS64);
+  assert(elf_class == ELFCLASS32 || elf_class == ELFCLASS64);
 
-	if (elf_class == ELFCLASS32) {
-		sh_type   = s->s_shdr.s_shdr32.sh_type;
-		sh_offset = (uint64_t) s->s_shdr.s_shdr32.sh_offset;
-		sh_size   = (uint64_t) s->s_shdr.s_shdr32.sh_size;
-		sh_align  = (uint64_t) s->s_shdr.s_shdr32.sh_addralign;
-	} else {
-		sh_type   = s->s_shdr.s_shdr64.sh_type;
-		sh_offset = s->s_shdr.s_shdr64.sh_offset;
-		sh_size   = s->s_shdr.s_shdr64.sh_size;
-		sh_align  = s->s_shdr.s_shdr64.sh_addralign;
-	}
+  if (elf_class == ELFCLASS32) {
+    sh_type = s->s_shdr.s_shdr32.sh_type;
+    sh_offset = (uint64_t)s->s_shdr.s_shdr32.sh_offset;
+    sh_size = (uint64_t)s->s_shdr.s_shdr32.sh_size;
+    sh_align = (uint64_t)s->s_shdr.s_shdr32.sh_addralign;
+  } else {
+    sh_type = s->s_shdr.s_shdr64.sh_type;
+    sh_offset = s->s_shdr.s_shdr64.sh_offset;
+    sh_size = s->s_shdr.s_shdr64.sh_size;
+    sh_align = s->s_shdr.s_shdr64.sh_addralign;
+  }
 
-	if (sh_type == SHT_NULL)
-		return (NULL);
+  if (sh_type == SHT_NULL)
+    return (NULL);
 
-	if ((d = _libelf_allocate_data(s)) == NULL)
-		return (NULL);
+  if ((d = _libelf_allocate_data(s)) == NULL)
+    return (NULL);
 
-	d->d_buf     = (sh_type == SHT_NOBITS || sh_size == 0) ? NULL :
-	    e->e_rawfile + sh_offset;
-	d->d_off     = 0;
-	d->d_align   = sh_align;
-	d->d_size    = sh_size;
-	d->d_type    = ELF_T_BYTE;
-	d->d_version = e->e_version;
+  d->d_buf =
+      (sh_type == SHT_NOBITS || sh_size == 0) ? NULL : e->e_rawfile + sh_offset;
+  d->d_off = 0;
+  d->d_align = sh_align;
+  d->d_size = sh_size;
+  d->d_type = ELF_T_BYTE;
+  d->d_version = e->e_version;
 
-	STAILQ_INSERT_TAIL(&s->s_rawdata, d, d_next);
+  STAILQ_INSERT_TAIL(&s->s_rawdata, d, d_next);
 
-	return (d);
+  return (d);
 }
 
-void
-elf_removedata(Elf_Scn *s, Elf_Data *d)
-{
-    STAILQ_REMOVE(&s->s_data, d, _Elf_Data, d_next);
-    d = _libelf_release_data(d);
+void elf_removedata(Elf_Scn *s, Elf_Data *d) {
+  STAILQ_REMOVE(&s->s_data, d, _Elf_Data, d_next);
+  d = _libelf_release_data(d);
 }

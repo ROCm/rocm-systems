@@ -80,8 +80,8 @@ exec_callback(void* user_data, int ncols, char** coltext, char** colnames)
     content << fmt::format(
         "| {} |", fmt::join(std::vector<std::string_view>(coltext, coltext + ncols), " | "));
 
-    ROCP_WARNING << "SQL callback for " << ncols << " columns contents: "
-                 << "\n\t" << header.str() << "\n\t" << div.str() << "\n\t" << content.str();
+    ROCP_WARNING << "SQL callback for " << ncols << " columns contents: " << "\n\t" << header.str()
+                 << "\n\t" << div.str() << "\n\t" << content.str();
 
     return SQLITE_OK;
 

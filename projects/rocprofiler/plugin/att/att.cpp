@@ -74,11 +74,11 @@ class att_plugin_t {
     std::vector<const char*> mpivars = {"MPI_RANK", "OMPI_COMM_WORLD_RANK", "MV2_COMM_WORLD_RANK"};
 
     for (const char* envvar : mpivars)
-    if (const char* env = getenv(envvar)) {
-      MPI_RANK = atoi(env);
-      MPI_ENABLE = true;
-      break;
-    }
+      if (const char* env = getenv(envvar)) {
+        MPI_RANK = atoi(env);
+        MPI_ENABLE = true;
+        break;
+      }
 
     header.raw = reinterpret_cast<uint64_t>(data);
     header.reserved = 0x11;
@@ -91,13 +91,11 @@ class att_plugin_t {
   rocprofiler::att_header_packet_t header{.raw = 0};
   std::string output_dir = ".";
 
-  bool CheckAddrMatches(uint64_t kernel_addr, uint64_t base_address, uint64_t size)
-  {
+  bool CheckAddrMatches(uint64_t kernel_addr, uint64_t base_address, uint64_t size) {
     return (kernel_addr >= base_address) && (kernel_addr < base_address + size);
   }
 
-  void InitOutputDir()
-  {
+  void InitOutputDir() {
     static bool bIsInit = false;
     if (bIsInit) return;
     bIsInit = true;
@@ -108,8 +106,9 @@ class att_plugin_t {
     if (!output_dir.size()) return;
 
     try {
-        rocprofiler::common::filesystem::create_directories(output_dir);
-    } catch (...) {}
+      rocprofiler::common::filesystem::create_directories(output_dir);
+    } catch (...) {
+    }
     output_dir += '/';
   }
 
@@ -122,7 +121,6 @@ class att_plugin_t {
 
   int FlushATTRecord(const rocprofiler_record_att_tracer_t* att_tracer_record,
                      rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
-
     if (!att_tracer_record) return ROCPROFILER_STATUS_ERROR;
     InitOutputDir();
 
@@ -167,14 +165,12 @@ class att_plugin_t {
     std::string fname = outfilepath + "_kernel.txt";
     std::ofstream kernel_txt_file((outfilepath + "_kernel.txt").c_str());
     kernel_txt_file << name_demangled << " dispatch[" << writer_id << "] GPU["
-                    << att_tracer_record->gpu_id.handle << "]: " << kernel_name_mangled
-                    << '\n';
+                    << att_tracer_record->gpu_id.handle << "]: " << kernel_name_mangled << '\n';
 
     // iterate over each shader engine att trace
     header.navi = !(att_tracer_record->intercept_list.userdata & 0x1);
     int se_num = att_tracer_record->shader_engine_data_count;
-    for (int i = 0; i < se_num; i++)
-    {
+    for (int i = 0; i < se_num; i++) {
       if (!att_tracer_record->shader_engine_data ||
           !att_tracer_record->shader_engine_data[i].buffer_ptr)
         continue;
@@ -189,33 +185,30 @@ class att_plugin_t {
         std::cerr << "ATT Failed to open file: " << outfilepath << "_se" << i << ".att\n";
         return ROCPROFILER_STATUS_ERROR;
       }
-      if (header.enable && !header.navi)
-        out.write((const char*)&header, sizeof(header.raw));
+      if (header.enable && !header.navi) out.write((const char*)&header, sizeof(header.raw));
       out.write(data_buffer_ptr, se_att_trace->buffer_size);
     }
 
-    for (size_t i = 0; i < att_tracer_record->intercept_list.count; i++)
-    {
+    for (size_t i = 0; i < att_tracer_record->intercept_list.count; i++) {
       const auto& symbol = att_tracer_record->intercept_list.symbols[i];
       if (!symbol.filepath) continue;
 
       std::string sfilepath(symbol.filepath);
       bool bCopiedData = symbol.data && symbol.data_size;
 
-      if (bCopiedData)
-      {
+      if (bCopiedData) {
         auto pos = sfilepath.find("://");
         auto rpos = sfilepath.rfind('/');
 
-        if (pos == std::string::npos || pos+3 >= sfilepath.size()) continue;
+        if (pos == std::string::npos || pos + 3 >= sfilepath.size()) continue;
 
-        std::string type(sfilepath.begin(), sfilepath.begin()+pos);
-        std::string cut(sfilepath.begin()+rpos+1, sfilepath.end());
+        std::string type(sfilepath.begin(), sfilepath.begin() + pos);
+        std::string cut(sfilepath.begin() + rpos + 1, sfilepath.end());
         sfilepath = type + cut + ".out";
       }
 
-      kernel_txt_file << std::hex << "0x" << symbol.base_address << " 0x" << symbol.mem_size
-                      << ' ' << std::dec << symbol.att_marker_id << ' ' << sfilepath << '\n';
+      kernel_txt_file << std::hex << "0x" << symbol.base_address << " 0x" << symbol.mem_size << ' '
+                      << std::dec << symbol.att_marker_id << ' ' << sfilepath << '\n';
 
       sfilepath = output_dir + '/' + sfilepath;
       if (!bCopiedData || att_file_exists(sfilepath)) continue;

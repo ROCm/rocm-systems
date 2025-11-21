@@ -53,30 +53,30 @@
 
 class AqlBarrierBitTest : public TestBase {
  public:
-    AqlBarrierBitTest(bool, bool);
+  AqlBarrierBitTest(bool, bool);
 
-    // @Brief: Destructor for the AqlBarrierBitTest class
-    virtual ~AqlBarrierBitTest();
+  // @Brief: Destructor for the AqlBarrierBitTest class
+  virtual ~AqlBarrierBitTest();
 
-    // @Brief: Setup the environment for measurement
-    virtual void SetUp();
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-    // @Brief: Core measurement execution
-    virtual void Run();
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-    // @Brief: Clean up and retrive the resource
-    virtual void Close();
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
 
-    // @Brief: Display  results
-    virtual void DisplayResults() const;
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
 
-    // @Brief: Display information about what this test does
-    virtual void DisplayTestInfo(void);
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 
-    // @Brief: Runtime will be initialized Num_Times
-    void BarrierBitSet(void);
+  // @Brief: Runtime will be initialized Num_Times
+  void BarrierBitSet(void);
 
-    void BarrierBitNotSet(void);
+  void BarrierBitNotSet(void);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_AQL_BARRIER_BIT_H_

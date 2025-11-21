@@ -49,7 +49,7 @@
 
 class TestEvtNotifReadWrite : public TestBase {
  public:
-    TestEvtNotifReadWrite();
+  TestEvtNotifReadWrite();
 
   // @Brief: Destructor for test case of TestEvtNotifReadWrite
   virtual ~TestEvtNotifReadWrite();

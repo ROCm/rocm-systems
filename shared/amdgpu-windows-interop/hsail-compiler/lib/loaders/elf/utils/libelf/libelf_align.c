@@ -35,151 +35,120 @@
 LIBELF_VCSID("$Id: libelf_align.c 1169 2010-09-04 01:06:31Z jkoshy $");
 
 struct align {
-	int a32;
-	int a64;
+  int a32;
+  int a64;
 };
 
-#ifdef	__GNUC__
-#define	MALIGN(N)	{					\
-		.a32 = __alignof__(Elf32_##N),			\
-		.a64 = __alignof__(Elf64_##N)			\
-	}
-#define	MALIGN64(V)	  {					\
-		.a32 = 0,					\
-		.a64 = __alignof__(Elf64_##V)			\
-	}
-#define	MALIGN_WORD()	{					\
-		.a32 = __alignof__(int32_t),			\
-		.a64 = __alignof__(int64_t)			\
-	    }
+#ifdef __GNUC__
+#define MALIGN(N)                                                              \
+  { .a32 = __alignof__(Elf32_##N), .a64 = __alignof__(Elf64_##N) }
+#define MALIGN64(V)                                                            \
+  { .a32 = 0, .a64 = __alignof__(Elf64_##V) }
+#define MALIGN_WORD()                                                          \
+  { .a32 = __alignof__(int32_t), .a64 = __alignof__(int64_t) }
 #elif !defined(_MSC_VER)
-#error	Need the __alignof__ builtin.
+#error Need the __alignof__ builtin.
 #endif
-#define	UNSUPPORTED()	{					\
-		.a32 = 0,					\
-		.a64 = 0					\
-	}
+#define UNSUPPORTED()                                                          \
+  { .a32 = 0, .a64 = 0 }
 
 static struct align malign[ELF_T_NUM] = {
 #if defined(__GNUC__)
-	[ELF_T_ADDR]	= MALIGN(Addr),
-	[ELF_T_BYTE]	= { .a32 = 1, .a64 = 1 },
+    [ELF_T_ADDR] = MALIGN(Addr),       [ELF_T_BYTE] = {.a32 = 1, .a64 = 1},
 #if LIBELF_CONFIG_CAP
-	[ELF_T_CAP]	= MALIGN(Cap),
+    [ELF_T_CAP] = MALIGN(Cap),
 #endif
-	[ELF_T_DYN]	= MALIGN(Dyn),
-	[ELF_T_EHDR]	= MALIGN(Ehdr),
-	[ELF_T_HALF]	= MALIGN(Half),
+    [ELF_T_DYN] = MALIGN(Dyn),         [ELF_T_EHDR] = MALIGN(Ehdr),
+    [ELF_T_HALF] = MALIGN(Half),
 #if LIBELF_CONFIG_LWORD
-	[ELF_T_LWORD]	= MALIGN(Lword),
+    [ELF_T_LWORD] = MALIGN(Lword),
 #endif
 #if LIBELF_CONFIG_MOVE
-	[ELF_T_MOVE]	= MALIGN(Move),
+    [ELF_T_MOVE] = MALIGN(Move),
 #endif
-	[ELF_T_MOVEP] 	= UNSUPPORTED(),
+    [ELF_T_MOVEP] = UNSUPPORTED(),
 #if LIBELF_CONFIG_NOTE
-	[ELF_T_NOTE]	= MALIGN(Nhdr),
+    [ELF_T_NOTE] = MALIGN(Nhdr),
 #endif
-	[ELF_T_OFF]	= MALIGN(Off),
-	[ELF_T_PHDR]	= MALIGN(Phdr),
-	[ELF_T_REL]	= MALIGN(Rel),
-	[ELF_T_RELA]	= MALIGN(Rela),
-	[ELF_T_SHDR]	= MALIGN(Shdr),
-	[ELF_T_SWORD]	= MALIGN(Sword),
-	[ELF_T_SXWORD]	= MALIGN64(Sxword),
-	[ELF_T_SYM]	= MALIGN(Sym),
+    [ELF_T_OFF] = MALIGN(Off),         [ELF_T_PHDR] = MALIGN(Phdr),
+    [ELF_T_REL] = MALIGN(Rel),         [ELF_T_RELA] = MALIGN(Rela),
+    [ELF_T_SHDR] = MALIGN(Shdr),       [ELF_T_SWORD] = MALIGN(Sword),
+    [ELF_T_SXWORD] = MALIGN64(Sxword), [ELF_T_SYM] = MALIGN(Sym),
 #if LIBELF_CONFIG_SYMINFO
-	[ELF_T_SYMINFO]	= MALIGN(Syminfo),
+    [ELF_T_SYMINFO] = MALIGN(Syminfo),
 #endif
 #if LIBELF_CONFIG_VDEF
-	[ELF_T_VDEF]	= MALIGN(Verdef),
+    [ELF_T_VDEF] = MALIGN(Verdef),
 #endif
 #if LIBELF_CONFIG_VNEED
-	[ELF_T_VNEED]	= MALIGN(Verneed),
+    [ELF_T_VNEED] = MALIGN(Verneed),
 #endif
-	[ELF_T_WORD]	= MALIGN(Word),
-	[ELF_T_XWORD]	= MALIGN64(Xword),
-	[ELF_T_GNUHASH] = MALIGN_WORD()
+    [ELF_T_WORD] = MALIGN(Word),       [ELF_T_XWORD] = MALIGN64(Xword),
+    [ELF_T_GNUHASH] = MALIGN_WORD()
 #elif defined(_MSC_VER)
-    { 4, 8 }, { 1, 1 }, { 4, 8 }, { 4, 8 }, { 4, 8 },
-    { 2, 2 }, { 8, 8 }, { 8, 8 }, { 0, 0 }, { 4, 4 },
-    { 4, 8 }, { 4, 8 }, { 4, 8 }, { 4, 8 }, { 4, 8 },
-    { 4, 4 }, { 0, 8 }, { 4, 8 }, { 2, 2 }, { 4, 4 },
-    { 4, 4 }, { 4, 4 }, { 0, 8 }, { 4, 8 }
+    {4, 8}, {1, 1}, {4, 8}, {4, 8}, {4, 8}, {2, 2}, {8, 8}, {8, 8}, {0, 0},
+    {4, 4}, {4, 8}, {4, 8}, {4, 8}, {4, 8}, {4, 8}, {4, 4}, {0, 8}, {4, 8},
+    {2, 2}, {4, 4}, {4, 4}, {4, 4}, {0, 8}, {4, 8}
 #else
 #error
 #endif
 };
 
-int
-_libelf_malign(Elf_Type t, int elfclass)
-{
-	if (t >= ELF_T_NUM || (int) t < 0)
-		return (0);
+int _libelf_malign(Elf_Type t, int elfclass) {
+  if (t >= ELF_T_NUM || (int)t < 0)
+    return (0);
 
-	return (elfclass == ELFCLASS32 ? malign[t].a32 :
-	    malign[t].a64);
+  return (elfclass == ELFCLASS32 ? malign[t].a32 : malign[t].a64);
 }
 
-#define	FALIGN(A32,A64)	{ .a32 = (A32), .a64 = (A64) }
+#define FALIGN(A32, A64)                                                       \
+  { .a32 = (A32), .a64 = (A64) }
 
 static struct align falign[ELF_T_NUM] = {
 #if defined(__GNUC__)
-	[ELF_T_ADDR]	= FALIGN(4,8),
-	[ELF_T_BYTE]	= FALIGN(1,1),
+    [ELF_T_ADDR] = FALIGN(4, 8),    [ELF_T_BYTE] = FALIGN(1, 1),
 #if LIBELF_CONFIG_CAP
-	[ELF_T_CAP]	= FALIGN(4,8),
+    [ELF_T_CAP] = FALIGN(4, 8),
 #endif
-	[ELF_T_DYN]	= FALIGN(4,8),
-	[ELF_T_EHDR]	= FALIGN(4,8),
-	[ELF_T_HALF]	= FALIGN(2,2),
+    [ELF_T_DYN] = FALIGN(4, 8),     [ELF_T_EHDR] = FALIGN(4, 8),
+    [ELF_T_HALF] = FALIGN(2, 2),
 #if LIBELF_CONFIG_LWORD
-	[ELF_T_LWORD]	= FALIGN(8,8),
+    [ELF_T_LWORD] = FALIGN(8, 8),
 #endif
 #if LIBELF_CONFIG_MOVE
-	[ELF_T_MOVE]	= FALIGN(8,8),
+    [ELF_T_MOVE] = FALIGN(8, 8),
 #endif
-	[ELF_T_MOVEP] 	= UNSUPPORTED(),
+    [ELF_T_MOVEP] = UNSUPPORTED(),
 #if LIBELF_CONFIG_NOTE
-	[ELF_T_NOTE]	= FALIGN(4,4),
+    [ELF_T_NOTE] = FALIGN(4, 4),
 #endif
-	[ELF_T_OFF]	= FALIGN(4,8),
-	[ELF_T_PHDR]	= FALIGN(4,8),
-	[ELF_T_REL]	= FALIGN(4,8),
-	[ELF_T_RELA]	= FALIGN(4,8),
-	[ELF_T_SHDR]	= FALIGN(4,8),
-	[ELF_T_SWORD]	= FALIGN(4,4),
-	[ELF_T_SXWORD]	= FALIGN(0,8),
-	[ELF_T_SYM]	= FALIGN(4,8),
+    [ELF_T_OFF] = FALIGN(4, 8),     [ELF_T_PHDR] = FALIGN(4, 8),
+    [ELF_T_REL] = FALIGN(4, 8),     [ELF_T_RELA] = FALIGN(4, 8),
+    [ELF_T_SHDR] = FALIGN(4, 8),    [ELF_T_SWORD] = FALIGN(4, 4),
+    [ELF_T_SXWORD] = FALIGN(0, 8),  [ELF_T_SYM] = FALIGN(4, 8),
 #if LIBELF_CONFIG_SYMINFO
-	[ELF_T_SYMINFO]	= FALIGN(2,2),
+    [ELF_T_SYMINFO] = FALIGN(2, 2),
 #endif
 #if LIBELF_CONFIG_VDEF
-	[ELF_T_VDEF]	= FALIGN(4,4),
+    [ELF_T_VDEF] = FALIGN(4, 4),
 #endif
 #if LIBELF_CONFIG_VNEED
-	[ELF_T_VNEED]	= FALIGN(4,4),
+    [ELF_T_VNEED] = FALIGN(4, 4),
 #endif
-	[ELF_T_WORD]	= FALIGN(4,4),
-	[ELF_T_XWORD]	= FALIGN(0,8),
-	[ELF_T_GNUHASH] = FALIGN(4,8)
+    [ELF_T_WORD] = FALIGN(4, 4),    [ELF_T_XWORD] = FALIGN(0, 8),
+    [ELF_T_GNUHASH] = FALIGN(4, 8)
 #elif defined(_MSC_VER)
-    { 4, 8 }, { 1, 1 }, { 4, 8 }, { 4, 8 }, { 4, 8 },
-    { 2, 2 }, { 8, 8 }, { 8, 8 }, { 0, 0 }, { 4, 4 },
-    { 4, 8 }, { 4, 8 }, { 4, 8 }, { 4, 8 }, { 4, 8 },
-    { 4, 4 }, { 0, 8 }, { 4, 8 }, { 2, 2 }, { 4, 4 },
-    { 4, 4 }, { 4, 4 }, { 0, 8 }, { 4, 8 }
+    {4, 8}, {1, 1}, {4, 8}, {4, 8}, {4, 8}, {2, 2}, {8, 8}, {8, 8}, {0, 0},
+    {4, 4}, {4, 8}, {4, 8}, {4, 8}, {4, 8}, {4, 8}, {4, 4}, {0, 8}, {4, 8},
+    {2, 2}, {4, 4}, {4, 4}, {4, 4}, {0, 8}, {4, 8}
 #else
 #error
 #endif
 };
 
-int
-_libelf_falign(Elf_Type t, int elfclass)
-{
-	if (t >= ELF_T_NUM || (int) t < 0)
-		return (0);
+int _libelf_falign(Elf_Type t, int elfclass) {
+  if (t >= ELF_T_NUM || (int)t < 0)
+    return (0);
 
-	return (elfclass == ELFCLASS32 ? falign[t].a32 :
-	    falign[t].a64);
+  return (elfclass == ELFCLASS32 ? falign[t].a32 : falign[t].a64);
 }

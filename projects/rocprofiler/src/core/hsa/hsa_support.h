@@ -106,7 +106,7 @@ class HSAAgentInfo {
 
 
  public:
-  HSAAgentInfo(hsa_agent_t agent, hsa_device_type_t type) : agent_(agent), type_(type){};
+  HSAAgentInfo(hsa_agent_t agent, hsa_device_type_t type) : agent_(agent), type_(type) {};
   uint64_t getHandle() const;
   const Agent::DeviceInfo& GetDeviceInfo() const;
   void SetNearCpuAgent(hsa_agent_t near_cpu_agent);
@@ -120,8 +120,8 @@ class HSAAgentInfo {
 
 
 struct queues_deleter {
-  queues_deleter(){};
-  queues_deleter(queues_deleter&){};
+  queues_deleter() {};
+  queues_deleter(queues_deleter&) {};
   void operator()(void* queue) const;
 };
 
@@ -132,7 +132,7 @@ struct new_signal_timestamp_t {
 
 class HSASupport_Singleton {
  private:
-  HSASupport_Singleton(){};
+  HSASupport_Singleton() {};
   ~HSASupport_Singleton() = delete;
   CoreApiTable saved_core_api;
   AmdExtTable saved_amd_ext_api;

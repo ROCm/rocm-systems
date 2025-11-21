@@ -111,8 +111,9 @@ bool context_handler(rocprofiler_group_t group, void* arg) {
 hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
                                rocprofiler_group_t* group) {
   // context features
-  const rocprofiler_feature_kind_t trace_kind = (rocprofiler_feature_kind_t)(
-      ROCPROFILER_FEATURE_KIND_TRACE | ROCPROFILER_FEATURE_KIND_PCSMP_MOD);
+  const rocprofiler_feature_kind_t trace_kind =
+      (rocprofiler_feature_kind_t)(ROCPROFILER_FEATURE_KIND_TRACE |
+                                   ROCPROFILER_FEATURE_KIND_PCSMP_MOD);
   const uint32_t feature_count = 1;
   const uint32_t parameter_count = 1;
   rocprofiler_feature_t* features = new rocprofiler_feature_t[feature_count];

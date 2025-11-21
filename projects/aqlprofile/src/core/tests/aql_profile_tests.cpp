@@ -30,9 +30,8 @@
 // header for memcpy
 #include <cstring>
 
-
-//#include "core/counter_dimensions.hpp"
-//#include "core/include/aql_profile_v2.h"
+// #include "core/counter_dimensions.hpp"
+// #include "core/include/aql_profile_v2.h"
 
 using namespace aql_profile;
 using namespace testing;
@@ -42,7 +41,7 @@ bool Pm4Factory::concurrent_create_mode_ = false;
 bool Pm4Factory::spm_kfd_mode_ = false;
 Pm4Factory::mutex_t Pm4Factory::mutex_;
 Pm4Factory::instances_t* Pm4Factory::instances_ = nullptr;
-}
+}  // namespace aql_profile
 
 // Mock classes to simulate Pm4Factory and related functionality
 class MockPm4Factory : public Pm4Factory {
@@ -56,7 +55,6 @@ class MockPm4Factory : public Pm4Factory {
   MOCK_METHOD(bool, SPISkip, (uint32_t, uint32_t), (const));
 };
 
-
 // Helper to create a mock GpuBlockInfo
 GpuBlockInfo* CreateBlockInfo(uint32_t id, uint32_t counter_count, uint32_t attr = 0) {
   auto* info = new GpuBlockInfo();
@@ -68,11 +66,13 @@ GpuBlockInfo* CreateBlockInfo(uint32_t id, uint32_t counter_count, uint32_t attr
 }
 
 // Helper to create a profile with specified events
-hsa_ven_amd_aqlprofile_profile_t* CreateProfile(const std::vector<hsa_ven_amd_aqlprofile_event_t>& events) {
+hsa_ven_amd_aqlprofile_profile_t* CreateProfile(
+    const std::vector<hsa_ven_amd_aqlprofile_event_t>& events) {
   auto* profile = new hsa_ven_amd_aqlprofile_profile_t();
   profile->event_count = events.size();
   if (!events.empty()) {
-      memcpy(reinterpret_cast<void*>(&profile->events), &events, sizeof(hsa_ven_amd_aqlprofile_event_t));
+    memcpy(reinterpret_cast<void*>(&profile->events), &events,
+           sizeof(hsa_ven_amd_aqlprofile_event_t));
   } else {
     profile->events = nullptr;
   }
@@ -110,9 +110,7 @@ class CountersVecTest : public Test {
     pm4_factory = new NiceMock<MockPm4Factory>();
     ON_CALL(*pm4_factory, IsGFX9()).WillByDefault(Return(true));
   }
-  void TearDown() override {
-    delete pm4_factory;
-  }
+  void TearDown() override { delete pm4_factory; }
   NiceMock<MockPm4Factory>* pm4_factory;
 
   pm4_builder::counters_vector CountersVec(const profile_t* profile, const Pm4Factory* pm4_factory);
@@ -131,8 +129,7 @@ pm4_builder::counters_vector CountersVecTest::CountersVec(const profile_t* profi
     const auto ret = index_map.insert({block_des, 0});
     uint32_t& reg_index = ret.first->second;
 
-    if (pm4_builder::SPISkip(block_info->attr, p->counter_id))
-    {
+    if (pm4_builder::SPISkip(block_info->attr, p->counter_id)) {
       vec.push_back({p->counter_id, reg_index, block_des, block_info});
       continue;
     }
@@ -148,7 +145,7 @@ pm4_builder::counters_vector CountersVecTest::CountersVec(const profile_t* profi
   return vec;
 }
 
-//Test case: Empty profile (no events)
+// Test case: Empty profile (no events)
 TEST_F(CountersVecTest, EmptyProfile) {
   auto profile = CreateProfile({});
   auto counters = CountersVec(profile, pm4_factory);
@@ -162,18 +159,16 @@ TEST_F(CountersVecTest, RegularEvents) {
   GpuBlockInfo* block_info2 = CreateBlockInfo(2, 2);
 
   std::vector<hsa_ven_amd_aqlprofile_event_t> events = {
-    {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 4}
-  };
+      {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 4}};
 
   auto profile = CreateProfile(events);
-  EXPECT_NE(profile,nullptr);
+  EXPECT_NE(profile, nullptr);
   EXPECT_EQ(profile->events->block_index, 0);
   EXPECT_EQ(profile->events->counter_id, 4);
 
   pm4_factory->GetBlockInfo(profile->events);
   bool is_gfx9 = pm4_factory->IsGFX9();
   EXPECT_TRUE(is_gfx9);
-
 }
 
 // Test fixture for the DefaultTracedataCallback function
@@ -188,7 +183,7 @@ class DefaultTracedataCallbackTest : public Test {
   }
 };
 
-//Test case: DefaultTracedataCallback with matching sample IDs
+// Test case: DefaultTracedataCallback with matching sample IDs
 TEST_F(DefaultTracedataCallbackTest, MatchingSampleId) {
   auto info_data = CreateInfoData(42);
   hsa_ven_amd_aqlprofile_info_data_t callback_data{};
@@ -196,10 +191,8 @@ TEST_F(DefaultTracedataCallbackTest, MatchingSampleId) {
   callback_data.trace_data.ptr = nullptr;
   callback_data.trace_data.size = 0;
 
-  hsa_status_t status = DefaultTracedataCallback(
-      HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA,
-      &info_data,
-      &callback_data);
+  hsa_status_t status =
+      DefaultTracedataCallback(HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA, &info_data, &callback_data);
 
   EXPECT_EQ(status, HSA_STATUS_INFO_BREAK);
   EXPECT_EQ(callback_data.trace_data.ptr, info_data.trace_data.ptr);
@@ -216,10 +209,8 @@ TEST_F(DefaultTracedataCallbackTest, NonMatchingSampleId) {
   callback_data.trace_data.ptr = original_ptr;
   callback_data.trace_data.size = original_size;
 
-  hsa_status_t status = DefaultTracedataCallback(
-      HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA,
-      &info_data,
-      &callback_data);
+  hsa_status_t status =
+      DefaultTracedataCallback(HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA, &info_data, &callback_data);
 
   EXPECT_EQ(status, HSA_STATUS_SUCCESS);
   EXPECT_EQ(callback_data.trace_data.ptr, original_ptr);
@@ -236,10 +227,8 @@ TEST_F(DefaultTracedataCallbackTest, NonTraceInfoType) {
   callback_data.trace_data.ptr = original_ptr;
   callback_data.trace_data.size = original_size;
 
-  hsa_status_t status = DefaultTracedataCallback(
-      HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA,
-      &info_data,
-      &callback_data);
+  hsa_status_t status =
+      DefaultTracedataCallback(HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA, &info_data, &callback_data);
 
   EXPECT_EQ(status, HSA_STATUS_SUCCESS);
   EXPECT_EQ(callback_data.trace_data.ptr, original_ptr);

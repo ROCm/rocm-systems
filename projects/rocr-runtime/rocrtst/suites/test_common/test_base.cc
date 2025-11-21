@@ -60,12 +60,10 @@ static const char kCloseLabel[] = "TEST CLEAN UP";
 static const char kResultsLabel[] = "TEST RESULTS";
 
 
-TestBase::TestBase() : description_("") {
-}
-TestBase::~TestBase() {
-}
+TestBase::TestBase() : description_("") {}
+TestBase::~TestBase() {}
 
-static void MakeHeaderStr(const char *inStr, std::string *outStr) {
+static void MakeHeaderStr(const char* inStr, std::string* outStr) {
   assert(outStr != nullptr);
   assert(inStr != nullptr);
 
@@ -123,8 +121,9 @@ void TestBase::DisplayResults(void) const {
 }
 
 void TestBase::DisplayTestInfo(void) {
-  printf("#########################################"
-                                  "######################################\n");
+  printf(
+      "#########################################"
+      "######################################\n");
 
   std::string label;
   MakeHeaderStr(kTitleLabel, &label);
@@ -148,4 +147,3 @@ void TestBase::set_description(std::string d) {
     i = endlptr;
   }
 }
-

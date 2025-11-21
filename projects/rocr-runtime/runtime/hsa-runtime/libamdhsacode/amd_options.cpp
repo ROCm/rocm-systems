@@ -62,9 +62,8 @@ namespace options {
 // StringFactory.                                                             //
 //===----------------------------------------------------------------------===//
 
-std::string StringFactory::Flatten(const char **cstrs,
-                                   const uint32_t &cstrs_count,
-                                   const char &spacer) {
+std::string StringFactory::Flatten(const char** cstrs, const uint32_t& cstrs_count,
+                                   const char& spacer) {
   if (NULL == cstrs || 0 == cstrs_count) {
     return std::string();
   }
@@ -82,8 +81,7 @@ std::string StringFactory::Flatten(const char **cstrs,
   return flattened;
 }
 
-std::list<std::string> StringFactory::Tokenize(const char *cstr,
-                                               const char &delim) {
+std::list<std::string> StringFactory::Tokenize(const char* cstr, const char& delim) {
   if (NULL == cstr) {
     return std::list<std::string>();
   }
@@ -122,45 +120,44 @@ std::string StringFactory::ToUpper(const std::string& str) {
 //===----------------------------------------------------------------------===//
 
 HelpStreambuf::HelpStreambuf(std::ostream& stream)
-  : basicStream_(&stream),
-    basicBuf_(stream.rdbuf()),
-    wrapWidth_(0),
-    indentSize_(0),
-    atLineStart_(true),
-    lineWidth_(0)
-{
+    : basicStream_(&stream),
+      basicBuf_(stream.rdbuf()),
+      wrapWidth_(0),
+      indentSize_(0),
+      atLineStart_(true),
+      lineWidth_(0) {
   basicStream_->rdbuf(this);
 }
 
 HelpStreambuf::int_type HelpStreambuf::overflow(HelpStreambuf::int_type ch) {
-    if (atLineStart_ && ch != '\n') {
-      std::string indent(indentSize_, ' ');
-      basicBuf_->sputn(indent.data(), indent.size());
-      lineWidth_ = indentSize_;
-      atLineStart_ = false;
-    } else if (ch == '\n') {
-      atLineStart_ = true;
-      lineWidth_ = 0;
-    }
-
-    if (wrapWidth_ > 0 && lineWidth_ == wrapWidth_) {
-      basicBuf_->sputc('\n');
-      std::string indent(indentSize_, ' ');
-      basicBuf_->sputn(indent.data(), indent.size());
-      lineWidth_ = indentSize_;
-      atLineStart_ = false;
-    }
-
-    lineWidth_++;
-    return basicBuf_->sputc(ch);
+  if (atLineStart_ && ch != '\n') {
+    std::string indent(indentSize_, ' ');
+    basicBuf_->sputn(indent.data(), indent.size());
+    lineWidth_ = indentSize_;
+    atLineStart_ = false;
+  } else if (ch == '\n') {
+    atLineStart_ = true;
+    lineWidth_ = 0;
   }
+
+  if (wrapWidth_ > 0 && lineWidth_ == wrapWidth_) {
+    basicBuf_->sputc('\n');
+    std::string indent(indentSize_, ' ');
+    basicBuf_->sputn(indent.data(), indent.size());
+    lineWidth_ = indentSize_;
+    atLineStart_ = false;
+  }
+
+  lineWidth_++;
+  return basicBuf_->sputc(ch);
+}
 
 HelpPrinter& HelpPrinter::PrintUsage(const std::string& usage) {
   sbuf_.IndentSize(0);
   sbuf_.WrapWidth(0);
   Stream() << usage;
   if (usage.length() < USAGE_WIDTH) {
-    Stream() <<  std::string(USAGE_WIDTH - usage.length(), ' ');
+    Stream() << std::string(USAGE_WIDTH - usage.length(), ' ');
   }
   Stream() << std::string(PADDING_WIDTH, ' ');
   return *this;
@@ -178,17 +175,15 @@ HelpPrinter& HelpPrinter::PrintDescription(const std::string& description) {
 //===----------------------------------------------------------------------===//
 // ChoiceOptioin.                                                             //
 //===----------------------------------------------------------------------===//
-ChoiceOption::ChoiceOption(const std::string& name,
-                           const std::vector<std::string>& choices,
-                           const std::string& help,
-                           std::ostream& error)
-  : OptionBase(name, help, error) {
-    for (const auto& choice: choices) {
-      choices_.insert(choice);
-    }
+ChoiceOption::ChoiceOption(const std::string& name, const std::vector<std::string>& choices,
+                           const std::string& help, std::ostream& error)
+    : OptionBase(name, help, error) {
+  for (const auto& choice : choices) {
+    choices_.insert(choice);
   }
+}
 
-bool ChoiceOption::ProcessTokens(std::list<std::string> &tokens) {
+bool ChoiceOption::ProcessTokens(std::list<std::string>& tokens) {
   assert(0 == name_.compare(tokens.front()) && "option name is mismatched");
   if (2 != tokens.size()) {
     error() << "error: invalid option: \'" << name_ << '\'' << std::endl;
@@ -211,7 +206,7 @@ bool ChoiceOption::ProcessTokens(std::list<std::string> &tokens) {
 void ChoiceOption::PrintHelp(HelpPrinter& printer) const {
   std::string usage = "-" + name_ + "=[";
   bool first = true;
-  for (const auto& choice: choices_) {
+  for (const auto& choice : choices_) {
     if (!first) {
       usage += '|';
     } else {
@@ -236,20 +231,19 @@ std::string::size_type PrefixOption::FindPrefix(const std::string& token) const 
 }
 
 bool PrefixOption::Accept(const std::string& token) const {
-  return
-    (token.compare(0, name_.length(), name_) == 0) &&
-    token.length() > name_.length() &&
-    token[name_.length()] == ':';
+  return (token.compare(0, name_.length(), name_) == 0) && token.length() > name_.length() &&
+      token[name_.length()] == ':';
 }
 
-bool PrefixOption::ProcessTokens(std::list<std::string> &tokens) {
+bool PrefixOption::ProcessTokens(std::list<std::string>& tokens) {
   assert(1 <= tokens.size());
   assert(Accept(tokens.front()) && "option name is mismatched");
 
-  std::string value = tokens.front(); tokens.pop_front();
+  std::string value = tokens.front();
+  tokens.pop_front();
   value = value.substr(name_.length() + 1);
 
-  for (const auto& token: tokens) {
+  for (const auto& token : tokens) {
     value += '=';
     value += token;
   }
@@ -267,8 +261,7 @@ void PrefixOption::PrintHelp(HelpPrinter& printer) const {
 //===----------------------------------------------------------------------===//
 // OptionParser.                                                              //
 //===----------------------------------------------------------------------===//
-std::vector<OptionBase*>::iterator
-OptionParser::FindOption(const std::string& name) {
+std::vector<OptionBase*>::iterator OptionParser::FindOption(const std::string& name) {
   std::vector<OptionBase*>::iterator it = options_.begin();
   std::vector<OptionBase*>::iterator end = options_.end();
   for (; it != end; ++it) {
@@ -279,7 +272,7 @@ OptionParser::FindOption(const std::string& name) {
   return end;
 }
 
-bool OptionParser::AddOption(OptionBase *option) {
+bool OptionParser::AddOption(OptionBase* option) {
   if (NULL == option || !option->IsValid()) {
     return false;
   }
@@ -295,7 +288,7 @@ const std::string& OptionParser::Unknown() const {
   return unknownOptions_;
 }
 
-bool OptionParser::ParseOptions(const char *options) {
+bool OptionParser::ParseOptions(const char* options) {
   std::list<std::string> tokens_l1 = StringFactory::Tokenize(options, ' ');
   if (0 == tokens_l1.size()) {
     return true;
@@ -320,8 +313,7 @@ bool OptionParser::ParseOptions(const char *options) {
             unknownOptions_ += *tokens_l1i + " ";
             continue;
           } else {
-            error() << "error: invalid option format: \'"
-                    << tokens_l2.front() << '\'' << std::endl;
+            error() << "error: invalid option format: \'" << tokens_l2.front() << '\'' << std::endl;
             Reset();
             return false;
           }
@@ -336,8 +328,7 @@ bool OptionParser::ParseOptions(const char *options) {
           }
           continue;
         } else {
-          error() << "error: unknown option: \'"
-                  << tokens_l2.front() << '\'' << std::endl;
+          error() << "error: unknown option: \'" << tokens_l2.front() << '\'' << std::endl;
           Reset();
           return false;
         }
@@ -352,8 +343,7 @@ bool OptionParser::ParseOptions(const char *options) {
       if (collectUnknown_) {
         unknownOptions_ += *tokens_l1i + " ";
       } else {
-        error() << "error: unknown option: \'"
-                << *tokens_l1i << '\'' << std::endl;
+        error() << "error: unknown option: \'" << *tokens_l1i << '\'' << std::endl;
         Reset();
         return false;
       }
@@ -365,7 +355,7 @@ bool OptionParser::ParseOptions(const char *options) {
 
 void OptionParser::PrintHelp(std::ostream& out, const std::string& addition) const {
   HelpPrinter printer(out);
-  for (const auto& option: options_) {
+  for (const auto& option : options_) {
     option->PrintHelp(printer);
   }
   out << addition << std::endl;
@@ -373,11 +363,11 @@ void OptionParser::PrintHelp(std::ostream& out, const std::string& addition) con
 
 void OptionParser::Reset() {
   unknownOptions_.clear();
-  for (auto &option : options_) {
+  for (auto& option : options_) {
     option->Reset();
   }
 }
 
-} // namespace options
-} // namespace amd
-} // namespace rocr
+}  // namespace options
+}  // namespace amd
+}  // namespace rocr

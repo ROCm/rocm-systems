@@ -14,7 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights
+// reserved.
 
 #ifndef METROHASH_PLATFORM_H
 #define METROHASH_PLATFORM_H
@@ -22,41 +23,35 @@
 #include <stdint.h>
 #include <string.h>
 
-namespace Util
-{
+namespace Util {
 
 // rotate right idiom recognized by most compilers
-inline static uint64_t rotate_right(uint64_t v, unsigned k)
-{
-    return (v >> k) | (v << (64 - k));
+inline static uint64_t rotate_right(uint64_t v, unsigned k) {
+  return (v >> k) | (v << (64 - k));
 }
 
-inline static uint64_t read_u64(const void * const ptr)
-{
-    uint64_t val;
-    memcpy(&val, ptr, sizeof(val));
-    return val;
+inline static uint64_t read_u64(const void *const ptr) {
+  uint64_t val;
+  memcpy(&val, ptr, sizeof(val));
+  return val;
 }
 
-inline static uint64_t read_u32(const void * const ptr)
-{
-    uint32_t val;
-    memcpy(&val, ptr, sizeof(val));
-    return static_cast<uint64_t>(val);
+inline static uint64_t read_u32(const void *const ptr) {
+  uint32_t val;
+  memcpy(&val, ptr, sizeof(val));
+  return static_cast<uint64_t>(val);
 }
 
-inline static uint64_t read_u16(const void * const ptr)
-{
-    uint16_t val;
-    memcpy(&val, ptr, sizeof(val));
-    return static_cast<uint64_t>(val);
+inline static uint64_t read_u16(const void *const ptr) {
+  uint16_t val;
+  memcpy(&val, ptr, sizeof(val));
+  return static_cast<uint64_t>(val);
 }
 
-inline static uint64_t read_u8 (const void * const ptr)
-{
-    return static_cast<uint64_t>(*reinterpret_cast<const uint8_t *>(ptr));
+inline static uint64_t read_u8(const void *const ptr) {
+  return static_cast<uint64_t>(*reinterpret_cast<const uint8_t *>(ptr));
 }
 
-} // Util
+} // namespace Util
 
 #endif // #ifndef METROHASH_PLATFORM_H

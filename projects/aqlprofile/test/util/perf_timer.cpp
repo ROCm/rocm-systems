@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #include "util/perf_timer.h"
 
 PerfTimer::PerfTimer() { freq_in_100mhz_ = MeasureTSCFreqHz(); }

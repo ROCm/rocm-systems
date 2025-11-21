@@ -28,16 +28,15 @@
 
 #include "KFDBaseComponentTest.hpp"
 
-class KFDSVMRangeTest : public KFDBaseComponentTest,
-                        public ::testing::WithParamInterface<int> {
+class KFDSVMRangeTest : public KFDBaseComponentTest, public ::testing::WithParamInterface<int> {
  public:
-    KFDSVMRangeTest() {}
-    ~KFDSVMRangeTest() {}
-    void SplitRangeTest(int defaultGPUNode, int prefetch_location);
+  KFDSVMRangeTest() {}
+  ~KFDSVMRangeTest() {}
+  void SplitRangeTest(int defaultGPUNode, int prefetch_location);
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 };
 
 #endif  // __KFD_LOCALMEMORY_TEST__H__

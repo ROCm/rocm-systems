@@ -46,7 +46,7 @@ template <typename PcSamplingRecordT>
 struct PCSamplingData
 {
     PCSamplingData(size_t size)
-    : samples(size){};
+    : samples(size) {};
     PCSamplingData& operator=(PCSamplingData&) = delete;
 
     std::vector<PcSamplingRecordT> samples;
@@ -56,7 +56,7 @@ class PCSamplingParserContext
 {
 public:
     PCSamplingParserContext()
-    : corr_map(std::make_unique<Parser::CorrelationMap>()){};
+    : corr_map(std::make_unique<Parser::CorrelationMap>()) {};
 
     /**
      * @brief Allocates some memory for samples.

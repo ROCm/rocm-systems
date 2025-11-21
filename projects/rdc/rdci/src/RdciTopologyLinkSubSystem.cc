@@ -105,25 +105,19 @@ void RdciTopologyLinkSubSystem::process() {
       rdc_device_topology_t topology;
       result = rdc_device_topology_get(rdc_handle_, group_index_, &topology);
       if (result == RDC_ST_OK) {
-        std::cout << "+-----------------------+"
-                  << "-----------------------------"
+        std::cout << "+-----------------------+" << "-----------------------------"
                   << "------------------+\n";
-        std::cout << "| GPU ID: " << group_index_ << "\t\t"
-                  << "| Topology Information \t\t\t\t|\n";
+        std::cout << "| GPU ID: " << group_index_ << "\t\t" << "| Topology Information \t\t\t\t|\n";
         std::cout << "+=======================+"
-                  << "============================="
-                  << "==================+\n";
-        std::cout << "+-----------------------+"
-                  << "-----------------------------"
+                  << "=============================" << "==================+\n";
+        std::cout << "+-----------------------+" << "-----------------------------"
                   << "------------------+\n";
         for (uint32_t i = 0; i < topology.num_of_gpus; i++) {
           if (group_index_ == i) continue;
-          std::cout << "| To GPU " << i << "\t\t"
-                    << "| " << topology_link_type_to_str(topology.link_infos[i].link_type)
-                    << "\t\t\t|\n";
+          std::cout << "| To GPU " << i << "\t\t" << "| "
+                    << topology_link_type_to_str(topology.link_infos[i].link_type) << "\t\t\t|\n";
         }
-        std::cout << "+-----------------------+"
-                  << "-----------------------------"
+        std::cout << "+-----------------------+" << "-----------------------------"
                   << "------------------+\n";
       }
       break;

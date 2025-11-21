@@ -48,14 +48,11 @@ class RdciHealthSubSystem : public RdciSubSystem {
   std::string health_string(rdc_health_result_t health) const;
   std::string component_string(rdc_health_system_t component) const;
   void output_errstr(const std::string& input) const;
-  unsigned int handle_one_component(rdc_health_response_t &response,
-                                    unsigned int start_index,
-                                    uint32_t gpu_index,
-                                    rdc_health_system_t component,
-                                    rdc_health_result_t &component_health,
-                                    std::vector<std::string> &err_str) const;
-  unsigned int handle_one_gpu(rdc_health_response_t &response,
-                              unsigned int start_index,
+  unsigned int handle_one_component(rdc_health_response_t& response, unsigned int start_index,
+                                    uint32_t gpu_index, rdc_health_system_t component,
+                                    rdc_health_result_t& component_health,
+                                    std::vector<std::string>& err_str) const;
+  unsigned int handle_one_gpu(rdc_health_response_t& response, unsigned int start_index,
                               uint32_t gpu_index) const;
 
   enum OPERATIONS {
@@ -67,8 +64,8 @@ class RdciHealthSubSystem : public RdciSubSystem {
     HEALTH_CLEAR,
   } health_ops_;
 
-  rdc_gpu_group_t      group_id_;
-  unsigned int         components_;
+  rdc_gpu_group_t group_id_;
+  unsigned int components_;
 };
 
 }  // namespace rdc

@@ -42,7 +42,7 @@ public:
                     rocprofiler_profile_counter_instance_types type)
     : name_(name)
     , size_(dim_size)
-    , type_(type){};
+    , type_(type) {};
 
     const std::string&                         name() const { return name_; }
     uint64_t                                   size() const { return size_; }

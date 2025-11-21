@@ -72,14 +72,12 @@ class MemoryRegion : public Checked<0x9C961F19EE175BB3> {
 
   // Convert this object into hsa_region_t.
   static __forceinline hsa_region_t Convert(MemoryRegion* region) {
-    const hsa_region_t region_handle = {
-        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(region))};
+    const hsa_region_t region_handle = {static_cast<uint64_t>(reinterpret_cast<uintptr_t>(region))};
     return region_handle;
   }
 
   static __forceinline const hsa_region_t Convert(const MemoryRegion* region) {
-    const hsa_region_t region_handle = {
-        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(region))};
+    const hsa_region_t region_handle = {static_cast<uint64_t>(reinterpret_cast<uintptr_t>(region))};
     return region_handle;
   }
 
@@ -104,17 +102,19 @@ class MemoryRegion : public Checked<0x9C961F19EE175BB3> {
     // Note: The node_id needs to be the node_id of the device even though this is allocating
     // system memory
     AllocateGTTAccess = (1 << 9),
-    AllocateContiguous = (1 << 10), // Physically contiguous memory
-    AllocateUncached = (1 << 11),   // Uncached memory
+    AllocateContiguous = (1 << 10),  // Physically contiguous memory
+    AllocateUncached = (1 << 11),    // Uncached memory
     // this flag is ignored by Thunk and only used for emulator/dxg to track code-object
     // allocations in AQL to PM4 conversion.
     AllocateExecutableBlitKernelObject = (1 << 12),
-    AllocateQueueObject = (1 << 13),  // Allocates AQL queue object, KMD requires physical access for the fence update
+    AllocateQueueObject =
+        (1 << 13),  // Allocates AQL queue object, KMD requires physical access for the fence update
   };
 
   typedef uint32_t AllocateFlags;
 
-  virtual hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id) const = 0;
+  virtual hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, void** address,
+                                int agent_node_id) const = 0;
 
   virtual hsa_status_t Free(void* address, size_t size) const = 0;
 
@@ -122,8 +122,7 @@ class MemoryRegion : public Checked<0x9C961F19EE175BB3> {
   virtual hsa_status_t IPCFragmentExport(void* address) const = 0;
 
   // Translate memory properties into HSA region attribute.
-  virtual hsa_status_t GetInfo(hsa_region_info_t attribute,
-                               void* value) const = 0;
+  virtual hsa_status_t GetInfo(hsa_region_info_t attribute, void* value) const = 0;
 
   virtual hsa_status_t AssignAgent(void* ptr, size_t size, const Agent& agent,
                                    hsa_access_permission_t access) const = 0;

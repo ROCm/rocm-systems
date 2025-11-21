@@ -27,24 +27,22 @@
  * KFDASMTest List
  */
 
-const std::vector<const char*> ShaderList = {
-    NoopIsa,
-    CopyDwordIsa,
-    InfiniteLoopIsa,
-    AtomicIncIsa,
-    ScratchCopyDwordIsa,
-    PollMemoryIsa,
-    CopyOnSignalIsa,
-    PollAndCopyIsa,
-    WriteFlagAndValueIsa,
-    WriteAndSignalIsa,
-    LoopIsa,
-    PersistentIterateIsa,
-    ReadMemoryIsa,
-    GwsInitIsa,
-    GwsAtomicIncreaseIsa,
-    CheckCuMaskIsa
-};
+const std::vector<const char*> ShaderList = {NoopIsa,
+                                             CopyDwordIsa,
+                                             InfiniteLoopIsa,
+                                             AtomicIncIsa,
+                                             ScratchCopyDwordIsa,
+                                             PollMemoryIsa,
+                                             CopyOnSignalIsa,
+                                             PollAndCopyIsa,
+                                             WriteFlagAndValueIsa,
+                                             WriteAndSignalIsa,
+                                             LoopIsa,
+                                             PersistentIterateIsa,
+                                             ReadMemoryIsa,
+                                             GwsInitIsa,
+                                             GwsAtomicIncreaseIsa,
+                                             CheckCuMaskIsa};
 
 /**
  * Macros
@@ -55,40 +53,40 @@ const std::vector<const char*> ShaderList = {
 /* Macros for portable v_add_co_u32, v_add_co_ci_u32,
  * and v_cmp_lt_u32.
  */
-#define SHADER_MACROS_U32 \
-    "   .text\n"\
-    "   .macro V_ADD_CO_U32 vdst, src0, vsrc1\n"\
-    "       .if (.amdgcn.gfx_generation_number >= 10)\n"\
-    "           v_add_co_u32        \\vdst, vcc_lo, \\src0, \\vsrc1\n"\
-    "       .elseif (.amdgcn.gfx_generation_number >= 9)\n"\
-    "           v_add_co_u32        \\vdst, vcc, \\src0, \\vsrc1\n"\
-    "       .else\n"\
-    "           v_add_u32           \\vdst, vcc, \\src0, \\vsrc1\n"\
-    "       .endif\n"\
-    "   .endm\n"\
-    "   .macro V_ADD_CO_CI_U32 vdst, src0, vsrc1\n"\
-    "       .if (.amdgcn.gfx_generation_number >= 10)\n"\
-    "           v_add_co_ci_u32     \\vdst, vcc_lo, \\src0, \\vsrc1, vcc_lo\n"\
-    "       .elseif (.amdgcn.gfx_generation_number >= 9)\n"\
-    "           v_addc_co_u32       \\vdst, vcc, \\src0, \\vsrc1, vcc\n"\
-    "       .else\n"\
-    "           v_addc_u32          \\vdst, vcc, \\src0, \\vsrc1, vcc\n"\
-    "       .endif\n"\
-    "   .endm\n"\
-    "   .macro V_CMP_LT_U32 src0, vsrc1\n"\
-    "       .if (.amdgcn.gfx_generation_number >= 10)\n"\
-    "           v_cmp_lt_u32        vcc_lo, \\src0, \\vsrc1\n"\
-    "       .else\n"\
-    "           v_cmp_lt_u32        vcc, \\src0, \\vsrc1\n"\
-    "       .endif\n"\
-    "   .endm\n"\
-    "   .macro V_CMP_EQ_U32 src0, vsrc1\n"\
-    "       .if (.amdgcn.gfx_generation_number >= 10)\n"\
-    "           v_cmp_eq_u32        vcc_lo, \\src0, \\vsrc1\n"\
-    "       .else\n"\
-    "           v_cmp_eq_u32        vcc, \\src0, \\vsrc1\n"\
-    "       .endif\n"\
-    "   .endm\n"
+#define SHADER_MACROS_U32                                                                          \
+  "   .text\n"                                                                                     \
+  "   .macro V_ADD_CO_U32 vdst, src0, vsrc1\n"                                                     \
+  "       .if (.amdgcn.gfx_generation_number >= 10)\n"                                             \
+  "           v_add_co_u32        \\vdst, vcc_lo, \\src0, \\vsrc1\n"                               \
+  "       .elseif (.amdgcn.gfx_generation_number >= 9)\n"                                          \
+  "           v_add_co_u32        \\vdst, vcc, \\src0, \\vsrc1\n"                                  \
+  "       .else\n"                                                                                 \
+  "           v_add_u32           \\vdst, vcc, \\src0, \\vsrc1\n"                                  \
+  "       .endif\n"                                                                                \
+  "   .endm\n"                                                                                     \
+  "   .macro V_ADD_CO_CI_U32 vdst, src0, vsrc1\n"                                                  \
+  "       .if (.amdgcn.gfx_generation_number >= 10)\n"                                             \
+  "           v_add_co_ci_u32     \\vdst, vcc_lo, \\src0, \\vsrc1, vcc_lo\n"                       \
+  "       .elseif (.amdgcn.gfx_generation_number >= 9)\n"                                          \
+  "           v_addc_co_u32       \\vdst, vcc, \\src0, \\vsrc1, vcc\n"                             \
+  "       .else\n"                                                                                 \
+  "           v_addc_u32          \\vdst, vcc, \\src0, \\vsrc1, vcc\n"                             \
+  "       .endif\n"                                                                                \
+  "   .endm\n"                                                                                     \
+  "   .macro V_CMP_LT_U32 src0, vsrc1\n"                                                           \
+  "       .if (.amdgcn.gfx_generation_number >= 10)\n"                                             \
+  "           v_cmp_lt_u32        vcc_lo, \\src0, \\vsrc1\n"                                       \
+  "       .else\n"                                                                                 \
+  "           v_cmp_lt_u32        vcc, \\src0, \\vsrc1\n"                                          \
+  "       .endif\n"                                                                                \
+  "   .endm\n"                                                                                     \
+  "   .macro V_CMP_EQ_U32 src0, vsrc1\n"                                                           \
+  "       .if (.amdgcn.gfx_generation_number >= 10)\n"                                             \
+  "           v_cmp_eq_u32        vcc_lo, \\src0, \\vsrc1\n"                                       \
+  "       .else\n"                                                                                 \
+  "           v_cmp_eq_u32        vcc, \\src0, \\vsrc1\n"                                          \
+  "       .endif\n"                                                                                \
+  "   .endm\n"
 
 /* Macros for portable flat load/store/atomic instructions.
  *
@@ -97,49 +95,46 @@ const std::vector<const char*> ShaderList = {
  * modifiers for gfx94x, but also take in arg0 arg1 to specify
  * (for non-gfx94x): glc, slc, or glc slc.
  */
-#define SHADER_MACROS_FLAT \
-    "   .macro FLAT_LOAD_DWORD_NSS vdst, vaddr arg0 arg1\n"\
-    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
-    "           flat_load_dword \\vdst, \\vaddr nt sc1 sc0\n"\
-    "       .else\n"\
-    "           flat_load_dword \\vdst, \\vaddr \\arg0 \\arg1\n"\
-    "       .endif\n"\
-    "   .endm\n"\
-    "   .macro FLAT_LOAD_DWORDX2_NSS vdst, vaddr arg0 arg1\n"\
-    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
-    "           flat_load_dwordx2 \\vdst, \\vaddr nt sc1 sc0\n"\
-    "       .else\n"\
-    "           flat_load_dwordx2 \\vdst, \\vaddr \\arg0 \\arg1\n"\
-    "       .endif\n"\
-    "   .endm\n"\
-    "   .macro FLAT_STORE_DWORD_NSS vaddr, vsrc arg0 arg1\n"\
-    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
-    "           flat_store_dword \\vaddr, \\vsrc nt sc1 sc0\n"\
-    "       .else\n"\
-    "           flat_store_dword \\vaddr, \\vsrc \\arg0 \\arg1\n"\
-    "       .endif\n"\
-    "   .endm\n"\
-    "   .macro FLAT_ATOMIC_ADD_NSS vdst, vaddr, vsrc arg0 arg1\n"\
-    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
-    "           flat_atomic_add \\vdst, \\vaddr, \\vsrc nt sc1 sc0\n"\
-    "       .else\n"\
-    "           flat_atomic_add \\vdst, \\vaddr, \\vsrc \\arg0 \\arg1\n"\
-    "       .endif\n"\
-    "   .endm\n"
+#define SHADER_MACROS_FLAT                                                                         \
+  "   .macro FLAT_LOAD_DWORD_NSS vdst, vaddr arg0 arg1\n"                                          \
+  "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"         \
+  "           flat_load_dword \\vdst, \\vaddr nt sc1 sc0\n"                                        \
+  "       .else\n"                                                                                 \
+  "           flat_load_dword \\vdst, \\vaddr \\arg0 \\arg1\n"                                     \
+  "       .endif\n"                                                                                \
+  "   .endm\n"                                                                                     \
+  "   .macro FLAT_LOAD_DWORDX2_NSS vdst, vaddr arg0 arg1\n"                                        \
+  "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"         \
+  "           flat_load_dwordx2 \\vdst, \\vaddr nt sc1 sc0\n"                                      \
+  "       .else\n"                                                                                 \
+  "           flat_load_dwordx2 \\vdst, \\vaddr \\arg0 \\arg1\n"                                   \
+  "       .endif\n"                                                                                \
+  "   .endm\n"                                                                                     \
+  "   .macro FLAT_STORE_DWORD_NSS vaddr, vsrc arg0 arg1\n"                                         \
+  "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"         \
+  "           flat_store_dword \\vaddr, \\vsrc nt sc1 sc0\n"                                       \
+  "       .else\n"                                                                                 \
+  "           flat_store_dword \\vaddr, \\vsrc \\arg0 \\arg1\n"                                    \
+  "       .endif\n"                                                                                \
+  "   .endm\n"                                                                                     \
+  "   .macro FLAT_ATOMIC_ADD_NSS vdst, vaddr, vsrc arg0 arg1\n"                                    \
+  "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"         \
+  "           flat_atomic_add \\vdst, \\vaddr, \\vsrc nt sc1 sc0\n"                                \
+  "       .else\n"                                                                                 \
+  "           flat_atomic_add \\vdst, \\vaddr, \\vsrc \\arg0 \\arg1\n"                             \
+  "       .endif\n"                                                                                \
+  "   .endm\n"
 
 /**
  * Common
  */
 
-const char *NoopIsa =
-    SHADER_START
+const char* NoopIsa = SHADER_START
     R"(
         s_endpgm
 )";
 
-const char *CopyDwordIsa =
-    SHADER_START
-    SHADER_MACROS_FLAT
+const char* CopyDwordIsa = SHADER_START SHADER_MACROS_FLAT
     R"(
         v_mov_b32 v0, s0
         v_mov_b32 v1, s1
@@ -157,8 +152,7 @@ const char *CopyDwordIsa =
         s_endpgm
 )";
 
-const char *InfiniteLoopIsa =
-    SHADER_START
+const char* InfiniteLoopIsa = SHADER_START
     R"(
         .text
         LOOP:
@@ -167,9 +161,7 @@ const char *InfiniteLoopIsa =
         s_endpgm
 )";
 
-const char *AtomicIncIsa =
-    SHADER_START
-    SHADER_MACROS_FLAT
+const char* AtomicIncIsa = SHADER_START SHADER_MACROS_FLAT
     R"(
         v_mov_b32 v0, s0
         v_mov_b32 v1, s1
@@ -190,9 +182,7 @@ const char *AtomicIncIsa =
  * KFDMemoryTest
  */
 
-const char *ScratchCopyDwordIsa =
-    SHADER_START
-    SHADER_MACROS_FLAT
+const char* ScratchCopyDwordIsa = SHADER_START SHADER_MACROS_FLAT
     R"(
         // Copy the parameters from scalar registers to vector registers
         .if (.amdgcn.gfx_generation_number >= 9)
@@ -241,8 +231,7 @@ const char *ScratchCopyDwordIsa =
  * by host program), fill dst buffer with specific
  * value(0x5678) and quit
  */
-const char *PollMemoryIsa =
-    SHADER_START
+const char* PollMemoryIsa = SHADER_START
     R"(
         // Assume src address in s0, s1, and dst address in s2, s3
         s_movk_i32 s18, 0x5678
@@ -274,8 +263,7 @@ const char *PollMemoryIsa =
  * cache coherence is not supported in scalar (smem) path.
  * Use vmem operations with scc
  */
-const char *PollNCMemoryIsa =
-    SHADER_START
+const char* PollNCMemoryIsa = SHADER_START
     R"(
         // Assume src address in s0, s1, and dst address in s2, s3
         v_mov_b32 v6, 0x5678
@@ -300,8 +288,7 @@ const char *PollNCMemoryIsa =
  * Once signal buffer is signaled, it copies input buffer
  * to output buffer
  */
-const char *CopyOnSignalIsa =
-    SHADER_START
+const char* CopyOnSignalIsa = SHADER_START
     R"(
         // Assume input buffer in s0, s1
         .if (.amdgcn.gfx_generation_number >= 10)
@@ -356,9 +343,7 @@ const char *CopyOnSignalIsa =
  * Note: Only works on GFX9 (only used in
  *       aldebaran tests)
  */
-const char *PollAndCopyIsa =
-    SHADER_START
-    SHADER_MACROS_FLAT
+const char* PollAndCopyIsa = SHADER_START SHADER_MACROS_FLAT
     R"(
         // Assume src buffer in s[0:1] and dst buffer in s[2:3]
         // Path for Aldebaran, Aqua Vanjaram
@@ -404,9 +389,7 @@ const char *PollAndCopyIsa =
  *
  * Note: Only works on Aldebaran and Aqua Vanjaram
  */
-const char *WriteFlagAndValueIsa =
-    SHADER_START
-    SHADER_MACROS_FLAT
+const char* WriteFlagAndValueIsa = SHADER_START SHADER_MACROS_FLAT
     R"(
         // Assume two inputs buffer in s[0:1] and s[2:3]
         .if (.amdgcn.gfx_generation_number == 9 && (.amdgcn.gfx_generation_minor >= 4 || .amdgcn.gfx_generation_stepping == 10))
@@ -429,8 +412,7 @@ const char *WriteFlagAndValueIsa =
  * DW1: Write to this buffer for other device to read.
  * Input1: mmio base address
  */
-const char *WriteAndSignalIsa =
-    SHADER_START
+const char* WriteAndSignalIsa = SHADER_START
     R"(
         // Assume input buffer in s0, s1
         .if (.amdgcn.gfx_generation_number >= 10)
@@ -476,8 +458,7 @@ const char *WriteAndSignalIsa =
  *
  * Aqua Vanjaram only
  */
-const char *FlushBufferForAcquireReleaseIsa =
-    SHADER_START
+const char* FlushBufferForAcquireReleaseIsa = SHADER_START
     R"(
         .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
             s_mov_b32 s11, 0x77
@@ -506,8 +487,7 @@ const char *FlushBufferForAcquireReleaseIsa =
  *
  * Aqua Vanjaram only
  */
-const char *WriteReleaseVectorIsa =
-    SHADER_START
+const char* WriteReleaseVectorIsa = SHADER_START
     R"(
         .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
             v_mov_b32 v11, 0x1
@@ -548,8 +528,7 @@ const char *WriteReleaseVectorIsa =
  *
  * Aqua Vanjaram only
  */
-const char *WriteReleaseScalarIsa =
-    SHADER_START
+const char* WriteReleaseScalarIsa = SHADER_START
     R"(
         .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
             s_mov_b32 s11, 0x6
@@ -591,8 +570,7 @@ const char *WriteReleaseScalarIsa =
  *
  * Aqua Vanjaram only
  */
-const char *ReadAcquireVectorIsa =
-    SHADER_START
+const char* ReadAcquireVectorIsa = SHADER_START
     R"(
         .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
             // Read-Acquire
@@ -647,8 +625,7 @@ const char *ReadAcquireVectorIsa =
  *
  * Aqua Vanjaram only
  */
-const char *ReadAcquireScalarIsa =
-    SHADER_START
+const char* ReadAcquireScalarIsa = SHADER_START
     R"(
         .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
             // Read-Acquire
@@ -685,8 +662,7 @@ const char *ReadAcquireScalarIsa =
  * s1 controls the number iterations of the loop
  * This shader can be used by GFX8, GFX9 and GFX10
  */
-const char *LoopIsa =
-    SHADER_START
+const char* LoopIsa = SHADER_START
     R"(
         s_movk_i32    s0, 0x0008
         s_movk_i32    s1, 0x00ff
@@ -804,10 +780,7 @@ const char *LoopIsa =
  *   v6 - register storing known-value output for mangle testing
  *   v7 - counter
  */
-const char *PersistentIterateIsa =
-    SHADER_START
-    SHADER_MACROS_U32
-    SHADER_MACROS_FLAT
+const char* PersistentIterateIsa = SHADER_START SHADER_MACROS_U32 SHADER_MACROS_FLAT
     R"(
         // Compute address of output buffer
         .if (.amdgcn.gfx_generation_number >= 12)
@@ -872,10 +845,7 @@ const char *PersistentIterateIsa =
  *   v[6:7] - local buf address used for read test
  *   v11 - size of local buffer in MB
  */
-const char *ReadMemoryIsa =
-    SHADER_START
-    SHADER_MACROS_U32
-    SHADER_MACROS_FLAT
+const char* ReadMemoryIsa = SHADER_START SHADER_MACROS_U32 SHADER_MACROS_FLAT
     R"(
         // Compute address of corresponding output buffer
         .if (.amdgcn.gfx_generation_number >= 12)
@@ -955,8 +925,7 @@ const char *ReadMemoryIsa =
  */
 
 /* Shader to initialize gws counter to 1 */
-const char *GwsInitIsa =
-    SHADER_START
+const char* GwsInitIsa = SHADER_START
     R"(
         .if (.amdgcn.gfx_generation_number >= 12)
         .else
@@ -978,8 +947,7 @@ const char *GwsInitIsa =
  * GWS semaphore is used to guarantee
  * the operation is atomic.
  */
-const char *GwsAtomicIncreaseIsa =
-    SHADER_START
+const char* GwsAtomicIncreaseIsa = SHADER_START
     R"(
         // Assume src address in s0, s1
         .if (.amdgcn.gfx_generation_number >= 12)
@@ -1029,10 +997,7 @@ const char *GwsAtomicIncreaseIsa =
  * Store HW_ID1 content in output buffer at index corresponding to workgroup id.
  *
  */
-const char *CheckCuMaskIsa =
-    SHADER_START
-    SHADER_MACROS_U32
-    SHADER_MACROS_FLAT
+const char* CheckCuMaskIsa = SHADER_START SHADER_MACROS_U32 SHADER_MACROS_FLAT
     R"(
         // Get workgroup id
         .if (.amdgcn.gfx_generation_number >= 12)
@@ -1060,9 +1025,7 @@ const char *CheckCuMaskIsa =
 )";
 
 
-const char *JumpToTrapIsa =
-    SHADER_START
-    SHADER_MACROS_U32
+const char* JumpToTrapIsa = SHADER_START SHADER_MACROS_U32
     R"(
         /*copy the parameters from scalar registers to vector registers*/
         v_mov_b32 v4, 0
@@ -1077,8 +1040,7 @@ const char *JumpToTrapIsa =
         s_endpgm
 )";
 
-const char *TrapHandlerIsa =
-    SHADER_START
+const char* TrapHandlerIsa = SHADER_START
     R"(
         CHECK_VMFAULT:
         /*if trap jumped to by vmfault, restore skip m0 signalling*/
@@ -1159,32 +1121,28 @@ const char *TrapHandlerIsa =
         s_rfe_b64 [ttmp0, ttmp1]
 )";
 
-#define WATCH_START SHADER_START SHADER_MACROS_U32\
-    "v_mov_b32 v0, s0\n"\
-    "v_mov_b32 v1, s1\n"\
-    "v_mov_b32 v2, s2\n"\
-    "v_mov_b32 v3, s3\n"\
-    "flat_load_dword v4, v[2:3]\n"\
-    "s_waitcnt vmcnt(0) & lgkmcnt(0)\n"\
-    "v_mov_b32 v5, 0\n"\
-    "v_mov_b32 v6, 0\n"
+#define WATCH_START                                                                                \
+  SHADER_START SHADER_MACROS_U32                                                                   \
+      "v_mov_b32 v0, s0\n"                                                                         \
+      "v_mov_b32 v1, s1\n"                                                                         \
+      "v_mov_b32 v2, s2\n"                                                                         \
+      "v_mov_b32 v3, s3\n"                                                                         \
+      "flat_load_dword v4, v[2:3]\n"                                                               \
+      "s_waitcnt vmcnt(0) & lgkmcnt(0)\n"                                                          \
+      "v_mov_b32 v5, 0\n"                                                                          \
+      "v_mov_b32 v6, 0\n"
 
-#define WATCH_END "\n"\
-    "v_mov_b32 v4, 2\n"\
-    "LOOP:\n"\
-    "V_CMP_EQ_U32 v6, 0\n"\
-    "s_cbranch_vccnz LOOP\n"\
-    "V_ADD_CO_U32 v6, v6, v5\n"\
-    "flat_store_dword v[2:3], v6\n"\
-    "s_waitcnt vmcnt(0) & lgkmcnt(0)\n"\
-    "s_endpgm\n"
+#define WATCH_END                                                                                  \
+  "\n"                                                                                             \
+  "v_mov_b32 v4, 2\n"                                                                              \
+  "LOOP:\n"                                                                                        \
+  "V_CMP_EQ_U32 v6, 0\n"                                                                           \
+  "s_cbranch_vccnz LOOP\n"                                                                         \
+  "V_ADD_CO_U32 v6, v6, v5\n"                                                                      \
+  "flat_store_dword v[2:3], v6\n"                                                                  \
+  "s_waitcnt vmcnt(0) & lgkmcnt(0)\n"                                                              \
+  "s_endpgm\n"
 
-const char *WatchReadIsa =
-    WATCH_START
-    "flat_load_dword v7, v[0:1]"
-    WATCH_END;
+const char* WatchReadIsa = WATCH_START "flat_load_dword v7, v[0:1]" WATCH_END;
 
-const char *WatchWriteIsa =
-    WATCH_START
-    "flat_store_dword v[0:1], v4"
-    WATCH_END;
+const char* WatchWriteIsa = WATCH_START "flat_store_dword v[0:1], v4" WATCH_END;

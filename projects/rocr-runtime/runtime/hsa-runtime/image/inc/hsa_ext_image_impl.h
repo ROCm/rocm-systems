@@ -95,8 +95,8 @@ hsa_status_t hsa_ext_sampler_create(hsa_agent_t agent,
                                     hsa_ext_sampler_t* sampler);
 
 hsa_status_t hsa_ext_sampler_create_v2(hsa_agent_t agent,
-                                    const hsa_ext_sampler_descriptor_v2_t* sampler_descriptor,
-                                    hsa_ext_sampler_t* sampler);
+                                       const hsa_ext_sampler_descriptor_v2_t* sampler_descriptor,
+                                       hsa_ext_sampler_t* sampler);
 
 hsa_status_t hsa_ext_sampler_destroy(hsa_agent_t agent, hsa_ext_sampler_t sampler);
 

@@ -49,7 +49,7 @@ union MemoryInst
 {
     MemoryInst() = default;
     MemoryInst(int type)
-    : raw(type){};
+    : raw(type) {};
 
     struct
     {

@@ -101,11 +101,21 @@ roctxRangeStartA(const char*)
     return range_id;
 }
 
-void roctxRangeStop(roctx_range_id_t /*id*/) {}
+void
+roctxRangeStop(roctx_range_id_t /*id*/)
+{}
 
-int roctxProfilerPause(roctx_thread_id_t /*tid*/) { return 0; }
+int
+roctxProfilerPause(roctx_thread_id_t /*tid*/)
+{
+    return 0;
+}
 
-int roctxProfilerResume(roctx_thread_id_t /*tid*/) { return 0; }
+int
+roctxProfilerResume(roctx_thread_id_t /*tid*/)
+{
+    return 0;
+}
 
 int
 roctxNameOsThread(const char* /*name*/)

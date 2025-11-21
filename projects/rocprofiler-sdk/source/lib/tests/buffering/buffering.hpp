@@ -41,7 +41,7 @@ struct raw_array
     raw_array(const raw_array&)     = default;
     raw_array(raw_array&&) noexcept = default;
 
-    raw_array& operator=(const raw_array&) = default;
+    raw_array& operator=(const raw_array&)     = default;
     raw_array& operator=(raw_array&&) noexcept = default;
 
     bool operator==(const raw_array<Tp, N>& rhs) const;

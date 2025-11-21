@@ -43,26 +43,27 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/power_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/power_read.h"
-#include "rocm_smi_test/test_common.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi_test/test_common.h"
 
 TestPowerRead::TestPowerRead() : TestBase() {
   set_title("RSMI Power Read Test");
-  set_description("The Power Read tests verifies that "
-                                "power related values can be read properly.");
+  set_description(
+      "The Power Read tests verifies that "
+      "power related values can be read properly.");
 }
 
-TestPowerRead::~TestPowerRead(void) {
-}
+TestPowerRead::~TestPowerRead(void) {}
 
 void TestPowerRead::SetUp(void) {
   TestBase::SetUp();
@@ -70,9 +71,7 @@ void TestPowerRead::SetUp(void) {
   return;
 }
 
-void TestPowerRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPowerRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPowerRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -84,7 +83,6 @@ void TestPowerRead::Close() {
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestPowerRead::Run(void) {
   rsmi_status_t err;
@@ -108,7 +106,7 @@ void TestPowerRead::Run(void) {
       } else {
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
-          std::cout << "\t**Current Power Cap: " << val_ui64 << "uW" <<std::endl;
+          std::cout << "\t**Current Power Cap: " << val_ui64 << "uW" << std::endl;
         }
       }
       err = rsmi_dev_power_cap_default_get(i, &val_ui64);
@@ -118,7 +116,7 @@ void TestPowerRead::Run(void) {
       } else {
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
-          std::cout << "\t**Default Power Cap: " << val_ui64 << "uW" <<std::endl;
+          std::cout << "\t**Default Power Cap: " << val_ui64 << "uW" << std::endl;
         }
       }
       err = rsmi_dev_power_cap_range_get(i, 0, &val_ui64, &val2_ui64);
@@ -128,27 +126,23 @@ void TestPowerRead::Run(void) {
       } else {
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
-          std::cout << "\t**Power Cap Range: " << val2_ui64 << " to " <<
-                                                   val_ui64 << " uW" << std::endl;
+          std::cout << "\t**Power Cap Range: " << val2_ui64 << " to " << val_ui64 << " uW"
+                    << std::endl;
         }
       }
 
       /* Average Power */
       err = rsmi_dev_power_ave_get(i, 0, &val_ui64);
 
-      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS
-                 || err == RSMI_STATUS_NOT_SUPPORTED);
+      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS || err == RSMI_STATUS_NOT_SUPPORTED);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        std::cout <<
-            "\t**Average Power Usage: not supported on this device"
-                                                                   << std::endl;
+        std::cout << "\t**Average Power Usage: not supported on this device" << std::endl;
       } else {
         CHK_RSMI_PERM_ERR(err)
         IF_VERB(STANDARD) {
           std::cout << "\t**Average Power Usage: ";
           if (err == RSMI_STATUS_SUCCESS) {
-            std::cout << static_cast<float>(val_ui64) / 1000 << " W"
-                      << std::endl;
+            std::cout << static_cast<float>(val_ui64) / 1000 << " W" << std::endl;
           }
         }
         // Verify api support checking functionality is working
@@ -158,19 +152,17 @@ void TestPowerRead::Run(void) {
 
       /* Current Socket Power */
       err = rsmi_dev_current_socket_power_get(i, &val_ui64);
-      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS
-                 || err == RSMI_STATUS_NOT_SUPPORTED);
+      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS || err == RSMI_STATUS_NOT_SUPPORTED);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        std::cout <<
-            "\t**Current Socket Power: not supported"
-            " on this device" << std::endl;
+        std::cout << "\t**Current Socket Power: not supported"
+                     " on this device"
+                  << std::endl;
       } else {
         CHK_RSMI_PERM_ERR(err)
         IF_VERB(STANDARD) {
           std::cout << "\t**Current Socket Power: ";
           if (err == RSMI_STATUS_SUCCESS) {
-            std::cout << static_cast<float>(val_ui64) / 1000 << " W"
-                      << std::endl;
+            std::cout << static_cast<float>(val_ui64) / 1000 << " W" << std::endl;
           }
         }
         // Verify api support checking functionality is working
@@ -180,23 +172,21 @@ void TestPowerRead::Run(void) {
 
       /* Generic Power */
       err = rsmi_dev_power_get(i, &val_ui64, &type);
-      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS
-                 || err == RSMI_STATUS_NOT_SUPPORTED);
-      ASSERT_TRUE(type == RSMI_AVERAGE_POWER || type == RSMI_CURRENT_POWER
-                  || type == RSMI_INVALID_POWER);
+      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS || err == RSMI_STATUS_NOT_SUPPORTED);
+      ASSERT_TRUE(type == RSMI_AVERAGE_POWER || type == RSMI_CURRENT_POWER ||
+                  type == RSMI_INVALID_POWER);
 
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        std::cout <<
-            "\t**Generic Power: not supported"
-            " on this device" << std::endl;
+        std::cout << "\t**Generic Power: not supported"
+                     " on this device"
+                  << std::endl;
       } else {
         CHK_RSMI_PERM_ERR(err)
         IF_VERB(STANDARD) {
           std::cout << "\t**Generic Power: ";
           if (err == RSMI_STATUS_SUCCESS) {
             std::cout << "[" << amd::smi::power_type_string(type) << "] "
-                      << static_cast<float>(val_ui64) / 1000 << " W"
-                      << std::endl;
+                      << static_cast<float>(val_ui64) / 1000 << " W" << std::endl;
           }
         }
         // Verify api support checking functionality is working

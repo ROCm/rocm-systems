@@ -81,8 +81,7 @@ hsa_status_t SetDefaultAgents(BaseRocR* test);
 /// \param[in] do_profile [Optional] Specificy whether profiled queue should
 ///  be created
 /// \returns  HSA_STATUS_SUCCESS if no errors encountered
-hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue,
-                         uint32_t num_pkts = 0);
+hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue, uint32_t num_pkts = 0);
 
 /// This function sets some reasonable default values for an AQL packet.
 /// Override any field as necessary after calling this function.
@@ -91,18 +90,16 @@ hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue,
 /// \param[inout] aql Caller provided pointer to aql packet that will be
 /// populated
 /// \returns Appropriate hsa_status_t
-hsa_status_t InitializeAQLPacket(const BaseRocR* test,
-                         hsa_kernel_dispatch_packet_t* aql);
+hsa_status_t InitializeAQLPacket(const BaseRocR* test, hsa_kernel_dispatch_packet_t* aql);
 
 /// This function writes all of the aql packet fields to the queue besides
 /// "setup" and "header". This assumes all the aql fields have be set
 /// appropriately.
 /// \param[in] test Test containing the queue and aql packet to be written.
 /// \returns Pointer to dispatch packet in queue that was written to
-hsa_kernel_dispatch_packet_t* WriteAQLToQueue(BaseRocR* test, uint64_t *ind);
+hsa_kernel_dispatch_packet_t* WriteAQLToQueue(BaseRocR* test, uint64_t* ind);
 
-void WriteAQLToQueueLoc(hsa_queue_t *queue, uint64_t indx,
-                                      hsa_kernel_dispatch_packet_t *aql_pkt);
+void WriteAQLToQueueLoc(hsa_queue_t* queue, uint64_t indx, hsa_kernel_dispatch_packet_t* aql_pkt);
 /// This function writes the first 32 bits of an aql packet to the provided
 /// aql packet. This function is meant to be called immediately before
 /// ringing door_bell signal.
@@ -112,9 +109,9 @@ void WriteAQLToQueueLoc(hsa_queue_t *queue, uint64_t indx,
 /// be written
 /// \returns void
 inline void AtomicSetPacketHeader(uint16_t header, uint16_t setup,
-                                hsa_kernel_dispatch_packet_t* queue_packet) {
-  __atomic_store_n(reinterpret_cast<uint32_t*>(queue_packet),
-                                    header | (setup <<16), __ATOMIC_RELEASE);
+                                  hsa_kernel_dispatch_packet_t* queue_packet) {
+  __atomic_store_n(reinterpret_cast<uint32_t*>(queue_packet), header | (setup << 16),
+                   __ATOMIC_RELEASE);
 }
 
 /// Perform common operations to clean up after executing a test. Specifically,
@@ -144,8 +141,7 @@ bool CheckProfile(BaseRocR const* test);
 /// \param arg_size Size of the kernel arg data (including padding) to be
 /// written
 /// \returns HSA_STATUS_SUCCESS if no errors
-hsa_status_t AllocAndSetKernArgs(BaseRocR* test, void* args,
-                                 size_t arg_size);
+hsa_status_t AllocAndSetKernArgs(BaseRocR* test, void* args, size_t arg_size);
 
 /// Verify that the machine running the test has the required profile.
 /// This function will verify that the execution machine meets any specific
@@ -172,7 +168,7 @@ hsa_status_t SetPoolsTypical(BaseRocR* test);
 /// \param[in] test Test that has handles to cpu and gpu agents that can own
 /// either source or destination of fill
 /// \returns HSA_STATUS_OK if not errors
-hsa_status_t hsa_memory_fill_workaround_gen(void* ptr, uint32_t value,
-      size_t count, hsa_agent_t dst_ag, hsa_agent_t src_ag, BaseRocR* test);
+hsa_status_t hsa_memory_fill_workaround_gen(void* ptr, uint32_t value, size_t count,
+                                            hsa_agent_t dst_ag, hsa_agent_t src_ag, BaseRocR* test);
 }  // namespace rocrtst
 #endif  // ROCRTST_COMMON_BASE_ROCR_UTILS_H_

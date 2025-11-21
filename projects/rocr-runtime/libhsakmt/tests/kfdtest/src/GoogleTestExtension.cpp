@@ -25,52 +25,51 @@
 #include "OSWrapper.hpp"
 
 bool Ok2Run(unsigned int testProfile) {
-    bool testMatchProfile = true;
-    if ((testProfile & g_TestRunProfile) == 0) {
-        WARN() << "Test is skipped beacuse profile does not match current run mode" << std::endl;
-        testMatchProfile = false;
-    }
+  bool testMatchProfile = true;
+  if ((testProfile & g_TestRunProfile) == 0) {
+    WARN() << "Test is skipped beacuse profile does not match current run mode" << std::endl;
+    testMatchProfile = false;
+  }
 
-    return testMatchProfile;
+  return testMatchProfile;
 }
 
 // This predication is used when specific HW capabilities must exist for the test to succeed.
 bool TestReqEnvCaps(unsigned int envCaps) {
-    bool testMatchEnv = true;
-    if ((envCaps & g_TestENVCaps) != envCaps) {
-        WARN() << "Test is skipped due to HW capability issues" << std::endl;
-        testMatchEnv = false;
-    }
+  bool testMatchEnv = true;
+  if ((envCaps & g_TestENVCaps) != envCaps) {
+    WARN() << "Test is skipped due to HW capability issues" << std::endl;
+    testMatchEnv = false;
+  }
 
-    return testMatchEnv;
+  return testMatchEnv;
 }
 
 // This predication is used when specific HW capabilities must be absent for the test to succeed.
 // e.g Testing capabilities not supported by HW scheduling
 bool TestReqNoEnvCaps(unsigned int envCaps) {
-    bool testMatchEnv = true;
-    if ((envCaps & g_TestENVCaps) != 0) {
-        WARN() << "Test is skipped due to HW capability issues" << std::endl;
-        testMatchEnv = false;
-    }
+  bool testMatchEnv = true;
+  if ((envCaps & g_TestENVCaps) != 0) {
+    WARN() << "Test is skipped due to HW capability issues" << std::endl;
+    testMatchEnv = false;
+  }
 
-    return testMatchEnv;
+  return testMatchEnv;
 }
 
-std::ostream& operator<< (KFDLog log, LOGTYPE level) {
-    const char *heading;
+std::ostream& operator<<(KFDLog log, LOGTYPE level) {
+  const char* heading;
 
-    if (level == LOGTYPE_WARNING) {
-        SetConsoleTextColor(TEXTCOLOR_YELLOW);
-        heading = "[----------] ";
-    } else {
-        SetConsoleTextColor(TEXTCOLOR_GREEN);
-        heading = "[          ] ";
-    }
+  if (level == LOGTYPE_WARNING) {
+    SetConsoleTextColor(TEXTCOLOR_YELLOW);
+    heading = "[----------] ";
+  } else {
+    SetConsoleTextColor(TEXTCOLOR_GREEN);
+    heading = "[          ] ";
+  }
 
-    std::clog << heading;
-    SetConsoleTextColor(TEXTCOLOR_WHITE);
+  std::clog << heading;
+  SetConsoleTextColor(TEXTCOLOR_WHITE);
 
-    return std::clog;
+  return std::clog;
 }
-

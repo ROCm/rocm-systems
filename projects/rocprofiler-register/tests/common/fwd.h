@@ -25,7 +25,8 @@
 #include <dlfcn.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 #if defined(ROCP_REG_TEST_WEAK) && ROCP_REG_TEST_WEAK > 0

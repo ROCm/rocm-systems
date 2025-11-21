@@ -33,30 +33,24 @@
 
 LIBELF_VCSID("$Id: gelf_fsize.c 189 2008-07-20 10:38:08Z jkoshy $");
 
-size_t
-elf32_fsize(Elf_Type t, size_t c, unsigned int v)
-{
-	return (_libelf_fsize(t, ELFCLASS32, v, c));
+size_t elf32_fsize(Elf_Type t, size_t c, unsigned int v) {
+  return (_libelf_fsize(t, ELFCLASS32, v, c));
 }
 
-size_t
-elf64_fsize(Elf_Type t, size_t c, unsigned int v)
-{
-	return (_libelf_fsize(t, ELFCLASS64, v, c));
+size_t elf64_fsize(Elf_Type t, size_t c, unsigned int v) {
+  return (_libelf_fsize(t, ELFCLASS64, v, c));
 }
 
-size_t
-gelf_fsize(Elf *e, Elf_Type t, size_t c, unsigned int v)
-{
+size_t gelf_fsize(Elf *e, Elf_Type t, size_t c, unsigned int v) {
 
-	if (e == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (0);
-	}
+  if (e == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (0);
+  }
 
-	if (e->e_class == ELFCLASS32 || e->e_class == ELFCLASS64)
-		return (_libelf_fsize(t, e->e_class, v, c));
+  if (e->e_class == ELFCLASS32 || e->e_class == ELFCLASS64)
+    return (_libelf_fsize(t, e->e_class, v, c));
 
-	LIBELF_SET_ERROR(ARGUMENT, 0);
-	return (0);
+  LIBELF_SET_ERROR(ARGUMENT, 0);
+  return (0);
 }

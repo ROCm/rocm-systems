@@ -43,7 +43,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_GPU_PM4_H_
 #define HSA_RUNTIME_CORE_INC_AMD_GPU_PM4_H_
 
- // clang-format off
+// clang-format off
 
 #define PM4_HDR_IT_OPCODE_NOP                             0x10U
 #define PM4_HDR_IT_OPCODE_INDIRECT_BUFFER                 0x3FU

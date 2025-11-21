@@ -121,26 +121,21 @@ void RdciGroupSubSystem::show_help() const {
             << " -c <groupName> [-a <entityId>]\n";
   std::cout << "    rdci group [--host <IP/FQDN>:port] [--json] [-u]"
             << " -g <groupId> [-a <entityId>]\n";
-  std::cout << "    rdci group [--host <IP/FQDN>:port] [--json] [-u] "
-            << "-g <groupId> [-i]\n";
-  std::cout << "    rdci group [--host <IP/FQDN>:port] [--json] [-u] "
-            << "-d <groupId>\n";
+  std::cout << "    rdci group [--host <IP/FQDN>:port] [--json] [-u] " << "-g <groupId> [-i]\n";
+  std::cout << "    rdci group [--host <IP/FQDN>:port] [--json] [-u] " << "-d <groupId>\n";
   std::cout << "\nFlags:\n";
   show_common_usage();
-  std::cout << "  --json                         "
-            << "Output using json.\n";
+  std::cout << "  --json                         " << "Output using json.\n";
   std::cout << "  -l  --list                     "
             << "List the groups that currently exist for a host.\n";
   std::cout << "  -g  --group groupId            "
             << "The GPU group to query on the specified host.\n";
-  std::cout << "  -c  --create groupName         "
-            << "Create a group on the remote host.\n";
+  std::cout << "  -c  --create groupName         " << "Create a group on the remote host.\n";
   std::cout << "  -a  --add    gpuIndexes        "
             << "Comma-separated list of the GPU indexes to add to the group.\n";
   std::cout << "  -i  --info                     "
             << "Display the information for the specified group Id\n";
-  std::cout << "  -d  --delete groupId           "
-            << "Delete a group on the remote host.\n";
+  std::cout << "  -d  --delete groupId           " << "Delete a group on the remote host.\n";
 }
 
 void RdciGroupSubSystem::process() {
@@ -207,9 +202,7 @@ void RdciGroupSubSystem::process() {
 
       if (!is_json_output()) {
         std::cout << count << " group found.\n";
-        std::cout << "GroupID\t"
-                  << "GroupName\t"
-                  << "GPUIndex\n";
+        std::cout << "GroupID\t" << "GroupName\t" << "GPUIndex\n";
       }
       for (uint32_t i = 0; i < count; i++) {
         result = rdc_group_gpu_get_info(rdc_handle_, group_id_list[i], &group_info);

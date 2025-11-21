@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "lib/rocprofiler-sdk/rocdecode/defines.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
+#include "lib/rocprofiler-sdk/rocdecode/defines.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/utils.hpp"
 
 #include <rocprofiler-sdk/external_correlation.h>

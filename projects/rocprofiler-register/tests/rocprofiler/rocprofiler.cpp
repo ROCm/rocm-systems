@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #include <rocprofiler-register/rocprofiler-register.h>
 #include <amdhip/amdhip.hpp>
 #include <hsa-runtime/hsa-runtime.hpp>
@@ -112,7 +111,8 @@ check_registration_info(const char*          name,
 }
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
     __attribute__((visibility("default")));
@@ -229,8 +229,8 @@ rocprofiler_set_api_table(const char* name,
            name, lib_version, num_tables, registration_info))
     {
         auto ss = std::stringstream{};
-        ss << "no matching registration info for " << name << " "
-           << " version " << lib_version << " (# tables = " << num_tables << ")";
+        ss << "no matching registration info for " << name << " " << " version "
+           << lib_version << " (# tables = " << num_tables << ")";
         throw std::runtime_error{ ss.str() };
     }
 

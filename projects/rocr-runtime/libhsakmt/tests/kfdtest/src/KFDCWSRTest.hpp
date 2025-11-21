@@ -32,12 +32,12 @@
 class KFDCWSRTest : public KFDBaseComponentTest,
                     public ::testing::WithParamInterface<std::tuple<int, int>> {
  public:
-    KFDCWSRTest() {}
-    ~KFDCWSRTest() {}
+  KFDCWSRTest() {}
+  ~KFDCWSRTest() {}
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 };
 
 #endif  // __KFD_CWSR_TEST__H__

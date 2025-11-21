@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -54,7 +54,7 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif /*__cplusplus*/ 
+#endif /*__cplusplus*/
 
 /** \defgroup ext-images Images and Samplers
  *  @{
@@ -66,22 +66,22 @@ extern "C" {
  * @remark Additions to hsa_status_t
  */
 enum {
-    /**
-     * Image format is not supported.
-     */
-    HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED = 0x3000,
-    /**
-     * Image size is not supported.
-     */
-    HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED = 0x3001,
-    /**
-     * Image pitch is not supported or invalid.
-     */
-    HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED = 0x3002,
-    /**
-     * Sampler descriptor is not supported or invalid.
-     */
-    HSA_EXT_STATUS_ERROR_SAMPLER_DESCRIPTOR_UNSUPPORTED = 0x3003
+  /**
+   * Image format is not supported.
+   */
+  HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED = 0x3000,
+  /**
+   * Image size is not supported.
+   */
+  HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED = 0x3001,
+  /**
+   * Image pitch is not supported or invalid.
+   */
+  HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED = 0x3002,
+  /**
+   * Sampler descriptor is not supported or invalid.
+   */
+  HSA_EXT_STATUS_ERROR_SAMPLER_DESCRIPTOR_UNSUPPORTED = 0x3003
 };
 
 /**
@@ -142,19 +142,20 @@ enum {
    */
   HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS = 0x3008,
   /**
-   * Maximum number of read-only image handles that can be created for an agent at any one
-   * time. Must be at least 128. The type of this attribute is size_t.
+   * Maximum number of read-only image handles that can be created for an agent
+   * at any one time. Must be at least 128. The type of this attribute is
+   * size_t.
    */
   HSA_EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES = 0x3009,
   /**
    * Maximum number of write-only and read-write image handles (combined) that
-   * can be created for an agent at any one time. Must be at least 64. The type of this
-   * attribute is size_t.
+   * can be created for an agent at any one time. Must be at least 64. The type
+   * of this attribute is size_t.
    */
   HSA_EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES = 0x300A,
   /**
-   * Maximum number of sampler handlers that can be created for an agent at any one
-   * time. Must be at least 16. The type of this attribute is size_t.
+   * Maximum number of sampler handlers that can be created for an agent at any
+   * one time. Must be at least 16. The type of this attribute is size_t.
    */
   HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS = 0x300B,
   /**
@@ -176,7 +177,7 @@ typedef struct hsa_ext_image_s {
    *  Opaque handle. For a given agent, two handles reference the same object of
    *  the enclosing type if and only if they are equal.
    */
-    uint64_t handle;
+  uint64_t handle;
 
 } hsa_ext_image_t;
 
@@ -189,7 +190,7 @@ typedef struct hsa_ext_image_s {
  * hsa_ext_brig_image_geometry_t.
  */
 typedef enum {
-/**
+  /**
    * One-dimensional image addressed by width coordinate.
    */
   HSA_EXT_IMAGE_GEOMETRY_1D = 0,
@@ -245,29 +246,30 @@ typedef enum {
  * hsa_ext_brig_image_channel_type_t.
  */
 typedef enum {
-    HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8 = 0,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT16 = 1,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8 = 2,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT16 = 3,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT24 = 4,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_555 = 5,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_565 = 6,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010 = 7,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT8 = 8,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT16 = 9,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT32 = 10,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8 = 11,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16 = 12,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32 = 13,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_HALF_FLOAT = 14,
-    HSA_EXT_IMAGE_CHANNEL_TYPE_FLOAT = 15
+  HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8 = 0,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT16 = 1,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8 = 2,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT16 = 3,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT24 = 4,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_555 = 5,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_565 = 6,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010 = 7,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT8 = 8,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT16 = 9,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT32 = 10,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8 = 11,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16 = 12,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32 = 13,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_HALF_FLOAT = 14,
+  HSA_EXT_IMAGE_CHANNEL_TYPE_FLOAT = 15
 } hsa_ext_image_channel_type_t;
 
 /**
- * @brief A fixed-size type used to represent ::hsa_ext_image_channel_type_t constants.
+ * @brief A fixed-size type used to represent ::hsa_ext_image_channel_type_t
+ * constants.
  */
 typedef uint32_t hsa_ext_image_channel_type32_t;
-    
+
 /**
  *
  * @brief Channel order associated with the elements of an image. See
@@ -277,120 +279,120 @@ typedef uint32_t hsa_ext_image_channel_type32_t;
  * hsa_ext_brig_image_channel_order_t.
  */
 typedef enum {
-    HSA_EXT_IMAGE_CHANNEL_ORDER_A = 0,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_R = 1,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_RX = 2,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_RG = 3,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_RGX = 4,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_RA = 5,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_RGB = 6,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_RGBX = 7,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_RGBA = 8,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_BGRA = 9,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_ARGB = 10,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_ABGR = 11,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_SRGB = 12,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBX = 13,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBA = 14,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_SBGRA = 15,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_INTENSITY = 16,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_LUMINANCE = 17,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH = 18,
-    HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH_STENCIL = 19
+  HSA_EXT_IMAGE_CHANNEL_ORDER_A = 0,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_R = 1,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_RX = 2,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_RG = 3,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_RGX = 4,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_RA = 5,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_RGB = 6,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_RGBX = 7,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_RGBA = 8,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_BGRA = 9,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_ARGB = 10,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_ABGR = 11,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_SRGB = 12,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBX = 13,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBA = 14,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_SBGRA = 15,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_INTENSITY = 16,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_LUMINANCE = 17,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH = 18,
+  HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH_STENCIL = 19
 } hsa_ext_image_channel_order_t;
 
 /**
- * @brief A fixed-size type used to represent ::hsa_ext_image_channel_order_t constants.
+ * @brief A fixed-size type used to represent ::hsa_ext_image_channel_order_t
+ * constants.
  */
 typedef uint32_t hsa_ext_image_channel_order32_t;
-    
 
 /**
  * @brief Image format.
  */
 typedef struct hsa_ext_image_format_s {
   /**
-    * Channel type.
-    */
-    hsa_ext_image_channel_type32_t channel_type;
+   * Channel type.
+   */
+  hsa_ext_image_channel_type32_t channel_type;
 
-   /**
-    * Channel order.
-    */
-    hsa_ext_image_channel_order32_t channel_order;
+  /**
+   * Channel order.
+   */
+  hsa_ext_image_channel_order32_t channel_order;
 } hsa_ext_image_format_t;
 
 /**
  * @brief Implementation independent image descriptor.
  */
 typedef struct hsa_ext_image_descriptor_s {
-    /**
-     * Image geometry.
-     */
-    hsa_ext_image_geometry_t geometry;
-    /**
-     * Width of the image, in components.
-     */
-    size_t width;
-    /**
-     * Height of the image, in components. Only used if the geometry is
-     * ::HSA_EXT_IMAGE_GEOMETRY_2D, ::HSA_EXT_IMAGE_GEOMETRY_3D,
-     * HSA_EXT_IMAGE_GEOMETRY_2DA, HSA_EXT_IMAGE_GEOMETRY_2DDEPTH, or
-     * HSA_EXT_IMAGE_GEOMETRY_2DADEPTH, otherwise must be 0.
-     */
-    size_t height;
-    /**
-     * Depth of the image, in components. Only used if the geometry is
-     * ::HSA_EXT_IMAGE_GEOMETRY_3D, otherwise must be 0.
-     */
-    size_t depth;
-    /**
-     * Number of image layers in the image array. Only used if the geometry is
-     * ::HSA_EXT_IMAGE_GEOMETRY_1DA, ::HSA_EXT_IMAGE_GEOMETRY_2DA, or
-     * HSA_EXT_IMAGE_GEOMETRY_2DADEPTH, otherwise must be 0.
-     */
-    size_t array_size;
-    /**
-     * Image format.
-     */
-    hsa_ext_image_format_t format;
+  /**
+   * Image geometry.
+   */
+  hsa_ext_image_geometry_t geometry;
+  /**
+   * Width of the image, in components.
+   */
+  size_t width;
+  /**
+   * Height of the image, in components. Only used if the geometry is
+   * ::HSA_EXT_IMAGE_GEOMETRY_2D, ::HSA_EXT_IMAGE_GEOMETRY_3D,
+   * HSA_EXT_IMAGE_GEOMETRY_2DA, HSA_EXT_IMAGE_GEOMETRY_2DDEPTH, or
+   * HSA_EXT_IMAGE_GEOMETRY_2DADEPTH, otherwise must be 0.
+   */
+  size_t height;
+  /**
+   * Depth of the image, in components. Only used if the geometry is
+   * ::HSA_EXT_IMAGE_GEOMETRY_3D, otherwise must be 0.
+   */
+  size_t depth;
+  /**
+   * Number of image layers in the image array. Only used if the geometry is
+   * ::HSA_EXT_IMAGE_GEOMETRY_1DA, ::HSA_EXT_IMAGE_GEOMETRY_2DA, or
+   * HSA_EXT_IMAGE_GEOMETRY_2DADEPTH, otherwise must be 0.
+   */
+  size_t array_size;
+  /**
+   * Image format.
+   */
+  hsa_ext_image_format_t format;
 } hsa_ext_image_descriptor_t;
 
 /**
  * @brief Image capability.
  */
-typedef enum  {
-   /**
-    * Images of this geometry, format, and layout are not supported by
-    * the agent.
-    */
-    HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED = 0x0,
-   /**
-    * Read-only images of this geometry, format, and layout are
-    * supported by the agent.
-    */
-    HSA_EXT_IMAGE_CAPABILITY_READ_ONLY = 0x1,
-   /**
-    * Write-only images of this geometry, format, and layout are
-    * supported by the agent.
-    */
-    HSA_EXT_IMAGE_CAPABILITY_WRITE_ONLY = 0x2,
-   /**
-    * Read-write images of this geometry, format, and layout are
-    * supported by the agent.
-    */
-    HSA_EXT_IMAGE_CAPABILITY_READ_WRITE = 0x4,
-   /**
-    * @deprecated Images of this geometry, format, and layout can be accessed from
-    * read-modify-write atomic operations in the agent.
-    */
-    HSA_EXT_IMAGE_CAPABILITY_READ_MODIFY_WRITE = 0x8,
-    /**
-    * Images of this geometry, format, and layout are guaranteed to
-    * have a consistent data layout regardless of how they are
-    * accessed by the associated agent.
-    */
-    HSA_EXT_IMAGE_CAPABILITY_ACCESS_INVARIANT_DATA_LAYOUT = 0x10
+typedef enum {
+  /**
+   * Images of this geometry, format, and layout are not supported by
+   * the agent.
+   */
+  HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED = 0x0,
+  /**
+   * Read-only images of this geometry, format, and layout are
+   * supported by the agent.
+   */
+  HSA_EXT_IMAGE_CAPABILITY_READ_ONLY = 0x1,
+  /**
+   * Write-only images of this geometry, format, and layout are
+   * supported by the agent.
+   */
+  HSA_EXT_IMAGE_CAPABILITY_WRITE_ONLY = 0x2,
+  /**
+   * Read-write images of this geometry, format, and layout are
+   * supported by the agent.
+   */
+  HSA_EXT_IMAGE_CAPABILITY_READ_WRITE = 0x4,
+  /**
+   * @deprecated Images of this geometry, format, and layout can be accessed
+   * from read-modify-write atomic operations in the agent.
+   */
+  HSA_EXT_IMAGE_CAPABILITY_READ_MODIFY_WRITE = 0x8,
+  /**
+   * Images of this geometry, format, and layout are guaranteed to
+   * have a consistent data layout regardless of how they are
+   * accessed by the associated agent.
+   */
+  HSA_EXT_IMAGE_CAPABILITY_ACCESS_INVARIANT_DATA_LAYOUT = 0x10
 } hsa_ext_image_capability_t;
 
 /**
@@ -408,30 +410,30 @@ typedef enum  {
  * for each agent that references the same image data.
  */
 
-typedef enum  {
-   /**
-    * An implementation specific opaque image data layout which can
-    * vary depending on the agent, geometry, image format, image size,
-    * and access permissions.
-    */
-    HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE = 0x0,
-   /**
-    * The image data layout is specified by the following rules in
-    * ascending byte address order. For a 3D image, 2DA image array,
-    * or 1DA image array, the image data is stored as a linear sequence
-    * of adjacent 2D image slices, 2D images, or 1D images
-    * respectively, spaced according to the slice pitch. Each 2D image
-    * is stored as a linear sequence of adjacent image rows, spaced
-    * according to the row pitch. Each 1D or 1DB image is stored as a
-    * single image row. Each image row is stored as a linear sequence
-    * of image elements. Each image element is stored as a linear
-    * sequence of image components specified by the left to right
-    * channel order definition. Each image component is stored using
-    * the memory type specified by the channel type.
-    *
-    * The 1DB image geometry always uses the linear image data layout.
-    */
-    HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR = 0x1
+typedef enum {
+  /**
+   * An implementation specific opaque image data layout which can
+   * vary depending on the agent, geometry, image format, image size,
+   * and access permissions.
+   */
+  HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE = 0x0,
+  /**
+   * The image data layout is specified by the following rules in
+   * ascending byte address order. For a 3D image, 2DA image array,
+   * or 1DA image array, the image data is stored as a linear sequence
+   * of adjacent 2D image slices, 2D images, or 1D images
+   * respectively, spaced according to the slice pitch. Each 2D image
+   * is stored as a linear sequence of adjacent image rows, spaced
+   * according to the row pitch. Each 1D or 1DB image is stored as a
+   * single image row. Each image row is stored as a linear sequence
+   * of image elements. Each image element is stored as a linear
+   * sequence of image components specified by the left to right
+   * channel order definition. Each image component is stored using
+   * the memory type specified by the channel type.
+   *
+   * The 1DB image geometry always uses the linear image data layout.
+   */
+  HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR = 0x1
 } hsa_ext_image_data_layout_t;
 
 /**
@@ -460,10 +462,8 @@ typedef enum  {
  * NULL, or @p capability_mask is NULL.
  */
 hsa_status_t HSA_API hsa_ext_image_get_capability(
-    hsa_agent_t agent,
-    hsa_ext_image_geometry_t geometry,
-    const hsa_ext_image_format_t *image_format,
-    uint32_t *capability_mask);
+    hsa_agent_t agent, hsa_ext_image_geometry_t geometry,
+    const hsa_ext_image_format_t *image_format, uint32_t *capability_mask);
 
 /**
  * @brief Retrieve the supported image capabilities for a given combination of
@@ -496,11 +496,9 @@ hsa_status_t HSA_API hsa_ext_image_get_capability(
  * or @p capability_mask is NULL.
  */
 hsa_status_t HSA_API hsa_ext_image_get_capability_with_layout(
-    hsa_agent_t agent,
-    hsa_ext_image_geometry_t geometry,
+    hsa_agent_t agent, hsa_ext_image_geometry_t geometry,
     const hsa_ext_image_format_t *image_format,
-    hsa_ext_image_data_layout_t image_data_layout,
-    uint32_t *capability_mask);
+    hsa_ext_image_data_layout_t image_data_layout, uint32_t *capability_mask);
 
 /**
  * @brief Agent specific image size and alignment requirements, populated by
@@ -520,9 +518,9 @@ typedef struct hsa_ext_image_data_info_s {
 } hsa_ext_image_data_info_t;
 
 /**
- * @brief Retrieve the image data requirements for a given combination of agent, image
- * descriptor, and access permission for an image created with an opaque image
- * data layout.
+ * @brief Retrieve the image data requirements for a given combination of agent,
+ * image descriptor, and access permission for an image created with an opaque
+ * image data layout.
  *
  * @details The optimal image data size and alignment requirements may
  * vary depending on the image attributes specified in @p
@@ -572,8 +570,7 @@ typedef struct hsa_ext_image_data_info_s {
  * image_data_info is NULL.
  */
 hsa_status_t HSA_API hsa_ext_image_data_get_info(
-    hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t *image_descriptor,
+    hsa_agent_t agent, const hsa_ext_image_descriptor_t *image_descriptor,
     hsa_access_permission_t access_permission,
     hsa_ext_image_data_info_t *image_data_info);
 
@@ -655,13 +652,10 @@ hsa_status_t HSA_API hsa_ext_image_data_get_info(
  * or @p image_data_info is NULL.
  */
 hsa_status_t HSA_API hsa_ext_image_data_get_info_with_layout(
-    hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t *image_descriptor,
+    hsa_agent_t agent, const hsa_ext_image_descriptor_t *image_descriptor,
     hsa_access_permission_t access_permission,
-    hsa_ext_image_data_layout_t image_data_layout,
-    size_t image_data_row_pitch,
-    size_t image_data_slice_pitch,
-    hsa_ext_image_data_info_t *image_data_info);
+    hsa_ext_image_data_layout_t image_data_layout, size_t image_data_row_pitch,
+    size_t image_data_slice_pitch, hsa_ext_image_data_info_t *image_data_info);
 
 /**
  * @brief Creates an agent specific image handle to an image with an
@@ -717,10 +711,11 @@ hsa_status_t HSA_API hsa_ext_image_data_get_info_with_layout(
  * does not support the image dimensions specified by @p
  * image_descriptor using the specified @p access_permission.
  *
- * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to allocate
- * the required resources.
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to
+ * allocate the required resources.
  *
- * support the creation of more image handles with the given @p access_permission).
+ * support the creation of more image handles with the given @p
+ * access_permission).
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p image_descriptor is NULL, @p
  * image_data is NULL, @p image_data does not have a valid alignment,
@@ -728,10 +723,8 @@ hsa_status_t HSA_API hsa_ext_image_data_get_info_with_layout(
  * value, or @p image is NULL.
  */
 hsa_status_t HSA_API hsa_ext_image_create(
-    hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t *image_descriptor,
-    const void *image_data,
-    hsa_access_permission_t access_permission,
+    hsa_agent_t agent, const hsa_ext_image_descriptor_t *image_descriptor,
+    const void *image_data, hsa_access_permission_t access_permission,
     hsa_ext_image_t *image);
 
 /**
@@ -820,10 +813,11 @@ hsa_status_t HSA_API hsa_ext_image_create(
  * not support the row and slice pitch specified by @p image_data_row_pitch
  * and @p image_data_slice_pitch, or the values are invalid.
  *
- * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to allocate
- * the required resources.
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to
+ * allocate the required resources.
  *
- * support the creation of more image handles with the given @p access_permission).
+ * support the creation of more image handles with the given @p
+ * access_permission).
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p image_descriptor is NULL, @p
  * image_data is NULL, @p image_data does not have a valid alignment,
@@ -831,23 +825,20 @@ hsa_status_t HSA_API hsa_ext_image_create(
  * or @p image is NULL.
  */
 hsa_status_t HSA_API hsa_ext_image_create_with_layout(
-    hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t *image_descriptor,
-    const void *image_data,
-    hsa_access_permission_t access_permission,
-    hsa_ext_image_data_layout_t image_data_layout,
-    size_t image_data_row_pitch,
-    size_t image_data_slice_pitch,
-    hsa_ext_image_t *image);
+    hsa_agent_t agent, const hsa_ext_image_descriptor_t *image_descriptor,
+    const void *image_data, hsa_access_permission_t access_permission,
+    hsa_ext_image_data_layout_t image_data_layout, size_t image_data_row_pitch,
+    size_t image_data_slice_pitch, hsa_ext_image_t *image);
 
 /**
- * @brief Destroy an image handle previously created using ::hsa_ext_image_create or
+ * @brief Destroy an image handle previously created using
+ * ::hsa_ext_image_create or
  * ::hsa_ext_image_create_with_layout.
  *
  * @details Destroying the image handle does not free the associated image data,
- * or modify its contents. The application should not destroy an image handle while
- * there are references to it queued for execution or currently being used in a
- * kernel dispatch.
+ * or modify its contents. The application should not destroy an image handle
+ * while there are references to it queued for execution or currently being used
+ * in a kernel dispatch.
  *
  * @param[in] agent Agent associated with the image handle.
  *
@@ -860,9 +851,8 @@ hsa_status_t HSA_API hsa_ext_image_create_with_layout(
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid.
  */
-hsa_status_t HSA_API hsa_ext_image_destroy(
-    hsa_agent_t agent,
-    hsa_ext_image_t image);
+hsa_status_t HSA_API hsa_ext_image_destroy(hsa_agent_t agent,
+                                           hsa_ext_image_t image);
 
 /**
  * @brief Copies a portion of one image (the source) to another image (the
@@ -877,19 +867,20 @@ hsa_status_t HSA_API hsa_ext_image_destroy(
  *
  * The source and destination images do not have to be of the same geometry and
  * appropriate scaling is performed by the HSA runtime. It is possible to copy
- * subregions between any combinations of source and destination geometries, provided
- * that the dimensions of the subregions are the same. For example, it is
- * allowed to copy a rectangular region from a 2D image to a slice of a 3D
+ * subregions between any combinations of source and destination geometries,
+ * provided that the dimensions of the subregions are the same. For example, it
+ * is allowed to copy a rectangular region from a 2D image to a slice of a 3D
  * image.
  *
  * If the source and destination image data overlap, or the combination of
  * offset and range references an out-out-bounds element in any of the images,
  * the behavior is undefined.
  *
- * @param[in] agent Agent associated with both the source and destination image handles.
+ * @param[in] agent Agent associated with both the source and destination image
+ * handles.
  *
- * @param[in] src_image Image handle of source image. The agent associated with the source
- * image handle must be identical to that of the destination image.
+ * @param[in] src_image Image handle of source image. The agent associated with
+ * the source image handle must be identical to that of the destination image.
  *
  * @param[in] src_offset Pointer to the offset within the source image where to
  * copy the data from. Must not be NULL.
@@ -913,28 +904,27 @@ hsa_status_t HSA_API hsa_ext_image_destroy(
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p src_offset is
  * NULL, @p dst_offset is NULL, or @p range is NULL.
  */
-hsa_status_t HSA_API hsa_ext_image_copy(
-    hsa_agent_t agent,
-    hsa_ext_image_t src_image,
-    const hsa_dim3_t* src_offset,
-    hsa_ext_image_t dst_image,
-    const hsa_dim3_t* dst_offset,
-    const hsa_dim3_t* range);
+hsa_status_t HSA_API hsa_ext_image_copy(hsa_agent_t agent,
+                                        hsa_ext_image_t src_image,
+                                        const hsa_dim3_t *src_offset,
+                                        hsa_ext_image_t dst_image,
+                                        const hsa_dim3_t *dst_offset,
+                                        const hsa_dim3_t *range);
 
 /**
  * @brief Image region.
  */
 typedef struct hsa_ext_image_region_s {
-   /**
-    * Offset within an image (in coordinates).
-    */
-    hsa_dim3_t offset;
+  /**
+   * Offset within an image (in coordinates).
+   */
+  hsa_dim3_t offset;
 
-   /**
-    * Dimension size of the image range (in coordinates). The x, y, and z dimensions
-    * correspond to width, height, and depth or index respectively.
-    */
-    hsa_dim3_t range;
+  /**
+   * Dimension size of the image range (in coordinates). The x, y, and z
+   * dimensions correspond to width, height, and depth or index respectively.
+   */
+  hsa_dim3_t range;
 } hsa_ext_image_region_t;
 
 /**
@@ -955,17 +945,18 @@ typedef struct hsa_ext_image_region_s {
  *
  * @param[in] src_memory Source memory. Must not be NULL.
  *
- * @param[in] src_row_pitch The size in bytes of a single row of the image in the
- * source memory. If the value is smaller than the destination image region
+ * @param[in] src_row_pitch The size in bytes of a single row of the image in
+ * the source memory. If the value is smaller than the destination image region
  * width * image element byte size, then region width * image element byte
  * size is used.
  *
- * @param[in] src_slice_pitch The size in bytes of a single 2D slice of a 3D image,
- * or the size in bytes of each image layer in an image array in the source memory.
- * If the geometry is ::HSA_EXT_IMAGE_GEOMETRY_1DA and the value is smaller than the
- * value used for @p src_row_pitch, then the value used for @p src_row_pitch is used.
- * If the geometry is ::HSA_EXT_IMAGE_GEOMETRY_3D, ::HSA_EXT_IMAGE_GEOMETRY_2DA, or
- * HSA_EXT_IMAGE_GEOMETRY_2DADEPTH and the value is smaller than the value used for
+ * @param[in] src_slice_pitch The size in bytes of a single 2D slice of a 3D
+ * image, or the size in bytes of each image layer in an image array in the
+ * source memory. If the geometry is ::HSA_EXT_IMAGE_GEOMETRY_1DA and the value
+ * is smaller than the value used for @p src_row_pitch, then the value used for
+ * @p src_row_pitch is used. If the geometry is ::HSA_EXT_IMAGE_GEOMETRY_3D,
+ * ::HSA_EXT_IMAGE_GEOMETRY_2DA, or HSA_EXT_IMAGE_GEOMETRY_2DADEPTH and the
+ * value is smaller than the value used for
  * @p src_row_pitch * destination image region height, then the value used for
  * @p src_row_pitch * destination image region height is used.
  * Otherwise, the value is not used.
@@ -987,11 +978,8 @@ typedef struct hsa_ext_image_region_s {
  *
  */
 hsa_status_t HSA_API hsa_ext_image_import(
-    hsa_agent_t agent,
-    const void *src_memory,
-    size_t src_row_pitch,
-    size_t src_slice_pitch,
-    hsa_ext_image_t dst_image,
+    hsa_agent_t agent, const void *src_memory, size_t src_row_pitch,
+    size_t src_slice_pitch, hsa_ext_image_t dst_image,
     const hsa_ext_image_region_t *image_region);
 
 /**
@@ -1013,17 +1001,19 @@ hsa_status_t HSA_API hsa_ext_image_import(
  *
  * @param[in] dst_memory Destination memory. Must not be NULL.
  *
- * @param[in] dst_row_pitch The size in bytes of a single row of the image in the
- * destination memory. If the value is smaller than the source image region
+ * @param[in] dst_row_pitch The size in bytes of a single row of the image in
+ * the destination memory. If the value is smaller than the source image region
  * width * image element byte size, then region width * image element byte
  * size is used.
  *
- * @param[in] dst_slice_pitch The size in bytes of a single 2D slice of a 3D image,
- * or the size in bytes of each image in an image array in the destination memory.
- * If the geometry is ::HSA_EXT_IMAGE_GEOMETRY_1DA and the value is smaller than the
- * value used for @p dst_row_pitch, then the value used for @p dst_row_pitch is used.
- * If the geometry is ::HSA_EXT_IMAGE_GEOMETRY_3D, ::HSA_EXT_IMAGE_GEOMETRY_2DA, or
- * HSA_EXT_IMAGE_GEOMETRY_2DADEPTH and the value is smaller than the value used for
+ * @param[in] dst_slice_pitch The size in bytes of a single 2D slice of a 3D
+ * image, or the size in bytes of each image in an image array in the
+ * destination memory. If the geometry is ::HSA_EXT_IMAGE_GEOMETRY_1DA and the
+ * value is smaller than the value used for @p dst_row_pitch, then the value
+ * used for @p dst_row_pitch is used. If the geometry is
+ * ::HSA_EXT_IMAGE_GEOMETRY_3D, ::HSA_EXT_IMAGE_GEOMETRY_2DA, or
+ * HSA_EXT_IMAGE_GEOMETRY_2DADEPTH and the value is smaller than the value used
+ * for
  * @p dst_row_pitch * source image region height, then the value used for
  * @p dst_row_pitch * source image region height is used.
  * Otherwise, the value is not used.
@@ -1042,11 +1032,8 @@ hsa_status_t HSA_API hsa_ext_image_import(
  * image_region is NULL.
  */
 hsa_status_t HSA_API hsa_ext_image_export(
-    hsa_agent_t agent,
-    hsa_ext_image_t src_image,
-    void *dst_memory,
-    size_t dst_row_pitch,
-    size_t dst_slice_pitch,
+    hsa_agent_t agent, hsa_ext_image_t src_image, void *dst_memory,
+    size_t dst_row_pitch, size_t dst_slice_pitch,
     const hsa_ext_image_region_t *image_region);
 
 /**
@@ -1082,11 +1069,9 @@ hsa_status_t HSA_API hsa_ext_image_export(
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p data is NULL, or @p
  * image_region is NULL.
  */
-hsa_status_t HSA_API hsa_ext_image_clear(
-    hsa_agent_t agent,
-    hsa_ext_image_t image,
-    const void* data,
-    const hsa_ext_image_region_t *image_region);
+hsa_status_t HSA_API
+hsa_ext_image_clear(hsa_agent_t agent, hsa_ext_image_t image, const void *data,
+                    const hsa_ext_image_region_t *image_region);
 
 /**
  * @brief Sampler handle. Samplers are populated by
@@ -1098,7 +1083,7 @@ typedef struct hsa_ext_sampler_s {
    *  Opaque handle. For a given agent, two handles reference the same object of
    *  the enclosing type if and only if they are equal.
    */
-    uint64_t handle;
+  uint64_t handle;
 } hsa_ext_sampler_t;
 
 /**
@@ -1140,7 +1125,8 @@ typedef enum {
 } hsa_ext_sampler_addressing_mode_t;
 
 /**
- * @brief A fixed-size type used to represent ::hsa_ext_sampler_addressing_mode_t constants.
+ * @brief A fixed-size type used to represent
+ * ::hsa_ext_sampler_addressing_mode_t constants.
  */
 typedef uint32_t hsa_ext_sampler_addressing_mode32_t;
 
@@ -1167,10 +1153,10 @@ typedef enum {
 } hsa_ext_sampler_coordinate_mode_t;
 
 /**
- * @brief A fixed-size type used to represent ::hsa_ext_sampler_coordinate_mode_t constants.
+ * @brief A fixed-size type used to represent
+ * ::hsa_ext_sampler_coordinate_mode_t constants.
  */
 typedef uint32_t hsa_ext_sampler_coordinate_mode32_t;
-    
 
 /**
  * @brief Sampler filter modes. See the <em>Filter Mode</em> section
@@ -1195,7 +1181,8 @@ typedef enum {
 } hsa_ext_sampler_filter_mode_t;
 
 /**
- * @brief A fixed-size type used to represent ::hsa_ext_sampler_filter_mode_t constants.
+ * @brief A fixed-size type used to represent ::hsa_ext_sampler_filter_mode_t
+ * constants.
  */
 typedef uint32_t hsa_ext_sampler_filter_mode32_t;
 
@@ -1244,19 +1231,19 @@ typedef struct hsa_ext_sampler_descriptor_s {
  * @p agent does not have the capability to support the properties
  * specified by @p sampler_descriptor or it is invalid.
  *
- * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to allocate
- * the required resources.
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to
+ * allocate the required resources.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p sampler_descriptor is NULL, or
  * @p sampler is NULL.
  */
 hsa_status_t HSA_API hsa_ext_sampler_create(
-    hsa_agent_t agent,
-    const hsa_ext_sampler_descriptor_t *sampler_descriptor,
+    hsa_agent_t agent, const hsa_ext_sampler_descriptor_t *sampler_descriptor,
     hsa_ext_sampler_t *sampler);
 
 /**
- * @brief Destroy a sampler handle previously created using ::hsa_ext_sampler_create.
+ * @brief Destroy a sampler handle previously created using
+ * ::hsa_ext_sampler_create.
  *
  * @details The sampler handle should not be destroyed while there are
  * references to it queued for execution or currently being used in a
@@ -1273,182 +1260,143 @@ hsa_status_t HSA_API hsa_ext_sampler_create(
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid.
  */
-hsa_status_t HSA_API hsa_ext_sampler_destroy(
-    hsa_agent_t agent,
-    hsa_ext_sampler_t sampler);
-
+hsa_status_t HSA_API hsa_ext_sampler_destroy(hsa_agent_t agent,
+                                             hsa_ext_sampler_t sampler);
 
 #define hsa_ext_images_1_00
 
 /**
- * @brief The function pointer table for the images v1.00 extension. Can be returned by ::hsa_system_get_extension_table or ::hsa_system_get_major_extension_table.
+ * @brief The function pointer table for the images v1.00 extension. Can be
+ * returned by ::hsa_system_get_extension_table or
+ * ::hsa_system_get_major_extension_table.
  */
 typedef struct hsa_ext_images_1_00_pfn_s {
 
   hsa_status_t (*hsa_ext_image_get_capability)(
-    hsa_agent_t agent,
-    hsa_ext_image_geometry_t geometry,
-    const hsa_ext_image_format_t *image_format,
-    uint32_t *capability_mask);
+      hsa_agent_t agent, hsa_ext_image_geometry_t geometry,
+      const hsa_ext_image_format_t *image_format, uint32_t *capability_mask);
 
   hsa_status_t (*hsa_ext_image_data_get_info)(
-    hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t *image_descriptor,
-    hsa_access_permission_t access_permission,
-    hsa_ext_image_data_info_t *image_data_info);
+      hsa_agent_t agent, const hsa_ext_image_descriptor_t *image_descriptor,
+      hsa_access_permission_t access_permission,
+      hsa_ext_image_data_info_t *image_data_info);
 
   hsa_status_t (*hsa_ext_image_create)(
-    hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t *image_descriptor,
-    const void *image_data,
-    hsa_access_permission_t access_permission,
-    hsa_ext_image_t *image);
+      hsa_agent_t agent, const hsa_ext_image_descriptor_t *image_descriptor,
+      const void *image_data, hsa_access_permission_t access_permission,
+      hsa_ext_image_t *image);
 
-  hsa_status_t (*hsa_ext_image_destroy)(
-    hsa_agent_t agent,
-    hsa_ext_image_t image);
+  hsa_status_t (*hsa_ext_image_destroy)(hsa_agent_t agent,
+                                        hsa_ext_image_t image);
 
-  hsa_status_t (*hsa_ext_image_copy)(
-    hsa_agent_t agent,
-    hsa_ext_image_t src_image,
-    const hsa_dim3_t* src_offset,
-    hsa_ext_image_t dst_image,
-    const hsa_dim3_t* dst_offset,
-    const hsa_dim3_t* range);
+  hsa_status_t (*hsa_ext_image_copy)(hsa_agent_t agent,
+                                     hsa_ext_image_t src_image,
+                                     const hsa_dim3_t *src_offset,
+                                     hsa_ext_image_t dst_image,
+                                     const hsa_dim3_t *dst_offset,
+                                     const hsa_dim3_t *range);
 
   hsa_status_t (*hsa_ext_image_import)(
-    hsa_agent_t agent,
-    const void *src_memory,
-    size_t src_row_pitch,
-    size_t src_slice_pitch,
-    hsa_ext_image_t dst_image,
-    const hsa_ext_image_region_t *image_region);
+      hsa_agent_t agent, const void *src_memory, size_t src_row_pitch,
+      size_t src_slice_pitch, hsa_ext_image_t dst_image,
+      const hsa_ext_image_region_t *image_region);
 
   hsa_status_t (*hsa_ext_image_export)(
-    hsa_agent_t agent,
-    hsa_ext_image_t src_image,
-    void *dst_memory,
-    size_t dst_row_pitch,
-    size_t dst_slice_pitch,
-    const hsa_ext_image_region_t *image_region);
+      hsa_agent_t agent, hsa_ext_image_t src_image, void *dst_memory,
+      size_t dst_row_pitch, size_t dst_slice_pitch,
+      const hsa_ext_image_region_t *image_region);
 
   hsa_status_t (*hsa_ext_image_clear)(
-    hsa_agent_t agent,
-    hsa_ext_image_t image,
-    const void* data,
-    const hsa_ext_image_region_t *image_region);
+      hsa_agent_t agent, hsa_ext_image_t image, const void *data,
+      const hsa_ext_image_region_t *image_region);
 
   hsa_status_t (*hsa_ext_sampler_create)(
-    hsa_agent_t agent,
-    const hsa_ext_sampler_descriptor_t *sampler_descriptor,
-    hsa_ext_sampler_t *sampler);
+      hsa_agent_t agent, const hsa_ext_sampler_descriptor_t *sampler_descriptor,
+      hsa_ext_sampler_t *sampler);
 
-  hsa_status_t (*hsa_ext_sampler_destroy)(
-    hsa_agent_t agent,
-    hsa_ext_sampler_t sampler);
+  hsa_status_t (*hsa_ext_sampler_destroy)(hsa_agent_t agent,
+                                          hsa_ext_sampler_t sampler);
 
 } hsa_ext_images_1_00_pfn_t;
 
 #define hsa_ext_images_1
 
 /**
- * @brief The function pointer table for the images v1 extension. Can be returned by ::hsa_system_get_extension_table or ::hsa_system_get_major_extension_table.
+ * @brief The function pointer table for the images v1 extension. Can be
+ * returned by ::hsa_system_get_extension_table or
+ * ::hsa_system_get_major_extension_table.
  */
 typedef struct hsa_ext_images_1_pfn_s {
 
   hsa_status_t (*hsa_ext_image_get_capability)(
-    hsa_agent_t agent,
-    hsa_ext_image_geometry_t geometry,
-    const hsa_ext_image_format_t *image_format,
-    uint32_t *capability_mask);
+      hsa_agent_t agent, hsa_ext_image_geometry_t geometry,
+      const hsa_ext_image_format_t *image_format, uint32_t *capability_mask);
 
   hsa_status_t (*hsa_ext_image_data_get_info)(
-    hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t *image_descriptor,
-    hsa_access_permission_t access_permission,
-    hsa_ext_image_data_info_t *image_data_info);
+      hsa_agent_t agent, const hsa_ext_image_descriptor_t *image_descriptor,
+      hsa_access_permission_t access_permission,
+      hsa_ext_image_data_info_t *image_data_info);
 
   hsa_status_t (*hsa_ext_image_create)(
-    hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t *image_descriptor,
-    const void *image_data,
-    hsa_access_permission_t access_permission,
-    hsa_ext_image_t *image);
+      hsa_agent_t agent, const hsa_ext_image_descriptor_t *image_descriptor,
+      const void *image_data, hsa_access_permission_t access_permission,
+      hsa_ext_image_t *image);
 
-  hsa_status_t (*hsa_ext_image_destroy)(
-    hsa_agent_t agent,
-    hsa_ext_image_t image);
+  hsa_status_t (*hsa_ext_image_destroy)(hsa_agent_t agent,
+                                        hsa_ext_image_t image);
 
-  hsa_status_t (*hsa_ext_image_copy)(
-    hsa_agent_t agent,
-    hsa_ext_image_t src_image,
-    const hsa_dim3_t* src_offset,
-    hsa_ext_image_t dst_image,
-    const hsa_dim3_t* dst_offset,
-    const hsa_dim3_t* range);
+  hsa_status_t (*hsa_ext_image_copy)(hsa_agent_t agent,
+                                     hsa_ext_image_t src_image,
+                                     const hsa_dim3_t *src_offset,
+                                     hsa_ext_image_t dst_image,
+                                     const hsa_dim3_t *dst_offset,
+                                     const hsa_dim3_t *range);
 
   hsa_status_t (*hsa_ext_image_import)(
-    hsa_agent_t agent,
-    const void *src_memory,
-    size_t src_row_pitch,
-    size_t src_slice_pitch,
-    hsa_ext_image_t dst_image,
-    const hsa_ext_image_region_t *image_region);
+      hsa_agent_t agent, const void *src_memory, size_t src_row_pitch,
+      size_t src_slice_pitch, hsa_ext_image_t dst_image,
+      const hsa_ext_image_region_t *image_region);
 
   hsa_status_t (*hsa_ext_image_export)(
-    hsa_agent_t agent,
-    hsa_ext_image_t src_image,
-    void *dst_memory,
-    size_t dst_row_pitch,
-    size_t dst_slice_pitch,
-    const hsa_ext_image_region_t *image_region);
+      hsa_agent_t agent, hsa_ext_image_t src_image, void *dst_memory,
+      size_t dst_row_pitch, size_t dst_slice_pitch,
+      const hsa_ext_image_region_t *image_region);
 
   hsa_status_t (*hsa_ext_image_clear)(
-    hsa_agent_t agent,
-    hsa_ext_image_t image,
-    const void* data,
-    const hsa_ext_image_region_t *image_region);
+      hsa_agent_t agent, hsa_ext_image_t image, const void *data,
+      const hsa_ext_image_region_t *image_region);
 
   hsa_status_t (*hsa_ext_sampler_create)(
-    hsa_agent_t agent,
-    const hsa_ext_sampler_descriptor_t *sampler_descriptor,
-    hsa_ext_sampler_t *sampler);
+      hsa_agent_t agent, const hsa_ext_sampler_descriptor_t *sampler_descriptor,
+      hsa_ext_sampler_t *sampler);
 
-  hsa_status_t (*hsa_ext_sampler_destroy)(
-    hsa_agent_t agent,
-    hsa_ext_sampler_t sampler);
+  hsa_status_t (*hsa_ext_sampler_destroy)(hsa_agent_t agent,
+                                          hsa_ext_sampler_t sampler);
 
   hsa_status_t (*hsa_ext_image_get_capability_with_layout)(
-    hsa_agent_t agent,
-    hsa_ext_image_geometry_t geometry,
-    const hsa_ext_image_format_t *image_format,
-    hsa_ext_image_data_layout_t image_data_layout,
-    uint32_t *capability_mask);
+      hsa_agent_t agent, hsa_ext_image_geometry_t geometry,
+      const hsa_ext_image_format_t *image_format,
+      hsa_ext_image_data_layout_t image_data_layout, uint32_t *capability_mask);
 
   hsa_status_t (*hsa_ext_image_data_get_info_with_layout)(
-    hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t *image_descriptor,
-    hsa_access_permission_t access_permission,
-    hsa_ext_image_data_layout_t image_data_layout,
-    size_t image_data_row_pitch,
-    size_t image_data_slice_pitch,
-    hsa_ext_image_data_info_t *image_data_info);
+      hsa_agent_t agent, const hsa_ext_image_descriptor_t *image_descriptor,
+      hsa_access_permission_t access_permission,
+      hsa_ext_image_data_layout_t image_data_layout,
+      size_t image_data_row_pitch, size_t image_data_slice_pitch,
+      hsa_ext_image_data_info_t *image_data_info);
 
   hsa_status_t (*hsa_ext_image_create_with_layout)(
-    hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t *image_descriptor,
-    const void *image_data,
-    hsa_access_permission_t access_permission,
-    hsa_ext_image_data_layout_t image_data_layout,
-    size_t image_data_row_pitch,
-    size_t image_data_slice_pitch,
-    hsa_ext_image_t *image);
+      hsa_agent_t agent, const hsa_ext_image_descriptor_t *image_descriptor,
+      const void *image_data, hsa_access_permission_t access_permission,
+      hsa_ext_image_data_layout_t image_data_layout,
+      size_t image_data_row_pitch, size_t image_data_slice_pitch,
+      hsa_ext_image_t *image);
 
 } hsa_ext_images_1_pfn_t;
 /** @} */
-    
+
 #ifdef __cplusplus
-}  // end extern "C" block
-#endif /*__cplusplus*/ 
+} // end extern "C" block
+#endif /*__cplusplus*/
 
 #endif

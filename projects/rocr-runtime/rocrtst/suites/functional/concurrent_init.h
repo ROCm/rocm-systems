@@ -53,27 +53,27 @@
 
 class ConcurrentInitTest : public TestBase {
  public:
-    ConcurrentInitTest();
+  ConcurrentInitTest();
 
-    // @Brief: Destructor for the ConcurrentInitTest class
-    virtual ~ConcurrentInitTest();
+  // @Brief: Destructor for the ConcurrentInitTest class
+  virtual ~ConcurrentInitTest();
 
-    // @Brief: Setup the environment for measurement
-    virtual void SetUp();
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-    // @Brief: Core measurement execution
-    virtual void Run();
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-    // @Brief: Clean up and retrive the resource
-    virtual void Close();
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
 
-    // @Brief: Display  results
-    virtual void DisplayResults() const;
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
 
-    // @Brief: Display information about what this test does
-    virtual void DisplayTestInfo(void);
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 
-    void TestConcurrentInit(void);
+  void TestConcurrentInit(void);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_CONCURRENT_INIT_H_

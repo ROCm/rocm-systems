@@ -90,7 +90,7 @@ static __forceinline void* _aligned_malloc(size_t size, size_t alignment) {
 #ifdef _ISOC11_SOURCE
   return aligned_alloc(alignment, size);
 #else
-  void *mem = NULL;
+  void* mem = NULL;
   if (0 != posix_memalign(&mem, alignment, size)) return NULL;
   return mem;
 #endif
@@ -100,8 +100,7 @@ static __forceinline void _aligned_free(void* ptr) { return free(ptr); }
 #include "intrin.h"
 #define __ALIGNED__(x) __declspec(align(x))
 #if (_MSC_VER < 1800)  // < VS 2013
-static __forceinline unsigned long long int strtoull(const char* str,
-                                                     char** endptr, int base) {
+static __forceinline unsigned long long int strtoull(const char* str, char** endptr, int base) {
   return static_cast<unsigned long long>(_strtoui64(str, endptr, base));
 }
 #endif
@@ -138,8 +137,7 @@ static __forceinline unsigned long long int strtoull(const char* str,
   do {                                                                                             \
     static std::atomic<int> count(0);                                                              \
     if (!(exp) && (limit == 0 || count < limit)) {                                                 \
-      fprintf(stderr, "Warning: " STRING(exp) " in %s, " __FILE__ ":" STRING(__LINE__) "\n"        \
-              );                                                                \
+      fprintf(stderr, "Warning: " STRING(exp) " in %s, " __FILE__ ":" STRING(__LINE__) "\n");      \
       count++;                                                                                     \
     }                                                                                              \
   } while (false)
@@ -178,8 +176,9 @@ static __forceinline unsigned long long int strtoull(const char* str,
     if (hsa_flag_isset64(log_flags, flag)) {                                                       \
       amd_signal_t* amd_signal = reinterpret_cast<amd_signal_t*>(signal.handle);                   \
       rocr::log_printf(__FILENAME__, __LINE__,                                                     \
-        "%s Signal = (0x%lx), ticks start/end = %lu / %lu, Ticks elapsed = %lu", msg, signal,      \
-        amd_signal->start_ts, amd_signal->end_ts, amd_signal->end_ts - amd_signal->start_ts);      \
+                       "%s Signal = (0x%lx), ticks start/end = %lu / %lu, Ticks elapsed = %lu",    \
+                       msg, signal, amd_signal->start_ts, amd_signal->end_ts,                      \
+                       amd_signal->end_ts - amd_signal->start_ts);                                 \
     }                                                                                              \
   } while (false);
 
@@ -193,11 +192,9 @@ static __forceinline unsigned long long int strtoull(const char* str,
   void operator=(const TypeName&) = delete;                                                        \
   void operator=(TypeName&&) = delete;
 
-template <typename lambda>
-class ScopeGuard {
+template <typename lambda> class ScopeGuard {
  public:
-  explicit __forceinline ScopeGuard(const lambda& release)
-      : release_(release), dismiss_(false) {}
+  explicit __forceinline ScopeGuard(const lambda& release) : release_(release), dismiss_(false) {}
 
   ScopeGuard(ScopeGuard& rhs) { *this = rhs; }
 
@@ -217,33 +214,27 @@ class ScopeGuard {
   bool dismiss_;
 };
 
-template <typename lambda>
-static __forceinline ScopeGuard<lambda> MakeScopeGuard(lambda rel) {
+template <typename lambda> static __forceinline ScopeGuard<lambda> MakeScopeGuard(lambda rel) {
   return ScopeGuard<lambda>(rel);
 }
 
-#define MAKE_SCOPE_GUARD_HELPER(lname, sname, ...) \
-  auto lname = __VA_ARGS__;                        \
+#define MAKE_SCOPE_GUARD_HELPER(lname, sname, ...)                                                 \
+  auto lname = __VA_ARGS__;                                                                        \
   ScopeGuard<decltype(lname)> sname(lname);
-#define MAKE_SCOPE_GUARD(...)                                   \
-  MAKE_SCOPE_GUARD_HELPER(PASTE(scopeGuardLambda, __COUNTER__), \
-                          PASTE(scopeGuard, __COUNTER__), __VA_ARGS__)
-#define MAKE_NAMED_SCOPE_GUARD(name, ...)                             \
-  MAKE_SCOPE_GUARD_HELPER(PASTE(scopeGuardLambda, __COUNTER__), name, \
+#define MAKE_SCOPE_GUARD(...)                                                                      \
+  MAKE_SCOPE_GUARD_HELPER(PASTE(scopeGuardLambda, __COUNTER__), PASTE(scopeGuard, __COUNTER__),    \
                           __VA_ARGS__)
+#define MAKE_NAMED_SCOPE_GUARD(name, ...)                                                          \
+  MAKE_SCOPE_GUARD_HELPER(PASTE(scopeGuardLambda, __COUNTER__), name, __VA_ARGS__)
 
 /// @brief: Finds out the min one of two inputs, input must support ">"
 /// operator.
 /// @param: a(Input), a reference to type T.
 /// @param: b(Input), a reference to type T.
 /// @return: T.
-template <class T>
-static __forceinline T Min(const T& a, const T& b) {
-  return (a > b) ? b : a;
-}
+template <class T> static __forceinline T Min(const T& a, const T& b) { return (a > b) ? b : a; }
 
-template <class T, class... Arg>
-static __forceinline T Min(const T& a, const T& b, Arg... args) {
+template <class T, class... Arg> static __forceinline T Min(const T& a, const T& b, Arg... args) {
   return Min(a, Min(b, args...));
 }
 
@@ -251,13 +242,9 @@ static __forceinline T Min(const T& a, const T& b, Arg... args) {
 /// @param: a(Input), a reference to type T.
 /// @param: b(Input), a reference to type T.
 /// @return: T.
-template <class T>
-static __forceinline T Max(const T& a, const T& b) {
-  return (b > a) ? b : a;
-}
+template <class T> static __forceinline T Max(const T& a, const T& b) { return (b > a) ? b : a; }
 
-template <class T, class... Arg>
-static __forceinline T Max(const T& a, const T& b, Arg... args) {
+template <class T, class... Arg> static __forceinline T Max(const T& a, const T& b, Arg... args) {
   return Max(a, Max(b, args...));
 }
 
@@ -265,18 +252,14 @@ static __forceinline T Max(const T& a, const T& b, Arg... args) {
 /// @param: ptr(Input), a pointer to memory space. Can't be NULL.
 /// @return: void.
 struct DeleteObject {
-  template <typename T>
-  void operator()(const T* ptr) const {
-    delete ptr;
-  }
+  template <typename T> void operator()(const T* ptr) const { delete ptr; }
 };
 
 /// @brief: Checks if a value is power of two, if it is, return true. Be careful
 /// when passing 0.
 /// @param: val(Input), the data to be checked.
 /// @return: bool.
-template <typename T>
-static __forceinline bool IsPowerOfTwo(T val) {
+template <typename T> static __forceinline bool IsPowerOfTwo(T val) {
   return (val & (val - 1)) == 0;
 }
 
@@ -285,8 +268,7 @@ static __forceinline bool IsPowerOfTwo(T val) {
 /// @param: value(Input), value to be calculated.
 /// @param: alignment(Input), alignment value.
 /// @return: T.
-template <typename T>
-static __forceinline T AlignDown(T value, size_t alignment) {
+template <typename T> static __forceinline T AlignDown(T value, size_t alignment) {
   return (T)((value / alignment) * alignment);
 }
 
@@ -295,8 +277,7 @@ static __forceinline T AlignDown(T value, size_t alignment) {
 /// @param: value(Input), pointer to type T.
 /// @param: alignment(Input), alignment value.
 /// @return: T*, pointer to type T.
-template <typename T>
-static __forceinline T* AlignDown(T* value, size_t alignment) {
+template <typename T> static __forceinline T* AlignDown(T* value, size_t alignment) {
   return (T*)AlignDown((intptr_t)value, alignment);
 }
 
@@ -306,8 +287,7 @@ static __forceinline T* AlignDown(T* value, size_t alignment) {
 /// @param: value(Input), value to be calculated.
 /// @param: alignment(Input), alignment value.
 /// @param: T.
-template <typename T>
-static __forceinline T AlignUp(T value, size_t alignment) {
+template <typename T> static __forceinline T AlignUp(T value, size_t alignment) {
   return AlignDown((T)(value + alignment - 1), alignment);
 }
 
@@ -316,8 +296,7 @@ static __forceinline T AlignUp(T value, size_t alignment) {
 /// @param: value(Input), pointer to type T.
 /// @param: alignment(Input), alignment value.
 /// @return: T*, pointer to type T.
-template <typename T>
-static __forceinline T* AlignUp(T* value, size_t alignment) {
+template <typename T> static __forceinline T* AlignUp(T* value, size_t alignment) {
   return (T*)AlignDown((intptr_t)((uint8_t*)value + alignment - 1), alignment);
 }
 
@@ -326,8 +305,7 @@ static __forceinline T* AlignUp(T* value, size_t alignment) {
 /// @param: value(Input), value to be checked.
 /// @param: alignment(Input), alignment value.
 /// @return: bool.
-template <typename T>
-static __forceinline bool IsMultipleOf(T value, size_t alignment) {
+template <typename T> static __forceinline bool IsMultipleOf(T value, size_t alignment) {
   return (AlignUp(value, alignment) == value);
 }
 
@@ -336,8 +314,7 @@ static __forceinline bool IsMultipleOf(T value, size_t alignment) {
 /// @param: value(Input), pointer to type T.
 /// @param: alignment(Input), alignment value.
 /// @return: bool.
-template <typename T>
-static __forceinline bool IsMultipleOf(T* value, size_t alignment) {
+template <typename T> static __forceinline bool IsMultipleOf(T* value, size_t alignment) {
   return (AlignUp(value, alignment) == value);
 }
 
@@ -393,10 +370,10 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   if (!cacheline_size) {
     long sz = 64;
 #if defined(__linux__)
-  #ifdef _SC_LEVEL1_DCACHE_LINESIZE
-		sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
-  #else
-		sz = 0;
+#ifdef _SC_LEVEL1_DCACHE_LINESIZE
+    sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+#else
+    sz = 0;
 #endif
 #else
     //@todo abstract GetLogicalProcessorInformation call

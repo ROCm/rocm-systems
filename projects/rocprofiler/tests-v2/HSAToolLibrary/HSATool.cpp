@@ -40,7 +40,7 @@ static rocprofiler_onload_callback rocprofiler_onload_callback_call = nullptr;
 */
 
 TEST_HSA_TOOL_API bool OnLoad(void* table, uint64_t runtime_version, uint64_t failed_tool_count,
- const char* const* failed_tool_names) {
+                              const char* const* failed_tool_names) {
   rocprofiler_onload_callback_call(table, runtime_version, failed_tool_count, failed_tool_names);
   return true;
 }

@@ -623,8 +623,8 @@ void Initialize(HsaApiTable* table) {
 }
 
 void Finalize() {
-  if (hsa_status_t status =
-          saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(profiling_async_copy_enable.load(std::memory_order_relaxed));
+  if (hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
+          profiling_async_copy_enable.load(std::memory_order_relaxed));
       status != HSA_STATUS_SUCCESS)
     assert(!"hsa_amd_profiling_async_copy_enable failed");
 

@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -54,24 +54,20 @@ namespace timer {
 
 // Needed to patch around a mixed arithmetic bug in MSVC's duration_cast as of
 // VS 2013.
-template <bool isFloat, bool isSigned>
-struct wide_type {
+template <bool isFloat, bool isSigned> struct wide_type {
   typedef double type;
 };
-template <>
-struct wide_type<false, false> {
+template <> struct wide_type<false, false> {
   typedef uintmax_t type;
 };
-template <>
-struct wide_type<false, true> {
+template <> struct wide_type<false, true> {
   typedef intmax_t type;
 };
 
 template <typename To, typename Rep, typename Period>
-static __forceinline To
-    duration_cast(const std::chrono::duration<Rep, Period>& d) {
-  typedef typename wide_type<std::is_floating_point<Rep>::value,
-                             std::is_signed<Rep>::value>::type wide;
+static __forceinline To duration_cast(const std::chrono::duration<Rep, Period>& d) {
+  typedef
+      typename wide_type<std::is_floating_point<Rep>::value, std::is_signed<Rep>::value>::type wide;
   typedef std::chrono::duration<wide, typename To::period> unit_convert_t;
 
   unit_convert_t temp = std::chrono::duration_cast<unit_convert_t>(d);
@@ -80,14 +76,12 @@ static __forceinline To
 // End patch
 
 template <typename Rep, typename Period>
-static __forceinline double duration_in_seconds(
-    std::chrono::duration<Rep, Period> delta) {
+static __forceinline double duration_in_seconds(std::chrono::duration<Rep, Period> delta) {
   typedef std::chrono::duration<double, std::ratio<1, 1>> seconds;
   return seconds(delta).count();
 }
 
-template <typename rep>
-static __forceinline rep duration_from_seconds(double delta) {
+template <typename rep> static __forceinline rep duration_from_seconds(double delta) {
   typedef std::chrono::duration<double, std::ratio<1, 1>> seconds;
   return std::chrono::duration_cast<rep>(seconds(delta));
 }
@@ -102,9 +96,7 @@ class accurate_clock {
 
   static const bool is_steady = true;
 
-  static __forceinline time_point now() {
-    return time_point(duration(raw_now() * period_ns));
-  }
+  static __forceinline time_point now() { return time_point(duration(raw_now() * period_ns)); }
 
   // These two extra APIs and types let us use clocks without conversion to the
   // arbitrary period unit
@@ -136,9 +128,7 @@ class fast_clock {
 
   static const bool is_steady = true;
 
-  static __forceinline time_point now() {
-    return time_point(duration(raw_now() * period_ps));
-  }
+  static __forceinline time_point now() { return time_point(duration(raw_now() * period_ps)); }
 
   // These two extra APIs and types let us use clocks without conversion to the
   // arbitrary period unit
@@ -167,7 +157,7 @@ class fast_clock {
   };
   static init fast_clock_init;
 };
-}   //  namespace timer
-}   //  namespace rocr  
+}  //  namespace timer
+}  //  namespace rocr
 
 #endif

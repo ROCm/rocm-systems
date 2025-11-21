@@ -1,10 +1,10 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
-#ifdef _WIN32 // Compiling for Windows Platform
+
+#ifdef _WIN32  // Compiling for Windows Platform
 
 #include <stdlib.h>
 #include <Windows.h>
@@ -13,14 +13,14 @@
 
 void SetEnv(const char* env_var_name, const char* env_var_value) {
   BOOL err = SetEnvironmentVariable(env_var_name, env_var_value);
-  if(FALSE == err){
-	  printf("Set environment variable failed!\n");
-	  exit(1);
+  if (FALSE == err) {
+    printf("Set environment variable failed!\n");
+    exit(1);
   }
   return;
 }
 
-char* GetEnv(const char* env_var_name){
+char* GetEnv(const char* env_var_name) {
   char* buff;
   DWORD char_count = GetEnvironmentVariable(env_var_name, NULL, 0);
   if (char_count == 0) return NULL;
@@ -35,17 +35,15 @@ char* GetEnv(const char* env_var_name){
 #include "os.h"
 #include <stdlib.h>
 
-void SetEnv(const char* env_var_name, const char* env_var_value){
-	int err = setenv(env_var_name, env_var_value, 1);
-	if(0 != err){
-		printf("Set environment variable failed!\n");
-		exit(1);
-	}
-	return;
+void SetEnv(const char* env_var_name, const char* env_var_value) {
+  int err = setenv(env_var_name, env_var_value, 1);
+  if (0 != err) {
+    printf("Set environment variable failed!\n");
+    exit(1);
+  }
+  return;
 }
 
-char* GetEnv(const char* env_var_name) {
-  return getenv(env_var_name);
-}
+char* GetEnv(const char* env_var_name) { return getenv(env_var_name); }
 
 #endif

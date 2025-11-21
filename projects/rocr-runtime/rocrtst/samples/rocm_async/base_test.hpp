@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef ROCM_ASYNC_BW_BASE_TEST_H_
 #define ROCM_ASYNC_BW_BASE_TEST_H_
 
@@ -17,9 +17,7 @@ using namespace std;
 // @Brief: An interface for tests to do some basic things,
 
 class BaseTest {
-
  public:
-
   BaseTest(size_t num = 10);
 
   virtual ~BaseTest();
@@ -46,7 +44,6 @@ class BaseTest {
   // @Brief: Pre-declare some variables for deriviation, the
   // derived class may declare more if needed
  protected:
-
   // @Brief: Real iteration number
   uint64_t num_iteration_;
 

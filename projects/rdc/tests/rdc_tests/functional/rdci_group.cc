@@ -120,9 +120,7 @@ void TestRdciGroup::Run(void) {
     ASSERT_EQ(result, RDC_ST_INVALID_HANDLER);
     result = rdc_group_gpu_get_info(rdc_handle, group_id_list[i], &group_info);
     ASSERT_EQ(result, RDC_ST_OK);
-    std::cout << "\tGroupID\t"
-              << "GroupName\t"
-              << "GPUIndex\n";
+    std::cout << "\tGroupID\t" << "GroupName\t" << "GPUIndex\n";
     std::cout << "\t" << group_id_list[i] << "\t" << group_info.group_name << "\t\t";
     for (uint32_t j = 0; j < group_info.count; j++) {
       std::cout << group_info.entity_ids[j];

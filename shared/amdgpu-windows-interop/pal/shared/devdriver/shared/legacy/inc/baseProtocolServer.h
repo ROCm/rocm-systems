@@ -4,22 +4,22 @@
  *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the "Software"), to deal
- *  in the Software without restriction, including without limitation the rights
- *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  copies of the Software, and to permit persons to whom the Software is
+ *  of this software and associated documentation files (the "Software"), to
+ *deal in the Software without restriction, including without limitation the
+ *rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ *sell copies of the Software, and to permit persons to whom the Software is
  *  furnished to do so, subject to the following conditions:
  *
- *  The above copyright notice and this permission notice shall be included in all
- *  copies or substantial portions of the Software.
+ *  The above copyright notice and this permission notice shall be included in
+ *all copies or substantial portions of the Software.
  *
  *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  SOFTWARE.
+ *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ *FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ *IN THE SOFTWARE.
  *
  **********************************************************************************************************************/
 
@@ -27,36 +27,39 @@
 
 #include "protocolServer.h"
 
-namespace DevDriver
-{
-    class IMsgChannel;
+namespace DevDriver {
+class IMsgChannel;
 
-    class BaseProtocolServer : public IProtocolServer
-    {
-    public:
-        virtual ~BaseProtocolServer();
+class BaseProtocolServer : public IProtocolServer {
+public:
+  virtual ~BaseProtocolServer();
 
-        Protocol GetProtocol() const override final { return m_protocol; };
-        SessionType GetType() const override final { return SessionType::Server; };
-        Version GetMinVersion() const override final { return m_minVersion; };
-        Version GetMaxVersion() const override final { return m_maxVersion; };
+  Protocol GetProtocol() const override final { return m_protocol; };
+  SessionType GetType() const override final { return SessionType::Server; };
+  Version GetMinVersion() const override final { return m_minVersion; };
+  Version GetMaxVersion() const override final { return m_maxVersion; };
 
-        bool GetSupportedVersion(Version minVersion, Version maxVersion, Version * version) const override final;
+  bool GetSupportedVersion(Version minVersion, Version maxVersion,
+                           Version *version) const override final;
 
-        virtual void Finalize() override;
-    protected:
-        BaseProtocolServer(IMsgChannel* pMsgChannel, Protocol protocol, Version minVersion, Version maxVersion);
+  virtual void Finalize() override;
 
-        // Helper functions for working with SizedPayloadContainers
-        Result SendPayload(ISession* pSession, const SizedPayloadContainer* pPayload, uint32 timeoutInMs);
-        Result ReceivePayload(ISession* pSession, SizedPayloadContainer* pPayload, uint32 timeoutInMs);
+protected:
+  BaseProtocolServer(IMsgChannel *pMsgChannel, Protocol protocol,
+                     Version minVersion, Version maxVersion);
 
-        IMsgChannel* const m_pMsgChannel;
-        const Protocol m_protocol;
-        const Version m_minVersion;
-        const Version m_maxVersion;
+  // Helper functions for working with SizedPayloadContainers
+  Result SendPayload(ISession *pSession, const SizedPayloadContainer *pPayload,
+                     uint32 timeoutInMs);
+  Result ReceivePayload(ISession *pSession, SizedPayloadContainer *pPayload,
+                        uint32 timeoutInMs);
 
-        bool m_isFinalized;
-    };
+  IMsgChannel *const m_pMsgChannel;
+  const Protocol m_protocol;
+  const Version m_minVersion;
+  const Version m_maxVersion;
 
-} // DevDriver
+  bool m_isFinalized;
+};
+
+} // namespace DevDriver

@@ -64,12 +64,11 @@ namespace options {
 //===----------------------------------------------------------------------===//
 
 class StringFactory final {
-public:
-  static std::string Flatten(const char **cstrs,
-                             const uint32_t &cstrs_count,
-                             const char &spacer = '\0');
+ public:
+  static std::string Flatten(const char** cstrs, const uint32_t& cstrs_count,
+                             const char& spacer = '\0');
 
-  static std::list<std::string> Tokenize(const char *cstr, const char &delim);
+  static std::list<std::string> Tokenize(const char* cstr, const char& delim);
 
   static std::string ToLower(const std::string& str);
   static std::string ToUpper(const std::string& str);
@@ -80,12 +79,10 @@ public:
 //===----------------------------------------------------------------------===//
 
 class HelpStreambuf : public std::streambuf {
-public:
+ public:
   explicit HelpStreambuf(std::ostream& stream);
 
-  virtual ~HelpStreambuf() {
-    basicStream_->rdbuf(basicBuf_);
-  }
+  virtual ~HelpStreambuf() { basicStream_->rdbuf(basicBuf_); }
 
   void IndentSize(unsigned indent) {
     assert(wrapWidth_ == 0 || indentSize_ < wrapWidth_);
@@ -97,10 +94,10 @@ public:
     wrapWidth_ = wrap;
   }
 
-protected:
+ protected:
   virtual int_type overflow(int_type ch) override;
 
-private:
+ private:
   std::ostream* basicStream_;
   std::streambuf* basicBuf_;
 
@@ -113,28 +110,28 @@ private:
 
 
 class HelpPrinter {
-private:
+ private:
   static const unsigned USAGE_WIDTH = 30;
   static const unsigned PADDING_WIDTH = 2;
   static const unsigned DESCRIPTION_WIDTH = 50;
 
-public:
+ public:
   HelpPrinter& PrintUsage(const std::string& usage);
   HelpPrinter& PrintDescription(const std::string& description);
 
   std::ostream& Stream() { return *out_; }
 
-private:
+ private:
   explicit HelpPrinter(std::ostream& out = std::cout) : out_(&out), sbuf_(*out_) {}
 
   /// @brief Not copy-constructible.
   HelpPrinter(const HelpPrinter&);
   /// @brief Not copy-assignable.
-  HelpPrinter& operator =(const HelpPrinter&);
+  HelpPrinter& operator=(const HelpPrinter&);
 
   friend class OptionParser;
 
-  std::ostream *out_;
+  std::ostream* out_;
   HelpStreambuf sbuf_;
 };
 
@@ -143,28 +140,18 @@ private:
 //===----------------------------------------------------------------------===//
 
 class OptionBase {
-public:
+ public:
   virtual ~OptionBase() {}
 
-  const std::string& name() const {
-    return name_;
-  }
-  const bool& is_set() const {
-    return is_set_;
-  }
+  const std::string& name() const { return name_; }
+  const bool& is_set() const { return is_set_; }
 
-  virtual bool IsValid() const {
-    return 0 < name_.size();
-  }
+  virtual bool IsValid() const { return 0 < name_.size(); }
 
-protected:
-  explicit OptionBase(const std::string& name,
-                      const std::string& help = "",
-                      std::ostream &error = std::cerr)
-    : name_(name),
-      help_(help),
-      is_set_(false),
-      error_(&error) {}
+ protected:
+  explicit OptionBase(const std::string& name, const std::string& help = "",
+                      std::ostream& error = std::cerr)
+      : name_(name), help_(help), is_set_(false), error_(&error) {}
 
   virtual void PrintHelp(HelpPrinter& printer) const = 0;
   virtual bool Accept(const std::string& name) const { return name_ == name; }
@@ -173,23 +160,21 @@ protected:
   const std::string help_;
   bool is_set_;
 
-  std::ostream &error() const { return *error_; }
+  std::ostream& error() const { return *error_; }
 
-private:
+ private:
   /// @brief Not copy-constructible.
-  OptionBase(const OptionBase &ob);
+  OptionBase(const OptionBase& ob);
   /// @brief Not copy-assignable.
-  OptionBase& operator=(const OptionBase &ob);
+  OptionBase& operator=(const OptionBase& ob);
 
-  void Reset() {
-    is_set_ = false;
-  }
+  void Reset() { is_set_ = false; }
 
-  virtual bool ProcessTokens(std::list<std::string> &tokens) = 0;
+  virtual bool ProcessTokens(std::list<std::string>& tokens) = 0;
 
   friend class OptionParser;
 
-  mutable std::ostream *error_;
+  mutable std::ostream* error_;
 };
 
 
@@ -197,36 +182,31 @@ private:
 // Option<T>.                                                                 //
 //===----------------------------------------------------------------------===//
 
-template<typename T>
-class Option final: public OptionBase {
-public:
-  explicit Option(const std::string& name,
-                  const std::string& help = "",
-                  std::ostream& error = std::cerr):
-    OptionBase(name, help, error) {}
+template <typename T> class Option final : public OptionBase {
+ public:
+  explicit Option(const std::string& name, const std::string& help = "",
+                  std::ostream& error = std::cerr)
+      : OptionBase(name, help, error) {}
 
   ~Option() {}
 
-  const std::list<T>& values() const {
-    return values_;
-  }
+  const std::list<T>& values() const { return values_; }
 
-protected:
+ protected:
   virtual void PrintHelp(HelpPrinter& printer) const override;
 
-private:
+ private:
   /// @brief Not copy-constructible.
-  Option(const Option &o);
+  Option(const Option& o);
   /// @brief Not copy-assignable.
-  Option& operator=(const Option &o);
+  Option& operator=(const Option& o);
 
-  bool ProcessTokens(std::list<std::string> &tokens);
+  bool ProcessTokens(std::list<std::string>& tokens);
 
   std::list<T> values_;
 };
 
-template<typename T>
-bool Option<T>::ProcessTokens(std::list<std::string> &tokens) {
+template <typename T> bool Option<T>::ProcessTokens(std::list<std::string>& tokens) {
   assert(0 == name_.compare(tokens.front()) && "option name is mismatched");
   if (2 > tokens.size()) {
     error() << "error: invalid option: \'" << name_ << '\'' << std::endl;
@@ -252,46 +232,40 @@ bool Option<T>::ProcessTokens(std::list<std::string> &tokens) {
   return true;
 }
 
-template<typename T>
-void Option<T>::PrintHelp(HelpPrinter& printer) const {
+template <typename T> void Option<T>::PrintHelp(HelpPrinter& printer) const {
   printer.PrintUsage("-" + name_ + " [" + StringFactory::ToUpper(name_) + "s]")
-         .PrintDescription(help_);
+      .PrintDescription(help_);
 }
 
 //===----------------------------------------------------------------------===//
 // ValueOption<T>.                                                            //
 //===----------------------------------------------------------------------===//
 
-template<typename T>
-class ValueOption final: public OptionBase {
-public:
-  explicit ValueOption(const std::string& name,
-                       const std::string& help = "",
-                       std::ostream& error = std::cerr):
-    OptionBase(name, help, error) {}
+template <typename T> class ValueOption final : public OptionBase {
+ public:
+  explicit ValueOption(const std::string& name, const std::string& help = "",
+                       std::ostream& error = std::cerr)
+      : OptionBase(name, help, error) {}
 
   ~ValueOption() {}
 
-  const T& value() const {
-    return value_;
-  }
+  const T& value() const { return value_; }
 
-protected:
+ protected:
   void PrintHelp(HelpPrinter& printer) const override;
 
-private:
+ private:
   /// @brief Not copy-constructible.
-  ValueOption(const ValueOption &o);
+  ValueOption(const ValueOption& o);
   /// @brief Not copy-assignable.
-  ValueOption& operator=(const ValueOption &o);
+  ValueOption& operator=(const ValueOption& o);
 
-  bool ProcessTokens(std::list<std::string> &tokens) override;
+  bool ProcessTokens(std::list<std::string>& tokens) override;
 
   T value_;
 };
 
-template<typename T>
-bool ValueOption<T>::ProcessTokens(std::list<std::string> &tokens) {
+template <typename T> bool ValueOption<T>::ProcessTokens(std::list<std::string>& tokens) {
   assert(0 == name_.compare(tokens.front()) && "option name is mismatched");
   if (2 != tokens.size()) {
     error() << "error: invalid option: \'" << name_ << '\'' << std::endl;
@@ -311,38 +285,32 @@ bool ValueOption<T>::ProcessTokens(std::list<std::string> &tokens) {
   return true;
 }
 
-template<typename T>
-void ValueOption<T>::PrintHelp(HelpPrinter& printer) const {
-  printer.PrintUsage("-" + name_ + "=[VAL]")
-         .PrintDescription(help_);
+template <typename T> void ValueOption<T>::PrintHelp(HelpPrinter& printer) const {
+  printer.PrintUsage("-" + name_ + "=[VAL]").PrintDescription(help_);
 }
 
 //===----------------------------------------------------------------------===//
 // ChoiceOptioin.                                                             //
 //===----------------------------------------------------------------------===//
-class ChoiceOption final: public OptionBase {
-public:
-  ChoiceOption(const std::string& name,
-               const std::vector<std::string>& choices,
-               const std::string& help = "",
-               std::ostream& error = std::cerr);
+class ChoiceOption final : public OptionBase {
+ public:
+  ChoiceOption(const std::string& name, const std::vector<std::string>& choices,
+               const std::string& help = "", std::ostream& error = std::cerr);
 
   ~ChoiceOption() {}
 
-  const std::string& value() const {
-    return value_;
-  }
+  const std::string& value() const { return value_; }
 
-protected:
+ protected:
   void PrintHelp(HelpPrinter& printer) const override;
 
-private:
+ private:
   /// @brief Not copy-constructible.
   ChoiceOption(const ChoiceOption&);
   /// @brief Not copy-assignable.
-  ChoiceOption& operator =(const ChoiceOption&);
+  ChoiceOption& operator=(const ChoiceOption&);
 
-  bool ProcessTokens(std::list<std::string> &tokens) override;
+  bool ProcessTokens(std::list<std::string>& tokens) override;
 
   std::unordered_set<std::string> choices_;
   std::string value_;
@@ -352,27 +320,26 @@ private:
 // Option<void>.                                                              //
 //===----------------------------------------------------------------------===//
 
-class NoArgOption final: public OptionBase {
-public:
-  explicit NoArgOption(const std::string& name,
-                       const std::string& help = "",
-                       std::ostream& error = std::cerr):
-    OptionBase(name, help, error) {}
+class NoArgOption final : public OptionBase {
+ public:
+  explicit NoArgOption(const std::string& name, const std::string& help = "",
+                       std::ostream& error = std::cerr)
+      : OptionBase(name, help, error) {}
 
   ~NoArgOption() {}
 
-protected:
+ protected:
   void PrintHelp(HelpPrinter& printer) const override {
     printer.PrintUsage("-" + name_).PrintDescription(help_);
   }
 
-private:
+ private:
   /// @brief Not copy-constructible.
-  NoArgOption(const NoArgOption &o);
+  NoArgOption(const NoArgOption& o);
   /// @brief Not copy-assignable.
-  NoArgOption& operator=(const NoArgOption &o);
+  NoArgOption& operator=(const NoArgOption& o);
 
-  bool ProcessTokens(std::list<std::string> &tokens) override {
+  bool ProcessTokens(std::list<std::string>& tokens) override {
     assert(0 == name_.compare(tokens.front()) && "option name is mismatched");
     if (1 == tokens.size()) {
       tokens.pop_front();
@@ -398,30 +365,27 @@ private:
 //===----------------------------------------------------------------------===//
 // PrefixOption.                                                              //
 //===----------------------------------------------------------------------===//
-class PrefixOption final: public OptionBase {
-public:
-  PrefixOption(const std::string& prefix,
-               const std::string& help = "",
+class PrefixOption final : public OptionBase {
+ public:
+  PrefixOption(const std::string& prefix, const std::string& help = "",
                std::ostream& error = std::cerr)
-    : OptionBase(prefix, help, error) {}
+      : OptionBase(prefix, help, error) {}
 
   ~PrefixOption() {}
 
-  const std::vector<std::string>& values() const {
-    return values_;
-  }
+  const std::vector<std::string>& values() const { return values_; }
 
   bool IsValid() const override;
 
-protected:
+ protected:
   void PrintHelp(HelpPrinter& printer) const override;
   bool Accept(const std::string& token) const override;
 
-private:
+ private:
   /// @brief Not copy-constructible.
   PrefixOption(const PrefixOption&);
   /// @brief Not copy-assignable.
-  PrefixOption& operator =(const PrefixOption&);
+  PrefixOption& operator=(const PrefixOption&);
 
   bool ProcessTokens(std::list<std::string>& tokens) override;
 
@@ -435,16 +399,15 @@ private:
 //===----------------------------------------------------------------------===//
 
 class OptionParser final {
-public:
+ public:
   explicit OptionParser(bool collectUnknown = false, std::ostream& error = std::cerr)
-    : collectUnknown_(collectUnknown),
-      error_(&error) {}
+      : collectUnknown_(collectUnknown), error_(&error) {}
 
   ~OptionParser() {}
 
-  bool AddOption(OptionBase *option);
+  bool AddOption(OptionBase* option);
 
-  bool ParseOptions(const char *options);
+  bool ParseOptions(const char* options);
 
   const std::string& Unknown() const;
   void CollectUnknown(bool b) { collectUnknown_ = b; }
@@ -453,11 +416,11 @@ public:
 
   void Reset();
 
-private:
+ private:
   /// @brief Not copy-constructible.
-  OptionParser(const OptionParser &op);
+  OptionParser(const OptionParser& op);
   /// @brief Not copy-assignable.
-  OptionParser& operator=(const OptionParser &op);
+  OptionParser& operator=(const OptionParser& op);
 
   std::ostream& error() { return *error_; }
 
@@ -468,11 +431,11 @@ private:
   std::string unknownOptions_;
   bool collectUnknown_;
 
-  std::ostream *error_;
+  std::ostream* error_;
 };
 
-} // namespace options
-} // namespace amd
-} // namespace rocr
+}  // namespace options
+}  // namespace amd
+}  // namespace rocr
 
-#endif // AMD_OPTIONS_HPP
+#endif  // AMD_OPTIONS_HPP

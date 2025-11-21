@@ -94,8 +94,7 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
   if (IsLocalMemory()) {
     mem_flag_.ui32.PageSize = HSA_PAGE_SIZE_4KB;
     mem_flag_.ui32.NoSubstitute = 1;
-    mem_flag_.ui32.HostAccess =
-        (mem_props_.HeapType == HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE) ? 0 : 1;
+    mem_flag_.ui32.HostAccess = (mem_props_.HeapType == HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE) ? 0 : 1;
     mem_flag_.ui32.NonPaged = 1;
 
     virtual_size_ = kGpuVmSize;
@@ -108,8 +107,7 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 
     if (kernarg) mem_flag_.ui32.Uncached = 1;
 
-    virtual_size_ =
-        (full_profile) ? os::GetUserModeVirtualMemorySize() : kGpuVmSize;
+    virtual_size_ = (full_profile) ? os::GetUserModeVirtualMemorySize() : kGpuVmSize;
   }
 
 
@@ -131,13 +129,14 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 
 MemoryRegion::~MemoryRegion() {}
 
-hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id) const {
+hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** address,
+                                    int agent_node_id) const {
   ScopedAcquire<KernelMutex> lock(&owner()->agent_memory_lock_);
   return AllocateImpl(size, alloc_flags, address, agent_node_id);
 }
 
-hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
-                                        void** address, int agent_node_id) const {
+hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags, void** address,
+                                        int agent_node_id) const {
   if (address == NULL) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -148,15 +147,13 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 
   // Alocation requests for system memory considers aggregate
   // memory available on all CPU devices
-  if (size > ((IsSystem() ?
-                max_sysmem_alloc_size_ : max_single_alloc_size_))) {
+  if (size > ((IsSystem() ? max_sysmem_alloc_size_ : max_single_alloc_size_))) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
   size = AlignUp(size, GetPageSize());
 
-  return owner()->driver().AllocateMemory(*this, alloc_flags, address, size,
-                                          agent_node_id);
+  return owner()->driver().AllocateMemory(*this, alloc_flags, address, size, agent_node_id);
 }
 
 hsa_status_t MemoryRegion::Free(void* address, size_t size) const {
@@ -177,8 +174,7 @@ hsa_status_t MemoryRegion::IPCFragmentExport(void* address) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
-                                   void* value) const {
+hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute, void* value) const {
   switch (attribute) {
     case HSA_REGION_INFO_SEGMENT:
       switch (mem_props_.HeapType) {
@@ -277,8 +273,7 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
     default:
       switch ((hsa_amd_region_info_t)attribute) {
         case HSA_AMD_REGION_INFO_HOST_ACCESSIBLE:
-          *((bool*)value) =
-              (mem_props_.HeapType == HSA_HEAPTYPE_SYSTEM) ? true : false;
+          *((bool*)value) = (mem_props_.HeapType == HSA_HEAPTYPE_SYSTEM) ? true : false;
           break;
         case HSA_AMD_REGION_INFO_BASE:
           *((void**)value) = reinterpret_cast<void*>(GetBaseAddress());
@@ -298,8 +293,7 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
-                                       void* value) const {
+hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute, void* value) const {
   switch (attribute) {
     case HSA_AMD_MEMORY_POOL_INFO_SEGMENT:
     case HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS:
@@ -346,7 +340,6 @@ hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
 
 hsa_amd_memory_pool_access_t MemoryRegion::GetAccessInfo(
     const core::Agent& agent, const core::Runtime::LinkInfo& link_info) const {
-
   // Return allowed by default if memory pool is owned by requesting device
   if (agent.public_handle().handle == owner()->public_handle().handle) {
     return HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT;
@@ -361,9 +354,9 @@ hsa_amd_memory_pool_access_t MemoryRegion::GetAccessInfo(
   // Return allowed by default if requesting device is a CPU
   // Return disallowed by default if requesting device is not a CPU
   if (IsSystem()) {
-    return (agent.device_type() == core::Agent::kAmdCpuDevice) ?
-            (HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT) :
-            (HSA_AMD_MEMORY_POOL_ACCESS_DISALLOWED_BY_DEFAULT);
+    return (agent.device_type() == core::Agent::kAmdCpuDevice)
+        ? (HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT)
+        : (HSA_AMD_MEMORY_POOL_ACCESS_DISALLOWED_BY_DEFAULT);
   }
 
   // Determine access type for device local memory which is
@@ -393,9 +386,9 @@ hsa_amd_memory_pool_access_t MemoryRegion::GetAccessInfo(
   return HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
 }
 
-hsa_status_t MemoryRegion::GetAgentPoolInfo(
-    const core::Agent& agent, hsa_amd_agent_memory_pool_info_t attribute,
-    void* value) const {
+hsa_status_t MemoryRegion::GetAgentPoolInfo(const core::Agent& agent,
+                                            hsa_amd_agent_memory_pool_info_t attribute,
+                                            void* value) const {
   const uint32_t node_id_from = agent.node_id();
   const uint32_t node_id_to = owner()->node_id();
 
@@ -410,14 +403,11 @@ hsa_status_t MemoryRegion::GetAgentPoolInfo(
       break;
     case HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS:
       *((uint32_t*)value) =
-          (access_type != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED)
-              ? link_info.num_hop
-              : 0;
+          (access_type != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) ? link_info.num_hop : 0;
       break;
     case HSA_AMD_AGENT_MEMORY_POOL_INFO_LINK_INFO:
       memset(value, 0, sizeof(hsa_amd_memory_pool_link_info_t));
-      if ((access_type != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) &&
-          (link_info.num_hop > 0)) {
+      if ((access_type != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) && (link_info.num_hop > 0)) {
         memcpy(value, &link_info.info, sizeof(hsa_amd_memory_pool_link_info_t));
       }
       break;
@@ -427,8 +417,7 @@ hsa_status_t MemoryRegion::GetAgentPoolInfo(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
-                                       const hsa_agent_t* agents,
+hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents, const hsa_agent_t* agents,
                                        const void* ptr, size_t size) const {
   if (num_agents == 0 || agents == NULL || ptr == NULL || size == 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -479,15 +468,15 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
     }
 
     switch (agent->device_type()) {
-    case core::Agent::kAmdGpuDevice:
-      whitelist_nodes.push_back(agent->node_id());
-      break;
-    case core::Agent::kAmdCpuDevice:
-      cpu_in_list = true;
-      break;
-    case core::Agent::kAmdAieDevice:
-    default:
-      return HSA_STATUS_ERROR_INVALID_AGENT;
+      case core::Agent::kAmdGpuDevice:
+        whitelist_nodes.push_back(agent->node_id());
+        break;
+      case core::Agent::kAmdCpuDevice:
+        cpu_in_list = true;
+        break;
+      case core::Agent::kAmdAieDevice:
+      default:
+        return HSA_STATUS_ERROR_INVALID_AGENT;
     }
   }
 
@@ -525,8 +514,7 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t MemoryRegion::CanMigrate(const MemoryRegion& dst,
-                                      bool& result) const {
+hsa_status_t MemoryRegion::CanMigrate(const MemoryRegion& dst, bool& result) const {
   // TODO: not implemented yet.
   result = false;
   return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -537,9 +525,8 @@ hsa_status_t MemoryRegion::Migrate(uint32_t flag, const void* ptr) const {
   return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 }
 
-hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
-                                void* host_ptr, size_t size, uint32_t flags,
-                                void** agent_ptr) const {
+hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents, void* host_ptr,
+                                size_t size, uint32_t flags, void** agent_ptr) const {
   if (!IsSystem()) {
     return HSA_STATUS_ERROR;
   }
@@ -562,15 +549,15 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
       }
 
       switch (agent->device_type()) {
-      case core::Agent::kAmdGpuDevice:
-        whitelist_nodes.push_back(agent->node_id());
-        break;
-      case core::Agent::kAmdCpuDevice:
-        // Do nothing.
-        break;
-      case core::Agent::kAmdAieDevice:
-      default:
-        return HSA_STATUS_ERROR_INVALID_AGENT;
+        case core::Agent::kAmdGpuDevice:
+          whitelist_nodes.push_back(agent->node_id());
+          break;
+        case core::Agent::kAmdCpuDevice:
+          // Do nothing.
+          break;
+        case core::Agent::kAmdAieDevice:
+        default:
+          return HSA_STATUS_ERROR_INVALID_AGENT;
       }
     }
   }
@@ -589,8 +576,7 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
   }
 
   // Call kernel driver to register and pin the memory.
-  if (owner()->driver().RegisterMemory(host_ptr, size, local_mem_flag) ==
-      HSA_STATUS_SUCCESS) {
+  if (owner()->driver().RegisterMemory(host_ptr, size, local_mem_flag) == HSA_STATUS_SUCCESS) {
     uint64_t alternate_va = 0;
     if (owner()->driver().MakeMemoryResident(host_ptr, size, &alternate_va, &map_flag_,
                                              whitelist_nodes.size(),
@@ -629,8 +615,7 @@ hsa_status_t MemoryRegion::Unlock(void* host_ptr) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t MemoryRegion::AssignAgent(void* ptr, size_t size,
-                                       const core::Agent& agent,
+hsa_status_t MemoryRegion::AssignAgent(void* ptr, size_t size, const core::Agent& agent,
                                        hsa_access_permission_t access) const {
   return HSA_STATUS_SUCCESS;
 }
@@ -651,5 +636,5 @@ void* MemoryRegion::BlockAllocator::alloc(size_t request_size, size_t& allocated
   return ret;
 }
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr

@@ -57,9 +57,8 @@
 
 namespace rocrtst {
 
-template<typename T>
-void PrintArray(const std::string header, const T* data, const int width,
-                const int height) {
+template <typename T>
+void PrintArray(const std::string header, const T* data, const int width, const int height) {
   std::cout << std::endl << header << std::endl;
 
   for (int i = 0; i < height; i++) {
@@ -73,12 +72,8 @@ void PrintArray(const std::string header, const T* data, const int width,
   std::cout << std::endl;
 }
 
-template<typename T>
-int FillRandom(T* arrayPtr,
-               const int width,
-               const int height,
-               const T rangeMin,
-               const T rangeMax,
+template <typename T>
+int FillRandom(T* arrayPtr, const int width, const int height, const T rangeMin, const T rangeMax,
                unsigned int seed) {
   if (!arrayPtr) {
     return 1;
@@ -125,9 +120,7 @@ bool IsPowerOf2(uint64_t val) {
   }
 }
 
-bool
-Compare(const float* refData, const float* data,
-        const int length, const float epsilon) {
+bool Compare(const float* refData, const float* data, const int length, const float epsilon) {
   float error = 0.0f;
   float ref = 0.0f;
 
@@ -137,7 +130,7 @@ Compare(const float* refData, const float* data,
     ref += refData[i] * refData[i];
   }
 
-  float normRef =::sqrtf(static_cast<float>(ref));
+  float normRef = ::sqrtf(static_cast<float>(ref));
 
   if (::fabs(static_cast<float>(ref)) < 1e-7f) {
     return false;
@@ -149,9 +142,7 @@ Compare(const float* refData, const float* data,
   return error < epsilon;
 }
 
-bool
-Compare(const double* refData, const double* data,
-        const int length, const double epsilon) {
+bool Compare(const double* refData, const double* data, const int length, const double epsilon) {
   double error = 0.0;
   double ref = 0.0;
 
@@ -161,7 +152,7 @@ Compare(const double* refData, const double* data,
     ref += refData[i] * refData[i];
   }
 
-  double normRef =::sqrt(static_cast<double>(ref));
+  double normRef = ::sqrt(static_cast<double>(ref));
 
   if (::fabs(static_cast<double>(ref)) < 1e-7) {
     return false;
@@ -173,26 +164,21 @@ Compare(const double* refData, const double* data,
   return error < epsilon;
 }
 
-intptr_t
-AlignDown(intptr_t value, size_t alignment) {
-    assert(alignment != 0 && "Zero alignment");
-    return (intptr_t) (value & ~(alignment - 1));
+intptr_t AlignDown(intptr_t value, size_t alignment) {
+  assert(alignment != 0 && "Zero alignment");
+  return (intptr_t)(value & ~(alignment - 1));
 }
 
-void *
-AlignDown(void* value, size_t alignment) {
-    return reinterpret_cast<void*>(AlignDown(
-                              reinterpret_cast<uintptr_t>(value), alignment));
+void* AlignDown(void* value, size_t alignment) {
+  return reinterpret_cast<void*>(AlignDown(reinterpret_cast<uintptr_t>(value), alignment));
 }
 
-void *
-AlignUp(void* value, size_t alignment) {
-    return reinterpret_cast<void*>(
-     AlignDown((uintptr_t)(reinterpret_cast<uintptr_t>(value) + alignment - 1),
-                                                                   alignment));
+void* AlignUp(void* value, size_t alignment) {
+  return reinterpret_cast<void*>(
+      AlignDown((uintptr_t)(reinterpret_cast<uintptr_t>(value) + alignment - 1), alignment));
 }
 
-double CalcMedian(const std::vector<double> &scores) {
+double CalcMedian(const std::vector<double>& scores) {
   double median;
   size_t size = scores.size();
 
@@ -205,11 +191,11 @@ double CalcMedian(const std::vector<double> &scores) {
   return median;
 }
 
-double CalcMean(const std::vector<double> &scores) {
+double CalcMean(const std::vector<double>& scores) {
   double mean;
 
   mean = std::accumulate(scores.begin(), scores.end(), 0.0);
-  return mean/scores.size();
+  return mean / scores.size();
 }
 
 double CalcMean(const std::vector<double>& v1, const std::vector<double>& v2) {
@@ -239,21 +225,14 @@ double CalcStdDeviation(std::vector<double> scores, int score_mean) {
 // Template Instantiations
 /////////////////////////////////////////////////////////////////
 
-template
-void PrintArray<uint32_t>(const std::string, const unsigned int*, int, int);
+template void PrintArray<uint32_t>(const std::string, const unsigned int*, int, int);
 
-template
-void PrintArray<float>(const std::string, const float*, int, int);
+template void PrintArray<float>(const std::string, const float*, int, int);
 
-template
-int FillRandom<uint32_t>(uint32_t* arrayPtr,
-                         const int width, const int height,
-                         uint32_t rangeMin, uint32_t rangeMax,
-                                                           unsigned int seed);
+template int FillRandom<uint32_t>(uint32_t* arrayPtr, const int width, const int height,
+                                  uint32_t rangeMin, uint32_t rangeMax, unsigned int seed);
 
-template
-int FillRandom<float>(float* arrayPtr,
-                      const int width, const int height,
-                      float rangeMin, float rangeMax, unsigned int seed);
+template int FillRandom<float>(float* arrayPtr, const int width, const int height, float rangeMin,
+                               float rangeMax, unsigned int seed);
 
 }  // namespace rocrtst

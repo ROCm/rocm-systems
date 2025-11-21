@@ -33,111 +33,105 @@
 
 LIBELF_VCSID("$Id: gelf_dyn.c 189 2008-07-20 10:38:08Z jkoshy $");
 
-GElf_Dyn *
-gelf_getdyn(Elf_Data *d, int ndx, GElf_Dyn *dst)
-{
-	int ec;
-	Elf *e;
-	Elf_Scn *scn;
-	Elf32_Dyn *dyn32;
-	Elf64_Dyn *dyn64;
-	size_t msz;
-	uint32_t sh_type;
+GElf_Dyn *gelf_getdyn(Elf_Data *d, int ndx, GElf_Dyn *dst) {
+  int ec;
+  Elf *e;
+  Elf_Scn *scn;
+  Elf32_Dyn *dyn32;
+  Elf64_Dyn *dyn64;
+  size_t msz;
+  uint32_t sh_type;
 
-	if (d == NULL || ndx < 0 || dst == NULL ||
-	    (scn = d->d_scn) == NULL ||
-	    (e = scn->s_elf) == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (d == NULL || ndx < 0 || dst == NULL || (scn = d->d_scn) == NULL ||
+      (e = scn->s_elf) == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	ec = e->e_class;
-	assert(ec == ELFCLASS32 || ec == ELFCLASS64);
+  ec = e->e_class;
+  assert(ec == ELFCLASS32 || ec == ELFCLASS64);
 
-	if (ec == ELFCLASS32)
-		sh_type = scn->s_shdr.s_shdr32.sh_type;
-	else
-		sh_type = scn->s_shdr.s_shdr64.sh_type;
+  if (ec == ELFCLASS32)
+    sh_type = scn->s_shdr.s_shdr32.sh_type;
+  else
+    sh_type = scn->s_shdr.s_shdr64.sh_type;
 
-	if (_libelf_xlate_shtype(sh_type) != ELF_T_DYN) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (_libelf_xlate_shtype(sh_type) != ELF_T_DYN) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	msz = _libelf_msize(ELF_T_DYN, ec, e->e_version);
+  msz = _libelf_msize(ELF_T_DYN, ec, e->e_version);
 
-	assert(msz > 0);
+  assert(msz > 0);
 
-	if (msz * ndx >= d->d_size) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (msz * ndx >= d->d_size) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	if (ec == ELFCLASS32) {
-		dyn32 = (Elf32_Dyn *) d->d_buf + ndx;
+  if (ec == ELFCLASS32) {
+    dyn32 = (Elf32_Dyn *)d->d_buf + ndx;
 
-		dst->d_tag      = dyn32->d_tag;
-		dst->d_un.d_val = (Elf64_Xword) dyn32->d_un.d_val;
+    dst->d_tag = dyn32->d_tag;
+    dst->d_un.d_val = (Elf64_Xword)dyn32->d_un.d_val;
 
-	} else {
+  } else {
 
-		dyn64 = (Elf64_Dyn *) d->d_buf + ndx;
+    dyn64 = (Elf64_Dyn *)d->d_buf + ndx;
 
-		*dst = *dyn64;
-	}
+    *dst = *dyn64;
+  }
 
-	return (dst);
+  return (dst);
 }
 
-int
-gelf_update_dyn(Elf_Data *d, int ndx, GElf_Dyn *ds)
-{
-	int ec;
-	Elf *e;
-	Elf_Scn *scn;
-	Elf32_Dyn *dyn32;
-	Elf64_Dyn *dyn64;
-	size_t msz;
-	uint32_t sh_type;
+int gelf_update_dyn(Elf_Data *d, int ndx, GElf_Dyn *ds) {
+  int ec;
+  Elf *e;
+  Elf_Scn *scn;
+  Elf32_Dyn *dyn32;
+  Elf64_Dyn *dyn64;
+  size_t msz;
+  uint32_t sh_type;
 
-	if (d == NULL || ndx < 0 || ds == NULL ||
-	    (scn = d->d_scn) == NULL ||
-	    (e = scn->s_elf) == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (0);
-	}
+  if (d == NULL || ndx < 0 || ds == NULL || (scn = d->d_scn) == NULL ||
+      (e = scn->s_elf) == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (0);
+  }
 
-	ec = e->e_class;
-	assert(ec == ELFCLASS32 || ec == ELFCLASS64);
+  ec = e->e_class;
+  assert(ec == ELFCLASS32 || ec == ELFCLASS64);
 
-	if (ec == ELFCLASS32)
-		sh_type = scn->s_shdr.s_shdr32.sh_type;
-	else
-		sh_type = scn->s_shdr.s_shdr64.sh_type;
+  if (ec == ELFCLASS32)
+    sh_type = scn->s_shdr.s_shdr32.sh_type;
+  else
+    sh_type = scn->s_shdr.s_shdr64.sh_type;
 
-	if (_libelf_xlate_shtype(sh_type) != ELF_T_DYN) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (0);
-	}
+  if (_libelf_xlate_shtype(sh_type) != ELF_T_DYN) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (0);
+  }
 
-	msz = _libelf_msize(ELF_T_DYN, ec, e->e_version);
-	assert(msz > 0);
+  msz = _libelf_msize(ELF_T_DYN, ec, e->e_version);
+  assert(msz > 0);
 
-	if (msz * ndx >= d->d_size) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (0);
-	}
+  if (msz * ndx >= d->d_size) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (0);
+  }
 
-	if (ec == ELFCLASS32) {
-		dyn32 = (Elf32_Dyn *) d->d_buf + ndx;
+  if (ec == ELFCLASS32) {
+    dyn32 = (Elf32_Dyn *)d->d_buf + ndx;
 
-		LIBELF_COPY_S32(dyn32, ds, d_tag);
-		LIBELF_COPY_U32(dyn32, ds, d_un.d_val);
-	} else {
-		dyn64 = (Elf64_Dyn *) d->d_buf + ndx;
+    LIBELF_COPY_S32(dyn32, ds, d_tag);
+    LIBELF_COPY_U32(dyn32, ds, d_un.d_val);
+  } else {
+    dyn64 = (Elf64_Dyn *)d->d_buf + ndx;
 
-		*dyn64 = *ds;
-	}
+    *dyn64 = *ds;
+  }
 
-	return (1);
+  return (1);
 }

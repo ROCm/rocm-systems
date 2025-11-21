@@ -24,28 +24,27 @@
 #include "core/commandbuffermgr.hpp"
 #include <climits>
 
-
 using namespace aql_profile;
 
 namespace {
 
 struct DummyBuffer {
-    std::array<char, 4096> data;
+  std::array<char, 4096> data;
 };
 
 TEST(CommandBufferMgrTest, BasicPrefixAndSize) {
-    DummyBuffer buf;
-    CommandBufferMgr mgr(buf.data.data(), sizeof(buf.data));
-    // Should not throw and should have a nonzero size
-    EXPECT_GT(mgr.GetSize(), 0u);
+  DummyBuffer buf;
+  CommandBufferMgr mgr(buf.data.data(), sizeof(buf.data));
+  // Should not throw and should have a nonzero size
+  EXPECT_GT(mgr.GetSize(), 0u);
 }
 
 TEST(CommandBufferMgrTest, FinalizeThrowsOnSmallData) {
-    DummyBuffer buf;
-    CommandBufferMgr mgr(buf.data.data(), sizeof(buf.data));
-    mgr.SetPreSize(128);
-    // Finalize with data_size <= precmds_size should throw
-    EXPECT_THROW(mgr.Finalize(64), aql_profile_exc_msg);
+  DummyBuffer buf;
+  CommandBufferMgr mgr(buf.data.data(), sizeof(buf.data));
+  mgr.SetPreSize(128);
+  // Finalize with data_size <= precmds_size should throw
+  EXPECT_THROW(mgr.Finalize(64), aql_profile_exc_msg);
 }
 
-} // namespace
+}  // namespace

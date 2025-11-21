@@ -60,11 +60,10 @@ namespace AMD {
 
 hsa_status_t handleException();
 
-}   // namespace amd
+}  // namespace AMD
 
-hsa_status_t hsa_ven_amd_loader_query_host_address(
-  const void *device_address,
-  const void **host_address) {
+hsa_status_t hsa_ven_amd_loader_query_host_address(const void* device_address,
+                                                   const void** host_address) {
   try {
     if (!Runtime::runtime_singleton_->IsOpen()) {
       return HSA_STATUS_ERROR_NOT_INITIALIZED;
@@ -84,25 +83,28 @@ hsa_status_t hsa_ven_amd_loader_query_host_address(
 
     *host_address = reinterpret_cast<void*>(uhaddr);
     return HSA_STATUS_SUCCESS;
-  } catch(...) { return AMD::handleException(); }
+  } catch (...) {
+    return AMD::handleException();
+  }
 }
 
 hsa_status_t hsa_ven_amd_loader_query_segment_descriptors(
-  hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
-  size_t *num_segment_descriptors) {
+    hsa_ven_amd_loader_segment_descriptor_t* segment_descriptors, size_t* num_segment_descriptors) {
   try {
     if (!Runtime::runtime_singleton_->IsOpen()) {
       return HSA_STATUS_ERROR_NOT_INITIALIZED;
     }
 
     // Arguments are checked by the loader.
-    return Runtime::runtime_singleton_->loader()->QuerySegmentDescriptors(segment_descriptors, num_segment_descriptors);
-  } catch(...) { return AMD::handleException(); }
+    return Runtime::runtime_singleton_->loader()->QuerySegmentDescriptors(segment_descriptors,
+                                                                          num_segment_descriptors);
+  } catch (...) {
+    return AMD::handleException();
+  }
 }
 
-hsa_status_t hsa_ven_amd_loader_query_executable(
-  const void *device_address,
-  hsa_executable_t *executable) {
+hsa_status_t hsa_ven_amd_loader_query_executable(const void* device_address,
+                                                 hsa_executable_t* executable) {
   try {
     if (!Runtime::runtime_singleton_->IsOpen()) {
       return HSA_STATUS_ERROR_NOT_INITIALIZED;
@@ -119,16 +121,16 @@ hsa_status_t hsa_ven_amd_loader_query_executable(
 
     *executable = exec;
     return HSA_STATUS_SUCCESS;
-  } catch(...) { return AMD::handleException(); }
+  } catch (...) {
+    return AMD::handleException();
+  }
 }
 
 hsa_status_t hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
-  hsa_executable_t executable,
-  hsa_status_t (*callback)(
     hsa_executable_t executable,
-    hsa_loaded_code_object_t loaded_code_object,
-    void *data),
-  void *data) {
+    hsa_status_t (*callback)(hsa_executable_t executable,
+                             hsa_loaded_code_object_t loaded_code_object, void* data),
+    void* data) {
   try {
     if (!Runtime::runtime_singleton_->IsOpen()) {
       return HSA_STATUS_ERROR_NOT_INITIALIZED;
@@ -137,19 +139,20 @@ hsa_status_t hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    Executable *exec = Executable::Object(executable);
+    Executable* exec = Executable::Object(executable);
     if (!exec) {
       return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
     }
 
     return exec->IterateLoadedCodeObjects(callback, data);
-  } catch(...) { return AMD::handleException(); }
+  } catch (...) {
+    return AMD::handleException();
+  }
 }
 
 hsa_status_t hsa_ven_amd_loader_loaded_code_object_get_info(
-  hsa_loaded_code_object_t loaded_code_object,
-  hsa_ven_amd_loader_loaded_code_object_info_t attribute,
-  void *value) {
+    hsa_loaded_code_object_t loaded_code_object,
+    hsa_ven_amd_loader_loaded_code_object_info_t attribute, void* value) {
   try {
     if (!Runtime::runtime_singleton_->IsOpen()) {
       return HSA_STATUS_ERROR_NOT_INITIALIZED;
@@ -158,7 +161,7 @@ hsa_status_t hsa_ven_amd_loader_loaded_code_object_get_info(
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    const LoadedCodeObject *lcobj = LoadedCodeObject::Object(loaded_code_object);
+    const LoadedCodeObject* lcobj = LoadedCodeObject::Object(loaded_code_object);
     if (!lcobj) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
@@ -177,7 +180,7 @@ hsa_status_t hsa_ven_amd_loader_loaded_code_object_get_info(
       case HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_AGENT: {
         hsa_agent_t agent = lcobj->getAgent();
         if (agent.handle == 0) {
-            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
         *((hsa_agent_t*)value) = agent;
         break;
@@ -238,15 +241,13 @@ hsa_status_t hsa_ven_amd_loader_loaded_code_object_get_info(
     }
 
     return HSA_STATUS_SUCCESS;
-  } catch(...) { return AMD::handleException(); }
+  } catch (...) {
+    return AMD::handleException();
+  }
 }
 
-hsa_status_t
-hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
-    hsa_file_t file,
-    size_t offset,
-    size_t size,
-    hsa_code_object_reader_t *code_object_reader) {
+hsa_status_t hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
+    hsa_file_t file, size_t offset, size_t size, hsa_code_object_reader_t* code_object_reader) {
   try {
     if (!Runtime::runtime_singleton_->IsOpen()) {
       return HSA_STATUS_ERROR_NOT_INITIALIZED;
@@ -259,8 +260,7 @@ hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
 
-    std::unique_ptr<CodeObjectReaderImpl> reader(
-        new (std::nothrow) CodeObjectReaderImpl());
+    std::unique_ptr<CodeObjectReaderImpl> reader(new (std::nothrow) CodeObjectReaderImpl());
     if (!reader) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
@@ -272,23 +272,19 @@ hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
 
     *code_object_reader = CodeObjectReaderImpl::Handle(reader.release());
     return HSA_STATUS_SUCCESS;
-  } catch(...) { return AMD::handleException(); }
+  } catch (...) {
+    return AMD::handleException();
+  }
 }
 
 namespace {
 
-Loader *GetLoader() {
-  return Runtime::runtime_singleton_->loader();
-}
+Loader* GetLoader() { return Runtime::runtime_singleton_->loader(); }
 
-} // namespace anonymous
+}  // namespace
 
-hsa_status_t
-hsa_ven_amd_loader_iterate_executables(
-    hsa_status_t (*callback)(
-      hsa_executable_t executable,
-      void *data),
-    void *data) {
+hsa_status_t hsa_ven_amd_loader_iterate_executables(
+    hsa_status_t (*callback)(hsa_executable_t executable, void* data), void* data) {
   try {
     if (!Runtime::runtime_singleton_->IsOpen()) {
       return HSA_STATUS_ERROR_NOT_INITIALIZED;
@@ -298,7 +294,9 @@ hsa_ven_amd_loader_iterate_executables(
     }
 
     return GetLoader()->IterateExecutables(callback, data);
-  } catch(...) { return AMD::handleException(); }
+  } catch (...) {
+    return AMD::handleException();
+  }
 }
 
-} // namespace rocr
+}  // namespace rocr

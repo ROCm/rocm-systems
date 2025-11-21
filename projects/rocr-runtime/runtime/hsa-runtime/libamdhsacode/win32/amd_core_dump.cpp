@@ -101,5 +101,5 @@ hsa_status_t dump_gpu_core() {
   return HSA_STATUS_ERROR;
 }
 }  //  namespace coredump
-}   //  namespace amd
-}   //  namespace rocr
+}  //  namespace amd
+}  //  namespace rocr

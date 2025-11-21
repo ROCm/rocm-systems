@@ -111,8 +111,7 @@ void RdciSubSystem::connect() {
 void RdciSubSystem::show_common_usage() const {
   std::cout << "  --host       <IP/FQDN>:port    Connects to "
             << "specified IP or fully-qualified domain name.\n";
-  std::cout << "                                 The port "
-            << "must be specified.\n";
+  std::cout << "                                 The port " << "must be specified.\n";
   std::cout << "                                 Default: localhost:50051\n";
   std::cout << "  -u  --unauth                   Do not use the SSL mutual"
             << " authentication to encrypt the communication\n"
@@ -120,8 +119,7 @@ void RdciSubSystem::show_common_usage() const {
             << " used. You must copy the root CA to " << root_ca_ << "\n"
             << "                                 Client certificate to " << client_cert_ << "\n"
             << "                                 Client key to " << client_key_ << "\n";
-  std::cout << "  -h  --help                     Displays usage "
-            << "information and exits.\n";
+  std::cout << "  -h  --help                     Displays usage " << "information and exits.\n";
 }
 
 void RdciSubSystem::set_json_output(bool is_json) {

@@ -69,7 +69,6 @@ enum CounterBlockAttr {
   CounterBlockAtcAttr = 0x400000,
 };
 
-
 // Register address corresponding to each counter
 struct CounterRegInfo {
   // counter select register address
@@ -89,7 +88,8 @@ struct BlockDelayInfo {
   const uint32_t* val;  // Layout: val[SA][SE][instance]
 };
 
-#define BLOCK_DELAY_NONE { REG_32B_NULL, nullptr }
+#define BLOCK_DELAY_NONE \
+  { REG_32B_NULL, nullptr }
 
 struct counter_des_t;
 
@@ -137,6 +137,5 @@ struct counter_des_t {
   block_des_t block_des;
   const GpuBlockInfo* block_info;
 };
-
 
 #endif  // SRC_DEF_GPU_BLOCK_INFO_H_

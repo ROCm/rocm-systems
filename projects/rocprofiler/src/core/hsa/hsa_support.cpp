@@ -417,7 +417,8 @@ struct CodeObjectCallbackArg {
   bool unload;
 };
 
-#define CheckInfo(x) if ((x) != HSA_STATUS_SUCCESS) \
+#define CheckInfo(x)                                                                               \
+  if ((x) != HSA_STATUS_SUCCESS)                                                                   \
     rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
 hsa_status_t CodeObjectCallback(hsa_executable_t executable,
@@ -426,75 +427,48 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
   hsa_evt_data_t data{};
 
   auto codeobj_info_func = rocprofiler::HSASupport_Singleton::GetInstance()
-                                    .GetHSALoaderApi()
-                                    .hsa_ven_amd_loader_loaded_code_object_get_info;
+                               .GetHSALoaderApi()
+                               .hsa_ven_amd_loader_loaded_code_object_get_info;
   auto codeobj_bound = std::bind(codeobj_info_func, loaded_code_object, _1, _2);
 
-  CheckInfo(codeobj_bound(
-    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE,
-    &data.codeobj.storage_type
-  ));
+  CheckInfo(codeobj_bound(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE,
+                          &data.codeobj.storage_type));
 
-  if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE)
-  {
-    CheckInfo(codeobj_bound(
-      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_FILE,
-      &data.codeobj.storage_file
-    ));
+  if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE) {
+    CheckInfo(codeobj_bound(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_FILE,
+                            &data.codeobj.storage_file));
     if (data.codeobj.storage_file == -1)
       rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
     data.codeobj.memory_base = data.codeobj.memory_size = 0;
-  }
-  else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
-  {
-    CheckInfo(codeobj_bound(
-      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE,
-      &data.codeobj.memory_base
-    ));
-    CheckInfo(codeobj_bound(
-      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE,
-      &data.codeobj.memory_size
-    ));
+  } else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY) {
+    CheckInfo(
+        codeobj_bound(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE,
+                      &data.codeobj.memory_base));
+    CheckInfo(
+        codeobj_bound(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE,
+                      &data.codeobj.memory_size));
     data.codeobj.storage_file = -1;
-  }
-  else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE)
-  {
+  } else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE) {
     return HSA_STATUS_SUCCESS;  // FIXME: do we really not care about these code objects?
-  }
-  else
-  {
+  } else {
     rocprofiler::fatal("unknown code object storage type: %d", data.codeobj.storage_type);
   }
 
-  CheckInfo(codeobj_bound(
-    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE,
-    &data.codeobj.load_base
-  ));
-  CheckInfo(codeobj_bound(
-    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE,
-    &data.codeobj.load_size
-  ));
-  CheckInfo(codeobj_bound(
-    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA,
-    &data.codeobj.load_delta
-  ));
+  CheckInfo(
+      codeobj_bound(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE, &data.codeobj.load_base));
+  CheckInfo(
+      codeobj_bound(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE, &data.codeobj.load_size));
+  CheckInfo(codeobj_bound(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA,
+                          &data.codeobj.load_delta));
 
-  CheckInfo(codeobj_bound(
-    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI_LENGTH,
-    &data.codeobj.uri_length
-  ));
+  CheckInfo(codeobj_bound(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI_LENGTH,
+                          &data.codeobj.uri_length));
 
   std::string uri_str(data.codeobj.uri_length, '\0');
 
-  CheckInfo(codeobj_bound(
-    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI,
-    uri_str.data()
-  ));
-  CheckInfo(codeobj_bound(
-    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_AGENT,
-    &data.codeobj.agent
-  ));
+  CheckInfo(codeobj_bound(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI, uri_str.data()));
+  CheckInfo(codeobj_bound(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_AGENT, &data.codeobj.agent));
 
   data.codeobj.uri = uri_str.c_str();
   data.codeobj.unload = *static_cast<bool*>(arg) ? 1 : 0;
@@ -503,8 +477,8 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
   if (data.codeobj.unload)
     codeobj_capture_instance::Unload(data.codeobj.load_delta);
   else
-    codeobj_capture_instance::Load(data.codeobj.load_delta, data.codeobj.load_size,
-            uri_str, data.codeobj.memory_base, data.codeobj.memory_size);
+    codeobj_capture_instance::Load(data.codeobj.load_delta, data.codeobj.load_size, uri_str,
+                                   data.codeobj.memory_base, data.codeobj.memory_size);
 
   hsa_executable_iterate_agent_symbols(executable, data.codeobj.agent,
                                        hsa_executable_iteration_callback, &(data.codeobj.unload));
@@ -1139,18 +1113,18 @@ void HSASupport_Singleton::HSAFinalize() {
   FinitKsymbols();
 }
 
-#define CHECK_HSA_STATUS(msg, status)                                                          \
-if ((status) != HSA_STATUS_SUCCESS && (status) != HSA_STATUS_INFO_BREAK) {                     \
-  try {                                                                                        \
-    const char* emsg = nullptr;                                                                \
-    hsa_status_string(status, &emsg);                                                          \
-    if (!emsg) emsg = "<Unknown HSA Error>";                                                   \
-    std::cerr << msg << std::endl;                                                             \
-    std::cerr << emsg << std::endl;                                                            \
-  } catch (std::exception & e) {                                                               \
-  }                                                                                            \
-  abort();                                                                                     \
-}
+#define CHECK_HSA_STATUS(msg, status)                                                              \
+  if ((status) != HSA_STATUS_SUCCESS && (status) != HSA_STATUS_INFO_BREAK) {                       \
+    try {                                                                                          \
+      const char* emsg = nullptr;                                                                  \
+      hsa_status_string(status, &emsg);                                                            \
+      if (!emsg) emsg = "<Unknown HSA Error>";                                                     \
+      std::cerr << msg << std::endl;                                                               \
+      std::cerr << emsg << std::endl;                                                              \
+    } catch (std::exception & e) {                                                                 \
+    }                                                                                              \
+    abort();                                                                                       \
+  }
 
 void HSASupport_Singleton::CreateSignal(uint32_t attribute, hsa_signal_t* signal) {
   auto status = GetAmdExtTable().hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);

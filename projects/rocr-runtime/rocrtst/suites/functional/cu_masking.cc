@@ -63,7 +63,9 @@ CU_Masking::CU_Masking() : TestBase() {
   std::string desc;
 
   name = "CU Masking";
-  desc = "This test checks CU masking functionality via hsa_amd_queue_cu_get(set)_mask and HSA_CU_MASK.";
+  desc =
+      "This test checks CU masking functionality via hsa_amd_queue_cu_get(set)_mask and "
+      "HSA_CU_MASK.";
 
   set_title(name);
   set_description(desc);
@@ -83,19 +85,17 @@ void CU_Masking::Run() {
   // Store cu masking variable
   std::string mask_var;
   char* temp = getenv("HSA_CU_MASK");
-  if(temp!=nullptr)
-    mask_var = temp;
+  if (temp != nullptr) mask_var = temp;
   unsetenv("HSA_CU_MASK");
 
   std::string mask_init_var;
   temp = getenv("HSA_CU_MASK_SKIP_INIT");
-  if(temp!=nullptr)
-    mask_init_var = temp;
+  if (temp != nullptr) mask_init_var = temp;
   unsetenv("HSA_CU_MASK_SKIP_INIT");
 
   // Loop over and test all GPUs
   uint32_t idx = 0;
-  while(true) {
+  while (true) {
     Device* gpu;
     CodeObject* obj;
     Kernel kern;
@@ -116,29 +116,31 @@ void CU_Masking::Run() {
 
     auto init = [&]() {
       System::Init();
-      if(idx == System::gpu().size())
-        return false;
+      if (idx == System::gpu().size()) return false;
 
       gpu = &System::gpu()[idx];
       std::string filename = rocrtst::LocateKernelFile(kernel_file_name(), gpu->agent);
 
       obj = new CodeObject(filename, *gpu);
 
-      err = hsa_agent_get_info(gpu->agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT, &cu_count);
+      err = hsa_agent_get_info(gpu->agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT,
+                               &cu_count);
       CHECK(err);
 
-      err = hsa_agent_get_info(gpu->agent, (hsa_agent_info_t)HSA_AGENT_INFO_WORKGROUP_MAX_SIZE, &group_size);
+      err = hsa_agent_get_info(gpu->agent, (hsa_agent_info_t)HSA_AGENT_INFO_WORKGROUP_MAX_SIZE,
+                               &group_size);
       CHECK(err);
 
-      err = hsa_agent_get_info(gpu->agent, (hsa_agent_info_t)HSA_AGENT_INFO_GRID_MAX_SIZE, &max_grid_size);
+      err = hsa_agent_get_info(gpu->agent, (hsa_agent_info_t)HSA_AGENT_INFO_GRID_MAX_SIZE,
+                               &max_grid_size);
       CHECK(err);
 
-      uint64_t max_threads = uint64_t(cu_count)*group_size*10;
+      uint64_t max_threads = uint64_t(cu_count) * group_size * 10;
       threads = max_threads < max_grid_size ? max_threads : max_grid_size;
       threads = (threads / group_size) * group_size;
 
       // All CU enabled check
-      if(!obj->GetKernel("get_hw_id", kern)) {
+      if (!obj->GetKernel("get_hw_id", kern)) {
         ADD_FAILURE();
         return false;
       }
@@ -146,7 +148,7 @@ void CU_Masking::Run() {
       args = (args_t*)hsaMalloc(sizeof(args_t), System::kernarg());
       memset(args, 0, sizeof(args_t));
 
-      args->hw_ids = (uint32_t*)hsaMalloc(sizeof(uint32_t)*threads, System::kernarg());
+      args->hw_ids = (uint32_t*)hsaMalloc(sizeof(uint32_t) * threads, System::kernarg());
 
       err = hsa_signal_create(1, 0, nullptr, &signal);
       CHECK(err);
@@ -172,9 +174,9 @@ void CU_Masking::Run() {
     };
 
     auto dispatch = [&]() {
-      memset(args->hw_ids, 0, sizeof(uint32_t)*threads);
+      memset(args->hw_ids, 0, sizeof(uint32_t) * threads);
 
-      Aql pkt = { };
+      Aql pkt = {};
       pkt.header.type = HSA_PACKET_TYPE_KERNEL_DISPATCH;
       pkt.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
       pkt.header.release = HSA_FENCE_SCOPE_SYSTEM;
@@ -197,7 +199,7 @@ void CU_Masking::Run() {
       hsa_signal_store_relaxed(signal, 1);
     };
 
-    auto getHwIds = [&](std::vector<uint32_t>& ids){
+    auto getHwIds = [&](std::vector<uint32_t>& ids) {
       dispatch();
       std::sort(&args->hw_ids[0], &args->hw_ids[threads]);
       uint32_t* end = std::unique(&args->hw_ids[0], &args->hw_ids[threads]);
@@ -209,13 +211,12 @@ void CU_Masking::Run() {
     unsetenv("HSA_CU_MASK_SKIP_INIT");
     setenv("HSA_CU_MASK_SKIP_INIT", "1", 1);
 
-    if(!init())
-      break;
-    
+    if (!init()) break;
+
     {
       char name[64];
       hsa_agent_get_info(gpu->agent, HSA_AGENT_INFO_NAME, name);
-      name[63]='\0';
+      name[63] = '\0';
       printf("Testing gpu index %u, %s\n", idx, name);
     }
 
@@ -229,17 +230,17 @@ void CU_Masking::Run() {
     unsetenv("HSA_CU_MASK_SKIP_INIT");
 
     // Check fully enabled, but mask used, set.
-    setenv("HSA_CU_MASK", (std::to_string(idx)+":0-"+std::to_string(cu_count-1)).c_str(), 1);
+    setenv("HSA_CU_MASK", (std::to_string(idx) + ":0-" + std::to_string(cu_count - 1)).c_str(), 1);
     init();
     getHwIds(right);
     printf("Expecting %u CUs, found %lu with HSA_CU_MASK.\n", cu_count, right.size());
-    if(cu_count != right.size()) {
+    if (cu_count != right.size()) {
       isect.resize(left.size());
-      auto isect_end = std::set_difference(left.begin(), left.end(), right.begin(), right.end(), isect.begin());
+      auto isect_end =
+          std::set_difference(left.begin(), left.end(), right.begin(), right.end(), isect.begin());
       isect.resize(isect_end - isect.begin());
       printf("Missing CUs: ");
-      for(auto cu : isect)
-        printf("%u ", cu);
+      for (auto cu : isect) printf("%u ", cu);
       printf("\n");
     }
     ASSERT_EQ(cu_count, right.size());
@@ -250,35 +251,32 @@ void CU_Masking::Run() {
     init();
     getHwIds(right);
     printf("Expecting %u CUs, found %lu.\n", cu_count, right.size());
-    if(cu_count != right.size()) {
+    if (cu_count != right.size()) {
       isect.resize(left.size());
-      auto isect_end = std::set_difference(left.begin(), left.end(), right.begin(), right.end(), isect.begin());
+      auto isect_end =
+          std::set_difference(left.begin(), left.end(), right.begin(), right.end(), isect.begin());
       isect.resize(isect_end - isect.begin());
       printf("Missing CUs: ");
-      for(auto cu : isect)
-        printf("%u ", cu);
+      for (auto cu : isect) printf("%u ", cu);
       printf("\n");
     }
     ASSERT_EQ(cu_count, right.size());
     fini();
 
     std::vector<uint32_t> bits;
-    for(uint32_t i=0; i<cu_count; i++)
-      bits.push_back(i);
-    
+    for (uint32_t i = 0; i < cu_count; i++) bits.push_back(i);
+
     std::vector<uint32_t> bitmask, resultmask;
     uint32_t dwords = (cu_count + 31) / 32;
 
     bitmask.resize(dwords);
     resultmask.resize(dwords);
 
-    for(size_t iteration=0; iteration<RealIterationNum(); iteration++) {
-
+    for (size_t iteration = 0; iteration < RealIterationNum(); iteration++) {
       auto setBits = [&](uint32_t start, uint32_t stop, std::vector<uint32_t>& array) {
         assert(array.size() == dwords && "Bitmask array has incorrect size.");
-        for(uint32_t i=0; i<dwords; i++)
-          array[i] = 0;
-        for(uint32_t i=start; i<stop; i++) {
+        for (uint32_t i = 0; i < dwords; i++) array[i] = 0;
+        for (uint32_t i = start; i < stop; i++) {
           int dword = bits[i] / 32;
           int offset = bits[i] % 32;
           array[dword] |= (1 << offset);
@@ -287,24 +285,24 @@ void CU_Masking::Run() {
 
       auto getMasks = [&](uint32_t start, uint32_t stop, std::vector<uint32_t>& hw_ids) {
         setBits(start, stop, bitmask);
-        err = hsa_amd_queue_cu_set_mask(q, dwords*32, &bitmask[0]);
-        if((err!=HSA_STATUS_SUCCESS) && (err!=(hsa_status_t)HSA_STATUS_CU_MASK_REDUCED))
+        err = hsa_amd_queue_cu_set_mask(q, dwords * 32, &bitmask[0]);
+        if ((err != HSA_STATUS_SUCCESS) && (err != (hsa_status_t)HSA_STATUS_CU_MASK_REDUCED))
           CHECK(err);
-        err = hsa_amd_queue_cu_get_mask(q, dwords*32, &resultmask[0]);
+        err = hsa_amd_queue_cu_get_mask(q, dwords * 32, &resultmask[0]);
         CHECK(err);
         getHwIds(hw_ids);
       };
 
       auto getIsect = [&]() {
         isect.resize(left.size());
-        auto isect_end = std::set_intersection(left.begin(), left.end(), right.begin(), right.end(), isect.begin());
+        auto isect_end = std::set_intersection(left.begin(), left.end(), right.begin(), right.end(),
+                                               isect.begin());
         isect.resize(isect_end - isect.begin());
       };
 
       auto printMask = [](std::vector<uint32_t>& mask) {
         printf("0x");
-        for(size_t i=1; i<mask.size()+1; i++)
-          printf("%08X", mask[mask.size()-i]);
+        for (size_t i = 1; i < mask.size() + 1; i++) printf("%08X", mask[mask.size() - i]);
       };
 
       auto printMasks = [&]() {
@@ -325,48 +323,43 @@ void CU_Masking::Run() {
       getMasks(0, split_index, left);
       printMasks();
       printf("Observed %lu CUs.\n", left.size());
-      for(uint32_t i=0; i<dwords; i++)
-        ASSERT_EQ(bitmask[i], resultmask[i]);
+      for (uint32_t i = 0; i < dwords; i++) ASSERT_EQ(bitmask[i], resultmask[i]);
       ASSERT_EQ(split_index, left.size());
 
       getMasks(split_index, cu_count, right);
       printMasks();
       printf("Observed %lu CUs.\n", right.size());
-      for(uint32_t i=0; i<dwords; i++)
-        ASSERT_EQ(bitmask[i], resultmask[i]);
-      ASSERT_EQ(cu_count-split_index, right.size());
+      for (uint32_t i = 0; i < dwords; i++) ASSERT_EQ(bitmask[i], resultmask[i]);
+      ASSERT_EQ(cu_count - split_index, right.size());
 
       getIsect();
       printf("Overlap of %lu CUs.\n", isect.size());
       ASSERT_EQ(0u, isect.size());
-      
+
       // CU set API check, overlap possible
       uint32_t high_split_index = (rand() % (cu_count - 2)) + 1;
 
-      if(high_split_index < split_index)
-        std::swap(high_split_index, split_index);
+      if (high_split_index < split_index) std::swap(high_split_index, split_index);
 
       getMasks(0, high_split_index, left);
       printMasks();
       printf("Observed %lu CUs.\n", left.size());
-      for(uint32_t i=0; i<dwords; i++)
-        ASSERT_EQ(bitmask[i], resultmask[i]);
+      for (uint32_t i = 0; i < dwords; i++) ASSERT_EQ(bitmask[i], resultmask[i]);
       ASSERT_EQ(high_split_index, left.size());
 
       getMasks(split_index, cu_count, right);
       printMasks();
       printf("Observed %lu CUs.\n", right.size());
-      for(uint32_t i=0; i<dwords; i++)
-        ASSERT_EQ(bitmask[i], resultmask[i]);
-      ASSERT_EQ(cu_count-split_index, right.size());
+      for (uint32_t i = 0; i < dwords; i++) ASSERT_EQ(bitmask[i], resultmask[i]);
+      ASSERT_EQ(cu_count - split_index, right.size());
 
       getIsect();
       printf("Overlap of %lu CUs.\n", isect.size());
       ASSERT_EQ(high_split_index - split_index, isect.size());
-      
+
       // HSA_CU_MASK check, default
       fini();
-      
+
       // Pick masking bits for env var
       std::shuffle(bits.begin(), bits.end(), rand);
       uint32_t mask_index = (rand() % (cu_count - 2)) + 1;
@@ -375,18 +368,18 @@ void CU_Masking::Run() {
       // Convert to string range syntax
       std::sort(env_mask.begin(), env_mask.end());
       uint32_t start, stop;
-      start=stop=env_mask[0];
+      start = stop = env_mask[0];
       std::vector<std::string> ranges;
       // Append invalid bit so that final loop will emit the last range.
       env_mask.push_back(-1);
-      for(size_t j=1; j<env_mask.size(); j++) {
+      for (size_t j = 1; j < env_mask.size(); j++) {
         uint32_t index = env_mask[j];
-        if(index != stop+1) {
-          if(start==stop)
+        if (index != stop + 1) {
+          if (start == stop)
             ranges.push_back(std::to_string(start));
           else
-            ranges.push_back(std::to_string(start)+"-"+std::to_string(stop));
-          start=stop=index;
+            ranges.push_back(std::to_string(start) + "-" + std::to_string(stop));
+          start = stop = index;
         } else {
           stop = index;
         }
@@ -397,11 +390,11 @@ void CU_Masking::Run() {
       // Assemble final env var string.
       std::string env_var = std::to_string(idx) + ":";
       env_var += ranges[0];
-      for(uint32_t i=1; i<ranges.size(); i++)
-        env_var += ", " + ranges[i];
+      for (uint32_t i = 1; i < ranges.size(); i++) env_var += ", " + ranges[i];
 
       // Set env var and check that default queues are masked.
-      //env_var = "0:41-44, 104-107, 47-50, 67-68, 77-100, 61, 102, 19-24, 109, 70-75, 52-59, 63-65, 0-17, 27-39";
+      // env_var = "0:41-44, 104-107, 47-50, 67-68, 77-100, 61, 102, 19-24, 109, 70-75, 52-59,
+      // 63-65, 0-17, 27-39";
       setenv("HSA_CU_MASK", env_var.c_str(), 1);
       printf("HSA_CU_MASK = %s\n", env_var.c_str());
       env_mask.clear();
@@ -412,7 +405,7 @@ void CU_Masking::Run() {
       printf("\n");
 
       init();
-      
+
       getHwIds(left);
       printf("Expecting %u CUs, found %lu\n", mask_index, left.size());
       ASSERT_EQ(left.size(), mask_index);
@@ -420,13 +413,12 @@ void CU_Masking::Run() {
       // Check that HSA_CU_MASK constrains the API
       // Find at least partially enabled CU mask.
       [&]() {
-        while(true) {
+        while (true) {
           std::shuffle(bits.begin(), bits.end(), rand);
           split_index = (rand() % (cu_count - 2)) + 1;
           setBits(0, split_index, bitmask);
-          for(uint32_t i=0; i<dwords; i++) {
-            if((bitmask[i] & env_mask[i]) != 0)
-              return;
+          for (uint32_t i = 0; i < dwords; i++) {
+            if ((bitmask[i] & env_mask[i]) != 0) return;
           }
         }
       }();
@@ -435,7 +427,7 @@ void CU_Masking::Run() {
       printMasks();
       printf("Observed %lu CUs.\n", left.size());
       uint32_t enabledCus = 0;
-      for(uint32_t i=0; i<dwords; i++) {
+      for (uint32_t i = 0; i < dwords; i++) {
         bitmask[i] &= env_mask[i];
         enabledCus += rocrtst::popcount(bitmask[i]);
         ASSERT_EQ(bitmask[i], resultmask[i]);
@@ -447,13 +439,10 @@ void CU_Masking::Run() {
       unsetenv("HSA_CU_MASK");
 
       // Todo: Hex syntax.  Syntax errors.  Above hw limit bits.
-
     }
     idx++;
   }
 
-  if(!mask_var.empty())
-    setenv("HSA_CU_MASK", mask_var.c_str(), 1);
-  if(!mask_init_var.empty())
-    setenv("HSA_CU_MASK_SKIP_INIT", mask_var.c_str(), 1);
+  if (!mask_var.empty()) setenv("HSA_CU_MASK", mask_var.c_str(), 1);
+  if (!mask_init_var.empty()) setenv("HSA_CU_MASK_SKIP_INIT", mask_var.c_str(), 1);
 }

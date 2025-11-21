@@ -33,37 +33,31 @@
 #include "amdp2ptest.h"
 #include "RDMAUtil.hpp"
 
-void LocalMemoryAccess::Open() {
-    fd = open(AMDP2PTEST_DEVICE_PATH, O_RDWR);
-}
+void LocalMemoryAccess::Open() { fd = open(AMDP2PTEST_DEVICE_PATH, O_RDWR); }
 
 void LocalMemoryAccess::Close() {
-    close(fd);
-    fd = -1;
+  close(fd);
+  fd = -1;
 }
 
 int LocalMemoryAccess::GetPages(uint64_t gpu_va_addr, uint64_t size) {
-    struct AMDRDMA_IOCTL_GET_PAGES_PARAM param = {0};
+  struct AMDRDMA_IOCTL_GET_PAGES_PARAM param = {0};
 
-    if (fd <= 0)
-        return -1;
+  if (fd <= 0) return -1;
 
-    param.addr = gpu_va_addr;
-    param.length = size;
+  param.addr = gpu_va_addr;
+  param.length = size;
 
-    return ioctl(fd, AMD2P2PTEST_IOCTL_GET_PAGES, &param);
+  return ioctl(fd, AMD2P2PTEST_IOCTL_GET_PAGES, &param);
 }
 
-void *LocalMemoryAccess::MMap(uint64_t offset, size_t size) {
-    void *gpuAddr;
+void* LocalMemoryAccess::MMap(uint64_t offset, size_t size) {
+  void* gpuAddr;
 
-    if (fd <= 0)
-        return NULL;
+  if (fd <= 0) return NULL;
 
-    gpuAddr = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, offset);
-    return gpuAddr;
+  gpuAddr = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, offset);
+  return gpuAddr;
 }
 
-void LocalMemoryAccess::UnMap(void *offset, size_t size) {
-    munmap(offset, size);
-}
+void LocalMemoryAccess::UnMap(void* offset, size_t size) { munmap(offset, size); }

@@ -123,7 +123,8 @@ get_unsupported()
 }  // namespace callback_tracing
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t               context_id,
                                                rocprofiler_callback_tracing_kind_t    kind,

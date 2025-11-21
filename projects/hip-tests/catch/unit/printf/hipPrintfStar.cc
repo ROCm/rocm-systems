@@ -53,7 +53,7 @@ TEST_CASE("Unit_Printf_PrintfStar") {
   }
   std::string reference(R"here(              42
 00000042
-00000042        
+00000042
     123.45600000 hello * world
 )here");
   CaptureStream captured(stdout);

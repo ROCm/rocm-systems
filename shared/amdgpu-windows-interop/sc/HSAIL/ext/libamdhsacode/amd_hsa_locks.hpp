@@ -51,52 +51,36 @@ namespace amd {
 namespace hsa {
 namespace common {
 
-template<typename LockType>
-class ReaderLockGuard final {
+template <typename LockType> class ReaderLockGuard final {
 public:
-  explicit ReaderLockGuard(LockType &lock):
-    lock_(lock)
-  {
-    lock_.ReaderLock();
-  }
+  explicit ReaderLockGuard(LockType &lock) : lock_(lock) { lock_.ReaderLock(); }
 
-  ~ReaderLockGuard()
-  {
-    lock_.ReaderUnlock();
-  }
+  ~ReaderLockGuard() { lock_.ReaderUnlock(); }
 
 private:
-  ReaderLockGuard(const ReaderLockGuard&);
-  ReaderLockGuard& operator=(const ReaderLockGuard&);
+  ReaderLockGuard(const ReaderLockGuard &);
+  ReaderLockGuard &operator=(const ReaderLockGuard &);
 
   LockType &lock_;
 };
 
-template<typename LockType>
-class WriterLockGuard final {
+template <typename LockType> class WriterLockGuard final {
 public:
-  explicit WriterLockGuard(LockType &lock):
-    lock_(lock)
-  {
-    lock_.WriterLock();
-  }
+  explicit WriterLockGuard(LockType &lock) : lock_(lock) { lock_.WriterLock(); }
 
-  ~WriterLockGuard()
-  {
-    lock_.WriterUnlock();
-  }
+  ~WriterLockGuard() { lock_.WriterUnlock(); }
 
 private:
-  WriterLockGuard(const WriterLockGuard&);
-  WriterLockGuard& operator=(const WriterLockGuard&);
+  WriterLockGuard(const WriterLockGuard &);
+  WriterLockGuard &operator=(const WriterLockGuard &);
 
   LockType &lock_;
 };
 
 class ReaderWriterLock final {
 public:
-  ReaderWriterLock():
-    readers_count_(0), writers_count_(0), writers_waiting_(0) {}
+  ReaderWriterLock()
+      : readers_count_(0), writers_count_(0), writers_waiting_(0) {}
 
   ~ReaderWriterLock() {}
 
@@ -109,8 +93,8 @@ public:
   void WriterUnlock();
 
 private:
-  ReaderWriterLock(const ReaderWriterLock&);
-  ReaderWriterLock& operator=(const ReaderWriterLock&);
+  ReaderWriterLock(const ReaderWriterLock &);
+  ReaderWriterLock &operator=(const ReaderWriterLock &);
 
   size_t readers_count_;
   size_t writers_count_;

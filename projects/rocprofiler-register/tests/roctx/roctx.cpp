@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #ifdef NDEBUG
 #    undef NDEBUG
 #endif
@@ -174,7 +173,8 @@ roctx_range_pop(const char* name)
 }
 }  // namespace roctx
 
-extern "C" {
+extern "C"
+{
 void
 roctxRangePush(const char* name)
 {

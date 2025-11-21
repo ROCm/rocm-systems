@@ -47,7 +47,7 @@
 
 class TestMemUtilRead : public TestBase {
  public:
-    TestMemUtilRead();
+  TestMemUtilRead();
 
   // @Brief: Destructor for test case of TestMemUtilRead
   virtual ~TestMemUtilRead();

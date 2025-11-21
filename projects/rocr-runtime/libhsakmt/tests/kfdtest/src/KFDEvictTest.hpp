@@ -31,26 +31,25 @@
 
 // @class KFDEvictTest
 // Test eviction and restore procedure using two processes
-class KFDEvictTest :  public KFDMultiProcessTest {
+class KFDEvictTest : public KFDMultiProcessTest {
  public:
-    KFDEvictTest(void) {}
-    ~KFDEvictTest(void) {}
+  KFDEvictTest(void) {}
+  ~KFDEvictTest(void) {}
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 
-    void AllocBuffers(bool m_IsParent, HSAuint32 defaultGPUNode, HSAuint32 count, HSAuint64 vramBufSize,
-                      std::vector<void *> &pBuffers);
-    void FreeBuffers(std::vector<void *> &pBuffers, HSAuint64 vramBufSize);
-    void AllocAmdgpuBo(bool m_IsParent, int rn, HSAuint64 vramBufSize, amdgpu_bo_handle &handle);
-    void FreeAmdgpuBo(amdgpu_bo_handle handle);
-    void AmdgpuCommandSubmissionSdmaNop(int rn, amdgpu_bo_handle handle,
-                                           PM4Queue *computeQueue);
+  void AllocBuffers(bool m_IsParent, HSAuint32 defaultGPUNode, HSAuint32 count,
+                    HSAuint64 vramBufSize, std::vector<void*>& pBuffers);
+  void FreeBuffers(std::vector<void*>& pBuffers, HSAuint64 vramBufSize);
+  void AllocAmdgpuBo(bool m_IsParent, int rn, HSAuint64 vramBufSize, amdgpu_bo_handle& handle);
+  void FreeAmdgpuBo(amdgpu_bo_handle handle);
+  void AmdgpuCommandSubmissionSdmaNop(int rn, amdgpu_bo_handle handle, PM4Queue* computeQueue);
 
  protected:  // Members
-    HsaMemFlags     m_Flags;
-    void*           m_pBuf;
+  HsaMemFlags m_Flags;
+  void* m_pBuf;
 };
 
 #endif  // __KFD_EVICT_TEST__H__

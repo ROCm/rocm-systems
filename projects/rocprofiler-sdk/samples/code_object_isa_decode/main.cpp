@@ -53,7 +53,7 @@ class ITranspose
 {
 public:
     virtual void run(TransposeType ttype, int numThreadsY, int num_iter) = 0;
-    virtual ~ITranspose(){};
+    virtual ~ITranspose() {};
 };
 
 template <typename T>
@@ -202,11 +202,9 @@ main(int argc, char** argv)
         auto _arg = std::string{argv[i]};
         if(_arg == "?" || _arg == "-h" || _arg == "--help")
         {
-            std::cout << "usage: transpose "
-                      << "[MatrixSize (" << mat_size << ")] "
-                      << "[numIter (" << num_iter << ")] "
-                      << "[blockDimY (" << blockDimY << ")] "
-                      << "[DEVICE_ID (" << deviceId << ")] " << std::endl;
+            std::cout << "usage: transpose " << "[MatrixSize (" << mat_size << ")] " << "[numIter ("
+                      << num_iter << ")] " << "[blockDimY (" << blockDimY << ")] " << "[DEVICE_ID ("
+                      << deviceId << ")] " << std::endl;
             exit(EXIT_SUCCESS);
         }
     }

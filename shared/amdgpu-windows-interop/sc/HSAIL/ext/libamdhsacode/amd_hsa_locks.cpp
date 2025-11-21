@@ -46,8 +46,7 @@ namespace amd {
 namespace hsa {
 namespace common {
 
-void ReaderWriterLock::ReaderLock()
-{
+void ReaderWriterLock::ReaderLock() {
   internal_lock_.lock();
   while (0 < writers_count_) {
     readers_condition_.wait(internal_lock_);
@@ -56,8 +55,7 @@ void ReaderWriterLock::ReaderLock()
   internal_lock_.unlock();
 }
 
-void ReaderWriterLock::ReaderUnlock()
-{
+void ReaderWriterLock::ReaderUnlock() {
   internal_lock_.lock();
   readers_count_ -= 1;
   if (0 == readers_count_ && 0 < writers_waiting_) {
@@ -66,8 +64,7 @@ void ReaderWriterLock::ReaderUnlock()
   internal_lock_.unlock();
 }
 
-void ReaderWriterLock::WriterLock()
-{
+void ReaderWriterLock::WriterLock() {
   internal_lock_.lock();
   writers_waiting_ += 1;
   while (0 < readers_count_ || 0 < writers_count_) {
@@ -78,8 +75,7 @@ void ReaderWriterLock::WriterLock()
   internal_lock_.unlock();
 }
 
-void ReaderWriterLock::WriterUnlock()
-{
+void ReaderWriterLock::WriterUnlock() {
   internal_lock_.lock();
   writers_count_ -= 1;
   if (0 < writers_waiting_) {

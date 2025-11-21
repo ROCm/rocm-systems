@@ -59,9 +59,9 @@ class PerfTimer {
  private:
   struct Timer {
     std::string name; /* < name name of time object*/
-    uint64_t _freq; /* < _freq frequency*/
+    uint64_t _freq;   /* < _freq frequency*/
     uint64_t _clocks; /* < _clocks number of ticks at end*/
-    uint64_t _start; /* < _start start point ticks*/
+    uint64_t _start;  /* < _start start point ticks*/
   };
 
   std::vector<Timer*> _timers; /*< _timers vector to Timer objects */
@@ -104,4 +104,3 @@ class PerfTimer {
 
 }  // namespace rocrtst
 #endif  // ROCRTST_COMMON_HSATIMER_H_
-

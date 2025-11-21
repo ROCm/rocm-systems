@@ -26,27 +26,27 @@
 #include "Dispatch.hpp"
 
 void KFDCWSRTest::SetUp() {
-    ROUTINE_START
+  ROUTINE_START
 
-    KFDBaseComponentTest::SetUp();
+  KFDBaseComponentTest::SetUp();
 
-    ROUTINE_END
+  ROUTINE_END
 }
 
 void KFDCWSRTest::TearDown() {
-    ROUTINE_START
+  ROUTINE_START
 
-    KFDBaseComponentTest::TearDown();
+  KFDBaseComponentTest::TearDown();
 
-    ROUTINE_END
+  ROUTINE_END
 }
 
 static inline uint32_t checkCWSREnabled() {
-    uint32_t cwsr_enable = 0;
+  uint32_t cwsr_enable = 0;
 
-    fscanf_dec("/sys/module/amdgpu/parameters/cwsr_enable", &cwsr_enable);
+  fscanf_dec("/sys/module/amdgpu/parameters/cwsr_enable", &cwsr_enable);
 
-    return cwsr_enable;
+  return cwsr_enable;
 }
 
 /**
@@ -77,92 +77,88 @@ static inline uint32_t checkCWSREnabled() {
  */
 
 static void BasicTest(KFDTEST_PARAMETERS* pTestParamters) {
+  int gpuNode = pTestParamters->gpuNode;
+  KFDCWSRTest* pKFDCWSRTest = (KFDCWSRTest*)pTestParamters->pTestObject;
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDCWSRTest* pKFDCWSRTest = (KFDCWSRTest*)pTestParamters->pTestObject;
+  const HSAuint32 m_FamilyId = pKFDCWSRTest->GetFamilyIdFromNodeId(gpuNode);
 
-    const HSAuint32 m_FamilyId = pKFDCWSRTest->GetFamilyIdFromNodeId(gpuNode);
+  Assembler* m_pAsm;
+  m_pAsm = pKFDCWSRTest->GetAssemblerFromNodeId(gpuNode);
+  ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    Assembler* m_pAsm;
-    m_pAsm = pKFDCWSRTest->GetAssemblerFromNodeId(gpuNode);
-    ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
+  int num_witems = std::get<0>(pKFDCWSRTest->GetParam());
+  int cwsr_thresh = std::get<1>(pKFDCWSRTest->GetParam());
+  // Increase delay on emulator by this factor.
+  const int delayMult = (g_IsEmuMode ? 20 : 1);
 
-    int num_witems = std::get<0>(pKFDCWSRTest->GetParam());
-    int cwsr_thresh = std::get<1>(pKFDCWSRTest->GetParam());
-    // Increase delay on emulator by this factor.
-    const int delayMult = (g_IsEmuMode ? 20 : 1);
+  if ((m_FamilyId >= FAMILY_VI) && (checkCWSREnabled())) {
+    HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true, false, true);
+    ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(PersistentIterateIsa, isaBuffer.As<char*>()),
+                       gpuNode);
 
-    if ((m_FamilyId >= FAMILY_VI) && (checkCWSREnabled())) {
-        HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true, false, true);
-        ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(PersistentIterateIsa, isaBuffer.As<char*>()), gpuNode);
+    unsigned stopval = 0x1234'5678;
+    unsigned outval = 0x8765'4321;
 
-        unsigned stopval = 0x1234'5678;
-        unsigned outval  = 0x8765'4321;
+    // 4B per work-item ==> 1 page per 1024 work-items (take ceiling)
+    unsigned bufSize = PAGE_SIZE * ((num_witems / 1024) + (num_witems % 1024 != 0));
 
-        // 4B per work-item ==> 1 page per 1024 work-items (take ceiling)
-        unsigned bufSize = PAGE_SIZE * ((num_witems / 1024) + (num_witems % 1024 != 0));
+    HsaMemoryBuffer inputBuf(bufSize, gpuNode, true, false, false);
+    HsaMemoryBuffer outputBuf(bufSize, gpuNode, true, false, false);
+    unsigned int* input = inputBuf.As<unsigned int*>();
+    unsigned int* output = outputBuf.As<unsigned int*>();
+    inputBuf.Fill(0);
+    outputBuf.Fill(outval);
 
-        HsaMemoryBuffer inputBuf(bufSize, gpuNode, true, false, false);
-        HsaMemoryBuffer outputBuf(bufSize, gpuNode, true, false, false);
-        unsigned int* input = inputBuf.As<unsigned int*>();
-        unsigned int* output = outputBuf.As<unsigned int*>();
-        inputBuf.Fill(0);
-        outputBuf.Fill(outval);
+    PM4Queue queue;
+    ASSERT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
 
-        PM4Queue queue;
-        ASSERT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
+    Dispatch dispatch(isaBuffer);
+    dispatch.SetArgs(input, output);
+    dispatch.SetDim(num_witems, 1, 1);
+    dispatch.Submit(queue);
 
-        Dispatch dispatch(isaBuffer);
-        dispatch.SetArgs(input, output);
-        dispatch.SetDim(num_witems, 1, 1);
-        dispatch.Submit(queue);
+    Delay(5 * delayMult);
 
-        Delay(5 * delayMult);
+    LOG() << "Starting iteration for " << std::dec << num_witems << " work items(s) (targeting "
+          << std::dec << cwsr_thresh << " CWSRs)" << std::endl;
 
-        LOG() << "Starting iteration for " << std::dec << num_witems
-              << " work items(s) (targeting " << std::dec << cwsr_thresh
-              << " CWSRs)" << std::endl;
+    for (int num_cwsrs = 0; num_cwsrs < cwsr_thresh; num_cwsrs++) {
+      // Send dequeue request
+      EXPECT_SUCCESS_GPU(queue.Update(0, BaseQueue::DEFAULT_PRIORITY, false), gpuNode);
 
-        for (int num_cwsrs = 0; num_cwsrs < cwsr_thresh; num_cwsrs++) {
+      Delay(5 * delayMult);
 
-            // Send dequeue request
-            EXPECT_SUCCESS_GPU(queue.Update(0, BaseQueue::DEFAULT_PRIORITY, false), gpuNode);
+      // Send requeue request
+      EXPECT_SUCCESS_GPU(queue.Update(100, BaseQueue::DEFAULT_PRIORITY, false), gpuNode);
 
-            Delay(5 * delayMult);
+      Delay(50 * delayMult);
 
-            // Send requeue request
-            EXPECT_SUCCESS_GPU(queue.Update(100, BaseQueue::DEFAULT_PRIORITY, false), gpuNode);
-
-            Delay(50 * delayMult);
-
-            // Check for reg mangling
-            for (int i = 0; i < num_witems; i++) {
-                EXPECT_EQ_GPU(outval, output[i], gpuNode);
-            }
-        }
-
-        LOG() << "Successful completion for " << std::dec << num_witems
-              << " work item(s) (CWSRs triggered: " << std::dec << cwsr_thresh
-              << ")" << std::endl;
-        LOG() << "Signalling shader stop..." << std::endl;
-
-        inputBuf.Fill(stopval);
-
-        // Wait for shader to finish or timeout if shader has vm page fault
-        EXPECT_EQ_GPU(0, dispatch.SyncWithStatus(180000), gpuNode);
-        EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
-    } else {
-        LOG() << "Skipping test: No CWSR present for family ID 0x" << m_FamilyId << "." << std::endl;
+      // Check for reg mangling
+      for (int i = 0; i < num_witems; i++) {
+        EXPECT_EQ_GPU(outval, output[i], gpuNode);
+      }
     }
 
+    LOG() << "Successful completion for " << std::dec << num_witems
+          << " work item(s) (CWSRs triggered: " << std::dec << cwsr_thresh << ")" << std::endl;
+    LOG() << "Signalling shader stop..." << std::endl;
+
+    inputBuf.Fill(stopval);
+
+    // Wait for shader to finish or timeout if shader has vm page fault
+    EXPECT_EQ_GPU(0, dispatch.SyncWithStatus(180000), gpuNode);
+    EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
+  } else {
+    LOG() << "Skipping test: No CWSR present for family ID 0x" << m_FamilyId << "." << std::endl;
+  }
 }
 
 TEST_P(KFDCWSRTest, BasicTest) {
-    TEST_START(TESTPROFILE_RUNALL);
+  TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(BasicTest));
+  ASSERT_SUCCESS(KFDTest_Launch(BasicTest));
 
-    TEST_END
+  TEST_END
 }
 
 /**
@@ -174,13 +170,11 @@ TEST_P(KFDCWSRTest, BasicTest) {
  */
 INSTANTIATE_TEST_CASE_P(
     , KFDCWSRTest,
-    ::testing::Values(
-            std::make_tuple(1, 10),     /* Single Wave Test,  10 CWSR Triggers */
-            std::make_tuple(256, 50),   /* Multi Wave Test,   50 CWSR Triggers */
-            std::make_tuple(512, 100),  /* Multi Wave Test,  100 CWSR Triggers */
-            std::make_tuple(1024, 1000) /* Multi Wave Test, 1000 CWSR Triggers */
-    )
-);
+    ::testing::Values(std::make_tuple(1, 10),     /* Single Wave Test,  10 CWSR Triggers */
+                      std::make_tuple(256, 50),   /* Multi Wave Test,   50 CWSR Triggers */
+                      std::make_tuple(512, 100),  /* Multi Wave Test,  100 CWSR Triggers */
+                      std::make_tuple(1024, 1000) /* Multi Wave Test, 1000 CWSR Triggers */
+                      ));
 
 /**
  * KFDCWSRTest.InterruptRestore
@@ -195,60 +189,59 @@ INSTANTIATE_TEST_CASE_P(
  */
 
 static void InterruptRestore(KFDTEST_PARAMETERS* pTestParamters) {
+  int gpuNode = pTestParamters->gpuNode;
+  KFDCWSRTest* pKFDCWSRTest = (KFDCWSRTest*)pTestParamters->pTestObject;
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDCWSRTest* pKFDCWSRTest = (KFDCWSRTest*)pTestParamters->pTestObject;
+  const HSAuint32 m_FamilyId = pKFDCWSRTest->GetFamilyIdFromNodeId(gpuNode);
 
-    const HSAuint32 m_FamilyId = pKFDCWSRTest->GetFamilyIdFromNodeId(gpuNode);
+  Assembler* m_pAsm;
+  m_pAsm = pKFDCWSRTest->GetAssemblerFromNodeId(gpuNode);
+  ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    Assembler* m_pAsm;
-    m_pAsm = pKFDCWSRTest->GetAssemblerFromNodeId(gpuNode);
-    ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
+  if ((m_FamilyId >= FAMILY_VI) && (checkCWSREnabled())) {
+    HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true /*zero*/, false /*local*/, true /*exec*/);
 
-   if ((m_FamilyId >= FAMILY_VI) && (checkCWSREnabled())) {
-        HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
+    ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(InfiniteLoopIsa, isaBuffer.As<char*>()), gpuNode);
 
-        ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(InfiniteLoopIsa, isaBuffer.As<char*>()), gpuNode);
+    PM4Queue queue1, queue2, queue3;
 
-        PM4Queue queue1, queue2, queue3;
+    ASSERT_SUCCESS_GPU(queue1.Create(gpuNode), gpuNode);
 
-        ASSERT_SUCCESS_GPU(queue1.Create(gpuNode), gpuNode);
+    Dispatch *dispatch1, *dispatch2;
 
-        Dispatch *dispatch1, *dispatch2;
+    dispatch1 = new Dispatch(isaBuffer);
+    dispatch2 = new Dispatch(isaBuffer);
 
-        dispatch1 = new Dispatch(isaBuffer);
-        dispatch2 = new Dispatch(isaBuffer);
+    dispatch1->SetDim(0x10000, 1, 1);
+    dispatch2->SetDim(0x10000, 1, 1);
 
-        dispatch1->SetDim(0x10000, 1, 1);
-        dispatch2->SetDim(0x10000, 1, 1);
+    dispatch1->Submit(queue1);
 
-        dispatch1->Submit(queue1);
+    ASSERT_SUCCESS_GPU(queue2.Create(gpuNode), gpuNode);
 
-        ASSERT_SUCCESS_GPU(queue2.Create(gpuNode), gpuNode);
+    dispatch2->Submit(queue2);
 
-        dispatch2->Submit(queue2);
+    // Give waves time to launch.
+    Delay(1);
 
-        // Give waves time to launch.
-        Delay(1);
+    ASSERT_SUCCESS_GPU(queue3.Create(gpuNode), gpuNode);
 
-        ASSERT_SUCCESS_GPU(queue3.Create(gpuNode), gpuNode);
+    EXPECT_SUCCESS_GPU(queue1.Destroy(), gpuNode);
+    EXPECT_SUCCESS_GPU(queue2.Destroy(), gpuNode);
+    EXPECT_SUCCESS_GPU(queue3.Destroy(), gpuNode);
 
-        EXPECT_SUCCESS_GPU(queue1.Destroy(), gpuNode);
-        EXPECT_SUCCESS_GPU(queue2.Destroy(), gpuNode);
-        EXPECT_SUCCESS_GPU(queue3.Destroy(), gpuNode);
+    delete dispatch1;
+    delete dispatch2;
 
-        delete dispatch1;
-        delete dispatch2;
-
-    } else {
-        LOG() << "Skipping test: No CWSR present for family ID 0x" << m_FamilyId << "." << std::endl;
-    }
+  } else {
+    LOG() << "Skipping test: No CWSR present for family ID 0x" << m_FamilyId << "." << std::endl;
+  }
 }
 
 TEST_F(KFDCWSRTest, InterruptRestore) {
-    TEST_START(TESTPROFILE_RUNALL);
+  TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(InterruptRestore));
+  ASSERT_SUCCESS(KFDTest_Launch(InterruptRestore));
 
-    TEST_END
+  TEST_END
 }

@@ -59,30 +59,30 @@
 
 static const uint32_t kNumBufferElements = 256;
 
-#define RET_IF_HSA_ERR(err) { \
-  if ((err) != HSA_STATUS_SUCCESS) { \
-    const char* msg = 0; \
-    hsa_status_string(err, &msg); \
-    std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << \
-                          __FILE__ << ". Call returned " << err << std::endl; \
-    std::cout << msg << std::endl; \
-    return (err); \
-  } \
-}
+#define RET_IF_HSA_ERR(err)                                                                        \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
+                << ". Call returned " << err << std::endl;                                         \
+      std::cout << msg << std::endl;                                                               \
+      return (err);                                                                                \
+    }                                                                                              \
+  }
 
 
-MemoryTest::MemoryTest(void) :
-    TestBase() {
+MemoryTest::MemoryTest(void) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
   set_title("RocR Memory Tests");
-  set_description("This series of tests check memory allocation limits, extent"
-    " of GPU access to system memory and other memory related functionality.");
+  set_description(
+      "This series of tests check memory allocation limits, extent"
+      " of GPU access to system memory and other memory related functionality.");
 }
 
-MemoryTest::~MemoryTest(void) {
-}
+MemoryTest::~MemoryTest(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -110,9 +110,7 @@ void MemoryTest::Run(void) {
   TestBase::Run();
 }
 
-void MemoryTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void MemoryTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void MemoryTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -131,7 +129,7 @@ void MemoryTest::Close() {
 }
 
 hsa_status_t MemoryTest::TestAllocate(hsa_amd_memory_pool_t pool, size_t sz) {
-  void *ptr;
+  void* ptr;
   hsa_status_t err;
 
   err = hsa_amd_memory_pool_allocate(pool, sz, 0, &ptr);
@@ -145,13 +143,12 @@ hsa_status_t MemoryTest::TestAllocate(hsa_amd_memory_pool_t pool, size_t sz) {
 
 static const char kSubTestSeparator[] = "  **************************";
 
-static void PrintMemorySubtestHeader(const char *header) {
+static void PrintMemorySubtestHeader(const char* header) {
   std::cout << "  *** Memory Subtest: " << header << " ***" << std::endl;
 }
 
 // Test Fixtures
-void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
-                                                 hsa_amd_memory_pool_t pool) {
+void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   hsa_status_t err;
   struct sysinfo info;
 
@@ -178,10 +175,8 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
     switch (ag_type) {
       case HSA_DEVICE_TYPE_CPU:
         std::cout << "CPU)" << std::endl;
-        std::cout << "  System Total Memory:        "
-                  << info.totalram / 1024 << " KB" << std::endl;
-        std::cout << "  System Free Memory:         "
-                  << info.freeram / 1024 << " KB";
+        std::cout << "  System Total Memory:        " << info.totalram / 1024 << " KB" << std::endl;
+        std::cout << "  System Free Memory:         " << info.freeram / 1024 << " KB";
         break;
       case HSA_DEVICE_TYPE_GPU:
         std::cout << "GPU)";
@@ -192,7 +187,6 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
       case HSA_DEVICE_TYPE_AIE:
         std::cout << "AIE)";
         break;
-
     }
     std::cout << std::endl;
   }
@@ -201,12 +195,11 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
   if (verbosity() > 0) {
-      rocrtst::DumpMemoryPoolInfo(&pool_i, 2);
+    rocrtst::DumpMemoryPoolInfo(&pool_i, 2);
   }
 
   if (!pool_i.alloc_allowed || pool_i.alloc_granule == 0 || pool_i.alloc_alignment == 0 ||
-      (pool_i.global_flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED)
-      ) {
+      (pool_i.global_flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED)) {
     if (verbosity() > 0) {
       std::cout << "  Test not applicable. Skipping." << std::endl;
       std::cout << kSubTestSeparator << std::endl;
@@ -217,7 +210,6 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   // To speed-up test, test all pools on CPU-0, only test coare-grained on remaining CPU agents
   if (ag_type == HSA_DEVICE_TYPE_CPU && node_id > 0 &&
       !(pool_i.global_flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED)) {
-
     if (verbosity() > 0) {
       std::cout << "  Test not applicable. Skipping." << std::endl;
       std::cout << kSubTestSeparator << std::endl;
@@ -230,7 +222,7 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   auto pool_sz = pool_i.aggregate_alloc_max / gran_sz;
 
   // Neg. test: Try to allocate more than the pool size
-  err = TestAllocate(pool, pool_sz*gran_sz + gran_sz);
+  err = TestAllocate(pool, pool_sz * gran_sz + gran_sz);
   EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ALLOCATION, err);
 
   const bool is_system_ram = (ag_type == HSA_DEVICE_TYPE_CPU) || (ag_type == HSA_DEVICE_TYPE_AIE);
@@ -250,8 +242,7 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
 
   while (true) {
     err = TestAllocate(pool, max_alloc_size * gran_sz);
-    ASSERT_TRUE(err == HSA_STATUS_SUCCESS ||
-                err == HSA_STATUS_ERROR_OUT_OF_RESOURCES ||
+    ASSERT_TRUE(err == HSA_STATUS_SUCCESS || err == HSA_STATUS_ERROR_OUT_OF_RESOURCES ||
                 err == HSA_STATUS_ERROR_INVALID_ALLOCATION);
     if (err == HSA_STATUS_SUCCESS) {
       break;
@@ -266,18 +257,17 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   }
 
   if (verbosity() > 0) {
-    std::cout << "  Biggest single allocation size for this pool is " <<
-                        (max_alloc_size * gran_sz)/1024 << "KB." << std::endl;
-    std::cout << "  This is " <<
-                  static_cast<float>(max_alloc_size)/pool_sz*100 <<
-                                               "% of the total." << std::endl;
+    std::cout << "  Biggest single allocation size for this pool is "
+              << (max_alloc_size * gran_sz) / 1024 << "KB." << std::endl;
+    std::cout << "  This is " << static_cast<float>(max_alloc_size) / pool_sz * 100
+              << "% of the total." << std::endl;
   }
 
   if (ag_type == HSA_DEVICE_TYPE_GPU) {
     if (pool_sz <= 536870912) {
-      EXPECT_GE((float)max_alloc_size/pool_sz, (float)6/10);
+      EXPECT_GE((float)max_alloc_size / pool_sz, (float)6 / 10);
     } else {
-      EXPECT_GE((float)max_alloc_size/pool_sz, (float)3/4);
+      EXPECT_GE((float)max_alloc_size / pool_sz, (float)3 / 4);
     }
   }
   if (verbosity() > 0) {
@@ -339,8 +329,8 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   err = rocrtst::AcquirePoolInfo(pool, &pool_i);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-  if (ag_type != HSA_DEVICE_TYPE_GPU ||
-      !pool_i.alloc_allowed || !pool_i.alloc_granule || !pool_i.alloc_alignment) {
+  if (ag_type != HSA_DEVICE_TYPE_GPU || !pool_i.alloc_allowed || !pool_i.alloc_granule ||
+      !pool_i.alloc_alignment) {
     if (verbosity() > 0) {
       std::cout << "  Test not applicable. Skipping." << std::endl;
       std::cout << kSubTestSeparator << std::endl;
@@ -353,7 +343,7 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   auto pool_sz = pool_i.aggregate_alloc_max / gran_sz;
 
   err = hsa_agent_get_info(ag, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                            &ag_avail_memory_before);
+                           &ag_avail_memory_before);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Try to allocate half
@@ -379,7 +369,8 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   // Check pointer info for invalid pointer
   hsa_amd_pointer_info_t info2 = {};
   info2.size = sizeof(info2);
-  ASSERT_SUCCESS(hsa_amd_pointer_info((reinterpret_cast<uint8_t *>(memPtr1) + allocate_sz1 + 1), &info2, NULL, 0, NULL));
+  ASSERT_SUCCESS(hsa_amd_pointer_info((reinterpret_cast<uint8_t*>(memPtr1) + allocate_sz1 + 1),
+                                      &info2, NULL, 0, NULL));
   ASSERT_EQ(info2.type, HSA_EXT_POINTER_TYPE_UNKNOWN);
 
   // Simulate case where ROCr has added extra parameters to hsa_amd_pointer_info.
@@ -392,7 +383,7 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   ASSERT_EQ(info3.size, sizeof(info3) - 2);
 
   err = hsa_agent_get_info(ag, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                            &ag_avail_memory_after);
+                           &ag_avail_memory_after);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Memory available after could be smaller because of fragmentation
@@ -410,11 +401,10 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_agent_get_info(ag, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                            &ag_avail_memory_after);
+                           &ag_avail_memory_after);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  ASSERT_GE(ag_avail_memory_before - (allocate_sz1 + allocate_sz2),
-                            ag_avail_memory_after);
+  ASSERT_GE(ag_avail_memory_before - (allocate_sz1 + allocate_sz2), ag_avail_memory_after);
 
   if (verbosity() > 0) {
     std::cout << "  Available memory before: " << ag_avail_memory_before << std::endl;
@@ -430,7 +420,7 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_agent_get_info(ag, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                            &ag_avail_memory_after);
+                           &ag_avail_memory_after);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   ASSERT_EQ(ag_avail_memory_before, ag_avail_memory_after);

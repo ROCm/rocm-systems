@@ -43,7 +43,8 @@ THE SOFTWARE.
  */
 
 #if defined(__cplusplus)
-extern "C" {
+extern "C"
+{
 #endif  // __cplusplus
 /**
  * @def

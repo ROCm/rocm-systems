@@ -65,11 +65,11 @@ public:
     virtual ~AQLPacket() = default;
 
     // Keep move constuctors (i.e. std::move())
-    AQLPacket(AQLPacket&& other) = default;
+    AQLPacket(AQLPacket&& other)            = default;
     AQLPacket& operator=(AQLPacket&& other) = default;
 
     // Do not allow copying this class
-    AQLPacket(const AQLPacket&) = delete;
+    AQLPacket(const AQLPacket&)            = delete;
     AQLPacket& operator=(const AQLPacket&) = delete;
 
     void clear()
@@ -96,8 +96,8 @@ public:
     EmptyAQLPacket()           = default;
     ~EmptyAQLPacket() override = default;
 
-    void populate_before() override{};
-    void populate_after() override{};
+    void populate_before() override {};
+    void populate_after() override {};
 };
 
 class CounterAQLPacket : public AQLPacket
@@ -181,7 +181,7 @@ public:
     ~CodeobjMarkerAQLPacket() override = default;
 
     void populate_before() override { before_krn_pkt.push_back(packet); };
-    void populate_after() override{};
+    void populate_after() override {};
 
     aqlprofile_handle_t GetHandle() const { return tracepool.handle; }
     hsa_agent_t         GetAgent() const { return tracepool.gpu_agent; }

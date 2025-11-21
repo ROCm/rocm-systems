@@ -12,10 +12,10 @@
 #include "elf_utils.hpp"
 #include "memfile.h"
 
+#include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdarg.h>
-#include <errno.h>
 
 /*
    See elf_utils.hpp for descriptions about each functions
@@ -23,26 +23,25 @@
 
 namespace amd {
 
-#define ELF_OPEN             mem_open
-#define ELF_READ(f, b, l)    mem_read((f), (b), (unsigned int)(l))
-#define ELF_WRITE            mem_write
-#define ELF_CLOSE            mem_close
-#define ELF_LSEEK            mem_lseek
+#define ELF_OPEN mem_open
+#define ELF_READ(f, b, l) mem_read((f), (b), (unsigned int)(l))
+#define ELF_WRITE mem_write
+#define ELF_CLOSE mem_close
+#define ELF_LSEEK mem_lseek
 
 /*
-   Save the error string in _lastErrMsg.  If it is built without NDEBUG, the program
-   will terminate immediately with exit(1).
+   Save the error string in _lastErrMsg.  If it is built without NDEBUG, the
+   program will terminate immediately with exit(1).
  */
-void OclElfErr::xfail(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(&_lastErrMsg[0], (size_t)MAX_ERROR_MESSAGE_LENGTH, fmt, ap);
-    va_end(ap);
+void OclElfErr::xfail(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(&_lastErrMsg[0], (size_t)MAX_ERROR_MESSAGE_LENGTH, fmt, ap);
+  va_end(ap);
 
 #ifndef NDEBUG
-    printf("%s\n", _lastErrMsg);
-    exit(1);
+  printf("%s\n", _lastErrMsg);
+  exit(1);
 #endif
 }
 
@@ -52,82 +51,73 @@ namespace oclelfutils {
    Wrap malloc() with xfail(), so this returns newly-allocated memory or 0.
    The memory is guaranteed to be initialized to zero.
  */
-void* xmalloc(OclElfErr& err, const size_t len)
-{
-    void *retval = calloc(1, len);
-    if (retval == NULL) {
-        err.xfail("xmalloc failed: out of memory");
-        return NULL;
-    }
-    return retval;
+void *xmalloc(OclElfErr &err, const size_t len) {
+  void *retval = calloc(1, len);
+  if (retval == NULL) {
+    err.xfail("xmalloc failed: out of memory");
+    return NULL;
+  }
+  return retval;
 }
 
 /*
    Return file descriptor on success; return -1 on error and invoke xfail()
    to record the error.
  */
-int xopen(OclElfErr& err, const char *fname, const int in_flags, const int perms)
-{
-    const int retval = ELF_OPEN(fname, in_flags, perms);
-    if (retval == -1) {
-        err.xfail("Failed to open '%s': %s", fname, strerror(errno));
-        return -1;
-    }
-    return retval;
+int xopen(OclElfErr &err, const char *fname, const int in_flags,
+          const int perms) {
+  const int retval = ELF_OPEN(fname, in_flags, perms);
+  if (retval == -1) {
+    err.xfail("Failed to open '%s': %s", fname, strerror(errno));
+    return -1;
+  }
+  return retval;
 }
 
 /*
    Return 0 on success; return -1 on error.
  */
-int xclose(OclElfErr& err, const char *fname, const int fd)
-{
-    int rc;
-    while ( ((rc = :: ELF_CLOSE(fd)) == -1) && (errno == EINTR) ) { ;/* spin. */ }
-    if (rc == -1) {
-        err.xfail("Failed to close '%s': %s", fname, strerror(errno));
-        return -1;
-    }
-    return rc;
+int xclose(OclElfErr &err, const char *fname, const int fd) {
+  int rc;
+  while (((rc = ::ELF_CLOSE(fd)) == -1) && (errno == EINTR)) {
+    ; /* spin. */
+  }
+  if (rc == -1) {
+    err.xfail("Failed to close '%s': %s", fname, strerror(errno));
+    return -1;
+  }
+  return rc;
 }
 
 /*
    Return the file offset location on success; return -1 on error.
  */
-off_t xlseek(
-   OclElfErr&     err,
-   const char* fname,
-   const int   fd,
-   const off_t offset,
-   const int   whence)
-{
-    // For really big file  _lseeki64/lseek64 are needed. For now,
-    // lseek/_lseek is enough.
-    off_t res = ELF_LSEEK(fd, offset, whence);
-    if (res == -1) {
-        err.xfail("Failed to seek in '%s': %s", fname, strerror(errno));
-        return -1;
-    }
-    return res;
+off_t xlseek(OclElfErr &err, const char *fname, const int fd,
+             const off_t offset, const int whence) {
+  // For really big file  _lseeki64/lseek64 are needed. For now,
+  // lseek/_lseek is enough.
+  off_t res = ELF_LSEEK(fd, offset, whence);
+  if (res == -1) {
+    err.xfail("Failed to seek in '%s': %s", fname, strerror(errno));
+    return -1;
+  }
+  return res;
 }
 
 /*
    Return the number of bytes that are read on success; return -1 on error.
  */
-ssize_t xread(
-    OclElfErr&   err,
-    const char*  fname,
-    const int    fd,
-    void*        buf,
-    const size_t buf_len
-    )
-{
-    ssize_t rc;
-    while (((rc = ELF_READ(fd, buf, buf_len)) == -1) && (errno == EINTR)) { ;/* spin */ }
-    if (rc < 0) {
-        err.xfail("Failed to read '%s': %s", fname, strerror(errno));
-        return -1;
-    }
-    return rc;
+ssize_t xread(OclElfErr &err, const char *fname, const int fd, void *buf,
+              const size_t buf_len) {
+  ssize_t rc;
+  while (((rc = ELF_READ(fd, buf, buf_len)) == -1) && (errno == EINTR)) {
+    ; /* spin */
+  }
+  if (rc < 0) {
+    err.xfail("Failed to read '%s': %s", fname, strerror(errno));
+    return -1;
+  }
+  return rc;
 }
 
 #if 0
@@ -280,6 +270,6 @@ align_to_page(const uint64_t offset)
 
 #endif
 
-} // namespace elfutils
+} // namespace oclelfutils
 
 } // namespace amd

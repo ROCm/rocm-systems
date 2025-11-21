@@ -124,14 +124,12 @@ int main(int, char**) {
   result = rdc_job_get_stats(rdc_handle, job_id, &job_info);
 
   if (result == RDC_ST_OK) {
-    std::cout << "|------- Execution Stats ----------+"
-              << "------------------------------------\n";
+    std::cout << "|------- Execution Stats ----------+" << "------------------------------------\n";
     std::cout << "| Start Time *                     | " << job_info.summary.start_time << "\n";
     std::cout << "| End Time *                       | " << job_info.summary.end_time << "\n";
     std::cout << "| Total Execution Time (sec) *     | "
               << (job_info.summary.end_time - job_info.summary.start_time) << "\n";
-    std::cout << "+------- Performance Stats --------+"
-              << "------------------------------------\n";
+    std::cout << "+------- Performance Stats --------+" << "------------------------------------\n";
     std::cout << "| Energy Consumed (Joules)         | " << job_info.summary.energy_consumed
               << "\n";
     std::cout << "| Power Usage (Watts)              | "
@@ -152,8 +150,7 @@ int main(int, char**) {
               << "Max: " << job_info.summary.memory_utilization.max_value
               << " Min: " << job_info.summary.memory_utilization.min_value
               << " Avg: " << job_info.summary.memory_utilization.average << "\n";
-    std::cout << "+----------------------------------+"
-              << "------------------------------------\n";
+    std::cout << "+----------------------------------+" << "------------------------------------\n";
   } else {
     std::cout << "No data for job stats found." << std::endl;
   }

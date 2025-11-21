@@ -71,9 +71,8 @@ AieAgent::~AieAgent() {
 }
 
 hsa_status_t AieAgent::VisitRegion(bool include_peer,
-                                   hsa_status_t (*callback)(hsa_region_t region,
-                                                            void *data),
-                                   void *data) const {
+                                   hsa_status_t (*callback)(hsa_region_t region, void* data),
+                                   void* data) const {
   AMD::callback_t<decltype(callback)> call(callback);
   for (const auto r : regions_) {
     hsa_region_t region_handle(core::MemoryRegion::Convert(r));
@@ -85,22 +84,19 @@ hsa_status_t AieAgent::VisitRegion(bool include_peer,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AieAgent::IterateRegion(
-    hsa_status_t (*callback)(hsa_region_t region, void *data),
-    void *data) const {
+hsa_status_t AieAgent::IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
+                                     void* data) const {
   return VisitRegion(false, callback, data);
 }
 
-hsa_status_t AieAgent::IterateCache(hsa_status_t (*callback)(hsa_cache_t cache,
-                                                             void *data),
-                                    void *data) const {
+hsa_status_t AieAgent::IterateCache(hsa_status_t (*callback)(hsa_cache_t cache, void* data),
+                                    void* data) const {
   // AIE has no caches.
   return HSA_STATUS_ERROR_INVALID_CACHE;
 }
 
-hsa_status_t AieAgent::IterateSupportedIsas(
-                    hsa_status_t (*callback)(hsa_isa_t isa, void* data),
-                                                          void* data) const {
+hsa_status_t AieAgent::IterateSupportedIsas(hsa_status_t (*callback)(hsa_isa_t isa, void* data),
+                                            void* data) const {
   AMD::callback_t<decltype(callback)> call(callback);
   for (const auto& isa : supported_isas()) {
     hsa_status_t err = call(core::Isa::Handle(isa), data);
@@ -109,7 +105,7 @@ hsa_status_t AieAgent::IterateSupportedIsas(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
+hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
   const size_t attribute_ = static_cast<size_t>(attribute);
 
   switch (attribute_) {
@@ -320,27 +316,22 @@ void AieAgent::InitRegionList() {
   /// As of now the AIE devices support coarse-grain memory regions that require
   /// explicit sync operations.
   regions_.reserve(3);
-  regions_.push_back(
-      new MemoryRegion(false, true, false, false, true, this, sys_mem_props));
-  regions_.push_back(
-      new MemoryRegion(false, false, false, false, true, this, dev_mem_props));
-  regions_.push_back(new MemoryRegion(false, false, false, false, true, this,
-                                      other_mem_props));
+  regions_.push_back(new MemoryRegion(false, true, false, false, true, this, sys_mem_props));
+  regions_.push_back(new MemoryRegion(false, false, false, false, true, this, dev_mem_props));
+  regions_.push_back(new MemoryRegion(false, false, false, false, true, this, other_mem_props));
 }
 
 void AieAgent::InitAllocators() {
-  for (const auto *region : regions()) {
-    const MemoryRegion *amd_mem_region(
-        static_cast<const MemoryRegion *>(region));
+  for (const auto* region : regions()) {
+    const MemoryRegion* amd_mem_region(static_cast<const MemoryRegion*>(region));
     if (amd_mem_region->kernarg()) {
-      system_allocator_ =
-          [region](size_t size, size_t align,
-                   core::MemoryRegion::AllocateFlags alloc_flags) -> void * {
-        void *mem(nullptr);
-        return (core::Runtime::runtime_singleton_->AllocateMemory(
-                    region, size, alloc_flags, &mem) == HSA_STATUS_SUCCESS)
-                   ? mem
-                   : nullptr;
+      system_allocator_ = [region](size_t size, size_t align,
+                                   core::MemoryRegion::AllocateFlags alloc_flags) -> void* {
+        void* mem(nullptr);
+        return (core::Runtime::runtime_singleton_->AllocateMemory(region, size, alloc_flags,
+                                                                  &mem) == HSA_STATUS_SUCCESS)
+            ? mem
+            : nullptr;
       };
 
       system_deallocator_ = [](void* ptr) { core::Runtime::runtime_singleton_->FreeMemory(ptr); };
@@ -349,5 +340,5 @@ void AieAgent::InitAllocators() {
   }
 }
 
-} // namespace AMD
-} // namespace rocr
+}  // namespace AMD
+}  // namespace rocr

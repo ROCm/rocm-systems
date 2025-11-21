@@ -611,7 +611,7 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
 
     args.op              = KFD_IOCTL_PCS_OP_CREATE;
     args.gpu_id          = agent->gpu_id;
-    args.sample_info_ptr = (uint64_t)(&ioctl_cfg);
+    args.sample_info_ptr = (uint64_t) (&ioctl_cfg);
     args.num_sample_info = 1;
     args.trace_id        = INVALID_TRACE_ID;
 

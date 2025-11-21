@@ -128,8 +128,7 @@ class SimpleProxyQueue : public ProxyQueue {
     const uint64_t que_idx = hsa_queue_load_write_index_relaxed_fn(queue_);
 
     // Waiting untill there is a free space in the queue
-    while (que_idx >= (hsa_queue_load_read_index_relaxed_fn(queue_) + size_))
-      ;
+    while (que_idx >= (hsa_queue_load_read_index_relaxed_fn(queue_) + size_));
 
     // Increment the write index
     hsa_queue_store_write_index_relaxed_fn(queue_, que_idx + 1);

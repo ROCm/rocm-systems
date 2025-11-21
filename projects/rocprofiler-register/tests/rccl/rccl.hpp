@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #pragma once
 
 #define RCCL_API_TRACE_VERSION_MAJOR 0
@@ -29,7 +28,8 @@
 #include <cstddef>
 #include <cstdint>
 
-extern "C" {
+extern "C"
+{
 // fake rccl function
 typedef int ncclResult_t;
 

@@ -68,7 +68,7 @@ class MemoryAsyncCopyNUMA : public MemoryAsyncCopy {
 
  protected:
   // @Brief: Run for Benchmark mode with verification
-  virtual void RunBenchmarkWithVerification(Transaction *t);
+  virtual void RunBenchmarkWithVerification(Transaction* t);
 };
 
 #endif  // ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_NUMA_H_

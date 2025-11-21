@@ -26,7 +26,8 @@
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 typedef struct

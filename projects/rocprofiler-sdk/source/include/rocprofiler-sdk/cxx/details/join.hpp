@@ -74,7 +74,7 @@ struct config : generic_config
     config(const config&)     = default;
     config(config&&) noexcept = default;
 
-    config& operator=(const config&) = default;
+    config& operator=(const config&)     = default;
     config& operator=(config&&) noexcept = default;
 
     // converting constructor

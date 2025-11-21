@@ -189,7 +189,11 @@ namespace hsa
 {
 namespace pc_sampling
 {
-const char* name_by_id(uint32_t) { return nullptr; }
+const char*
+name_by_id(uint32_t)
+{
+    return nullptr;
+}
 
 std::vector<uint32_t>
 get_ids()

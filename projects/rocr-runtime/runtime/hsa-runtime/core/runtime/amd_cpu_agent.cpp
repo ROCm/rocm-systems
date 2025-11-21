@@ -97,7 +97,8 @@ void CpuAgent::InitRegionList() {
 
     if (!is_apu_node) {
       // Coarse Grain
-      regions_.push_back(new MemoryRegion(false, false, is_apu_node, false, true, this, system_props));
+      regions_.push_back(
+          new MemoryRegion(false, false, is_apu_node, false, true, this, system_props));
     }
   }
 }
@@ -131,28 +132,25 @@ void CpuAgent::InitCacheList() {
 }
 
 hsa_status_t CpuAgent::VisitRegion(bool include_peer,
-                                   hsa_status_t (*callback)(hsa_region_t region,
-                                                            void* data),
+                                   hsa_status_t (*callback)(hsa_region_t region, void* data),
                                    void* data) const {
   if (!include_peer) {
     return VisitRegion(regions_, callback, data);
   }
 
   // Expose all system regions in the system.
-  hsa_status_t stat = VisitRegion(
-      core::Runtime::runtime_singleton_->system_regions_fine(), callback, data);
+  hsa_status_t stat =
+      VisitRegion(core::Runtime::runtime_singleton_->system_regions_fine(), callback, data);
   if (stat != HSA_STATUS_SUCCESS) {
     return stat;
   }
 
-  return VisitRegion(core::Runtime::runtime_singleton_->system_regions_coarse(),
-                     callback, data);
+  return VisitRegion(core::Runtime::runtime_singleton_->system_regions_coarse(), callback, data);
 }
 
-hsa_status_t CpuAgent::VisitRegion(
-    const std::vector<const core::MemoryRegion*>& regions,
-    hsa_status_t (*callback)(hsa_region_t region, void* data),
-    void* data) const {
+hsa_status_t CpuAgent::VisitRegion(const std::vector<const core::MemoryRegion*>& regions,
+                                   hsa_status_t (*callback)(hsa_region_t region, void* data),
+                                   void* data) const {
   for (const core::MemoryRegion* region : regions) {
     if (!region->user_visible()) continue;
     hsa_region_t region_handle = core::MemoryRegion::Convert(region);
@@ -165,9 +163,8 @@ hsa_status_t CpuAgent::VisitRegion(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t CpuAgent::IterateRegion(
-    hsa_status_t (*callback)(hsa_region_t region, void* data),
-    void* data) const {
+hsa_status_t CpuAgent::IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
+                                     void* data) const {
   return VisitRegion(true, callback, data);
 }
 
@@ -180,9 +177,8 @@ hsa_status_t CpuAgent::IterateCache(hsa_status_t (*callback)(hsa_cache_t cache, 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t CpuAgent::IterateSupportedIsas(
-                  hsa_status_t (*callback)(hsa_isa_t isa, void* data),
-                                                          void* data) const {
+hsa_status_t CpuAgent::IterateSupportedIsas(hsa_status_t (*callback)(hsa_isa_t isa, void* data),
+                                            void* data) const {
   AMD::callback_t<decltype(callback)> call(callback);
   for (const auto& isa : supported_isas()) {
     hsa_status_t stat = call(core::Isa::Handle(isa), data);
@@ -192,12 +188,10 @@ hsa_status_t CpuAgent::IterateSupportedIsas(
 }
 
 hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
-
   // agent, and vendor name size limit
   const size_t attribute_u = static_cast<size_t>(attribute);
 
   switch (attribute_u) {
-
     // The code copies HsaNodeProperties.MarketingName a Unicode string
     // which is encoded in UTF-16 as a 7-bit ASCII string. The value of
     // HsaNodeProperties.MarketingName is obtained from the "model name"
@@ -206,8 +200,8 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_PRODUCT_NAME: {
       std::memset(value, 0, HSA_PUBLIC_NAME_SIZE);
       char* temp = reinterpret_cast<char*>(value);
-      for (uint32_t idx = 0;
-           properties_.MarketingName[idx] != 0 && idx < HSA_PUBLIC_NAME_SIZE - 1; idx++) {
+      for (uint32_t idx = 0; properties_.MarketingName[idx] != 0 && idx < HSA_PUBLIC_NAME_SIZE - 1;
+           idx++) {
         temp[idx] = (uint8_t)properties_.MarketingName[idx];
       }
       break;
@@ -230,8 +224,7 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AGENT_INFO_BASE_PROFILE_DEFAULT_FLOAT_ROUNDING_MODES:
     case HSA_AGENT_INFO_DEFAULT_FLOAT_ROUNDING_MODE:
       // TODO: validate if this is true.
-      *((hsa_default_float_rounding_mode_t*)value) =
-          HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
+      *((hsa_default_float_rounding_mode_t*)value) = HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
       break;
     case HSA_AGENT_INFO_FAST_F16_OPERATION:
       // TODO: validate if this is true.
@@ -337,15 +330,15 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint32_t*)value) = node_id();
       break;
     case HSA_AMD_AGENT_INFO_MAX_ADDRESS_WATCH_POINTS:
-      *((uint32_t*)value) = static_cast<uint32_t>(
-          1 << properties_.Capability.ui32.WatchPointsTotalBits);
+      *((uint32_t*)value) =
+          static_cast<uint32_t>(1 << properties_.Capability.ui32.WatchPointsTotalBits);
       break;
     case HSA_AMD_AGENT_INFO_BDFID:
       *((uint32_t*)value) = static_cast<uint32_t>(properties_.LocationId);
       break;
     case HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU:
-      *((uint32_t*)value) = static_cast<uint32_t>(
-          properties_.NumSIMDPerCU * properties_.MaxWavesPerSIMD);
+      *((uint32_t*)value) =
+          static_cast<uint32_t>(properties_.NumSIMDPerCU * properties_.MaxWavesPerSIMD);
       break;
     case HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU:
       *((uint32_t*)value) = properties_.NumSIMDPerCU;
@@ -466,5 +459,5 @@ hsa_status_t CpuAgent::DmaCopy(void* dst, core::Agent& dst_agent, const void* sr
   return HSA_STATUS_SUCCESS;
 }
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr

@@ -184,10 +184,7 @@ int run() {
   // Get the latest metrics
   std::cout << "Get the latest metrics for group:" << group_id << " field_group:" << field_group_id
             << std::endl;
-  std::cout << "time_stamp\t"
-            << "GPU_index\t"
-            << "field_name\t\t"
-            << "field_value\n";
+  std::cout << "time_stamp\t" << "GPU_index\t" << "field_name\t\t" << "field_value\n";
   for (uint32_t gindex = 0; gindex < group_info.count; gindex++) {
     for (uint32_t findex = 0; findex < field_info.count; findex++) {
       rdc_field_value value;
@@ -218,10 +215,7 @@ int run() {
   // Get the history data last 0.1 seconds
   std::cout << "Get last 0.1 seconds metrics for group:" << group_id
             << " field_group:" << field_group_id << std::endl;
-  std::cout << "time_stamp\t"
-            << "GPU_index\t"
-            << "field_name\t\t"
-            << "field_value\n";
+  std::cout << "time_stamp\t" << "GPU_index\t" << "field_name\t\t" << "field_value\n";
   start_timestamp = static_cast<uint64_t>(time(nullptr) - 10) * 1000;
   for (uint32_t gindex = 0; gindex < group_info.count; gindex++) {
     for (uint32_t findex = 0; findex < field_info.count; findex++) {
@@ -243,8 +237,8 @@ int run() {
                   << value_to_string(value) << std::endl;
         since_timestamp = next_timestamp;
       }  // while
-    }    // for findex
-  }      // for gindex
+    }  // for findex
+  }  // for gindex
 
   // Delete the field group and GPU group
   result = rdc_group_field_destroy(rdc_handle, field_group_id);

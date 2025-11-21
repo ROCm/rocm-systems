@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef ROCM_ASYNC_BW_UTILS_OS_H_
 #define ROCM_ASYNC_BW_UTILS_OS_H_
 
@@ -16,4 +16,4 @@ void SetEnv(const char* env_var_name, const char* env_var_value);
 char* GetEnv(const char* env_var_name);
 
 
-#endif    //  ROCM_ASYNC_BW_UTILS_OS_H_
+#endif  //  ROCM_ASYNC_BW_UTILS_OS_H_

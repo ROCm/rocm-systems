@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2015, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -62,12 +62,12 @@ namespace ELF {
 // See current registered ELF machine architectures at:
 //    http://www.uxsglobal.com/developers/gabi/latest/ch4.eheader.html
 enum {
-  EM_AMDGPU = 224,        // AMD GPU architecture
+  EM_AMDGPU = 224, // AMD GPU architecture
 };
 
 // OS ABI identification.
 enum {
-  ELFOSABI_AMDGPU_HSA = 64,    // AMD HSA runtime
+  ELFOSABI_AMDGPU_HSA = 64, // AMD HSA runtime
 };
 
 // AMDGPU OS ABI Version identification.
@@ -115,61 +115,61 @@ enum : unsigned {
   EF_AMDGPU_MACH_R600_FIRST = EF_AMDGPU_MACH_R600_R600,
   EF_AMDGPU_MACH_R600_LAST = EF_AMDGPU_MACH_R600_TURKS,
   // AMDGCN-based processors.
-  EF_AMDGPU_MACH_AMDGCN_GFX600        = 0x020,
-  EF_AMDGPU_MACH_AMDGCN_GFX601        = 0x021,
-  EF_AMDGPU_MACH_AMDGCN_GFX700        = 0x022,
-  EF_AMDGPU_MACH_AMDGCN_GFX701        = 0x023,
-  EF_AMDGPU_MACH_AMDGCN_GFX702        = 0x024,
-  EF_AMDGPU_MACH_AMDGCN_GFX703        = 0x025,
-  EF_AMDGPU_MACH_AMDGCN_GFX704        = 0x026,
-  EF_AMDGPU_MACH_AMDGCN_GFX801        = 0x028,
-  EF_AMDGPU_MACH_AMDGCN_GFX802        = 0x029,
-  EF_AMDGPU_MACH_AMDGCN_GFX803        = 0x02a,
-  EF_AMDGPU_MACH_AMDGCN_GFX810        = 0x02b,
-  EF_AMDGPU_MACH_AMDGCN_GFX900        = 0x02c,
-  EF_AMDGPU_MACH_AMDGCN_GFX902        = 0x02d,
-  EF_AMDGPU_MACH_AMDGCN_GFX904        = 0x02e,
-  EF_AMDGPU_MACH_AMDGCN_GFX906        = 0x02f,
-  EF_AMDGPU_MACH_AMDGCN_GFX908        = 0x030,
-  EF_AMDGPU_MACH_AMDGCN_GFX909        = 0x031,
-  EF_AMDGPU_MACH_AMDGCN_GFX90C        = 0x032,
-  EF_AMDGPU_MACH_AMDGCN_GFX1010       = 0x033,
-  EF_AMDGPU_MACH_AMDGCN_GFX1011       = 0x034,
-  EF_AMDGPU_MACH_AMDGCN_GFX1012       = 0x035,
-  EF_AMDGPU_MACH_AMDGCN_GFX1030       = 0x036,
-  EF_AMDGPU_MACH_AMDGCN_GFX1031       = 0x037,
-  EF_AMDGPU_MACH_AMDGCN_GFX1032       = 0x038,
-  EF_AMDGPU_MACH_AMDGCN_GFX1033       = 0x039,
-  EF_AMDGPU_MACH_AMDGCN_GFX602        = 0x03a,
-  EF_AMDGPU_MACH_AMDGCN_GFX705        = 0x03b,
-  EF_AMDGPU_MACH_AMDGCN_GFX805        = 0x03c,
-  EF_AMDGPU_MACH_AMDGCN_GFX1035       = 0x03d,
-  EF_AMDGPU_MACH_AMDGCN_GFX1000       = 0x0f1,
+  EF_AMDGPU_MACH_AMDGCN_GFX600 = 0x020,
+  EF_AMDGPU_MACH_AMDGCN_GFX601 = 0x021,
+  EF_AMDGPU_MACH_AMDGCN_GFX700 = 0x022,
+  EF_AMDGPU_MACH_AMDGCN_GFX701 = 0x023,
+  EF_AMDGPU_MACH_AMDGCN_GFX702 = 0x024,
+  EF_AMDGPU_MACH_AMDGCN_GFX703 = 0x025,
+  EF_AMDGPU_MACH_AMDGCN_GFX704 = 0x026,
+  EF_AMDGPU_MACH_AMDGCN_GFX801 = 0x028,
+  EF_AMDGPU_MACH_AMDGCN_GFX802 = 0x029,
+  EF_AMDGPU_MACH_AMDGCN_GFX803 = 0x02a,
+  EF_AMDGPU_MACH_AMDGCN_GFX810 = 0x02b,
+  EF_AMDGPU_MACH_AMDGCN_GFX900 = 0x02c,
+  EF_AMDGPU_MACH_AMDGCN_GFX902 = 0x02d,
+  EF_AMDGPU_MACH_AMDGCN_GFX904 = 0x02e,
+  EF_AMDGPU_MACH_AMDGCN_GFX906 = 0x02f,
+  EF_AMDGPU_MACH_AMDGCN_GFX908 = 0x030,
+  EF_AMDGPU_MACH_AMDGCN_GFX909 = 0x031,
+  EF_AMDGPU_MACH_AMDGCN_GFX90C = 0x032,
+  EF_AMDGPU_MACH_AMDGCN_GFX1010 = 0x033,
+  EF_AMDGPU_MACH_AMDGCN_GFX1011 = 0x034,
+  EF_AMDGPU_MACH_AMDGCN_GFX1012 = 0x035,
+  EF_AMDGPU_MACH_AMDGCN_GFX1030 = 0x036,
+  EF_AMDGPU_MACH_AMDGCN_GFX1031 = 0x037,
+  EF_AMDGPU_MACH_AMDGCN_GFX1032 = 0x038,
+  EF_AMDGPU_MACH_AMDGCN_GFX1033 = 0x039,
+  EF_AMDGPU_MACH_AMDGCN_GFX602 = 0x03a,
+  EF_AMDGPU_MACH_AMDGCN_GFX705 = 0x03b,
+  EF_AMDGPU_MACH_AMDGCN_GFX805 = 0x03c,
+  EF_AMDGPU_MACH_AMDGCN_GFX1035 = 0x03d,
+  EF_AMDGPU_MACH_AMDGCN_GFX1000 = 0x0f1,
 #if defined(GFX40_BUILD)
-  EF_AMDGPU_MACH_AMDGCN_GFX4000       = 0x0f8,
-  EF_AMDGPU_MACH_AMDGCN_GFX4010       = 0x0f9,
-  EF_AMDGPU_MACH_AMDGCN_GFX4020       = 0x0fe,
-  EF_AMDGPU_MACH_AMDGCN_GFX4030       = 0x0f6,
+  EF_AMDGPU_MACH_AMDGCN_GFX4000 = 0x0f8,
+  EF_AMDGPU_MACH_AMDGCN_GFX4010 = 0x0f9,
+  EF_AMDGPU_MACH_AMDGCN_GFX4020 = 0x0fe,
+  EF_AMDGPU_MACH_AMDGCN_GFX4030 = 0x0f6,
 #endif // GFX40_BUILD
-  EF_AMDGPU_MACH_AMDGCN_GFX1034       = 0x03e,
-  EF_AMDGPU_MACH_AMDGCN_GFX1036       = 0x045,
+  EF_AMDGPU_MACH_AMDGCN_GFX1034 = 0x03e,
+  EF_AMDGPU_MACH_AMDGCN_GFX1036 = 0x045,
 #if defined(GFX11_BUILD)
-  EF_AMDGPU_MACH_AMDGCN_GFX1100       = 0x041,
-  EF_AMDGPU_MACH_AMDGCN_GFX1101       = 0x046,
-  EF_AMDGPU_MACH_AMDGCN_GFX1102       = 0x047,
-  EF_AMDGPU_MACH_AMDGCN_GFX1103       = 0x044,
-  EF_AMDGPU_MACH_AMDGCN_GFX1150       = 0x043,
-  EF_AMDGPU_MACH_AMDGCN_GFX1151       = 0x04a,
-  EF_AMDGPU_MACH_AMDGCN_GFX1152       = 0x055,
+  EF_AMDGPU_MACH_AMDGCN_GFX1100 = 0x041,
+  EF_AMDGPU_MACH_AMDGCN_GFX1101 = 0x046,
+  EF_AMDGPU_MACH_AMDGCN_GFX1102 = 0x047,
+  EF_AMDGPU_MACH_AMDGCN_GFX1103 = 0x044,
+  EF_AMDGPU_MACH_AMDGCN_GFX1150 = 0x043,
+  EF_AMDGPU_MACH_AMDGCN_GFX1151 = 0x04a,
+  EF_AMDGPU_MACH_AMDGCN_GFX1152 = 0x055,
   EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC = 0x054,
 #endif // GFX11_BUILD
 #if defined(GFX12_BUILD)
-  EF_AMDGPU_MACH_AMDGCN_GFX1200       = 0x048,
-  EF_AMDGPU_MACH_AMDGCN_GFX1201       = 0x04e,
+  EF_AMDGPU_MACH_AMDGCN_GFX1200 = 0x048,
+  EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x04e,
 #endif // GFX12_BUILD
-  EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC      = 0x051,
-  EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC   = 0x052,
-  EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC   = 0x053,
+  EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC = 0x051,
+  EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC = 0x052,
+  EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC = 0x053,
   // Reserved for AMDGCN-based processors.
   EF_AMDGPU_MACH_AMDGCN_RESERVED_LAST = 0x0ff,
   // First/last AMDGCN-based processors.
@@ -232,10 +232,10 @@ enum : unsigned {
 } // end namespace ELF
 
 // ELF Section Header Flag Enumeration Values.
-#define SHF_AMDGPU_HSA_GLOBAL   (0x00100000 & SHF_MASKOS)
+#define SHF_AMDGPU_HSA_GLOBAL (0x00100000 & SHF_MASKOS)
 #define SHF_AMDGPU_HSA_READONLY (0x00200000 & SHF_MASKOS)
-#define SHF_AMDGPU_HSA_CODE     (0x00400000 & SHF_MASKOS)
-#define SHF_AMDGPU_HSA_AGENT    (0x00800000 & SHF_MASKOS)
+#define SHF_AMDGPU_HSA_CODE (0x00400000 & SHF_MASKOS)
+#define SHF_AMDGPU_HSA_AGENT (0x00800000 & SHF_MASKOS)
 
 //
 typedef enum {
@@ -247,23 +247,27 @@ typedef enum {
 } amdgpu_hsa_elf_segment_t;
 
 // ELF Program Header Type Enumeration Values.
-#define PT_AMDGPU_HSA_LOAD_GLOBAL_PROGRAM (PT_LOOS + AMDGPU_HSA_SEGMENT_GLOBAL_PROGRAM)
-#define PT_AMDGPU_HSA_LOAD_GLOBAL_AGENT   (PT_LOOS + AMDGPU_HSA_SEGMENT_GLOBAL_AGENT)
-#define PT_AMDGPU_HSA_LOAD_READONLY_AGENT (PT_LOOS + AMDGPU_HSA_SEGMENT_READONLY_AGENT)
-#define PT_AMDGPU_HSA_LOAD_CODE_AGENT     (PT_LOOS + AMDGPU_HSA_SEGMENT_CODE_AGENT)
+#define PT_AMDGPU_HSA_LOAD_GLOBAL_PROGRAM                                      \
+  (PT_LOOS + AMDGPU_HSA_SEGMENT_GLOBAL_PROGRAM)
+#define PT_AMDGPU_HSA_LOAD_GLOBAL_AGENT                                        \
+  (PT_LOOS + AMDGPU_HSA_SEGMENT_GLOBAL_AGENT)
+#define PT_AMDGPU_HSA_LOAD_READONLY_AGENT                                      \
+  (PT_LOOS + AMDGPU_HSA_SEGMENT_READONLY_AGENT)
+#define PT_AMDGPU_HSA_LOAD_CODE_AGENT (PT_LOOS + AMDGPU_HSA_SEGMENT_CODE_AGENT)
 
 // ELF Symbol Type Enumeration Values.
-#define STT_AMDGPU_HSA_KERNEL            (STT_LOOS + 0)
+#define STT_AMDGPU_HSA_KERNEL (STT_LOOS + 0)
 #define STT_AMDGPU_HSA_INDIRECT_FUNCTION (STT_LOOS + 1)
-#define STT_AMDGPU_HSA_METADATA          (STT_LOOS + 2)
+#define STT_AMDGPU_HSA_METADATA (STT_LOOS + 2)
 
 // ELF Symbol Binding Enumeration Values.
 #define STB_AMDGPU_HSA_EXTERNAL (STB_LOOS + 0)
 
 // ELF Symbol Other Information Creation/Retrieval.
-#define ELF64_ST_AMDGPU_ALLOCATION(o)  (((o) >> 2) & 0x3)
-#define ELF64_ST_AMDGPU_FLAGS(o)       ((o) >> 4)
-#define ELF64_ST_AMDGPU_OTHER(f, a, v) (((f) << 4) + (((a) & 0x3) << 2) + ((v) & 0x3))
+#define ELF64_ST_AMDGPU_ALLOCATION(o) (((o) >> 2) & 0x3)
+#define ELF64_ST_AMDGPU_FLAGS(o) ((o) >> 4)
+#define ELF64_ST_AMDGPU_OTHER(f, a, v)                                         \
+  (((f) << 4) + (((a) & 0x3) << 2) + ((v) & 0x3))
 
 typedef enum {
   AMDGPU_HSA_SYMBOL_ALLOCATION_DEFAULT = 0,
@@ -274,10 +278,12 @@ typedef enum {
 } amdgpu_hsa_symbol_allocation_t;
 
 // ELF Symbol Allocation Enumeration Values.
-#define STA_AMDGPU_HSA_DEFAULT        AMDGPU_HSA_SYMBOL_ALLOCATION_DEFAULT
-#define STA_AMDGPU_HSA_GLOBAL_PROGRAM AMDGPU_HSA_SYMBOL_ALLOCATION_GLOBAL_PROGRAM
-#define STA_AMDGPU_HSA_GLOBAL_AGENT   AMDGPU_HSA_SYMBOL_ALLOCATION_GLOBAL_AGENT
-#define STA_AMDGPU_HSA_READONLY_AGENT AMDGPU_HSA_SYMBOL_ALLOCATION_READONLY_AGENT
+#define STA_AMDGPU_HSA_DEFAULT AMDGPU_HSA_SYMBOL_ALLOCATION_DEFAULT
+#define STA_AMDGPU_HSA_GLOBAL_PROGRAM                                          \
+  AMDGPU_HSA_SYMBOL_ALLOCATION_GLOBAL_PROGRAM
+#define STA_AMDGPU_HSA_GLOBAL_AGENT AMDGPU_HSA_SYMBOL_ALLOCATION_GLOBAL_AGENT
+#define STA_AMDGPU_HSA_READONLY_AGENT                                          \
+  AMDGPU_HSA_SYMBOL_ALLOCATION_READONLY_AGENT
 
 typedef enum {
   AMDGPU_HSA_SYMBOL_FLAG_DEFAULT = 0,
@@ -289,24 +295,24 @@ typedef enum {
 #define STF_AMDGPU_HSA_CONST AMDGPU_HSA_SYMBOL_FLAG_CONST
 
 // AMD GPU Relocation Type Enumeration Values.
-#define R_AMDGPU_NONE         0
-#define R_AMDGPU_32_LOW       1
-#define R_AMDGPU_32_HIGH      2
-#define R_AMDGPU_64           3
+#define R_AMDGPU_NONE 0
+#define R_AMDGPU_32_LOW 1
+#define R_AMDGPU_32_HIGH 2
+#define R_AMDGPU_64 3
 #define R_AMDGPU_INIT_SAMPLER 4
-#define R_AMDGPU_INIT_IMAGE   5
-#define R_AMDGPU_RELATIVE64   13
+#define R_AMDGPU_INIT_IMAGE 5
+#define R_AMDGPU_RELATIVE64 13
 
 // AMD GPU Note Type Enumeration Values.
 #define NT_AMD_HSA_CODE_OBJECT_VERSION 1
-#define NT_AMD_HSA_HSAIL               2
-#define NT_AMD_HSA_ISA_VERSION         3
-#define NT_AMD_HSA_PRODUCER            4
-#define NT_AMD_HSA_PRODUCER_OPTIONS    5
-#define NT_AMD_HSA_EXTENSION           6
-#define NT_AMD_HSA_ISA_NAME            11
-#define NT_AMD_HSA_HLDEBUG_DEBUG       101
-#define NT_AMD_HSA_HLDEBUG_TARGET      102
+#define NT_AMD_HSA_HSAIL 2
+#define NT_AMD_HSA_ISA_VERSION 3
+#define NT_AMD_HSA_PRODUCER 4
+#define NT_AMD_HSA_PRODUCER_OPTIONS 5
+#define NT_AMD_HSA_EXTENSION 6
+#define NT_AMD_HSA_ISA_NAME 11
+#define NT_AMD_HSA_HLDEBUG_DEBUG 101
+#define NT_AMD_HSA_HLDEBUG_TARGET 102
 
 // AMD GPU Metadata Kind Enumeration Values.
 typedef uint16_t amdgpu_hsa_metadata_kind16_t;

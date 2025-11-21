@@ -51,7 +51,7 @@
 
 class DebugBasicTest : public TestBase {
  public:
-    DebugBasicTest();
+  DebugBasicTest();
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~DebugBasicTest();

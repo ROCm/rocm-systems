@@ -25,9 +25,7 @@
 
 #include "amd_smi/amdsmi.h"
 
-const char *
-NameFromFWEnum(amdsmi_fw_block_t blk);
-const char *
-NameFromEvtNotifType(amdsmi_evt_notification_type_t evt);
+const char* NameFromFWEnum(amdsmi_fw_block_t blk);
+const char* NameFromEvtNotifType(amdsmi_evt_notification_type_t evt);
 
 #endif  // TESTS_AMD_SMI_TEST_TEST_UTILS_H_

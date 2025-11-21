@@ -30,7 +30,8 @@
 #include <string>
 #include <vector>
 
-extern "C" {
+extern "C"
+{
 struct Kokkos_Tools_ToolSettings
 {
     bool requires_global_fencing;
@@ -47,11 +48,11 @@ namespace
 {
 struct Section
 {
-    Section()                   = default;
-    ~Section()                  = default;
-    Section(const Section&)     = default;
-    Section(Section&&) noexcept = default;
-    Section& operator=(const Section&) = default;
+    Section()                              = default;
+    ~Section()                             = default;
+    Section(const Section&)                = default;
+    Section(Section&&) noexcept            = default;
+    Section& operator=(const Section&)     = default;
     Section& operator=(Section&&) noexcept = default;
 
     std::string      label = {};
@@ -62,7 +63,8 @@ bool tool_globfences  = false;
 auto kokkosp_sections = std::vector<Section>{};
 }  // namespace
 
-extern "C" {
+extern "C"
+{
 void
 kokkosp_request_tool_settings(const uint32_t, Kokkos_Tools_ToolSettings* settings) ROCTX_PUBLIC_API;
 
@@ -132,7 +134,8 @@ kokkosp_end_fence(const uint64_t /*fID*/) ROCTX_PUBLIC_API;
 //          IMPLEMENTATION
 //
 //
-extern "C" {
+extern "C"
+{
 void
 kokkosp_request_tool_settings(const uint32_t, Kokkos_Tools_ToolSettings* settings)
 {

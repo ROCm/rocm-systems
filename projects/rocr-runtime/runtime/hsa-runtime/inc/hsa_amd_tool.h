@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef HSA_RUNTIME_AMD_TOOL_EVENTS_H_
 #define HSA_RUNTIME_AMD_TOOL_EVENTS_H_
 

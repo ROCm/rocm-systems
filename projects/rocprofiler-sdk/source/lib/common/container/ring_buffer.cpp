@@ -266,7 +266,8 @@ ring_buffer::clear()
     return true;
 }
 
-bool ring_buffer::clear(std::nothrow_t)
+bool
+ring_buffer::clear(std::nothrow_t)
 {
     if(!can_clear()) return false;
 

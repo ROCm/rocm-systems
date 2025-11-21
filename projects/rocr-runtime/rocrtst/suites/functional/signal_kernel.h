@@ -50,43 +50,43 @@
 #include "suites/test_common/test_base.h"
 
 enum SignalKernelType {
-	SET,  // For signal kernel set operation
-	MULTISET, // For multiple kernel set operation
-	WAIT, // For single wait operation
-    MULTIWAIT, // For multiple wait operation
-	NOTEST  // No operation
-}; 
+  SET,        // For signal kernel set operation
+  MULTISET,   // For multiple kernel set operation
+  WAIT,       // For single wait operation
+  MULTIWAIT,  // For multiple wait operation
+  NOTEST      // No operation
+};
 class SignalKernelTest : public TestBase {
  public:
-    SignalKernelTest(SignalKernelType);
+  SignalKernelTest(SignalKernelType);
 
-    // @Brief: Destructor for the SignalKernelTest class
-    virtual ~SignalKernelTest();
+  // @Brief: Destructor for the SignalKernelTest class
+  virtual ~SignalKernelTest();
 
-    // @Brief: Setup the environment for measurement
-    virtual void SetUp();
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-    // @Brief: Core measurement execution
-    virtual void Run();
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-    // @Brief: Clean up and retrive the resource
-    virtual void Close();
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
 
-    // @Brief: Display  results
-    virtual void DisplayResults() const;
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
 
-    // @Brief: Display information about what this test does
-    virtual void DisplayTestInfo(void);
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 
-    void TestSignalKernelSet(void);
+  void TestSignalKernelSet(void);
 
-    void TestSignalKernelWait(void);
+  void TestSignalKernelWait(void);
 
-    void TestSignalKernelMultiSet(void);
+  void TestSignalKernelMultiSet(void);
 
-    void TestSignalKernelMultiWait(void);
+  void TestSignalKernelMultiWait(void);
 
-    void KernelSetFunction(SignalKernelType);
+  void KernelSetFunction(SignalKernelType);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_SIGNAL_KERNEL_H_

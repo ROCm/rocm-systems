@@ -32,17 +32,14 @@
 
 LIBELF_VCSID("$Id: elf_getbase.c 977 2010-06-06 11:50:31Z jkoshy $");
 
-off_t
-elf_getbase(Elf *e)
-{
-	if (e == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return ((off_t) -1);
-	}
+off_t elf_getbase(Elf *e) {
+  if (e == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return ((off_t)-1);
+  }
 
-	if (e->e_parent == NULL)
-		return ((off_t) 0);
+  if (e->e_parent == NULL)
+    return ((off_t)0);
 
-	return ((off_t) ((uintptr_t) e->e_rawfile -
-	    (uintptr_t) e->e_parent->e_rawfile));
+  return ((off_t)((uintptr_t)e->e_rawfile - (uintptr_t)e->e_parent->e_rawfile));
 }

@@ -170,10 +170,8 @@ dump_flat_profile()
                             sample_instruction.exec_mask_counts())
                         {
                             ss << std::endl;
-                            ss << "\t\t"
-                               << "exec_mask: " << std::hex << exec_mask;
-                            ss << "\t"
-                               << "samples: " << std::dec << samples_per_exec;
+                            ss << "\t\t" << "exec_mask: " << std::hex << exec_mask;
+                            ss << "\t" << "samples: " << std::dec << samples_per_exec;
                             num_samples_sum += samples_per_exec;
                             ss << std::endl;
                         }

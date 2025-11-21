@@ -74,7 +74,10 @@ template <class R, class... Args> class callback_t<R (*)(Args...)> {
 
   // Should not be marked explicit.
   callback_t(func_t function_ptr) : function(function_ptr) {}
-  callback_t& operator=(func_t function_ptr) { function = function_ptr; return *this; }
+  callback_t& operator=(func_t function_ptr) {
+    function = function_ptr;
+    return *this;
+  }
 
   bool operator==(func_t function_ptr) { return function == function_ptr; }
   bool operator!=(func_t function_ptr) { return function != function_ptr; }
@@ -95,7 +98,7 @@ template <class R, class... Args> class callback_t<R (*)(Args...)> {
   func_t function;
 };
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr
 
 #endif  // HSA_RUNTIME_CORE_INC_EXCEPTIONS_H

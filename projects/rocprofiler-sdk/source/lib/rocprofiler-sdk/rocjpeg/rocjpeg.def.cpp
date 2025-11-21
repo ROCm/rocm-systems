@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "lib/rocprofiler-sdk/rocjpeg/defines.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
+#include "lib/rocprofiler-sdk/rocjpeg/defines.hpp"
 
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -77,5 +77,3 @@ ROCJPEG_API_INFO_DEFINITION_V(ROCPROFILER_ROCJPEG_TABLE_ID_CORE, ROCPROFILER_ROC
 #    error                                                                                         \
         "Do not compile this file directly. It is included by lib/rocprofiler-sdk/rocjpeg/rocjpeg.cpp"
 #endif
-
-

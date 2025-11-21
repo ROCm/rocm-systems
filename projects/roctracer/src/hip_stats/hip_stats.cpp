@@ -225,9 +225,9 @@ void DumpStatistics() {
                memcpy_stats.begin(), memcpy_stats.end(), compare))
         out << "\"" << roctracer_op_string(ACTIVITY_DOMAIN_HIP_OPS, HIP_OP_ID_COPY, kind.first)
             << "(" << HumanReadableSize(kind.second >> 1, 0) << "-"
-            << HumanReadableSize(kind.second, 0) << ")"
-            << "\"," << stats.count << "," << stats.total_byte_size << "," << stats.total_time_ns
-            << "," << stats.total_time_ns / stats.count << "," << std::fixed << std::setprecision(4)
+            << HumanReadableSize(kind.second, 0) << ")" << "\"," << stats.count << ","
+            << stats.total_byte_size << "," << stats.total_time_ns << ","
+            << stats.total_time_ns / stats.count << "," << std::fixed << std::setprecision(4)
             << (double)stats.total_time_ns / total_memory_copy_time_ns * 100 << std::endl;
     } else {
       std::cerr << "warning: could not open " << output_dir / filename << std::endl;

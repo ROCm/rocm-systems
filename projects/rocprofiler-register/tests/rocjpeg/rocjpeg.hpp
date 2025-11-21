@@ -28,7 +28,8 @@
 #include <cstddef>
 #include <cstdint>
 
-extern "C" {
+extern "C"
+{
 // fake rccl function
 enum RocJpegStatus
 {

@@ -60,7 +60,7 @@ hsa_status_t hsa_amd_queue_intercept_create(
 
 hsa_status_t hsa_amd_runtime_queue_create_register(hsa_amd_runtime_queue_notifier callback,
                                                    void* user_data);
-}   //  namespace amd
+}  // namespace AMD
 
 namespace core {
 
@@ -74,9 +74,7 @@ HsaApiTable& hsa_internal_api_table() {
   return table;
 }
 
-HsaApiTable::HsaApiTable() {
-  Init();
-}
+HsaApiTable::HsaApiTable() { Init(); }
 
 // Initialize member fields for Hsa Core and Amd Extension Api's
 // Member fields for Finalizer and Image extensions will be
@@ -137,12 +135,9 @@ void HsaApiTable::Init() {
   hsa_api.tools_ = &tools_api;
 }
 
-void HsaApiTable::Reset() {
-  Init();
-}
+void HsaApiTable::Reset() { Init(); }
 
 void HsaApiTable::CloneExts(void* ext_table, uint32_t table_id) {
-
   assert(ext_table != NULL && "Invalid extension table linked.");
 
   // Update HSA Extension Finalizer Api table
@@ -168,7 +163,6 @@ void HsaApiTable::CloneExts(void* ext_table, uint32_t table_id) {
 }
 
 void HsaApiTable::LinkExts(void* ext_table, uint32_t table_id) {
-
   assert(ext_table != NULL && "Invalid extension table linked.");
 
   // Update HSA Extension Finalizer Api table
@@ -195,7 +189,6 @@ void HsaApiTable::LinkExts(void* ext_table, uint32_t table_id) {
 
 // Update Api table for Hsa Core Runtime
 void HsaApiTable::UpdateCore() {
-
   // Initialize Version of Api Table
   core_api.version.major_id = HSA_CORE_API_TABLE_MAJOR_VERSION;
   core_api.version.minor_id = sizeof(::CoreApiTable);
@@ -209,34 +202,27 @@ void HsaApiTable::UpdateCore() {
   core_api.hsa_system_get_extension_table_fn = HSA::hsa_system_get_extension_table;
   core_api.hsa_iterate_agents_fn = HSA::hsa_iterate_agents;
   core_api.hsa_agent_get_info_fn = HSA::hsa_agent_get_info;
-  core_api.hsa_agent_get_exception_policies_fn =
-      HSA::hsa_agent_get_exception_policies;
+  core_api.hsa_agent_get_exception_policies_fn = HSA::hsa_agent_get_exception_policies;
   core_api.hsa_agent_extension_supported_fn = HSA::hsa_agent_extension_supported;
   core_api.hsa_queue_create_fn = HSA::hsa_queue_create;
   core_api.hsa_soft_queue_create_fn = HSA::hsa_soft_queue_create;
   core_api.hsa_queue_destroy_fn = HSA::hsa_queue_destroy;
   core_api.hsa_queue_inactivate_fn = HSA::hsa_queue_inactivate;
   core_api.hsa_queue_load_read_index_scacquire_fn = HSA::hsa_queue_load_read_index_scacquire;
-  core_api.hsa_queue_load_read_index_relaxed_fn =
-      HSA::hsa_queue_load_read_index_relaxed;
+  core_api.hsa_queue_load_read_index_relaxed_fn = HSA::hsa_queue_load_read_index_relaxed;
   core_api.hsa_queue_load_write_index_scacquire_fn = HSA::hsa_queue_load_write_index_scacquire;
-  core_api.hsa_queue_load_write_index_relaxed_fn =
-      HSA::hsa_queue_load_write_index_relaxed;
-  core_api.hsa_queue_store_write_index_relaxed_fn =
-      HSA::hsa_queue_store_write_index_relaxed;
+  core_api.hsa_queue_load_write_index_relaxed_fn = HSA::hsa_queue_load_write_index_relaxed;
+  core_api.hsa_queue_store_write_index_relaxed_fn = HSA::hsa_queue_store_write_index_relaxed;
   core_api.hsa_queue_store_write_index_screlease_fn = HSA::hsa_queue_store_write_index_screlease;
   core_api.hsa_queue_cas_write_index_scacq_screl_fn = HSA::hsa_queue_cas_write_index_scacq_screl;
   core_api.hsa_queue_cas_write_index_scacquire_fn = HSA::hsa_queue_cas_write_index_scacquire;
-  core_api.hsa_queue_cas_write_index_relaxed_fn =
-      HSA::hsa_queue_cas_write_index_relaxed;
+  core_api.hsa_queue_cas_write_index_relaxed_fn = HSA::hsa_queue_cas_write_index_relaxed;
   core_api.hsa_queue_cas_write_index_screlease_fn = HSA::hsa_queue_cas_write_index_screlease;
   core_api.hsa_queue_add_write_index_scacq_screl_fn = HSA::hsa_queue_add_write_index_scacq_screl;
   core_api.hsa_queue_add_write_index_scacquire_fn = HSA::hsa_queue_add_write_index_scacquire;
-  core_api.hsa_queue_add_write_index_relaxed_fn =
-      HSA::hsa_queue_add_write_index_relaxed;
+  core_api.hsa_queue_add_write_index_relaxed_fn = HSA::hsa_queue_add_write_index_relaxed;
   core_api.hsa_queue_add_write_index_screlease_fn = HSA::hsa_queue_add_write_index_screlease;
-  core_api.hsa_queue_store_read_index_relaxed_fn =
-      HSA::hsa_queue_store_read_index_relaxed;
+  core_api.hsa_queue_store_read_index_relaxed_fn = HSA::hsa_queue_store_read_index_relaxed;
   core_api.hsa_queue_store_read_index_screlease_fn = HSA::hsa_queue_store_read_index_screlease;
   core_api.hsa_agent_iterate_regions_fn = HSA::hsa_agent_iterate_regions;
   core_api.hsa_region_get_info_fn = HSA::hsa_region_get_info;
@@ -306,8 +292,7 @@ void HsaApiTable::UpdateCore() {
   // Deprecated since v1.1.
   core_api.hsa_code_symbol_get_info_fn = HSA::hsa_code_symbol_get_info;
   // Deprecated since v1.1.
-  core_api.hsa_code_object_iterate_symbols_fn =
-      HSA::hsa_code_object_iterate_symbols;
+  core_api.hsa_code_object_iterate_symbols_fn = HSA::hsa_code_object_iterate_symbols;
 
   //===--- Executable -----------------------------------------------------===//
 
@@ -315,12 +300,10 @@ void HsaApiTable::UpdateCore() {
   core_api.hsa_executable_create_fn = HSA::hsa_executable_create;
   core_api.hsa_executable_destroy_fn = HSA::hsa_executable_destroy;
   // Deprecated since v1.1.
-  core_api.hsa_executable_load_code_object_fn =
-      HSA::hsa_executable_load_code_object;
+  core_api.hsa_executable_load_code_object_fn = HSA::hsa_executable_load_code_object;
   core_api.hsa_executable_freeze_fn = HSA::hsa_executable_freeze;
   core_api.hsa_executable_get_info_fn = HSA::hsa_executable_get_info;
-  core_api.hsa_executable_global_variable_define_fn =
-      HSA::hsa_executable_global_variable_define;
+  core_api.hsa_executable_global_variable_define_fn = HSA::hsa_executable_global_variable_define;
   core_api.hsa_executable_agent_global_variable_define_fn =
       HSA::hsa_executable_agent_global_variable_define;
   core_api.hsa_executable_readonly_variable_define_fn =
@@ -328,11 +311,9 @@ void HsaApiTable::UpdateCore() {
   core_api.hsa_executable_validate_fn = HSA::hsa_executable_validate;
   // Deprecated since v1.1.
   core_api.hsa_executable_get_symbol_fn = HSA::hsa_executable_get_symbol;
-  core_api.hsa_executable_symbol_get_info_fn =
-      HSA::hsa_executable_symbol_get_info;
+  core_api.hsa_executable_symbol_get_info_fn = HSA::hsa_executable_symbol_get_info;
   // Deprecated since v1.1.
-  core_api.hsa_executable_iterate_symbols_fn =
-      HSA::hsa_executable_iterate_symbols;
+  core_api.hsa_executable_iterate_symbols_fn = HSA::hsa_executable_iterate_symbols;
 
   //===--- Runtime Notifications ------------------------------------------===//
 
@@ -357,8 +338,7 @@ void HsaApiTable::UpdateCore() {
 
   core_api.hsa_agent_iterate_isas_fn = HSA::hsa_agent_iterate_isas;
   core_api.hsa_isa_get_info_alt_fn = HSA::hsa_isa_get_info_alt;
-  core_api.hsa_isa_get_exception_policies_fn =
-      HSA::hsa_isa_get_exception_policies;
+  core_api.hsa_isa_get_exception_policies_fn = HSA::hsa_isa_get_exception_policies;
   core_api.hsa_isa_get_round_method_fn = HSA::hsa_isa_get_round_method;
   core_api.hsa_wavefront_get_info_fn = HSA::hsa_wavefront_get_info;
   core_api.hsa_isa_iterate_wavefronts_fn = HSA::hsa_isa_iterate_wavefronts;
@@ -366,8 +346,7 @@ void HsaApiTable::UpdateCore() {
   //===--- Code Objects (deprecated) - HSA v1.1 additions -----------------===//
 
   // Deprecated since v1.1.
-  core_api.hsa_code_object_get_symbol_from_name_fn =
-      HSA::hsa_code_object_get_symbol_from_name;
+  core_api.hsa_code_object_get_symbol_from_name_fn = HSA::hsa_code_object_get_symbol_from_name;
 
   //===--- Executable - HSA v1.1 additions --------------------------------===//
 
@@ -375,20 +354,15 @@ void HsaApiTable::UpdateCore() {
       HSA::hsa_code_object_reader_create_from_file;
   core_api.hsa_code_object_reader_create_from_memory_fn =
       HSA::hsa_code_object_reader_create_from_memory;
-  core_api.hsa_code_object_reader_destroy_fn =
-      HSA::hsa_code_object_reader_destroy;
+  core_api.hsa_code_object_reader_destroy_fn = HSA::hsa_code_object_reader_destroy;
   core_api.hsa_executable_create_alt_fn = HSA::hsa_executable_create_alt;
   core_api.hsa_executable_load_program_code_object_fn =
       HSA::hsa_executable_load_program_code_object;
-  core_api.hsa_executable_load_agent_code_object_fn =
-      HSA::hsa_executable_load_agent_code_object;
+  core_api.hsa_executable_load_agent_code_object_fn = HSA::hsa_executable_load_agent_code_object;
   core_api.hsa_executable_validate_alt_fn = HSA::hsa_executable_validate_alt;
-  core_api.hsa_executable_get_symbol_by_name_fn =
-      HSA::hsa_executable_get_symbol_by_name;
-  core_api.hsa_executable_iterate_agent_symbols_fn =
-      HSA::hsa_executable_iterate_agent_symbols;
-  core_api.hsa_executable_iterate_program_symbols_fn =
-      HSA::hsa_executable_iterate_program_symbols;
+  core_api.hsa_executable_get_symbol_by_name_fn = HSA::hsa_executable_get_symbol_by_name;
+  core_api.hsa_executable_iterate_agent_symbols_fn = HSA::hsa_executable_iterate_agent_symbols;
+  core_api.hsa_executable_iterate_program_symbols_fn = HSA::hsa_executable_iterate_program_symbols;
 }
 
 // Update Api table for Amd Extensions.
@@ -396,7 +370,6 @@ void HsaApiTable::UpdateCore() {
 // member variable hsa_amd_image_create_fn while loading
 // Image extension library
 void HsaApiTable::UpdateAmdExts() {
-
   // Initialize Version of Api Table
   amd_ext_api.version.major_id = HSA_AMD_EXT_API_TABLE_MAJOR_VERSION;
   amd_ext_api.version.minor_id = sizeof(::AmdExtTable);
@@ -405,11 +378,13 @@ void HsaApiTable::UpdateAmdExts() {
   // Initialize function pointers for Amd Extension Api's
   amd_ext_api.hsa_amd_coherency_get_type_fn = AMD::hsa_amd_coherency_get_type;
   amd_ext_api.hsa_amd_coherency_set_type_fn = AMD::hsa_amd_coherency_set_type;
-  amd_ext_api.hsa_amd_profiling_set_profiler_enabled_fn = AMD::hsa_amd_profiling_set_profiler_enabled;
+  amd_ext_api.hsa_amd_profiling_set_profiler_enabled_fn =
+      AMD::hsa_amd_profiling_set_profiler_enabled;
   amd_ext_api.hsa_amd_profiling_async_copy_enable_fn = AMD::hsa_amd_profiling_async_copy_enable;
   amd_ext_api.hsa_amd_profiling_get_dispatch_time_fn = AMD::hsa_amd_profiling_get_dispatch_time;
   amd_ext_api.hsa_amd_profiling_get_async_copy_time_fn = AMD::hsa_amd_profiling_get_async_copy_time;
-  amd_ext_api.hsa_amd_profiling_convert_tick_to_system_domain_fn = AMD::hsa_amd_profiling_convert_tick_to_system_domain;
+  amd_ext_api.hsa_amd_profiling_convert_tick_to_system_domain_fn =
+      AMD::hsa_amd_profiling_convert_tick_to_system_domain;
   amd_ext_api.hsa_amd_signal_async_handler_fn = AMD::hsa_amd_signal_async_handler;
   amd_ext_api.hsa_amd_async_function_fn = AMD::hsa_amd_async_function;
   amd_ext_api.hsa_amd_signal_wait_any_fn = AMD::hsa_amd_signal_wait_any;
@@ -446,8 +421,10 @@ void HsaApiTable::UpdateAmdExts() {
   amd_ext_api.hsa_amd_memory_async_copy_rect_fn = AMD::hsa_amd_memory_async_copy_rect;
   amd_ext_api.hsa_amd_runtime_queue_create_register_fn = AMD::hsa_amd_runtime_queue_create_register;
   amd_ext_api.hsa_amd_memory_lock_to_pool_fn = AMD::hsa_amd_memory_lock_to_pool;
-  amd_ext_api.hsa_amd_register_deallocation_callback_fn = AMD::hsa_amd_register_deallocation_callback;
-  amd_ext_api.hsa_amd_deregister_deallocation_callback_fn = AMD::hsa_amd_deregister_deallocation_callback;
+  amd_ext_api.hsa_amd_register_deallocation_callback_fn =
+      AMD::hsa_amd_register_deallocation_callback;
+  amd_ext_api.hsa_amd_deregister_deallocation_callback_fn =
+      AMD::hsa_amd_deregister_deallocation_callback;
   amd_ext_api.hsa_amd_signal_value_pointer_fn = AMD::hsa_amd_signal_value_pointer;
   amd_ext_api.hsa_amd_svm_attributes_set_fn = AMD::hsa_amd_svm_attributes_set;
   amd_ext_api.hsa_amd_svm_attributes_get_fn = AMD::hsa_amd_svm_attributes_get;
@@ -477,7 +454,8 @@ void HsaApiTable::UpdateAmdExts() {
   amd_ext_api.hsa_amd_ais_file_write_fn = AMD::hsa_amd_ais_file_write;
   amd_ext_api.hsa_amd_ais_file_read_fn = AMD::hsa_amd_ais_file_read;
   amd_ext_api.hsa_amd_signal_wait_all_fn = AMD::hsa_amd_signal_wait_all;
-  amd_ext_api.hsa_amd_memory_get_preferred_copy_engine_fn = AMD::hsa_amd_memory_get_preferred_copy_engine;
+  amd_ext_api.hsa_amd_memory_get_preferred_copy_engine_fn =
+      AMD::hsa_amd_memory_get_preferred_copy_engine;
   amd_ext_api.hsa_amd_portable_export_dmabuf_v2_fn = AMD::hsa_amd_portable_export_dmabuf_v2;
 }
 
@@ -494,12 +472,10 @@ void HsaApiTable::UpdateTools() {
   tools_api.hsa_amd_tool_scratch_event_async_reclaim_end_fn = nullptr;
 }
 
-void LoadInitialHsaApiTable() {
-  hsa_table_interface_init(&hsa_api_table().hsa_api);
-}
+void LoadInitialHsaApiTable() { hsa_table_interface_init(&hsa_api_table().hsa_api); }
 
-}   //  namespace core
-}   //  namespace rocr
+}  //  namespace core
+}  //  namespace rocr
 
 class Init {
  public:

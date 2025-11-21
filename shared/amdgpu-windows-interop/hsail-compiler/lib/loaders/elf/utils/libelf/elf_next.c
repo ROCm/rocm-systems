@@ -34,29 +34,27 @@
 
 LIBELF_VCSID("$Id: elf_next.c 1678 2011-07-28 04:36:34Z jkoshy $");
 
-Elf_Cmd
-elf_next(Elf *e)
-{
-	off_t next;
-	Elf *parent;
+Elf_Cmd elf_next(Elf *e) {
+  off_t next;
+  Elf *parent;
 
-	if (e == NULL)
-		return (ELF_C_NULL);
+  if (e == NULL)
+    return (ELF_C_NULL);
 
-	 if ((parent = e->e_parent) == NULL) {
-		 LIBELF_SET_ERROR(ARGUMENT, 0);
-		 return (ELF_C_NULL);
-	 }
+  if ((parent = e->e_parent) == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (ELF_C_NULL);
+  }
 
-	assert (parent->e_kind == ELF_K_AR);
-	assert (parent->e_cmd == ELF_C_READ);
-	assert(e->e_rawfile > parent->e_rawfile);
+  assert(parent->e_kind == ELF_K_AR);
+  assert(parent->e_cmd == ELF_C_READ);
+  assert(e->e_rawfile > parent->e_rawfile);
 
-	next = e->e_rawfile - parent->e_rawfile + e->e_rawsize;
-	next = (next + 1) & ~1;	/* round up to an even boundary */
+  next = e->e_rawfile - parent->e_rawfile + e->e_rawsize;
+  next = (next + 1) & ~1; /* round up to an even boundary */
 
-	parent->e_u.e_ar.e_next = (next >= (off_t) parent->e_rawsize) ?
-	    (off_t) 0 : next;
+  parent->e_u.e_ar.e_next =
+      (next >= (off_t)parent->e_rawsize) ? (off_t)0 : next;
 
-	return (ELF_C_READ);
+  return (ELF_C_READ);
 }

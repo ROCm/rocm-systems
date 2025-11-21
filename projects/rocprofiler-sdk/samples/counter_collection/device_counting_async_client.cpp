@@ -103,7 +103,8 @@ buffered_callback(rocprofiler_context_id_t,
         auto* header = headers[i];
         if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
            header->kind == ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER)
-        {}
+        {
+        }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
                 header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
@@ -311,7 +312,8 @@ tool_fini(void* user_data)
 
     exit_toggle().store(true);
     while(exit_toggle().load() == true)
-    {};
+    {
+    };
 
     rocprofiler_stop_context(get_client_ctx());
     ROCPROFILER_CALL(rocprofiler_flush_buffer(get_buffer()), "buffer flush");

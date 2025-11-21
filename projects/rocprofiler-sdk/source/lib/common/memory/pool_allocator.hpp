@@ -63,9 +63,9 @@ public:
     template <typename Up>
     pool_allocator(const pool_allocator<Up>& rhs);
 
-    pool_allocator(const pool_allocator& rhs)     = default;
-    pool_allocator(pool_allocator&& rhs) noexcept = default;
-    pool_allocator& operator=(const pool_allocator& rhs) = default;
+    pool_allocator(const pool_allocator& rhs)                = default;
+    pool_allocator(pool_allocator&& rhs) noexcept            = default;
+    pool_allocator& operator=(const pool_allocator& rhs)     = default;
     pool_allocator& operator=(pool_allocator&& rhs) noexcept = default;
 
     value_type* allocate(size_t n);

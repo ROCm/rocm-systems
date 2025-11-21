@@ -72,12 +72,12 @@ class PcsRuntime {
 
   class PcSamplingSession {
    public:
-    PcSamplingSession() : agent(NULL), thunkId_(0), active_(false){};
+    PcSamplingSession() : agent(NULL), thunkId_(0), active_(false) {};
     PcSamplingSession(core::Agent* agent, hsa_ven_amd_pcs_method_kind_t method,
                       hsa_ven_amd_pcs_units_t units, size_t interval, size_t latency,
                       size_t buffer_size, hsa_ven_amd_pcs_data_ready_callback_t data_ready_callback,
                       void* client_callback_data);
-    ~PcSamplingSession(){};
+    ~PcSamplingSession() {};
 
     bool isValid() const { return valid_; }
     size_t buffer_size() const { return csd.buffer_size; }
@@ -161,9 +161,9 @@ class PcsRuntime {
   static __forceinline std::mutex& instance_mutex() {
     // This allocation is meant to last until the last thread has exited.
     // It is intentionally not freed.
-   static std::mutex* instance_mutex_ = new std::mutex();
-   return *instance_mutex_;
-}
+    static std::mutex* instance_mutex_ = new std::mutex();
+    return *instance_mutex_;
+  }
   // Map of pc sampling sessions indexed by hsa_ven_amd_pcs_t handle
   std::map<uint64_t, PcSamplingSession> pc_sampling_;
   KernelMutex pc_sampling_lock_;

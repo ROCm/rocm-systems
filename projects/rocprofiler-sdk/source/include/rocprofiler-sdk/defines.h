@@ -174,7 +174,9 @@
 #endif
 
 #ifdef __cplusplus
-#    define ROCPROFILER_EXTERN_C_INIT extern "C" {
+#    define ROCPROFILER_EXTERN_C_INIT                                                              \
+        extern "C"                                                                                 \
+        {
 #    define ROCPROFILER_EXTERN_C_FINI }
 #    define ROCPROFILER_CXX_CODE(...) __VA_ARGS__
 #else

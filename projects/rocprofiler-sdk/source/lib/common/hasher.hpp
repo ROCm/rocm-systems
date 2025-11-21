@@ -50,7 +50,7 @@ struct fnv1a_hasher
     fnv1a_hasher(const fnv1a_hasher&)     = default;
     fnv1a_hasher(fnv1a_hasher&&) noexcept = default;
 
-    fnv1a_hasher& operator=(const fnv1a_hasher&) = default;
+    fnv1a_hasher& operator=(const fnv1a_hasher&)     = default;
     fnv1a_hasher& operator=(fnv1a_hasher&&) noexcept = default;
 
     // Hashes a numeric value.

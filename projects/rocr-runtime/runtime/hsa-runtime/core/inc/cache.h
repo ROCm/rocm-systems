@@ -79,7 +79,7 @@ class Cache : public Checked<0x39A6C7AD3F135B06> {
   DISALLOW_COPY_AND_ASSIGN(Cache);
 };
 
-}   // namespace core
-}   // namespace rocr
+}  // namespace core
+}  // namespace rocr
 
 #endif  // HSA_RUNTIME_CORE_INC_CACHE_H

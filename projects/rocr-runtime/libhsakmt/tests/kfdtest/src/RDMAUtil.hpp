@@ -26,12 +26,12 @@
 
 class LocalMemoryAccess {
  public:
-    int fd;
-    void Open(void);
-    void Close(void);
-    int GetPages(uint64_t, uint64_t);
-    void *MMap(uint64_t, size_t);
-    void UnMap(void *, size_t);
+  int fd;
+  void Open(void);
+  void Close(void);
+  int GetPages(uint64_t, uint64_t);
+  void* MMap(uint64_t, size_t);
+  void UnMap(void*, size_t);
 };
 
 #endif  // __RDMA__UTIL__H__

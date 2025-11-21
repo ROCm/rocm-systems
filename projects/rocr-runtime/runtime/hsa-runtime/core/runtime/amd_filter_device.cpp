@@ -128,8 +128,7 @@ int32_t RvdFilter::ProcessUuidToken(const std::string& token) {
     uint32_t uuidLen = devUuidList_[idx].length();
 
     // Token could match UUID of another device
-    if (tokenLen > uuidLen)
-      continue;
+    if (tokenLen > uuidLen) continue;
 
     // Token could match as substring of device UUID
     compareVal = token.compare(0, tokenLen, devUuidList_[idx], 0, tokenLen);
@@ -259,5 +258,5 @@ void RvdFilter::PrintRvdTokenList() {
 }
 #endif
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr

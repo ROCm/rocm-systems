@@ -42,7 +42,7 @@ template <typename T>
 inline static std::ostream&
 operator<<(std::ostream& out, const T& v)
 {
-    using std::              operator<<;
+    using std::operator<<;
     static thread_local bool recursion = false;
     if(recursion == false)
     {

@@ -612,20 +612,20 @@ hipError_t GraphExec::CaptureAQLPackets() {
     kernArgSizeForGraph[devId] = 0;
   }
   GetKernelArgSizeForGraph(kernArgSizeForGraph);
-  
+
   // Allocate kernel argument pools on respective devices with extra space for updates
   for (const auto& deviceKernArgPair : kernArgSizeForGraph) {
     const int deviceId = deviceKernArgPair.first;
     const size_t kernArgSize = deviceKernArgPair.second;
-    
+
     if (kernArgSize == 0) {
       continue;
     }
 
     const size_t totalPoolSize = kernArgSize + kKernArgChunkSize;
     if (!kernArgManager_->AllocGraphKernargPool(totalPoolSize, g_devices[deviceId]->devices()[0])) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, 
-              "[hipGraph] Failed to allocate kernel argument pool of size %zu for device %d", 
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "[hipGraph] Failed to allocate kernel argument pool of size %zu for device %d",
               totalPoolSize, deviceId);
       return hipErrorMemoryAllocation;
     }
@@ -1188,7 +1188,7 @@ address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int d
   }
 
   auto& current_pool = device_pools.back();
-  
+
   // Calculate aligned address for the allocation
   address aligned_addr = amd::alignUp(current_pool.kernarg_pool_addr_ + current_pool.kernarg_pool_offset_, alignment);
   const size_t new_pool_usage = (aligned_addr + size) - current_pool.kernarg_pool_addr_;
@@ -1231,7 +1231,7 @@ void GraphKernelArgManager::ReadBackOrFlush() {
       // Perform readback operation on the last byte of the pool
       address dev_ptr = pool.kernarg_pool_addr_ + pool.kernarg_pool_size_;
       volatile unsigned char* sentinel_ptr = reinterpret_cast<volatile unsigned char*>(dev_ptr - 1);
-      
+
       // Read-modify-write sequence with memory barriers
       volatile unsigned char kSentinel = *sentinel_ptr;
       _mm_sfence();

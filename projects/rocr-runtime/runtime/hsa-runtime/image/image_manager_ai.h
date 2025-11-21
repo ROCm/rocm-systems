@@ -56,11 +56,12 @@ class ImageManagerAi : public ImageManagerKv {
 
   /// @brief Calculate the size and alignment of the backing storage of an
   /// image.
-  virtual hsa_status_t CalculateImageSizeAndAlignment(
-      hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
-      hsa_ext_image_data_layout_t image_data_layout,
-      size_t image_data_row_pitch, size_t image_data_slice_pitch,
-      hsa_ext_image_data_info_t& image_info) const;
+  virtual hsa_status_t CalculateImageSizeAndAlignment(hsa_agent_t component,
+                                                      const hsa_ext_image_descriptor_t& desc,
+                                                      hsa_ext_image_data_layout_t image_data_layout,
+                                                      size_t image_data_row_pitch,
+                                                      size_t image_data_slice_pitch,
+                                                      hsa_ext_image_data_info_t& image_info) const;
 
   /// @brief Fill image structure with device specific image object.
   virtual hsa_status_t PopulateImageSrd(Image& image) const;
@@ -70,19 +71,16 @@ class ImageManagerAi : public ImageManagerKv {
 
   /// @brief Modify device specific image object according to the specified
   /// new format.
-  virtual hsa_status_t ModifyImageSrd(Image& image,
-                                      hsa_ext_image_format_t& new_format) const;
+  virtual hsa_status_t ModifyImageSrd(Image& image, hsa_ext_image_format_t& new_format) const;
 
   /// @brief Fill sampler structure with device specific sampler object.
   virtual hsa_status_t PopulateSamplerSrd(Sampler& sampler) const;
 
  protected:
-  uint32_t GetAddrlibSurfaceInfoAi(hsa_agent_t component,
-                             const hsa_ext_image_descriptor_t& desc,
-                             Image::TileMode tileMode,
-                             size_t image_data_row_pitch,
-                             size_t image_data_slice_pitch,
-                             ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out) const;
+  uint32_t GetAddrlibSurfaceInfoAi(hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
+                                   Image::TileMode tileMode, size_t image_data_row_pitch,
+                                   size_t image_data_slice_pitch,
+                                   ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out) const;
 
   bool IsLocalMemory(const void* address) const;
 

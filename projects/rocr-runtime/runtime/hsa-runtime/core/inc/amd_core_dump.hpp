@@ -47,8 +47,8 @@ namespace rocr {
 namespace amd {
 namespace coredump {
 hsa_status_t dump_gpu_core();
-}   //  namespace coredump
-}   //  namespace amd
-}   //  namespace rocr
+}  //  namespace coredump
+}  //  namespace amd
+}  //  namespace rocr
 
-#endif // OPENSRC_HSA_RUNTIME_CORE_INC_AMD_CORE_DUMP_HPP_
+#endif  // OPENSRC_HSA_RUNTIME_CORE_INC_AMD_CORE_DUMP_HPP_

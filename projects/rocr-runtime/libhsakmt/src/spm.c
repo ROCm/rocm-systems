@@ -29,76 +29,68 @@
 #include <stdio.h>
 
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtSPMAcquire(HSAuint32 PreferredNode)
-{
-	int ret;
-	struct kfd_ioctl_spm_args args = {0};
-	uint32_t gpu_id;
+HSAKMT_STATUS HSAKMTAPI hsaKmtSPMAcquire(HSAuint32 PreferredNode) {
+  int ret;
+  struct kfd_ioctl_spm_args args = {0};
+  uint32_t gpu_id;
 
-	ret = hsakmt_validate_nodeid(PreferredNode, &gpu_id);
-	if (ret != HSAKMT_STATUS_SUCCESS) {
-		pr_err("[%s] invalid node ID: %d\n", __func__, PreferredNode);
-		return ret;
-	}
+  ret = hsakmt_validate_nodeid(PreferredNode, &gpu_id);
+  if (ret != HSAKMT_STATUS_SUCCESS) {
+    pr_err("[%s] invalid node ID: %d\n", __func__, PreferredNode);
+    return ret;
+  }
 
-	ret = HSAKMT_STATUS_SUCCESS;
-	args.op = KFD_IOCTL_SPM_OP_ACQUIRE;
-	args.gpu_id = gpu_id;
+  ret = HSAKMT_STATUS_SUCCESS;
+  args.op = KFD_IOCTL_SPM_OP_ACQUIRE;
+  args.gpu_id = gpu_id;
 
-	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RLC_SPM, &args);
+  ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RLC_SPM, &args);
 
-	return ret;
+  return ret;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtSPMSetDestBuffer(HSAuint32 PreferredNode,
-						HSAuint32 SizeInBytes,
-						HSAuint32 * timeout,
-						HSAuint32 * SizeCopied,
-						void *DestMemoryAddress,
-						bool *isSPMDataLoss)
-{
-	int ret;
-	struct kfd_ioctl_spm_args args = {0};
-	uint32_t gpu_id = 0;
+HSAKMT_STATUS HSAKMTAPI hsaKmtSPMSetDestBuffer(HSAuint32 PreferredNode, HSAuint32 SizeInBytes,
+                                               HSAuint32* timeout, HSAuint32* SizeCopied,
+                                               void* DestMemoryAddress, bool* isSPMDataLoss) {
+  int ret;
+  struct kfd_ioctl_spm_args args = {0};
+  uint32_t gpu_id = 0;
 
-	ret = hsakmt_validate_nodeid(PreferredNode, &gpu_id);
-	if (ret != HSAKMT_STATUS_SUCCESS) {
-		return ret;
-	}
+  ret = hsakmt_validate_nodeid(PreferredNode, &gpu_id);
+  if (ret != HSAKMT_STATUS_SUCCESS) {
+    return ret;
+  }
 
-	args.timeout    = *timeout;
-	args.dest_buf    = (uint64_t)DestMemoryAddress;
-	args.buf_size   = SizeInBytes;
-	args.op         = KFD_IOCTL_SPM_OP_SET_DEST_BUF;
-	args.gpu_id     = gpu_id;
+  args.timeout = *timeout;
+  args.dest_buf = (uint64_t)DestMemoryAddress;
+  args.buf_size = SizeInBytes;
+  args.op = KFD_IOCTL_SPM_OP_SET_DEST_BUF;
+  args.gpu_id = gpu_id;
 
-	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RLC_SPM, &args);
+  ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RLC_SPM, &args);
 
-	*SizeCopied = args.bytes_copied;
-	*isSPMDataLoss = args.has_data_loss;
-	*timeout = args.timeout;
+  *SizeCopied = args.bytes_copied;
+  *isSPMDataLoss = args.has_data_loss;
+  *timeout = args.timeout;
 
-	return ret;
+  return ret;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtSPMRelease(HSAuint32 PreferredNode)
-{
-	int ret = HSAKMT_STATUS_SUCCESS;
-	struct kfd_ioctl_spm_args args = {0};
-	uint32_t gpu_id;
+HSAKMT_STATUS HSAKMTAPI hsaKmtSPMRelease(HSAuint32 PreferredNode) {
+  int ret = HSAKMT_STATUS_SUCCESS;
+  struct kfd_ioctl_spm_args args = {0};
+  uint32_t gpu_id;
 
-	ret = hsakmt_validate_nodeid(PreferredNode, &gpu_id);
-	if (ret != HSAKMT_STATUS_SUCCESS) {
-		pr_err("[%s] invalid node ID: %d\n", __func__, PreferredNode);
-		return ret;
-	}
+  ret = hsakmt_validate_nodeid(PreferredNode, &gpu_id);
+  if (ret != HSAKMT_STATUS_SUCCESS) {
+    pr_err("[%s] invalid node ID: %d\n", __func__, PreferredNode);
+    return ret;
+  }
 
-	args.op = KFD_IOCTL_SPM_OP_RELEASE;
-	args.gpu_id = gpu_id;
+  args.op = KFD_IOCTL_SPM_OP_RELEASE;
+  args.gpu_id = gpu_id;
 
-	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RLC_SPM, &args);
+  ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RLC_SPM, &args);
 
-	return ret;
+  return ret;
 }
-
-

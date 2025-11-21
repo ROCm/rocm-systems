@@ -161,20 +161,16 @@ void CheckPacketReqiurements() {
 // Initialize the PM4 commands with having the CPU&GPU agents, the counters,
 // counters count to output three packets which are start, stop and read
 // packets
-std::unique_ptr<AQLPacketProfile> InitializeAqlPackets(
-  hsa_agent_t cpu_agent,
-  hsa_agent_t gpu_agent,
-  std::vector<std::string>& counter_names,
-  rocprofiler_session_id_t session_id,
-  bool is_spm
-) {
+std::unique_ptr<AQLPacketProfile> InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
+                                                       std::vector<std::string>& counter_names,
+                                                       rocprofiler_session_id_t session_id,
+                                                       bool is_spm) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton =
       rocprofiler::ROCProfiler_Singleton::GetInstance();
   rocprofiler::HSASupport_Singleton& hsasupport_singleton =
       rocprofiler::HSASupport_Singleton::GetInstance();
-  if (!counters_added.load(std::memory_order_acquire))
-  {
+  if (!counters_added.load(std::memory_order_acquire)) {
     for (auto& name : counter_names) {
       if (rocprofiler_singleton.HasActiveSession()) {
         rocprofiler_singleton.GetSession(session_id)->GetProfiler()->AddCounterName(name);
@@ -210,7 +206,8 @@ std::unique_ptr<AQLPacketProfile> InitializeAqlPackets(
   }
 
   // do {
-  auto prof_context = std::make_unique<AQLPacketProfile>(hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_free_fn);
+  auto prof_context = std::make_unique<AQLPacketProfile>(
+      hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_free_fn);
   auto* context = prof_context->context.get();
   auto* profile = prof_context->profile.get();
 
@@ -319,15 +316,13 @@ std::unique_ptr<AQLPacketProfile> InitializeAqlPackets(
   hsa_agent_t ag_list[ag_list_count];
   ag_list[0] = gpu_agent;
 
-  if (context->events_list.size() == 0)
-    return prof_context;
+  if (context->events_list.size() == 0) return prof_context;
 
   // Preparing an Getting the size of the command and output buffers
   status = hsa_ven_amd_aqlprofile_start(profile, NULL);
   CHECK_HSA_STATUS("Error: Getting Buffers Size", status);
 
-  if (profile->command_buffer.size == 0 || profile->output_buffer.size == 0)
-  {
+  if (profile->command_buffer.size == 0 || profile->output_buffer.size == 0) {
     std::cerr << __FILE__ << ":" << __LINE__ << "Error: Did not return buffer size" << std::endl;
     abort();
   }
@@ -335,7 +330,8 @@ std::unique_ptr<AQLPacketProfile> InitializeAqlPackets(
   status = HSA_STATUS_ERROR;
   size_t size = (profile->command_buffer.size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.cpu_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
+      agentInfo.cpu_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+      reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
   if (status != HSA_STATUS_SUCCESS) {
     profile->command_buffer.ptr = malloc(size);
     /*numa_alloc_onnode(
@@ -356,8 +352,8 @@ std::unique_ptr<AQLPacketProfile> InitializeAqlPackets(
     status = HSA_STATUS_ERROR;
     size_t size = (profile->output_buffer.size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
     status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.kernarg_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &profile->output_buffer.ptr
-    );
+        agentInfo.kernarg_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+        &profile->output_buffer.ptr);
     if (status != HSA_STATUS_SUCCESS) {
       profile->output_buffer.ptr = malloc(size);
       if (profile->output_buffer.ptr == NULL) {
@@ -367,9 +363,10 @@ std::unique_ptr<AQLPacketProfile> InitializeAqlPackets(
       }
     } else {
       status = hsasupport_singleton.GetAmdExtTable().hsa_amd_agents_allow_access_fn(
-        ag_list_count, ag_list, NULL, profile->output_buffer.ptr);
+          ag_list_count, ag_list, NULL, profile->output_buffer.ptr);
       CHECK_HSA_STATUS("Error: GPU Agent can't have output buffer access", status);
-      hsa_amd_memory_fill(profile->output_buffer.ptr, 0, profile->output_buffer.size/sizeof(uint32_t));
+      hsa_amd_memory_fill(profile->output_buffer.ptr, 0,
+                          profile->output_buffer.size / sizeof(uint32_t));
     }
   } else {
     profile->output_buffer.size = 0;
@@ -425,7 +422,8 @@ hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
   if (size <= 0) return nullptr;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.cpu_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
+      agentInfo.cpu_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+      reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
   // Both the CPU and GPU can access the memory
   if (status == HSA_STATUS_SUCCESS) {
     status = hsasupport_singleton.GetAmdExtTable().hsa_amd_agents_allow_access_fn(
@@ -450,7 +448,8 @@ hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
   profile->output_buffer.ptr = nullptr;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.gpu_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, reinterpret_cast<void**>(&(profile->output_buffer.ptr)));
+      agentInfo.gpu_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+      reinterpret_cast<void**>(&(profile->output_buffer.ptr)));
   CHECK_HSA_STATUS("Error: Can't Allocate Output Buffer", status);
   // Both the CPU and GPU can access the kernel arguments
   if (status == HSA_STATUS_SUCCESS) {
@@ -515,8 +514,8 @@ hsa_status_t Allocate(hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_profile_t* p
       AllocateSysMemory(gpu_agent, profile->command_buffer.size, &agentInfo.cpu_pool_);
 
   profile->output_buffer.size = att_buffer_size;
-  profile->output_buffer.ptr = AllocateLocalMemory(profile->output_buffer.size,
-                                                   &agentInfo.gpu_pool_);
+  profile->output_buffer.ptr =
+      AllocateLocalMemory(profile->output_buffer.size, &agentInfo.gpu_pool_);
 
   return (profile->command_buffer.ptr && profile->output_buffer.ptr) ? HSA_STATUS_SUCCESS
                                                                      : HSA_STATUS_ERROR;
@@ -562,13 +561,13 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion-null"
   // Preparing the profile structure to get the packets
-  auto* params = new hsa_ven_amd_aqlprofile_parameter_t[att_params.size()+1];
-  memcpy(params, att_params.data(), att_params.size()*sizeof(params[0]));
+  auto* params = new hsa_ven_amd_aqlprofile_parameter_t[att_params.size() + 1];
+  memcpy(params, att_params.data(), att_params.size() * sizeof(params[0]));
   hsa_ven_amd_aqlprofile_profile_t* profile =
-      new hsa_ven_amd_aqlprofile_profile_t{gpu_agent,      HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE,
-                                           nullptr,        0,
-                                           params,         (uint32_t)att_params.size(),
-                                           NULL,           NULL};
+      new hsa_ven_amd_aqlprofile_profile_t{gpu_agent, HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE,
+                                           nullptr,   0,
+                                           params,    (uint32_t)att_params.size(),
+                                           NULL,      NULL};
 #pragma GCC diagnostic pop
 
   // Check the profile buffer sizes
@@ -596,28 +595,18 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
 // Generate ATT tracer marker packets. Also generate and return
 // the descriptor object which has the PM4 buffer for inserting data
 hsa_ven_amd_aqlprofile_descriptor_t GenerateATTMarkerPackets(
-  hsa_agent_t gpu_agent,
-  packet_t& marker_packet,
-  uint32_t data,
-  hsa_ven_amd_aqlprofile_att_marker_channel_t channel
-)
-{
+    hsa_agent_t gpu_agent, packet_t& marker_packet, uint32_t data,
+    hsa_ven_amd_aqlprofile_att_marker_channel_t channel) {
   // Preparing the profile structure to get the packets
-  auto pool = rocprofiler::HSASupport_Singleton::GetInstance()
-                                                  .GetHSAAgentInfo(gpu_agent.handle)
-                                                  .cpu_pool_;
+  auto pool =
+      rocprofiler::HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle).cpu_pool_;
 
   hsa_ven_amd_aqlprofile_descriptor_t desc{AllocateSysMemory(gpu_agent, 1024, &pool), 1024};
   hsa_ven_amd_aqlprofile_profile_t profile{
-    gpu_agent, HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE,
-    nullptr, 0,
-    nullptr, 0,
-    {}, desc
-  };
+      gpu_agent, HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE, nullptr, 0, nullptr, 0, {}, desc};
 
   hsa_status_t status = hsa_ven_amd_aqlprofile_att_marker(&profile, &marker_packet, data, channel);
-  if (status != HSA_STATUS_SUCCESS)
-  {
+  if (status != HSA_STATUS_SUCCESS) {
     rocprofiler::warning("Could not create ATT Marker Packets.");
     desc.size = 0;
     desc.ptr = nullptr;
@@ -626,8 +615,7 @@ hsa_ven_amd_aqlprofile_descriptor_t GenerateATTMarkerPackets(
   return desc;
 }
 
-void AddVendorSpecificPacket(const packet_t* packet,
-                             std::vector<packet_t>* transformed_packets,
+void AddVendorSpecificPacket(const packet_t* packet, std::vector<packet_t>* transformed_packets,
                              const hsa_signal_t& packet_completion_signal) {
   transformed_packets->emplace_back(*packet).completion_signal = packet_completion_signal;
 }
@@ -643,10 +631,10 @@ void AddVendorSpecificPacket(const packet_t* packet,
 */
 void CreateBarrierPacket(std::vector<packet_t>* transformed_packets,
                          const hsa_signal_t* packet_dependency_signal,
-                         const hsa_signal_t* packet_completion_signal
-                         ) {
+                         const hsa_signal_t* packet_completion_signal) {
   hsa_barrier_and_packet_t barrier{0};
-  barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.header =
+      HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE | (1 << HSA_PACKET_HEADER_BARRIER);
   if (packet_completion_signal != nullptr) barrier.completion_signal = *packet_completion_signal;
   if (packet_dependency_signal != nullptr) barrier.dep_signal[0] = *packet_dependency_signal;
   void* barrier_ptr = &barrier;
@@ -666,20 +654,15 @@ template <typename Integral> constexpr Integral bit_extract(Integral x, int firs
   return (x >> first) & bit_mask<Integral>(0, last - first);
 }
 
-bool IsDispatchPacket(const hsa_barrier_and_packet_t& packet)
-{
-  return bit_extract(
-    packet.header,
-    HSA_PACKET_HEADER_TYPE,
-    HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1
-  ) == HSA_PACKET_TYPE_KERNEL_DISPATCH;
+bool IsDispatchPacket(const hsa_barrier_and_packet_t& packet) {
+  return bit_extract(packet.header, HSA_PACKET_HEADER_TYPE,
+                     HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1) ==
+      HSA_PACKET_TYPE_KERNEL_DISPATCH;
 }
 
 // Returns a list of pointers to dispatch packets.
-std::vector<const hsa_kernel_dispatch_packet_s*> ExtractDispatchPackets(
-  const void* packets,
-  int pkt_count
-) {
+std::vector<const hsa_kernel_dispatch_packet_s*> ExtractDispatchPackets(const void* packets,
+                                                                        int pkt_count) {
   std::vector<const hsa_kernel_dispatch_packet_s*> ret;
   for (int i = 0; i < pkt_count; ++i) {
     auto& original_packet = static_cast<const hsa_barrier_and_packet_t*>(packets)[i];
@@ -687,7 +670,7 @@ std::vector<const hsa_kernel_dispatch_packet_s*> ExtractDispatchPackets(
     // Skip packets other than kernel dispatch packets.
     if (!IsDispatchPacket(original_packet)) continue;
 
-    ret.push_back(static_cast<const hsa_kernel_dispatch_packet_s*>(packets)+i);
+    ret.push_back(static_cast<const hsa_kernel_dispatch_packet_s*>(packets) + i);
   }
   return ret;
 }
@@ -700,8 +683,7 @@ bool AQLPacketProfile::IsDeletingBegin = false;
 std::unordered_map<uint64_t, std::vector<std::unique_ptr<AQLPacketProfile>>> _cache;
 std::mutex cache_mutex;
 
-void AQLPacketProfile::WaitForProfileDeletion()
-{
+void AQLPacketProfile::WaitForProfileDeletion() {
   {
     std::unique_lock<std::mutex> lk(cache_mutex);
     _cache.clear();
@@ -709,20 +691,17 @@ void AQLPacketProfile::WaitForProfileDeletion()
 
   std::unique_lock<std::shared_mutex> lk(deleter_mutex);
 
-  if (valid_profiles.load() == 0)
-  {
+  if (valid_profiles.load() == 0) {
     IsDeletingBegin = true;
     return;
   }
 
-  delete_cv.wait_for(lk, std::chrono::seconds(2), [] () {
-    return ::Packet::AQLPacketProfile::valid_profiles.load() == 0;
-  });
+  delete_cv.wait_for(lk, std::chrono::seconds(2),
+                     []() { return ::Packet::AQLPacketProfile::valid_profiles.load() == 0; });
   IsDeletingBegin = true;
 }
 
-std::unique_ptr<AQLPacketProfile> AQLPacketProfile::MoveFromCache(hsa_agent_t gpu_agent)
-{
+std::unique_ptr<AQLPacketProfile> AQLPacketProfile::MoveFromCache(hsa_agent_t gpu_agent) {
   std::lock_guard<std::mutex> lk(cache_mutex);
 
   auto agent_it = _cache.find(gpu_agent.handle);
@@ -732,42 +711,39 @@ std::unique_ptr<AQLPacketProfile> AQLPacketProfile::MoveFromCache(hsa_agent_t gp
   if (!profile_set.size()) return nullptr;
 
   auto moved = std::move(profile_set.back());
-  profile_set.resize(profile_set.size()-1);
+  profile_set.resize(profile_set.size() - 1);
   return moved;
 }
 
-void AQLPacketProfile::MoveToCache(hsa_agent_t gpu_agent, std::unique_ptr<AQLPacketProfile>&& packet)
-{
+void AQLPacketProfile::MoveToCache(hsa_agent_t gpu_agent,
+                                   std::unique_ptr<AQLPacketProfile>&& packet) {
   if (!packet.get()) return;
 
   std::lock_guard<std::mutex> lk(cache_mutex);
 
   auto agent_it = _cache.find(gpu_agent.handle);
   if (agent_it == _cache.end())
-    agent_it = _cache.emplace(gpu_agent.handle, std::vector<std::unique_ptr<AQLPacketProfile>>{}).first;
+    agent_it =
+        _cache.emplace(gpu_agent.handle, std::vector<std::unique_ptr<AQLPacketProfile>>{}).first;
 
   auto& profile_set = agent_it->second;
   profile_set.emplace_back(std::move(packet));
 }
 
-AQLPacketProfile::~AQLPacketProfile()
-{
+AQLPacketProfile::~AQLPacketProfile() {
   std::shared_lock<std::shared_mutex> deleter_lock(deleter_mutex);
   if (IsDeletingBegin) return;
 
   int old_valid = valid_profiles.fetch_sub(1);
 
-  if (profile->output_buffer.ptr)
-    free_fn(profile->output_buffer.ptr);
+  if (profile->output_buffer.ptr) free_fn(profile->output_buffer.ptr);
   profile->output_buffer.ptr = nullptr;
   profile->output_buffer.size = 0;
-  if (profile->command_buffer.ptr)
-    free_fn(profile->command_buffer.ptr);
+  if (profile->command_buffer.ptr) free_fn(profile->command_buffer.ptr);
   profile->command_buffer.ptr = nullptr;
   profile->command_buffer.size = 0;
 
-  if (old_valid <= 1)
-    delete_cv.notify_all();
+  if (old_valid <= 1) delete_cv.notify_all();
 }
 
 }  // namespace Packet

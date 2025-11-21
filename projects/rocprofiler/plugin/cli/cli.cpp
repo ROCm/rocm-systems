@@ -137,8 +137,8 @@ class file_plugin_t {
   }
 
  public:
-  file_plugin_t() { 
-    valid_ = true; 
+  file_plugin_t() {
+    valid_ = true;
     kernel_filters_ = GetKernelFilters();
   }
 
@@ -212,7 +212,7 @@ class file_plugin_t {
 
   void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
                            rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
-    auto check_filter_cache = [&](const char * k_name) {
+    auto check_filter_cache = [&](const char* k_name) {
       auto str = std::string{k_name};
       auto f = kernel_filter_cache_.find(k_name);
       if (f == kernel_filter_cache_.end()) {
@@ -240,34 +240,29 @@ class file_plugin_t {
     if (name_length > 1) {
       CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                       profiler_record->kernel_id, &kernel_name_c));
-      if (kernel_name_c != nullptr && !kernel_filters_.empty() && !check_filter_cache(kernel_name_c)) {
+      if (kernel_name_c != nullptr && !kernel_filters_.empty() &&
+          !check_filter_cache(kernel_name_c)) {
         free(const_cast<char*>(kernel_name_c));
         return;
       }
     }
-    *output_file << "Dispatch_ID(" << std::to_string(profiler_record->header.id.handle) << "), "
-                 << "GPU_ID(" << std::to_string(profiler_record->gpu_id.handle) << "), "
-                 << "Queue_ID(" << std::to_string(profiler_record->queue_id.handle) << "), "
-                 << "Process_ID(" << std::to_string(GetPid()) << "), "
-                 << "Thread_ID(" << std::to_string(profiler_record->thread_id.value) << "), "
-                 << "Grid_Size(" << std::to_string(profiler_record->kernel_properties.grid_size)
-                 << "), "
-                 << "Workgroup_Size("
-                 << std::to_string(profiler_record->kernel_properties.workgroup_size) << "), "
-                 << "LDS_Per_Workgroup("
-                 << std::to_string(
-                        ((profiler_record->kernel_properties.lds_size + (lds_block_size - 1)) &
-                         ~(lds_block_size - 1)))
-                 << "), "
-                 << "Scratch_Per_Workitem("
-                 << std::to_string(profiler_record->kernel_properties.scratch_size) << "), "
-                 << "Arch_VGPR("
-                 << std::to_string(profiler_record->kernel_properties.arch_vgpr_count) << "), "
-                 << "Accum_VGPR("
-                 << std::to_string(profiler_record->kernel_properties.accum_vgpr_count) << "), "
-                 << "SGPR(" << std::to_string(profiler_record->kernel_properties.sgpr_count)
-                 << "), "
-                 << "Wave_Size(" << std::to_string(profiler_record->kernel_properties.wave_size);
+    *output_file
+        << "Dispatch_ID(" << std::to_string(profiler_record->header.id.handle) << "), " << "GPU_ID("
+        << std::to_string(profiler_record->gpu_id.handle) << "), " << "Queue_ID("
+        << std::to_string(profiler_record->queue_id.handle) << "), " << "Process_ID("
+        << std::to_string(GetPid()) << "), " << "Thread_ID("
+        << std::to_string(profiler_record->thread_id.value) << "), " << "Grid_Size("
+        << std::to_string(profiler_record->kernel_properties.grid_size) << "), "
+        << "Workgroup_Size(" << std::to_string(profiler_record->kernel_properties.workgroup_size)
+        << "), " << "LDS_Per_Workgroup("
+        << std::to_string(((profiler_record->kernel_properties.lds_size + (lds_block_size - 1)) &
+                           ~(lds_block_size - 1)))
+        << "), " << "Scratch_Per_Workitem("
+        << std::to_string(profiler_record->kernel_properties.scratch_size) << "), " << "Arch_VGPR("
+        << std::to_string(profiler_record->kernel_properties.arch_vgpr_count) << "), "
+        << "Accum_VGPR(" << std::to_string(profiler_record->kernel_properties.accum_vgpr_count)
+        << "), " << "SGPR(" << std::to_string(profiler_record->kernel_properties.sgpr_count)
+        << "), " << "Wave_Size(" << std::to_string(profiler_record->kernel_properties.wave_size);
     std::string kernel_name = "";
     if (name_length > 1) {
       kernel_name = rocprofiler::truncate_name(rocprofiler::cxx_demangle(kernel_name_c));
@@ -278,14 +273,11 @@ class file_plugin_t {
         found = kernel_name.rfind(key, found - 1);
       }
     }
-    *output_file << "), "
-                 << "Kernel_Name(\"" << kernel_name << "\"), "
-                 << "Begin_Timestamp(" << std::to_string(profiler_record->timestamps.begin.value)
-                 << "), "
+    *output_file << "), " << "Kernel_Name(\"" << kernel_name << "\"), " << "Begin_Timestamp("
+                 << std::to_string(profiler_record->timestamps.begin.value) << "), "
                  << "End_Timestamp(" << std::to_string(profiler_record->timestamps.end.value)
-                 << "), "
-                 << "Correlation_ID(" << std::to_string(profiler_record->correlation_id.value)
-                 << ")";
+                 << "), " << "Correlation_ID("
+                 << std::to_string(profiler_record->correlation_id.value) << ")";
 
     // For Counters
     if (profiler_record->counters) {
@@ -318,11 +310,10 @@ class file_plugin_t {
     output_file_t* output_file{nullptr};
     output_file = get_output_file(output_type_t::PC_SAMPLING);
     const auto& sample = pc_sampling_record->pc_sample;
-    *output_file << "dispatch[" << sample.dispatch_id.value << "], "
-                 << "timestamp(" << sample.timestamp.value << "), "
-                 << "gpu_id(" << sample.gpu_id.handle << "), "
-                 << "pc-sample(" << std::hex << std::showbase << sample.pc << "), "
-                 << "se(" << sample.se << ')' << std::endl;
+    *output_file << "dispatch[" << sample.dispatch_id.value << "], " << "timestamp("
+                 << sample.timestamp.value << "), " << "gpu_id(" << sample.gpu_id.handle << "), "
+                 << "pc-sample(" << std::hex << std::showbase << sample.pc << "), " << "se("
+                 << sample.se << ')' << std::endl;
   }
   int WriteBufferRecords(const rocprofiler_record_header_t* begin,
                          const rocprofiler_record_header_t* end,

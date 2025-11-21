@@ -30,27 +30,24 @@
 
 HsaVersionInfo hsakmt_kfd_version_info;
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo *VersionInfo)
-{
-	CHECK_KFD_OPEN();
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo* VersionInfo) {
+  CHECK_KFD_OPEN();
 
-	*VersionInfo = hsakmt_kfd_version_info;
+  *VersionInfo = hsakmt_kfd_version_info;
 
-	return HSAKMT_STATUS_SUCCESS;
+  return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS hsakmt_init_kfd_version(void)
-{
-	struct kfd_ioctl_get_version_args args = {0};
+HSAKMT_STATUS hsakmt_init_kfd_version(void) {
+  struct kfd_ioctl_get_version_args args = {0};
 
-	if (hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_GET_VERSION, &args) == -1)
-		return HSAKMT_STATUS_ERROR;
+  if (hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_GET_VERSION, &args) == -1)
+    return HSAKMT_STATUS_ERROR;
 
-	hsakmt_kfd_version_info.KernelInterfaceMajorVersion = args.major_version;
-	hsakmt_kfd_version_info.KernelInterfaceMinorVersion = args.minor_version;
+  hsakmt_kfd_version_info.KernelInterfaceMajorVersion = args.major_version;
+  hsakmt_kfd_version_info.KernelInterfaceMinorVersion = args.minor_version;
 
-	if (args.major_version != 1)
-		return HSAKMT_STATUS_DRIVER_MISMATCH;
+  if (args.major_version != 1) return HSAKMT_STATUS_DRIVER_MISMATCH;
 
-	return HSAKMT_STATUS_SUCCESS;
+  return HSAKMT_STATUS_SUCCESS;
 }

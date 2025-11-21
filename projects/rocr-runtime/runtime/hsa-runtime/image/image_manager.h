@@ -65,26 +65,22 @@ class ImageManager {
 
   /// @brief Retrieve device specific image property of a certain format
   /// and geometry.
-  virtual ImageProperty GetImageProperty(
-      hsa_agent_t component, const hsa_ext_image_format_t& format,
-      hsa_ext_image_geometry_t geometry) const = 0;
+  virtual ImageProperty GetImageProperty(hsa_agent_t component,
+                                         const hsa_ext_image_format_t& format,
+                                         hsa_ext_image_geometry_t geometry) const = 0;
 
   /// @brief Retrieve device specific supported max width, height, depth,
   /// and array size of an image geometry.
-  virtual void GetImageInfoMaxDimension(hsa_agent_t component,
-                                        hsa_ext_image_geometry_t geometry,
-                                        uint32_t& width, uint32_t& height,
-                                        uint32_t& depth,
+  virtual void GetImageInfoMaxDimension(hsa_agent_t component, hsa_ext_image_geometry_t geometry,
+                                        uint32_t& width, uint32_t& height, uint32_t& depth,
                                         uint32_t& array_size) const = 0;
 
   /// @brief Calculate the size and alignment of the backing storage of an
   /// image.
   virtual hsa_status_t CalculateImageSizeAndAlignment(
       hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
-      hsa_ext_image_data_layout_t image_data_layout,
-      size_t image_data_row_pitch,
-      size_t image_data_slice_pitch,
-      hsa_ext_image_data_info_t& image_info) const = 0;
+      hsa_ext_image_data_layout_t image_data_layout, size_t image_data_row_pitch,
+      size_t image_data_slice_pitch, hsa_ext_image_data_info_t& image_info) const = 0;
 
   /// @brief Fill image structure with device specific image object.
   virtual hsa_status_t PopulateImageSrd(Image& image) const = 0;
@@ -94,26 +90,24 @@ class ImageManager {
 
   /// @brief Modify device specific image object according to the specified
   /// new format.
-  virtual hsa_status_t ModifyImageSrd(
-      Image& image, hsa_ext_image_format_t& new_format) const = 0;
+  virtual hsa_status_t ModifyImageSrd(Image& image, hsa_ext_image_format_t& new_format) const = 0;
 
   /// @brief Fill sampler structure with device specific sampler object.
   virtual hsa_status_t PopulateSamplerSrd(Sampler& sampler) const = 0;
 
   // @brief Copy the content of a linear memory to an image object.
-  virtual hsa_status_t CopyBufferToImage(
-      const void* src_memory, size_t src_row_pitch, size_t src_slice_pitch,
-      const Image& dst_image, const hsa_ext_image_region_t& image_region);
+  virtual hsa_status_t CopyBufferToImage(const void* src_memory, size_t src_row_pitch,
+                                         size_t src_slice_pitch, const Image& dst_image,
+                                         const hsa_ext_image_region_t& image_region);
 
   /// @brief Copy the content of an image object to a linear memory.
-  virtual hsa_status_t CopyImageToBuffer(
-      const Image& src_image, void* dst_memory, size_t dst_row_pitch,
-      size_t dst_slice_pitch, const hsa_ext_image_region_t& image_region);
+  virtual hsa_status_t CopyImageToBuffer(const Image& src_image, void* dst_memory,
+                                         size_t dst_row_pitch, size_t dst_slice_pitch,
+                                         const hsa_ext_image_region_t& image_region);
 
   /// @brief Transfer images backing storage.
   virtual hsa_status_t CopyImage(const Image& dst_image, const Image& src_image,
-                                 const hsa_dim3_t& dst_origin,
-                                 const hsa_dim3_t& src_origin,
+                                 const hsa_dim3_t& dst_origin, const hsa_dim3_t& src_origin,
                                  const hsa_dim3_t size);
 
   /// @brief Fill image backing storage using host copy.
@@ -131,12 +125,12 @@ class ImageManager {
 
   static float LinearToStandardRGB(float l_val);
 
-  static void FormatPattern(const hsa_ext_image_format_t& format,
-                            const void* pattern_in, void* pattern_out);
+  static void FormatPattern(const hsa_ext_image_format_t& format, const void* pattern_in,
+                            void* pattern_out);
 
   template <typename dstT, typename srcT>
-  static inline hsa_status_t convertAddressMode(dstT &word,
-                            const hsa_ext_sampler_addressing_mode32_t address_mode[3]) {
+  static inline hsa_status_t convertAddressMode(
+      dstT& word, const hsa_ext_sampler_addressing_mode32_t address_mode[3]) {
     srcT clamp[3];
     for (int i = 0; i < 3; i++) {
       switch (address_mode[i]) {
@@ -162,6 +156,7 @@ class ImageManager {
     word.bits.CLAMP_Z = static_cast<unsigned int>(clamp[2]);
     return HSA_STATUS_SUCCESS;
   }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(ImageManager);
 };

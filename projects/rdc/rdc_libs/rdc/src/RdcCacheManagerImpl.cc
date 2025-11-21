@@ -565,7 +565,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_health_get_values(
         break;
       }
     }  // end for
-  }    // end if
+  }  // end if
 
   if ((RDC_ST_OK == result) && (end_value != nullptr)) {
     // get end value
@@ -583,7 +583,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_health_get_values(
         break;
       }
     }  // end for
-  }    // end if
+  }  // end if
 
   return result;
 }

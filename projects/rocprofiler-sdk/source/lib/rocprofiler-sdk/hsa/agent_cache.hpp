@@ -58,7 +58,7 @@ public:
     AgentCache(const AgentCache&)     = default;
     AgentCache(AgentCache&&) noexcept = default;
 
-    AgentCache& operator=(const AgentCache&) = default;
+    AgentCache& operator=(const AgentCache&)     = default;
     AgentCache& operator=(AgentCache&&) noexcept = default;
 
     // Provides const and a non-const accessor functions.

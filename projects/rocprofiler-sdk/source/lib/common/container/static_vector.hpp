@@ -45,10 +45,10 @@ struct static_vector
     using this_type  = static_vector<Tp, N>;
     using value_type = Tp;
 
-    static_vector()                         = default;
-    static_vector(const static_vector&)     = default;
-    static_vector(static_vector&&) noexcept = default;
-    static_vector& operator=(const static_vector&) = default;
+    static_vector()                                    = default;
+    static_vector(const static_vector&)                = default;
+    static_vector(static_vector&&) noexcept            = default;
+    static_vector& operator=(const static_vector&)     = default;
     static_vector& operator=(static_vector&&) noexcept = default;
 
     explicit static_vector(size_t _n, Tp _v = {});

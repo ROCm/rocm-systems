@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 #include "rocm_async.hpp"
 
@@ -15,7 +15,6 @@
 #include <sstream>
 
 void RocmAsync::RunIOBenchmark(async_trans_t& trans) {
-
   std::cout << "Unsupported Request - Read / Write" << std::endl;
   exit(1);
 }

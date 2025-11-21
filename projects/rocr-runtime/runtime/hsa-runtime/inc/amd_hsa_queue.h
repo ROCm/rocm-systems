@@ -136,19 +136,19 @@ typedef struct AMD_QUEUE_ALIGN amd_queue_v2_s {
   uint64_t scratch_backing_memory_byte_size;
   uint32_t scratch_wave64_lane_byte_size;
   amd_queue_properties32_t queue_properties;
-  volatile uint64_t scratch_max_use_index;       /* V2 */
+  volatile uint64_t scratch_max_use_index; /* V2 */
   hsa_signal_t queue_inactive_signal;
   volatile uint64_t alt_scratch_max_use_index;  /* V2 */
-  uint32_t alt_scratch_resource_descriptor[4];   /* V2 */
-  uint64_t alt_scratch_backing_memory_location;  /* V2 */
-  uint32_t alt_scratch_dispatch_limit_x;         /* V2 */
-  uint32_t alt_scratch_dispatch_limit_y;         /* V2 */
-  uint32_t alt_scratch_dispatch_limit_z;         /* V2 */
-  uint32_t alt_scratch_wave64_lane_byte_size;    /* V2 */
-  uint32_t alt_compute_tmpring_size;             /* V2 */
+  uint32_t alt_scratch_resource_descriptor[4];  /* V2 */
+  uint64_t alt_scratch_backing_memory_location; /* V2 */
+  uint32_t alt_scratch_dispatch_limit_x;        /* V2 */
+  uint32_t alt_scratch_dispatch_limit_y;        /* V2 */
+  uint32_t alt_scratch_dispatch_limit_z;        /* V2 */
+  uint32_t alt_scratch_wave64_lane_byte_size;   /* V2 */
+  uint32_t alt_compute_tmpring_size;            /* V2 */
   uint32_t reserved5;
 
   scratch_last_used_index_xcc_t scratch_last_used_index[MAX_NUM_XCC];
 } amd_queue_v2_t;
 
-#endif // AMD_HSA_QUEUE_H
+#endif  // AMD_HSA_QUEUE_H

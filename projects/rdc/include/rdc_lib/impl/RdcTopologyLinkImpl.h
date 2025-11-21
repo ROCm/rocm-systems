@@ -51,7 +51,6 @@ class RdcTopologyLinkImpl : public RdcTopologyLink {
  private:
   RdcGroupSettingsPtr group_settings_;
   RdcMetricFetcherPtr metric_fetcher_;
-  
 };
 
 }  // namespace rdc

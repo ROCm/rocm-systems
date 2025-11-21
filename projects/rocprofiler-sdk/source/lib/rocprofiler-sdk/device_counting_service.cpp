@@ -36,7 +36,8 @@ namespace
 constexpr auto rocprofiler_context_none = ROCPROFILER_CONTEXT_NONE;
 }
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_device_counting_service(rocprofiler_context_id_t                 context_id,
                                               rocprofiler_buffer_id_t                  buffer_id,

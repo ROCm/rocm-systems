@@ -167,7 +167,7 @@ public:
     , size(size_)
     , doorbell()
     , device(buffer_->device)
-    , buffer(buffer_){};
+    , buffer(buffer_) {};
 
     //! Submits a packet to the runtime buffer
     void submit(const packet_union_t& pkt) { buffer->submit(pkt); }

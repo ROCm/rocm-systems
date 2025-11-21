@@ -60,8 +60,7 @@ PYBIND11_MODULE(libpyroctx, pyroctx)
         [](const std::string& _msg) { return roctxRangePushA(_msg.c_str()); },
         "Start a new nested range");
 
-    pyroctx.def(
-        "roctxRangePop", []() { return roctxRangePop(); }, "Stop the current nested range");
+    pyroctx.def("roctxRangePop", []() { return roctxRangePop(); }, "Stop the current nested range");
 
     pyroctx.def(
         "roctxRangeStart",

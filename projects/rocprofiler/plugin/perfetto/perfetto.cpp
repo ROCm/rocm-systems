@@ -413,7 +413,8 @@ class perfetto_plugin_t {
           case 1: {
             std::unordered_map<uint64_t, perfetto::Track>::iterator roctx_track_it;
             {
-              uint64_t rtx_track_id = getTrackID(TrackType::ROCTX_PUSH_RANGE, machine_id_, 0, thread_id);
+              uint64_t rtx_track_id =
+                  getTrackID(TrackType::ROCTX_PUSH_RANGE, machine_id_, 0, thread_id);
               roctx_track_it = roctx_push_tracks_.find(rtx_track_id);
               if (roctx_track_it == roctx_push_tracks_.end()) {
                 roctx_track_it =
@@ -437,7 +438,8 @@ class perfetto_plugin_t {
           case 3: {
             std::unordered_map<uint64_t, perfetto::Track>::iterator roctx_track_it;
             {
-              uint64_t rtx_track_id = getTrackID(TrackType::ROCTX_START_RANGE, machine_id_, 0, thread_id);
+              uint64_t rtx_track_id =
+                  getTrackID(TrackType::ROCTX_START_RANGE, machine_id_, 0, thread_id);
               roctx_track_it = roctx_start_tracks_.find(rtx_track_id);
               if (roctx_track_it == roctx_start_tracks_.end()) {
                 roctx_track_it =
@@ -461,7 +463,8 @@ class perfetto_plugin_t {
           case 2: {
             std::unordered_map<uint64_t, perfetto::Track>::iterator roctx_track_it;
             {
-              uint64_t rtx_track_id = getTrackID(TrackType::ROCTX_PUSH_RANGE, machine_id_, 0, thread_id);
+              uint64_t rtx_track_id =
+                  getTrackID(TrackType::ROCTX_PUSH_RANGE, machine_id_, 0, thread_id);
               roctx_track_it = roctx_push_tracks_.find(rtx_track_id);
               if (roctx_track_it == roctx_push_tracks_.end()) {
                 roctx_track_it =
@@ -482,7 +485,8 @@ class perfetto_plugin_t {
           case 4: {
             std::unordered_map<uint64_t, perfetto::Track>::iterator roctx_track_it;
             {
-              uint64_t rtx_track_id = getTrackID(TrackType::ROCTX_START_RANGE, machine_id_, 0, thread_id);
+              uint64_t rtx_track_id =
+                  getTrackID(TrackType::ROCTX_START_RANGE, machine_id_, 0, thread_id);
               roctx_track_it = roctx_start_tracks_.find(rtx_track_id);
               if (roctx_track_it == roctx_start_tracks_.end()) {
                 roctx_track_it =

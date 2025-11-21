@@ -51,9 +51,8 @@ typedef struct _HsaKFDContext HsaKFDContext;
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtOpenKFDCtx(
-    HsaKFDContext **pCtx   //IN/OUT
-    );
+hsaKmtOpenKFDCtx(HsaKFDContext** pCtx  // IN/OUT
+);
 
 /**
   The context-aware version for closing the kfd device.
@@ -72,7 +71,7 @@ hsaKmtOpenKFDCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtCloseKFDCtx( void );
+hsaKmtCloseKFDCtx(void);
 
 /**
   The function takes a "snapshot" of the topology information within the KFD
@@ -81,10 +80,9 @@ hsaKmtCloseKFDCtx( void );
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtAcquireSystemPropertiesCtx(
-    HsaKFDContext         *ctx,               //IN
-    HsaSystemProperties*  SystemProperties    //OUT
-    );
+hsaKmtAcquireSystemPropertiesCtx(HsaKFDContext* ctx,                    // IN
+                                 HsaSystemProperties* SystemProperties  // OUT
+);
 
 /**
   Releases the topology "snapshot" taken by hsaKmtAcquireSystemProperties()
@@ -92,9 +90,8 @@ hsaKmtAcquireSystemPropertiesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtReleaseSystemPropertiesCtx(
-    HsaKFDContext         *ctx              //IN
-    );
+hsaKmtReleaseSystemPropertiesCtx(HsaKFDContext* ctx  // IN
+);
 
 /**
   Retrieves the discoverable sub-properties for a given HSA
@@ -104,11 +101,10 @@ hsaKmtReleaseSystemPropertiesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtGetNodePropertiesCtx(
-    HsaKFDContext          *ctx,              //IN
-    HSAuint32              NodeId,            //IN
-    HsaNodeProperties*     NodeProperties     //OUT
-    );
+hsaKmtGetNodePropertiesCtx(HsaKFDContext* ctx,                // IN
+                           HSAuint32 NodeId,                  // IN
+                           HsaNodeProperties* NodeProperties  // OUT
+);
 
 /**
   Retrieves the memory properties of a specific HSA node.
@@ -122,12 +118,11 @@ hsaKmtGetNodePropertiesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtGetNodeMemoryPropertiesCtx(
-    HsaKFDContext         *ctx,               //IN
-    HSAuint32             NodeId,             //IN
-    HSAuint32             NumBanks,           //IN
-    HsaMemoryProperties*  MemoryProperties    //OUT
-    );
+hsaKmtGetNodeMemoryPropertiesCtx(HsaKFDContext* ctx,                    // IN
+                                 HSAuint32 NodeId,                      // IN
+                                 HSAuint32 NumBanks,                    // IN
+                                 HsaMemoryProperties* MemoryProperties  // OUT
+);
 
 /**
   Retrieves the cache properties of a specific HSA node and processor ID.
@@ -143,13 +138,12 @@ hsaKmtGetNodeMemoryPropertiesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtGetNodeCachePropertiesCtx(
-    HsaKFDContext       *ctx,           //IN
-    HSAuint32           NodeId,         //IN
-    HSAuint32           ProcessorId,    //IN
-    HSAuint32           NumCaches,      //IN
-    HsaCacheProperties* CacheProperties //OUT
-    );
+hsaKmtGetNodeCachePropertiesCtx(HsaKFDContext* ctx,                  // IN
+                                HSAuint32 NodeId,                    // IN
+                                HSAuint32 ProcessorId,               // IN
+                                HSAuint32 NumCaches,                 // IN
+                                HsaCacheProperties* CacheProperties  // OUT
+);
 
 /**
   Retrieves the HSA IO affinity properties of a specific HSA node.
@@ -163,12 +157,11 @@ hsaKmtGetNodeCachePropertiesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtGetNodeIoLinkPropertiesCtx(
-    HsaKFDContext        *ctx,              //IN
-    HSAuint32            NodeId,            //IN
-    HSAuint32            NumIoLinks,        //IN
-    HsaIoLinkProperties* IoLinkProperties   //OUT
-    );
+hsaKmtGetNodeIoLinkPropertiesCtx(HsaKFDContext* ctx,                    // IN
+                                 HSAuint32 NodeId,                      // IN
+                                 HSAuint32 NumIoLinks,                  // IN
+                                 HsaIoLinkProperties* IoLinkProperties  // OUT
+);
 
 
 /**
@@ -177,13 +170,12 @@ hsaKmtGetNodeIoLinkPropertiesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtCreateEventCtx(
-    HsaKFDContext       *ctx,           //IN
-    HsaEventDescriptor* EventDesc,      //IN
-    bool                ManualReset,    //IN
-    bool                IsSignaled,     //IN
-    HsaEvent**          Event           //OUT
-    );
+hsaKmtCreateEventCtx(HsaKFDContext* ctx,             // IN
+                     HsaEventDescriptor* EventDesc,  // IN
+                     bool ManualReset,               // IN
+                     bool IsSignaled,                // IN
+                     HsaEvent** Event                // OUT
+);
 
 /**
   Destroys an operating system event associated with a HSA event ID
@@ -191,10 +183,9 @@ hsaKmtCreateEventCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtDestroyEventCtx(
-    HsaKFDContext       *ctx,    //IN
-    HsaEvent*           Event    //IN
-    );
+hsaKmtDestroyEventCtx(HsaKFDContext* ctx,  // IN
+                      HsaEvent* Event      // IN
+);
 
 /**
   Sets the specified event object to the signaled state
@@ -202,10 +193,9 @@ hsaKmtDestroyEventCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSetEventCtx(
-    HsaKFDContext       *ctx,    //IN
-    HsaEvent*           Event    //IN
-    );
+hsaKmtSetEventCtx(HsaKFDContext* ctx,  // IN
+                  HsaEvent* Event      // IN
+);
 
 /**
   Sets the specified event object to the non-signaled state
@@ -213,10 +203,9 @@ hsaKmtSetEventCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtResetEventCtx(
-    HsaKFDContext       *ctx,    //IN
-    HsaEvent*           Event    //IN
-    );
+hsaKmtResetEventCtx(HsaKFDContext* ctx,  // IN
+                    HsaEvent* Event      // IN
+);
 
 /**
   Queries the state of the specified event object
@@ -224,10 +213,9 @@ hsaKmtResetEventCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtQueryEventStateCtx(
-    HsaKFDContext       *ctx,    //IN
-    HsaEvent*           Event    //IN
-    );
+hsaKmtQueryEventStateCtx(HsaKFDContext* ctx,  // IN
+                         HsaEvent* Event      // IN
+);
 
 /**
   Checks the current state of the event object. If the object's state is
@@ -240,11 +228,10 @@ hsaKmtQueryEventStateCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtWaitOnEventCtx(
-    HsaKFDContext       *ctx,           //IN
-    HsaEvent*           Event,          //IN
-    HSAuint32           Milliseconds    //IN
-    );
+hsaKmtWaitOnEventCtx(HsaKFDContext* ctx,     // IN
+                     HsaEvent* Event,        // IN
+                     HSAuint32 Milliseconds  // IN
+);
 
 /**
   Checks the current state of the event object. If the object's state is
@@ -259,12 +246,11 @@ hsaKmtWaitOnEventCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtWaitOnEvent_ExtCtx(
-    HsaKFDContext       *ctx,           //IN
-    HsaEvent*           Event,          //IN
-    HSAuint32           Milliseconds,   //IN
-    uint64_t            *event_age      //IN/OUT
-    );
+hsaKmtWaitOnEvent_ExtCtx(HsaKFDContext* ctx,      // IN
+                         HsaEvent* Event,         // IN
+                         HSAuint32 Milliseconds,  // IN
+                         uint64_t* event_age      // IN/OUT
+);
 
 /**
   Checks the current state of multiple event objects.
@@ -280,13 +266,12 @@ hsaKmtWaitOnEvent_ExtCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtWaitOnMultipleEventsCtx(
-    HsaKFDContext       *ctx,           //IN
-    HsaEvent*           Events[],       //IN
-    HSAuint32           NumEvents,      //IN
-    bool                WaitOnAll,      //IN
-    HSAuint32           Milliseconds    //IN
-    );
+hsaKmtWaitOnMultipleEventsCtx(HsaKFDContext* ctx,     // IN
+                              HsaEvent* Events[],     // IN
+                              HSAuint32 NumEvents,    // IN
+                              bool WaitOnAll,         // IN
+                              HSAuint32 Milliseconds  // IN
+);
 
 /**
   Checks the current state of multiple event objects.
@@ -304,14 +289,13 @@ hsaKmtWaitOnMultipleEventsCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtWaitOnMultipleEvents_ExtCtx(
-    HsaKFDContext       *ctx,           //IN
-    HsaEvent*           Events[],       //IN
-    HSAuint32           NumEvents,      //IN
-    bool                WaitOnAll,      //IN
-    HSAuint32           Milliseconds,   //IN
-    uint64_t            *event_age      //IN/OUT
-    );
+hsaKmtWaitOnMultipleEvents_ExtCtx(HsaKFDContext* ctx,      // IN
+                                  HsaEvent* Events[],      // IN
+                                  HSAuint32 NumEvents,     // IN
+                                  bool WaitOnAll,          // IN
+                                  HSAuint32 Milliseconds,  // IN
+                                  uint64_t* event_age      // IN/OUT
+);
 
 /**
   Creates a GPU queue with user-mode access rights
@@ -319,17 +303,16 @@ hsaKmtWaitOnMultipleEvents_ExtCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtCreateQueueCtx(
-    HsaKFDContext       *ctx,             //IN
-    HSAuint32           NodeId,           //IN
-    HSA_QUEUE_TYPE      Type,             //IN
-    HSAuint32           QueuePercentage,  //IN
-    HSA_QUEUE_PRIORITY  Priority,         //IN
-    void*               QueueAddress,     //IN
-    HSAuint64           QueueSizeInBytes, //IN
-    HsaEvent*           Event,            //IN
-    HsaQueueResource*   QueueResource     //OUT
-    );
+hsaKmtCreateQueueCtx(HsaKFDContext* ctx,              // IN
+                     HSAuint32 NodeId,                // IN
+                     HSA_QUEUE_TYPE Type,             // IN
+                     HSAuint32 QueuePercentage,       // IN
+                     HSA_QUEUE_PRIORITY Priority,     // IN
+                     void* QueueAddress,              // IN
+                     HSAuint64 QueueSizeInBytes,      // IN
+                     HsaEvent* Event,                 // IN
+                     HsaQueueResource* QueueResource  // OUT
+);
 
 /**
   Creates a GPU queue with user-mode access rights
@@ -337,18 +320,17 @@ hsaKmtCreateQueueCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtCreateQueueExtCtx(
-    HsaKFDContext       *ctx,             //IN
-    HSAuint32           NodeId,           //IN
-    HSA_QUEUE_TYPE      Type,             //IN
-    HSAuint32           QueuePercentage,  //IN
-    HSA_QUEUE_PRIORITY  Priority,         //IN
-    HSAuint32           SdmaEngineId,     //IN
-    void*               QueueAddress,     //IN
-    HSAuint64           QueueSizeInBytes, //IN
-    HsaEvent*           Event,            //IN
-    HsaQueueResource*   QueueResource     //OUT
-    );
+hsaKmtCreateQueueExtCtx(HsaKFDContext* ctx,              // IN
+                        HSAuint32 NodeId,                // IN
+                        HSA_QUEUE_TYPE Type,             // IN
+                        HSAuint32 QueuePercentage,       // IN
+                        HSA_QUEUE_PRIORITY Priority,     // IN
+                        HSAuint32 SdmaEngineId,          // IN
+                        void* QueueAddress,              // IN
+                        HSAuint64 QueueSizeInBytes,      // IN
+                        HsaEvent* Event,                 // IN
+                        HsaQueueResource* QueueResource  // OUT
+);
 
 /**
   Updates a queue
@@ -356,15 +338,14 @@ hsaKmtCreateQueueExtCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtUpdateQueueCtx(
-    HsaKFDContext       *ctx,             //IN
-    HSA_QUEUEID         QueueId,          //IN
-    HSAuint32           QueuePercentage,  //IN
-    HSA_QUEUE_PRIORITY  Priority,         //IN
-    void*               QueueAddress,     //IN
-    HSAuint64           QueueSize,        //IN
-    HsaEvent*           Event             //IN
-    );
+hsaKmtUpdateQueueCtx(HsaKFDContext* ctx,           // IN
+                     HSA_QUEUEID QueueId,          // IN
+                     HSAuint32 QueuePercentage,    // IN
+                     HSA_QUEUE_PRIORITY Priority,  // IN
+                     void* QueueAddress,           // IN
+                     HSAuint64 QueueSize,          // IN
+                     HsaEvent* Event               // IN
+);
 
 /**
   Destroys a queue
@@ -372,10 +353,9 @@ hsaKmtUpdateQueueCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtDestroyQueueCtx(
-    HsaKFDContext       *ctx,           //IN
-    HSA_QUEUEID         QueueId         //IN
-    );
+hsaKmtDestroyQueueCtx(HsaKFDContext* ctx,  // IN
+                      HSA_QUEUEID QueueId  // IN
+);
 
 /**
   Set cu mask for a queue
@@ -383,35 +363,33 @@ hsaKmtDestroyQueueCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSetQueueCUMaskCtx(
-    HsaKFDContext       *ctx,           //IN
-    HSA_QUEUEID         QueueId,        //IN
-    HSAuint32           CUMaskCount,    //IN
-    HSAuint32*          QueueCUMask     //IN
-    );
+hsaKmtSetQueueCUMaskCtx(HsaKFDContext* ctx,     // IN
+                        HSA_QUEUEID QueueId,    // IN
+                        HSAuint32 CUMaskCount,  // IN
+                        HSAuint32* QueueCUMask  // IN
+);
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtGetQueueInfoCtx(
-    HsaKFDContext       *ctx,           //IN
-    HSA_QUEUEID         QueueId,        //IN
-    HsaQueueInfo        *QueueInfo      //IN
-    );
+hsaKmtGetQueueInfoCtx(HsaKFDContext* ctx,      // IN
+                      HSA_QUEUEID QueueId,     // IN
+                      HsaQueueInfo* QueueInfo  // IN
+);
 
 /**
-  Allows an HSA process to set/change the default and alternate memory coherency, before starting to dispatch.
+  Allows an HSA process to set/change the default and alternate memory coherency, before starting to
+  dispatch.
 */
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSetMemoryPolicyCtx(
-    HsaKFDContext      *ctx,                      //IN
-    HSAuint32          Node,                      //IN
-    HSAuint32          DefaultPolicy,             //IN
-    HSAuint32          AlternatePolicy,           //IN
-    void*              MemoryAddressAlternate,    //IN (page-aligned)
-    HSAuint64          MemorySizeInBytes          //IN (page-aligned)
-    );
+hsaKmtSetMemoryPolicyCtx(HsaKFDContext* ctx,            // IN
+                         HSAuint32 Node,                // IN
+                         HSAuint32 DefaultPolicy,       // IN
+                         HSAuint32 AlternatePolicy,     // IN
+                         void* MemoryAddressAlternate,  // IN (page-aligned)
+                         HSAuint64 MemorySizeInBytes    // IN (page-aligned)
+);
 
 /**
   Allocates a memory buffer that may be accessed by the GPU
@@ -419,13 +397,12 @@ hsaKmtSetMemoryPolicyCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtAllocMemoryCtx(
-    HsaKFDContext     *ctx,                   //IN
-    HSAuint32         PreferredNode,          //IN
-    HSAuint64         SizeInBytes,            //IN  (multiple of page size)
-    HsaMemFlags       MemFlags,               //IN
-    void**            MemoryAddress           //IN/OUT (page-aligned)
-    );
+hsaKmtAllocMemoryCtx(HsaKFDContext* ctx,       // IN
+                     HSAuint32 PreferredNode,  // IN
+                     HSAuint64 SizeInBytes,    // IN  (multiple of page size)
+                     HsaMemFlags MemFlags,     // IN
+                     void** MemoryAddress      // IN/OUT (page-aligned)
+);
 
 /**
   Allocates a memory buffer with specific alignment that may be accessed by the GPU
@@ -434,14 +411,13 @@ hsaKmtAllocMemoryCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtAllocMemoryAlignCtx(
-    HsaKFDContext     *ctx,                  //IN
-    HSAuint32         PreferredNode,          //IN
-    HSAuint64         SizeInBytes,            //IN  (multiple of page size)
-    HSAuint64         Alignment,              //IN  (power of 2 and >= page size)
-    HsaMemFlags       MemFlags,               //IN
-    void**            MemoryAddress           //IN/OUT (page-aligned)
-    );
+hsaKmtAllocMemoryAlignCtx(HsaKFDContext* ctx,       // IN
+                          HSAuint32 PreferredNode,  // IN
+                          HSAuint64 SizeInBytes,    // IN  (multiple of page size)
+                          HSAuint64 Alignment,      // IN  (power of 2 and >= page size)
+                          HsaMemFlags MemFlags,     // IN
+                          void** MemoryAddress      // IN/OUT (page-aligned)
+);
 
 /**
   Frees a memory buffer
@@ -449,11 +425,10 @@ hsaKmtAllocMemoryAlignCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtFreeMemoryCtx(
-    HsaKFDContext     *ctx,                 //IN
-    void*             MemoryAddress,        //IN (page-aligned)
-    HSAuint64         SizeInBytes           //IN
-    );
+hsaKmtFreeMemoryCtx(HsaKFDContext* ctx,    // IN
+                    void* MemoryAddress,   // IN (page-aligned)
+                    HSAuint64 SizeInBytes  // IN
+);
 
 /**
   Inquires memory available for allocation as a memory buffer
@@ -461,11 +436,10 @@ hsaKmtFreeMemoryCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtAvailableMemoryCtx(
-    HsaKFDContext     *ctx,                //IN
-    HSAuint32         Node,                //IN
-    HSAuint64         *AvailableBytes      //OUT
-    );
+hsaKmtAvailableMemoryCtx(HsaKFDContext* ctx,        // IN
+                         HSAuint32 Node,            // IN
+                         HSAuint64* AvailableBytes  // OUT
+);
 
 /**
   Registers with KFD a memory buffer that may be accessed by the GPU
@@ -473,11 +447,10 @@ hsaKmtAvailableMemoryCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtRegisterMemoryCtx(
-    HsaKFDContext     *ctx,               //IN
-    void*             MemoryAddress,      //IN (cache-aligned)
-    HSAuint64         MemorySizeInBytes   //IN (cache-aligned)
-    );
+hsaKmtRegisterMemoryCtx(HsaKFDContext* ctx,          // IN
+                        void* MemoryAddress,         // IN (cache-aligned)
+                        HSAuint64 MemorySizeInBytes  // IN (cache-aligned)
+);
 
 
 /**
@@ -486,13 +459,12 @@ hsaKmtRegisterMemoryCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtRegisterMemoryToNodesCtx(
-    HsaKFDContext    *ctx,               //IN
-    void             *MemoryAddress,     //IN (cache-aligned)
-    HSAuint64        MemorySizeInBytes,  //IN (cache-aligned)
-    HSAuint64        NumberOfNodes,      //IN
-    HSAuint32*       NodeArray           //IN
-    );
+hsaKmtRegisterMemoryToNodesCtx(HsaKFDContext* ctx,           // IN
+                               void* MemoryAddress,          // IN (cache-aligned)
+                               HSAuint64 MemorySizeInBytes,  // IN (cache-aligned)
+                               HSAuint64 NumberOfNodes,      // IN
+                               HSAuint32* NodeArray          // IN
+);
 
 
 /**
@@ -501,12 +473,11 @@ hsaKmtRegisterMemoryToNodesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtRegisterMemoryWithFlagsCtx(
-    HsaKFDContext    *ctx,                //IN
-    void             *MemoryAddress,      //IN (cache-aligned)
-    HSAuint64        MemorySizeInBytes,   //IN (cache-aligned)
-    HsaMemFlags      MemFlags             //IN
-    );
+hsaKmtRegisterMemoryWithFlagsCtx(HsaKFDContext* ctx,           // IN
+                                 void* MemoryAddress,          // IN (cache-aligned)
+                                 HSAuint64 MemorySizeInBytes,  // IN (cache-aligned)
+                                 HsaMemFlags MemFlags          // IN
+);
 
 /**
   Registers with KFD a graphics buffer and returns graphics metadata
@@ -514,13 +485,12 @@ hsaKmtRegisterMemoryWithFlagsCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtRegisterGraphicsHandleToNodesCtx(
-    HsaKFDContext             *ctx,                         //IN
-    HSAuint64                 GraphicsResourceHandle,       //IN
-    HsaGraphicsResourceInfo   *GraphicsResourceInfo,        //OUT
-    HSAuint64                 NumberOfNodes,                //IN
-    HSAuint32*                NodeArray                     //IN
-    );
+hsaKmtRegisterGraphicsHandleToNodesCtx(HsaKFDContext* ctx,                             // IN
+                                       HSAuint64 GraphicsResourceHandle,               // IN
+                                       HsaGraphicsResourceInfo* GraphicsResourceInfo,  // OUT
+                                       HSAuint64 NumberOfNodes,                        // IN
+                                       HSAuint32* NodeArray                            // IN
+);
 
 /**
   Similar to hsaKmtRegisterGraphicsHandleToNodes but provides registration
@@ -529,14 +499,13 @@ hsaKmtRegisterGraphicsHandleToNodesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtRegisterGraphicsHandleToNodesExtCtx(
-    HsaKFDContext           *ctx,                         //IN
-    HSAuint64               GraphicsResourceHandle,       //IN
-    HsaGraphicsResourceInfo *GraphicsResourceInfo,        //OUT
-    HSAuint64               NumberOfNodes,                //IN
-    HSAuint32*              NodeArray,                    //IN
-    HSA_REGISTER_MEM_FLAGS  RegisterFlags                 //IN
-    );
+hsaKmtRegisterGraphicsHandleToNodesExtCtx(HsaKFDContext* ctx,                             // IN
+                                          HSAuint64 GraphicsResourceHandle,               // IN
+                                          HsaGraphicsResourceInfo* GraphicsResourceInfo,  // OUT
+                                          HSAuint64 NumberOfNodes,                        // IN
+                                          HSAuint32* NodeArray,                           // IN
+                                          HSA_REGISTER_MEM_FLAGS RegisterFlags            // IN
+);
 
 /**
  * Export a dmabuf handle and offset for a given memory address
@@ -551,13 +520,12 @@ hsaKmtRegisterGraphicsHandleToNodesExtCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtExportDMABufHandleCtx(
-    HsaKFDContext     *ctx,               //IN
-    void              *MemoryAddress,     //IN
-    HSAuint64         MemorySizeInBytes,  //IN
-    int               *DMABufFd,          //OUT
-    HSAuint64         *Offset             //OUT
-    );
+hsaKmtExportDMABufHandleCtx(HsaKFDContext* ctx,           // IN
+                            void* MemoryAddress,          // IN
+                            HSAuint64 MemorySizeInBytes,  // IN
+                            int* DMABufFd,                // OUT
+                            HSAuint64* Offset             // OUT
+);
 
 /**
  Export a memory buffer for sharing with other processes
@@ -568,11 +536,10 @@ hsaKmtExportDMABufHandleCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtShareMemoryCtx(
-    HsaKFDContext         *ctx,               //IN
-    void                  *MemoryAddress,     //IN
-    HSAuint64             SizeInBytes,        //IN
-    HsaSharedMemoryHandle *SharedMemoryHandle //OUT
+hsaKmtShareMemoryCtx(HsaKFDContext* ctx,                        // IN
+                     void* MemoryAddress,                       // IN
+                     HSAuint64 SizeInBytes,                     // IN
+                     HsaSharedMemoryHandle* SharedMemoryHandle  // OUT
 );
 
 /**
@@ -581,11 +548,10 @@ hsaKmtShareMemoryCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtRegisterSharedHandleCtx(
-    HsaKFDContext               *ctx,                //IN
-    const HsaSharedMemoryHandle *SharedMemoryHandle, //IN
-    void                        **MemoryAddress,     //OUT
-    HSAuint64                   *SizeInBytes         //OUT
+hsaKmtRegisterSharedHandleCtx(HsaKFDContext* ctx,                               // IN
+                              const HsaSharedMemoryHandle* SharedMemoryHandle,  // IN
+                              void** MemoryAddress,                             // OUT
+                              HSAuint64* SizeInBytes                            // OUT
 );
 
 /**
@@ -594,13 +560,12 @@ hsaKmtRegisterSharedHandleCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtRegisterSharedHandleToNodesCtx(
-    HsaKFDContext               *ctx,                //IN
-    const HsaSharedMemoryHandle *SharedMemoryHandle, //IN
-    void                        **MemoryAddress,     //OUT
-    HSAuint64                   *SizeInBytes,        //OUT
-    HSAuint64                   NumberOfNodes,       //OUT
-    HSAuint32*                  NodeArray            //OUT
+hsaKmtRegisterSharedHandleToNodesCtx(HsaKFDContext* ctx,                               // IN
+                                     const HsaSharedMemoryHandle* SharedMemoryHandle,  // IN
+                                     void** MemoryAddress,                             // OUT
+                                     HSAuint64* SizeInBytes,                           // OUT
+                                     HSAuint64 NumberOfNodes,                          // OUT
+                                     HSAuint32* NodeArray                              // OUT
 );
 
 /**
@@ -609,10 +574,9 @@ hsaKmtRegisterSharedHandleToNodesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtDeregisterMemoryCtx(
-    HsaKFDContext     *ctx,           //IN
-    void*             MemoryAddress   //IN
-    );
+hsaKmtDeregisterMemoryCtx(HsaKFDContext* ctx,  // IN
+                          void* MemoryAddress  // IN
+);
 
 /**
   Ensures that the memory is resident and can be accessed by GPU
@@ -620,12 +584,11 @@ hsaKmtDeregisterMemoryCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtMapMemoryToGPUCtx(
-    HsaKFDContext     *ctx,              //IN
-    void*             MemoryAddress,     //IN (page-aligned)
-    HSAuint64         MemorySizeInBytes, //IN (page-aligned)
-    HSAuint64*        AlternateVAGPU     //OUT (page-aligned)
-    );
+hsaKmtMapMemoryToGPUCtx(HsaKFDContext* ctx,           // IN
+                        void* MemoryAddress,          // IN (page-aligned)
+                        HSAuint64 MemorySizeInBytes,  // IN (page-aligned)
+                        HSAuint64* AlternateVAGPU     // OUT (page-aligned)
+);
 
 /**
   Ensures that the memory is resident and can be accessed by GPUs
@@ -633,15 +596,14 @@ hsaKmtMapMemoryToGPUCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtMapMemoryToGPUNodesCtx(
-    HsaKFDContext     *ctx,                  //IN
-    void*             MemoryAddress,         //IN (page-aligned)
-    HSAuint64         MemorySizeInBytes,     //IN (page-aligned)
-    HSAuint64*        AlternateVAGPU,        //OUT (page-aligned)
-    HsaMemMapFlags    MemMapFlags,           //IN
-    HSAuint64         NumberOfNodes,         //IN
-    HSAuint32*        NodeArray              //IN
-    );
+hsaKmtMapMemoryToGPUNodesCtx(HsaKFDContext* ctx,           // IN
+                             void* MemoryAddress,          // IN (page-aligned)
+                             HSAuint64 MemorySizeInBytes,  // IN (page-aligned)
+                             HSAuint64* AlternateVAGPU,    // OUT (page-aligned)
+                             HsaMemMapFlags MemMapFlags,   // IN
+                             HSAuint64 NumberOfNodes,      // IN
+                             HSAuint32* NodeArray          // IN
+);
 
 /**
   Releases the residency of the memory
@@ -649,10 +611,9 @@ hsaKmtMapMemoryToGPUNodesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtUnmapMemoryToGPUCtx(
-    HsaKFDContext     *ctx,              //IN
-    void*             MemoryAddress      //IN (page-aligned)
-    );
+hsaKmtUnmapMemoryToGPUCtx(HsaKFDContext* ctx,  // IN
+                          void* MemoryAddress  // IN (page-aligned)
+);
 
 /**
   Stub for Unmap Graphic Handle
@@ -660,23 +621,21 @@ hsaKmtUnmapMemoryToGPUCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtUnmapGraphicHandleCtx(
-    HsaKFDContext      *ctx,                  //IN
-    HSAuint32          NodeId,                //IN
-    HSAuint64          FlatMemoryAddress,     //IN
-    HSAuint64          SizeInBytes            //IN
-    );
+hsaKmtUnmapGraphicHandleCtx(HsaKFDContext* ctx,           // IN
+                            HSAuint32 NodeId,             // IN
+                            HSAuint64 FlatMemoryAddress,  // IN
+                            HSAuint64 SizeInBytes         // IN
+);
 
 /**
  * Get an AMDGPU device handle for a GPU node
  */
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtGetAMDGPUDeviceHandleCtx(
-    HsaKFDContext           *ctx,          //IN
-    HSAuint32               NodeId,        //IN
-    HsaAMDGPUDeviceHandle   *DeviceHandle  //OUT
-    );
+hsaKmtGetAMDGPUDeviceHandleCtx(HsaKFDContext* ctx,                  // IN
+                               HSAuint32 NodeId,                    // IN
+                               HsaAMDGPUDeviceHandle* DeviceHandle  // OUT
+);
 
 /**
   Sets trap handler and trap buffer to be used for all queues
@@ -685,47 +644,43 @@ hsaKmtGetAMDGPUDeviceHandleCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSetTrapHandlerCtx(
-    HsaKFDContext      *ctx,                     //IN
-    HSAuint32          NodeId,                   //IN
-    void*              TrapHandlerBaseAddress,   //IN
-    HSAuint64          TrapHandlerSizeInBytes,   //IN
-    void*              TrapBufferBaseAddress,    //IN
-    HSAuint64          TrapBufferSizeInBytes     //IN
-    );
+hsaKmtSetTrapHandlerCtx(HsaKFDContext* ctx,                // IN
+                        HSAuint32 NodeId,                  // IN
+                        void* TrapHandlerBaseAddress,      // IN
+                        HSAuint64 TrapHandlerSizeInBytes,  // IN
+                        void* TrapBufferBaseAddress,       // IN
+                        HSAuint64 TrapBufferSizeInBytes    // IN
+);
 
 /**
   Gets image tile configuration.
  */
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtGetTileConfigCtx(
-    HsaKFDContext       *ctx,       //IN
-    HSAuint32           NodeId,     //IN
-    HsaGpuTileConfig    *config     //IN/OUT
-    );
+hsaKmtGetTileConfigCtx(HsaKFDContext* ctx,       // IN
+                       HSAuint32 NodeId,         // IN
+                       HsaGpuTileConfig* config  // IN/OUT
+);
 
 /**
   Returns information about pointers
 */
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtQueryPointerInfoCtx(
-    HsaKFDContext     *ctx,            //IN
-    const void        *Pointer,        //IN
-    HsaPointerInfo    *PointerInfo     //OUT
-    );
+hsaKmtQueryPointerInfoCtx(HsaKFDContext* ctx,          // IN
+                          const void* Pointer,         // IN
+                          HsaPointerInfo* PointerInfo  // OUT
+);
 
 /**
   Associates user data with a memory allocation
 */
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSetMemoryUserDataCtx(
-    HsaKFDContext    *ctx,       //IN
-    const void *     Pointer,    //IN
-    void *           UserData    //IN
-    );
+hsaKmtSetMemoryUserDataCtx(HsaKFDContext* ctx,   // IN
+                           const void* Pointer,  // IN
+                           void* UserData        // IN
+);
 
 /**
   Allocate GWS resource for a queue
@@ -733,64 +688,59 @@ hsaKmtSetMemoryUserDataCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtAllocQueueGWSCtx(
-    HsaKFDContext      *ctx,           //IN
-    HSA_QUEUEID        QueueId,        //IN
-    HSAuint32          nGWS,           //IN
-    HSAuint32          *firstGWS       //OUT
-    );
+hsaKmtAllocQueueGWSCtx(HsaKFDContext* ctx,   // IN
+                       HSA_QUEUEID QueueId,  // IN
+                       HSAuint32 nGWS,       // IN
+                       HSAuint32* firstGWS   // OUT
+);
 
 /* Helper functions for calling KFD SVM ioctl */
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSVMSetAttrCtx(
-    HsaKFDContext     *ctx,         //IN
-    void              *start_addr,  //IN: Start of the virtual address range (page-aligned)
-    HSAuint64         size,         //IN: size (page-aligned)
-    unsigned int      nattr,        //IN: number of attributes
-    HSA_SVM_ATTRIBUTE *attrs        //IN: array of attributes
-    );
+hsaKmtSVMSetAttrCtx(HsaKFDContext* ctx,  // IN
+                    void* start_addr,    // IN: Start of the virtual address range (page-aligned)
+                    HSAuint64 size,      // IN: size (page-aligned)
+                    unsigned int nattr,  // IN: number of attributes
+                    HSA_SVM_ATTRIBUTE* attrs  // IN: array of attributes
+);
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSVMGetAttrCtx(
-    HsaKFDContext     *ctx,         //IN
-    void              *start_addr,  //IN: Start of the virtual address range (page-aligned)
-    HSAuint64         size,         //IN: size (page aligned)
-    unsigned int      nattr,        //IN: number of attributes
-    HSA_SVM_ATTRIBUTE *attrs        //IN/OUT: array of attributes
-    );
+hsaKmtSVMGetAttrCtx(HsaKFDContext* ctx,  // IN
+                    void* start_addr,    // IN: Start of the virtual address range (page-aligned)
+                    HSAuint64 size,      // IN: size (page aligned)
+                    unsigned int nattr,  // IN: number of attributes
+                    HSA_SVM_ATTRIBUTE* attrs  // IN/OUT: array of attributes
+);
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSetXNACKModeCtx(
-    HsaKFDContext     *ctx,       //IN
-    HSAint32          enable      //IN: enable/disable XNACK node.
-    );
+hsaKmtSetXNACKModeCtx(HsaKFDContext* ctx,  // IN
+                      HSAint32 enable      // IN: enable/disable XNACK node.
+);
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtGetXNACKModeCtx(
-    HsaKFDContext     *ctx,       //IN
-    HSAint32          *enable     //OUT: returns XNACK value.
-    );
+hsaKmtGetXNACKModeCtx(HsaKFDContext* ctx,  // IN
+                      HSAint32* enable     // OUT: returns XNACK value.
+);
 
 /**
    Open anonymous file handle to enable events and read SMI events.
 
    To enable events, write 64bit events mask to fd, event enums as bit index.
-   for example, event mask ctx(HSA_SMI_EVENT_MASK_FROM_INDEXCtx(HSA_SMI_EVENT_INDEX_MAX) - 1) to enable all events
+   for example, event mask ctx(HSA_SMI_EVENT_MASK_FROM_INDEXCtx(HSA_SMI_EVENT_INDEX_MAX) - 1) to
+   enable all events
 
    Read event from fd is not blocking, use poll with timeout value to check if event is available.
    Event is dropped if kernel event fifo is full.
 */
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtOpenSMICtx(
-    HsaKFDContext     *ctx,      //IN
-    HSAuint32         NodeId,    //IN: GPU node_id to receive the SMI event from
-    int               *fd        //OUT: anonymous file handle
-    );
+hsaKmtOpenSMICtx(HsaKFDContext* ctx,  // IN
+                 HSAuint32 NodeId,    // IN: GPU node_id to receive the SMI event from
+                 int* fd              // OUT: anonymous file handle
+);
 
 /**
    If this is GPU Mapped memory, remap the first page at this address to be normal system memory
@@ -801,10 +751,9 @@ hsaKmtOpenSMICtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtReplaceAsanHeaderPageCtx(
-    HsaKFDContext     *ctx,      //IN
-    void              *addr      //IN: Start of the virtual address page
-    );
+hsaKmtReplaceAsanHeaderPageCtx(HsaKFDContext* ctx,  // IN
+                               void* addr           // IN: Start of the virtual address page
+);
 
 /**
    If this is GPU Mapped memory, remap the first page back to the original GPU memory
@@ -815,13 +764,12 @@ hsaKmtReplaceAsanHeaderPageCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtReturnAsanHeaderPageCtx(
-    HsaKFDContext     *ctx,       //IN
-    void              *addr       //IN: Start of the virtual address page
-    );
+hsaKmtReturnAsanHeaderPageCtx(HsaKFDContext* ctx,  // IN
+                              void* addr           // IN: Start of the virtual address page
+);
 
 #ifdef __cplusplus
-}   //extern "C"
+}  // extern "C"
 #endif
 
-#endif //_HSAKMTCTX_H_
+#endif  //_HSAKMTCTX_H_

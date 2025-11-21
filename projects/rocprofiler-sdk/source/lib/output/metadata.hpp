@@ -176,10 +176,10 @@ struct metadata
     metadata() = default;
     metadata(inprocess);
 
-    ~metadata()                   = default;
-    metadata(const metadata&)     = delete;
-    metadata(metadata&&) noexcept = delete;
-    metadata& operator=(const metadata&) = delete;
+    ~metadata()                              = default;
+    metadata(const metadata&)                = delete;
+    metadata(metadata&&) noexcept            = delete;
+    metadata& operator=(const metadata&)     = delete;
     metadata& operator=(metadata&&) noexcept = delete;
 
     // Loads all counters supported on agents. Used by the 'rocprofv3-avail' tool.

@@ -28,10 +28,11 @@
 
 class XgmiOptimizedSDMAQueue : public SDMAQueue {
  public:
-    XgmiOptimizedSDMAQueue(void) {CMD_NOP = 0;}
-    virtual ~XgmiOptimizedSDMAQueue(void) {}
+  XgmiOptimizedSDMAQueue(void) { CMD_NOP = 0; }
+  virtual ~XgmiOptimizedSDMAQueue(void) {}
+
  protected:
-    virtual _HSA_QUEUE_TYPE GetQueueType() { return HSA_QUEUE_SDMA_XGMI; }
+  virtual _HSA_QUEUE_TYPE GetQueueType() { return HSA_QUEUE_SDMA_XGMI; }
 };
 
 #endif  // __KFD_XGMI_OPTIMIZED_SDMA_QUEUE__H__

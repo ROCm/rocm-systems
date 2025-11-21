@@ -21,15 +21,17 @@
  */
 
 #include "rocm_smi/rocm_smi_npm.h"
-#include "rocm_smi/rocm_smi_utils.h"
+
+#include <cerrno>
+#include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <map>
+#include <sstream>
+
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_logger.h"
-#include <fstream>
-#include <cstring>
-#include <cerrno>
-#include <iomanip>
-#include <sstream>
-#include <map>
+#include "rocm_smi/rocm_smi_utils.h"
 
 using amd::smi::getRSMIStatusString;
 
@@ -97,4 +99,4 @@ rsmi_status_t get_npm_board_limit(const std::string &board_path, uint64_t *limit
   }
 }
 
-}  // end namespace
+}  // namespace amd::smi

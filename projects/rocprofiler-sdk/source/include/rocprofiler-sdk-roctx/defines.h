@@ -108,7 +108,9 @@
 #endif
 
 #ifdef __cplusplus
-#    define ROCTX_EXTERN_C_INIT extern "C" {
+#    define ROCTX_EXTERN_C_INIT                                                                    \
+        extern "C"                                                                                 \
+        {
 #    define ROCTX_EXTERN_C_FINI }
 #else
 #    define ROCTX_EXTERN_C_INIT

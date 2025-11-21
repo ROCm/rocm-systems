@@ -25,28 +25,19 @@
 #include "GoogleTestExtension.hpp"
 
 
-AqlQueue::AqlQueue(void) {
-}
+AqlQueue::AqlQueue(void) {}
 
 
-AqlQueue::~AqlQueue(void) {
-}
+AqlQueue::~AqlQueue(void) {}
 
-unsigned int AqlQueue::Wptr() {
-    return *m_Resources.Queue_write_ptr;
-}
+unsigned int AqlQueue::Wptr() { return *m_Resources.Queue_write_ptr; }
 
-unsigned int AqlQueue::Rptr() {
-    return *m_Resources.Queue_read_ptr;
-}
+unsigned int AqlQueue::Rptr() { return *m_Resources.Queue_read_ptr; }
 
-unsigned int AqlQueue::RptrWhenConsumed() {
-    return Wptr();
-}
+unsigned int AqlQueue::RptrWhenConsumed() { return Wptr(); }
 
 void AqlQueue::SubmitPacket() {
-    // m_pending Wptr is in dwords
-    *m_Resources.Queue_write_ptr = m_pendingWptr;
-    *(m_Resources.Queue_DoorBell) = Wptr();
+  // m_pending Wptr is in dwords
+  *m_Resources.Queue_write_ptr = m_pendingWptr;
+  *(m_Resources.Queue_DoorBell) = Wptr();
 }
-

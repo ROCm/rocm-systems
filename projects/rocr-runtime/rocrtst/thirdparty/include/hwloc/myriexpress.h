@@ -46,10 +46,8 @@ extern "C" {
  * The function only returns the locality of the device.
  * No additional information about the device is available.
  */
-static __hwloc_inline int
-hwloc_mx_board_get_device_cpuset(hwloc_topology_t topology,
-				 unsigned id, hwloc_cpuset_t set)
-{
+static __hwloc_inline int hwloc_mx_board_get_device_cpuset(hwloc_topology_t topology, unsigned id,
+                                                           hwloc_cpuset_t set) {
   uint32_t in, out;
 
   if (!hwloc_topology_is_thissystem(topology)) {
@@ -63,18 +61,18 @@ hwloc_mx_board_get_device_cpuset(hwloc_topology_t topology,
     return -1;
   }
 
-  if (out != (uint32_t) -1) {
+  if (out != (uint32_t)-1) {
     hwloc_obj_t obj = NULL;
     while ((obj = hwloc_get_next_obj_by_type(topology, HWLOC_OBJ_NUMANODE, obj)) != NULL)
       if (obj->os_index == out) {
-	hwloc_bitmap_copy(set, obj->cpuset);
-	goto out;
+        hwloc_bitmap_copy(set, obj->cpuset);
+        goto out;
       }
   }
   /* fallback to the full topology cpuset */
   hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
 
- out:
+out:
   return 0;
 }
 
@@ -90,10 +88,9 @@ hwloc_mx_board_get_device_cpuset(hwloc_topology_t topology,
  * The function only returns the locality of the endpoint.
  * No additional information about the endpoint or device is available.
  */
-static __hwloc_inline int
-hwloc_mx_endpoint_get_device_cpuset(hwloc_topology_t topology,
-				    mx_endpoint_t endpoint, hwloc_cpuset_t set)
-{
+static __hwloc_inline int hwloc_mx_endpoint_get_device_cpuset(hwloc_topology_t topology,
+                                                              mx_endpoint_t endpoint,
+                                                              hwloc_cpuset_t set) {
   uint64_t nid;
   uint32_t nindex, eid;
   mx_endpoint_addr_t eaddr;

@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 #include "rocm_async.hpp"
 
@@ -13,15 +13,13 @@
 
 // Parse option value string. The string has one more decimal
 // values separated by comma - "3,6,9,12,15".
-static bool ParseOptionValue(char* value, vector<uint32_t>&value_list) {
- 
+static bool ParseOptionValue(char* value, vector<uint32_t>& value_list) {
   // Capture the option value string
   std::stringstream stream;
   stream << value;
-  
+
   uint32_t token = 0x11231926;
   do {
-    
     // Read the option value
     stream >> token;
 
@@ -29,8 +27,7 @@ static bool ParseOptionValue(char* value, vector<uint32_t>&value_list) {
     value_list.push_back(token);
 
     // Ignore the delimiter
-    if((stream.eof()) ||
-       (stream.peek() == ',')) {
+    if ((stream.eof()) || (stream.peek() == ',')) {
       stream.ignore();
     } else {
       return false;
@@ -42,7 +39,6 @@ static bool ParseOptionValue(char* value, vector<uint32_t>&value_list) {
 }
 
 void RocmAsync::ParseArguments() {
-
   bool print_help = false;
   bool copy_all_bi = false;
   bool copy_all_uni = false;
@@ -52,12 +48,11 @@ void RocmAsync::ParseArguments() {
   // In case of error, it will return the character '?' as
   // return value.
   opterr = 0;
-  
+
   int opt;
   bool status;
   while ((opt = getopt(usr_argc_, usr_argv_, "hvtaAb:s:d:r:w:m:")) != -1) {
     switch (opt) {
-
       // Print help screen
       case 'h':
         print_help = true;
@@ -156,20 +151,20 @@ void RocmAsync::ParseArguments() {
         break;
     }
   }
-  
+
   // Print help screen if user option has "-h"
   if (print_help) {
     PrintHelpScreen();
     exit(0);
   }
-  
+
   // Initialize Roc Runtime
   err_ = hsa_init();
   ErrorCheck(err_);
 
   // Discover the topology of RocR agent in system
   DiscoverTopology();
-  
+
   // Print system topology if user option has "-t"
   if (print_topology) {
     PrintTopology();
@@ -203,7 +198,7 @@ void RocmAsync::ParseArguments() {
   // Initialize the list of buffer sizes to use in copy/read/write operations
   // For All Copy operations use only one buffer size
   if (size_list_.size() == 0) {
-    uint32_t size_len = sizeof(SIZE_LIST)/sizeof(uint32_t);
+    uint32_t size_len = sizeof(SIZE_LIST) / sizeof(uint32_t);
     for (uint32_t idx = 0; idx < size_len; idx++) {
       if ((copy_all_bi) || (copy_all_uni)) {
         if (idx == 0) {
@@ -216,4 +211,3 @@ void RocmAsync::ParseArguments() {
   }
   std::sort(size_list_.begin(), size_list_.end());
 }
-

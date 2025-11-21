@@ -88,43 +88,37 @@ class BlitKernel {
 
   hsa_status_t Cleanup();
 
-  hsa_status_t BuildBlitCode(hsa_agent_t agent,
-                             std::vector<BlitCodeInfo>& blit_code_catalog);
+  hsa_status_t BuildBlitCode(hsa_agent_t agent, std::vector<BlitCodeInfo>& blit_code_catalog);
 
-  hsa_status_t CopyBufferToImage(
-      BlitQueue& blit_queue,
-      const std::vector<BlitCodeInfo>& blit_code_catalog,
-      const void* src_memory, size_t src_row_pitch, size_t src_slice_pitch,
-      const Image& dst_image, const hsa_ext_image_region_t& image_region);
+  hsa_status_t CopyBufferToImage(BlitQueue& blit_queue,
+                                 const std::vector<BlitCodeInfo>& blit_code_catalog,
+                                 const void* src_memory, size_t src_row_pitch,
+                                 size_t src_slice_pitch, const Image& dst_image,
+                                 const hsa_ext_image_region_t& image_region);
 
-  hsa_status_t CopyImageToBuffer(
-      BlitQueue& blit_queue,
-      const std::vector<BlitCodeInfo>& blit_code_catalog,
-      const Image& src_image, void* dst_memory, size_t dst_row_pitch,
-      size_t dst_slice_pitch, const hsa_ext_image_region_t& image_region);
+  hsa_status_t CopyImageToBuffer(BlitQueue& blit_queue,
+                                 const std::vector<BlitCodeInfo>& blit_code_catalog,
+                                 const Image& src_image, void* dst_memory, size_t dst_row_pitch,
+                                 size_t dst_slice_pitch,
+                                 const hsa_ext_image_region_t& image_region);
 
-  hsa_status_t CopyImage(BlitQueue& blit_queue,
-                         const std::vector<BlitCodeInfo>& blit_code_catalog,
+  hsa_status_t CopyImage(BlitQueue& blit_queue, const std::vector<BlitCodeInfo>& blit_code_catalog,
                          const Image& dst_image, const Image& src_image,
-                         const hsa_dim3_t& dst_origin,
-                         const hsa_dim3_t& src_origin, const hsa_dim3_t size,
-                         KernelOp copy_type);
+                         const hsa_dim3_t& dst_origin, const hsa_dim3_t& src_origin,
+                         const hsa_dim3_t size, KernelOp copy_type);
 
-  hsa_status_t FillImage(BlitQueue& blit_queue,
-                         const std::vector<BlitCodeInfo>& blit_code_catalog,
+  hsa_status_t FillImage(BlitQueue& blit_queue, const std::vector<BlitCodeInfo>& blit_code_catalog,
                          const Image& image, const void* pattern,
                          const hsa_ext_image_region_t& region);
 
  private:
+  hsa_status_t PopulateKernelCode(hsa_agent_t agent, hsa_executable_t executable,
+                                  std::vector<BlitCodeInfo>& blit_code_catalog);
 
-  hsa_status_t PopulateKernelCode(
-      hsa_agent_t agent, hsa_executable_t executable,
-      std::vector<BlitCodeInfo>& blit_code_catalog);
-
-  inline void CalcBufferRowSlicePitchesInPixel(
-      hsa_ext_image_geometry_t geometry, uint32_t element_size,
-      const hsa_dim3_t& copy_size, size_t in_row_pitch_byte,
-      size_t in_slice_pitch_byte, unsigned long* out_pitch_pixel);
+  inline void CalcBufferRowSlicePitchesInPixel(hsa_ext_image_geometry_t geometry,
+                                               uint32_t element_size, const hsa_dim3_t& copy_size,
+                                               size_t in_row_pitch_byte, size_t in_slice_pitch_byte,
+                                               unsigned long* out_pitch_pixel);
 
   inline uint32_t GetDimSize(const Image& image);
 
@@ -135,15 +129,12 @@ class BlitKernel {
   void CalcWorkingSize(const Image& image, const hsa_dim3_t& range,
                        hsa_kernel_dispatch_packet_t& packet);
 
-  void CalcWorkingSize(const Image& src_image, const Image& dst_image,
-                       const hsa_dim3_t& range,
+  void CalcWorkingSize(const Image& src_image, const Image& dst_image, const hsa_dim3_t& range,
                        hsa_kernel_dispatch_packet_t& packet);
 
-  hsa_status_t ConvertImage(const Image& original_image,
-                            const Image** new_image);
+  hsa_status_t ConvertImage(const Image& original_image, const Image** new_image);
 
-  hsa_status_t LaunchKernel(BlitQueue& queue,
-                            hsa_kernel_dispatch_packet_t& packet);
+  hsa_status_t LaunchKernel(BlitQueue& queue, hsa_kernel_dispatch_packet_t& packet);
 
   // The kernels' name.
   static const char* kernel_name_[KERNEL_OP_COUNT];

@@ -64,16 +64,16 @@ void PCSampler::Start() {
   agents_t agents;
   HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
   hsasupport_singleton.GetCoreApiTable().hsa_iterate_agents_fn(
-   [](hsa_agent_t agent, void *arg){
-     auto &agents = *reinterpret_cast<agents_t *>(arg);
-     agents.emplace_back(agent);
-     return HSA_STATUS_SUCCESS;
-   },
-   &agents);
+      [](hsa_agent_t agent, void* arg) {
+        auto& agents = *reinterpret_cast<agents_t*>(arg);
+        agents.emplace_back(agent);
+        return HSA_STATUS_SUCCESS;
+      },
+      &agents);
 
-  for (const auto &agent : agents) {
+  for (const auto& agent : agents) {
     const auto& ai = hsasupport_singleton.GetHSAAgentInfo(agent.handle);
-    if (ai.GetType() !=  HSA_DEVICE_TYPE_GPU) {
+    if (ai.GetType() != HSA_DEVICE_TYPE_GPU) {
       continue;
     }
     devices_.emplace(agent.handle, gfxip::device_t{pci_system_initialized_, ai});
@@ -93,7 +93,8 @@ void PCSampler::Stop() {
 }
 
 void PCSampler::AddRecord(rocprofiler_record_pc_sample_t& record) {
-  rocprofiler::ROCProfiler_Singleton&  rocprofiler_instance = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  rocprofiler::ROCProfiler_Singleton& rocprofiler_instance =
+      rocprofiler::ROCProfiler_Singleton::GetInstance();
   const auto session = rocprofiler_instance.GetSession(session_id_);
   const auto buffer = session->GetBuffer(buffer_id_);
 

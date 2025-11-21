@@ -200,4 +200,3 @@ union SQ_IMG_RSRC_WORD7 {
   float f32All;
 };
 }  // namespace amd::roc
-

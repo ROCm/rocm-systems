@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include <unistd.h>
 #include <iostream>
 #include "hsatimer.hpp"
@@ -12,7 +12,6 @@
 using namespace std;
 
 int main(int argc, char** argv) {
-
   // Create the Bandwidth test object
   RocmAsync bw_test(argc, argv);
 

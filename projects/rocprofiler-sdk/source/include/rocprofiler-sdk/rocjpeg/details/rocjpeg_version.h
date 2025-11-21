@@ -31,7 +31,8 @@ THE SOFTWARE.
  */
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 #define ROCJPEG_MAJOR_VERSION 0
 #define ROCJPEG_MINOR_VERSION 6

@@ -40,155 +40,143 @@
 
 #define MAX_GPU 64
 
-typedef struct _KFDTEST_PARAMETERS
-{
-    void*   pTestObject;
-    int     gpuNode;
+typedef struct _KFDTEST_PARAMETERS {
+  void* pTestObject;
+  int gpuNode;
 } KFDTEST_PARAMETERS;
 
-typedef void (* Test_Function)(KFDTEST_PARAMETERS*);
+typedef void (*Test_Function)(KFDTEST_PARAMETERS*);
 
-typedef struct _KFDTESTGPU_PARAMETERS
-{
-    KFDTEST_PARAMETERS*   pKFDTest_Parameters;
-    Test_Function         pTest_Function;
+typedef struct _KFDTESTGPU_PARAMETERS {
+  KFDTEST_PARAMETERS* pKFDTest_Parameters;
+  Test_Function pTest_Function;
 } KFDTEST_GPUPARAMETERS;
 
 //  @class KFDBaseComponentTest
 class KFDBaseComponentTest : public testing::Test {
  public:
-    KFDBaseComponentTest(void) { m_MemoryFlags.Value = 0; }
-    ~KFDBaseComponentTest(void) {}
+  KFDBaseComponentTest(void) { m_MemoryFlags.Value = 0; }
+  ~KFDBaseComponentTest(void) {}
 
-    HSAuint64 GetSysMemSize();
-    HSAuint64 GetVramSize(int gpuNode);
+  HSAuint64 GetSysMemSize();
+  HSAuint64 GetVramSize(int gpuNode);
 #define MAX_RENDER_NODES 64
-    struct {
-        int fd;
-        uint32_t major_version;
-        uint32_t minor_version;
-        amdgpu_device_handle device_handle;
-        uint32_t bdf;
-    } m_RenderNodes[MAX_RENDER_NODES];
+  struct {
+    int fd;
+    uint32_t major_version;
+    uint32_t minor_version;
+    amdgpu_device_handle device_handle;
+    uint32_t bdf;
+  } m_RenderNodes[MAX_RENDER_NODES];
 
-// @brief Finds DRM Render node corresponding to gpuNode
-// @return DRM Render Node if successful or -1 on failure
-    int FindDRMRenderNode(int gpuNode);
-    unsigned int GetFamilyIdFromNodeId(unsigned int nodeId);
-    Assembler* GetAssemblerFromNodeId(unsigned int nodeId);
-    bool NeedCwsrWA(unsigned int nodeId);
-    bool NeedNonPagedWptr(unsigned int nodeId);
-    unsigned int GetFamilyIdFromDefaultNode(){ return m_FamilyId; }
+  // @brief Finds DRM Render node corresponding to gpuNode
+  // @return DRM Render Node if successful or -1 on failure
+  int FindDRMRenderNode(int gpuNode);
+  unsigned int GetFamilyIdFromNodeId(unsigned int nodeId);
+  Assembler* GetAssemblerFromNodeId(unsigned int nodeId);
+  bool NeedCwsrWA(unsigned int nodeId);
+  bool NeedNonPagedWptr(unsigned int nodeId);
+  unsigned int GetFamilyIdFromDefaultNode() { return m_FamilyId; }
 
-    // @brief Executed before the first test that uses KFDBaseComponentTest.
-    static  void SetUpTestCase();
-    // @brief Executed after the last test from KFDBaseComponentTest.
-    static  void TearDownTestCase();
+  // @brief Executed before the first test that uses KFDBaseComponentTest.
+  static void SetUpTestCase();
+  // @brief Executed after the last test from KFDBaseComponentTest.
+  static void TearDownTestCase();
 
-    HsaVersionInfo*  Get_Version();
-    HsaNodeInfo* Get_NodeInfo();
-    HsaMemFlags& GetHsaMemFlags();
-    bool SVMAPISupported_GPU(unsigned int nodeId);
+  HsaVersionInfo* Get_Version();
+  HsaNodeInfo* Get_NodeInfo();
+  HsaMemFlags& GetHsaMemFlags();
+  bool SVMAPISupported_GPU(unsigned int nodeId);
 
-    inline unsigned int Get_NumCpQueues(int gpuIndex){
-        return m_numCpQueues_GPU[gpuIndex];
-    }
+  inline unsigned int Get_NumCpQueues(int gpuIndex) { return m_numCpQueues_GPU[gpuIndex]; }
 
-    inline unsigned int Get_NumSdmaEngines(int gpuIndex){
-        return m_numSdmaEngines_GPU[gpuIndex];
-    }
+  inline unsigned int Get_NumSdmaEngines(int gpuIndex) { return m_numSdmaEngines_GPU[gpuIndex]; }
 
-    inline unsigned int Get_NumSdmaSdmaQueuesPerEngine(int gpuIndex){
-        return m_numSdmaQueuesPerEngine_GPU[gpuIndex];
-    }
+  inline unsigned int Get_NumSdmaSdmaQueuesPerEngine(int gpuIndex) {
+    return m_numSdmaQueuesPerEngine_GPU[gpuIndex];
+  }
 
-    inline unsigned int Get_NumSdmaSdmaXgmiEngines(int gpuIndex){
-        return m_numSdmaXgmiEngines_GPU[gpuIndex];
-    }
+  inline unsigned int Get_NumSdmaSdmaXgmiEngines(int gpuIndex) {
+    return m_numSdmaXgmiEngines_GPU[gpuIndex];
+  }
 
-    HSAKMT_STATUS KFDTestMultiGPU(Test_Function test_function, 
-                                            const std::vector<int>& gpu_indices,
-                                            unsigned int gpu_num);
+  HSAKMT_STATUS KFDTestMultiGPU(Test_Function test_function, const std::vector<int>& gpu_indices,
+                                unsigned int gpu_num);
 
-    HSAKMT_STATUS KFDTest_Launch(Test_Function test_function);
+  HSAKMT_STATUS KFDTest_Launch(Test_Function test_function);
 
  protected:
-    HsaVersionInfo  m_VersionInfo;
-    HsaSystemProperties m_SystemProperties;
-    unsigned int m_FamilyId;
-    unsigned int m_numCpQueues;
-    unsigned int m_numSdmaEngines;
-    unsigned int m_numSdmaXgmiEngines;
-    unsigned int m_numSdmaQueuesPerEngine;
-    HsaMemFlags m_MemoryFlags;
-    HsaNodeInfo m_NodeInfo;
-    HSAint32 m_xnack;
-    Assembler* m_pAsm;
+  HsaVersionInfo m_VersionInfo;
+  HsaSystemProperties m_SystemProperties;
+  unsigned int m_FamilyId;
+  unsigned int m_numCpQueues;
+  unsigned int m_numSdmaEngines;
+  unsigned int m_numSdmaXgmiEngines;
+  unsigned int m_numSdmaQueuesPerEngine;
+  HsaMemFlags m_MemoryFlags;
+  HsaNodeInfo m_NodeInfo;
+  HSAint32 m_xnack;
+  Assembler* m_pAsm;
 
-    Assembler* m_pAsmGPU[MAX_GPU];
+  Assembler* m_pAsmGPU[MAX_GPU];
 
-    unsigned int m_numCpQueues_GPU[MAX_GPU];
-    unsigned int m_numSdmaEngines_GPU[MAX_GPU];
-    unsigned int m_numSdmaXgmiEngines_GPU[MAX_GPU];
-    unsigned int m_numSdmaQueuesPerEngine_GPU[MAX_GPU];
+  unsigned int m_numCpQueues_GPU[MAX_GPU];
+  unsigned int m_numSdmaEngines_GPU[MAX_GPU];
+  unsigned int m_numSdmaXgmiEngines_GPU[MAX_GPU];
+  unsigned int m_numSdmaQueuesPerEngine_GPU[MAX_GPU];
 
-    // @brief Executed before every test that uses KFDBaseComponentTest class and sets all common settings for the tests.
-    virtual void SetUp();
-    // @brief Executed after every test that uses KFDBaseComponentTest class.
-    virtual void TearDown();
+  // @brief Executed before every test that uses KFDBaseComponentTest class and sets all common
+  // settings for the tests.
+  virtual void SetUp();
+  // @brief Executed after every test that uses KFDBaseComponentTest class.
+  virtual void TearDown();
 
-    /* TO DO: check all gpu support svm api */
-    bool SVMAPISupported() {
-        bool supported = m_NodeInfo.HsaDefaultGPUNodeProperties()
-                        ->Capability.ui32.SVMAPISupported;
-        if (!supported)
-            LOG() << "SVM API not supported" << std::endl;
-        return supported;
+  /* TO DO: check all gpu support svm api */
+  bool SVMAPISupported() {
+    bool supported = m_NodeInfo.HsaDefaultGPUNodeProperties()->Capability.ui32.SVMAPISupported;
+    if (!supported) LOG() << "SVM API not supported" << std::endl;
+    return supported;
+  }
+
+  // Set xnack_override to -1 if parameter is not passed in, to avoid unnecessary code churn
+  void SVMSetXNACKMode(int xnack_override = -1) {
+    if (!SVMAPISupported()) return;
+
+    m_xnack = -1;
+    HSAKMT_STATUS ret = hsaKmtGetXNACKMode(&m_xnack);
+    if (ret != HSAKMT_STATUS_SUCCESS) {
+      LOG() << "Failed " << ret << " to get XNACK mode" << std::endl;
+      return;
     }
 
-    // Set xnack_override to -1 if parameter is not passed in, to avoid unnecessary code churn
-    void SVMSetXNACKMode(int xnack_override = -1) {
-        if (!SVMAPISupported())
-            return;
+    HSAint32 xnack_on = -1;
+    char* hsa_xnack = getenv("HSA_XNACK");
 
-        m_xnack = -1;
-        HSAKMT_STATUS ret = hsaKmtGetXNACKMode(&m_xnack);
-        if (ret != HSAKMT_STATUS_SUCCESS) {
-            LOG() << "Failed " << ret << " to get XNACK mode" << std::endl;
-            return;
-        }
+    // HSA_XNACK takes priority over kfdtest parameters
+    if (hsa_xnack)
+      xnack_on = strncmp(hsa_xnack, "0", 1);
+    else if (xnack_override > -1)
+      xnack_on = xnack_override;
+    else
+      return;
 
-        HSAint32 xnack_on = -1;
-        char *hsa_xnack = getenv("HSA_XNACK");
+    // No need to set XNACK if it's already the current value
+    if (xnack_on == m_xnack) return;
 
-        // HSA_XNACK takes priority over kfdtest parameters
-        if (hsa_xnack)
-                xnack_on = strncmp(hsa_xnack, "0", 1);
-        else if (xnack_override > -1)
-                xnack_on = xnack_override;
-        else
-                return;
+    ret = hsaKmtSetXNACKMode(xnack_on);
+    if (ret != HSAKMT_STATUS_SUCCESS)
+      LOG() << "Failed " << ret << " to set XNACK mode " << xnack_on << std::endl;
+    else
+      LOG() << "Setting XNACK mode to " << xnack_on << std::endl;
+  }
 
-	// No need to set XNACK if it's already the current value
-	if (xnack_on == m_xnack)
-		return;
+  void SVMRestoreXNACKMode() {
+    if (!SVMAPISupported()) return;
 
-        ret = hsaKmtSetXNACKMode(xnack_on);
-        if (ret != HSAKMT_STATUS_SUCCESS)
-            LOG() << "Failed " << ret << " to set XNACK mode " << xnack_on << std::endl;
-        else
-            LOG() << "Setting XNACK mode to " << xnack_on << std::endl;
-    }
+    if (m_xnack == -1) return;
 
-    void SVMRestoreXNACKMode() {
-        if (!SVMAPISupported())
-             return;
-
-        if (m_xnack == -1)
-            return;
-
-        hsaKmtSetXNACKMode(m_xnack);
-    }
+    hsaKmtSetXNACKMode(m_xnack);
+  }
 };
 
 extern KFDBaseComponentTest* g_baseTest;

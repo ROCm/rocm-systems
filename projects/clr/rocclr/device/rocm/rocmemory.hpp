@@ -271,4 +271,3 @@ class Image : public roc::Memory {
   std::vector<amd::Image*> view_cache_;  //!< Cache of views for fast access
 };
 }  // namespace amd::roc
-

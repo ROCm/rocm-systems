@@ -56,7 +56,7 @@ uint32_t MinorVerFromDevID(uint32_t dev_id) { return (dev_id >> 4) & 0xF; }
 
 uint32_t StepFromDevID(uint32_t dev_id) { return dev_id & 0xF; }
 
-hsa_status_t GetGPUAsicID(hsa_agent_t agent, uint32_t *chip_id) {
+hsa_status_t GetGPUAsicID(hsa_agent_t agent, uint32_t* chip_id) {
   char asic_name[64];
   assert(chip_id != nullptr);
 
@@ -71,7 +71,7 @@ hsa_status_t GetGPUAsicID(hsa_agent_t agent, uint32_t *chip_id) {
 
   assert(a_str.compare(0, 3, "gfx", 3) == 0);
 
-  a_str.erase(0,3);
+  a_str.erase(0, 3);
 
   // Load chip_id accounting for stepping and minor in hex and major in dec.
   *chip_id = std::stoi(a_str.substr(a_str.length() - 2), nullptr, 16);

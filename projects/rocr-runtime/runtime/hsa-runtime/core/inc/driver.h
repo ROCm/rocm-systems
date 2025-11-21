@@ -80,7 +80,7 @@ struct ShareableHandle {
 /// and agent kernel drivers. It also maintains state associated with active
 /// kernel drivers.
 class Driver {
-public:
+ public:
   Driver(DriverType kernel_driver_type, std::string devnode_name);
   virtual ~Driver() = default;
 
@@ -140,12 +140,11 @@ public:
   /// @param[out] mem pointer to newly allocated memory.
   /// @retval HSA_STATUS_SUCCESS if memory was successfully allocated or
   /// hsa_status_t error code if the memory allocation failed.
-  virtual hsa_status_t AllocateMemory(const MemoryRegion &mem_region,
-                                      MemoryRegion::AllocateFlags alloc_flags,
-                                      void **mem, size_t size,
-                                      uint32_t node_id) = 0;
+  virtual hsa_status_t AllocateMemory(const MemoryRegion& mem_region,
+                                      MemoryRegion::AllocateFlags alloc_flags, void** mem,
+                                      size_t size, uint32_t node_id) = 0;
 
-  virtual hsa_status_t FreeMemory(void *mem, size_t size) = 0;
+  virtual hsa_status_t FreeMemory(void* mem, size_t size) = 0;
 
   /// @brief Create an agent dispatch queue with user-mode access rights.
   /// @param[in] node_id Node ID of the agent on which the queue is being created.
@@ -201,16 +200,15 @@ public:
   /// @param[in] size memory size in bytes
   /// @param[out] dmabuf_fd dma-buf file descriptor
   /// @param[out] offset memory offset in bytes
-  virtual hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
-                                    size_t *offset) = 0;
+  virtual hsa_status_t ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, size_t* offset) = 0;
 
   /// @brief Imports a memory chunk via dma-buf.
   ///
   /// @param[in] dmabuf_fd dma-buf file descriptor
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory
-  virtual hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                                    core::ShareableHandle &handle) = 0;
+  virtual hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent& agent,
+                                    core::ShareableHandle& handle) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -219,8 +217,7 @@ public:
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
   /// @param[out] perms new permissions
-  virtual hsa_status_t Map(core::ShareableHandle handle, void *mem,
-                           size_t offset, size_t size,
+  virtual hsa_status_t Map(core::ShareableHandle handle, void* mem, size_t offset, size_t size,
                            hsa_access_permission_t perms) = 0;
 
   /// @brief Unmaps the memory associated with the handle.
@@ -229,14 +226,13 @@ public:
   /// @param[in] mem virtual address associated with the handle
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
-  virtual hsa_status_t Unmap(core::ShareableHandle handle, void *mem,
-                             size_t offset, size_t size) = 0;
+  virtual hsa_status_t Unmap(core::ShareableHandle handle, void* mem, size_t offset,
+                             size_t size) = 0;
 
   /// @brief Releases the object associated with the handle.
   ///
   /// @param[in] handle handle of the object to release
-  virtual hsa_status_t
-  ReleaseShareableHandle(core::ShareableHandle &handle) = 0;
+  virtual hsa_status_t ReleaseShareableHandle(core::ShareableHandle& handle) = 0;
 
   /// @brief Acquire a streaming performance monitor on an agent.
   /// @param[in] preferred_node_id Node ID of the preferred agent.
@@ -354,15 +350,15 @@ public:
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 
-protected:
- HsaVersionInfo version_{std::numeric_limits<uint32_t>::max(),
-                         std::numeric_limits<uint32_t>::max()};
+ protected:
+  HsaVersionInfo version_{std::numeric_limits<uint32_t>::max(),
+                          std::numeric_limits<uint32_t>::max()};
 
- const std::string devnode_name_;
- int fd_ = -1;
+  const std::string devnode_name_;
+  int fd_ = -1;
 };
 
-} // namespace core
-} // namespace rocr
+}  // namespace core
+}  // namespace rocr
 
-#endif // header guard
+#endif  // header guard

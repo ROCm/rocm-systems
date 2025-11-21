@@ -41,12 +41,17 @@
 #define THREAD_TRACE_PREFIX_SIZE 0x100
 #define DEFAULT_TRACE_BUFFER_SIZE (3 << 26)
 
-inline rocprof_trace_decoder_gfx9_header_t getHeaderPacket(int SE, int CU, int SIMD, aql_profile::gpu_id_t id, bool double_buffer) {
+inline rocprof_trace_decoder_gfx9_header_t getHeaderPacket(int SE, int CU, int SIMD,
+                                                           aql_profile::gpu_id_t id,
+                                                           bool double_buffer) {
   rocprof_trace_decoder_gfx9_header_t header{.raw = 0};
   // Requires decoder version 0.1.2 or higher
-  if(id == aql_profile::MI300_GPU_ID) header.gfx9_version2 = 5;
-  else if(id == aql_profile::MI350_GPU_ID) header.gfx9_version2 = 6;
-  else header.gfx9_version2 = 4;
+  if (id == aql_profile::MI300_GPU_ID)
+    header.gfx9_version2 = 5;
+  else if (id == aql_profile::MI350_GPU_ID)
+    header.gfx9_version2 = 6;
+  else
+    header.gfx9_version2 = 4;
 
   header.legacy_version = 0x11;
   header.SEID = SE;
@@ -80,12 +85,14 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
   for (size_t se_index = 0; se_index < se_number_total; se_index++) {
     bool bMaskedIn = memorymgr->config.GetTargetCU(se_index) >= 0;
     if (!bMaskedIn) continue;
-  
+
     if (control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask()) {
       ERR_LOGGING << "SQTT memory error received, SE(" << se_index << ")";
       status = HSA_STATUS_ERROR_EXCEPTION;
     }
-    auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID) ? control_ptr[se_index].status2 : control_ptr[se_index].status;
+    auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID)
+                             ? control_ptr[se_index].status2
+                             : control_ptr[se_index].status;
     if (status2_value & sqttbuilder->GetBufferFullMask()) {
       ERR2_LOGGING << "SQTT data buffer full, SE(" << se_index << ")";
       if (status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -114,10 +121,10 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     sample_sizes.at(se_index) = sample_size;
     max_sample_size = std::max(sample_size, max_sample_size);
 
-    if (memorymgr->isDoubleBuffer())
-    {
+    if (memorymgr->isDoubleBuffer()) {
       size_t buf_num = memorymgr->config.buffer_data.at(se_index).size();
-      sample_ptr = memorymgr->config.buffer_data.at(se_index)[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
+      sample_ptr = memorymgr->config.buffer_data.at(
+          se_index)[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
       callback(se_index, sample_ptr, sample_size, userdata);
       return status;
     }
@@ -138,7 +145,8 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     char* sample_data_ptr = (char*)cpu_sample.data();
     if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID) {
       auto* header = reinterpret_cast<rocprof_trace_decoder_gfx9_header_t*>(cpu_sample.data());
-      *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetGpuId(), false);
+      *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(),
+                                pm4_factory->GetGpuId(), false);
       sample_data_ptr += gfx9_header_size;
       sample_size_plus_header = sample_size + gfx9_header_size;
     }
@@ -203,7 +211,8 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
           buffer_size = (buffer_size & UINT32_MAX) | (uint64_t(p->value) << 32);  // High 32 bits
           break;
         case AQLPROFILE_ATT_PARAMETER_NAME_RT_TIMESTAMP:
-          trace_config.enable_rt_timestamp = p->value != static_cast<uint32_t>(AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DISABLE);
+          trace_config.enable_rt_timestamp =
+              p->value != static_cast<uint32_t>(AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DISABLE);
           break;
         case AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS:
           if (p->value < 1) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -230,31 +239,28 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
   memorymgr->CreateTraceControlBuf(control_size + THREAD_TRACE_PREFIX_SIZE);
   memorymgr->CreateOutputBuf(buffer_size);
 
-  if (buffer_num > 1)
-  {
+  if (buffer_num > 1) {
     // Not supported: If more than one shader is enabled, return error
-    if ((trace_config.se_mask & (trace_config.se_mask-1)) != 0)
+    if ((trace_config.se_mask & (trace_config.se_mask - 1)) != 0)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     // Loop over all shader engines
-    for (int se_id = 0; (trace_config.se_mask>>se_id) != 0; se_id++)
-    {
+    for (int se_id = 0; (trace_config.se_mask >> se_id) != 0; se_id++) {
       if ((trace_config.se_mask >> se_id) % 2 == 0) continue;
 
       auto& buffer_data = trace_config.buffer_data[se_id];
 
-      for (int64_t i=1; i<buffer_num; i++)
+      for (int64_t i = 1; i < buffer_num; i++)
         buffer_data.emplace_back(memorymgr->AddExtraOutputBuf());
 
       // First == Last buf for ring
       buffer_data.emplace_back(memorymgr->GetOutputBuf());
 
-      if ((pm4_factory->GetGpuId() != aql_profile::GFX9_GPU_ID) && (buffer_num%2))
-      {
+      if ((pm4_factory->GetGpuId() != aql_profile::GFX9_GPU_ID) && (buffer_num % 2)) {
         // For gfxip != 9, an odd number of buffers in the ring causes buf0 and buf1 to have swapped
         // pointers after a round trip. We need two turns around the ring to restore the state.
         // Think about a Mobius Strip
-        for (int i=0; i<buffer_num; i++) buffer_data.emplace_back(buffer_data.at(i));
+        for (int i = 0; i < buffer_num; i++) buffer_data.emplace_back(buffer_data.at(i));
       }
     }
   }
@@ -319,10 +325,14 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
   pm4_builder::CmdBuffer commands;
 
   if (!data.isUnload) {
-    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.addr), ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_LO);
-    sqttbuilder->InsertCodeobjMarker(&commands, data.addr >> 32, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_HI);
-    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.size), ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_LO);
-    sqttbuilder->InsertCodeobjMarker(&commands, data.size >> 32, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_HI);
+    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.addr),
+                                     ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_LO);
+    sqttbuilder->InsertCodeobjMarker(&commands, data.addr >> 32,
+                                     ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_HI);
+    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.size),
+                                     ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_LO);
+    sqttbuilder->InsertCodeobjMarker(&commands, data.size >> 32,
+                                     ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_HI);
   }
 
   rocprof_trace_decoder_codeobj_marker_tail_t header{};
@@ -330,12 +340,15 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
   header.isUnload = data.isUnload;
 
   if (data.id >= (1 << 30)) {
-    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.id), ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_LO);
-    sqttbuilder->InsertCodeobjMarker(&commands, data.id >> 32, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_HI);
+    sqttbuilder->InsertCodeobjMarker(&commands, uint32_t(data.id),
+                                     ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_LO);
+    sqttbuilder->InsertCodeobjMarker(&commands, data.id >> 32,
+                                     ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_HI);
   } else
     header.legacy_id = data.id;
 
-  sqttbuilder->InsertCodeobjMarker(&commands, header.raw, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_TAIL);
+  sqttbuilder->InsertCodeobjMarker(&commands, header.raw,
+                                   ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_TAIL);
 
   auto memorymgr = std::make_shared<CodeobjMemoryManager>(data.agent, alloc_cb, dealloc_cb,
                                                           commands.Size(), userdata);
@@ -353,58 +366,53 @@ hsa_status_t _internal_aqlprofile_att_codeobj_marker(
 
 extern "C" {
 
-PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(
-  aqlprofile_att_buffer_status_t* out,
-  aqlprofile_handle_t handle,
-  int shader_engine_id,
-  int flags
-)
-{
+PUBLIC_API hsa_status_t aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
+                                                            aqlprofile_handle_t handle,
+                                                            int shader_engine_id, int flags) {
   auto generic_manager = MemoryManager::GetManager(handle.handle);
 
   auto* manager = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
   if (manager == nullptr) return HSA_STATUS_ERROR;
 
-  volatile auto& control = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id];
-  uint32_t status        = control.status_double_buffer;
+  volatile auto& control =
+      manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id];
+  uint32_t status = control.status_double_buffer;
 
-  out->_size       = sizeof(aqlprofile_att_buffer_status_t);
+  out->_size = sizeof(aqlprofile_att_buffer_status_t);
   out->is_too_late = false;
-  out->needs_swap  = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetBufferFullMask()) != 0;
+  out->needs_swap = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())
+                                  ->GetSqttBuilder()
+                                  ->GetBufferFullMask()) != 0;
 
   auto it = manager->config.buffer_data.find(shader_engine_id);
-  if(it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  if (out->needs_swap)
-  {
+  if (out->needs_swap) {
     // Lockdown error signals we have overflown the buffer and the trace has already stopped
-    out->is_too_late = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())->GetSqttBuilder()->GetLockDownFailMask()) != 0;
+    out->is_too_late = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())
+                                     ->GetSqttBuilder()
+                                     ->GetLockDownFailMask()) != 0;
 
     auto& buffer_data = it->second;
-    out->read_size    = manager->config.capacity_per_se;
-    out->num_swaps    = manager->buffer_swaps.fetch_add(1);
-    out->data         = buffer_data.at((out->num_swaps + buffer_data.size() - 1) % buffer_data.size());
+    out->read_size = manager->config.capacity_per_se;
+    out->num_swaps = manager->buffer_swaps.fetch_add(1);
+    out->data = buffer_data.at((out->num_swaps + buffer_data.size() - 1) % buffer_data.size());
   }
 
   return HSA_STATUS_SUCCESS;
 }
 
 PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
-  uint64_t* header,
-  hsa_ext_amd_aql_pm4_packet_t* query_status,
-  hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
-  uint64_t* num_buffer_packets,
-  aqlprofile_handle_t handle,
-  int shader_engine_id,
-  int flags)
-{
+    uint64_t* header, hsa_ext_amd_aql_pm4_packet_t* query_status,
+    hsa_ext_amd_aql_pm4_packet_t** buffer_swap, uint64_t* num_buffer_packets,
+    aqlprofile_handle_t handle, int shader_engine_id, int flags) {
   auto generic_manager = MemoryManager::GetManager(handle.handle);
 
   auto* manager = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
   if (manager == nullptr) return HSA_STATUS_ERROR;
 
   auto it = manager->config.buffer_data.find(shader_engine_id);
-  if(it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   auto& buffers = it->second;
   if (buffers.size() < 2) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -417,14 +425,16 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   *num_buffer_packets = buffers.size();
 
   if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
-    *header = getHeaderPacket(shader_engine_id, manager->config.GetTargetCU(shader_engine_id), manager->GetSimdMask(), pm4_factory->GetGpuId(), true).raw;
+    *header = getHeaderPacket(shader_engine_id, manager->config.GetTargetCU(shader_engine_id),
+                              manager->GetSimdMask(), pm4_factory->GetGpuId(), true)
+                  .raw;
   else
     *header = 0;
 
-  for (size_t i=0; i<buffers.size(); i++)
-  {
+  for (size_t i = 0; i < buffers.size(); i++) {
     pm4_builder::CmdBuffer commands;
-    sqttbuilder->Swapbuffer(&commands, &manager->config, buffers.at((i + 1) % buffers.size()), buffers.at(i % buffers.size()), shader_engine_id, i%2);
+    sqttbuilder->Swapbuffer(&commands, &manager->config, buffers.at((i + 1) % buffers.size()),
+                            buffers.at(i % buffers.size()), shader_engine_id, i % 2);
 
     void* cmdbuffer = manager->AddExtraCmdBuf(commands.Size());
     memcpy(cmdbuffer, commands.Data(), commands.Size());

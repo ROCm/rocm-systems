@@ -56,8 +56,7 @@ HostQueue::HostQueue(core::SharedQueue* shared_queue, hsa_region_t region, uint3
                          [&]() { HSA::hsa_memory_deregister(this, sizeof(HostQueue)); });
 
   const size_t queue_buffer_size = size_ * sizeof(AqlPacket);
-  if (HSA_STATUS_SUCCESS !=
-      HSA::hsa_memory_allocate(region, queue_buffer_size, &ring_)) {
+  if (HSA_STATUS_SUCCESS != HSA::hsa_memory_allocate(region, queue_buffer_size, &ring_)) {
     throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Host queue buffer alloc failed\n");
   }
   MAKE_NAMED_SCOPE_GUARD(bufferGuard, [&]() { HSA::hsa_memory_free(&ring_); });
@@ -78,15 +77,12 @@ HostQueue::HostQueue(core::SharedQueue* shared_queue, hsa_region_t region, uint3
   amd_queue_.hsa_queue.type = type;
   amd_queue_.hsa_queue.features = features;
 #ifdef HSA_LARGE_MODEL
-  AMD_HSA_BITS_SET(
-      amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64, 1);
+  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64, 1);
 #else
-  AMD_HSA_BITS_SET(
-      amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64, 0);
+  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64, 0);
 #endif
   amd_queue_.write_dispatch_id = amd_queue_.read_dispatch_id = 0;
-  AMD_HSA_BITS_SET(
-      amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING, 0);
+  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING, 0);
 
   bufferGuard.Dismiss();
   registerGuard.Dismiss();

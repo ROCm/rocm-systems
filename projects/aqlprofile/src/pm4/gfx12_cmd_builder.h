@@ -46,7 +46,7 @@ class Gfx12CmdBuilder : public CmdBuilder {
   }
 
  public:
-  Gfx12CmdBuilder(const reg_base_offset_table* _table) : CmdBuilder(_table){};
+  Gfx12CmdBuilder(const reg_base_offset_table* _table) : CmdBuilder(_table) {};
 
   static constexpr bool IsPrivilegedConfigReg(uint32_t addr) {
     return ((addr >= CONFIG_SPACE_START) && (addr <= CONFIG_SPACE_END));
@@ -387,8 +387,7 @@ class Gfx12CmdBuilder : public CmdBuilder {
     APPEND_COMMAND_WRAPPER(cmdbuf, pm4_mec_atomic_mem_cmd);
   }
 
-  void BuildPrimeL2(CmdBuffer* cmdBuf, uint64_t addr) override
-  {
+  void BuildPrimeL2(CmdBuffer* cmdBuf, uint64_t addr) override {
 #ifdef PM4_MEC_PRIME_UTCL2_DEFINED
     PM4_MEC_PRIME_UTCL2 prime{};
     prime.header = MakePacket3Header(IT_PRIME_UTCL2, sizeof(prime));

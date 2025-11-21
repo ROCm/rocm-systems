@@ -51,33 +51,34 @@
 #include "hsa/hsa.h"
 #include "suites/test_common/test_base.h"
 
-class ReferenceCountTest:public TestBase {
+class ReferenceCountTest : public TestBase {
  public:
-    ReferenceCountTest(bool _referenceCount, bool _maxReferenceCount);
+  ReferenceCountTest(bool _referenceCount, bool _maxReferenceCount);
 
-    // @Brief: Destructor for the ReferenceCountTest class
-    virtual ~ReferenceCountTest();
+  // @Brief: Destructor for the ReferenceCountTest class
+  virtual ~ReferenceCountTest();
 
-    // @Brief: Setup the environment for measurement
-    virtual void SetUp();
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-    // @Brief: Core measurement execution
-    virtual void Run();
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-    // @Brief: Clean up and retrive the resource
-    virtual void Close();
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
 
-    // @Brief: Display  results
-    virtual void DisplayResults() const;
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
 
-    // @Brief: Display information about what this test does
-    virtual void DisplayTestInfo(void);
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 
-    // @Brief: The function initializes runtime to N times, shutdown N-1
-    void TestReferenceCount(void);
+  // @Brief: The function initializes runtime to N times, shutdown N-1
+  void TestReferenceCount(void);
 
-    // @Brief: The function checks maximum no.of allowed hsa runtime initialization before reaching outof resource
-    void TestMaxReferenceCount(void);
+  // @Brief: The function checks maximum no.of allowed hsa runtime initialization before reaching
+  // outof resource
+  void TestMaxReferenceCount(void);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_REFERENCE_COUNT_H_

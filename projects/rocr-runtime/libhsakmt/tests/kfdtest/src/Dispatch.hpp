@@ -29,51 +29,51 @@
 
 class Dispatch {
  public:
-    Dispatch(const HsaMemoryBuffer& isaBuf, const bool eventAutoReset = false);
-    ~Dispatch();
+  Dispatch(const HsaMemoryBuffer& isaBuf, const bool eventAutoReset = false);
+  ~Dispatch();
 
-    void SetArgs(void* pArg1, void* pArg2);
+  void SetArgs(void* pArg1, void* pArg2);
 
-    void SetDim(unsigned int x, unsigned int y, unsigned int z);
+  void SetDim(unsigned int x, unsigned int y, unsigned int z);
 
-    void Submit(BaseQueue& queue);
+  void Submit(BaseQueue& queue);
 
-    void Sync(unsigned int timeout = HSA_EVENTTIMEOUT_INFINITE);
+  void Sync(unsigned int timeout = HSA_EVENTTIMEOUT_INFINITE);
 
-    int  SyncWithStatus(unsigned int timeout);
+  int SyncWithStatus(unsigned int timeout);
 
-    void SetScratch(int numWaves, int waveSize, HSAuint64 scratch_base);
+  void SetScratch(int numWaves, int waveSize, HSAuint64 scratch_base);
 
-    void SetSpiPriority(unsigned int priority);
-    
-    void SetPriv(bool priv);
+  void SetSpiPriority(unsigned int priority);
 
-    HsaEvent *GetHsaEvent() { return m_pEop; }
+  void SetPriv(bool priv);
 
- private:
-    void BuildIb();
+  HsaEvent* GetHsaEvent() { return m_pEop; }
 
  private:
-    const HsaMemoryBuffer& m_IsaBuf;
+  void BuildIb();
 
-    IndirectBuffer m_IndirectBuf;
+ private:
+  const HsaMemoryBuffer& m_IsaBuf;
 
-    unsigned int m_DimX;
-    unsigned int m_DimY;
-    unsigned int m_DimZ;
+  IndirectBuffer m_IndirectBuf;
 
-    void* m_pArg1;
-    void* m_pArg2;
+  unsigned int m_DimX;
+  unsigned int m_DimY;
+  unsigned int m_DimZ;
 
-    HsaEvent* m_pEop;
+  void* m_pArg1;
+  void* m_pArg2;
 
-    bool            m_ScratchEn;
-    unsigned int    m_ComputeTmpringSize;
+  HsaEvent* m_pEop;
 
-    HSAuint64  m_scratch_base;
-    unsigned int m_SpiPriority;
-    unsigned int  m_FamilyId;
-    bool  m_NeedCwsrWA;
+  bool m_ScratchEn;
+  unsigned int m_ComputeTmpringSize;
+
+  HSAuint64 m_scratch_base;
+  unsigned int m_SpiPriority;
+  unsigned int m_FamilyId;
+  bool m_NeedCwsrWA;
 };
 
 #endif  // __KFD_DISPATCH__H__

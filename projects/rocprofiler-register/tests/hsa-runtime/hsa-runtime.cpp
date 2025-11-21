@@ -162,7 +162,8 @@ hsa_init()
 }
 }  // namespace hsa
 
-extern "C" {
+extern "C"
+{
 void
 hsa_init(void)
 {

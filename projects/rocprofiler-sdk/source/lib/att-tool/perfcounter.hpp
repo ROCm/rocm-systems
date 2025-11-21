@@ -41,7 +41,7 @@ public:
     using shader_map_t   = std::unordered_map<int, realtime_vec_t>;
 
     RealtimeTS(const Fspath& dir)
-    : path(dir / "realtime.json"){};
+    : path(dir / "realtime.json") {};
     ~RealtimeTS();
 
     void     add(int shader, const realtime_t* events, size_t event_count);

@@ -59,9 +59,9 @@ typedef void* Thread;
 typedef void* EventHandle;
 
 typedef enum {
-  OS_THREAD_PRIORITY_DEFAULT    = -1,
-  OS_THREAD_PRIORITY_HIGH       = 254,
-  OS_THREAD_PRIORITY_MAX        = 255,
+  OS_THREAD_PRIORITY_DEFAULT = -1,
+  OS_THREAD_PRIORITY_HIGH = 254,
+  OS_THREAD_PRIORITY_MAX = 255,
 } ThreadPriority;
 
 enum class os_t { OS_WIN = 0, OS_LINUX, COUNT };
@@ -219,8 +219,8 @@ typedef void (*ThreadEntry)(void*);
 /// @param: stack_size(Input), size of the thread's stack, 0 by default.
 /// @param: priority(Input), thread priority.
 /// @return: Thread, a handle to thread created.
-Thread CreateThread(ThreadEntry entry_function, void* entry_argument,
-                    uint stack_size = 0, int priority = OS_THREAD_PRIORITY_DEFAULT);
+Thread CreateThread(ThreadEntry entry_function, void* entry_argument, uint stack_size = 0,
+                    int priority = OS_THREAD_PRIORITY_DEFAULT);
 
 /// @brief: Destroys the thread.
 /// @param: thread(Input), thread handle to what will be destroyed.
@@ -342,8 +342,7 @@ enum MemProt { MEM_PROT_NONE = 0, MEM_PROT_READ, MEM_PROT_RW, MEM_PROT_RWX };
 
 /// @brief Reserves a chunk of memory (priv | anon | noreserve)
 /// @param:
-void* ReserveMemory(void* start, size_t size, size_t alignment = 0,
-                    MemProt prot = MEM_PROT_NONE);
+void* ReserveMemory(void* start, size_t size, size_t alignment = 0, MemProt prot = MEM_PROT_NONE);
 
 /// Release a chunk of memory reserved with reserveMemory.
 bool ReleaseMemory(void* addr, size_t size);
@@ -363,7 +362,7 @@ int Ctz(uint64_t i);
 /// Shared library or DLL load error
 char* DlError();
 
-}   //  namespace os
-}   //  namespace rocr
+}  //  namespace os
+}  //  namespace rocr
 
 #endif  // HSA_RUNTIME_CORE_UTIL_OS_H_

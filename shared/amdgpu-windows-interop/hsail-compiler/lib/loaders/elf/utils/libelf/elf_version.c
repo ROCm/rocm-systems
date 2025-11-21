@@ -32,21 +32,19 @@
 
 LIBELF_VCSID("$Id: elf_version.c 189 2008-07-20 10:38:08Z jkoshy $");
 
-unsigned int
-elf_version(unsigned int v)
-{
-	unsigned int old;
+unsigned int elf_version(unsigned int v) {
+  unsigned int old;
 
-	if ((old = LIBELF_PRIVATE(version)) == EV_NONE)
-		old = EV_CURRENT;
+  if ((old = LIBELF_PRIVATE(version)) == EV_NONE)
+    old = EV_CURRENT;
 
-	if (v == EV_NONE)
-		return old;
-	if (v > EV_CURRENT) {
-		LIBELF_SET_ERROR(VERSION, 0);
-		return EV_NONE;
-	}
+  if (v == EV_NONE)
+    return old;
+  if (v > EV_CURRENT) {
+    LIBELF_SET_ERROR(VERSION, 0);
+    return EV_NONE;
+  }
 
-	LIBELF_PRIVATE(version) = v;
-	return (old);
+  LIBELF_PRIVATE(version) = v;
+  return (old);
 }

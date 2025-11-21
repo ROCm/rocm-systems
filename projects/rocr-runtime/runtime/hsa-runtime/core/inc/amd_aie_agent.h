@@ -52,58 +52,57 @@ namespace rocr {
 namespace AMD {
 
 class AieAgent : public core::Agent {
-public:
- /// @brief AIE agent constructor.
- /// @param [in] node Node id.
- /// @param [in] node_props Node properties.
- AieAgent(uint32_t node, const HsaNodeProperties& node_props);
+ public:
+  /// @brief AIE agent constructor.
+  /// @param [in] node Node id.
+  /// @param [in] node_props Node properties.
+  AieAgent(uint32_t node, const HsaNodeProperties& node_props);
 
- ~AieAgent();
+  ~AieAgent();
 
- hsa_status_t VisitRegion(bool include_peer,
-                          hsa_status_t (*callback)(hsa_region_t region, void* data),
-                          void* data) const;
- hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
-                            void* data) const override;
+  hsa_status_t VisitRegion(bool include_peer,
+                           hsa_status_t (*callback)(hsa_region_t region, void* data),
+                           void* data) const;
+  hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
+                             void* data) const override;
 
- hsa_status_t IterateCache(hsa_status_t (*callback)(hsa_cache_t cache, void* data),
-                           void* value) const override;
+  hsa_status_t IterateCache(hsa_status_t (*callback)(hsa_cache_t cache, void* data),
+                            void* value) const override;
 
- hsa_status_t IterateSupportedIsas(hsa_status_t (*callback)(hsa_isa_t isa, void* data),
-                                   void* data) const override;
+  hsa_status_t IterateSupportedIsas(hsa_status_t (*callback)(hsa_isa_t isa, void* data),
+                                    void* data) const override;
 
- hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
+  hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
- hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
-                          core::HsaEventCallback event_callback, void* data,
-                          uint32_t private_segment_size, uint32_t group_segment_size,
-                          core::Queue** queue) override;
+  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
+                           core::HsaEventCallback event_callback, void* data,
+                           uint32_t private_segment_size, uint32_t group_segment_size,
+                           core::Queue** queue) override;
 
- /// @brief Override from core::Agent.
- const std::vector<const core::Isa*>& supported_isas() const override { return supported_isas_; }
+  /// @brief Override from core::Agent.
+  const std::vector<const core::Isa*>& supported_isas() const override { return supported_isas_; }
 
- const std::vector<const core::MemoryRegion*>& regions() const override { return regions_; }
+  const std::vector<const core::MemoryRegion*>& regions() const override { return regions_; }
 
- /// @brief Getter for the AIE system allocator.
- const std::function<void*(size_t size, size_t align, core::MemoryRegion::AllocateFlags flags)>&
- system_allocator() const {
-   return system_allocator_;
- }
+  /// @brief Getter for the AIE system allocator.
+  const std::function<void*(size_t size, size_t align, core::MemoryRegion::AllocateFlags flags)>&
+  system_allocator() const {
+    return system_allocator_;
+  }
 
   /// @brief Getter for the AIE system deallocator.
   const std::function<void(void*)>& system_deallocator() const { return system_deallocator_; }
 
   const HsaNodeProperties& properties() const { return node_props_; }
 
-private:
+ private:
   /// @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();
   /// @brief Setup the memory allocators used by this agent.
   void InitAllocators();
 
-  std::vector<const core::MemoryRegion *> regions_;
-  std::function<void *(size_t size, size_t align,
-                       core::MemoryRegion::AllocateFlags flags)>
+  std::vector<const core::MemoryRegion*> regions_;
+  std::function<void*(size_t size, size_t align, core::MemoryRegion::AllocateFlags flags)>
       system_allocator_;
 
 
@@ -117,7 +116,7 @@ private:
   const HsaNodeProperties node_props_;
 };
 
-} // namespace AMD
-} // namespace rocr
+}  // namespace AMD
+}  // namespace rocr
 
-#endif // header guard
+#endif  // header guard

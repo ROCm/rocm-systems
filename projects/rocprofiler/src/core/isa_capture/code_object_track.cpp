@@ -51,7 +51,7 @@ std::unordered_set<codeobj_record*> codeobj_record::listeners;
 std::atomic<uint32_t> codeobj_capture_instance::eventcount{0};
 
 // Codeobj Record
-codeobj_record::codeobj_record(rocprofiler_codeobj_capture_mode_t mode) : capture_mode(mode){};
+codeobj_record::codeobj_record(rocprofiler_codeobj_capture_mode_t mode) : capture_mode(mode) {};
 
 void codeobj_record::start_capture() {
   listeners.insert(this);
@@ -64,24 +64,18 @@ void codeobj_record::addcapture(CodeobjPtr& capture) {
   captures.insert(capture);
 }
 
-void codeobj_record::stop_capture() {
-  listeners.erase(this);
-}
+void codeobj_record::stop_capture() { listeners.erase(this); }
 
 // Codeobj Capture
-void codeobj_capture_instance::Load(
-  uint64_t addr,
-  uint64_t load_size,
-  const std::string& URI,
-  uint64_t mem_addr,
-  uint64_t mem_size
-) {
-  uint32_t id = eventcount.fetch_add(1, std::memory_order_relaxed)+1;
+void codeobj_capture_instance::Load(uint64_t addr, uint64_t load_size, const std::string& URI,
+                                    uint64_t mem_addr, uint64_t mem_size) {
+  uint32_t id = eventcount.fetch_add(1, std::memory_order_relaxed) + 1;
   auto time = rocprofiler::ROCProfiler_Singleton::GetInstance().timestamp_ns().value;
 
   std::lock_guard<std::mutex> lock(codeobj_record::mutex);
 
-  auto inst = std::make_shared<codeobj_capture_instance>(addr, load_size, URI, mem_addr, mem_size, time, id);
+  auto inst = std::make_shared<codeobj_capture_instance>(addr, load_size, URI, mem_addr, mem_size,
+                                                         time, id);
   codeobj_record::codeobjs[addr] = inst;
   for (auto* listen : codeobj_record::listeners) listen->addcapture(inst);
 }

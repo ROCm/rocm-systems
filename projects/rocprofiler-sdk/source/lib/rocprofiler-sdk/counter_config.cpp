@@ -30,7 +30,8 @@
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
-extern "C" {
+extern "C"
+{
 /**
  * @brief Create Profile Configuration.
  *

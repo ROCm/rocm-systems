@@ -105,11 +105,11 @@ queue_cb(const context::context*                                         ctx,
         dispatch_info.private_segment_size = pkt.kernel_dispatch.private_segment_size;
         dispatch_info.group_segment_size   = pkt.kernel_dispatch.group_segment_size;
         dispatch_info.workgroup_size       = {pkt.kernel_dispatch.workgroup_size_x,
-                                        pkt.kernel_dispatch.workgroup_size_y,
-                                        pkt.kernel_dispatch.workgroup_size_z};
+                                              pkt.kernel_dispatch.workgroup_size_y,
+                                              pkt.kernel_dispatch.workgroup_size_z};
         dispatch_info.grid_size            = {pkt.kernel_dispatch.grid_size_x,
-                                   pkt.kernel_dispatch.grid_size_y,
-                                   pkt.kernel_dispatch.grid_size_z};
+                                              pkt.kernel_dispatch.grid_size_y,
+                                              pkt.kernel_dispatch.grid_size_z};
         dispatch_data.dispatch_info        = dispatch_info;
     }
 

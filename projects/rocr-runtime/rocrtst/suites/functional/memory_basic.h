@@ -52,7 +52,7 @@
 
 class MemoryTest : public TestBase {
  public:
-    MemoryTest();
+  MemoryTest();
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~MemoryTest();

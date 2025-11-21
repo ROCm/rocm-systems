@@ -60,48 +60,45 @@ extern "C" {
  * Linux with the AMD OpenCL implementation; other systems will simply
  * get a full cpuset.
  */
-static __hwloc_inline int
-hwloc_opencl_get_device_cpuset(hwloc_topology_t topology __hwloc_attribute_unused,
-			       cl_device_id device __hwloc_attribute_unused,
-			       hwloc_cpuset_t set)
-{
+static __hwloc_inline int hwloc_opencl_get_device_cpuset(
+    hwloc_topology_t topology __hwloc_attribute_unused,
+    cl_device_id device __hwloc_attribute_unused, hwloc_cpuset_t set) {
 #if (defined HWLOC_LINUX_SYS) && (defined CL_DEVICE_TOPOLOGY_AMD)
-	/* If we're on Linux + AMD OpenCL, use the AMD extension + the sysfs mechanism to get the local cpus */
+  /* If we're on Linux + AMD OpenCL, use the AMD extension + the sysfs mechanism to get the local
+   * cpus */
 #define HWLOC_OPENCL_DEVICE_SYSFS_PATH_MAX 128
-	char path[HWLOC_OPENCL_DEVICE_SYSFS_PATH_MAX];
-	FILE *sysfile = NULL;
-	cl_device_topology_amd amdtopo;
-	cl_int clret;
+  char path[HWLOC_OPENCL_DEVICE_SYSFS_PATH_MAX];
+  FILE* sysfile = NULL;
+  cl_device_topology_amd amdtopo;
+  cl_int clret;
 
-	if (!hwloc_topology_is_thissystem(topology)) {
-		errno = EINVAL;
-		return -1;
-	}
+  if (!hwloc_topology_is_thissystem(topology)) {
+    errno = EINVAL;
+    return -1;
+  }
 
-	clret = clGetDeviceInfo(device, CL_DEVICE_TOPOLOGY_AMD, sizeof(amdtopo), &amdtopo, NULL);
-	if (CL_SUCCESS != clret) {
-		hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
-		return 0;
-	}
-	if (CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD != amdtopo.raw.type) {
-		hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
-		return 0;
-	}
+  clret = clGetDeviceInfo(device, CL_DEVICE_TOPOLOGY_AMD, sizeof(amdtopo), &amdtopo, NULL);
+  if (CL_SUCCESS != clret) {
+    hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
+    return 0;
+  }
+  if (CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD != amdtopo.raw.type) {
+    hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
+    return 0;
+  }
 
-	sprintf(path, "/sys/bus/pci/devices/0000:%02x:%02x.%01x/local_cpus",
-		(unsigned) amdtopo.pcie.bus, (unsigned) amdtopo.pcie.device, (unsigned) amdtopo.pcie.function);
-	sysfile = fopen(path, "r");
-	if (!sysfile)
-		return -1;
+  sprintf(path, "/sys/bus/pci/devices/0000:%02x:%02x.%01x/local_cpus", (unsigned)amdtopo.pcie.bus,
+          (unsigned)amdtopo.pcie.device, (unsigned)amdtopo.pcie.function);
+  sysfile = fopen(path, "r");
+  if (!sysfile) return -1;
 
-	if (hwloc_linux_parse_cpumap_file(sysfile, set) < 0
-	    || hwloc_bitmap_iszero(set))
-		hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
+  if (hwloc_linux_parse_cpumap_file(sysfile, set) < 0 || hwloc_bitmap_iszero(set))
+    hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
 
-	fclose(sysfile);
+  fclose(sysfile);
 #else
-	/* Non-Linux + AMD OpenCL systems simply get a full cpuset */
-	hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
+  /* Non-Linux + AMD OpenCL systems simply get a full cpuset */
+  hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
 #endif
   return 0;
 }
@@ -121,20 +118,17 @@ hwloc_opencl_get_device_cpuset(hwloc_topology_t topology __hwloc_attribute_unuse
  * \note The corresponding PCI device object can be obtained by looking
  * at the OS device parent object.
  */
-static __hwloc_inline hwloc_obj_t
-hwloc_opencl_get_device_osdev_by_index(hwloc_topology_t topology,
-				       unsigned platform_index, unsigned device_index)
-{
-	unsigned x = (unsigned) -1, y = (unsigned) -1;
-	hwloc_obj_t osdev = NULL;
-	while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
-		if (HWLOC_OBJ_OSDEV_COPROC == osdev->attr->osdev.type
-                    && osdev->name
-		    && sscanf(osdev->name, "opencl%ud%u", &x, &y) == 2
-		    && platform_index == x && device_index == y)
-                        return osdev;
-        }
-        return NULL;
+static __hwloc_inline hwloc_obj_t hwloc_opencl_get_device_osdev_by_index(hwloc_topology_t topology,
+                                                                         unsigned platform_index,
+                                                                         unsigned device_index) {
+  unsigned x = (unsigned)-1, y = (unsigned)-1;
+  hwloc_obj_t osdev = NULL;
+  while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
+    if (HWLOC_OBJ_OSDEV_COPROC == osdev->attr->osdev.type && osdev->name &&
+        sscanf(osdev->name, "opencl%ud%u", &x, &y) == 2 && platform_index == x && device_index == y)
+      return osdev;
+  }
+  return NULL;
 }
 
 /** \brief Get the hwloc OS device object corresponding to OpenCL device \p device.
@@ -152,40 +146,36 @@ hwloc_opencl_get_device_osdev_by_index(hwloc_topology_t topology,
  */
 static __hwloc_inline hwloc_obj_t
 hwloc_opencl_get_device_osdev(hwloc_topology_t topology __hwloc_attribute_unused,
-			      cl_device_id device __hwloc_attribute_unused)
-{
+                              cl_device_id device __hwloc_attribute_unused) {
 #ifdef CL_DEVICE_TOPOLOGY_AMD
-	hwloc_obj_t osdev;
-	cl_device_topology_amd amdtopo;
-	cl_int clret;
+  hwloc_obj_t osdev;
+  cl_device_topology_amd amdtopo;
+  cl_int clret;
 
-	clret = clGetDeviceInfo(device, CL_DEVICE_TOPOLOGY_AMD, sizeof(amdtopo), &amdtopo, NULL);
-	if (CL_SUCCESS != clret) {
-		errno = EINVAL;
-		return NULL;
-	}
-	if (CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD != amdtopo.raw.type) {
-		errno = EINVAL;
-		return NULL;
-	}
+  clret = clGetDeviceInfo(device, CL_DEVICE_TOPOLOGY_AMD, sizeof(amdtopo), &amdtopo, NULL);
+  if (CL_SUCCESS != clret) {
+    errno = EINVAL;
+    return NULL;
+  }
+  if (CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD != amdtopo.raw.type) {
+    errno = EINVAL;
+    return NULL;
+  }
 
-	osdev = NULL;
-	while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
-		hwloc_obj_t pcidev = osdev->parent;
-		if (strncmp(osdev->name, "opencl", 6))
-			continue;
-		if (pcidev
-		    && pcidev->type == HWLOC_OBJ_PCI_DEVICE
-		    && pcidev->attr->pcidev.domain == 0
-		    && pcidev->attr->pcidev.bus == amdtopo.pcie.bus
-		    && pcidev->attr->pcidev.dev == amdtopo.pcie.device
-		    && pcidev->attr->pcidev.func == amdtopo.pcie.function)
-			return osdev;
-	}
+  osdev = NULL;
+  while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
+    hwloc_obj_t pcidev = osdev->parent;
+    if (strncmp(osdev->name, "opencl", 6)) continue;
+    if (pcidev && pcidev->type == HWLOC_OBJ_PCI_DEVICE && pcidev->attr->pcidev.domain == 0 &&
+        pcidev->attr->pcidev.bus == amdtopo.pcie.bus &&
+        pcidev->attr->pcidev.dev == amdtopo.pcie.device &&
+        pcidev->attr->pcidev.func == amdtopo.pcie.function)
+      return osdev;
+  }
 
-	return NULL;
+  return NULL;
 #else
-	return NULL;
+  return NULL;
 #endif
 }
 

@@ -114,56 +114,56 @@ struct callback_args {
 };
 
 // Wrap printf to add first or second process indicator
-#define PROCESS_LOG(format, ...)  { \
-    if (verbosity() >= VERBOSE_STANDARD || !parentProcess_) { \
-      fprintf(stdout, "line:%d P%u: " format, \
-                   __LINE__, static_cast<int>(!parentProcess_), ##__VA_ARGS__); \
-    } \
-}
+#define PROCESS_LOG(format, ...)                                                                   \
+  {                                                                                                \
+    if (verbosity() >= VERBOSE_STANDARD || !parentProcess_) {                                      \
+      fprintf(stdout, "line:%d P%u: " format, __LINE__, static_cast<int>(!parentProcess_),         \
+              ##__VA_ARGS__);                                                                      \
+    }                                                                                              \
+  }
 
 // Fork safe ASSERT_EQ.
 #define MSG(y, msg, ...) msg
 #define Y(y, ...) y
 
-#define FORK_ASSERT_EQ(x, ...)                                                    \
-  if ((x) != (Y(__VA_ARGS__))) {                                                  \
-    if ((x) != (Y(__VA_ARGS__))) {                                                \
-      std::cout << MSG(__VA_ARGS__, "");                                          \
-      if (parentProcess_) {                                                       \
-        shared_->parent_status = -1;                                              \
-      } else {                                                                    \
-        shared_->child_status = -1;                                               \
-      }                                                                           \
-      ASSERT_EQ(x, Y(__VA_ARGS__));                                               \
-    }                                                                             \
+#define FORK_ASSERT_EQ(x, ...)                                                                     \
+  if ((x) != (Y(__VA_ARGS__))) {                                                                   \
+    if ((x) != (Y(__VA_ARGS__))) {                                                                 \
+      std::cout << MSG(__VA_ARGS__, "");                                                           \
+      if (parentProcess_) {                                                                        \
+        shared_->parent_status = -1;                                                               \
+      } else {                                                                                     \
+        shared_->child_status = -1;                                                                \
+      }                                                                                            \
+      ASSERT_EQ(x, Y(__VA_ARGS__));                                                                \
+    }                                                                                              \
   }
 
-#define USR_TRIGGERED_FAILURE(x, y, z)                                            \
-  if (usr_fail_val_ == (z)) {                                                     \
-    std::cout << "Env value is: " << z << std::endl;                              \
-    std::cout << "Return value before: " << x << std::endl;                       \
-    std::cout << "Return value  after: " << y << std::endl << std::flush;         \
-    (x) = (y);                                                                    \
+#define USR_TRIGGERED_FAILURE(x, y, z)                                                             \
+  if (usr_fail_val_ == (z)) {                                                                      \
+    std::cout << "Env value is: " << z << std::endl;                                               \
+    std::cout << "Return value before: " << x << std::endl;                                        \
+    std::cout << "Return value  after: " << y << std::endl << std::flush;                          \
+    (x) = (y);                                                                                     \
   }
 
-IPCTest::IPCTest(void) :
-    TestBase() {
+IPCTest::IPCTest(void) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
   set_title("IPC Test");
-  set_description("IPCTest verifies that the IPC feature of RocR is "
+  set_description(
+      "IPCTest verifies that the IPC feature of RocR is "
       "functioning as expected. The test first forks off second process. The "
       "2 processes share pointers to RocR allocated memory and also share "
       "signal handles");
 }
 
-IPCTest::~IPCTest(void) {
-}
+IPCTest::~IPCTest(void) {}
 
 // See if the other process wrote an error value to the token; if not, write
 // the newVal to the token.
-static int CheckAndSetToken(std::atomic<int> *token, int newVal) {
+static int CheckAndSetToken(std::atomic<int>* token, int newVal) {
   if (*token == -1) {
     return -1;
   } else {
@@ -173,7 +173,7 @@ static int CheckAndSetToken(std::atomic<int> *token, int newVal) {
   return 0;
 }
 
-static void ClearShared(Shared *s) {
+static void ClearShared(Shared* s) {
   s->token = 0;
   s->count = 0;
   s->size = 0;
@@ -198,8 +198,7 @@ void IPCTest::SetUp(void) {
   // each process needs to do this.
   // Allocate linux shared_ memory.
   shared_ = reinterpret_cast<Shared*>(
-      mmap(nullptr, sizeof(Shared), PROT_READ | PROT_WRITE,
-                                          MAP_SHARED | MAP_ANONYMOUS, -1, 0));
+      mmap(nullptr, sizeof(Shared), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0));
   ASSERT_NE(shared_, MAP_FAILED) << "mmap failed to allocated shared_ memory";
 
   // Initialize shared control block to zeros. The field "token"
@@ -210,7 +209,7 @@ void IPCTest::SetUp(void) {
   child_ = 0;
   child_ = fork();
   ASSERT_NE(-1, child_) << "fork failed";
-  std::atomic<int> * token = &shared_->token;
+  std::atomic<int>* token = &shared_->token;
   if (child_ != 0) {
     parentProcess_ = true;
 
@@ -265,10 +264,10 @@ void IPCTest::SetUp(void) {
 
   // Update the size granularity for allocations
   if (rocrtst::isEmuModeEnabled()) {
-    gpu_mem_granule = 4; 
+    gpu_mem_granule = 4;
   } else {
-    err = hsa_amd_memory_pool_get_info(device_pool(), HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE,
-                                      &gpu_mem_granule);
+    err = hsa_amd_memory_pool_get_info(
+        device_pool(), HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE, &gpu_mem_granule);
   }
 
   return;
@@ -276,9 +275,7 @@ void IPCTest::SetUp(void) {
 
 // Do a few extra iterations as we toss out some of the inital and final
 // iterations when calculating statistics
-uint32_t IPCTest::RealIterationNum(void) {
-  return num_iteration() * 1.2 + 1;
-}
+uint32_t IPCTest::RealIterationNum(void) { return num_iteration() * 1.2 + 1; }
 
 /*
  * if the hsa_signal_value_t value matches sig_value, and
@@ -286,18 +283,17 @@ uint32_t IPCTest::RealIterationNum(void) {
  * new value.
  */
 struct signal_cb_handler_data {
-  IPCTest *obj;
+  IPCTest* obj;
   hsa_signal_value_t exp_sig_value;
   uint32_t exp_value;
-  uint32_t *destination;
+  uint32_t* destination;
   uint32_t new_value;
   std::atomic<int> token;
 };
 
 bool SignalCallbackHandler(hsa_signal_value_t value, void* arg) {
   signal_cb_handler_data* cb_data = reinterpret_cast<signal_cb_handler_data*>(arg);
-  if (cb_data->exp_sig_value != value)
-    return false;
+  if (cb_data->exp_sig_value != value) return false;
 
   cb_data->obj->CheckAndFillBuffer(cb_data->destination, cb_data->exp_value, cb_data->new_value);
   cb_data->token++;
@@ -307,7 +303,6 @@ bool SignalCallbackHandler(hsa_signal_value_t value, void* arg) {
 }
 
 void IPCTest::ChildProcessImpl() {
-
   // Yield until shared token value changes i.e. is updated by parent.
   // Validate parent's update is per expectation
   PROCESS_LOG("Child: Waiting for parent process to signal\n");
@@ -361,10 +356,13 @@ void IPCTest::ChildProcessImpl() {
   child_cb_data.new_value = fourth_val_;
   child_cb_data.token = 0;
 
-  err = hsa_amd_signal_async_handler(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 3, &SignalCallbackHandler, &child_cb_data);
+  err = hsa_amd_signal_async_handler(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 3,
+                                     &SignalCallbackHandler, &child_cb_data);
   USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 202);
-  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure registering async_handler to ipc_signal\n");
-  PROCESS_LOG("Child: [pid:%d] Attached async handler to IPC signal shared by parent process\n", getpid());
+  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err,
+                 "Child: Failure registering async_handler to ipc_signal\n");
+  PROCESS_LOG("Child: [pid:%d] Attached async handler to IPC signal shared by parent process\n",
+              getpid());
 
   // Signal parent process to wake up and continue.
   // The next time parent process updates ipc_signal, SignalCallbackHandler will
@@ -372,8 +370,7 @@ void IPCTest::ChildProcessImpl() {
   hsa_signal_store_release(ipc_signal, 2);
 
   // Wait for SignalCallbackHandler to be called
-  while (child_cb_data.token <= 0)
-    sched_yield();
+  while (child_cb_data.token <= 0) sched_yield();
 
   PROCESS_LOG("Child: Confirmed DWord's of IPC buffer has: %d\n", third_val_);
   PROCESS_LOG("Child: Updated DWord's of IPC buffer to: %d\n", fourth_val_);
@@ -382,8 +379,9 @@ void IPCTest::ChildProcessImpl() {
   hsa_signal_store_release(ipc_signal, 4);
 
   hsa_signal_value_t ret = 1;
-  while(true) {
-    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_LT, 0, timeout_, HSA_WAIT_STATE_BLOCKED);
+  while (true) {
+    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_LT, 0, timeout_,
+                                  HSA_WAIT_STATE_BLOCKED);
     if (shared_->child_status == -1) {
       exit(0);
     }
@@ -408,7 +406,6 @@ void IPCTest::ChildProcessImpl() {
 }
 
 void IPCTest::ParentProcessImpl() {
-
   // Ignoring the first allocation to exercise fragment allocation.
   hsa_status_t err;
   uint32_t* discard = NULL;
@@ -479,8 +476,9 @@ void IPCTest::ParentProcessImpl() {
   // Wait for child processs to signal. Child will update signal object
   // value to TWO (2). Check signal value is per expectation
   hsa_signal_value_t ret = 1;
-  while(true) {
-    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 2, timeout_, HSA_WAIT_STATE_BLOCKED);
+  while (true) {
+    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 2, timeout_,
+                                  HSA_WAIT_STATE_BLOCKED);
     if (shared_->child_status == -1) {
       exit(0);
     }
@@ -499,8 +497,9 @@ void IPCTest::ParentProcessImpl() {
 
   hsa_signal_store_relaxed(ipc_signal, 3);
 
-  while(true) {
-    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 4, timeout_, HSA_WAIT_STATE_BLOCKED);
+  while (true) {
+    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 4, timeout_,
+                                  HSA_WAIT_STATE_BLOCKED);
     if (shared_->child_status == -1) {
       exit(0);
     }
@@ -580,16 +579,16 @@ void IPCTest::CheckAndFillBuffer(void* gpu_src_ptr, uint32_t exp_cur_val, uint32
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
   // Wait for copy to complete
-  sig = hsa_signal_wait_relaxed(copy_signal,
-                   HSA_SIGNAL_CONDITION_LT, 1, -1, HSA_WAIT_STATE_BLOCKED);
+  sig =
+      hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, -1, HSA_WAIT_STATE_BLOCKED);
   FORK_ASSERT_EQ(0, sig, "Expected signal 0, but got " << sig << "\n");
 
   // Validate buffer has expected data
   uint32_t count = sz / sizeof(uint32_t);
   for (uint32_t idx = 0; idx < count; idx++) {
     if (exp_cur_val != sysBuf[idx]) {
-      PROCESS_LOG("Validation failed: expected: %d observed: %d at index: %d\n",
-                  exp_cur_val, sysBuf[idx], idx);
+      PROCESS_LOG("Validation failed: expected: %d observed: %d at index: %d\n", exp_cur_val,
+                  sysBuf[idx], idx);
       FORK_ASSERT_EQ(exp_cur_val, sysBuf[idx]);
     }
     sysBuf[idx] = new_val;
@@ -602,7 +601,8 @@ void IPCTest::CheckAndFillBuffer(void* gpu_src_ptr, uint32_t exp_cur_val, uint32
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
   // Wait for copy to complete
-  sig = hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, -1, HSA_WAIT_STATE_BLOCKED);
+  sig =
+      hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, -1, HSA_WAIT_STATE_BLOCKED);
   FORK_ASSERT_EQ(sig, 0, "Expected signal 0, but got " << sig << "\n");
 
   // Release resources allocated by this method
@@ -632,9 +632,7 @@ void IPCTest::Run(void) {
   return;
 }
 
-void IPCTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void IPCTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void IPCTest::DisplayResults(void) const {
   TestBase::DisplayResults();

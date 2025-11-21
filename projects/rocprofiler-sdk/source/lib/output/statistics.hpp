@@ -59,11 +59,11 @@ public:
     static_assert(std::is_arithmetic<Tp>::value, "only supports arithmetic types");
 
 public:
-    statistics()                      = default;
-    ~statistics()                     = default;
-    statistics(const statistics&)     = default;
-    statistics(statistics&&) noexcept = default;
-    statistics& operator=(const statistics&) = default;
+    statistics()                                 = default;
+    ~statistics()                                = default;
+    statistics(const statistics&)                = default;
+    statistics(statistics&&) noexcept            = default;
+    statistics& operator=(const statistics&)     = default;
     statistics& operator=(statistics&&) noexcept = default;
 
     explicit statistics(value_type val)
@@ -271,11 +271,11 @@ struct stats_entry_t
 {
     using sort_predicate_t = bool (*)(const stats_pair_t&, const stats_pair_t&);
 
-    stats_entry_t()                         = default;
-    ~stats_entry_t()                        = default;
-    stats_entry_t(const stats_entry_t&)     = default;
-    stats_entry_t(stats_entry_t&&) noexcept = default;
-    stats_entry_t& operator=(const stats_entry_t&) = default;
+    stats_entry_t()                                    = default;
+    ~stats_entry_t()                                   = default;
+    stats_entry_t(const stats_entry_t&)                = default;
+    stats_entry_t(stats_entry_t&&) noexcept            = default;
+    stats_entry_t& operator=(const stats_entry_t&)     = default;
     stats_entry_t& operator=(stats_entry_t&&) noexcept = default;
 
     template <typename FuncT = sort_predicate_t>

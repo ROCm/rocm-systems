@@ -1,5 +1,5 @@
-//Copyright © Advanced Micro Devices, Inc., or its affiliates.
-//SPDX-License-Identifier: MIT
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
 #include "../trace_config.h"
@@ -7,11 +7,11 @@
 namespace pm4_builder {
 
 class TraceConfigTest : public ::testing::Test {
-protected:
+ protected:
   void SetUp() override {
     // Setup default configuration
     config.sampleRate = 1000;
-    config.se_number = 4;  // Use se_number instead of spm_se_number_total
+    config.se_number = 4;   // Use se_number instead of spm_se_number_total
     config.se_mask = 0x0F;  // All 4 SEs enabled
     config.capacity_per_se = 0x2000;
     config.capacity_per_disabled_se = 0x1000;
@@ -22,7 +22,7 @@ protected:
 
 TEST_F(TraceConfigTest, DefaultValues) {
   TraceConfig default_config;
-  
+
   // Check default initialization values
   EXPECT_EQ(default_config.targetCu, 0);
   EXPECT_EQ(default_config.vmIdMask, 0);
@@ -59,10 +59,10 @@ TEST_F(TraceConfigTest, SEConfiguration) {
   EXPECT_EQ(config.GetSEBaseAddr(3), 0x4000);
 
   // Test SE capacity calculations
-  EXPECT_EQ(config.GetCapacity(0), config.capacity_per_se);        // Enabled SE
-  EXPECT_EQ(config.GetCapacity(1), config.capacity_per_disabled_se); // Disabled SE
-  EXPECT_EQ(config.GetCapacity(2), config.capacity_per_se);        // Enabled SE
-  EXPECT_EQ(config.GetCapacity(3), config.capacity_per_se);        // Enabled SE
+  EXPECT_EQ(config.GetCapacity(0), config.capacity_per_se);           // Enabled SE
+  EXPECT_EQ(config.GetCapacity(1), config.capacity_per_disabled_se);  // Disabled SE
+  EXPECT_EQ(config.GetCapacity(2), config.capacity_per_se);           // Enabled SE
+  EXPECT_EQ(config.GetCapacity(3), config.capacity_per_se);           // Enabled SE
 }
 
 TEST_F(TraceConfigTest, SEMaskConfiguration) {
@@ -103,7 +103,7 @@ TEST_F(TraceConfigTest, PerformanceConfiguration) {
   // Test performance counter configuration
   config.perfMASK = 0xF0F0;
   config.perfCTRL = 0x1234;
-  
+
   // Add some performance counters
   config.perfcounters.push_back({0, 1});  // Counter 0, Instance 1
   config.perfcounters.push_back({2, 3});  // Counter 2, Instance 3
@@ -152,4 +152,4 @@ TEST_F(TraceConfigTest, ExceptionHandling) {
   EXPECT_THROW(config.GetSEBaseAddr(99), std::out_of_range);
 }
 
-} // namespace pm4_builder
+}  // namespace pm4_builder

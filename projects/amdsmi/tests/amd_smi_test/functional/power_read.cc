@@ -20,24 +20,25 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include "power_read.h"
+
 #include <gtest/gtest.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <string>
 
 #include "amd_smi/amdsmi.h"
-#include "power_read.h"
 
 TestPowerRead::TestPowerRead() : TestBase() {
   set_title("AMDSMI Power Read Test");
-  set_description("The Power Read tests verifies that "
-                                "power related values can be read properly.");
+  set_description(
+      "The Power Read tests verifies that "
+      "power related values can be read properly.");
 }
 
-TestPowerRead::~TestPowerRead(void) {
-}
+TestPowerRead::~TestPowerRead(void) {}
 
 void TestPowerRead::SetUp(void) {
   TestBase::SetUp();
@@ -45,9 +46,7 @@ void TestPowerRead::SetUp(void) {
   return;
 }
 
-void TestPowerRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPowerRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPowerRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -59,7 +58,6 @@ void TestPowerRead::Close() {
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestPowerRead::Run(void) {
   amdsmi_status_t err;
@@ -83,13 +81,13 @@ void TestPowerRead::Run(void) {
       }
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << "\t**Current Power Cap: " << info.power_cap << "uW" <<std::endl;
+        std::cout << "\t**Current Power Cap: " << info.power_cap << "uW" << std::endl;
       }
 
       IF_VERB(STANDARD) {
-        std::cout << "\t**Default Power Cap: " << info.default_power_cap << "uW" <<std::endl;
-        std::cout << "\t**Power Cap Range: " << info.min_power_cap << " to " <<
-                                                 info.max_power_cap << " uW" << std::endl;
+        std::cout << "\t**Default Power Cap: " << info.default_power_cap << "uW" << std::endl;
+        std::cout << "\t**Power Cap Range: " << info.min_power_cap << " to " << info.max_power_cap
+                  << " uW" << std::endl;
       }
       // TODO(amdsmi_team): Add current_socket_power tests
     }

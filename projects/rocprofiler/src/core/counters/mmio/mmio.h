@@ -105,7 +105,7 @@ class DFPerfmonMMIO : public MMIO {
   friend class MMIOManager;
 
  protected:
-  DFPerfmonMMIO( const HSAAgentInfo& info) : MMIO(info) { type_ = DF_PERFMON; };
+  DFPerfmonMMIO(const HSAAgentInfo& info) : MMIO(info) { type_ = DF_PERFMON; };
 };
 /*
     Class to manage mmio for UMC/DF/PCIe etc.
@@ -115,7 +115,7 @@ class DFPerfmonMMIO : public MMIO {
 */
 class MMIOManager {
  public:
-  static MMIO* CreateMMIO(mmap_type_t type,  const HSAAgentInfo& info);
+  static MMIO* CreateMMIO(mmap_type_t type, const HSAAgentInfo& info);
   static MMIO* GetMMIOInstance(mmap_type_t type, const HSAAgentInfo& info);
   static void DestroyMMIOInstance(MMIO* instance);
 

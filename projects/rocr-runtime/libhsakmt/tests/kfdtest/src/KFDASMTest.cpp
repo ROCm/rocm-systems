@@ -30,46 +30,23 @@ void KFDASMTest::SetUp() {}
 void KFDASMTest::TearDown() {}
 
 static const std::vector<uint32_t> TargetList = {
-    0x080001,
-    0x080002,
-    0x080003,
-    0x080005,
-    0x080100,
-    0x090000,
-    0x090002,
-    0x090004,
-    0x090006,
-    0x090008,
-    0x090009,
-    0x09000a,
-    0x09000c,
-    0x090402,
-    0x0a0100,
-    0x0a0101,
-    0x0a0102,
-    0x0a0103,
-    0x0a0300,
-    0x0a0301,
-    0x0a0302,
-    0x0a0303,
-    0x0a0304,
-    0x0a0305,
-    0x0a0306,
-    0x0c0000,
+    0x080001, 0x080002, 0x080003, 0x080005, 0x080100, 0x090000, 0x090002, 0x090004, 0x090006,
+    0x090008, 0x090009, 0x09000a, 0x09000c, 0x090402, 0x0a0100, 0x0a0101, 0x0a0102, 0x0a0103,
+    0x0a0300, 0x0a0301, 0x0a0302, 0x0a0303, 0x0a0304, 0x0a0305, 0x0a0306, 0x0c0000,
 };
 
 TEST_F(KFDASMTest, AssembleShaders) {
-    TEST_START(TESTPROFILE_RUNALL)
+  TEST_START(TESTPROFILE_RUNALL)
 
-    for (auto &t : TargetList) {
-        Assembler asmblr(t);
+  for (auto& t : TargetList) {
+    Assembler asmblr(t);
 
-        LOG() << "Running ASM test for target " << asmblr.GetTargetAsic() << std::endl;
+    LOG() << "Running ASM test for target " << asmblr.GetTargetAsic() << std::endl;
 
-        for (auto &s : ShaderList) {
-            EXPECT_SUCCESS(asmblr.RunAssemble(s));
-        }
+    for (auto& s : ShaderList) {
+      EXPECT_SUCCESS(asmblr.RunAssemble(s));
     }
+  }
 
-    TEST_END
+  TEST_END
 }

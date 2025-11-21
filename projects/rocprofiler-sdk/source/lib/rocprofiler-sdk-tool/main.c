@@ -76,9 +76,9 @@ signal(int signum, sighandler_t handler) ROCPROFV3_PUBLIC_API;
 #if !defined(ROCPROFV3_THREAD_SANITIZER)
 // breaks thread sanitizer
 int
-sigaction(int                              signum,
+sigaction(int signum,
           const struct sigaction* restrict act,
-          struct sigaction* restrict       oldact) ROCPROFV3_PUBLIC_API;
+          struct sigaction* restrict oldact) ROCPROFV3_PUBLIC_API;
 #endif
 
 extern void
@@ -91,9 +91,9 @@ extern sighandler_t
 rocprofv3_signal(int signum, sighandler_t handler) ROCPROFV3_INTERNAL_API;
 
 extern int
-rocprofv3_sigaction(int                              signum,
+rocprofv3_sigaction(int signum,
                     const struct sigaction* restrict act,
-                    struct sigaction* restrict       oldact) ROCPROFV3_INTERNAL_API;
+                    struct sigaction* restrict oldact) ROCPROFV3_INTERNAL_API;
 
 int
 rocprofv3_libc_start_main(int (*_main)(int, char**, char**),

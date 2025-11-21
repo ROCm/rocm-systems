@@ -28,33 +28,33 @@
 #include "KFDTestUtil.hpp"
 
 /** @class IndirectBuffer
- *  When working with an indirect buffer, create IndirectBuffer, fill it with all the packets you want,
- *  create an indirect packet to point to it, and submit the packet to queue
+ *  When working with an indirect buffer, create IndirectBuffer, fill it with all the packets you
+ * want, create an indirect packet to point to it, and submit the packet to queue
  */
 class IndirectBuffer {
  public:
-    // @param[size] Queue max size in DWords
-    // @param[type] Packet type allowed in queue
-    IndirectBuffer(PACKETTYPE type, unsigned int sizeInDWords, unsigned int NodeId);
-    ~IndirectBuffer(void);
+  // @param[size] Queue max size in DWords
+  // @param[type] Packet type allowed in queue
+  IndirectBuffer(PACKETTYPE type, unsigned int sizeInDWords, unsigned int NodeId);
+  ~IndirectBuffer(void);
 
-    // @brief Add packet to queue, all validations are done with gtest ASSERT and EXPECT
-    uint32_t *AddPacket(const BasePacket &packet);
-    // @returns Actual size of the indirect queue in DWords, equivalent to write pointer
-    unsigned int SizeInDWord() { return m_ActualSize; }
-    // @returns Indirect queue address
-    unsigned int *Addr() { return m_IndirectBuf->As<unsigned int*>(); }
+  // @brief Add packet to queue, all validations are done with gtest ASSERT and EXPECT
+  uint32_t* AddPacket(const BasePacket& packet);
+  // @returns Actual size of the indirect queue in DWords, equivalent to write pointer
+  unsigned int SizeInDWord() { return m_ActualSize; }
+  // @returns Indirect queue address
+  unsigned int* Addr() { return m_IndirectBuf->As<unsigned int*>(); }
 
  protected:
-    // Number of packets in the queue
-    unsigned int m_NumOfPackets;
-    // Max size of queue in DWords
-    unsigned int m_MaxSize;
-    // Current size of queue in DWords
-    unsigned int m_ActualSize;
-    HsaMemoryBuffer *m_IndirectBuf;
-    // What packets are supported in this queue
-    PACKETTYPE m_PacketTypeAllowed;
+  // Number of packets in the queue
+  unsigned int m_NumOfPackets;
+  // Max size of queue in DWords
+  unsigned int m_MaxSize;
+  // Current size of queue in DWords
+  unsigned int m_ActualSize;
+  HsaMemoryBuffer* m_IndirectBuf;
+  // What packets are supported in this queue
+  PACKETTYPE m_PacketTypeAllowed;
 };
 
 #endif  //  __INDIRECT_BUFFER__H__

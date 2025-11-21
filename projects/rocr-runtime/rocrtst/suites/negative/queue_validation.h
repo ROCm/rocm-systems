@@ -53,11 +53,9 @@
 
 class QueueValidation : public TestBase {
  public:
-    QueueValidation(bool launch_InvalidDimension,
-                    bool launch_InvalidGroupMemory,
-                    bool launch_InvalidKernelObject,
-                    bool launch_InvalidPacket,
-                    bool launch_InvalidWorkGroupSize);
+  QueueValidation(bool launch_InvalidDimension, bool launch_InvalidGroupMemory,
+                  bool launch_InvalidKernelObject, bool launch_InvalidPacket,
+                  bool launch_InvalidWorkGroupSize);
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~QueueValidation();
@@ -95,7 +93,7 @@ class QueueValidation : public TestBase {
 
 
  private:
-  struct rlimit rlimit_; //value of rlimit before test starts
+  struct rlimit rlimit_;  // value of rlimit before test starts
 
   void QueueValidationForInvalidDimension(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
   void QueueValidationInvalidGroupMemory(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);

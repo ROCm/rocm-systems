@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #ifndef _GFX12_PRIMITIVES_H_
 #define _GFX12_PRIMITIVES_H_
 
@@ -224,14 +223,14 @@ class gfx12_cntx_prim {
   }
 
   // GRBM SE/SH/WGP indexing
-  static uint32_t grbm_se_sh_wgp_index_value(const uint32_t& se_index,
-                                             const uint32_t& sa_index,
+  static uint32_t grbm_se_sh_wgp_index_value(const uint32_t& se_index, const uint32_t& sa_index,
                                              const uint32_t& wgp_index) {
     // Hardcode wgp_side to 0 now because we don't have a product with wgp1 configuration
     uint32_t wgp_side = 0;
-    uint32_t grbm_gfx_index = SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SE_INDEX, se_index) |
-                              SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SA_INDEX, sa_index) |
-                              SET_REG_FIELD_BITS(GRBM_GFX_INDEX, INSTANCE_INDEX, ((wgp_side<<6) | (wgp_index << 2)));
+    uint32_t grbm_gfx_index =
+        SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SE_INDEX, se_index) |
+        SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SA_INDEX, sa_index) |
+        SET_REG_FIELD_BITS(GRBM_GFX_INDEX, INSTANCE_INDEX, ((wgp_side << 6) | (wgp_index << 2)));
     return grbm_gfx_index;
   }
 
@@ -246,7 +245,8 @@ class gfx12_cntx_prim {
     uint32_t grbm_gfx_index =
         SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SE_INDEX, se_index) |
         SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SA_INDEX, sa_index) |
-        SET_REG_FIELD_BITS(GRBM_GFX_INDEX, INSTANCE_INDEX, ((wgp_side<<6) | (wgp_index << 2) | instance_index));
+        SET_REG_FIELD_BITS(GRBM_GFX_INDEX, INSTANCE_INDEX,
+                           ((wgp_side << 6) | (wgp_index << 2) | instance_index));
     return grbm_gfx_index;
   }
 
@@ -471,11 +471,11 @@ class gfx12_cntx_prim {
   // Enable Shader Array (SH) at index Zero to be used for fine-grained data
   static uint32_t sqtt_mask_value(uint32_t wgp, uint32_t simd, uint32_t vmid) {
     uint32_t sq_thread_trace_mask{0};
-    sq_thread_trace_mask =
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SIMD_SEL, simd) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WGP_SEL, wgp) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SA_SEL, 0x0) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WTYPE_INCLUDE, 0x40); // SQ_TT_WTYPE_INCLUDE_CS_BIT
+    sq_thread_trace_mask = SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SIMD_SEL, simd) |
+                           SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WGP_SEL, wgp) |
+                           SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SA_SEL, 0x0) |
+                           SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WTYPE_INCLUDE,
+                                              0x40);  // SQ_TT_WTYPE_INCLUDE_CS_BIT
     return sq_thread_trace_mask;
   }
   // not supported in gfx12
@@ -605,7 +605,8 @@ class gfx12_cntx_prim {
   enum ESQTT_STATUS_MASK {
     // Mask to check if memory error was received
     TT_CONTROL_UTC_ERR_MASK = SQ_THREAD_TRACE_STATUS__WRITE_ERROR_MASK,
-    TT_CONTROL_FULL_MASK = SQ_THREAD_TRACE_STATUS2__BUF0_FULL_MASK | SQ_THREAD_TRACE_STATUS2__BUF1_FULL_MASK,
+    TT_CONTROL_FULL_MASK =
+        SQ_THREAD_TRACE_STATUS2__BUF0_FULL_MASK | SQ_THREAD_TRACE_STATUS2__BUF1_FULL_MASK,
     TT_WRITE_PTR_MASK = SQ_THREAD_TRACE_WPTR__OFFSET_MASK,
     TT_LOCKDOWN_FAIL = SQ_THREAD_TRACE_STATUS2__PACKET_LOST_BUF_NO_LOCKDOWN_MASK
   };

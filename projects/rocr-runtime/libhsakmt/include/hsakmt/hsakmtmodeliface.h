@@ -40,21 +40,21 @@ typedef struct hsakmt_model_queue hsakmt_model_queue_t;
 //
 // Addresses are relative to the global aperture.
 struct hsakmt_model_queue_info {
-	uint64_t ring_base_address;
-	uint64_t write_pointer_address;
-	uint64_t read_pointer_address;
+  uint64_t ring_base_address;
+  uint64_t write_pointer_address;
+  uint64_t read_pointer_address;
 
-	uint64_t *doorbell;
+  uint64_t* doorbell;
 
-	uint32_t ring_size; // in bytes
-	uint32_t queue_type;
+  uint32_t ring_size;  // in bytes
+  uint32_t queue_type;
 };
 
 // Pointer to a "set event" function.
 //
 // data is a user-provided opaque pointer.
 // event_id is the ID of the event to set (as in amd_signal_s::event_id).
-typedef void (*hsakmt_model_set_event_fn)(void *data, unsigned event_id);
+typedef void (*hsakmt_model_set_event_fn)(void* data, unsigned event_id);
 
 // Interface provided by the software model implementation.
 //
@@ -67,43 +67,45 @@ typedef void (*hsakmt_model_set_event_fn)(void *data, unsigned event_id);
 //
 // The model is designed to support only one VMID space.
 struct hsakmt_model_functions {
-	uint32_t version_major; // HSAKMT_MODEL_INTERFACE_VERSION_MAJOR
-	uint32_t version_minor; // HSAKMT_MODEL_INTERFACE_VERSION_MINOR
+  uint32_t version_major;  // HSAKMT_MODEL_INTERFACE_VERSION_MAJOR
+  uint32_t version_minor;  // HSAKMT_MODEL_INTERFACE_VERSION_MINOR
 
-	// Create a GPU device model.
-	hsakmt_model_t *(*create)(void);
+  // Create a GPU device model.
+  hsakmt_model_t* (*create)(void);
 
-	// Destroy a GPU device model.
-	void (*destroy)(hsakmt_model_t *model);
+  // Destroy a GPU device model.
+  void (*destroy)(hsakmt_model_t* model);
 
-	// Set the global aperture. GPU virtual address 0 is at CPU address `base`.
-	void (*set_global_aperture)(hsakmt_model_t *model, void *base, uint64_t size);
-	void (*alloced_memory)(hsakmt_model_t *model, void *base, uint64_t size, uint32_t flags);
-	void (*freed_memory)(hsakmt_model_t *model, void *base, uint64_t size);
-	// Register a callback that the model should call when an event is signaled.
-	// `data` is client data that is opaque to the model.
-	//
-	// TODO: Deprecated -- remove this!
-	void (*set_notify_event)(hsakmt_model_t *model, void (*callback)(void *data), void *data);
+  // Set the global aperture. GPU virtual address 0 is at CPU address `base`.
+  void (*set_global_aperture)(hsakmt_model_t* model, void* base, uint64_t size);
+  void (*alloced_memory)(hsakmt_model_t* model, void* base, uint64_t size, uint32_t flags);
+  void (*freed_memory)(hsakmt_model_t* model, void* base, uint64_t size);
+  // Register a callback that the model should call when an event is signaled.
+  // `data` is client data that is opaque to the model.
+  //
+  // TODO: Deprecated -- remove this!
+  void (*set_notify_event)(hsakmt_model_t* model, void (*callback)(void* data), void* data);
 
-	// Register a callback that the model should call in order to wait for an
-	// event to be signaled.
-	// `data` is client data that is opaque to the model.
-	void (*set_wait_event)(hsakmt_model_t *model, void (*callback)(void *data, uint64_t address, uint64_t age), void *data);
+  // Register a callback that the model should call in order to wait for an
+  // event to be signaled.
+  // `data` is client data that is opaque to the model.
+  void (*set_wait_event)(hsakmt_model_t* model,
+                         void (*callback)(void* data, uint64_t address, uint64_t age), void* data);
 
-	// Register a queue with the model. The model will immediately begin
-	// asynchronous processing of the queue (but by default, the model need not
-	// provide forward progress guarantees between multiple queues).
-	hsakmt_model_queue_t *(*register_queue)(hsakmt_model_t *model, struct hsakmt_model_queue_info *info);
+  // Register a queue with the model. The model will immediately begin
+  // asynchronous processing of the queue (but by default, the model need not
+  // provide forward progress guarantees between multiple queues).
+  hsakmt_model_queue_t* (*register_queue)(hsakmt_model_t* model,
+                                          struct hsakmt_model_queue_info* info);
 
-	// Register a callback that allows the model to set an event.
-	void (*set_set_event)(hsakmt_model_t *model, hsakmt_model_set_event_fn fn, void *data);
+  // Register a callback that allows the model to set an event.
+  void (*set_set_event)(hsakmt_model_t* model, hsakmt_model_set_event_fn fn, void* data);
 
-	// Destroy a queue that was returned by register_queue.
-	void (*destroy_queue)(hsakmt_model_t *model, hsakmt_model_queue_t *queue);
+  // Destroy a queue that was returned by register_queue.
+  void (*destroy_queue)(hsakmt_model_t* model, hsakmt_model_queue_t* queue);
 };
 
 // Type of a shared library export called `get_hsakmt_model_functions`.
-typedef const struct hsakmt_model_functions *(*get_hsakmt_model_functions_t)(void);
+typedef const struct hsakmt_model_functions* (*get_hsakmt_model_functions_t)(void);
 
-#endif // _HSAKMTMODELIFACE_H_
+#endif  // _HSAKMTMODELIFACE_H_

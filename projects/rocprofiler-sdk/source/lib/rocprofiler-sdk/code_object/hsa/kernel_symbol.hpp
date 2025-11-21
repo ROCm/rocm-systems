@@ -56,7 +56,7 @@ struct kernel_symbol
     kernel_symbol(kernel_symbol&&) noexcept;
 
     kernel_symbol& operator=(const kernel_symbol&) = delete;
-    kernel_symbol& operator                        =(kernel_symbol&&) noexcept;
+    kernel_symbol& operator=(kernel_symbol&&) noexcept;
 
     bool                    beg_notified   = false;
     bool                    end_notified   = false;

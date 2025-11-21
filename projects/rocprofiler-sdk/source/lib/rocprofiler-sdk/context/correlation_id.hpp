@@ -55,7 +55,7 @@ struct correlation_id
     correlation_id(correlation_id&& val) noexcept = delete;
     correlation_id(const correlation_id&)         = delete;
 
-    correlation_id& operator=(const correlation_id&) = delete;
+    correlation_id& operator=(const correlation_id&)     = delete;
     correlation_id& operator=(correlation_id&&) noexcept = delete;
 
     rocprofiler_thread_id_t thread_idx = 0;

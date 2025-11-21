@@ -55,9 +55,9 @@ TEST_CASE("Unit_Buffered_Printf_Flags") {
 +0000042
 -42
 +0000042
-xyzzy   
+xyzzy
 -42
-00000042        
+00000042
         00000042
 )here");
 

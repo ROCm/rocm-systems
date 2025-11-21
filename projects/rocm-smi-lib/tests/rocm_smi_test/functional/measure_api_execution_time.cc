@@ -43,35 +43,31 @@
  *
  */
 
+#include "rocm_smi_test/functional/measure_api_execution_time.h"
+
 #include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <string>
 
-
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/measure_api_execution_time.h"
-#include "rocm_smi_test/test_common.h"
 #include "rocm_smi/rocm_smi_utils.h"
-
+#include "rocm_smi_test/test_common.h"
 
 TestMeasureApiExecutionTime::TestMeasureApiExecutionTime() : TestBase() {
   set_title("RSMI Measure API Execution Time");
   set_description("This test measures execution times for select APIs");
 }
 
-TestMeasureApiExecutionTime::~TestMeasureApiExecutionTime(void) {
-}
+TestMeasureApiExecutionTime::~TestMeasureApiExecutionTime(void) {}
 
 void TestMeasureApiExecutionTime::SetUp(void) {
   TestBase::SetUp();
   return;
 }
 
-void TestMeasureApiExecutionTime::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestMeasureApiExecutionTime::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestMeasureApiExecutionTime::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -93,7 +89,7 @@ void TestMeasureApiExecutionTime::Run(void) {
   constexpr float kFAN_SPEED_ELAPSED_MICROSEC_BASE = (1000);
   /**
    * gpu_metrics can only refresh every 1000 microseconds (1 millisecs) due to FW
-   * 
+   *
    * We have additional processing time (each read() -> fread()  ~ costs 900 microseconds).
    * We need to read 2x:
    * 1) reading metric's header to check support (~900 microseconds)
@@ -103,25 +99,23 @@ void TestMeasureApiExecutionTime::Run(void) {
    * 5) Pass to public structure (~100 microseconds)
    * ---------------------------
    * ~2100 worst case
-   * 
+   *
    * Note: performance of fread/mmap/read
    * https://github.com/nurettn/c-read-vs-mmap-vs-fread
-   * 
+   *
    * Possible improvments ideas:
    * a) Initize "N/A" / Max UINT only for non-backwards comptable public struct
    * or arrays
    * b) Directly put data into public structure - this skips other copy/fill
    * procedures
    * c) Expirement with other file reading options
-   **/ 
+   **/
   constexpr float kMETRICS_ELAPSED_MICROSEC_BASE = (2100);
   bool skip = false;
 
   TestBase::Run();
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
@@ -133,19 +127,18 @@ void TestMeasureApiExecutionTime::Run(void) {
 
     // test execution time for rsmi_dev_fan_speed_get
     auto start = std::chrono::high_resolution_clock::now();
-    for (int i=0; i < static_cast<int>(repeat); ++i) {
+    for (int i = 0; i < static_cast<int>(repeat); ++i) {
       ret = rsmi_dev_fan_speed_get(dv_ind, 0, &val_i64);
     }
     auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast
-                            <std::chrono::microseconds>(stop - start);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
 
-    std::cout << "\n\trsmi_dev_fan_speed_get returned: "
-              << amd::smi::getRSMIStatusString(ret) << "\n";
+    std::cout << "\n\trsmi_dev_fan_speed_get returned: " << amd::smi::getRSMIStatusString(ret)
+              << "\n";
     if (ret != RSMI_STATUS_SUCCESS) {
       skip = true;
     }
-    std::cout << std:: endl;
+    std::cout << std::endl;
 
     // Expected performance: (stop - start) over all iterations [in microseconds]
     //                          == (expected microseconds * # of iterations)
@@ -157,22 +150,21 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((static_cast<float>(kFAN_SPEED_ELAPSED_MICROSEC_BASE) * repeat))
                 << " microseconds" << std::endl;
       std::cout << "\trsmi_dev_fan_speed_get() average execution time: "
-                << std::to_string(duration.count()/repeat) << " microseconds" << std::endl;
+                << std::to_string(duration.count() / repeat) << " microseconds" << std::endl;
       EXPECT_LT(duration.count(), static_cast<float>(kFAN_SPEED_ELAPSED_MICROSEC_BASE) * repeat);
     }
     skip = false;
 
     // test execution time for rsmi_dev_temp_metric_get
     start = std::chrono::high_resolution_clock::now();
-    for (int i=0; i < static_cast<int>(repeat); ++i) {
+    for (int i = 0; i < static_cast<int>(repeat); ++i) {
       ret = rsmi_dev_temp_metric_get(dv_ind, 0, met, &val_i64);
     }
     stop = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast
-                            <std::chrono::microseconds>(stop - start);
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
 
-    std::cout << "\n\trsmi_dev_temp_metric_get returned: "
-              << amd::smi::getRSMIStatusString(ret) << "\n";
+    std::cout << "\n\trsmi_dev_temp_metric_get returned: " << amd::smi::getRSMIStatusString(ret)
+              << "\n";
     if (ret != RSMI_STATUS_SUCCESS) {
       skip = true;
     }
@@ -183,19 +175,18 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat))
                 << " microseconds" << std::endl;
       std::cout << "\trsmi_dev_temp_metric_get() average execution time: "
-                << std::to_string(duration.count()/repeat) << " microseconds"  << std::endl;
+                << std::to_string(duration.count() / repeat) << " microseconds" << std::endl;
       EXPECT_LT(duration.count(), (static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat));
     }
     skip = false;
 
     // test execution time for rsmi_dev_gpu_metrics_info_get
     start = std::chrono::high_resolution_clock::now();
-    for (int i=0; i < static_cast<int>(repeat); ++i) {
+    for (int i = 0; i < static_cast<int>(repeat); ++i) {
       ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &smu);
     }
     stop = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast
-                            <std::chrono::microseconds>(stop - start);
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
 
     std::cout << "\n\trsmi_dev_gpu_metrics_info_get returned: "
               << amd::smi::getRSMIStatusString(ret) << "\n";
@@ -206,10 +197,10 @@ void TestMeasureApiExecutionTime::Run(void) {
       std::cout << "\trsmi_dev_gpu_metrics_info_get() total execution time: "
                 << std::to_string(static_cast<float>(duration.count()))
                 << " microseconds, expected < "
-                << std::to_string((kMETRICS_ELAPSED_MICROSEC_BASE * repeat))
-                << " microseconds" << std::endl;
+                << std::to_string((kMETRICS_ELAPSED_MICROSEC_BASE * repeat)) << " microseconds"
+                << std::endl;
       std::cout << "\trsmi_dev_gpu_metrics_info_get() average execution time: "
-                << std::to_string(duration.count()/repeat) << " microseconds" << std::endl;
+                << std::to_string(duration.count() / repeat) << " microseconds" << std::endl;
       EXPECT_LT(static_cast<float>(duration.count()),
                 static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat);
     }
@@ -218,7 +209,7 @@ void TestMeasureApiExecutionTime::Run(void) {
     auto val_ui16 = static_cast<uint16_t>(0);
     auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
     start = std::chrono::high_resolution_clock::now();
-    for (int i=0; i < static_cast<int>(repeat); ++i) {
+    for (int i = 0; i < static_cast<int>(repeat); ++i) {
       status_code = rsmi_dev_metrics_xcd_counter_get(dv_ind, &val_ui16);
     }
     stop = std::chrono::high_resolution_clock::now();
@@ -235,7 +226,7 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat))
                 << " microseconds" << std::endl;
       std::cout << "\trsmi_dev_metrics_xcd_counter_get() average execution time: "
-                << std::to_string(duration.count()/repeat) << " microseconds" << std::endl;
+                << std::to_string(duration.count() / repeat) << " microseconds" << std::endl;
       EXPECT_LT(duration.count(), static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat);
     }
     skip = false;
@@ -243,13 +234,14 @@ void TestMeasureApiExecutionTime::Run(void) {
 
   std::cout.precision(prev);
   auto test_stop = std::chrono::high_resolution_clock::now();
-  auto test_duration = std::chrono::duration_cast<std::chrono::microseconds>(
-                          test_stop - test_start);
+  auto test_duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(test_stop - test_start);
 
   std::cout << "\n"
-    << "============================================================================" << "\n";
-  std::cout << "  Total execution time (All APIs): "
-            << (test_duration.count()) << " microseconds" << "\n";
-  std::cout
-    << "============================================================================" << "\n";
+            << "============================================================================"
+            << "\n";
+  std::cout << "  Total execution time (All APIs): " << (test_duration.count()) << " microseconds"
+            << "\n";
+  std::cout << "============================================================================"
+            << "\n";
 }

@@ -32,12 +32,10 @@
 
 LIBELF_VCSID("$Id: elf_errno.c 1345 2011-01-01 11:17:52Z jkoshy $");
 
-int
-elf_errno(void)
-{
-	int old;
+int elf_errno(void) {
+  int old;
 
-	old = LIBELF_PRIVATE(error);
-	LIBELF_PRIVATE(error) = 0;
-	return (old & LIBELF_ELF_ERROR_MASK);
+  old = LIBELF_PRIVATE(error);
+  LIBELF_PRIVATE(error) = 0;
+  return (old & LIBELF_ELF_ERROR_MASK);
 }

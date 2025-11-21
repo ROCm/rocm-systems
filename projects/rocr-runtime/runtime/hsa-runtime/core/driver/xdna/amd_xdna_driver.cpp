@@ -161,9 +161,7 @@ uint64_t XdnaDriver::GetSystemMemoryByteSize() {
   return pagesize * page_count;
 }
 
-uint64_t XdnaDriver::GetDevHeapByteSize() {
-  return dev_heap_size;
-}
+uint64_t XdnaDriver::GetDevHeapByteSize() { return dev_heap_size; }
 
 hsa_status_t XdnaDriver::Init() { return InitDeviceHeap(); }
 
@@ -171,10 +169,10 @@ hsa_status_t XdnaDriver::ShutDown() { return FreeDeviceHeap(); }
 
 hsa_status_t XdnaDriver::QueryKernelModeDriver(core::DriverQuery query) {
   switch (query) {
-  case core::DriverQuery::GET_DRIVER_VERSION:
-    return QueryDriverVersion();
-  default:
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case core::DriverQuery::GET_DRIVER_VERSION:
+      return QueryDriverVersion();
+    default:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
@@ -307,10 +305,9 @@ hsa_status_t XdnaDriver::GetCacheProperties(uint32_t node_id, uint32_t processor
   return HSA_STATUS_ERROR_INVALID_CACHE;
 }
 
-hsa_status_t
-XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
-                           core::MemoryRegion::AllocateFlags alloc_flags,
-                           void **mem, size_t size, uint32_t node_id) {
+hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
+                                        core::MemoryRegion::AllocateFlags alloc_flags, void** mem,
+                                        size_t size, uint32_t node_id) {
   const MemoryRegion& m_region = static_cast<const MemoryRegion&>(mem_region);
 
   if (!m_region.IsSystem()) {
@@ -357,7 +354,7 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
   }
 
   if (alloc_flags & core::MemoryRegion::AllocateMemoryOnly) {
-    *mem = reinterpret_cast<void *>(create_bo_args.handle);
+    *mem = reinterpret_cast<void*>(create_bo_args.handle);
   } else {
     *mem = bo_handle.vaddr;
   }
@@ -370,7 +367,7 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::FreeMemory(void *mem, size_t size) {
+hsa_status_t XdnaDriver::FreeMemory(void* mem, size_t size) {
   auto it = vmem_addr_mappings.find(mem);
   if (it == vmem_addr_mappings.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
@@ -451,50 +448,44 @@ hsa_status_t XdnaDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, si
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                                      core::ShareableHandle &handle) {
+hsa_status_t XdnaDriver::ImportDMABuf(int dmabuf_fd, core::Agent& agent,
+                                      core::ShareableHandle& handle) {
   drm_prime_handle import_params = {};
   import_params.handle = AMDXDNA_INVALID_BO_HANDLE;
   import_params.fd = dmabuf_fd;
-  if (ioctl(fd_, DRM_IOCTL_PRIME_FD_TO_HANDLE, &import_params) < 0)
-    return HSA_STATUS_ERROR;
+  if (ioctl(fd_, DRM_IOCTL_PRIME_FD_TO_HANDLE, &import_params) < 0) return HSA_STATUS_ERROR;
 
   handle.handle = import_params.handle;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::Map(core::ShareableHandle handle, void *mem,
-                             size_t offset, size_t size,
+hsa_status_t XdnaDriver::Map(core::ShareableHandle handle, void* mem, size_t offset, size_t size,
                              hsa_access_permission_t perms) {
   // Get fd associated with the handle.
   drm_prime_handle params = {};
   params.handle = handle.handle;
   params.fd = -1;
-  if (ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &params) < 0)
-    return HSA_STATUS_ERROR;
+  if (ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &params) < 0) return HSA_STATUS_ERROR;
 
   // Change permissions.
-  void *mapped_ptr = mmap(mem, size, PermissionsToMmapFlags(perms),
-                          MAP_FIXED | MAP_SHARED, params.fd, offset);
-  if (mapped_ptr == MAP_FAILED)
-    return HSA_STATUS_ERROR;
+  void* mapped_ptr =
+      mmap(mem, size, PermissionsToMmapFlags(perms), MAP_FIXED | MAP_SHARED, params.fd, offset);
+  if (mapped_ptr == MAP_FAILED) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::Unmap(core::ShareableHandle handle, void *mem,
-                               size_t offset, size_t size) {
-  if (munmap(mem, size) != 0)
-    return HSA_STATUS_ERROR;
+hsa_status_t XdnaDriver::Unmap(core::ShareableHandle handle, void* mem, size_t offset,
+                               size_t size) {
+  if (munmap(mem, size) != 0) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::ReleaseShareableHandle(core::ShareableHandle &handle) {
+hsa_status_t XdnaDriver::ReleaseShareableHandle(core::ShareableHandle& handle) {
   drm_gem_close close_params = {};
   close_params.handle = handle.handle;
-  if (ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_params) < 0)
-    return HSA_STATUS_ERROR;
+  if (ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_params) < 0) return HSA_STATUS_ERROR;
 
   handle = {};
 
@@ -545,9 +536,8 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
   void* addr_aligned = reinterpret_cast<void*>(
       AlignUp(reinterpret_cast<uintptr_t>(dev_heap_handle.vaddr), dev_heap_align));
 
-  dev_heap_aligned =
-      mmap(addr_aligned, dev_heap_size, PROT_READ | PROT_WRITE,
-           MAP_SHARED | MAP_FIXED, fd_, get_bo_info_args.map_offset);
+  dev_heap_aligned = mmap(addr_aligned, dev_heap_size, PROT_READ | PROT_WRITE,
+                          MAP_SHARED | MAP_FIXED, fd_, get_bo_info_args.map_offset);
   if (dev_heap_aligned == MAP_FAILED) {
     dev_heap_aligned = nullptr;
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1029,5 +1019,5 @@ hsa_status_t XdnaDriver::MakeMemoryResident(const void* mem, size_t size, uint64
 
 hsa_status_t XdnaDriver::MakeMemoryUnresident(const void* mem) const { return HSA_STATUS_ERROR; }
 
-} // namespace AMD
-} // namespace rocr
+}  // namespace AMD
+}  // namespace rocr

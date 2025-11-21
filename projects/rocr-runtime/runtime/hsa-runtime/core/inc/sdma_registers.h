@@ -255,17 +255,17 @@ typedef struct SDMA_PKT_COPY_LINEAR_RECT_TAG {
 
 // linear sub-window (GFX12)
 typedef struct SDMA_PKT_COPY_LINEAR_RECT_TAG_GFX12 {
-  static const unsigned int pitch_bits   = 16;
-  static const unsigned int slice_bits   = 32;
+  static const unsigned int pitch_bits = 16;
+  static const unsigned int slice_bits = 32;
   static const unsigned int rect_xy_bits = 16;
-  static const unsigned int rect_z_bits  = 14;
+  static const unsigned int rect_z_bits = 14;
 
   union {
     struct {
-      unsigned int op       :  8;
-      unsigned int sub_op   :  8;
+      unsigned int op : 8;
+      unsigned int sub_op : 8;
       unsigned int reserved : 13;
-      unsigned int element  :  3;
+      unsigned int element : 3;
     };
     unsigned int DW_0_DATA;
   } HEADER_UNION;
@@ -295,8 +295,8 @@ typedef struct SDMA_PKT_COPY_LINEAR_RECT_TAG_GFX12 {
   union {
     struct {
       unsigned int src_offset_z : 14;
-      unsigned int reserved_1   : 2;
-      unsigned int src_pitch    : pitch_bits;
+      unsigned int reserved_1 : 2;
+      unsigned int src_pitch : pitch_bits;
     };
     unsigned int DW_4_DATA;
   } SRC_PARAMETER_2_UNION;
@@ -333,8 +333,8 @@ typedef struct SDMA_PKT_COPY_LINEAR_RECT_TAG_GFX12 {
   union {
     struct {
       unsigned int dst_offset_z : 14;
-      unsigned int reserved_1   : 2;
-      unsigned int dst_pitch    : pitch_bits;
+      unsigned int reserved_1 : 2;
+      unsigned int dst_pitch : pitch_bits;
     };
     unsigned int DW_9_DATA;
   } DST_PARAMETER_2_UNION;
@@ -350,18 +350,18 @@ typedef struct SDMA_PKT_COPY_LINEAR_RECT_TAG_GFX12 {
     struct {
       unsigned int rect_x : rect_xy_bits;
       unsigned int rect_y : rect_xy_bits;
-      };
+    };
     unsigned int DW_11_DATA;
   } RECT_PARAMETER_1_UNION;
 
   union {
     struct {
-      unsigned int rect_z           : rect_z_bits;
-      unsigned int reserved_1       : 6;
+      unsigned int rect_z : rect_z_bits;
+      unsigned int reserved_1 : 6;
       unsigned int dst_cache_policy : 3;
-      unsigned int reserved_2       : 5;
+      unsigned int reserved_2 : 5;
       unsigned int src_cache_policy : 3;
-      unsigned int reserved_3       : 1;
+      unsigned int reserved_3 : 1;
     };
     unsigned int DW_12_DATA;
   } RECT_PARAMETER_2_UNION;
@@ -684,7 +684,7 @@ typedef struct SDMA_PKT_GCR_TAG {
   } WORD4_UNION;
 } SDMA_PKT_GCR;
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr
 
 #endif  // HSA_RUNTIME_CORE_INC_SDMA_REGISTERS_H_

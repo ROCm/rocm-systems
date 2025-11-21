@@ -21,12 +21,12 @@
  */
 
 #include <dirent.h>
-#include <cinttypes>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cinttypes>
 #include <cstdlib>
 #include <fstream>
 #include <vector>
@@ -70,14 +70,13 @@ amdsmi_status_t gpuvsmi_pid_is_gpu(const std::string &path, const char *bdf) {
 
 // Determine via kfd whether pid uses specified gpu
 amdsmi_status_t gpu_is_in_kfd_pid(const amdsmi_bdf_t &bdf, long pid) {
-
   // pack (domain,bus,device,function) to the same 64-bit key
   // (DOMAIN << 32) | (BUS << 8) | (DEVICE << 3) | FUNCTION
-  auto pack_bdf_to_kfd_bdfid = [](const amdsmi_bdf_t& b) -> uint64_t {
-    const uint64_t domain = static_cast<uint64_t>(b.domain_number  & 0xffffu);
-    const uint64_t bus    = static_cast<uint64_t>(b.bus_number     & 0xffu);
-    const uint64_t dev    = static_cast<uint64_t>(b.device_number  & 0x1fu);
-    const uint64_t func   = static_cast<uint64_t>(b.function_number & 0x7u);
+  auto pack_bdf_to_kfd_bdfid = [](const amdsmi_bdf_t &b) -> uint64_t {
+    const uint64_t domain = static_cast<uint64_t>(b.domain_number & 0xffffu);
+    const uint64_t bus = static_cast<uint64_t>(b.bus_number & 0xffu);
+    const uint64_t dev = static_cast<uint64_t>(b.device_number & 0x1fu);
+    const uint64_t func = static_cast<uint64_t>(b.function_number & 0x7u);
     const uint64_t loc = (bus << 8) | (dev << 3) | func;
     return (domain << 32) | loc;
   };
@@ -115,8 +114,7 @@ amdsmi_status_t gpu_is_in_kfd_pid(const amdsmi_bdf_t &bdf, long pid) {
   }
 
   // Return success if gpu id is in pid gpu ids
-  return (pid_gids.count(target_gid) ? AMDSMI_STATUS_SUCCESS
-                                     : AMDSMI_STATUS_NOT_FOUND);
+  return (pid_gids.count(target_gid) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_FOUND);
 }
 
 amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
@@ -216,8 +214,8 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
     std::string container_id;
     for (std::string line; getline(cgroup_info, line);) {
       if (line.find(container_type_name[i]) != std::string::npos) {
-        container_id = line.substr(line.find(container_type_name[i]) +
-                                   strlen(container_type_name[i]) + 1, 16);
+        container_id =
+            line.substr(line.find(container_type_name[i]) + strlen(container_type_name[i]) + 1, 16);
         strcpy(info.container_name, container_id.c_str());
         break;
       }

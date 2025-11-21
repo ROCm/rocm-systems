@@ -43,10 +43,9 @@ extern "C" {
  *
  * Device \p cudevice must match the local machine.
  */
-static __hwloc_inline int
-hwloc_cuda_get_device_pci_ids(hwloc_topology_t topology __hwloc_attribute_unused,
-			      CUdevice cudevice, int *domain, int *bus, int *dev)
-{
+static __hwloc_inline int hwloc_cuda_get_device_pci_ids(
+    hwloc_topology_t topology __hwloc_attribute_unused, CUdevice cudevice, int* domain, int* bus,
+    int* dev) {
   CUresult cres;
 
 #if CUDA_VERSION >= 4000
@@ -88,19 +87,16 @@ hwloc_cuda_get_device_pci_ids(hwloc_topology_t topology __hwloc_attribute_unused
  * This function is currently only implemented in a meaningful way for
  * Linux; other systems will simply get a full cpuset.
  */
-static __hwloc_inline int
-hwloc_cuda_get_device_cpuset(hwloc_topology_t topology __hwloc_attribute_unused,
-			     CUdevice cudevice, hwloc_cpuset_t set)
-{
+static __hwloc_inline int hwloc_cuda_get_device_cpuset(
+    hwloc_topology_t topology __hwloc_attribute_unused, CUdevice cudevice, hwloc_cpuset_t set) {
 #ifdef HWLOC_LINUX_SYS
   /* If we're on Linux, use the sysfs mechanism to get the local cpus */
 #define HWLOC_CUDA_DEVICE_SYSFS_PATH_MAX 128
   char path[HWLOC_CUDA_DEVICE_SYSFS_PATH_MAX];
-  FILE *sysfile = NULL;
+  FILE* sysfile = NULL;
   int domainid, busid, deviceid;
 
-  if (hwloc_cuda_get_device_pci_ids(topology, cudevice, &domainid, &busid, &deviceid))
-    return -1;
+  if (hwloc_cuda_get_device_pci_ids(topology, cudevice, &domainid, &busid, &deviceid)) return -1;
 
   if (!hwloc_topology_is_thissystem(topology)) {
     errno = EINVAL;
@@ -109,11 +105,9 @@ hwloc_cuda_get_device_cpuset(hwloc_topology_t topology __hwloc_attribute_unused,
 
   sprintf(path, "/sys/bus/pci/devices/%04x:%02x:%02x.0/local_cpus", domainid, busid, deviceid);
   sysfile = fopen(path, "r");
-  if (!sysfile)
-    return -1;
+  if (!sysfile) return -1;
 
-  if (hwloc_linux_parse_cpumap_file(sysfile, set) < 0
-      || hwloc_bitmap_iszero(set))
+  if (hwloc_linux_parse_cpumap_file(sysfile, set) < 0 || hwloc_bitmap_iszero(set))
     hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
 
   fclose(sysfile);
@@ -134,13 +128,11 @@ hwloc_cuda_get_device_cpuset(hwloc_topology_t topology __hwloc_attribute_unused,
  * I/O devices detection must be enabled in topology \p topology.
  * The CUDA component is not needed in the topology.
  */
-static __hwloc_inline hwloc_obj_t
-hwloc_cuda_get_device_pcidev(hwloc_topology_t topology, CUdevice cudevice)
-{
+static __hwloc_inline hwloc_obj_t hwloc_cuda_get_device_pcidev(hwloc_topology_t topology,
+                                                               CUdevice cudevice) {
   int domain, bus, dev;
 
-  if (hwloc_cuda_get_device_pci_ids(topology, cudevice, &domain, &bus, &dev))
-    return NULL;
+  if (hwloc_cuda_get_device_pci_ids(topology, cudevice, &domain, &bus, &dev)) return NULL;
 
   return hwloc_get_pcidev_by_busid(topology, domain, bus, dev, 0);
 }
@@ -158,30 +150,24 @@ hwloc_cuda_get_device_pcidev(hwloc_topology_t topology, CUdevice cudevice)
  * \note The corresponding hwloc PCI device may be found by looking
  * at the result parent pointer.
  */
-static __hwloc_inline hwloc_obj_t
-hwloc_cuda_get_device_osdev(hwloc_topology_t topology, CUdevice cudevice)
-{
-	hwloc_obj_t osdev = NULL;
-	int domain, bus, dev;
+static __hwloc_inline hwloc_obj_t hwloc_cuda_get_device_osdev(hwloc_topology_t topology,
+                                                              CUdevice cudevice) {
+  hwloc_obj_t osdev = NULL;
+  int domain, bus, dev;
 
-	if (hwloc_cuda_get_device_pci_ids(topology, cudevice, &domain, &bus, &dev))
-		return NULL;
+  if (hwloc_cuda_get_device_pci_ids(topology, cudevice, &domain, &bus, &dev)) return NULL;
 
-	osdev = NULL;
-	while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
-		hwloc_obj_t pcidev = osdev->parent;
-		if (strncmp(osdev->name, "cuda", 4))
-			continue;
-		if (pcidev
-		    && pcidev->type == HWLOC_OBJ_PCI_DEVICE
-		    && (int) pcidev->attr->pcidev.domain == domain
-		    && (int) pcidev->attr->pcidev.bus == bus
-		    && (int) pcidev->attr->pcidev.dev == dev
-		    && pcidev->attr->pcidev.func == 0)
-			return osdev;
-	}
+  osdev = NULL;
+  while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
+    hwloc_obj_t pcidev = osdev->parent;
+    if (strncmp(osdev->name, "cuda", 4)) continue;
+    if (pcidev && pcidev->type == HWLOC_OBJ_PCI_DEVICE &&
+        (int)pcidev->attr->pcidev.domain == domain && (int)pcidev->attr->pcidev.bus == bus &&
+        (int)pcidev->attr->pcidev.dev == dev && pcidev->attr->pcidev.func == 0)
+      return osdev;
+  }
 
-	return NULL;
+  return NULL;
 }
 
 /** \brief Get the hwloc OS device object corresponding to the
@@ -199,18 +185,15 @@ hwloc_cuda_get_device_osdev(hwloc_topology_t topology, CUdevice cudevice)
  *
  * \note This function is identical to hwloc_cudart_get_device_osdev_by_index().
  */
-static __hwloc_inline hwloc_obj_t
-hwloc_cuda_get_device_osdev_by_index(hwloc_topology_t topology, unsigned idx)
-{
-	hwloc_obj_t osdev = NULL;
-	while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
-		if (HWLOC_OBJ_OSDEV_COPROC == osdev->attr->osdev.type
-		    && osdev->name
-		    && !strncmp("cuda", osdev->name, 4)
-		    && atoi(osdev->name + 4) == (int) idx)
-			return osdev;
-	}
-	return NULL;
+static __hwloc_inline hwloc_obj_t hwloc_cuda_get_device_osdev_by_index(hwloc_topology_t topology,
+                                                                       unsigned idx) {
+  hwloc_obj_t osdev = NULL;
+  while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
+    if (HWLOC_OBJ_OSDEV_COPROC == osdev->attr->osdev.type && osdev->name &&
+        !strncmp("cuda", osdev->name, 4) && atoi(osdev->name + 4) == (int)idx)
+      return osdev;
+  }
+  return NULL;
 }
 
 /** @} */

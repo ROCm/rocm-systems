@@ -36,21 +36,19 @@ LIBELF_VCSID("$Id: elf_hash.c 189 2008-07-20 10:38:08Z jkoshy $");
  * This elf_hash function is defined by the System V ABI.
  */
 
-unsigned long
-elf_hash(const char *name)
-{
-	unsigned long h, t;
-	const unsigned char *s;
+unsigned long elf_hash(const char *name) {
+  unsigned long h, t;
+  const unsigned char *s;
 
-	s = (const unsigned char *) name;
-	h = t = 0;
+  s = (const unsigned char *)name;
+  h = t = 0;
 
-	for (; *s != '\0'; h = h & ~t) {
-		h = (h << 4) + *s++;
-		t = h & 0xF0000000UL;
-		if (t)
-			h ^= t >> 24;
-	}
+  for (; *s != '\0'; h = h & ~t) {
+    h = (h << 4) + *s++;
+    t = h & 0xF0000000UL;
+    if (t)
+      h ^= t >> 24;
+  }
 
-	return (h);
+  return (h);
 }

@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef HSA_RSRC_FACTORY_H_
 #define HSA_RSRC_FACTORY_H_
 
@@ -26,19 +26,19 @@
 #define HSA_QUEUE_ALIGN_BYTES 64
 #define HSA_PACKET_ALIGN_BYTES 64
 
-#define check(msg, status) \
-if (status != HSA_STATUS_SUCCESS) { \
-    const char *emsg = 0; \
-    hsa_status_string(status, &emsg); \
-    printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>"); \
-    exit(1); \
-}
+#define check(msg, status)                                                                         \
+  if (status != HSA_STATUS_SUCCESS) {                                                              \
+    const char* emsg = 0;                                                                          \
+    hsa_status_string(status, &emsg);                                                              \
+    printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                      \
+    exit(1);                                                                                       \
+  }
 
-#define check_build(msg, status) \
-if (status != STATUS_SUCCESS) { \
-    printf("%s\n", msg); \
-    exit(1); \
-}
+#define check_build(msg, status)                                                                   \
+  if (status != STATUS_SUCCESS) {                                                                  \
+    printf("%s\n", msg);                                                                           \
+    exit(1);                                                                                       \
+  }
 
 // Define required BRIG data structures.
 typedef uint32_t BrigCodeOffset32_t;
@@ -91,15 +91,14 @@ struct BrigData {
 
 // Provide access to command line arguments passed in by user
 extern uint32_t hsa_cmdline_arg_cnt;
-extern char **hsa_cmdline_arg_list;
+extern char** hsa_cmdline_arg_list;
 
 // Encapsulates information about a Hsa Agent such as its
 // handle, name, max queue size, max wavefront size, etc.
 typedef struct {
-
   // Handle of Agent
   hsa_agent_t dev_id;
-  
+
   // Agent type - Cpu = 0, Gpu = 1 or Dsp = 2
   uint32_t dev_type;
 
@@ -124,27 +123,25 @@ typedef struct {
 } AgentInfo;
 
 class HsaRsrcFactory {
-
  public:
-
   // Constructor of the class. Will initialize the Hsa Runtime and
   // query the system topology to get the list of Cpu and Gpu devices
-  HsaRsrcFactory( );
+  HsaRsrcFactory();
 
   // Destructor of the class
-  ~HsaRsrcFactory( );
+  ~HsaRsrcFactory();
 
   // Get the count of Hsa Gpu Agents available on the platform
   //
   // @return uint32_t Number of Gpu agents on platform
   //
-  uint32_t GetCountOfGpuAgents( );
+  uint32_t GetCountOfGpuAgents();
 
   // Get the count of Hsa Cpu Agents available on the platform
   //
   // @return uint32_t Number of Cpu agents on platform
   //
-  uint32_t GetCountOfCpuAgents( );
+  uint32_t GetCountOfCpuAgents();
 
   // Get the AgentInfo handle of a Gpu device
   //
@@ -154,7 +151,7 @@ class HsaRsrcFactory {
   //
   // @return bool true if successful, false otherwise
   //
-  bool GetGpuAgentInfo(uint32_t idx, AgentInfo **agent_info);
+  bool GetGpuAgentInfo(uint32_t idx, AgentInfo** agent_info);
 
   // Get the AgentInfo handle of a Cpu device
   //
@@ -164,7 +161,7 @@ class HsaRsrcFactory {
   //
   // @return bool true if successful, false otherwise
   //
-  bool GetCpuAgentInfo(uint32_t idx, AgentInfo **agent_info);
+  bool GetCpuAgentInfo(uint32_t idx, AgentInfo** agent_info);
 
   // Create a Queue object and return its handle. The queue object is expected
   // to support user requested number of Aql dispatch packets.
@@ -177,8 +174,7 @@ class HsaRsrcFactory {
   //
   // @return bool true if successful, false otherwise
   //
-  bool CreateQueue(AgentInfo *agent_info,
-                   uint32_t num_pkts, hsa_queue_t **queue);
+  bool CreateQueue(AgentInfo* agent_info, uint32_t num_pkts, hsa_queue_t** queue);
 
   // Create a Signal object and return its handle.
   //
@@ -188,7 +184,7 @@ class HsaRsrcFactory {
   //
   // @return bool true if successful, false otherwise
   //
-  bool CreateSignal(uint32_t value, hsa_signal_t *signal);
+  bool CreateSignal(uint32_t value, hsa_signal_t* signal);
 
   // Allocate memory for use by a kernel of specified size in specified
   // agent's memory region. Currently supports Global segment whose Kernarg
@@ -200,11 +196,10 @@ class HsaRsrcFactory {
   //
   // @return uint8_t* Pointer to buffer, null if allocation fails.
   //
-  uint8_t* AllocateLocalMemory(AgentInfo *agent_info, size_t size);
-  uint8_t* AllocateMemory(AgentInfo *agent_info, size_t size);
+  uint8_t* AllocateLocalMemory(AgentInfo* agent_info, size_t size);
+  uint8_t* AllocateMemory(AgentInfo* agent_info, size_t size);
 
-  bool TransferData(uint8_t *dest_buff, uint8_t *src_buff,
-                    uint32_t length, bool host_to_dev);
+  bool TransferData(uint8_t* dest_buff, uint8_t* src_buff, uint32_t length, bool host_to_dev);
 
   // Allocate memory tp pass kernel parameters.
   //
@@ -214,7 +209,7 @@ class HsaRsrcFactory {
   //
   // @return uint8_t* Pointer to buffer, null if allocation fails.
   //
-  uint8_t* AllocateSysMemory(AgentInfo *agent_info, size_t size);
+  uint8_t* AllocateSysMemory(AgentInfo* agent_info, size_t size);
 
   // Loads an Assembled Brig file and Finalizes it into Device Isa
   //
@@ -229,55 +224,53 @@ class HsaRsrcFactory {
   //
   // @return bool true if successful, false otherwise
   //
-  bool LoadAndFinalize(AgentInfo *agent_info,
-                       const char *brig_path, char *kernel_name,
-                       hsa_executable_symbol_t *code_desc);
+  bool LoadAndFinalize(AgentInfo* agent_info, const char* brig_path, char* kernel_name,
+                       hsa_executable_symbol_t* code_desc);
 
   // Add an instance of AgentInfo representing a Hsa Gpu agent
-  void AddAgentInfo(AgentInfo *agent_info, bool gpu);
+  void AddAgentInfo(AgentInfo* agent_info, bool gpu);
 
   // Returns the file path where brig files is located
-  static char* GetBrigPath( );
+  static char* GetBrigPath();
 
   // Returns the number of compute units present on platform
-  static uint32_t GetNumOfCUs( );
+  static uint32_t GetNumOfCUs();
 
   // Returns the maximum number of waves that can be launched
   // per compute unit. The actual number that can be launched
   // is affected by resource availability
-  static uint32_t GetNumOfWavesPerCU( );
+  static uint32_t GetNumOfWavesPerCU();
 
   // Returns the number of work-items that can execute per wave
-  static uint32_t GetNumOfWorkItemsPerWave( );
-  
+  static uint32_t GetNumOfWorkItemsPerWave();
+
   // Returns the number of times kernel loop body should execute.
   static uint32_t GetKernelLoopCount();
-  
+
   // Returns boolean flag to indicate if debug info should be printed
   static uint32_t GetPrintDebugInfo();
 
  private:
- 
   // Number of queues to create
   uint32_t num_queues_;
 
   // Used to maintain a list of Hsa Queue handles
-  std::vector<hsa_queue_t *> queue_list_;
- 
+  std::vector<hsa_queue_t*> queue_list_;
+
   // Number of Signals to create
   uint32_t num_signals_;
- 
+
   // Used to maintain a list of Hsa Signal handles
-  std::vector<hsa_signal_t *> signal_list_;
- 
+  std::vector<hsa_signal_t*> signal_list_;
+
   // Number of agents reported by platform
   uint32_t num_agents_;
- 
+
   // Used to maintain a list of Hsa Gpu Agent Info
-  std::vector<AgentInfo *> gpu_list_;
- 
+  std::vector<AgentInfo*> gpu_list_;
+
   // Used to maintain a list of Hsa Cpu Agent Info
-  std::vector<AgentInfo *> cpu_list_;
+  std::vector<AgentInfo*> cpu_list_;
 
   // Records the file path where Brig file is located.
   // Value is available only after an instance has been built.
@@ -310,17 +303,17 @@ class HsaRsrcFactory {
   static char* print_debug_key_;
 
   // Print the various fields of Hsa Gpu Agents
-  bool PrintGpuAgents( );
-  
+  bool PrintGpuAgents();
+
   // Process command line arguments. The method will capture
   // various user command line parameters for tests to use
-  static void ProcessCmdline( );
-  
+  static void ProcessCmdline();
+
   // Prints the help banner on user arg keys
-  static void PrintHelpMsg( );
+  static void PrintHelpMsg();
 
   // Maps an index for the user argument
-  static uint32_t GetArgIndex(char *arg_value);
+  static uint32_t GetArgIndex(char* arg_value);
 
   HSAIL_ASM::Tool tool;
 };

@@ -33,12 +33,12 @@
 
 class KFDNegativeTest : public KFDBaseComponentTest {
  public:
-    KFDNegativeTest() {}
-    ~KFDNegativeTest() {}
+  KFDNegativeTest() {}
+  ~KFDNegativeTest() {}
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 };
 
 #endif  // __KFD_NEGATIVE_TEST__H__

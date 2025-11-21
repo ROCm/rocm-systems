@@ -150,8 +150,7 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
 
   addr_create_input.minPitchAlignPixels = 0;
 
-  ADDR_E_RETURNCODE addr_ret =
-      AddrCreate(&addr_create_input, &addr_create_output);
+  ADDR_E_RETURNCODE addr_ret = AddrCreate(&addr_create_input, &addr_create_output);
 
   if (addr_ret == ADDR_OK) {
     addr_lib_ = addr_create_output.hLib;
@@ -200,16 +199,15 @@ void ImageManagerKv::Cleanup() {
   }
 }
 
-ImageProperty ImageManagerKv::GetImageProperty(
-    hsa_agent_t component, const hsa_ext_image_format_t& format,
-    hsa_ext_image_geometry_t geometry) const {
+ImageProperty ImageManagerKv::GetImageProperty(hsa_agent_t component,
+                                               const hsa_ext_image_format_t& format,
+                                               hsa_ext_image_geometry_t geometry) const {
   return ImageLut().MapFormat(format, geometry);
 }
 
 void ImageManagerKv::GetImageInfoMaxDimension(hsa_agent_t component,
-                                              hsa_ext_image_geometry_t geometry,
-                                              uint32_t& width, uint32_t& height,
-                                              uint32_t& depth,
+                                              hsa_ext_image_geometry_t geometry, uint32_t& width,
+                                              uint32_t& height, uint32_t& depth,
                                               uint32_t& array_size) const {
   width = ImageLut().GetMaxWidth(geometry);
   height = ImageLut().GetMaxHeight(geometry);
@@ -219,10 +217,8 @@ void ImageManagerKv::GetImageInfoMaxDimension(hsa_agent_t component,
 
 hsa_status_t ImageManagerKv::CalculateImageSizeAndAlignment(
     hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
-    hsa_ext_image_data_layout_t image_data_layout,
-    size_t image_data_row_pitch,
-    size_t image_data_slice_pitch,
-    hsa_ext_image_data_info_t& image_info) const {
+    hsa_ext_image_data_layout_t image_data_layout, size_t image_data_row_pitch,
+    size_t image_data_slice_pitch, hsa_ext_image_data_info_t& image_info) const {
   ADDR_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
   hsa_profile_t profile;
 
@@ -231,16 +227,16 @@ hsa_status_t ImageManagerKv::CalculateImageSizeAndAlignment(
 
   Image::TileMode tileMode = Image::TileMode::LINEAR;
   if (image_data_layout == HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE) {
-    tileMode = (profile == HSA_PROFILE_BASE &&
-                desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)?
-      Image::TileMode::TILED : Image::TileMode::LINEAR;
+    tileMode = (profile == HSA_PROFILE_BASE && desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)
+        ? Image::TileMode::TILED
+        : Image::TileMode::LINEAR;
   }
-  if (!GetAddrlibSurfaceInfo(component, desc, tileMode,
-        image_data_row_pitch, image_data_slice_pitch, out)) {
+  if (!GetAddrlibSurfaceInfo(component, desc, tileMode, image_data_row_pitch,
+                             image_data_slice_pitch, out)) {
     return HSA_STATUS_ERROR;
   }
 
-  size_t rowPitch   = (out.bpp >> 3) * out.pitch;
+  size_t rowPitch = (out.bpp >> 3) * out.pitch;
   size_t slicePitch = rowPitch * out.height;
   if (desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB &&
       image_data_layout == HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR &&
@@ -277,20 +273,20 @@ bool ImageManagerKv::IsLocalMemory(const void* address) const {
 #endif
 }
 
-hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image, const metadata_amd_t* descriptor) const {
+hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image,
+                                              const metadata_amd_t* descriptor) const {
   metadata_amd_ci_vi_t* desc = (metadata_amd_ci_vi_t*)descriptor;
   bool atc_access = true;
   uint32_t mtype = mtype_;
   const void* image_data_addr = image.data;
 
   ImageProperty image_prop = ImageLut().MapFormat(image.desc.format, image.desc.geometry);
-  if((image_prop.cap == HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED) ||
-     (image_prop.element_size == 0))
+  if ((image_prop.cap == HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED) || (image_prop.element_size == 0))
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
 
   uint32_t hwPixelSize =
       ImageLut().GetPixelSize(desc->word1.bitfields.data_format, desc->word1.bitfields.num_format);
-  if(image_prop.element_size!=hwPixelSize)
+  if (image_prop.element_size != hwPixelSize)
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
 
   const Swizzle swizzle = ImageLut().MapSwizzle(image.desc.format.channel_order);
@@ -298,36 +294,36 @@ hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image, const metadata_amd_t
   if (IsLocalMemory(image.data)) {
     atc_access = false;
     mtype = 1;
-    image_data_addr = reinterpret_cast<const void*>(
-        reinterpret_cast<uintptr_t>(image.data) - local_memory_base_address_);
+    image_data_addr = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(image.data) -
+                                                    local_memory_base_address_);
   }
 
-  image.srd[0]=desc->word0.u32_all;
-  image.srd[1]=desc->word1.u32_all;
-  image.srd[2]=desc->word2.u32_all;
-  image.srd[3]=desc->word3.u32_all;
-  image.srd[4]=desc->word4.u32_all;
-  image.srd[5]=desc->word5.u32_all;
-  image.srd[6]=desc->word6.u32_all;
-  image.srd[7]=desc->word7.u32_all;
+  image.srd[0] = desc->word0.u32_all;
+  image.srd[1] = desc->word1.u32_all;
+  image.srd[2] = desc->word2.u32_all;
+  image.srd[3] = desc->word3.u32_all;
+  image.srd[4] = desc->word4.u32_all;
+  image.srd[5] = desc->word5.u32_all;
+  image.srd[6] = desc->word6.u32_all;
+  image.srd[7] = desc->word7.u32_all;
 
   ((SQ_IMG_RSRC_WORD0*)(&image.srd[0]))->bits.base_address = PtrLow40Shift8(image_data_addr);
   ((SQ_IMG_RSRC_WORD1*)(&image.srd[1]))->bits.base_address_hi = PtrHigh64Shift40(image_data_addr);
   ((SQ_IMG_RSRC_WORD1*)(&image.srd[1]))->bits.data_format = image_prop.data_format;
   ((SQ_IMG_RSRC_WORD1*)(&image.srd[1]))->bits.num_format = image_prop.data_type;
   ((SQ_IMG_RSRC_WORD1*)(&image.srd[1]))->bits.mtype = mtype;
-  ((SQ_IMG_RSRC_WORD3*)(&image.srd[3]))->bits.atc=atc_access;
+  ((SQ_IMG_RSRC_WORD3*)(&image.srd[3]))->bits.atc = atc_access;
   ((SQ_IMG_RSRC_WORD3*)(&image.srd[3]))->bits.dst_sel_x = swizzle.x;
   ((SQ_IMG_RSRC_WORD3*)(&image.srd[3]))->bits.dst_sel_y = swizzle.y;
   ((SQ_IMG_RSRC_WORD3*)(&image.srd[3]))->bits.dst_sel_z = swizzle.z;
   ((SQ_IMG_RSRC_WORD3*)(&image.srd[3]))->bits.dst_sel_w = swizzle.w;
   ((SQ_IMG_RSRC_WORD7*)(&image.srd[7]))->bits.meta_data_address += PtrLow40Shift8(image_data_addr);
 
-  //Looks like this is only used for CPU copies.
-  image.row_pitch = (desc->word4.bits.pitch+1)*image_prop.element_size;
-  image.slice_pitch = image.row_pitch * (desc->word2.bits.height+1);
+  // Looks like this is only used for CPU copies.
+  image.row_pitch = (desc->word4.bits.pitch + 1) * image_prop.element_size;
+  image.slice_pitch = image.row_pitch * (desc->word2.bits.height + 1);
 
-  //Used by HSAIL shader ABI
+  // Used by HSAIL shader ABI
   image.srd[8] = image.desc.format.channel_type;
   image.srd[9] = image.desc.format.channel_order;
   image.srd[10] = static_cast<uint32_t>(image.desc.width);
@@ -347,8 +343,8 @@ hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image) const {
   if (IsLocalMemory(image.data)) {
     atc_access = false;
     mtype = 1;
-    image_data_addr = reinterpret_cast<const void*>(
-        reinterpret_cast<uintptr_t>(image.data) - local_memory_base_address_);
+    image_data_addr = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(image.data) -
+                                                    local_memory_base_address_);
   }
 
   if (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
@@ -367,8 +363,8 @@ hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image) const {
     word1.bits.cache_swizzle = false;
 
     uint32_t major_ver = MajorVerFromDevID(chip_id_);
-    word2.bits.num_records = (major_ver < 8) ?
-                image.desc.width : image.desc.width * image_prop.element_size;
+    word2.bits.num_records =
+        (major_ver < 8) ? image.desc.width : image.desc.width * image_prop.element_size;
 
     const Swizzle swizzle = ImageLut().MapSwizzle(image.desc.format.channel_order);
     word3.u32_all = 0;
@@ -401,8 +397,8 @@ hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image) const {
     SQ_IMG_RSRC_WORD7 word7;
 
     ADDR_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
-    if (!GetAddrlibSurfaceInfo(image.component, image.desc, image.tile_mode,
-          image.row_pitch, image.slice_pitch, out)) {
+    if (!GetAddrlibSurfaceInfo(image.component, image.desc, image.tile_mode, image.row_pitch,
+                               image.slice_pitch, out)) {
       return HSA_STATUS_ERROR;
     }
 
@@ -436,24 +432,20 @@ hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image) const {
     word3.bits.type = ImageLut().MapGeometry(image.desc.geometry);
     word3.bits.atc = atc_access;
 
-    const bool image_array =
-        (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
-         image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DA ||
-         image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DADEPTH);
+    const bool image_array = (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
+                              image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DA ||
+                              image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DADEPTH);
     const bool image_3d = (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_3D);
 
     word4.u32_all = 0;
-    word4.bits.depth =
-        (image_array)
-            ? std::max(image.desc.array_size, static_cast<size_t>(1)) - 1
-            : (image_3d) ? image.desc.depth - 1 : 0;
+    word4.bits.depth = (image_array) ? std::max(image.desc.array_size, static_cast<size_t>(1)) - 1
+        : (image_3d)                 ? image.desc.depth - 1
+                                     : 0;
     word4.bits.pitch = out.pitch - 1;
 
     word5.u32_all = 0;
     word5.bits.last_array =
-        (image_array)
-            ? (std::max(image.desc.array_size, static_cast<size_t>(1)) - 1)
-            : 0;
+        (image_array) ? (std::max(image.desc.array_size, static_cast<size_t>(1)) - 1) : 0;
 
     word6.u32_all = 0;
     word7.u32_all = 0;
@@ -478,8 +470,8 @@ hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ImageManagerKv::ModifyImageSrd(
-    Image& image, hsa_ext_image_format_t& new_format) const {
+hsa_status_t ImageManagerKv::ModifyImageSrd(Image& image,
+                                            hsa_ext_image_format_t& new_format) const {
   image.desc.format = new_format;
 
   ImageProperty image_prop = ImageLut().MapFormat(image.desc.format, image.desc.geometry);
@@ -488,8 +480,7 @@ hsa_status_t ImageManagerKv::ModifyImageSrd(
 
   if (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
     const Swizzle swizzle = ImageLut().MapSwizzle(image.desc.format.channel_order);
-    SQ_BUF_RSRC_WORD3* word3 =
-        reinterpret_cast<SQ_BUF_RSRC_WORD3*>(&image.srd[3]);
+    SQ_BUF_RSRC_WORD3* word3 = reinterpret_cast<SQ_BUF_RSRC_WORD3*>(&image.srd[3]);
     word3->bits.dst_sel_x = swizzle.x;
     word3->bits.dst_sel_y = swizzle.y;
     word3->bits.dst_sel_z = swizzle.z;
@@ -497,14 +488,12 @@ hsa_status_t ImageManagerKv::ModifyImageSrd(
     word3->bits.num_format = image_prop.data_type;
     word3->bits.data_format = image_prop.data_format;
   } else {
-    SQ_IMG_RSRC_WORD1* word1 =
-        reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&image.srd[1]);
+    SQ_IMG_RSRC_WORD1* word1 = reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&image.srd[1]);
     word1->bits.data_format = image_prop.data_format;
     word1->bits.num_format = image_prop.data_type;
 
     const Swizzle swizzle = ImageLut().MapSwizzle(image.desc.format.channel_order);
-    SQ_IMG_RSRC_WORD3* word3 =
-        reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3]);
+    SQ_IMG_RSRC_WORD3* word3 = reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3]);
     word3->bits.dst_sel_x = swizzle.x;
     word3->bits.dst_sel_y = swizzle.y;
     word3->bits.dst_sel_z = swizzle.z;
@@ -519,7 +508,7 @@ hsa_status_t ImageManagerKv::ModifyImageSrd(
 }
 
 hsa_status_t ImageManagerKv::PopulateSamplerSrd(Sampler& sampler) const {
-  const hsa_ext_sampler_descriptor_v2_t &sampler_descriptor = sampler.desc;
+  const hsa_ext_sampler_descriptor_v2_t& sampler_descriptor = sampler.desc;
 
   SQ_IMG_SAMP_WORD0 word0;
   SQ_IMG_SAMP_WORD1 word1;
@@ -527,11 +516,11 @@ hsa_status_t ImageManagerKv::PopulateSamplerSrd(Sampler& sampler) const {
   SQ_IMG_SAMP_WORD3 word3;
 
   word0.u32_all = 0;
-  hsa_status_t status = convertAddressMode<SQ_IMG_SAMP_WORD0, SQ_TEX_CLAMP>
-                                         (word0, sampler_descriptor.address_modes);
+  hsa_status_t status =
+      convertAddressMode<SQ_IMG_SAMP_WORD0, SQ_TEX_CLAMP>(word0, sampler_descriptor.address_modes);
   if (status != HSA_STATUS_SUCCESS) return status;
-  word0.bits.force_unormalized = (sampler_descriptor.coordinate_mode ==
-                                  HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED);
+  word0.bits.force_unormalized =
+      (sampler_descriptor.coordinate_mode == HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED);
 
   word1.u32_all = 0;
   word1.bits.max_lod = 4095;
@@ -564,9 +553,9 @@ hsa_status_t ImageManagerKv::PopulateSamplerSrd(Sampler& sampler) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ImageManagerKv::CopyBufferToImage(
-    const void* src_memory, size_t src_row_pitch, size_t src_slice_pitch,
-    const Image& dst_image, const hsa_ext_image_region_t& image_region) {
+hsa_status_t ImageManagerKv::CopyBufferToImage(const void* src_memory, size_t src_row_pitch,
+                                               size_t src_slice_pitch, const Image& dst_image,
+                                               const hsa_ext_image_region_t& image_region) {
   if (BlitQueueInit().queue_ == NULL) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -576,9 +565,9 @@ hsa_status_t ImageManagerKv::CopyBufferToImage(
       image_region);
 }
 
-hsa_status_t ImageManagerKv::CopyImageToBuffer(
-    const Image& src_image, void* dst_memory, size_t dst_row_pitch,
-    size_t dst_slice_pitch, const hsa_ext_image_region_t& image_region) {
+hsa_status_t ImageManagerKv::CopyImageToBuffer(const Image& src_image, void* dst_memory,
+                                               size_t dst_row_pitch, size_t dst_slice_pitch,
+                                               const hsa_ext_image_region_t& image_region) {
   if (BlitQueueInit().queue_ == NULL) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -588,10 +577,8 @@ hsa_status_t ImageManagerKv::CopyImageToBuffer(
       image_region);
 }
 
-hsa_status_t ImageManagerKv::CopyImage(const Image& dst_image,
-                                       const Image& src_image,
-                                       const hsa_dim3_t& dst_origin,
-                                       const hsa_dim3_t& src_origin,
+hsa_status_t ImageManagerKv::CopyImage(const Image& dst_image, const Image& src_image,
+                                       const hsa_dim3_t& dst_origin, const hsa_dim3_t& src_origin,
                                        const hsa_dim3_t size) {
   if (BlitQueueInit().queue_ == NULL) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -628,8 +615,8 @@ hsa_status_t ImageManagerKv::CopyImage(const Image& dst_image,
     if (copy_type != BlitKernel::KERNEL_OP_COPY_IMAGE_DEFAULT) {
       // KV and CZ don't have write support for SRGBA image, so treat the
       // destination image as RGBA image.
-      SQ_IMG_RSRC_WORD1* word1 = reinterpret_cast<SQ_IMG_RSRC_WORD1*>(
-          &const_cast<Image&>(dst_image).srd[1]);
+      SQ_IMG_RSRC_WORD1* word1 =
+          reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&const_cast<Image&>(dst_image).srd[1]);
 
       // Destination can be linear or standard, preserve the original value.
       uint32_t num_format_original = word1->bits.num_format;
@@ -660,8 +647,7 @@ hsa_status_t ImageManagerKv::FillImage(const Image& image, const void* pattern,
   SQ_BUF_RSRC_WORD3* word3_buff = NULL;
   SQ_IMG_RSRC_WORD3* word3_image = NULL;
   uint32_t dst_sel_w_original = 0;
-  if (image_view->desc.format.channel_type ==
-      HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010) {
+  if (image_view->desc.format.channel_type == HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010) {
     // Force GPU to ignore the last two bits (alpha bits).
     if (image_view->desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
       word3_buff = reinterpret_cast<SQ_BUF_RSRC_WORD3*>(&image_view->srd[3]);
@@ -719,8 +705,7 @@ hsa_status_t ImageManagerKv::FillImage(const Image& image, const void* pattern,
   return status;
 }
 
-hsa_status_t ImageManagerKv::GetLocalMemoryRegion(hsa_region_t region,
-                                                  void* data) {
+hsa_status_t ImageManagerKv::GetLocalMemoryRegion(hsa_region_t region, void* data) {
   if (data == NULL) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -755,19 +740,16 @@ AddrFormat ImageManagerKv::GetAddrlibFormat(const ImageProperty& image_prop) {
       return ADDR_FMT_8;
       break;
     case FMT_16:
-      return (image_prop.data_type != TYPE_FLOAT) ? ADDR_FMT_16
-                                                  : ADDR_FMT_16_FLOAT;
+      return (image_prop.data_type != TYPE_FLOAT) ? ADDR_FMT_16 : ADDR_FMT_16_FLOAT;
       break;
     case FMT_8_8:
       return ADDR_FMT_8_8;
       break;
     case FMT_32:
-      return (image_prop.data_type != TYPE_FLOAT) ? ADDR_FMT_32
-                                                  : ADDR_FMT_32_FLOAT;
+      return (image_prop.data_type != TYPE_FLOAT) ? ADDR_FMT_32 : ADDR_FMT_32_FLOAT;
       break;
     case FMT_16_16:
-      return (image_prop.data_type != TYPE_FLOAT) ? ADDR_FMT_16_16
-                                                  : ADDR_FMT_16_16_FLOAT;
+      return (image_prop.data_type != TYPE_FLOAT) ? ADDR_FMT_16_16 : ADDR_FMT_16_16_FLOAT;
       break;
     case FMT_2_10_10_10:
       return ADDR_FMT_2_10_10_10;
@@ -776,8 +758,7 @@ AddrFormat ImageManagerKv::GetAddrlibFormat(const ImageProperty& image_prop) {
       return ADDR_FMT_8_8_8_8;
       break;
     case FMT_32_32:
-      return (image_prop.data_type != TYPE_FLOAT) ? ADDR_FMT_32_32
-                                                  : ADDR_FMT_32_32_FLOAT;
+      return (image_prop.data_type != TYPE_FLOAT) ? ADDR_FMT_32_32 : ADDR_FMT_32_32_FLOAT;
       break;
     case FMT_16_16_16_16:
       return (image_prop.data_type != TYPE_FLOAT) ? ADDR_FMT_16_16_16_16
@@ -806,34 +787,30 @@ AddrFormat ImageManagerKv::GetAddrlibFormat(const ImageProperty& image_prop) {
   return ADDR_FMT_INVALID;
 }
 
-VOID* ADDR_API
-    ImageManagerKv::AllocSysMem(const ADDR_ALLOCSYSMEM_INPUT* input) {
+VOID* ADDR_API ImageManagerKv::AllocSysMem(const ADDR_ALLOCSYSMEM_INPUT* input) {
   return malloc(input->sizeInBytes);
 }
 
-ADDR_E_RETURNCODE ADDR_API
-    ImageManagerKv::FreeSysMem(const ADDR_FREESYSMEM_INPUT* input) {
+ADDR_E_RETURNCODE ADDR_API ImageManagerKv::FreeSysMem(const ADDR_FREESYSMEM_INPUT* input) {
   free(input->pVirtAddr);
 
   return ADDR_OK;
 }
 
-bool ImageManagerKv::GetAddrlibSurfaceInfo(
-    hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
-    Image::TileMode tileMode,
-    size_t image_data_row_pitch,
-    size_t image_data_slice_pitch,
-    ADDR_COMPUTE_SURFACE_INFO_OUTPUT& out) const {
-  const ImageProperty image_prop =
-      GetImageProperty(component, desc.format, desc.geometry);
+bool ImageManagerKv::GetAddrlibSurfaceInfo(hsa_agent_t component,
+                                           const hsa_ext_image_descriptor_t& desc,
+                                           Image::TileMode tileMode, size_t image_data_row_pitch,
+                                           size_t image_data_slice_pitch,
+                                           ADDR_COMPUTE_SURFACE_INFO_OUTPUT& out) const {
+  const ImageProperty image_prop = GetImageProperty(component, desc.format, desc.geometry);
 
   const AddrFormat addrlib_format = GetAddrlibFormat(image_prop);
 
   const uint32_t width = static_cast<uint32_t>(desc.width);
   const uint32_t height = static_cast<uint32_t>(desc.height);
   static const size_t kMinNumSlice = 1;
-  const uint32_t num_slice = static_cast<uint32_t>(
-      std::max(kMinNumSlice, std::max(desc.array_size, desc.depth)));
+  const uint32_t num_slice =
+      static_cast<uint32_t>(std::max(kMinNumSlice, std::max(desc.array_size, desc.depth)));
 
   uint32_t major_ver = MajorVerFromDevID(chip_id_);
 
@@ -846,78 +823,77 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
     in.height = height;
     in.numSlices = num_slice;
     in.pitchInElement = image_data_row_pitch / image_prop.element_size;
-    switch(desc.geometry) {
-    case HSA_EXT_IMAGE_GEOMETRY_1D:
-    case HSA_EXT_IMAGE_GEOMETRY_1DB:
-      in.resourceType = ADDR_RSRC_TEX_1D;
-      break;
-    case HSA_EXT_IMAGE_GEOMETRY_2D:
-    case HSA_EXT_IMAGE_GEOMETRY_2DDEPTH:
-    case HSA_EXT_IMAGE_GEOMETRY_1DA:
-      in.resourceType = ADDR_RSRC_TEX_2D;
-      break;
-    case HSA_EXT_IMAGE_GEOMETRY_3D:
-    case HSA_EXT_IMAGE_GEOMETRY_2DA:
-    case HSA_EXT_IMAGE_GEOMETRY_2DADEPTH:
-      {
-	      in.resourceType = ADDR_RSRC_TEX_3D;
-	      /*
-	       * 3D swizzle modes enforce alignment
-	       * of the number of slices  to the block depth.
-	       * If numSlices = 3 then the 3 slices are
-	       * interleaved for 3D locality among the 8 slices
-	       * that make up each block. This causes the memory
-	       * footprint to jump to a 3x size of the ideal size
-	       * 'enable3DSwizzleMode' flag tests for env variable
-	       * HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG to enable or disable
-	       * 3D swizzle:
-	       * true: Keep view3dAs2dArray = 0 for real 3D interleaving.
-	       * false: Use view3dAs2dArray = 1 to avoid the alignment
-	       *       expansion.
-	       * 2D swizzle modes can lower size overhead but may yield
-	       * suboptimal cache behavior for fully 3D volumetric
-	       * operations.
-	       */
-	      bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
-	      if (enable3DSwizzleMode)
-		      in.flags.view3dAs2dArray = 0;
-	      else
-		      in.flags.view3dAs2dArray = 1;
+    switch (desc.geometry) {
+      case HSA_EXT_IMAGE_GEOMETRY_1D:
+      case HSA_EXT_IMAGE_GEOMETRY_1DB:
+        in.resourceType = ADDR_RSRC_TEX_1D;
+        break;
+      case HSA_EXT_IMAGE_GEOMETRY_2D:
+      case HSA_EXT_IMAGE_GEOMETRY_2DDEPTH:
+      case HSA_EXT_IMAGE_GEOMETRY_1DA:
+        in.resourceType = ADDR_RSRC_TEX_2D;
+        break;
+      case HSA_EXT_IMAGE_GEOMETRY_3D:
+      case HSA_EXT_IMAGE_GEOMETRY_2DA:
+      case HSA_EXT_IMAGE_GEOMETRY_2DADEPTH: {
+        in.resourceType = ADDR_RSRC_TEX_3D;
+        /*
+         * 3D swizzle modes enforce alignment
+         * of the number of slices  to the block depth.
+         * If numSlices = 3 then the 3 slices are
+         * interleaved for 3D locality among the 8 slices
+         * that make up each block. This causes the memory
+         * footprint to jump to a 3x size of the ideal size
+         * 'enable3DSwizzleMode' flag tests for env variable
+         * HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG to enable or disable
+         * 3D swizzle:
+         * true: Keep view3dAs2dArray = 0 for real 3D interleaving.
+         * false: Use view3dAs2dArray = 1 to avoid the alignment
+         *       expansion.
+         * 2D swizzle modes can lower size overhead but may yield
+         * suboptimal cache behavior for fully 3D volumetric
+         * operations.
+         */
+        bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
+        if (enable3DSwizzleMode)
+          in.flags.view3dAs2dArray = 0;
+        else
+          in.flags.view3dAs2dArray = 1;
 
-	      break;
+        break;
       }
     }
     in.flags.texture = 1;
 
-    ADDR2_GET_PREFERRED_SURF_SETTING_INPUT  prefSettingsInput = { 0 };
-    ADDR2_GET_PREFERRED_SURF_SETTING_OUTPUT prefSettingsOutput = { 0 };
+    ADDR2_GET_PREFERRED_SURF_SETTING_INPUT prefSettingsInput = {0};
+    ADDR2_GET_PREFERRED_SURF_SETTING_OUTPUT prefSettingsOutput = {0};
 
-    prefSettingsInput.size            = sizeof(prefSettingsInput);
-    prefSettingsInput.flags           = in.flags;
-    prefSettingsInput.bpp             = in.bpp;
-    prefSettingsInput.format          = in.format;
-    prefSettingsInput.width           = in.width;
-    prefSettingsInput.height          = in.height;
-    prefSettingsInput.numFrags        = in.numFrags;
-    prefSettingsInput.numSamples      = in.numSamples;
-    prefSettingsInput.numMipLevels    = in.numMipLevels;
-    prefSettingsInput.numSlices       = in.numSlices;
+    prefSettingsInput.size = sizeof(prefSettingsInput);
+    prefSettingsInput.flags = in.flags;
+    prefSettingsInput.bpp = in.bpp;
+    prefSettingsInput.format = in.format;
+    prefSettingsInput.width = in.width;
+    prefSettingsInput.height = in.height;
+    prefSettingsInput.numFrags = in.numFrags;
+    prefSettingsInput.numSamples = in.numSamples;
+    prefSettingsInput.numMipLevels = in.numMipLevels;
+    prefSettingsInput.numSlices = in.numSlices;
     prefSettingsInput.resourceLoction = ADDR_RSRC_LOC_UNDEF;
-    prefSettingsInput.resourceType    = in.resourceType;
+    prefSettingsInput.resourceType = in.resourceType;
 
     // Disallow all swizzles but linear.
-    if (tileMode == Image::TileMode::LINEAR)
-    {
+    if (tileMode == Image::TileMode::LINEAR) {
       prefSettingsInput.forbiddenBlock.macroThin4KB = 1;
       prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
       prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
       prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
     }
 
-    prefSettingsInput.forbiddenBlock.micro = 1; // but don't ever allow the 256b swizzle modes
-    prefSettingsInput.forbiddenBlock.var = 1; // and don't allow variable-size block modes
+    prefSettingsInput.forbiddenBlock.micro = 1;  // but don't ever allow the 256b swizzle modes
+    prefSettingsInput.forbiddenBlock.var = 1;    // and don't allow variable-size block modes
 
-    if (ADDR_OK != Addr2GetPreferredSurfaceSetting(addr_lib_, &prefSettingsInput, &prefSettingsOutput)) {
+    if (ADDR_OK !=
+        Addr2GetPreferredSurfaceSetting(addr_lib_, &prefSettingsInput, &prefSettingsOutput)) {
       return false;
     }
 
@@ -940,8 +916,8 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
 
   ADDR_COMPUTE_SURFACE_INFO_INPUT in = {0};
   in.size = sizeof(ADDR_COMPUTE_SURFACE_INFO_INPUT);
-  in.tileMode = (tileMode == Image::TileMode::LINEAR)?
-    ADDR_TM_LINEAR_ALIGNED : ADDR_TM_2D_TILED_THIN1;
+  in.tileMode =
+      (tileMode == Image::TileMode::LINEAR) ? ADDR_TM_LINEAR_ALIGNED : ADDR_TM_2D_TILED_THIN1;
   in.format = addrlib_format;
   in.bpp = static_cast<unsigned int>(image_prop.element_size) * 8;
   in.numSamples = 1;
@@ -956,8 +932,8 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
 
   if (image_data_row_pitch != 0) {
     in.width = image_data_row_pitch / image_prop.element_size;
-//    in.pitchAlign  = image_data_row_pitch / image_prop.element_size;
-//    in.heightAlign = image_data_slice_pitch / image_data_row_pitch;
+    //    in.pitchAlign  = image_data_row_pitch / image_prop.element_size;
+    //    in.heightAlign = image_data_slice_pitch / image_data_row_pitch;
   }
 
   if (ADDR_OK != AddrComputeSurfaceInfo(addr_lib_, &in, &out)) {
@@ -969,8 +945,7 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
   return (out.tileIndex != -1) ? true : false;
 }
 
-size_t ImageManagerKv::CalWorkingSizeBytes(hsa_ext_image_geometry_t geometry,
-                                           hsa_dim3_t size_pixel,
+size_t ImageManagerKv::CalWorkingSizeBytes(hsa_ext_image_geometry_t geometry, hsa_dim3_t size_pixel,
                                            uint32_t element_size) const {
   switch (geometry) {
     case HSA_EXT_IMAGE_GEOMETRY_1D:
@@ -1017,8 +992,7 @@ BlitQueue& ImageManagerKv::BlitQueueInit() {
     }
   }
 
-  assert(blit_queue_.queue_ != NULL &&
-         blit_code_catalog_.size() == BlitKernel::KERNEL_OP_COUNT);
+  assert(blit_queue_.queue_ != NULL && blit_code_catalog_.size() == BlitKernel::KERNEL_OP_COUNT);
 
   return blit_queue_;
 }

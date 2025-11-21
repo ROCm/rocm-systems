@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef HSA_TEST_H
 #define HSA_TEST_H
 
@@ -104,14 +104,12 @@ class HsaTest {
     std::string hsail_file_;
   };
 
-  virtual void GetGpuPeer(hsa_agent_t master,
-                          std::vector<hsa_agent_t>& gpu_peers);
+  virtual void GetGpuPeer(hsa_agent_t master, std::vector<hsa_agent_t>& gpu_peers);
   virtual void* AllocateSystemMemory(bool fine_grain, size_t size);
   virtual void* AllocateLocalMemory(hsa_agent_t agent, size_t size);
   virtual void FreeMemory(void* ptr);
 
-  virtual void LaunchPacket(hsa_queue_t& queue, hsa_packet_type_t type,
-                            void* packet);
+  virtual void LaunchPacket(hsa_queue_t& queue, hsa_packet_type_t type, void* packet);
 
   virtual void PrintAgentInfo(AgentProps& prop);
   virtual void PrintPeers(hsa_agent_t agent);

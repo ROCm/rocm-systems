@@ -143,12 +143,14 @@ debugger_block()
 }
 }  // namespace
 
-extern "C" {
+extern "C"
+{
 void
 rocprofiler_debugger_block()
 {
     while(debugger_block().load() == true)
-    {};
+    {
+    };
     // debugger_block().exchange(true);
 }
 

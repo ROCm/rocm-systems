@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #ifndef TEST_PGEN_TEST_PGEN_SPM_H_
 #define TEST_PGEN_TEST_PGEN_SPM_H_
 
@@ -57,7 +56,8 @@ hsa_status_t TestPGenSpmCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
     auto* streams_ = (std::vector<std::ofstream>*)callback_data;
     (*streams_)[info_data->sample_id].write((const char*)info_data->trace_data.ptr,
                                             info_data->trace_data.size);
-  }  return status;
+  }
+  return status;
 }
 
 // Class implements SPM profiling

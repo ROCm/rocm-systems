@@ -508,7 +508,8 @@ struct scratch_memory_callback_record_t
 
         if constexpr(std::is_same<ArchiveT, cereal::BinaryOutputArchive>::value ||
                      std::is_same<ArchiveT, cereal::PortableBinaryOutputArchive>::value)
-        {}
+        {
+        }
         else
         {
             ar.setNextName("args");
@@ -537,11 +538,11 @@ struct profile_counting_record
     rocprofiler_dispatch_counting_service_record_t header = {};
     std::vector<rocprofiler_record_counter_t>      data   = {};
 
-    profile_counting_record()                                   = default;
-    ~profile_counting_record()                                  = default;
-    profile_counting_record(const profile_counting_record&)     = default;
-    profile_counting_record(profile_counting_record&&) noexcept = default;
-    profile_counting_record& operator=(const profile_counting_record&) = default;
+    profile_counting_record()                                              = default;
+    ~profile_counting_record()                                             = default;
+    profile_counting_record(const profile_counting_record&)                = default;
+    profile_counting_record(profile_counting_record&&) noexcept            = default;
+    profile_counting_record& operator=(const profile_counting_record&)     = default;
     profile_counting_record& operator=(profile_counting_record&&) noexcept = default;
 
     template <typename ArchiveT>

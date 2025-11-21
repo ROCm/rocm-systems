@@ -81,25 +81,23 @@ template <> struct less<hsa_signal_t> {
   typedef hsa_signal_t second_argument_type;
   typedef bool result_type;
 };
-}
+}  // namespace std
 
 namespace rocr {
 namespace timer {
 inline timer::fast_clock::duration GetFastTimeout(uint64_t timeout) {
   uint64_t hsa_freq = 0;
   HSA::hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &hsa_freq);
-  return timer::duration_from_seconds<timer::fast_clock::duration>(
-      double(timeout) / double(hsa_freq));
+  return timer::duration_from_seconds<timer::fast_clock::duration>(double(timeout) /
+                                                                   double(hsa_freq));
 }
 
 inline void CheckAbortTimeout(const timer::fast_clock::time_point& start_time,
-                            uint32_t signal_abort_timeout) {
+                              uint32_t signal_abort_timeout) {
   if (signal_abort_timeout) {
-    const timer::fast_clock::duration abort_timeout =
-        std::chrono::seconds(signal_abort_timeout);
+    const timer::fast_clock::duration abort_timeout = std::chrono::seconds(signal_abort_timeout);
     if (timer::fast_clock::now() - start_time > abort_timeout) {
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_FATAL,
-                             "Signal wait abort timeout.\n");
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_FATAL, "Signal wait abort timeout.\n");
     }
   }
 }
@@ -110,10 +108,10 @@ inline void DoMwaitx(int64_t* addr, uint32_t timeout, bool timer_enable = false)
   _mm_mwaitx(0, timeout, timer_enable ? MWAITX_ECX_TIMER_ENABLE : 0);
 #endif
 }
-} // namespace timer
+}  // namespace timer
 
 inline bool CheckSignalCondition(int64_t value, hsa_signal_condition_t condition,
-                               hsa_signal_value_t compare_value) {
+                                 hsa_signal_value_t compare_value) {
   switch (condition) {
     case HSA_SIGNAL_CONDITION_EQ:
       return value == compare_value;
@@ -142,11 +140,7 @@ struct SharedSignal {
   uint64_t sdma_end_ts;
   uint8_t reserved2[24];
 
-  SharedSignal() :
-    sdma_start_ts(0),
-    reserved{},
-    sdma_end_ts(0),
-    reserved2{} {
+  SharedSignal() : sdma_start_ts(0), reserved{}, sdma_end_ts(0), reserved2{} {
     memset(&amd_signal, 0, sizeof(amd_signal));
     amd_signal.kind = AMD_SIGNAL_KIND_INVALID;
     core_signal = nullptr;
@@ -206,15 +200,12 @@ static_assert(std::is_standard_layout<SharedSignal>::value,
               "SharedSignal must remain standard layout for IPC use.");
 static_assert(std::is_trivially_destructible<SharedSignal>::value,
               "SharedSignal must not be modified on delete for IPC use.");
-static_assert((offsetof(SharedSignal, sdma_start_ts) % 32) == 0,
-              "Bad SDMA time stamp alignment.");
-static_assert((offsetof(SharedSignal, sdma_end_ts) % 32) == 0,
-              "Bad SDMA time stamp alignment.");
-static_assert(sizeof(SharedSignal) == 128,
-              "Bad SharedSignal size.");
+static_assert((offsetof(SharedSignal, sdma_start_ts) % 32) == 0, "Bad SDMA time stamp alignment.");
+static_assert((offsetof(SharedSignal, sdma_end_ts) % 32) == 0, "Bad SDMA time stamp alignment.");
+static_assert(sizeof(SharedSignal) == 128, "Bad SharedSignal size.");
 
 
-#define SIGNAL_PREALLOC_BLOCKS 512 //16K Signals
+#define SIGNAL_PREALLOC_BLOCKS 512  // 16K Signals
 
 /// @brief Pool class for SharedSignal suitable for use with Shared.
 class SharedSignalPool_t : private BaseShared {
@@ -344,12 +335,10 @@ class Signal {
   virtual void StoreRelease(hsa_signal_value_t value) = 0;
 
   virtual hsa_signal_value_t WaitRelaxed(hsa_signal_condition_t condition,
-                                         hsa_signal_value_t compare_value,
-                                         uint64_t timeout,
+                                         hsa_signal_value_t compare_value, uint64_t timeout,
                                          hsa_wait_state_t wait_hint) = 0;
   virtual hsa_signal_value_t WaitAcquire(hsa_signal_condition_t condition,
-                                         hsa_signal_value_t compare_value,
-                                         uint64_t timeout,
+                                         hsa_signal_value_t compare_value, uint64_t timeout,
                                          hsa_wait_state_t wait_hint) = 0;
 
   virtual void AndRelaxed(hsa_signal_value_t value) = 0;
@@ -382,14 +371,10 @@ class Signal {
   virtual hsa_signal_value_t ExchRelease(hsa_signal_value_t value) = 0;
   virtual hsa_signal_value_t ExchAcqRel(hsa_signal_value_t value) = 0;
 
-  virtual hsa_signal_value_t CasRelaxed(hsa_signal_value_t expected,
-                                        hsa_signal_value_t value) = 0;
-  virtual hsa_signal_value_t CasAcquire(hsa_signal_value_t expected,
-                                        hsa_signal_value_t value) = 0;
-  virtual hsa_signal_value_t CasRelease(hsa_signal_value_t expected,
-                                        hsa_signal_value_t value) = 0;
-  virtual hsa_signal_value_t CasAcqRel(hsa_signal_value_t expected,
-                                       hsa_signal_value_t value) = 0;
+  virtual hsa_signal_value_t CasRelaxed(hsa_signal_value_t expected, hsa_signal_value_t value) = 0;
+  virtual hsa_signal_value_t CasAcquire(hsa_signal_value_t expected, hsa_signal_value_t value) = 0;
+  virtual hsa_signal_value_t CasRelease(hsa_signal_value_t expected, hsa_signal_value_t value) = 0;
+  virtual hsa_signal_value_t CasAcqRel(hsa_signal_value_t expected, hsa_signal_value_t value) = 0;
 
   //-------------------------
   // implementation specific
@@ -429,9 +414,10 @@ class Signal {
                                bool wait_on_all);
 
   /// @brief Dedicated funtion to wait on signals that are not of type HSA_EVENTTYPE_SIGNAL
-  /// these events can only be received by calling the underlying driver (i.e via the hsaKmtWaitOnMultipleEvents_Ext
-  /// function call). We still need to have 1 signal of type HSA_EVENT_TYPE_SIGNAL attached to the list of signals
-  /// to be able to force hsaKmtWaitOnMultipleEvents_Ext to return.
+  /// these events can only be received by calling the underlying driver (i.e via the
+  /// hsaKmtWaitOnMultipleEvents_Ext function call). We still need to have 1 signal of type
+  /// HSA_EVENT_TYPE_SIGNAL attached to the list of signals to be able to force
+  /// hsaKmtWaitOnMultipleEvents_Ext to return.
   /// @param signal_count Number of hsa_signals
   /// @param hsa_signals Pointer to array of signals. All signals should have a valid EopEvent()
   /// @param conds list of conditions
@@ -439,8 +425,9 @@ class Signal {
   /// @param satisfying_value value to be satisfied
   /// @return index of signal that satisfies condition
   static uint32_t WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hsa_signals,
-                         const hsa_signal_condition_t* conds, const hsa_signal_value_t* values,
-                         hsa_signal_value_t* satisfying_value);
+                                    const hsa_signal_condition_t* conds,
+                                    const hsa_signal_value_t* values,
+                                    hsa_signal_value_t* satisfying_value);
 
   __forceinline bool IsType(rtti_t id) { return _IsA(id); }
 
@@ -685,12 +672,10 @@ struct hsa_signal_handle {
   operator hsa_signal_t() { return signal; }
   Signal* operator->() { return core::Signal::Convert(signal); }
 };
-static_assert(
-    sizeof(hsa_signal_handle) == sizeof(hsa_signal_t),
-    "hsa_signal_handle and hsa_signal_t must have identical binary layout.");
-static_assert(
-    sizeof(hsa_signal_handle[2]) == sizeof(hsa_signal_t[2]),
-    "hsa_signal_handle and hsa_signal_t must have identical binary layout.");
+static_assert(sizeof(hsa_signal_handle) == sizeof(hsa_signal_t),
+              "hsa_signal_handle and hsa_signal_t must have identical binary layout.");
+static_assert(sizeof(hsa_signal_handle[2]) == sizeof(hsa_signal_t[2]),
+              "hsa_signal_handle and hsa_signal_t must have identical binary layout.");
 
 class SignalGroup : public Checked<0xBD35DDDD578F091> {
  public:

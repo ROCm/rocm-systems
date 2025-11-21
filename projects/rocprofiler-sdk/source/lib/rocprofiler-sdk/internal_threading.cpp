@@ -49,7 +49,8 @@ namespace
 using task_group_vec_t     = std::vector<task_group_t*>;
 using thread_pool_config_t = PTL::ThreadPool::Config;
 
-auto affinity_functor(intmax_t)
+auto
+affinity_functor(intmax_t)
 {
     static auto assigned = std::atomic<intmax_t>{0};
     intmax_t    _assign  = assigned++;
@@ -308,7 +309,8 @@ get_task_group(rocprofiler_callback_thread_t cb_tid)
 }  // namespace internal_threading
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t precreate,
                                       rocprofiler_internal_thread_library_cb_t postcreate,

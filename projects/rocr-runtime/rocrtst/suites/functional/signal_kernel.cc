@@ -59,33 +59,33 @@
 
 static unsigned int NumOfKernels = 1;
 
-#define ASSERT_MSG(C, err) { \
-  if (C == 1) { \
-  std::cout << err << std::endl; \
-  } \
-}
+#define ASSERT_MSG(C, err)                                                                         \
+  {                                                                                                \
+    if (C == 1) {                                                                                  \
+      std::cout << err << std::endl;                                                               \
+    }                                                                                              \
+  }
 
 SignalKernelTest::SignalKernelTest(SignalKernelType type_) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
-            // This is a default value which can be overridden
-            // on the command line.
+                          // This is a default value which can be overridden
+                          // on the command line.
   if (type_ == SET) {
-  set_title("RocR Signal Kernel Set Test");
-  set_description("This test verifies that the signal is set from kernel");
+    set_title("RocR Signal Kernel Set Test");
+    set_description("This test verifies that the signal is set from kernel");
   } else if (type_ == WAIT) {
-  set_title("RocR Signal Wait Test");
-  set_description("This test verifies that the signal is re-set from system side");
+    set_title("RocR Signal Wait Test");
+    set_description("This test verifies that the signal is re-set from system side");
   } else if (type_ == MULTISET) {
-  set_title("RocR Signal Kernel Multi Set Test");
-  set_description("This test verifies that the signal is set on multiple work-items");
-  } else if (type_ ==  MULTIWAIT) {
-  set_title("RocR Signal Kernel Multi Set Test");
-  set_description("This tset verifies that re-set signal from system side, multiple work-items");
+    set_title("RocR Signal Kernel Multi Set Test");
+    set_description("This test verifies that the signal is set on multiple work-items");
+  } else if (type_ == MULTIWAIT) {
+    set_title("RocR Signal Kernel Multi Set Test");
+    set_description("This tset verifies that re-set signal from system side, multiple work-items");
   }
 }
 
-SignalKernelTest::~SignalKernelTest(void) {
-}
+SignalKernelTest::~SignalKernelTest(void) {}
 
 void SignalKernelTest::SetUp(void) {
   hsa_status_t err;
@@ -102,22 +102,18 @@ void SignalKernelTest::SetUp(void) {
 
 
 void SignalKernelTest::Run(void) {
-// Compare required profile for this test case with what we're actually
-// running on
+  // Compare required profile for this test case with what we're actually
+  // running on
   if (!rocrtst::CheckProfile(this)) {
-  return;
+    return;
   }
 
   TestBase::Run();
 }
 
-void SignalKernelTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void SignalKernelTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
-void SignalKernelTest::DisplayResults(void) const {
-  return;
-}
+void SignalKernelTest::DisplayResults(void) const { return; }
 
 void SignalKernelTest::Close() {
   // This will close handles opened within rocrtst utility calls and call
@@ -126,10 +122,9 @@ void SignalKernelTest::Close() {
 }
 
 
-
 // The kernarg data structure
-typedef struct __attribute__ ((aligned(16))) signal_args_s {
-  void *signal_values;
+typedef struct __attribute__((aligned(16))) signal_args_s {
+  void* signal_values;
 } signal_args_t;
 signal_args_t signal_args;
 
@@ -160,7 +155,8 @@ void SignalKernelTest::KernelSetFunction(SignalKernelType type_) {
     // Find a memory pool that supports fine grained memory
     hsa_amd_memory_pool_t global_pool;
     global_pool.handle = (uint64_t)-1;
-    status = hsa_amd_agent_iterate_memory_pools(agent_list[ii], rocrtst::GetGlobalMemoryPool, &global_pool);
+    status = hsa_amd_agent_iterate_memory_pools(agent_list[ii], rocrtst::GetGlobalMemoryPool,
+                                                &global_pool);
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
     // Obtain the agent's machine model
@@ -171,11 +167,13 @@ void SignalKernelTest::KernelSetFunction(SignalKernelType type_) {
     // Find a memory pool that supports kernel arguments
     hsa_amd_memory_pool_t kernarg_pool;
     kernarg_pool.handle = (uint64_t)-1;
-    status = hsa_amd_agent_iterate_memory_pools(cpu_agent[0], rocrtst::GetKernArgMemoryPool, &kernarg_pool);
+    status = hsa_amd_agent_iterate_memory_pools(cpu_agent[0], rocrtst::GetKernArgMemoryPool,
+                                                &kernarg_pool);
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
     // Create a queue
     hsa_queue_t* queue;
-    status = hsa_queue_create(agent_list[ii], 1024, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX, UINT32_MAX, &queue);
+    status = hsa_queue_create(agent_list[ii], 1024, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX,
+                              UINT32_MAX, &queue);
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
     set_kernel_file_name("signal_operations_kernels.hsaco");
@@ -197,9 +195,8 @@ void SignalKernelTest::KernelSetFunction(SignalKernelType type_) {
 
     // Allocate the kernel argument buffer from the correct pool
     signal_args_t* kernarg_buffer = NULL;
-    status = hsa_amd_memory_pool_allocate(kernarg_pool,
-                 sizeof(signal_args_t), 0,
-                   reinterpret_cast<void**>(&kernarg_buffer));
+    status = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(signal_args_t), 0,
+                                          reinterpret_cast<void**>(&kernarg_buffer));
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
     status = hsa_amd_agents_allow_access(1, &agent_list[ii], NULL, kernarg_buffer);
@@ -210,19 +207,16 @@ void SignalKernelTest::KernelSetFunction(SignalKernelType type_) {
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
     hsa_amd_memory_pool_access_t access;
-    status = hsa_amd_agent_memory_pool_get_info(cpu_agent[0],
-                                              global_pool,
-                                              HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
-                                              &access);
+    status = hsa_amd_agent_memory_pool_get_info(cpu_agent[0], global_pool,
+                                                HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access);
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
     hsa_signal_t* kernel_signal;
 
     if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
-     // Create the kernel signal
-      status = hsa_amd_memory_pool_allocate(global_pool,
-                                          NumOfKernels*sizeof(hsa_signal_t), 0,
-                                          reinterpret_cast<void**>(&kernel_signal));
+      // Create the kernel signal
+      status = hsa_amd_memory_pool_allocate(global_pool, NumOfKernels * sizeof(hsa_signal_t), 0,
+                                            reinterpret_cast<void**>(&kernel_signal));
       ASSERT_EQ(status, HSA_STATUS_SUCCESS);
       status = hsa_amd_agents_allow_access(1, &cpu_agent[0], NULL, kernel_signal);
       ASSERT_EQ(status, HSA_STATUS_SUCCESS);
@@ -269,9 +263,9 @@ void SignalKernelTest::KernelSetFunction(SignalKernelType type_) {
 
     void* q_base = queue->base_address;
     // Set the Aql packet header
-    rocrtst::AtomicSetPacketHeader(dispatch_packet.header, dispatch_packet.setup,
-                        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
-                            (q_base))[index & queue_mask]);
+    rocrtst::AtomicSetPacketHeader(
+        dispatch_packet.header, dispatch_packet.setup,
+        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[index & queue_mask]);
 
     // ringdoor bell
     hsa_signal_store_relaxed(queue->doorbell_signal, index);
@@ -284,7 +278,8 @@ void SignalKernelTest::KernelSetFunction(SignalKernelType type_) {
     }
 
     // Wait on the completion signal
-    hsa_signal_wait_relaxed(completion_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+    hsa_signal_wait_relaxed(completion_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                            HSA_WAIT_STATE_BLOCKED);
 
     // Check kernel signal
     for (unsigned int k = 0; k < NumOfKernels; ++k) {
@@ -308,19 +303,13 @@ void SignalKernelTest::KernelSetFunction(SignalKernelType type_) {
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
   }
 }
-void SignalKernelTest::TestSignalKernelSet(void) {
-  KernelSetFunction(SET);
-}
+void SignalKernelTest::TestSignalKernelSet(void) { KernelSetFunction(SET); }
 
 
-void SignalKernelTest::TestSignalKernelMultiSet(void) {
-  KernelSetFunction(MULTISET);
-}
+void SignalKernelTest::TestSignalKernelMultiSet(void) { KernelSetFunction(MULTISET); }
 
 
-void SignalKernelTest::TestSignalKernelWait(void) {
-  KernelSetFunction(WAIT);
-}
+void SignalKernelTest::TestSignalKernelWait(void) { KernelSetFunction(WAIT); }
 
 
 void SignalKernelTest::TestSignalKernelMultiWait(void) {
@@ -351,7 +340,8 @@ void SignalKernelTest::TestSignalKernelMultiWait(void) {
     // Find a memory pool that supports fine grained memory
     hsa_amd_memory_pool_t global_pool;
     global_pool.handle = (uint64_t)-1;
-    status = hsa_amd_agent_iterate_memory_pools(agent_list[ii], rocrtst::GetGlobalMemoryPool, &global_pool);
+    status = hsa_amd_agent_iterate_memory_pools(agent_list[ii], rocrtst::GetGlobalMemoryPool,
+                                                &global_pool);
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
     // Obtain the agent's machine model
@@ -363,12 +353,14 @@ void SignalKernelTest::TestSignalKernelMultiWait(void) {
     // Find a memory pool that supports kernel arguments
     hsa_amd_memory_pool_t kernarg_pool;
     kernarg_pool.handle = (uint64_t)-1;
-    status = hsa_amd_agent_iterate_memory_pools(cpu_agent[0], rocrtst::GetKernArgMemoryPool, &kernarg_pool);
+    status = hsa_amd_agent_iterate_memory_pools(cpu_agent[0], rocrtst::GetKernArgMemoryPool,
+                                                &kernarg_pool);
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
     // Create a queue
     hsa_queue_t* queue;
-    status = hsa_queue_create(agent_list[ii], 1024, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX, UINT32_MAX, &queue);
+    status = hsa_queue_create(agent_list[ii], 1024, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX,
+                              UINT32_MAX, &queue);
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
 
@@ -379,9 +371,8 @@ void SignalKernelTest::TestSignalKernelMultiWait(void) {
 
     // Allocate the kernel argument buffer from the correct pool
     signal_args_t* kernarg_buffer = NULL;
-    status = hsa_amd_memory_pool_allocate(kernarg_pool,
-           sizeof(signal_args_t), 0,
-           reinterpret_cast<void**>(&kernarg_buffer));
+    status = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(signal_args_t), 0,
+                                          reinterpret_cast<void**>(&kernarg_buffer));
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
     status = hsa_amd_agents_allow_access(1, &agent_list[ii], NULL, kernarg_buffer);
@@ -392,26 +383,23 @@ void SignalKernelTest::TestSignalKernelMultiWait(void) {
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
     hsa_amd_memory_pool_access_t access;
-    status = hsa_amd_agent_memory_pool_get_info(cpu_agent[0],
-                                              global_pool,
-                                              HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
-                                              &access);
+    status = hsa_amd_agent_memory_pool_get_info(cpu_agent[0], global_pool,
+                                                HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access);
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
     hsa_signal_t* kernel_signal;
 
     if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
       // Create the kernel signal
-      status = hsa_amd_memory_pool_allocate(global_pool,
-                                          NumOfKernels*sizeof(hsa_signal_t), 0,
-                                          reinterpret_cast<void**>(&kernel_signal));
+      status = hsa_amd_memory_pool_allocate(global_pool, NumOfKernels * sizeof(hsa_signal_t), 0,
+                                            reinterpret_cast<void**>(&kernel_signal));
       ASSERT_EQ(status, HSA_STATUS_SUCCESS);
       status = hsa_amd_agents_allow_access(1, &cpu_agent[0], NULL, kernel_signal);
       ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
       for (unsigned int k = 0; k < NumOfKernels; ++k) {
-       status = hsa_signal_create(1, 0, NULL, kernel_signal + k);
-       ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+        status = hsa_signal_create(1, 0, NULL, kernel_signal + k);
+        ASSERT_EQ(status, HSA_STATUS_SUCCESS);
       }
 
       // Set the signal_args with kernel_signal, will be accessed from Kernel side
@@ -453,9 +441,9 @@ void SignalKernelTest::TestSignalKernelMultiWait(void) {
 
     void* q_base = queue->base_address;
     // Set the Aql packet header
-    rocrtst::AtomicSetPacketHeader(dispatch_packet.header, dispatch_packet.setup,
-                        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
-                            (q_base))[index & queue_mask]);
+    rocrtst::AtomicSetPacketHeader(
+        dispatch_packet.header, dispatch_packet.setup,
+        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[index & queue_mask]);
 
 
     // ringdoor bell
@@ -466,7 +454,8 @@ void SignalKernelTest::TestSignalKernelMultiWait(void) {
       kernel_signal[k].handle = 0;
     }
     // Wait on the completion signal
-    hsa_signal_wait_relaxed(completion_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+    hsa_signal_wait_relaxed(completion_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                            HSA_WAIT_STATE_BLOCKED);
 
     // Check kernel signal
     ASSERT_EQ(0, (int)kernel_signal->handle);
@@ -483,4 +472,3 @@ void SignalKernelTest::TestSignalKernelMultiWait(void) {
     ASSERT_EQ(status, HSA_STATUS_SUCCESS);
   }
 }
-

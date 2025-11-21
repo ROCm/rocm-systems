@@ -116,9 +116,7 @@ void TestRdciFieldgroup::Run(void) {
 
   ASSERT_GT(count, 0);
 
-  std::cout << "\tGroupID\t"
-            << "GroupName\t"
-            << "FieldIds\n";
+  std::cout << "\tGroupID\t" << "GroupName\t" << "FieldIds\n";
   for (uint32_t i = 0; i < count; i++) {
     result = rdc_group_field_get_info(rdc_handle, group_id_list[i], 0);
     ASSERT_EQ(result, RDC_ST_BAD_PARAMETER);

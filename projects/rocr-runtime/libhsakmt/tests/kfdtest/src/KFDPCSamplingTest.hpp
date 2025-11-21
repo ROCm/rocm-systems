@@ -28,11 +28,12 @@
 
 class KFDPCSamplingTest : public KFDMultiProcessTest {
  public:
-    KFDPCSamplingTest(void) {}
-    ~KFDPCSamplingTest(void) {}
+  KFDPCSamplingTest(void) {}
+  ~KFDPCSamplingTest(void) {}
+
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 
  protected:
 };

@@ -54,7 +54,7 @@
 
 class AgentPropTest : public TestBase {
  public:
-    AgentPropTest();
+  AgentPropTest();
 
   // @Brief: Destructor for test case of AgentPropTest
   virtual ~AgentPropTest();

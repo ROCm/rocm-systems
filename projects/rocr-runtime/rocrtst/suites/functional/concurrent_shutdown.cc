@@ -68,19 +68,20 @@ void* TestHSAShutdownFunction(void* args) {
   pthread_exit(NULL);
 }
 
-static const int NumOfThreads = 1000;  // Number of thread to be created
+static const int NumOfThreads = 1000;       // Number of thread to be created
 static const int NumTimesInitalize = 1000;  // Number of time the hsa runtime will be initialized
 
-#define RET_IF_HSA_ERR(err) { \
-  if ((err) != HSA_STATUS_SUCCESS) { \
-    const char* msg = 0; \
-    hsa_status_string(err, &msg); \
-    std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << \
-                          __FILE__ << ". Call returned " << err << std::endl; \
-    std::cout << msg << std::endl; \
-    return (err); \
-  } \
-}
+#define RET_IF_HSA_ERR(err)                                                                        \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
+                << ". Call returned " << err << std::endl;                                         \
+      std::cout << msg << std::endl;                                                               \
+      return (err);                                                                                \
+    }                                                                                              \
+  }
 
 ConcurrentShutdownTest::ConcurrentShutdownTest(void) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
@@ -92,14 +93,13 @@ ConcurrentShutdownTest::ConcurrentShutdownTest(void) : TestBase() {
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
-ConcurrentShutdownTest::~ConcurrentShutdownTest(void) {
-}
+ConcurrentShutdownTest::~ConcurrentShutdownTest(void) {}
 
 void ConcurrentShutdownTest::SetUp(void) {
   hsa_status_t status;
   // Initialize the hsa runtime sequentially, NumTimesInitalize
   for (int Counter = 0; Counter < NumTimesInitalize; ++Counter) {
-  // Initialize hsa runtime NumTimesInitalize times.
+    // Initialize hsa runtime NumTimesInitalize times.
     status = hsa_init();
     if (status != HSA_STATUS_SUCCESS) {
       std::cout << "Failed" << std::endl;
@@ -115,9 +115,7 @@ void ConcurrentShutdownTest::Run(void) {
   TestBase::Run();
 }
 
-void ConcurrentShutdownTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void ConcurrentShutdownTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void ConcurrentShutdownTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -132,7 +130,8 @@ void ConcurrentShutdownTest::DisplayResults(void) const {
 void ConcurrentShutdownTest::Close() {
   // This will close handles opened within rocrtst utility calls and call
   // hsa_shut_down(), so it should be done after other hsa cleanup
-  // all the reference count decremented in main function, ConcurrentShutdownTest::SequentiallyInitializeRuntime()
+  // all the reference count decremented in main function,
+  // ConcurrentShutdownTest::SequentiallyInitializeRuntime()
 }
 
 void ConcurrentShutdownTest::TestConcurrentShutdown(void) {
@@ -143,10 +142,10 @@ void ConcurrentShutdownTest::TestConcurrentShutdown(void) {
   // Setting the attribute to PTHREAD_CREATE_JOINABLE
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-  for (int Id = 0; Id < NumOfThreads; ++Id) {  // This is to create threads concurrently
-                                               // HSA runtime will be shutdown concurrently from each thread
-    int ThreadStatus = pthread_create(ThreadId + Id,
-                                      &attr, TestHSAShutdownFunction, &Id);
+  for (int Id = 0; Id < NumOfThreads;
+       ++Id) {  // This is to create threads concurrently
+                // HSA runtime will be shutdown concurrently from each thread
+    int ThreadStatus = pthread_create(ThreadId + Id, &attr, TestHSAShutdownFunction, &Id);
     // Check if the thread is created successfully
     if (ThreadStatus < 0) {
       std::cout << Id << "Thread creation failed " << std::endl;

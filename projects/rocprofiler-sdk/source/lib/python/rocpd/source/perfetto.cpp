@@ -706,7 +706,7 @@ write_perfetto(
         // memory copy counter track
         auto mem_cpy_endpoints = std::map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>{};
         auto mem_cpy_extremes  = std::pair<uint64_t, uint64_t>{std::numeric_limits<uint64_t>::max(),
-                                                              std::numeric_limits<uint64_t>::min()};
+                                                               std::numeric_limits<uint64_t>::min()};
         auto constexpr timestamp_buffer = 1000;
         for(auto ditr : memory_copy_gen)
         {
@@ -1130,8 +1130,7 @@ write_perfetto(
                     auto       agent_index_info = agent_data.at(record.agent_abs_index).second;
                     auto       track_name_ss    = std::stringstream{};
                     track_name_ss << agent_index_info.label << " [" << agent_index_info.index
-                                  << "] "
-                                  << "PMC " << record.counter_name;
+                                  << "] " << "PMC " << record.counter_name;
 
                     auto track_name = track_name_ss.str();
 

@@ -44,10 +44,8 @@
 
 LIBELF_VCSID("$Id: libelf_allocate.c 1341 2011-01-01 04:28:29Z jkoshy $");
 
-Elf *
-_libelf_allocate_elf(Elf_Mem *mem)
-{
-	Elf *e;
+Elf *_libelf_allocate_elf(Elf_Mem *mem) {
+  Elf *e;
 
   if (mem != NULL) {
     if ((e = mem->alloc(sizeof(*e))) == NULL) {
@@ -55,174 +53,163 @@ _libelf_allocate_elf(Elf_Mem *mem)
       return NULL;
     }
     e->e_mem.dealloc = mem->dealloc;
-    e->e_mem.alloc   = mem->alloc;
+    e->e_mem.alloc = mem->alloc;
   } else {
     if ((e = malloc(sizeof(*e))) == NULL) {
       LIBELF_SET_ERROR(RESOURCE, errno);
       return NULL;
     }
     e->e_mem.dealloc = &free;
-    e->e_mem.alloc   = &malloc;
+    e->e_mem.alloc = &malloc;
   }
 
-	e->e_activations = 1;
-	e->e_hdr.e_rawhdr = NULL;
-	e->e_byteorder   = ELFDATANONE;
-	e->e_class       = ELFCLASSNONE;
-	e->e_cmd         = ELF_C_NULL;
-	e->e_fd          = -1;
-	e->e_flags	     = 0;
-	e->e_kind        = ELF_K_NONE;
-	e->e_parent      = NULL;
-	e->e_rawfile     = NULL;
-	e->e_rawsize     = 0;
-	e->e_version     = LIBELF_PRIVATE(version);
+  e->e_activations = 1;
+  e->e_hdr.e_rawhdr = NULL;
+  e->e_byteorder = ELFDATANONE;
+  e->e_class = ELFCLASSNONE;
+  e->e_cmd = ELF_C_NULL;
+  e->e_fd = -1;
+  e->e_flags = 0;
+  e->e_kind = ELF_K_NONE;
+  e->e_parent = NULL;
+  e->e_rawfile = NULL;
+  e->e_rawsize = 0;
+  e->e_version = LIBELF_PRIVATE(version);
 
-	(void) memset(&e->e_u, 0, sizeof(e->e_u));
+  (void)memset(&e->e_u, 0, sizeof(e->e_u));
 
-	return (e);
+  return (e);
 }
 
-void
-_libelf_init_elf(Elf *e, Elf_Kind kind)
-{
-	assert(e != NULL);
-	assert(e->e_kind == ELF_K_NONE);
+void _libelf_init_elf(Elf *e, Elf_Kind kind) {
+  assert(e != NULL);
+  assert(e->e_kind == ELF_K_NONE);
 
-	e->e_kind = kind;
+  e->e_kind = kind;
 
-	switch (kind) {
-	case ELF_K_ELF:
-		STAILQ_INIT(&e->e_u.e_elf.e_scn);
-		break;
-	default:
-		break;
-	}
+  switch (kind) {
+  case ELF_K_ELF:
+    STAILQ_INIT(&e->e_u.e_elf.e_scn);
+    break;
+  default:
+    break;
+  }
 }
 
-#define	FREE(E, P)		do {				\
-		if (P)					\
-			E->e_mem.dealloc(P);			\
-	} while (0)
+#define FREE(E, P)                                                             \
+  do {                                                                         \
+    if (P)                                                                     \
+      E->e_mem.dealloc(P);                                                     \
+  } while (0)
 
-Elf *
-_libelf_release_elf(Elf *e)
-{
-	Elf_Arhdr *arh;
+Elf *_libelf_release_elf(Elf *e) {
+  Elf_Arhdr *arh;
 
-	switch (e->e_kind) {
-	case ELF_K_AR:
-		FREE(e, e->e_u.e_ar.e_symtab);
-		break;
+  switch (e->e_kind) {
+  case ELF_K_AR:
+    FREE(e, e->e_u.e_ar.e_symtab);
+    break;
 
-	case ELF_K_ELF:
-		switch (e->e_class) {
-		case ELFCLASS32:
-			FREE(e, e->e_u.e_elf.e_ehdr.e_ehdr32);
-			FREE(e, e->e_u.e_elf.e_phdr.e_phdr32);
-			break;
-		case ELFCLASS64:
-			FREE(e, e->e_u.e_elf.e_ehdr.e_ehdr64);
-			FREE(e, e->e_u.e_elf.e_phdr.e_phdr64);
-			break;
-		}
+  case ELF_K_ELF:
+    switch (e->e_class) {
+    case ELFCLASS32:
+      FREE(e, e->e_u.e_elf.e_ehdr.e_ehdr32);
+      FREE(e, e->e_u.e_elf.e_phdr.e_phdr32);
+      break;
+    case ELFCLASS64:
+      FREE(e, e->e_u.e_elf.e_ehdr.e_ehdr64);
+      FREE(e, e->e_u.e_elf.e_phdr.e_phdr64);
+      break;
+    }
 
-		assert(STAILQ_EMPTY(&e->e_u.e_elf.e_scn));
+    assert(STAILQ_EMPTY(&e->e_u.e_elf.e_scn));
 
-		if (e->e_flags & LIBELF_F_AR_HEADER) {
-			arh = e->e_hdr.e_arhdr;
-			FREE(e, arh->ar_name);
-			FREE(e, arh->ar_rawname);
-			e->e_mem.dealloc(arh);
-		}
+    if (e->e_flags & LIBELF_F_AR_HEADER) {
+      arh = e->e_hdr.e_arhdr;
+      FREE(e, arh->ar_name);
+      FREE(e, arh->ar_rawname);
+      e->e_mem.dealloc(arh);
+    }
 
-		break;
+    break;
 
-	default:
-		break;
-	}
+  default:
+    break;
+  }
 
-	e->e_mem.dealloc(e);
+  e->e_mem.dealloc(e);
 
-	return (NULL);
+  return (NULL);
 }
 
-Elf_Data *
-_libelf_allocate_data(Elf_Scn *s)
-{
-	Elf_Data *d;
+Elf_Data *_libelf_allocate_data(Elf_Scn *s) {
+  Elf_Data *d;
 
-	if ((d = s->s_elf->e_mem.alloc(sizeof(Elf_Data))) == NULL) {
-		LIBELF_SET_ERROR(RESOURCE, 0);
-		return (NULL);
-	}
-    memset(d, 0, sizeof(*d));
+  if ((d = s->s_elf->e_mem.alloc(sizeof(Elf_Data))) == NULL) {
+    LIBELF_SET_ERROR(RESOURCE, 0);
+    return (NULL);
+  }
+  memset(d, 0, sizeof(*d));
 
-	d->d_scn = s;
+  d->d_scn = s;
 
-	return (d);
+  return (d);
 }
 
-Elf_Data *
-_libelf_release_data(Elf_Data *d)
-{
+Elf_Data *_libelf_release_data(Elf_Data *d) {
 
-	if (d->d_flags & LIBELF_F_DATA_MALLOCED)
-		d->d_scn->s_elf->e_mem.dealloc(d->d_buf);
+  if (d->d_flags & LIBELF_F_DATA_MALLOCED)
+    d->d_scn->s_elf->e_mem.dealloc(d->d_buf);
 
-	d->d_scn->s_elf->e_mem.dealloc(d);
+  d->d_scn->s_elf->e_mem.dealloc(d);
 
-	return (NULL);
+  return (NULL);
 }
 
-Elf_Scn *
-_libelf_allocate_scn(Elf *e, size_t ndx)
-{
-	Elf_Scn *s;
+Elf_Scn *_libelf_allocate_scn(Elf *e, size_t ndx) {
+  Elf_Scn *s;
 
-	if ((s = e->e_mem.alloc(sizeof(Elf_Scn))) == NULL) {
-		LIBELF_SET_ERROR(RESOURCE, errno);
-		return (NULL);
-	}
-    memset(s, 0, sizeof(*s));
+  if ((s = e->e_mem.alloc(sizeof(Elf_Scn))) == NULL) {
+    LIBELF_SET_ERROR(RESOURCE, errno);
+    return (NULL);
+  }
+  memset(s, 0, sizeof(*s));
 
-	s->s_elf = e;
-	s->s_ndx = ndx;
+  s->s_elf = e;
+  s->s_ndx = ndx;
 
-	STAILQ_INIT(&s->s_data);
-	STAILQ_INIT(&s->s_rawdata);
+  STAILQ_INIT(&s->s_data);
+  STAILQ_INIT(&s->s_rawdata);
 
-	STAILQ_INSERT_TAIL(&e->e_u.e_elf.e_scn, s, s_next);
+  STAILQ_INSERT_TAIL(&e->e_u.e_elf.e_scn, s, s_next);
 
-	return (s);
+  return (s);
 }
 
-Elf_Scn *
-_libelf_release_scn(Elf_Scn *s)
-{
-	Elf *e;
-	Elf_Data *d, *td;
+Elf_Scn *_libelf_release_scn(Elf_Scn *s) {
+  Elf *e;
+  Elf_Data *d, *td;
 
-	assert(s != NULL);
+  assert(s != NULL);
 
-	STAILQ_FOREACH_SAFE(d, &s->s_data, d_next, td) {
-		STAILQ_REMOVE(&s->s_data, d, _Elf_Data, d_next);
-		d = _libelf_release_data(d);
-	}
+  STAILQ_FOREACH_SAFE(d, &s->s_data, d_next, td) {
+    STAILQ_REMOVE(&s->s_data, d, _Elf_Data, d_next);
+    d = _libelf_release_data(d);
+  }
 
-	STAILQ_FOREACH_SAFE(d, &s->s_rawdata, d_next, td) {
-		assert((d->d_flags & LIBELF_F_DATA_MALLOCED) == 0);
-		STAILQ_REMOVE(&s->s_rawdata, d, _Elf_Data, d_next);
-		d = _libelf_release_data(d);
-	}
+  STAILQ_FOREACH_SAFE(d, &s->s_rawdata, d_next, td) {
+    assert((d->d_flags & LIBELF_F_DATA_MALLOCED) == 0);
+    STAILQ_REMOVE(&s->s_rawdata, d, _Elf_Data, d_next);
+    d = _libelf_release_data(d);
+  }
 
-	e = s->s_elf;
+  e = s->s_elf;
 
-	assert(e != NULL);
+  assert(e != NULL);
 
-	STAILQ_REMOVE(&e->e_u.e_elf.e_scn, s, _Elf_Scn, s_next);
+  STAILQ_REMOVE(&e->e_u.e_elf.e_scn, s, _Elf_Scn, s_next);
 
-	e->e_mem.dealloc(s);
+  e->e_mem.dealloc(s);
 
-	return (NULL);
+  return (NULL);
 }

@@ -313,7 +313,8 @@ class file_plugin_t {
     }
     if (operation_name_c) ss << ",\"" << operation_name_c << "\"";
     if (tracer_record.name && tracer_record.domain != ACTIVITY_DOMAIN_ROCTX) {
-      ss << ",\"" << rocprofiler::truncate_name(rocprofiler::cxx_demangle(tracer_record.name)) << "\"";
+      ss << ",\"" << rocprofiler::truncate_name(rocprofiler::cxx_demangle(tracer_record.name))
+         << "\"";
     } else if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS) {
       ss << ",";
     }
@@ -330,8 +331,7 @@ class file_plugin_t {
 
   void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
                            rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
-
-    auto check_filter_cache = [&](const char * k_name) {
+    auto check_filter_cache = [&](const char* k_name) {
       auto str = std::string{k_name};
       auto f = kernel_filter_cache_.find(k_name);
       if (f == kernel_filter_cache_.end()) {
@@ -361,7 +361,8 @@ class file_plugin_t {
     if (name_length > 1) {
       CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                       profiler_record->kernel_id, &kernel_name_c));
-      if (kernel_name_c != nullptr && !kernel_filters_.empty() && !check_filter_cache(kernel_name_c)) {
+      if (kernel_name_c != nullptr && !kernel_filters_.empty() &&
+          !check_filter_cache(kernel_name_c)) {
         free(const_cast<char*>(kernel_name_c));
         return;
       }
@@ -369,7 +370,7 @@ class file_plugin_t {
 
     if (!counter_header_written_) {
       if (profiler_record->counters) {
-        if(is_individual_xcc_mode) ss << ',' << "XCC_Index";
+        if (is_individual_xcc_mode) ss << ',' << "XCC_Index";
         for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
           auto counter_handler = profiler_record->counters[i].counter_handler;
           if (!counter_handler.handle) continue;
@@ -421,7 +422,7 @@ class file_plugin_t {
 
     // For Counters
     if (profiler_record->counters) {
-      if(is_individual_xcc_mode) ss << "," << profiler_record->xcc_index;
+      if (is_individual_xcc_mode) ss << "," << profiler_record->xcc_index;
       for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
         if (profiler_record->counters[i].counter_handler.handle > 0) {
           ss << "," << std::to_string(profiler_record->counters[i].value.value);
@@ -486,7 +487,7 @@ class file_plugin_t {
  private:
   bool valid_{false};
   bool counter_header_written_ = false;
-  bool is_individual_xcc_mode=false;
+  bool is_individual_xcc_mode = false;
   std::vector<std::string> counter_names_;
   std::set<std::string> kernel_filters_;
   std::map<std::string, bool> kernel_filter_cache_;

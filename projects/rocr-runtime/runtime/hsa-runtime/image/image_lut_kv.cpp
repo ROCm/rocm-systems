@@ -93,7 +93,7 @@ const ImageProperty ImageLutKv::kPropLut_[ORDER_COUNT][TYPE_COUNT] = {
      {RW, 2, FMT_16, TYPE_FLOAT},
      {RW, 4, FMT_32, TYPE_FLOAT}},
     {},  // HSA_EXT_IMAGE_CHANNEL_ORDER_RX
-    {     // HSA_EXT_IMAGE_CHANNEL_ORDER_RG
+    {    // HSA_EXT_IMAGE_CHANNEL_ORDER_RG
      {RW, 2, FMT_8_8, TYPE_SNORM},
      {RW, 4, FMT_16_16, TYPE_SNORM},
      {RW, 2, FMT_8_8, TYPE_UNORM},
@@ -111,7 +111,7 @@ const ImageProperty ImageLutKv::kPropLut_[ORDER_COUNT][TYPE_COUNT] = {
      {RW, 4, FMT_16_16, TYPE_FLOAT},
      {RW, 8, FMT_32_32, TYPE_FLOAT}},
     {},  // HSA_EXT_IMAGE_CHANNEL_ORDER_RGX
-    {     // HSA_EXT_IMAGE_CHANNEL_ORDER_RA
+    {    // HSA_EXT_IMAGE_CHANNEL_ORDER_RA
      {RW, 2, FMT_8_8, TYPE_SNORM},
      {RW, 4, FMT_16_16, TYPE_SNORM},
      {RW, 2, FMT_8_8, TYPE_UNORM},
@@ -146,7 +146,7 @@ const ImageProperty ImageLutKv::kPropLut_[ORDER_COUNT][TYPE_COUNT] = {
      {0, 0, 0, 0},
      {0, 0, 0, 0}},
     {},  // HSA_EXT_IMAGE_CHANNEL_ORDER_RGBX
-    {     // HSA_EXT_IMAGE_CHANNEL_ORDER_RGBA
+    {    // HSA_EXT_IMAGE_CHANNEL_ORDER_RGBA
      {RW, 4, FMT_8_8_8_8, TYPE_SNORM},
      {RW, 8, FMT_16_16_16_16, TYPE_SNORM},
      {RW, 4, FMT_8_8_8_8, TYPE_UNORM},
@@ -200,7 +200,7 @@ const ImageProperty ImageLutKv::kPropLut_[ORDER_COUNT][TYPE_COUNT] = {
     {},  // HSA_EXT_IMAGE_CHANNEL_ORDER_ABGR
     {},  // HSA_EXT_IMAGE_CHANNEL_ORDER_SRGB
     {},  // HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBX
-    {     // HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBA
+    {    // HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBA
      {0, 0, 0, 0},
      {0, 0, 0, 0},
      {RO, 4, FMT_8_8_8_8, TYPE_SRGB},
@@ -218,7 +218,7 @@ const ImageProperty ImageLutKv::kPropLut_[ORDER_COUNT][TYPE_COUNT] = {
      {0, 0, 0, 0},
      {0, 0, 0, 0}},
     {},  // HSA_EXT_IMAGE_CHANNEL_ORDER_SBGRA
-    {     // HSA_EXT_IMAGE_CHANNEL_ORDER_INTENSITY
+    {    // HSA_EXT_IMAGE_CHANNEL_ORDER_INTENSITY
      {RW, 1, FMT_8, TYPE_SNORM},
      {RW, 2, FMT_16, TYPE_SNORM},
      {RW, 1, FMT_8, TYPE_UNORM},
@@ -418,22 +418,35 @@ uint32_t ImageLutKv::GetMaxArraySize(hsa_ext_image_geometry_t geometry) const {
 }
 
 uint32_t ImageLutKv::GetPixelSize(uint8_t data_format, uint8_t data_type) const {
-  //Currently only supports formats that ROCr can create.
-  switch(data_format) {
-    case FMT_1_5_5_5: return 2;
-    case FMT_16: return 2;
-    case FMT_16_16: return 4;
-    case FMT_16_16_16_16: return 8;
-    case FMT_2_10_10_10: return 4;
-    //SPK: Where is unorm returning 3?  Was this a Hawaii specific thing?
-    case FMT_32: return (data_type==TYPE_UNORM) ? 3 : 4;
-    case FMT_32_32: return 8;
-    case FMT_32_32_32_32: return 16;
-    case FMT_5_6_5: return 2;
-    case FMT_8: return 1;
-    case FMT_8_8: return 2;
-    case FMT_8_8_8_8: return 4;
-    default: return 0;
+  // Currently only supports formats that ROCr can create.
+  switch (data_format) {
+    case FMT_1_5_5_5:
+      return 2;
+    case FMT_16:
+      return 2;
+    case FMT_16_16:
+      return 4;
+    case FMT_16_16_16_16:
+      return 8;
+    case FMT_2_10_10_10:
+      return 4;
+    // SPK: Where is unorm returning 3?  Was this a Hawaii specific thing?
+    case FMT_32:
+      return (data_type == TYPE_UNORM) ? 3 : 4;
+    case FMT_32_32:
+      return 8;
+    case FMT_32_32_32_32:
+      return 16;
+    case FMT_5_6_5:
+      return 2;
+    case FMT_8:
+      return 1;
+    case FMT_8_8:
+      return 2;
+    case FMT_8_8_8_8:
+      return 4;
+    default:
+      return 0;
   }
 }
 

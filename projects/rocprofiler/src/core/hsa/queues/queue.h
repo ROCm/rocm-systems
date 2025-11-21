@@ -57,26 +57,23 @@ state of the queue destruction.
 3. done_destroy - The async handler has been unregistered
 and the destructor can now complete.
 */
-enum is_destroy {
- normal=0,
- to_destroy=1,
- done_destroy=2
-};
+enum is_destroy { normal = 0, to_destroy = 1, done_destroy = 2 };
 
 class Queue {
  public:
-  Queue(const hsa_agent_t cpu_agent, const hsa_agent_t gpu_agent,
-         hsa_queue_t* queue);
+  Queue(const hsa_agent_t cpu_agent, const hsa_agent_t gpu_agent, hsa_queue_t* queue);
   ~Queue();
 
   static void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index,
                                void* data, hsa_amd_queue_intercept_packet_writer writer);
   static bool ATTWriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index,
-                               void* data, hsa_amd_queue_intercept_packet_writer writer);
-  static bool ATTSingleWriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index,
-                               void* data, hsa_amd_queue_intercept_packet_writer writer);
-  static bool ATTContiguousWriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index,
-                               void* data, hsa_amd_queue_intercept_packet_writer writer);
+                                  void* data, hsa_amd_queue_intercept_packet_writer writer);
+  static bool ATTSingleWriteInterceptor(const void* packets, uint64_t pkt_count,
+                                        uint64_t user_pkt_index, void* data,
+                                        hsa_amd_queue_intercept_packet_writer writer);
+  static bool ATTContiguousWriteInterceptor(const void* packets, uint64_t pkt_count,
+                                            uint64_t user_pkt_index, void* data,
+                                            hsa_amd_queue_intercept_packet_writer writer);
   hsa_queue_t* GetCurrentInterceptQueue();
   hsa_agent_t GetGPUAgent();
   hsa_agent_t GetCPUAgent();
@@ -84,12 +81,13 @@ class Queue {
   static void PrintCounters();
   std::mutex qw_mutex;
   enum is_destroy state;
-  std::condition_variable  cv_ready_signal;
+  std::condition_variable cv_ready_signal;
   hsa_signal_t GetReadySignal();
   hsa_signal_t GetBlockSignal();
 
   static void ResetSessionID(rocprofiler_session_id_t id = rocprofiler_session_id_t{0});
   static bool CheckNeededProfileConfigs();
+
  private:
   static std::shared_mutex session_id_mutex;
   static rocprofiler_session_id_t session_id;

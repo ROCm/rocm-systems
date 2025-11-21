@@ -138,8 +138,8 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
 
   /* Verify that pointer info for unmapped VA offset return expected values */
   ptrInfo.size = sizeof(ptrInfo);
-  ASSERT_SUCCESS(hsa_amd_pointer_info(reinterpret_cast<uint8_t*>(addrRangeUnmapped) + 10, &ptrInfo, &malloc,
-                                      &num_agents_accessible, &agents_accessible));
+  ASSERT_SUCCESS(hsa_amd_pointer_info(reinterpret_cast<uint8_t*>(addrRangeUnmapped) + 10, &ptrInfo,
+                                      &malloc, &num_agents_accessible, &agents_accessible));
   ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
   ASSERT_EQ(ptrInfo.hostBaseAddress,
             addrRangeUnmapped);  // hostBaseAddress is address of reservation instead of offset.
@@ -421,8 +421,8 @@ void VirtMemoryTestBasic::TestPartialMapping(hsa_agent_t agent, hsa_amd_memory_p
 
   // Step 3
   // Should fail as this is exceeding size of address range
-  err = hsa_amd_vmem_map((void*)((uint64_t)addrRange + (14 * granule_size)),
-                                  2 * granule_size, 0, mem_handleB, 0);
+  err = hsa_amd_vmem_map((void*)((uint64_t)addrRange + (14 * granule_size)), 2 * granule_size, 0,
+                         mem_handleB, 0);
   ASSERT_NE(err, HSA_STATUS_SUCCESS);
 
   ASSERT_SUCCESS(hsa_amd_vmem_map((void*)((uint64_t)addrRange + (14 * granule_size)),
@@ -430,8 +430,8 @@ void VirtMemoryTestBasic::TestPartialMapping(hsa_agent_t agent, hsa_amd_memory_p
 
   // Step 4
   // Should fail as this is overlapping with AddressRange[11] already mapped
-  err = hsa_amd_vmem_map((void*)((uint64_t)addrRange + (8 * granule_size)),
-                                  4 * granule_size, 0, mem_handleB, 0);
+  err = hsa_amd_vmem_map((void*)((uint64_t)addrRange + (8 * granule_size)), 4 * granule_size, 0,
+                         mem_handleB, 0);
   ASSERT_NE(err, HSA_STATUS_SUCCESS);
 
   ASSERT_SUCCESS(hsa_amd_vmem_map((void*)((uint64_t)addrRange + (8 * granule_size)),

@@ -25,58 +25,56 @@
 
 
 
-An example code to execute sequential access to explore cache hits/misses in L2 Cache.
+An example code to execute sequential access to explore cache hits/misses in L2
+Cache.
 */
 
-
+#include <assert.h>
 #include <hip/hip_runtime.h>
 #include <iostream>
-#include <assert.h>
 
-#define HIP_ASSERT(x) (assert((x)==hipSuccess))
+#define HIP_ASSERT(x) (assert((x) == hipSuccess))
 
 // Kernel: sequential access, each thread reads/writes an element in order
-__global__ void sequentialAccessKernel(int *d_data, int N)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid < N)
-    {
-        d_data[tid] += 1;
-    }
+__global__ void sequentialAccessKernel(int *d_data, int N) {
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid < N) {
+    d_data[tid] += 1;
+  }
 }
 
-int main()
-{
-    hipError_t hip_status;
+int main() {
+  hipError_t hip_status;
 
-    const int N = 1 << 20; // 1M elements
-    size_t size = N * sizeof(int);
-    // Allocate host memory
-    int *h_data = (int *)malloc(size);
-    std::fill_n(h_data, N, 0);
+  const int N = 1 << 20; // 1M elements
+  size_t size = N * sizeof(int);
+  // Allocate host memory
+  int *h_data = (int *)malloc(size);
+  std::fill_n(h_data, N, 0);
 
-    // Allocate device memory
-    int *d_data;
-    HIP_ASSERT(hipMalloc(&d_data, size));
+  // Allocate device memory
+  int *d_data;
+  HIP_ASSERT(hipMalloc(&d_data, size));
 
-    // Copy h_data to device
-    HIP_ASSERT(hipMemcpy(d_data, h_data, size, hipMemcpyHostToDevice));
+  // Copy h_data to device
+  HIP_ASSERT(hipMemcpy(d_data, h_data, size, hipMemcpyHostToDevice));
 
-    // Configure kernel
-    dim3 blockSize(64);
-    dim3 gridSize((N + blockSize.x - 1) / blockSize.x);
+  // Configure kernel
+  dim3 blockSize(64);
+  dim3 gridSize((N + blockSize.x - 1) / blockSize.x);
 
-    // Launch kernel
-    hipLaunchKernelGGL(sequentialAccessKernel, gridSize, blockSize, 0, 0, d_data, N);
-    hip_status = hipDeviceSynchronize();
+  // Launch kernel
+  hipLaunchKernelGGL(sequentialAccessKernel, gridSize, blockSize, 0, 0, d_data,
+                     N);
+  hip_status = hipDeviceSynchronize();
 
-    // Copy back to host
-    HIP_ASSERT(hipMemcpy(h_data, d_data, size, hipMemcpyDeviceToHost));
+  // Copy back to host
+  HIP_ASSERT(hipMemcpy(h_data, d_data, size, hipMemcpyDeviceToHost));
 
-    // Cleanup
-    HIP_ASSERT(hipFree(d_data));
-    free(h_data);
+  // Cleanup
+  HIP_ASSERT(hipFree(d_data));
+  free(h_data);
 
-    std::cout << "SequentialAccess HIP test completed.\n";
-    return 0;
+  std::cout << "SequentialAccess HIP test completed.\n";
+  return 0;
 }

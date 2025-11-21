@@ -56,10 +56,8 @@
 #include "hsa/hsa_ext_amd.h"
 #include "suites/test_common/test_base.h"
 
-hsa_status_t AcquireAccess(hsa_agent_t agent,
-                                    hsa_amd_memory_pool_t pool, void* ptr);
-typedef enum TransType
-              {H2D = 0, D2H, P2P, H2DRemote, D2HRemote, P2PRemote} TransType;
+hsa_status_t AcquireAccess(hsa_agent_t agent, hsa_amd_memory_pool_t pool, void* ptr);
+typedef enum TransType { H2D = 0, D2H, P2P, H2DRemote, D2HRemote, P2PRemote } TransType;
 
 typedef struct Transaction {
   int src;
@@ -68,59 +66,58 @@ typedef struct Transaction {
   size_t max_size;  // Max. amount of kBytes to copy
   TransType type;
   // BenchMark copy time
-  std::vector<double> *benchmark_copy_time;
+  std::vector<double>* benchmark_copy_time;
   // Min time
-  std::vector<double> *min_time;
+  std::vector<double>* min_time;
 } Transaction;
 
 class AgentInfo {
  public:
-    AgentInfo(hsa_agent_t agent, int index, hsa_device_type_t device_type,
-                                                        bool remote = false) {
-      agent_ = agent;
-      index_ = index;
-      device_type_ = device_type;
-      remote_ = remote;
-    }
-    AgentInfo() {}
+  AgentInfo(hsa_agent_t agent, int index, hsa_device_type_t device_type, bool remote = false) {
+    agent_ = agent;
+    index_ = index;
+    device_type_ = device_type;
+    remote_ = remote;
+  }
+  AgentInfo() {}
 
-    ~AgentInfo() {}
-    hsa_agent_t agent(void) const {return agent_;}
-    hsa_device_type_t device_type(void) const {return device_type_;}
-    bool is_remote(void) const {return remote_;}
-    void set_remote(bool r) {remote_ = r;}
-    hsa_agent_t agent_;
-    int index_;
+  ~AgentInfo() {}
+  hsa_agent_t agent(void) const { return agent_; }
+  hsa_device_type_t device_type(void) const { return device_type_; }
+  bool is_remote(void) const { return remote_; }
+  void set_remote(bool r) { remote_ = r; }
+  hsa_agent_t agent_;
+  int index_;
 
  private:
-    hsa_device_type_t device_type_;
-    bool remote_;
+  hsa_device_type_t device_type_;
+  bool remote_;
 };
 
 class PoolInfo {
  public:
-    PoolInfo(hsa_amd_memory_pool_t pool, int index,
-               hsa_amd_segment_t segment, bool is_fine_grained, size_t size,
-               size_t max_alloc_size, AgentInfo *agent_info) {
-      pool_ = pool;
-      index_ = index;
-      segment_ = segment;
-      is_fine_grained_ = is_fine_grained;
-      size_ = size;
-      allocable_size_ = max_alloc_size;
-      owner_agent_info_ = agent_info;
-    }
-    PoolInfo() {}
-    ~PoolInfo() {}
-    AgentInfo* owner_agent_info(void) const {return owner_agent_info_;}
-    hsa_amd_memory_pool_t pool_;
-    int index_;
-    hsa_amd_segment_t segment_;
-    bool is_fine_grained_;
-    size_t size_;
-    size_t allocable_size_;
+  PoolInfo(hsa_amd_memory_pool_t pool, int index, hsa_amd_segment_t segment, bool is_fine_grained,
+           size_t size, size_t max_alloc_size, AgentInfo* agent_info) {
+    pool_ = pool;
+    index_ = index;
+    segment_ = segment;
+    is_fine_grained_ = is_fine_grained;
+    size_ = size;
+    allocable_size_ = max_alloc_size;
+    owner_agent_info_ = agent_info;
+  }
+  PoolInfo() {}
+  ~PoolInfo() {}
+  AgentInfo* owner_agent_info(void) const { return owner_agent_info_; }
+  hsa_amd_memory_pool_t pool_;
+  int index_;
+  hsa_amd_segment_t segment_;
+  bool is_fine_grained_;
+  size_t size_;
+  size_t allocable_size_;
+
  private:
-    AgentInfo *owner_agent_info_;
+  AgentInfo* owner_agent_info_;
 };
 
 
@@ -162,42 +159,39 @@ class MemoryAsyncCopy : public TestBase {
   //    other gpu
   // The default is #2 above. If *both* a source and dest. are set for #1
   // above, then that overides both #2 and #3
-  void set_src_pool(int pool_id) {src_pool_id_ = pool_id;}
-  void set_dst_pool(int pool_id) {dst_pool_id_ = pool_id;}
-  int pool_index(void) const {return pool_index_;}
-  void set_pool_index(int i) {pool_index_ = i;}
-  int agent_index(void) const {return agent_index_;}
-  void set_agent_index(int i) {agent_index_ = i;}
-  std::vector<PoolInfo *> *pool_info(void) {return &pool_info_;}
-  std::vector<AgentInfo *> *agent_info(void) {return &agent_info_;}
-  std::vector<NodeInfo> *node_info(void) {return &node_info_;}
+  void set_src_pool(int pool_id) { src_pool_id_ = pool_id; }
+  void set_dst_pool(int pool_id) { dst_pool_id_ = pool_id; }
+  int pool_index(void) const { return pool_index_; }
+  void set_pool_index(int i) { pool_index_ = i; }
+  int agent_index(void) const { return agent_index_; }
+  void set_agent_index(int i) { agent_index_ = i; }
+  std::vector<PoolInfo*>* pool_info(void) { return &pool_info_; }
+  std::vector<AgentInfo*>* agent_info(void) { return &agent_info_; }
+  std::vector<NodeInfo>* node_info(void) { return &node_info_; }
 
-  hwloc_topology_t topology(void) const {return topology_;}
-  void set_topology(hwloc_topology_t t) {topology_ = t;}
+  hwloc_topology_t topology(void) const { return topology_; }
+  void set_topology(hwloc_topology_t t) { topology_ = t; }
 
-  hwloc_nodeset_t cpu_hwl_numa_nodeset(void) const {
-                                                return cpu_hwl_numa_nodeset_;}
-  void set_cpu_hwl_numa_nodeset(hwloc_nodeset_t ns) {
-                                                  cpu_hwl_numa_nodeset_ = ns;}
-  hsa_agent_t gpu_local_agent1() const {return gpu_local_agent1_;}
-  void set_gpu_local_agent1(hsa_agent_t a) {gpu_local_agent1_ = a;}
-  hsa_agent_t gpu_local_agent2() const {return gpu_local_agent2_;}
-  void set_gpu_local_agent2(hsa_agent_t a) {gpu_local_agent2_ = a;}
+  hwloc_nodeset_t cpu_hwl_numa_nodeset(void) const { return cpu_hwl_numa_nodeset_; }
+  void set_cpu_hwl_numa_nodeset(hwloc_nodeset_t ns) { cpu_hwl_numa_nodeset_ = ns; }
+  hsa_agent_t gpu_local_agent1() const { return gpu_local_agent1_; }
+  void set_gpu_local_agent1(hsa_agent_t a) { gpu_local_agent1_ = a; }
+  hsa_agent_t gpu_local_agent2() const { return gpu_local_agent2_; }
+  void set_gpu_local_agent2(hsa_agent_t a) { gpu_local_agent2_ = a; }
 
-  hsa_agent_t gpu_remote_agent() const {return gpu_remote_agent_;}
-  void set_gpu_remote_agent(hsa_agent_t a) {gpu_remote_agent_ = a;}
+  hsa_agent_t gpu_remote_agent() const { return gpu_remote_agent_; }
+  void set_gpu_remote_agent(hsa_agent_t a) { gpu_remote_agent_ = a; }
 
-  hsa_agent_t cpu_agent() const {return cpu_agent_;}
-  void set_cpu_agent(hsa_agent_t a) {cpu_agent_ = a;}
+  hsa_agent_t cpu_agent() const { return cpu_agent_; }
+  void set_cpu_agent(hsa_agent_t a) { cpu_agent_ = a; }
 
-  hsa_agent_t *
-  AcquireAsyncCopyAccess(
-         void *dst_ptr, hsa_amd_memory_pool_t dst_pool, hsa_agent_t *dst_ag,
-         void *src_ptr, hsa_amd_memory_pool_t src_pool, hsa_agent_t *src_ag);
+  hsa_agent_t* AcquireAsyncCopyAccess(void* dst_ptr, hsa_amd_memory_pool_t dst_pool,
+                                      hsa_agent_t* dst_ag, void* src_ptr,
+                                      hsa_amd_memory_pool_t src_pool, hsa_agent_t* src_ag);
 
  protected:
-  void PrintTransactionType(Transaction *t);
-  
+  void PrintTransactionType(Transaction* t);
+
   // Struct representing one granularity (copy size + string label)
   struct Granularity {
     const char* Str;
@@ -221,10 +215,10 @@ class MemoryAsyncCopy : public TestBase {
   virtual void FindTopology(void);
 
   // @Brief: Run for Benchmark mode with verification
-  virtual void RunBenchmarkWithVerification(Transaction *t);
+  virtual void RunBenchmarkWithVerification(Transaction* t);
 
   // @Brief: Dispaly Benchmark result
-  void DisplayBenchmark(Transaction *t) const;
+  void DisplayBenchmark(Transaction* t) const;
 
   // @Brief: Print topology info
   void PrintTopology(void);
@@ -238,10 +232,10 @@ class MemoryAsyncCopy : public TestBase {
   std::vector<Transaction> tran_;
 
   // Variable used to store agent info, indexed by agent_index_
-  std::vector<AgentInfo *> agent_info_;
+  std::vector<AgentInfo*> agent_info_;
 
   // Variable used to store region info, indexed by pool_index_
-  std::vector<PoolInfo *> pool_info_;
+  std::vector<PoolInfo*> pool_info_;
 
   // To store node info
   std::vector<NodeInfo> node_info_;

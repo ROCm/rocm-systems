@@ -292,4 +292,3 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
 }
 
 }  // namespace amd::roc
-

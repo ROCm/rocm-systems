@@ -51,7 +51,7 @@ static constexpr auto fminGlobalMem{
 extern "C"
 __global__ void unsafeAtomicMin_GlobalMem(double* addr, double* result) {
   double comp = 10;
-  *result = unsafeAtomicMin(addr, comp);   
+  *result = unsafeAtomicMin(addr, comp);
 }
 )"};
 

@@ -1,17 +1,15 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef ROCRTST_UTILS_TIMER_TEST_H_
 #define ROCRTST_UTILS_TIMER_TEST_H_
 
 // Encapsulates Api's to access Timer service of rocrtst Utils library
 class rocrtstUtilsTimerTest {
-
  public:
-
   // Destructor method of test driver
   ~rocrtstUtilsTimerTest();
 
@@ -30,7 +28,6 @@ class rocrtstUtilsTimerTest {
   void print();
 
  private:
-
   // Number of times to invoke sleep Api
   uint32_t loopCnt_;
 

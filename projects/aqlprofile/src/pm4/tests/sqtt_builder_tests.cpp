@@ -1,5 +1,5 @@
-//Copyright © Advanced Micro Devices, Inc., or its affiliates.
-//SPDX-License-Identifier: MIT
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
 #include <cstdint>
@@ -27,7 +27,7 @@ struct TestPrimitives {
   static constexpr uint32_t TT_CONTROL_FULL_MASK = 0x2;
   static constexpr uint32_t TT_WRITE_PTR_MASK = 0x4;
   static constexpr uint32_t SQ_THREAD_TRACE_USERDATA_2 = 0x1000;
-  
+
   static uint32_t grbm_broadcast_value() { return 0xFFFFFFFF; }
   static uint32_t sqtt_mode_off_value() { return 0; }
   static uint32_t sqtt_mode_on_value() { return 1; }
@@ -38,7 +38,7 @@ struct TestPrimitives {
 
 // Minimal command buffer for testing
 class CmdBuffer {
-public:
+ public:
   void Clear() {}
   size_t DwSize() const { return 0; }
   const void* Data() const { return nullptr; }
@@ -48,14 +48,14 @@ public:
 
 // Minimal command builder for testing
 class TestBuilder {
-public:
+ public:
   TestBuilder(const AgentInfo*) {}
-  
+
   void BuildWriteUConfigRegPacket(CmdBuffer* cmd_buffer, uint32_t addr, uint32_t value) {
     cmd_buffer->commands.push_back(addr);
     cmd_buffer->commands.push_back(value);
   }
-  
+
   void BuildPredExecPacket(CmdBuffer*, uint32_t, uint32_t) {}
   void BuildWriteWaitIdlePacket(CmdBuffer*) {}
   void BuildCacheFlushPacket(CmdBuffer*, size_t, size_t) {}
@@ -64,11 +64,11 @@ public:
 // Actual GpuSqttBuilder implementation for testing
 template <typename Builder, typename Primitives>
 class GpuSqttBuilder {
-public:
-  explicit GpuSqttBuilder(const AgentInfo* agent_info) 
-    : xcc_number_(agent_info->xcc_num)
-    , se_number_total(agent_info->se_num)
-    , builder_(agent_info) {}
+ public:
+  explicit GpuSqttBuilder(const AgentInfo* agent_info)
+      : xcc_number_(agent_info->xcc_num),
+        se_number_total(agent_info->se_num),
+        builder_(agent_info) {}
 
   size_t GetUTCErrorMask() const { return Primitives::TT_CONTROL_UTC_ERR_MASK; }
   size_t GetBufferFullMask() const { return Primitives::TT_CONTROL_FULL_MASK; }
@@ -93,14 +93,14 @@ public:
     return uint64_t(buffer_per_se) & ~((1ULL << Primitives::TT_BUFF_ALIGN_SHIFT) - 1);
   }
 
-private:
+ private:
   uint32_t xcc_number_;
   size_t se_number_total;
   Builder builder_;
 };
 
 class SqttBuilderTest : public ::testing::Test {
-protected:
+ protected:
   void SetUp() override {
     agent_info.gfxip = 9;
     agent_info.xcc_num = 2;
@@ -117,7 +117,7 @@ TEST_F(SqttBuilderTest, DISABLED_BufferStepCalculation) {
 
   // Test with different buffer sizes and SE masks
   const uint64_t total_buffer = 1024 * 1024;  // 1MB total
-  
+
   // Test case 1: All SEs enabled (4 SEs)
   uint64_t mask1 = 0xF;  // 0b1111
   uint64_t step1 = builder.GetBaseStep(total_buffer, mask1);
@@ -135,11 +135,11 @@ TEST_F(SqttBuilderTest, PopulationCount) {
   GpuSqttBuilder<TestBuilder, TestPrimitives> builder(&agent_info);
 
   // Test different SE mask configurations
-  EXPECT_EQ(builder.PopCount(0x1), 1);    // Single SE
-  EXPECT_EQ(builder.PopCount(0x3), 2);    // Two SEs
-  EXPECT_EQ(builder.PopCount(0xF), 4);    // Four SEs
-  EXPECT_EQ(builder.PopCount(0x0), 1);    // No SEs (minimum is 1)
-  EXPECT_EQ(builder.PopCount(0x5), 2);    // Non-contiguous SEs
+  EXPECT_EQ(builder.PopCount(0x1), 1);  // Single SE
+  EXPECT_EQ(builder.PopCount(0x3), 2);  // Two SEs
+  EXPECT_EQ(builder.PopCount(0xF), 4);  // Four SEs
+  EXPECT_EQ(builder.PopCount(0x0), 1);  // No SEs (minimum is 1)
+  EXPECT_EQ(builder.PopCount(0x5), 2);  // Non-contiguous SEs
 }
 
 TEST_F(SqttBuilderTest, ThreadTraceStatusMasks) {
@@ -149,7 +149,7 @@ TEST_F(SqttBuilderTest, ThreadTraceStatusMasks) {
   EXPECT_EQ(builder.GetUTCErrorMask(), TestPrimitives::TT_CONTROL_UTC_ERR_MASK);
   EXPECT_EQ(builder.GetBufferFullMask(), TestPrimitives::TT_CONTROL_FULL_MASK);
   EXPECT_EQ(builder.GetWritePtrMask(), TestPrimitives::TT_WRITE_PTR_MASK);
-  
+
   // Verify masks are unique
   EXPECT_NE(builder.GetUTCErrorMask(), builder.GetBufferFullMask());
   EXPECT_NE(builder.GetUTCErrorMask(), builder.GetWritePtrMask());
@@ -161,7 +161,7 @@ TEST_F(SqttBuilderTest, XCCConfiguration) {
 
   // Test XCC number configuration
   EXPECT_EQ(builder.GetXCCNumber(), agent_info.xcc_num);
-  
+
   // Test with different XCC configurations
   agent_info.xcc_num = 1;
   GpuSqttBuilder<TestBuilder, TestPrimitives> single_xcc(&agent_info);
@@ -183,4 +183,4 @@ TEST_F(SqttBuilderTest, BufferAlignmentAndBlockSize) {
   EXPECT_EQ(builder.GetWritePtrBlk(), 32);  // 32-byte blocks
 }
 
-} // namespace pm4_builder
+}  // namespace pm4_builder

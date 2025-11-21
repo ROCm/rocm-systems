@@ -60,12 +60,12 @@ namespace ELF {
 // See current registered ELF machine architectures at:
 //    http://www.uxsglobal.com/developers/gabi/latest/ch4.eheader.html
 enum {
-  EM_AMDGPU = 224,        // AMD GPU architecture
+  EM_AMDGPU = 224,  // AMD GPU architecture
 };
 
 // OS ABI identification.
 enum {
-  ELFOSABI_AMDGPU_HSA = 64,    // AMD HSA runtime
+  ELFOSABI_AMDGPU_HSA = 64,  // AMD HSA runtime
 };
 
 // AMDGPU OS ABI Version identification.
@@ -218,13 +218,13 @@ enum : unsigned {
   R_AMDGPU_RELATIVE64 = 13,
 };
 
-} // end namespace ELF
+}  // end namespace ELF
 
 // ELF Section Header Flag Enumeration Values.
-#define SHF_AMDGPU_HSA_GLOBAL   (0x00100000 & SHF_MASKOS)
+#define SHF_AMDGPU_HSA_GLOBAL (0x00100000 & SHF_MASKOS)
 #define SHF_AMDGPU_HSA_READONLY (0x00200000 & SHF_MASKOS)
-#define SHF_AMDGPU_HSA_CODE     (0x00400000 & SHF_MASKOS)
-#define SHF_AMDGPU_HSA_AGENT    (0x00800000 & SHF_MASKOS)
+#define SHF_AMDGPU_HSA_CODE (0x00400000 & SHF_MASKOS)
+#define SHF_AMDGPU_HSA_AGENT (0x00800000 & SHF_MASKOS)
 
 //
 typedef enum {
@@ -237,21 +237,21 @@ typedef enum {
 
 // ELF Program Header Type Enumeration Values.
 #define PT_AMDGPU_HSA_LOAD_GLOBAL_PROGRAM (PT_LOOS + AMDGPU_HSA_SEGMENT_GLOBAL_PROGRAM)
-#define PT_AMDGPU_HSA_LOAD_GLOBAL_AGENT   (PT_LOOS + AMDGPU_HSA_SEGMENT_GLOBAL_AGENT)
+#define PT_AMDGPU_HSA_LOAD_GLOBAL_AGENT (PT_LOOS + AMDGPU_HSA_SEGMENT_GLOBAL_AGENT)
 #define PT_AMDGPU_HSA_LOAD_READONLY_AGENT (PT_LOOS + AMDGPU_HSA_SEGMENT_READONLY_AGENT)
-#define PT_AMDGPU_HSA_LOAD_CODE_AGENT     (PT_LOOS + AMDGPU_HSA_SEGMENT_CODE_AGENT)
+#define PT_AMDGPU_HSA_LOAD_CODE_AGENT (PT_LOOS + AMDGPU_HSA_SEGMENT_CODE_AGENT)
 
 // ELF Symbol Type Enumeration Values.
-#define STT_AMDGPU_HSA_KERNEL            (STT_LOOS + 0)
+#define STT_AMDGPU_HSA_KERNEL (STT_LOOS + 0)
 #define STT_AMDGPU_HSA_INDIRECT_FUNCTION (STT_LOOS + 1)
-#define STT_AMDGPU_HSA_METADATA          (STT_LOOS + 2)
+#define STT_AMDGPU_HSA_METADATA (STT_LOOS + 2)
 
 // ELF Symbol Binding Enumeration Values.
 #define STB_AMDGPU_HSA_EXTERNAL (STB_LOOS + 0)
 
 // ELF Symbol Other Information Creation/Retrieval.
-#define ELF64_ST_AMDGPU_ALLOCATION(o)  (((o) >> 2) & 0x3)
-#define ELF64_ST_AMDGPU_FLAGS(o)       ((o) >> 4)
+#define ELF64_ST_AMDGPU_ALLOCATION(o) (((o) >> 2) & 0x3)
+#define ELF64_ST_AMDGPU_FLAGS(o) ((o) >> 4)
 #define ELF64_ST_AMDGPU_OTHER(f, a, v) (((f) << 4) + (((a) & 0x3) << 2) + ((v) & 0x3))
 
 typedef enum {
@@ -263,9 +263,9 @@ typedef enum {
 } amdgpu_hsa_symbol_allocation_t;
 
 // ELF Symbol Allocation Enumeration Values.
-#define STA_AMDGPU_HSA_DEFAULT        AMDGPU_HSA_SYMBOL_ALLOCATION_DEFAULT
+#define STA_AMDGPU_HSA_DEFAULT AMDGPU_HSA_SYMBOL_ALLOCATION_DEFAULT
 #define STA_AMDGPU_HSA_GLOBAL_PROGRAM AMDGPU_HSA_SYMBOL_ALLOCATION_GLOBAL_PROGRAM
-#define STA_AMDGPU_HSA_GLOBAL_AGENT   AMDGPU_HSA_SYMBOL_ALLOCATION_GLOBAL_AGENT
+#define STA_AMDGPU_HSA_GLOBAL_AGENT AMDGPU_HSA_SYMBOL_ALLOCATION_GLOBAL_AGENT
 #define STA_AMDGPU_HSA_READONLY_AGENT AMDGPU_HSA_SYMBOL_ALLOCATION_READONLY_AGENT
 
 typedef enum {
@@ -278,26 +278,26 @@ typedef enum {
 #define STF_AMDGPU_HSA_CONST AMDGPU_HSA_SYMBOL_FLAG_CONST
 
 // Legacy/V1 AMD GPU Relocation Type Enumeration Values.
-#define R_AMDGPU_V1_NONE         0
-#define R_AMDGPU_V1_32_LOW       1
-#define R_AMDGPU_V1_32_HIGH      2
-#define R_AMDGPU_V1_64           3
+#define R_AMDGPU_V1_NONE 0
+#define R_AMDGPU_V1_32_LOW 1
+#define R_AMDGPU_V1_32_HIGH 2
+#define R_AMDGPU_V1_64 3
 #define R_AMDGPU_V1_INIT_SAMPLER 4
-#define R_AMDGPU_V1_INIT_IMAGE   5
-#define R_AMDGPU_V1_RELATIVE64   13
+#define R_AMDGPU_V1_INIT_IMAGE 5
+#define R_AMDGPU_V1_RELATIVE64 13
 
 // AMD GPU Note Type Enumeration Values.
 #define NT_AMD_HSA_CODE_OBJECT_VERSION 1
-#define NT_AMD_HSA_HSAIL               2
-#define NT_AMD_HSA_ISA_VERSION         3
-#define NT_AMD_HSA_PRODUCER            4
-#define NT_AMD_HSA_PRODUCER_OPTIONS    5
-#define NT_AMD_HSA_EXTENSION           6
-#define NT_AMD_HSA_ISA_NAME            11
+#define NT_AMD_HSA_HSAIL 2
+#define NT_AMD_HSA_ISA_VERSION 3
+#define NT_AMD_HSA_PRODUCER 4
+#define NT_AMD_HSA_PRODUCER_OPTIONS 5
+#define NT_AMD_HSA_EXTENSION 6
+#define NT_AMD_HSA_ISA_NAME 11
 /* AMDGPU snapshots of runtime, agent and queues state for use in core dump */
-#define NT_AMDGPU_CORE_STATE           33
-#define NT_AMD_HSA_HLDEBUG_DEBUG       101
-#define NT_AMD_HSA_HLDEBUG_TARGET      102
+#define NT_AMDGPU_CORE_STATE 33
+#define NT_AMD_HSA_HLDEBUG_DEBUG 101
+#define NT_AMD_HSA_HLDEBUG_TARGET 102
 
 // AMD GPU Metadata Kind Enumeration Values.
 typedef uint16_t amdgpu_hsa_metadata_kind16_t;
@@ -464,4 +464,4 @@ typedef enum {
   AMDGPU_HSA_SECTION_LAST,
 } amdgpu_hsa_elf_section_t;
 
-#endif // AMD_HSA_ELF_H
+#endif  // AMD_HSA_ELF_H

@@ -41,7 +41,7 @@ std::string string_format(const std::string& format, Args... args) {
   return std::string(buf.get(), buf.get() + size - 1);  // We don't want the '\0' inside
 }
 
-#define DEBUG_SPM   0
+#define DEBUG_SPM 0
 #define SUPPORT_XCC 1
 
 struct spm_set_dest_buffer_args {
@@ -96,8 +96,7 @@ static void producer(spm_state_t* s) {
     // If s->stop_prod_thread is set in current loop, producer thread will exit after all
     // SPM counters are drained (args.size_copied == 0) which could be at least one
     // HsaSpmSetDestBuffer() call or maybe more than one.
-    if (s->stop_prod_thread)
-      exiting = true;
+    if (s->stop_prod_thread) exiting = true;
     status = HsaSpmSetDestBuffer(args);
     if (status != HSA_STATUS_SUCCESS) {
       ERR_LOGGING << "hsa_amd_spm_set_dest_buffer() error";
@@ -130,10 +129,10 @@ static void producer(spm_state_t* s) {
     // call from this loop!
     //
     if (exiting && !s->size_copied) break;
-    // Forced exit: This happens when we want to stop SPM but not the app. This should be
-    // improved by getting the hint from caller instead of a hardcoded number. Will consider this
-    // in the new SPM api design
-    #define MAX_EXTRA_CALLS_AFTER_FORCED_EXIT 5
+// Forced exit: This happens when we want to stop SPM but not the app. This should be
+// improved by getting the hint from caller instead of a hardcoded number. Will consider this
+// in the new SPM api design
+#define MAX_EXTRA_CALLS_AFTER_FORCED_EXIT 5
     if (exiting && s->size_copied) {
       count_down++;
       if (count_down > MAX_EXTRA_CALLS_AFTER_FORCED_EXIT) {

@@ -299,7 +299,8 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
     if (config->spm_sample_delay_max) {
       builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
                                          Primitives::grbm_broadcast_value());
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_PERFMON_SAMPLE_DELAY_MAX__ADDR,
+      builder.BuildWriteUConfigRegPacket(cmd_buffer,
+                                         Primitives::RLC_SPM_PERFMON_SAMPLE_DELAY_MAX__ADDR,
                                          config->spm_sample_delay_max);
     }
 
@@ -323,8 +324,7 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
             for (size_t j = 0; j < block_info->instance_count; ++j) {
               builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
                                                  Primitives::grbm_inst_se_index_value(j, i));
-              builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                 block_info->delay_info.reg,
+              builder.BuildWriteUConfigRegPacket(cmd_buffer, block_info->delay_info.reg,
                                                  Primitives::get_spm_se_delay(counter_des, i, j));
             }
           }
@@ -379,9 +379,8 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
         const auto* block_info = counter_des.block_info;
         int index = j >> 1;
         int select = j % 2;
-        Register spm_select_addr = (select == 0) ?
-            block_info->counter_reg_info[index].select_addr :
-            block_info->counter_reg_info[index].select1_addr;
+        Register spm_select_addr = (select == 0) ? block_info->counter_reg_info[index].select_addr
+                                                 : block_info->counter_reg_info[index].select1_addr;
         builder.BuildWriteUConfigRegPacket(
             cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
             Primitives::grbm_inst_index_value(counter_des.block_des.index));
@@ -389,7 +388,7 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
       }
     }
     builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                        Primitives::grbm_broadcast_value());
+                                       Primitives::grbm_broadcast_value());
 
     // Set segment size
     uint32_t global_count = ss[0];

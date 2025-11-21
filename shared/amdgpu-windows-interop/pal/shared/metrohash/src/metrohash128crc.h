@@ -14,20 +14,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights
+// reserved.
 
 #ifndef METROHASH_METROHASH_128_CRC_H
 #define METROHASH_METROHASH_128_CRC_H
 
 #include <stdint.h>
 
-namespace Util
-{
+namespace Util {
 
 // Legacy 128-bit hash functions
-void metrohash128crc_1(const uint8_t * key, uint64_t len, uint32_t seed, uint8_t * out);
-void metrohash128crc_2(const uint8_t * key, uint64_t len, uint32_t seed, uint8_t * out);
+void metrohash128crc_1(const uint8_t *key, uint64_t len, uint32_t seed,
+                       uint8_t *out);
+void metrohash128crc_2(const uint8_t *key, uint64_t len, uint32_t seed,
+                       uint8_t *out);
 
-} // Util
+} // namespace Util
 
 #endif // #ifndef METROHASH_METROHASH_128_CRC_H

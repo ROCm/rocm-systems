@@ -52,7 +52,7 @@ namespace image {
 uint32_t MajorVerFromDevID(uint32_t dev_id);
 uint32_t MinorVerFromDevID(uint32_t dev_id);
 uint32_t StepFromDevID(uint32_t dev_id);
-hsa_status_t GetGPUAsicID(hsa_agent_t agent, uint32_t *chip_id);
+hsa_status_t GetGPUAsicID(hsa_agent_t agent, uint32_t* chip_id);
 
 }  // namespace image
 }  // namespace rocr

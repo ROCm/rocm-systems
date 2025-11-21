@@ -135,4 +135,3 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
             const DisplayHandle display, const ContextHandle context);
 }  // namespace MesaInterop
 }  // namespace amd::roc
-

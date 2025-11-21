@@ -203,8 +203,7 @@ void InterceptQueue::Submit(const void* pkts, uint64_t pkt_count, uint64_t user_
 
   // Could not submit all the final packets, stash unsubmitted ones for later.
   assert(queue->overflow_.empty() && "Packet intercept error: overflow buffer not empty.\n");
-  for (uint64_t i = submitted_count; i < pkt_count; i++)
-    queue->overflow_.push_back(packets[i]);
+  for (uint64_t i = submitted_count; i < pkt_count; i++) queue->overflow_.push_back(packets[i]);
 }
 
 uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
@@ -288,7 +287,8 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       uint64_t packets_index = 0;
       uint64_t write_index = 0;
       uint64_t first_written_packet_index;
-      while (submitted_count > 0 || (packets_index < count && IsInterceptMarkerPacket(&packets[packets_index]))) {
+      while (submitted_count > 0 ||
+             (packets_index < count && IsInterceptMarkerPacket(&packets[packets_index]))) {
         // Ensure the marker packet callback is invoked before following
         // packets are made available for the packet processor.
         if (IsInterceptMarkerPacket(&packets[packets_index])) {
@@ -317,8 +317,8 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
           // Ensure the packet body is written as header may get reordered when writing over PCIE
           _mm_sfence();
         }
-        atomic::Store(&ring[write & mask].packet.header, packets[first_written_packet_index].packet.header,
-                      std::memory_order_release);
+        atomic::Store(&ring[write & mask].packet.header,
+                      packets[first_written_packet_index].packet.header, std::memory_order_release);
         HSA::hsa_signal_store_screlease(wrapped->amd_queue_.hsa_queue.doorbell_signal,
                                         write + write_index - 1);
       }
@@ -398,8 +398,8 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     Cursor.interceptor_index = interceptors.size() - 1;
     Cursor.pkt_index = next_packet_;
     auto& handler = interceptors[Cursor.interceptor_index];
-    handler.first(&ring[next_packet_ & mask], packet_count, next_packet_,
-                                                handler.second, PacketWriter);
+    handler.first(&ring[next_packet_ & mask], packet_count, next_packet_, handler.second,
+                  PacketWriter);
     if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
       // Ensure the packet body is written as header may get reordered when writing over PCIE
       _mm_sfence();

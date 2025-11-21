@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 // Compiling for Windows Platform
 #ifdef _WIN32
 
@@ -31,10 +31,10 @@ char* GetEnv(const char* env_var_name) {
   return buff;
 }
 
-#endif    // End of Windows Code
+#endif  // End of Windows Code
 
 // Compiling for Linux Platform
-#ifdef  __linux__
+#ifdef __linux__
 
 #include "os.hpp"
 #include <stdlib.h>
@@ -50,5 +50,4 @@ void SetEnv(const char* env_var_name, const char* env_var_value) {
 
 char* GetEnv(const char* env_var_name) { return getenv(env_var_name); }
 
-#endif    // End of Linux Code
-
+#endif  // End of Linux Code

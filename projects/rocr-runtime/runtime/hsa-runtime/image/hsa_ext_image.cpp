@@ -54,11 +54,19 @@ template <class T> static __forceinline T handleExceptionT() {
   abort();
   return T();
 }
-}   // namespace amd
+}  // namespace amd
 
 #define TRY try {
-#define CATCH } catch(...) { return AMD::handleException(); }
-#define CATCHRET(RETURN_TYPE) } catch(...) { return AMD::handleExceptionT<RETURN_TYPE>(); }
+#define CATCH                                                                                      \
+  }                                                                                                \
+  catch (...) {                                                                                    \
+    return AMD::handleException();                                                                 \
+  }
+#define CATCHRET(RETURN_TYPE)                                                                      \
+  }                                                                                                \
+  catch (...) {                                                                                    \
+    return AMD::handleExceptionT<RETURN_TYPE>();                                                   \
+  }
 
 namespace image {
 
@@ -73,28 +81,28 @@ static void enforceDefaultPitch(hsa_agent_t agent,
     auto manager = ImageRuntime::instance()->image_manager(agent);
     assert((manager != nullptr) && "Image manager should already exit.");
     image_data_row_pitch = image_descriptor->width *
-      manager->GetImageProperty(agent, image_descriptor->format, image_descriptor->geometry)
-      .element_size;
+        manager->GetImageProperty(agent, image_descriptor->format, image_descriptor->geometry)
+            .element_size;
   }
 
   // Set default slice pitch
   if ((image_data_slice_pitch == 0) &&
-    ((image_descriptor->depth != 0) || (image_descriptor->array_size != 0))) {
-      switch (image_descriptor->geometry) {
+      ((image_descriptor->depth != 0) || (image_descriptor->array_size != 0))) {
+    switch (image_descriptor->geometry) {
       case HSA_EXT_IMAGE_GEOMETRY_3D:
       case HSA_EXT_IMAGE_GEOMETRY_2DA:
       case HSA_EXT_IMAGE_GEOMETRY_2DADEPTH: {
         image_data_slice_pitch = image_data_row_pitch * image_descriptor->height;
         break;
-                                            }
+      }
       case HSA_EXT_IMAGE_GEOMETRY_1DA: {
         image_data_slice_pitch = image_data_row_pitch;
         break;
-                                       }
+      }
       default:
         fprintf(stderr, "Depth set on single layer image geometry.\n");
-        //assert(false && "Depth set on single layer image geometry.");
-      }
+        // assert(false && "Depth set on single layer image geometry.");
+    }
   }
 }
 
@@ -194,8 +202,8 @@ hsa_status_t hsa_ext_image_copy(hsa_agent_t agent, hsa_ext_image_t src_image,
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
-  if (src_image.handle == 0 || dst_image.handle == 0 || src_offset == NULL ||
-      dst_offset == NULL || range == NULL) {
+  if (src_image.handle == 0 || dst_image.handle == 0 || src_offset == NULL || dst_offset == NULL ||
+      range == NULL) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -267,16 +275,15 @@ hsa_status_t hsa_ext_sampler_create(hsa_agent_t agent,
   hsa_ext_sampler_descriptor_v2_t sampler_descriptor_v2 = {
       sampler_descriptor->coordinate_mode,
       sampler_descriptor->filter_mode,
-      {sampler_descriptor->address_mode,
-          sampler_descriptor->address_mode, sampler_descriptor->address_mode}
-  };
+      {sampler_descriptor->address_mode, sampler_descriptor->address_mode,
+       sampler_descriptor->address_mode}};
   return ImageRuntime::instance()->CreateSamplerHandle(agent, sampler_descriptor_v2, *sampler);
   CATCH;
 }
 
 hsa_status_t hsa_ext_sampler_create_v2(hsa_agent_t agent,
-                                    const hsa_ext_sampler_descriptor_v2_t* sampler_descriptor,
-                                    hsa_ext_sampler_t* sampler) {
+                                       const hsa_ext_sampler_descriptor_v2_t* sampler_descriptor,
+                                       hsa_ext_sampler_t* sampler) {
   TRY;
   if (agent.handle == 0) {
     return HSA_STATUS_ERROR_INVALID_AGENT;

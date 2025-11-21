@@ -49,7 +49,8 @@ THE SOFTWARE.
  */
 
 #if defined(__cplusplus)
-extern "C" {
+extern "C"
+{
 #endif  // __cplusplus
 
 /*********************************************************************************/
@@ -99,10 +100,8 @@ typedef enum rocDecVideoCodec_enum
     // Uncompressed YUV
     rocDecVideoCodec_YUV420 =
         (('I' << 24) | ('Y' << 16) | ('U' << 8) | ('V')), /**< Y,U,V (4:2:0)      */
-    rocDecVideoCodec_YV12 =
-        (('Y' << 24) | ('V' << 16) | ('1' << 8) | ('2')), /**< Y,V,U (4:2:0)      */
-    rocDecVideoCodec_NV12 =
-        (('N' << 24) | ('V' << 16) | ('1' << 8) | ('2')), /**< Y,UV  (4:2:0)      */
+    rocDecVideoCodec_YV12 = (('Y' << 24) | ('V' << 16) | ('1' << 8) | ('2')), /**< Y,V,U (4:2:0) */
+    rocDecVideoCodec_NV12 = (('N' << 24) | ('V' << 16) | ('1' << 8) | ('2')), /**< Y,UV  (4:2:0) */
     rocDecVideoCodec_YUYV =
         (('Y' << 24) | ('U' << 16) | ('Y' << 8) | ('V')), /**< YUYV/YUY2 (4:2:2)  */
     rocDecVideoCodec_UYVY = (('U' << 24) | ('Y' << 16) | ('V' << 8) | ('Y')) /**< UYVY (4:2:2) */

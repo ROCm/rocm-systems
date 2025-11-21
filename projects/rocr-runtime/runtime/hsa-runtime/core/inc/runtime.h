@@ -96,11 +96,11 @@
 #define HSA_PACKET_ALIGN_BYTES 64
 #define HSA_MAX_DEP_SIGNALS 5
 
-//Avoids include
+// Avoids include
 namespace rocr {
 namespace AMD {
-  class MemoryRegion;
-} // namespace amd
+class MemoryRegion;
+}  // namespace AMD
 
 namespace core {
 extern bool g_use_interrupt_wait;
@@ -117,7 +117,8 @@ extern bool g_use_mwaitx;
 /// - maintain loader state.
 /// - monitor asynchronous event from agent.
 class Runtime {
- friend class AMD::MemoryRegion;
+  friend class AMD::MemoryRegion;
+
  public:
   /// @brief Structure to describe connectivity between agents.
   struct LinkInfo {
@@ -180,9 +181,8 @@ class Runtime {
   /// @param [in] node_id_to Node id of the destination node.
   /// @param [in] link_info The link information between source and destination
   /// nodes.
-  void RegisterLinkInfo(uint32_t node_id_from, uint32_t node_id_to,
-                        uint32_t num_hop, uint32_t rec_sdma_eng_id_mask,
-                        hsa_amd_memory_pool_link_info_t& link_info);
+  void RegisterLinkInfo(uint32_t node_id_from, uint32_t node_id_to, uint32_t num_hop,
+                        uint32_t rec_sdma_eng_id_mask, hsa_amd_memory_pool_link_info_t& link_info);
 
   /// @brief Query link information between two nodes.
   /// @param [in] node_id_from Node id of the source node.
@@ -198,9 +198,7 @@ class Runtime {
   ///
   /// @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   /// agent returns ::HSA_STATUS_SUCCESS.
-  hsa_status_t IterateAgent(hsa_status_t (*callback)(hsa_agent_t agent,
-                                                     void* data),
-                            void* data);
+  hsa_status_t IterateAgent(hsa_status_t (*callback)(hsa_agent_t agent, void* data), void* data);
 
   /// @brief Allocate memory on a particular region.
   ///
@@ -211,8 +209,8 @@ class Runtime {
   ///
   /// @retval ::HSA_STATUS_SUCCESS If allocation is successful.
   hsa_status_t AllocateMemory(const MemoryRegion* region, size_t size,
-                              MemoryRegion::AllocateFlags alloc_flags,
-                              void** address, int agent_node_id = 0);
+                              MemoryRegion::AllocateFlags alloc_flags, void** address,
+                              int agent_node_id = 0);
 
   /// @brief Free memory previously allocated with AllocateMemory.
   ///
@@ -228,14 +226,14 @@ class Runtime {
 
   hsa_status_t DeregisterReleaseNotifier(void* ptr, hsa_amd_deallocation_callback_t callback);
 
-  /// @brief Blocking memory copy from src to dst.
-  ///
-  /// @param [in] dst Memory address of the destination.
-  /// @param [in] src Memory address of the source.
-  /// @param [in] size Copy size in bytes.
-  ///
-  /// @retval ::HSA_STATUS_SUCCESS if memory copy is successful and completed.
-  #undef CopyMemory
+/// @brief Blocking memory copy from src to dst.
+///
+/// @param [in] dst Memory address of the destination.
+/// @param [in] src Memory address of the source.
+/// @param [in] size Copy size in bytes.
+///
+/// @retval ::HSA_STATUS_SUCCESS if memory copy is successful and completed.
+#undef CopyMemory
   hsa_status_t CopyMemory(void* dst, const void* src, size_t size);
 
   /// @brief Non-blocking memory copy from src to dst.
@@ -274,9 +272,10 @@ class Runtime {
   /// @retval ::HSA_STATUS_SUCCESS if copy command has been submitted
   /// successfully to the agent DMA queue.
   hsa_status_t CopyMemoryOnEngine(void* dst, core::Agent* dst_agent, const void* src,
-                          core::Agent* src_agent, size_t size,
-                          std::vector<core::Signal*>& dep_signals, core::Signal& completion_signal,
-                          hsa_amd_sdma_engine_id_t  engine_id, bool force_copy_on_sdma);
+                                  core::Agent* src_agent, size_t size,
+                                  std::vector<core::Signal*>& dep_signals,
+                                  core::Signal& completion_signal,
+                                  hsa_amd_sdma_engine_id_t engine_id, bool force_copy_on_sdma);
 
   /// @brief Return SDMA availability status for copy direction
   ///
@@ -287,7 +286,7 @@ class Runtime {
   /// @retval HSA_STATUS_SUCCESS DMA engines are available
   /// @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES DMA engines are not available
   hsa_status_t CopyMemoryStatus(core::Agent* dst_agent, core::Agent* src_agent,
-                                uint32_t *engine_ids_mask);
+                                uint32_t* engine_ids_mask);
 
   /// @brief Get preferred SDMA engine for the copy direction
   ///
@@ -299,14 +298,14 @@ class Runtime {
   hsa_status_t GetPreferredEngine(core::Agent* dst_agent, core::Agent* src_agent,
                                   uint32_t* recommended_ids_mask);
 
-  /// @brief Fill the first @p count of uint32_t in ptr with value.
-  ///
-  /// @param [in] ptr Memory address to be filled.
-  /// @param [in] value The value/pattern that will be used to set @p ptr.
-  /// @param [in] count Number of uint32_t element to be set.
-  ///
-  /// @retval ::HSA_STATUS_SUCCESS if memory fill is successful and completed.
-  #undef FillMemory
+/// @brief Fill the first @p count of uint32_t in ptr with value.
+///
+/// @param [in] ptr Memory address to be filled.
+/// @param [in] value The value/pattern that will be used to set @p ptr.
+/// @param [in] count Number of uint32_t element to be set.
+///
+/// @retval ::HSA_STATUS_SUCCESS if memory fill is successful and completed.
+#undef FillMemory
   hsa_status_t FillMemory(void* ptr, uint32_t value, size_t count);
 
   /// @brief Set agents as the whitelist to access ptr.
@@ -318,8 +317,7 @@ class Runtime {
   ///
   /// @retval ::HSA_STATUS_SUCCESS The whitelist has been configured
   /// successfully and all agents in the @p agents could start accessing @p ptr.
-  hsa_status_t AllowAccess(uint32_t num_agents, const hsa_agent_t* agents,
-                           const void* ptr);
+  hsa_status_t AllowAccess(uint32_t num_agents, const hsa_agent_t* agents, const void* ptr);
 
   /// @brief Query system information.
   ///
@@ -341,15 +339,12 @@ class Runtime {
   /// handler.
   ///
   /// @retval ::HSA_STATUS_SUCCESS Registration is successful.
-  hsa_status_t SetAsyncSignalHandler(hsa_signal_t signal,
-                                     hsa_signal_condition_t cond,
-                                     hsa_signal_value_t value,
-                                     hsa_amd_signal_handler handler, void* arg);
+  hsa_status_t SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_condition_t cond,
+                                     hsa_signal_value_t value, hsa_amd_signal_handler handler,
+                                     void* arg);
 
-  hsa_status_t InteropMap(uint32_t num_agents, Agent** agents,
-                          hsa_handle_t interop_handle,
-                          uint32_t flags, size_t* size,
-                          void** ptr, size_t* metadata_size,
+  hsa_status_t InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t interop_handle,
+                          uint32_t flags, size_t* size, void** ptr, size_t* metadata_size,
                           const void** metadata);
 
   hsa_status_t InteropUnmap(void* ptr);
@@ -382,18 +377,19 @@ class Runtime {
   hsa_status_t SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent, uint32_t num_dep_signals,
                            const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
-  hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf,
-                                            uint64_t* offset, uint64_t flags);
+  hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
+                            uint64_t flags);
 
   hsa_status_t DmaBufClose(int dmabuf);
 
-  hsa_status_t VMemoryAddressReserve(void** ptr, size_t size, uint64_t address, uint64_t alignment, uint64_t flags);
+  hsa_status_t VMemoryAddressReserve(void** ptr, size_t size, uint64_t address, uint64_t alignment,
+                                     uint64_t flags);
 
   hsa_status_t VMemoryAddressFree(void* ptr, size_t size);
 
   hsa_status_t VMemoryHandleCreate(const MemoryRegion* region, size_t size,
-                                   MemoryRegion::AllocateFlags alloc_flags,
-                                   uint64_t flags, hsa_amd_vmem_alloc_handle_t* memoryHandle);
+                                   MemoryRegion::AllocateFlags alloc_flags, uint64_t flags,
+                                   hsa_amd_vmem_alloc_handle_t* memoryHandle);
 
   hsa_status_t VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryHandle);
 
@@ -427,7 +423,7 @@ class Runtime {
 
   const std::vector<Agent*>& gpu_agents() { return gpu_agents_; }
 
-  const std::vector<Agent *> &aie_agents() { return aie_agents_; }
+  const std::vector<Agent*>& aie_agents() { return aie_agents_; }
 
   const std::vector<Agent*>& disabled_gpu_agents() { return disabled_gpu_agents_; }
 
@@ -451,14 +447,13 @@ class Runtime {
 
   amd::hsa::code::AmdHsaCodeManager* code_manager() { return &code_manager_; }
 
-  std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags, int agent_node_id)>&
+  std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags,
+                      int agent_node_id)>&
   system_allocator() {
     return system_allocator_;
   }
 
-  std::function<void(void*)>& system_deallocator() {
-    return system_deallocator_;
-  }
+  std::function<void(void*)>& system_deallocator() { return system_deallocator_; }
 
   const Flag& flag() const { return flag_; }
   Flag& flag() { return flag_; }
@@ -467,8 +462,7 @@ class Runtime {
 
   ExtensionEntryPoints extensions_;
 
-  hsa_status_t SetCustomSystemEventHandler(hsa_amd_system_event_callback_t callback,
-                                           void* data);
+  hsa_status_t SetCustomSystemEventHandler(hsa_amd_system_event_callback_t callback, void* data);
 
   hsa_status_t SetInternalQueueCreateNotifier(hsa_amd_runtime_queue_notifier callback,
                                               void* user_data);
@@ -483,8 +477,7 @@ class Runtime {
 
   void KfdVersion(const HsaVersionInfo& version) {
     kfd_version.version = version;
-    if (version.KernelInterfaceMajorVersion == 1 &&
-      version.KernelInterfaceMinorVersion >= 14)
+    if (version.KernelInterfaceMajorVersion == 1 && version.KernelInterfaceMinorVersion >= 14)
       kfd_version.supports_event_age = true;
 
     if (thunkLoader()->IsDXG()) {
@@ -503,13 +496,12 @@ class Runtime {
   bool XnackEnabled() const { return xnack_enabled_; }
   void XnackEnabled(bool enable) { xnack_enabled_ = enable; }
 
-  Driver &AgentDriver(DriverType drv_type) {
-    auto is_drv_type = [&](const std::unique_ptr<Driver> &d) {
+  Driver& AgentDriver(DriverType drv_type) {
+    auto is_drv_type = [&](const std::unique_ptr<Driver>& d) {
       return d->kernel_driver_type_ == drv_type;
     };
 
-    auto driver(std::find_if(agent_drivers_.begin(), agent_drivers_.end(),
-                             is_drv_type));
+    auto driver(std::find_if(agent_drivers_.begin(), agent_drivers_.end(), is_drv_type));
 
     if (driver == agent_drivers_.end()) {
       throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
@@ -568,7 +560,7 @@ class Runtime {
 
   struct AsyncEventsInfo;
   struct AsyncEventsControl {
-    AsyncEventsControl(AsyncEventsInfo *asyncInfo);
+    AsyncEventsControl(AsyncEventsInfo* asyncInfo);
     void Shutdown();
 
     hsa_signal_t wake;
@@ -577,9 +569,8 @@ class Runtime {
   };
 
   struct AsyncEvents {
-    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
-                  hsa_signal_value_t value, hsa_amd_signal_handler handler,
-                  void* arg);
+    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond, hsa_signal_value_t value,
+                  hsa_amd_signal_handler handler, void* arg);
 
     void CopyIndex(size_t dst, size_t src);
 
@@ -593,8 +584,8 @@ class Runtime {
     std::vector<hsa_signal_condition_t> cond_;
     std::vector<hsa_signal_value_t> value_;
     std::vector<hsa_amd_signal_handler> handler_;
-    std::vector<HsaEvent*> hsa_events_; //!< A list of HSA events for KFD wait
-    std::vector<uint64_t> age_;         //!< The age list for KFD wait
+    std::vector<HsaEvent*> hsa_events_;  //!< A list of HSA events for KFD wait
+    std::vector<uint64_t> age_;          //!< The age list for KFD wait
     std::vector<void*> arg_;
   };
 
@@ -608,24 +599,35 @@ class Runtime {
     HsaEvent* hsa_event;  //!< A list of HSA events for KFD wait
     uint64_t age;         //!< The age list for KFD wait
 
-    AsyncEventItem() : signal{0}, cond(HSA_SIGNAL_CONDITION_EQ), value(0),
-                      handler(nullptr), arg(nullptr), hsa_event(nullptr), age(0) {}
+    AsyncEventItem()
+        : signal{0},
+          cond(HSA_SIGNAL_CONDITION_EQ),
+          value(0),
+          handler(nullptr),
+          arg(nullptr),
+          hsa_event(nullptr),
+          age(0) {}
 
     AsyncEventItem(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t val,
-                    hsa_amd_signal_handler h, void* a)
-        : signal(sig), cond(c), value(val), handler(h), arg(a),
-          hsa_event(nullptr), age(0) {}
+                   hsa_amd_signal_handler h, void* a)
+        : signal(sig), cond(c), value(val), handler(h), arg(a), hsa_event(nullptr), age(0) {}
 
     AsyncEventItem(const AsyncEventItem& other)
-        : signal(other.signal), cond(other.cond), value(other.value),
-          handler(other.handler), arg(other.arg), hsa_event(other.hsa_event), age(other.age) {}
+        : signal(other.signal),
+          cond(other.cond),
+          value(other.value),
+          handler(other.handler),
+          arg(other.arg),
+          hsa_event(other.hsa_event),
+          age(other.age) {}
 
-    void init(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t v, hsa_amd_signal_handler h, void* a) {
-        signal = sig;
-        cond = c;
-        value = v;
-        handler = h;
-        arg = a;
+    void init(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t v,
+              hsa_amd_signal_handler h, void* a) {
+      signal = sig;
+      cond = c;
+      value = v;
+      handler = h;
+      arg = a;
     }
     // Helper operator to convert signal to Signal* for easier access
     Signal* operator->() {
@@ -637,29 +639,29 @@ class Runtime {
   };
 
   class AsyncEventsPool : private BaseShared {
-    public:
-      AsyncEventsPool() : block_size_(preallocblocks_ * minblock_) {}
-      ~AsyncEventsPool() { clear(); }
+   public:
+    AsyncEventsPool() : block_size_(preallocblocks_ * minblock_) {}
+    ~AsyncEventsPool() { clear(); }
 
-      AsyncEventItem* alloc();
-      void free(AsyncEventItem* item);
-      void clear();
+    AsyncEventItem* alloc();
+    void free(AsyncEventItem* item);
+    void clear();
 
-    private:
-      static const size_t minblock_ = 4096 / sizeof(AsyncEventItem);
-      static const size_t preallocblocks_ = 512;
-      static const size_t maxblocksize_ = 1ULL << 28;
-      HybridMutex lock_;
-      std::vector<AsyncEventItem*> free_list_;
-      std::vector<std::pair<void*, size_t>> block_list_;
-      size_t block_size_;
+   private:
+    static const size_t minblock_ = 4096 / sizeof(AsyncEventItem);
+    static const size_t preallocblocks_ = 512;
+    static const size_t maxblocksize_ = 1ULL << 28;
+    HybridMutex lock_;
+    std::vector<AsyncEventItem*> free_list_;
+    std::vector<std::pair<void*, size_t>> block_list_;
+    size_t block_size_;
   };
   // New concurrent events structure using lock-free queue
   struct ConcurrentAsyncEvents {
     ConcurrentAsyncEvents() {}
 
-    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
-                  hsa_signal_value_t value, hsa_amd_signal_handler handler, void* arg);
+    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond, hsa_signal_value_t value,
+                  hsa_amd_signal_handler handler, void* arg);
 
     void Clear();
 
@@ -675,8 +677,9 @@ class Runtime {
 
     //! Add events back to queue (for events that need to be kept)
     void AddEventsBack(const std::vector<AsyncEventItem>& events);
-  private:
-    //AsyncEventItem Queue
+
+   private:
+    // AsyncEventItem Queue
     ::rocr::MPSCQueue<AsyncEventItem*> event_queue_;
     AsyncEventsPool asyncEventPool_;
   };
@@ -792,13 +795,13 @@ class Runtime {
   std::vector<Agent*> gpu_agents_;
 
   // Agent list containing all compatible AIE agents in the platform.
-  std::vector<Agent *> aie_agents_;
+  std::vector<Agent*> aie_agents_;
 
   // Agent list containing incompletely initialized GPU agents not to be used by the process.
   std::vector<Agent*> disabled_gpu_agents_;
 
   // Agent map containing all agents indexed by their KFD node IDs.
-  std::map<uint32_t, std::vector<Agent*> > agents_by_node_;
+  std::map<uint32_t, std::vector<Agent*>> agents_by_node_;
 
   // Agent map containing all agents indexed by their KFD gpuid.
   std::map<uint32_t, Agent*> agents_by_gpuid_;
@@ -832,7 +835,9 @@ class Runtime {
   prefetch_map_t prefetch_map_;
 
   // Allocator using ::system_region_
-  std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags, int agent_node_id)> system_allocator_;
+  std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags,
+                      int agent_node_id)>
+      system_allocator_;
 
   // Deallocator using ::system_region_
   std::function<void(void*)> system_deallocator_;
@@ -899,8 +904,7 @@ class Runtime {
 
  private:
   void CheckVirtualMemApiSupport();
-  int GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle, int *drm_fd,
-                          uint64_t *cpu_addr);
+  int GetAmdgpuDeviceArgs(Agent* agent, ShareableHandle handle, int* drm_fd, uint64_t* cpu_addr);
 
   bool virtual_mem_api_supported_;
   bool xnack_enabled_;
@@ -909,10 +913,11 @@ class Runtime {
 
   struct AddressHandle {
     AddressHandle() : os_addr(nullptr), size(0), use_count(0), registered(false) {}
-    AddressHandle(void* addr, size_t _size, bool _registered) : os_addr(addr), size(_size), use_count(0), registered(_registered) {}
+    AddressHandle(void* addr, size_t _size, bool _registered)
+        : os_addr(addr), size(_size), use_count(0), registered(_registered) {}
 
     // Address returned by OS. May be different from user address when adjusted for alignment
-    void *os_addr;
+    void* os_addr;
     size_t size;
     int use_count;
     bool registered;
@@ -968,9 +973,9 @@ class Runtime {
   };
 
   struct MappedHandle {
-    MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
-                 uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle);
+    MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va, uint64_t offset,
+                 size_t size, int drm_fd, void* drm_cpu_addr, hsa_access_permission_t perm,
+                 ShareableHandle shareable_handle);
 
     MappedHandle() {}
 
@@ -991,20 +996,17 @@ class Runtime {
   hsa_status_t VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
                               uint32_t* num_agents_accessible, hsa_agent_t** accessible);
 
-  hsa_status_t VMemoryMapAllowAccess(const void *va,
-                                     hsa_access_permission_t perm,
-                                     const hsa_agent_t *agents,
-                                     size_t num_agents);
-  hsa_status_t
-  VMemorySetAccessPerHandle(void *va, MappedHandle &MappedHandle,
-                            const hsa_amd_memory_access_desc_t *desc,
-                            const size_t desc_cnt);
+  hsa_status_t VMemoryMapAllowAccess(const void* va, hsa_access_permission_t perm,
+                                     const hsa_agent_t* agents, size_t num_agents);
+  hsa_status_t VMemorySetAccessPerHandle(void* va, MappedHandle& MappedHandle,
+                                         const hsa_amd_memory_access_desc_t* desc,
+                                         const size_t desc_cnt);
 
   void InitIPCDmaBufSupport();
   bool ipc_dmabuf_supported_;
-  int  IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
-                       unsigned int numNodes, HSAuint32 *nodes,
-                       void **importAddress, HSAuint64 *importSize, bool isdmabufSysmem);
+  int IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, unsigned int numNodes,
+                      HSAuint32* nodes, void** importAddress, HSAuint64* importSize,
+                      bool isdmabufSysmem);
 };
 
 }  // namespace core

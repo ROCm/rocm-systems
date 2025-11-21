@@ -66,29 +66,17 @@ namespace rocr {
 namespace AMD {
 
 static const char* smi_event_string(uint32_t event) {
-  static const char* strings[] = {"NONE",
-                                  "VMFAULT",
-                                  "THERMAL_THROTTLE",
-                                  "GPU_PRE_RESET",
-                                  "GPU_POST_RESET",
-                                  "MIGRATE_START",
-                                  "MIGRATE_END",
-                                  "PAGE_FAULT_START",
-                                  "PAGE_FAULT_END",
-                                  "QUEUE_EVICTION",
-                                  "QUEUE_RESTORE",
-                                  "UNMAP_FROM_GPU",
-                                  "UNKNOWN"};
+  static const char* strings[] = {
+      "NONE",          "VMFAULT",        "THERMAL_THROTTLE", "GPU_PRE_RESET",  "GPU_POST_RESET",
+      "MIGRATE_START", "MIGRATE_END",    "PAGE_FAULT_START", "PAGE_FAULT_END", "QUEUE_EVICTION",
+      "QUEUE_RESTORE", "UNMAP_FROM_GPU", "UNKNOWN"};
 
   event = std::min<uint32_t>(event, sizeof(strings) / sizeof(char*) - 1);
   return strings[event];
 }
 
 static const char* smi_migrate_string(uint32_t trigger) {
-  static const char* strings[] = {"PREFETCH",
-                                  "PAGEFAULT_GPU",
-                                  "PAGEFAULT_CPU",
-                                  "TTM_EVICTION",
+  static const char* strings[] = {"PREFETCH", "PAGEFAULT_GPU", "PAGEFAULT_CPU", "TTM_EVICTION",
                                   "UNKNOWN"};
 
   trigger = std::min<uint32_t>(trigger, sizeof(strings) / sizeof(char*) - 1);
@@ -96,23 +84,15 @@ static const char* smi_migrate_string(uint32_t trigger) {
 }
 
 static const char* smi_eviction_string(uint32_t trigger) {
-  static const char* strings[] = {"SVM",
-                                  "USERPTR",
-                                  "TTM",
-                                  "SUSPEND",
-                                  "CRIU_CHECKPOINT",
-                                  "CRIU_RESTORE",
-                                  "UNKNOWN"};
+  static const char* strings[] = {"SVM",          "USERPTR", "TTM", "SUSPEND", "CRIU_CHECKPOINT",
+                                  "CRIU_RESTORE", "UNKNOWN"};
 
   trigger = std::min<uint32_t>(trigger, sizeof(strings) / sizeof(char*) - 1);
   return strings[trigger];
 }
 
 static const char* smi_unmap_string(uint32_t trigger) {
-  static const char* strings[] = {"MMU_NOTIFY",
-                                  "MMU_NOTIFY_MIGRATE",
-                                  "UNMAP_FROM_CPU",
-                                  "UNKNOWN"};
+  static const char* strings[] = {"MMU_NOTIFY", "MMU_NOTIFY_MIGRATE", "UNMAP_FROM_CPU", "UNKNOWN"};
 
   trigger = std::min<uint32_t>(trigger, sizeof(strings) / sizeof(char*) - 1);
   return strings[trigger];
@@ -395,5 +375,5 @@ std::string SvmProfileControl::format(const char* format, Args... args) {
   return std::string(&format_buffer[0]);
 }
 
-} // namespace AMD
-} // namespace rocr
+}  // namespace AMD
+}  // namespace rocr

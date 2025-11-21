@@ -83,9 +83,8 @@ extern "C" {
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT @p device_address is invalid or
  * null, or @p host_address is null.
  */
-hsa_status_t hsa_ven_amd_loader_query_host_address(
-  const void *device_address,
-  const void **host_address);
+hsa_status_t hsa_ven_amd_loader_query_host_address(const void *device_address,
+                                                   const void **host_address);
 
 /**
  * @brief The storage type of the code object that is backing loaded memory
@@ -221,8 +220,8 @@ typedef struct hsa_ven_amd_loader_segment_descriptor_s {
  * segment descriptors.
  */
 hsa_status_t hsa_ven_amd_loader_query_segment_descriptors(
-  hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
-  size_t *num_segment_descriptors);
+    hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
+    size_t *num_segment_descriptors);
 
 /**
  * @brief Obtains the handle of executable to which the device address belongs.
@@ -238,9 +237,8 @@ hsa_status_t hsa_ven_amd_loader_query_segment_descriptors(
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT The input is invalid or there
  * is no exectuable found for this kernel code object.
  */
-hsa_status_t hsa_ven_amd_loader_query_executable(
-  const void *device_address,
-  hsa_executable_t *executable);
+hsa_status_t hsa_ven_amd_loader_query_executable(const void *device_address,
+                                                 hsa_executable_t *executable);
 
 //===----------------------------------------------------------------------===//
 
@@ -271,12 +269,11 @@ hsa_status_t hsa_ven_amd_loader_query_executable(
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p callback is NULL.
  */
 hsa_status_t hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
-  hsa_executable_t executable,
-  hsa_status_t (*callback)(
     hsa_executable_t executable,
-    hsa_loaded_code_object_t loaded_code_object,
-    void *data),
-  void *data);
+    hsa_status_t (*callback)(hsa_executable_t executable,
+                             hsa_loaded_code_object_t loaded_code_object,
+                             void *data),
+    void *data);
 
 /**
  * @brief Loaded code object kind.
@@ -315,8 +312,8 @@ typedef enum hsa_ven_amd_loader_loaded_code_object_info_e {
    */
   HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_AGENT = 3,
   /**
-   * The storage type of the code object reader used to load the loaded code object.
-   * The type of this attribute is ::uint32_t interpreted as a
+   * The storage type of the code object reader used to load the loaded code
+   * object. The type of this attribute is ::uint32_t interpreted as a
    * ::hsa_ven_amd_loader_code_object_storage_type_t.
    */
   HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE = 4,
@@ -327,7 +324,8 @@ typedef enum hsa_ven_amd_loader_loaded_code_object_info_e {
    * ::HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY. The type of this
    * attribute is ::uint64_t.
    */
-  HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE = 5,
+  HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE =
+      5,
   /**
    * The memory size in bytes of the code object that was loaaded.
    * The value of this attribute is only defined if
@@ -335,7 +333,8 @@ typedef enum hsa_ven_amd_loader_loaded_code_object_info_e {
    * ::HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY. The type of this
    * attribute is ::uint64_t.
    */
-  HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE = 6,
+  HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE =
+      6,
   /**
    * The file descriptor of the code object that was loaaded.
    * The value of this attribute is only defined if
@@ -439,9 +438,8 @@ typedef enum hsa_ven_amd_loader_loaded_code_object_info_e {
  * loaded code object attribute, or @p value is NULL.
  */
 hsa_status_t hsa_ven_amd_loader_loaded_code_object_get_info(
-  hsa_loaded_code_object_t loaded_code_object,
-  hsa_ven_amd_loader_loaded_code_object_info_t attribute,
-  void *value);
+    hsa_loaded_code_object_t loaded_code_object,
+    hsa_ven_amd_loader_loaded_code_object_info_t attribute, void *value);
 
 //===----------------------------------------------------------------------===//
 
@@ -486,9 +484,7 @@ hsa_status_t hsa_ven_amd_loader_loaded_code_object_get_info(
  */
 hsa_status_t
 hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
-    hsa_file_t file,
-    size_t offset,
-    size_t size,
+    hsa_file_t file, size_t offset, size_t size,
     hsa_code_object_reader_t *code_object_reader);
 
 //===----------------------------------------------------------------------===//
@@ -517,12 +513,9 @@ hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
  * initialized.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p callback is NULL.
-*/
-hsa_status_t
-hsa_ven_amd_loader_iterate_executables(
-    hsa_status_t (*callback)(
-      hsa_executable_t executable,
-      void *data),
+ */
+hsa_status_t hsa_ven_amd_loader_iterate_executables(
+    hsa_status_t (*callback)(hsa_executable_t executable, void *data),
     void *data);
 
 //===----------------------------------------------------------------------===//
@@ -537,16 +530,14 @@ hsa_ven_amd_loader_iterate_executables(
  */
 typedef struct hsa_ven_amd_loader_1_00_pfn_s {
   hsa_status_t (*hsa_ven_amd_loader_query_host_address)(
-    const void *device_address,
-    const void **host_address);
+      const void *device_address, const void **host_address);
 
   hsa_status_t (*hsa_ven_amd_loader_query_segment_descriptors)(
-    hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
-    size_t *num_segment_descriptors);
+      hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
+      size_t *num_segment_descriptors);
 
   hsa_status_t (*hsa_ven_amd_loader_query_executable)(
-    const void *device_address,
-    hsa_executable_t *executable);
+      const void *device_address, hsa_executable_t *executable);
 } hsa_ven_amd_loader_1_00_pfn_t;
 
 /**
@@ -554,29 +545,25 @@ typedef struct hsa_ven_amd_loader_1_00_pfn_s {
  */
 typedef struct hsa_ven_amd_loader_1_01_pfn_s {
   hsa_status_t (*hsa_ven_amd_loader_query_host_address)(
-    const void *device_address,
-    const void **host_address);
+      const void *device_address, const void **host_address);
 
   hsa_status_t (*hsa_ven_amd_loader_query_segment_descriptors)(
-    hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
-    size_t *num_segment_descriptors);
+      hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
+      size_t *num_segment_descriptors);
 
   hsa_status_t (*hsa_ven_amd_loader_query_executable)(
-    const void *device_address,
-    hsa_executable_t *executable);
+      const void *device_address, hsa_executable_t *executable);
 
   hsa_status_t (*hsa_ven_amd_loader_executable_iterate_loaded_code_objects)(
-    hsa_executable_t executable,
-    hsa_status_t (*callback)(
       hsa_executable_t executable,
-      hsa_loaded_code_object_t loaded_code_object,
-      void *data),
-    void *data);
+      hsa_status_t (*callback)(hsa_executable_t executable,
+                               hsa_loaded_code_object_t loaded_code_object,
+                               void *data),
+      void *data);
 
   hsa_status_t (*hsa_ven_amd_loader_loaded_code_object_get_info)(
-    hsa_loaded_code_object_t loaded_code_object,
-    hsa_ven_amd_loader_loaded_code_object_info_t attribute,
-    void *value);
+      hsa_loaded_code_object_t loaded_code_object,
+      hsa_ven_amd_loader_loaded_code_object_info_t attribute, void *value);
 } hsa_ven_amd_loader_1_01_pfn_t;
 
 /**
@@ -584,35 +571,29 @@ typedef struct hsa_ven_amd_loader_1_01_pfn_s {
  */
 typedef struct hsa_ven_amd_loader_1_02_pfn_s {
   hsa_status_t (*hsa_ven_amd_loader_query_host_address)(
-    const void *device_address,
-    const void **host_address);
+      const void *device_address, const void **host_address);
 
   hsa_status_t (*hsa_ven_amd_loader_query_segment_descriptors)(
-    hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
-    size_t *num_segment_descriptors);
+      hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
+      size_t *num_segment_descriptors);
 
   hsa_status_t (*hsa_ven_amd_loader_query_executable)(
-    const void *device_address,
-    hsa_executable_t *executable);
+      const void *device_address, hsa_executable_t *executable);
 
   hsa_status_t (*hsa_ven_amd_loader_executable_iterate_loaded_code_objects)(
-    hsa_executable_t executable,
-    hsa_status_t (*callback)(
       hsa_executable_t executable,
-      hsa_loaded_code_object_t loaded_code_object,
-      void *data),
-    void *data);
+      hsa_status_t (*callback)(hsa_executable_t executable,
+                               hsa_loaded_code_object_t loaded_code_object,
+                               void *data),
+      void *data);
 
   hsa_status_t (*hsa_ven_amd_loader_loaded_code_object_get_info)(
-    hsa_loaded_code_object_t loaded_code_object,
-    hsa_ven_amd_loader_loaded_code_object_info_t attribute,
-    void *value);
+      hsa_loaded_code_object_t loaded_code_object,
+      hsa_ven_amd_loader_loaded_code_object_info_t attribute, void *value);
 
-  hsa_status_t
-    (*hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size)(
-      hsa_file_t file,
-      size_t offset,
-      size_t size,
+  hsa_status_t (
+      *hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size)(
+      hsa_file_t file, size_t offset, size_t size,
       hsa_code_object_reader_t *code_object_reader);
 } hsa_ven_amd_loader_1_02_pfn_t;
 
@@ -621,42 +602,33 @@ typedef struct hsa_ven_amd_loader_1_02_pfn_s {
  */
 typedef struct hsa_ven_amd_loader_1_03_pfn_s {
   hsa_status_t (*hsa_ven_amd_loader_query_host_address)(
-    const void *device_address,
-    const void **host_address);
+      const void *device_address, const void **host_address);
 
   hsa_status_t (*hsa_ven_amd_loader_query_segment_descriptors)(
-    hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
-    size_t *num_segment_descriptors);
+      hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
+      size_t *num_segment_descriptors);
 
   hsa_status_t (*hsa_ven_amd_loader_query_executable)(
-    const void *device_address,
-    hsa_executable_t *executable);
+      const void *device_address, hsa_executable_t *executable);
 
   hsa_status_t (*hsa_ven_amd_loader_executable_iterate_loaded_code_objects)(
-    hsa_executable_t executable,
-    hsa_status_t (*callback)(
       hsa_executable_t executable,
-      hsa_loaded_code_object_t loaded_code_object,
-      void *data),
-    void *data);
+      hsa_status_t (*callback)(hsa_executable_t executable,
+                               hsa_loaded_code_object_t loaded_code_object,
+                               void *data),
+      void *data);
 
   hsa_status_t (*hsa_ven_amd_loader_loaded_code_object_get_info)(
-    hsa_loaded_code_object_t loaded_code_object,
-    hsa_ven_amd_loader_loaded_code_object_info_t attribute,
-    void *value);
+      hsa_loaded_code_object_t loaded_code_object,
+      hsa_ven_amd_loader_loaded_code_object_info_t attribute, void *value);
 
-  hsa_status_t
-    (*hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size)(
-      hsa_file_t file,
-      size_t offset,
-      size_t size,
+  hsa_status_t (
+      *hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size)(
+      hsa_file_t file, size_t offset, size_t size,
       hsa_code_object_reader_t *code_object_reader);
 
-  hsa_status_t
-    (*hsa_ven_amd_loader_iterate_executables)(
-      hsa_status_t (*callback)(
-        hsa_executable_t executable,
-        void *data),
+  hsa_status_t (*hsa_ven_amd_loader_iterate_executables)(
+      hsa_status_t (*callback)(hsa_executable_t executable, void *data),
       void *data);
 } hsa_ven_amd_loader_1_03_pfn_t;
 

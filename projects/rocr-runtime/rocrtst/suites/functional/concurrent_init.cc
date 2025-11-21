@@ -78,8 +78,7 @@ static const int NumOfThreads = 100;  // Number of thread to be created
       EXPECT_EQ(HSA_STATUS_SUCCESS, err) << msg;                                                   \
       return (err);                                                                                \
     }                                                                                              \
-  \
-}
+  }
 
 ConcurrentInitTest::ConcurrentInitTest(void) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
@@ -91,8 +90,7 @@ ConcurrentInitTest::ConcurrentInitTest(void) : TestBase() {
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
-ConcurrentInitTest::~ConcurrentInitTest(void) {
-}
+ConcurrentInitTest::~ConcurrentInitTest(void) {}
 
 // Compare required profile for this test case with what we're actually
 // running on
@@ -113,9 +111,7 @@ void ConcurrentInitTest::Run(void) {
 
 // Compare required profile for this test case with what we're actually
 // running on
-void ConcurrentInitTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void ConcurrentInitTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void ConcurrentInitTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -135,7 +131,8 @@ void ConcurrentInitTest::TestConcurrentInit(void) {
   pthread_t ThreadId[NumOfThreads];
   pthread_attr_t attr;
   pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);  // Setting the attribute to PTHREAD_CREATE_JOINABLE
+  pthread_attr_setdetachstate(
+      &attr, PTHREAD_CREATE_JOINABLE);  // Setting the attribute to PTHREAD_CREATE_JOINABLE
 
   // This is to create threads concurrently
   // HSA runtime will be initialized for each thread

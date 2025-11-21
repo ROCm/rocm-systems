@@ -43,23 +43,24 @@
  *
  */
 
+#include "rocm_smi_test/functional/frequencies_read.h"
+
 #include <cstdint>
 #include <iostream>
 #include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/frequencies_read.h"
 #include "rocm_smi_test/test_common.h"
 
 TestFrequenciesRead::TestFrequenciesRead() : TestBase() {
   set_title("RSMI Frequencies Read Test");
-  set_description("The Frequency Read tests verifies that the "
-              "available and current frequency levels can be read properly.");
+  set_description(
+      "The Frequency Read tests verifies that the "
+      "available and current frequency levels can be read properly.");
 }
 
-TestFrequenciesRead::~TestFrequenciesRead(void) {
-}
+TestFrequenciesRead::~TestFrequenciesRead(void) {}
 
 void TestFrequenciesRead::SetUp(void) {
   TestBase::SetUp();
@@ -67,9 +68,7 @@ void TestFrequenciesRead::SetUp(void) {
   return;
 }
 
-void TestFrequenciesRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestFrequenciesRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestFrequenciesRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -82,19 +81,17 @@ void TestFrequenciesRead::Close() {
   TestBase::Close();
 }
 
-
 static void print_frequencies(rsmi_frequencies_t *f, uint32_t *l = nullptr) {
   assert(f != nullptr);
   for (uint32_t clk_i = 0; clk_i < f->num_supported; ++clk_i) {
     std::string clk_i_str;
     if (f->has_deep_sleep) {
-      clk_i_str = (clk_i == 0) ? "S" : std::to_string(clk_i-1);
+      clk_i_str = (clk_i == 0) ? "S" : std::to_string(clk_i - 1);
     } else {
       clk_i_str = std::to_string(clk_i);
     }
-    std::cout << "\t**  " <<
-      std::setw(2) << std::right << clk_i_str << ": " <<
-      std::setw(11) << std::right << f->frequency[clk_i];
+    std::cout << "\t**  " << std::setw(2) << std::right << clk_i_str << ": " << std::setw(11)
+              << std::right << f->frequency[clk_i];
     if (l != nullptr) {
       std::cout << "T/s; x" << l[clk_i];
     } else {
@@ -124,8 +121,7 @@ void TestFrequenciesRead::Run(void) {
       auto freq_output = [&](rsmi_clk_type_t t, const char *name) {
         err = rsmi_dev_gpu_clk_freq_get(i, t, &f);
         if (err == RSMI_STATUS_NOT_SUPPORTED) {
-          std::cout << "\t**Get " << name <<
-                               ": Not supported on this machine" << std::endl;
+          std::cout << "\t**Get " << name << ": Not supported on this machine" << std::endl;
           // Verify api support checking functionality is working
           err = rsmi_dev_gpu_clk_freq_get(i, t, nullptr);
           ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
@@ -134,7 +130,8 @@ void TestFrequenciesRead::Run(void) {
 
         // special driver issue, shouldn't normally occur
         if (err == RSMI_STATUS_UNEXPECTED_DATA) {
-          std::cerr << "WARN: Clock file [" << FreqEnumToStr(t) << "] exists on device [" << i << "] but empty!" << std::endl;
+          std::cerr << "WARN: Clock file [" << FreqEnumToStr(t) << "] exists on device [" << i
+                    << "] but empty!" << std::endl;
           std::cerr << "      Likely a driver issue!" << std::endl;
           return;
         }
@@ -160,8 +157,7 @@ void TestFrequenciesRead::Run(void) {
 
       err = rsmi_dev_pci_bandwidth_get(i, &b);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine"
-                                                              << std::endl;
+        std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine" << std::endl;
         // Verify api support checking functionality is working
         err = rsmi_dev_pci_bandwidth_get(i, nullptr);
         ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
@@ -175,8 +171,7 @@ void TestFrequenciesRead::Run(void) {
           err = rsmi_dev_pci_bandwidth_get(i, nullptr);
           if (err != rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
             ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
-          }
-          else {
+          } else {
             auto status_string("");
             rsmi_status_string(err, &status_string);
             std::cout << "\t\t** rsmi_dev_pci_bandwidth_get(): " << status_string << "\n";

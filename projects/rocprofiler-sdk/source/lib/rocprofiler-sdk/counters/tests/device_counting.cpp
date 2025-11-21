@@ -133,7 +133,8 @@ check_output_created(rocprofiler_context_id_t,
         auto* header = headers[i];
         if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
            header->kind == ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER)
-        {}
+        {
+        }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
                 header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
@@ -218,10 +219,10 @@ submitPacket(hsa_queue_t* queue, const void* packet)
         sched_yield();
     }
 
-    const uint32_t slot_idx = (uint32_t)(write_idx % queue->size);
+    const uint32_t slot_idx = (uint32_t) (write_idx % queue->size);
     // NOLINTBEGIN(performance-no-int-to-ptr)
     uint32_t* queue_slot =
-        reinterpret_cast<uint32_t*>((uintptr_t)(queue->base_address) + (slot_idx * slot_size_b));
+        reinterpret_cast<uint32_t*>((uintptr_t) (queue->base_address) + (slot_idx * slot_size_b));
     const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packet);
 
     // Copy buffered commands into the queue slot.

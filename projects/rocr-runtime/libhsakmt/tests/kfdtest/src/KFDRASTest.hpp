@@ -28,29 +28,29 @@
 
 // To be removed when amdgpu_drm.h updated with those definitions
 #ifndef AMDGPU_INFO_RAS_ENABLED_FEATURES
-#define AMDGPU_INFO_RAS_ENABLED_FEATURES    0x20
+#define AMDGPU_INFO_RAS_ENABLED_FEATURES 0x20
 
-#define AMDGPU_INFO_RAS_ENABLED_UMC         (1 << 0)
-#define AMDGPU_INFO_RAS_ENABLED_SDMA        (1 << 1)
-#define AMDGPU_INFO_RAS_ENABLED_GFX         (1 << 2)
+#define AMDGPU_INFO_RAS_ENABLED_UMC (1 << 0)
+#define AMDGPU_INFO_RAS_ENABLED_SDMA (1 << 1)
+#define AMDGPU_INFO_RAS_ENABLED_GFX (1 << 2)
 #endif
 
-class KFDRASTest :  public KFDBaseComponentTest {
+class KFDRASTest : public KFDBaseComponentTest {
  public:
-    KFDRASTest(void) {}
-    ~KFDRASTest(void) {}
+  KFDRASTest(void) {}
+  ~KFDRASTest(void) {}
 
-    // @brief Executed before every test in KFDRASTest.
-    virtual void SetUp();
-    // @brief Executed after every test in KFDRASTest.
-    virtual void TearDown();
+  // @brief Executed before every test in KFDRASTest.
+  virtual void SetUp();
+  // @brief Executed after every test in KFDRASTest.
+  virtual void TearDown();
 
  protected:
-    static const unsigned int EVENT_TIMEOUT = 5000;  // 5 seconds
-    HsaEvent* m_pRasEvent;
-    HSAint32 m_defaultGPUNode;
-    FILE* m_pFile;
-    bool m_setupStatus;
+  static const unsigned int EVENT_TIMEOUT = 5000;  // 5 seconds
+  HsaEvent* m_pRasEvent;
+  HSAint32 m_defaultGPUNode;
+  FILE* m_pFile;
+  bool m_setupStatus;
 };
 
 #endif  // __KFD_RAS_TEST__H__

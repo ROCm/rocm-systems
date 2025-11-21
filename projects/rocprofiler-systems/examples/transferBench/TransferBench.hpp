@@ -4000,7 +4000,7 @@ RunExecutor(int const iteration, ConfigOptions const& cfg, ExeDevice const& exeD
 
 ErrResult::ErrResult(ErrType err)
 : errType(err)
-, errMsg(""){};
+, errMsg("") {};
 
 ErrResult::ErrResult(hipError_t err)
 {

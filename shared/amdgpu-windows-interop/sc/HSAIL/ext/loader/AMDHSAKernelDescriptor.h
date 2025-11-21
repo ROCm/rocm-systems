@@ -48,28 +48,27 @@
 
 // Gets offset of specified member in specified type.
 #ifndef offsetof
-#define offsetof(TYPE, MEMBER) ((size_t)&((TYPE*)0)->MEMBER)
+#define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *)0)->MEMBER)
 #endif // offsetof
 
 // Creates enumeration entries used for packing bits into integers. Enumeration
 // entries include bit shift amount, bit width, and bit mask.
 #ifndef AMDHSA_BITS_ENUM_ENTRY
-#define AMDHSA_BITS_ENUM_ENTRY(NAME, SHIFT, WIDTH) \
-  NAME ## _SHIFT = (SHIFT),                        \
-  NAME ## _WIDTH = (WIDTH),                        \
+#define AMDHSA_BITS_ENUM_ENTRY(NAME, SHIFT, WIDTH)                             \
+  NAME##_SHIFT = (SHIFT), NAME##_WIDTH = (WIDTH),                              \
   NAME = (((1 << (WIDTH)) - 1) << (SHIFT))
 #endif // AMDHSA_BITS_ENUM_ENTRY
 
 // Gets bits for specified bit mask from specified source.
 #ifndef AMDHSA_BITS_GET
-#define AMDHSA_BITS_GET(SRC, MSK) ((SRC & MSK) >> MSK ## _SHIFT)
+#define AMDHSA_BITS_GET(SRC, MSK) ((SRC & MSK) >> MSK##_SHIFT)
 #endif // AMDHSA_BITS_GET
 
 // Sets bits for specified bit mask in specified destination.
 #ifndef AMDHSA_BITS_SET
-#define AMDHSA_BITS_SET(DST, MSK, VAL)  \
-  DST &= ~MSK;                          \
-  DST |= ((VAL << MSK ## _SHIFT) & MSK)
+#define AMDHSA_BITS_SET(DST, MSK, VAL)                                         \
+  DST &= ~MSK;                                                                 \
+  DST |= ((VAL << MSK##_SHIFT) & MSK)
 #endif // AMDHSA_BITS_SET
 
 namespace llvm {
@@ -100,8 +99,8 @@ enum : uint8_t {
 };
 
 // Compute program resource register 1. Must match hardware definition.
-#define COMPUTE_PGM_RSRC1(NAME, SHIFT, WIDTH) \
-  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC1_ ## NAME, SHIFT, WIDTH)
+#define COMPUTE_PGM_RSRC1(NAME, SHIFT, WIDTH)                                  \
+  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC1_##NAME, SHIFT, WIDTH)
 enum : int32_t {
   COMPUTE_PGM_RSRC1(GRANULATED_WORKITEM_VGPR_COUNT, 0, 6),
   COMPUTE_PGM_RSRC1(GRANULATED_WAVEFRONT_SGPR_COUNT, 6, 4),
@@ -116,7 +115,7 @@ enum : int32_t {
   COMPUTE_PGM_RSRC1(ENABLE_IEEE_MODE, 23, 1),
   COMPUTE_PGM_RSRC1(BULKY, 24, 1),
   COMPUTE_PGM_RSRC1(CDBG_USER, 25, 1),
-  COMPUTE_PGM_RSRC1(FP16_OVFL, 26, 1),    // GFX9+
+  COMPUTE_PGM_RSRC1(FP16_OVFL, 26, 1), // GFX9+
   COMPUTE_PGM_RSRC1(RESERVED0, 27, 2),
   COMPUTE_PGM_RSRC1(WGP_MODE, 29, 1),     // GFX10+
   COMPUTE_PGM_RSRC1(MEM_ORDERED, 30, 1),  // GFX10+
@@ -125,8 +124,8 @@ enum : int32_t {
 #undef COMPUTE_PGM_RSRC1
 
 // Compute program resource register 2. Must match hardware definition.
-#define COMPUTE_PGM_RSRC2(NAME, SHIFT, WIDTH) \
-  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC2_ ## NAME, SHIFT, WIDTH)
+#define COMPUTE_PGM_RSRC2(NAME, SHIFT, WIDTH)                                  \
+  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC2_##NAME, SHIFT, WIDTH)
 enum : int32_t {
   COMPUTE_PGM_RSRC2(ENABLE_PRIVATE_SEGMENT, 0, 1),
   COMPUTE_PGM_RSRC2(USER_SGPR_COUNT, 1, 5),
@@ -152,8 +151,8 @@ enum : int32_t {
 
 // Compute program resource register 3 for GFX90A+. Must match hardware
 // definition.
-#define COMPUTE_PGM_RSRC3_GFX90A(NAME, SHIFT, WIDTH) \
-  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC3_GFX90A_ ## NAME, SHIFT, WIDTH)
+#define COMPUTE_PGM_RSRC3_GFX90A(NAME, SHIFT, WIDTH)                           \
+  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC3_GFX90A_##NAME, SHIFT, WIDTH)
 enum : int32_t {
   COMPUTE_PGM_RSRC3_GFX90A(ACCUM_OFFSET, 0, 6),
   COMPUTE_PGM_RSRC3_GFX90A(RESERVED0, 6, 10),
@@ -164,8 +163,8 @@ enum : int32_t {
 
 // Compute program resource register 3 for GFX10+. Must match hardware
 // definition.
-#define COMPUTE_PGM_RSRC3_GFX10_PLUS(NAME, SHIFT, WIDTH) \
-  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC3_GFX10_PLUS_ ## NAME, SHIFT, WIDTH)
+#define COMPUTE_PGM_RSRC3_GFX10_PLUS(NAME, SHIFT, WIDTH)                       \
+  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC3_GFX10_PLUS_##NAME, SHIFT, WIDTH)
 enum : int32_t {
   COMPUTE_PGM_RSRC3_GFX10_PLUS(SHARED_VGPR_COUNT, 0, 4), // GFX10+
   COMPUTE_PGM_RSRC3_GFX10_PLUS(INST_PREF_SIZE, 4, 6),
@@ -177,8 +176,8 @@ enum : int32_t {
 #undef COMPUTE_PGM_RSRC3_GFX10_PLUS
 
 // Kernel code properties. Must be kept backwards compatible.
-#define KERNEL_CODE_PROPERTY(NAME, SHIFT, WIDTH) \
-  AMDHSA_BITS_ENUM_ENTRY(KERNEL_CODE_PROPERTY_ ## NAME, SHIFT, WIDTH)
+#define KERNEL_CODE_PROPERTY(NAME, SHIFT, WIDTH)                               \
+  AMDHSA_BITS_ENUM_ENTRY(KERNEL_CODE_PROPERTY_##NAME, SHIFT, WIDTH)
 enum : int32_t {
   KERNEL_CODE_PROPERTY(ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 0, 1),
   KERNEL_CODE_PROPERTY(ENABLE_SGPR_DISPATCH_PTR, 1, 1),
@@ -223,9 +222,8 @@ enum : uint32_t {
   RESERVED2_OFFSET = 58,
 };
 
-static_assert(
-    sizeof(kernel_descriptor_t) == 64,
-    "invalid size for kernel_descriptor_t");
+static_assert(sizeof(kernel_descriptor_t) == 64,
+              "invalid size for kernel_descriptor_t");
 static_assert(offsetof(kernel_descriptor_t, group_segment_fixed_size) ==
                   GROUP_SEGMENT_FIXED_SIZE_OFFSET,
               "invalid offset for group_segment_fixed_size");

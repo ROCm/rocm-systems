@@ -52,9 +52,9 @@ public:
     TaskGroup();
     ~TaskGroup() override;
 
-    TaskGroup(const TaskGroup&)     = delete;
-    TaskGroup(TaskGroup&&) noexcept = delete;
-    TaskGroup& operator=(const TaskGroup&) = delete;
+    TaskGroup(const TaskGroup&)                = delete;
+    TaskGroup(TaskGroup&&) noexcept            = delete;
+    TaskGroup& operator=(const TaskGroup&)     = delete;
     TaskGroup& operator=(TaskGroup&&) noexcept = delete;
 
     void exec(std::function<void()>&&);

@@ -52,9 +52,9 @@ struct tool_buffer_tracing_kernel_dispatch_ext_record_t
         const tool_buffer_tracing_kernel_dispatch_ext_record_t&) = default;
     tool_buffer_tracing_kernel_dispatch_ext_record_t(
         tool_buffer_tracing_kernel_dispatch_ext_record_t&&) noexcept = default;
-    tool_buffer_tracing_kernel_dispatch_ext_record_t& operator       =(
+    tool_buffer_tracing_kernel_dispatch_ext_record_t& operator=(
         const tool_buffer_tracing_kernel_dispatch_ext_record_t&) = default;
-    tool_buffer_tracing_kernel_dispatch_ext_record_t& operator       =(
+    tool_buffer_tracing_kernel_dispatch_ext_record_t& operator=(
         tool_buffer_tracing_kernel_dispatch_ext_record_t&&) noexcept = default;
 
     rocprofiler_stream_id_t stream_id = {.handle = 0};
@@ -77,9 +77,9 @@ struct tool_buffer_tracing_memory_copy_ext_record_t
         const tool_buffer_tracing_memory_copy_ext_record_t&) = default;
     tool_buffer_tracing_memory_copy_ext_record_t(
         tool_buffer_tracing_memory_copy_ext_record_t&&) noexcept = default;
-    tool_buffer_tracing_memory_copy_ext_record_t& operator       =(
+    tool_buffer_tracing_memory_copy_ext_record_t& operator=(
         const tool_buffer_tracing_memory_copy_ext_record_t&) = default;
-    tool_buffer_tracing_memory_copy_ext_record_t& operator       =(
+    tool_buffer_tracing_memory_copy_ext_record_t& operator=(
         tool_buffer_tracing_memory_copy_ext_record_t&&) noexcept = default;
 
     rocprofiler_stream_id_t stream_id = {};
@@ -102,9 +102,9 @@ struct tool_buffer_tracing_memory_allocation_ext_record_t
         const tool_buffer_tracing_memory_allocation_ext_record_t&) = default;
     tool_buffer_tracing_memory_allocation_ext_record_t(
         tool_buffer_tracing_memory_allocation_ext_record_t&&) noexcept = default;
-    tool_buffer_tracing_memory_allocation_ext_record_t& operator       =(
+    tool_buffer_tracing_memory_allocation_ext_record_t& operator=(
         const tool_buffer_tracing_memory_allocation_ext_record_t&) = default;
-    tool_buffer_tracing_memory_allocation_ext_record_t& operator       =(
+    tool_buffer_tracing_memory_allocation_ext_record_t& operator=(
         tool_buffer_tracing_memory_allocation_ext_record_t&&) noexcept = default;
 
     rocprofiler_stream_id_t stream_id = {};
@@ -126,9 +126,9 @@ struct tool_buffer_tracing_hip_api_ext_record_t : rocprofiler_buffer_tracing_hip
         default;
     tool_buffer_tracing_hip_api_ext_record_t(tool_buffer_tracing_hip_api_ext_record_t&&) noexcept =
         default;
-    tool_buffer_tracing_hip_api_ext_record_t& operator       =(
+    tool_buffer_tracing_hip_api_ext_record_t& operator=(
         const tool_buffer_tracing_hip_api_ext_record_t&) = default;
-    tool_buffer_tracing_hip_api_ext_record_t& operator       =(
+    tool_buffer_tracing_hip_api_ext_record_t& operator=(
         tool_buffer_tracing_hip_api_ext_record_t&&) noexcept = default;
 
     rocprofiler_stream_id_t stream_id = {};

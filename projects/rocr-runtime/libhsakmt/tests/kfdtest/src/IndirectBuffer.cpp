@@ -27,27 +27,26 @@
 #include "PM4Packet.hpp"
 
 
-IndirectBuffer::IndirectBuffer(PACKETTYPE type,  unsigned int sizeInDWords, unsigned int NodeId)
-    :m_NumOfPackets(0), m_MaxSize(sizeInDWords), m_ActualSize(0), m_PacketTypeAllowed(type) {
-    m_IndirectBuf = new HsaMemoryBuffer(sizeInDWords*sizeof(unsigned int), NodeId, true/*zero*/,
-                                        false/*local*/, true/*exec*/, false/*isScratch*/,
-                                        false/*isReadOnly*/, true/*isUncached*/);
+IndirectBuffer::IndirectBuffer(PACKETTYPE type, unsigned int sizeInDWords, unsigned int NodeId)
+    : m_NumOfPackets(0), m_MaxSize(sizeInDWords), m_ActualSize(0), m_PacketTypeAllowed(type) {
+  m_IndirectBuf = new HsaMemoryBuffer(sizeInDWords * sizeof(unsigned int), NodeId, true /*zero*/,
+                                      false /*local*/, true /*exec*/, false /*isScratch*/,
+                                      false /*isReadOnly*/, true /*isUncached*/);
 }
 
-IndirectBuffer::~IndirectBuffer(void) {
-    delete m_IndirectBuf;
-}
+IndirectBuffer::~IndirectBuffer(void) { delete m_IndirectBuf; }
 
-uint32_t *IndirectBuffer::AddPacket(const BasePacket &packet) {
-    EXPECT_EQ(packet.PacketType(), m_PacketTypeAllowed) << "Cannot add a packet since packet type doesn't match queue";
+uint32_t* IndirectBuffer::AddPacket(const BasePacket& packet) {
+  EXPECT_EQ(packet.PacketType(), m_PacketTypeAllowed)
+      << "Cannot add a packet since packet type doesn't match queue";
 
-    unsigned int writePtr = m_ActualSize;
+  unsigned int writePtr = m_ActualSize;
 
-    EXPECT_GE(m_MaxSize, packet.SizeInDWords() + writePtr) << "Cannot add a packet, not enough room";
+  EXPECT_GE(m_MaxSize, packet.SizeInDWords() + writePtr) << "Cannot add a packet, not enough room";
 
-    memcpy(m_IndirectBuf->As<unsigned int*>() + writePtr , packet.GetPacket(),  packet.SizeInBytes());
-    m_ActualSize += packet.SizeInDWords();
-    m_NumOfPackets++;
+  memcpy(m_IndirectBuf->As<unsigned int*>() + writePtr, packet.GetPacket(), packet.SizeInBytes());
+  m_ActualSize += packet.SizeInDWords();
+  m_NumOfPackets++;
 
-    return m_IndirectBuf->As<HSAuint32 *>() + writePtr;
+  return m_IndirectBuf->As<HSAuint32*>() + writePtr;
 }

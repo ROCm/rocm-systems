@@ -35,4 +35,4 @@ union att_header_packet_t {
   uint64_t raw;
 };
 
-}
+}  // namespace rocprofiler

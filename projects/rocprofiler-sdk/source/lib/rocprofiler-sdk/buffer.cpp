@@ -262,7 +262,8 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 }  // namespace buffer
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_create_buffer(rocprofiler_context_id_t        context,
                           size_t                          size,

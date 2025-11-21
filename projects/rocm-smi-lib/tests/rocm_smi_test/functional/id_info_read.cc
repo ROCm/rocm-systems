@@ -41,25 +41,26 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/id_info_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/id_info_read.h"
 #include "rocm_smi_test/test_common.h"
 
 TestIdInfoRead::TestIdInfoRead() : TestBase() {
   set_title("RSMI ID Info Read Test");
-  set_description("This test verifies that ID information such as the "
-             "device, subsystem and vendor IDs can be read properly.");
+  set_description(
+      "This test verifies that ID information such as the "
+      "device, subsystem and vendor IDs can be read properly.");
 }
 
-TestIdInfoRead::~TestIdInfoRead(void) {
-}
+TestIdInfoRead::~TestIdInfoRead(void) {}
 
 void TestIdInfoRead::SetUp(void) {
   TestBase::SetUp();
@@ -67,9 +68,7 @@ void TestIdInfoRead::SetUp(void) {
   return;
 }
 
-void TestIdInfoRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestIdInfoRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestIdInfoRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -104,8 +103,8 @@ void TestIdInfoRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     std::string temp_val = "Hello World111111111111111111111111111111";
     memset(fix_market_name, '\0', kBufferLen);
-    temp_val.copy(fix_market_name, kBufferLen-1);
-    fix_market_name[kBufferLen-1] = '\0';
+    temp_val.copy(fix_market_name, kBufferLen - 1);
+    fix_market_name[kBufferLen - 1] = '\0';
 
     IF_VERB(STANDARD) {
       std::cout << "\t*************************" << std::endl;
@@ -122,9 +121,7 @@ void TestIdInfoRead::Run(void) {
     } else {
       CHK_ERR_ASRT(err)
 
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Device ID: 0x" << std::hex << id << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Device ID: 0x" << std::hex << id << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_id_get(i, nullptr);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
@@ -139,9 +136,7 @@ void TestIdInfoRead::Run(void) {
     } else {
       CHK_ERR_ASRT(err)
 
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Dev.Rev.ID: 0x" << std::hex << id << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Dev.Rev.ID: 0x" << std::hex << id << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_revision_get(i, nullptr);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
@@ -150,8 +145,7 @@ void TestIdInfoRead::Run(void) {
     // Verify api support checking functionality is working
     err = rsmi_dev_market_name_get(i, small_buffer, kSize5);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**Device Marketing name (libdrm) not found on this system." <<
-                                                                    std::endl;
+      std::cout << "\t**Device Marketing name (libdrm) not found on this system." << std::endl;
     } else {
       IF_VERB(STANDARD) {
         std::cout << "\t**[Test small_buffer] Device Marketing name"
@@ -166,8 +160,7 @@ void TestIdInfoRead::Run(void) {
 
     err = rsmi_dev_market_name_get(i, fix_market_name, kBufferLen);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**Device Marketing name (libdrm) not found on this system." <<
-                                                                    std::endl;
+      std::cout << "\t**Device Marketing name (libdrm) not found on this system." << std::endl;
     } else {
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
@@ -181,69 +174,60 @@ void TestIdInfoRead::Run(void) {
 
     err = rsmi_dev_market_name_get(i, buffer, kBufferLen);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**Device Marketing name (libdrm) not found on this system." <<
-                                                                    std::endl;
+      std::cout << "\t**Device Marketing name (libdrm) not found on this system." << std::endl;
     } else {
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
         std::cout << "\t**[buffer] Device Marketing name (libdrm): " << buffer << std::endl;
       }
-      (shouldCompareMarketValue && err == RSMI_STATUS_SUCCESS) ? shouldCompareMarketValue = true :
-        shouldCompareMarketValue = false;
+      (shouldCompareMarketValue && err == RSMI_STATUS_SUCCESS) ? shouldCompareMarketValue = true
+                                                               : shouldCompareMarketValue = false;
     }
 
     if (shouldCompareMarketValue) {
       IF_VERB(STANDARD) {
         std::cout << "\t**fix_market_name: |" << fix_market_name << "|" << std::endl;
         std::cout << "\t**buffer: |" << buffer << "|" << std::endl;
-        (strcmp(fix_market_name, buffer) == 0) ?
-          (std::cout << "\t**Both fix_market_name & buffer are equal" << std::endl) :
-          (std::cout << "\t**Both fix_market_name & buffer not equal" << std::endl);
+        (strcmp(fix_market_name, buffer) == 0)
+            ? (std::cout << "\t**Both fix_market_name & buffer are equal" << std::endl)
+            : (std::cout << "\t**Both fix_market_name & buffer not equal" << std::endl);
       }
       ASSERT_STREQ(fix_market_name, buffer);
     }
 
     err = rsmi_dev_name_get(i, buffer, kBufferLen);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**Device Marketing name not found on this system." <<
-                                                                    std::endl;
+      std::cout << "\t**Device Marketing name not found on this system." << std::endl;
       // Verify api support checking functionality is working
       err = rsmi_dev_name_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Device Marketing name: " << buffer << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Device Marketing name: " << buffer << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_name_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
     err = rsmi_dev_brand_get(i, buffer, kBufferLen);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        // Verify api support checking functionality is working
-        err = rsmi_dev_brand_get(i, nullptr, kBufferLen);
-        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+      // Verify api support checking functionality is working
+      err = rsmi_dev_brand_get(i, nullptr, kBufferLen);
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Device Brand name: " << buffer << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Device Brand name: " << buffer << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_brand_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
     err = rsmi_dev_vram_vendor_get(i, buffer, kBufferLen);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout <<
-        "\t**Vram Vendor string not supported on this system." << std::endl;
+      std::cout << "\t**Vram Vendor string not supported on this system." << std::endl;
       err = rsmi_dev_vram_vendor_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Device Vram Vendor name: " << buffer << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Device Vram Vendor name: " << buffer << std::endl; }
       err = rsmi_dev_vram_vendor_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
@@ -254,9 +238,7 @@ void TestIdInfoRead::Run(void) {
       ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Vendor ID: 0x" << std::hex << id << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Vendor ID: 0x" << std::hex << id << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_vendor_id_get(i, nullptr);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
@@ -268,25 +250,20 @@ void TestIdInfoRead::Run(void) {
       ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**DRM Render Minor: " << drm_render_minor << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**DRM Render Minor: " << drm_render_minor << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_drm_render_minor_get(i, nullptr);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
     err = rsmi_dev_vendor_name_get(i, buffer, kBufferLen);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**Device Vendor name string not found on this system." <<
-                                                                     std::endl;
+      std::cout << "\t**Device Vendor name string not found on this system." << std::endl;
       // Verify api support checking functionality is working
       err = rsmi_dev_vendor_name_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Device Vendor name: " << buffer << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Device Vendor name: " << buffer << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_vendor_name_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
@@ -300,25 +277,20 @@ void TestIdInfoRead::Run(void) {
       ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Subsystem ID: 0x" << std::hex << id << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Subsystem ID: 0x" << std::hex << id << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_subsystem_id_get(i, nullptr);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
     err = rsmi_dev_subsystem_name_get(i, buffer, kBufferLen);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**Subsystem name string not found on this system." <<
-                                                                    std::endl;
+      std::cout << "\t**Subsystem name string not found on this system." << std::endl;
       // Verify api support checking functionality is working
       err = rsmi_dev_subsystem_name_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Subsystem name: " << buffer << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Subsystem name: " << buffer << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_subsystem_name_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
@@ -331,8 +303,7 @@ void TestIdInfoRead::Run(void) {
     } else {
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << "\t**Sub-system Vendor ID: 0x" << std::hex <<
-                                                              id << std::endl;
+        std::cout << "\t**Sub-system Vendor ID: 0x" << std::hex << id << std::endl;
       }
       // Verify api support checking functionality is working
       err = rsmi_dev_subsystem_vendor_id_get(i, nullptr);
@@ -340,17 +311,13 @@ void TestIdInfoRead::Run(void) {
     }
     err = rsmi_dev_vendor_name_get(i, buffer, kBufferLen);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout <<
-           "\t**Subsystem Vendor name string not found on this system." <<
-                                                                    std::endl;
-     // Verify api support checking functionality is working
-     err = rsmi_dev_vendor_name_get(i, nullptr, kBufferLen);
-     ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+      std::cout << "\t**Subsystem Vendor name string not found on this system." << std::endl;
+      // Verify api support checking functionality is working
+      err = rsmi_dev_vendor_name_get(i, nullptr, kBufferLen);
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Subsystem Vendor name: " << buffer << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Subsystem Vendor name: " << buffer << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_vendor_name_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
@@ -374,13 +341,10 @@ void TestIdInfoRead::Run(void) {
       err = rsmi_dev_serial_number_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
 
-      std::cout <<
-        "\t**Serial Number string not supported on this system." << std::endl;
+      std::cout << "\t**Serial Number string not supported on this system." << std::endl;
     } else {
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Device Serial Number:" << buffer << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Device Serial Number:" << buffer << std::endl; }
       // Verify api support checking functionality is working
       err = rsmi_dev_serial_number_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);

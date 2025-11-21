@@ -30,6 +30,6 @@
   (((unsigned)(value) << reg_name##__##field_name##__SHIFT) & reg_name##__##field_name##_MASK)
 
 #define GET_REG_FIELD_BITS(reg_name, field_name, value) \
-  (((unsigned)(value)&reg_name##__##field_name##_MASK) >> reg_name##__##field_name##__SHIFT)
+  (((unsigned)(value) & reg_name##__##field_name##_MASK) >> reg_name##__##field_name##__SHIFT)
 
 #endif

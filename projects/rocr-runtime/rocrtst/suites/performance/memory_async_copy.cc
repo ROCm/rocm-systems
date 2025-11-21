@@ -100,7 +100,8 @@ std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::initGranularities() {
 }
 
 const int MemoryAsyncCopy::kNumGranularity = rocrtst::isEmuModeEnabled() ? 1 : 20;
-const std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::Granularities = MemoryAsyncCopy::initGranularities();
+const std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::Granularities =
+    MemoryAsyncCopy::initGranularities();
 const int MemoryAsyncCopy::kMaxCopySize = MemoryAsyncCopy::Granularities.back().Size;
 
 MemoryAsyncCopy::MemoryAsyncCopy(void) : TestBase() {
@@ -126,17 +127,18 @@ MemoryAsyncCopy::MemoryAsyncCopy(void) : TestBase() {
   dst_pool_id_ = -1;
   set_num_iteration(10);  // Default value
   set_title("Asynchronous Memory Copy Bandwidth");
-  set_description("This test measures bandwidth to/from Host from/to GPU "
+  set_description(
+      "This test measures bandwidth to/from Host from/to GPU "
       "and Peer to Peer using hsa_amd_memory_async_copy() to copy buffers "
       "of various length from memory pool to another.");
 }
 
 MemoryAsyncCopy::~MemoryAsyncCopy(void) {
-  for (PoolInfo *p : pool_info_) {
+  for (PoolInfo* p : pool_info_) {
     delete p;
   }
 
-  for (AgentInfo *a : agent_info_) {
+  for (AgentInfo* a : agent_info_) {
     delete a;
   }
 }
@@ -169,18 +171,16 @@ void MemoryAsyncCopy::FindSystemPool(void) {
   //  err = hsa_iterate_agents(rocrtst::FindCPUDevice, &cpu_agent_);
   //  ASSERT_EQ(HSA_STATUS_INFO_BREAK, err);
 
-  err = hsa_amd_agent_iterate_memory_pools(cpu_agent_, rocrtst::FindGlobalPool,
-        &sys_pool_);
+  err = hsa_amd_agent_iterate_memory_pools(cpu_agent_, rocrtst::FindGlobalPool, &sys_pool_);
   ASSERT_EQ(HSA_STATUS_INFO_BREAK, err);
 }
 
-hsa_status_t AcquireAccess(hsa_agent_t agent,
-                                    hsa_amd_memory_pool_t pool, void* ptr) {
+hsa_status_t AcquireAccess(hsa_agent_t agent, hsa_amd_memory_pool_t pool, void* ptr) {
   hsa_status_t err;
 
   hsa_amd_memory_pool_access_t access;
-  err = hsa_amd_agent_memory_pool_get_info(agent, pool,
-                              HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access);
+  err = hsa_amd_agent_memory_pool_get_info(agent, pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
+                                           &access);
 
   RET_IF_HSA_ERR(err);
 
@@ -205,10 +205,10 @@ hsa_status_t AcquireAccess(hsa_agent_t agent,
 // the second agent will be returned. If it fails, nullptr will be returned.
 // We prefer to use GPU agents over CPU agents to avoid poor copy performance
 // due to reading of uncached device memory by CPU.
-hsa_agent_t *
-MemoryAsyncCopy::AcquireAsyncCopyAccess(
-         void *dst_ptr, hsa_amd_memory_pool_t dst_pool, hsa_agent_t *dst_ag,
-         void *src_ptr, hsa_amd_memory_pool_t src_pool, hsa_agent_t *src_ag) {
+hsa_agent_t* MemoryAsyncCopy::AcquireAsyncCopyAccess(void* dst_ptr, hsa_amd_memory_pool_t dst_pool,
+                                                     hsa_agent_t* dst_ag, void* src_ptr,
+                                                     hsa_amd_memory_pool_t src_pool,
+                                                     hsa_agent_t* src_ag) {
   hsa_status_t err;
   bool can_use_src_agent = false;
   hsa_device_type_t type = HSA_DEVICE_TYPE_CPU;
@@ -232,7 +232,7 @@ MemoryAsyncCopy::AcquireAsyncCopyAccess(
   return NULL;
 }
 
-void MemoryAsyncCopy::PrintTransactionType(Transaction *t) {
+void MemoryAsyncCopy::PrintTransactionType(Transaction* t) {
   if (verbosity() >= VERBOSE_STANDARD) {
     printf("Executing Copy Path: From Pool %d To Pool %d ", t->src, t->dst);
     switch (t->type) {
@@ -266,7 +266,7 @@ void MemoryAsyncCopy::PrintTransactionType(Transaction *t) {
     }
   }
 }
-void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
+void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction* t) {
   hsa_status_t err;
   void* ptr_src;
   void* ptr_dst;
@@ -279,7 +279,7 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
 
   size_t max_trans_size = t->max_size * 1024;
 
-  hsa_amd_memory_pool_t src_pool =  pool_info_[t->src]->pool_;
+  hsa_amd_memory_pool_t src_pool = pool_info_[t->src]->pool_;
   hsa_agent_t dst_agent = pool_info_[t->dst]->owner_agent_info()->agent();
   hsa_amd_memory_pool_t dst_pool = pool_info_[t->dst]->pool_;
   hsa_agent_t src_agent = pool_info_[t->src]->owner_agent_info()->agent();
@@ -312,36 +312,32 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
 
-  max_alloc_size = (src_alloc_size < dst_alloc_size) ? src_alloc_size: dst_alloc_size;
+  max_alloc_size = (src_alloc_size < dst_alloc_size) ? src_alloc_size : dst_alloc_size;
 
   if (dst_alloc_size <= 536870912 && ag_type == HSA_DEVICE_TYPE_GPU)
-    size = (max_alloc_size/3 <= max_trans_size) ? max_alloc_size/3: max_trans_size;
+    size = (max_alloc_size / 3 <= max_trans_size) ? max_alloc_size / 3 : max_trans_size;
   else
-    size = (max_alloc_size/2 <= max_trans_size) ? max_alloc_size/2: max_trans_size;
+    size = (max_alloc_size / 2 <= max_trans_size) ? max_alloc_size / 2 : max_trans_size;
 
-  err = hsa_amd_memory_pool_allocate(src_pool, size, 0,
-				      &ptr_src);
+  err = hsa_amd_memory_pool_allocate(src_pool, size, 0, &ptr_src);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-  err = hsa_amd_memory_pool_allocate(dst_pool, size, 0,
-				      &ptr_dst);
+  err = hsa_amd_memory_pool_allocate(dst_pool, size, 0, &ptr_dst);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
 
   // rocrtst::CommonCleanUp data
   void* host_ptr_src = NULL;
   void* host_ptr_dst = NULL;
-  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0,
-                                     reinterpret_cast<void**>(&host_ptr_src));
+  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0, reinterpret_cast<void**>(&host_ptr_src));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
-  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0,
-                                     reinterpret_cast<void**>(&host_ptr_dst));
+  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0, reinterpret_cast<void**>(&host_ptr_dst));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-  err = hsa_amd_memory_fill(host_ptr_src, 1, size/sizeof(uint32_t));
+  err = hsa_amd_memory_fill(host_ptr_src, 1, size / sizeof(uint32_t));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-  err = hsa_amd_memory_fill(host_ptr_dst, 0, size/sizeof(uint32_t));
+  err = hsa_amd_memory_fill(host_ptr_dst, 0, size / sizeof(uint32_t));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
   hsa_signal_t s;
@@ -368,34 +364,32 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
   // **** First copy from the system buffer source to the test source pool
   // Acquire the appropriate access; prefer GPU agent over CPU where there
   // is a choice.
-  hsa_agent_t *cpy_ag = nullptr;
-  cpy_ag = AcquireAsyncCopyAccess(ptr_src, src_pool, &src_agent, host_ptr_src,
-                                                     sys_pool_, &cpu_agent_);
+  hsa_agent_t* cpy_ag = nullptr;
+  cpy_ag =
+      AcquireAsyncCopyAccess(ptr_src, src_pool, &src_agent, host_ptr_src, sys_pool_, &cpu_agent_);
   if (cpy_ag == nullptr) {
-    std::cout << "Agents " << t->src << " and " << t->dst <<
-                              "cannot access each other's pool." << std::endl;
+    std::cout << "Agents " << t->src << " and " << t->dst << "cannot access each other's pool."
+              << std::endl;
     std::cout << "Skipping..." << std::endl;
     return;
   }
 
-  err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag,
-                                                            size, 0, NULL, s);
+  err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag, size, 0, NULL, s);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
   while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
-                                   HSA_WAIT_STATE_ACTIVE))
-  {}
+                                   HSA_WAIT_STATE_ACTIVE)) {
+  }
 
   int iterations = RealIterationNum();
 
   // **** Next, copy from the test source pool to the test destination pool
   // Prefer a gpu agent to a cpu agent
 
-  cpy_ag = AcquireAsyncCopyAccess(ptr_dst, dst_pool, &dst_agent, ptr_src,
-                                                        src_pool, &src_agent);
+  cpy_ag = AcquireAsyncCopyAccess(ptr_dst, dst_pool, &dst_agent, ptr_src, src_pool, &src_agent);
   if (cpy_ag == nullptr) {
-    std::cout << "Owner agents for pools" << t->src << " and " <<
-                   t->dst << " cannot access each other's pool." << std::endl;
+    std::cout << "Owner agents for pools" << t->src << " and " << t->dst
+              << " cannot access each other's pool." << std::endl;
     std::cout << "Skipping..." << std::endl;
     return;
   }
@@ -421,30 +415,29 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
       int index = copy_timer.CreateTimer();
 
       copy_timer.StartTimer(index);
-      err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag, 
-                                                Granularities[i].Size, 0, NULL, t->signal);
+      err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag, Granularities[i].Size, 0,
+                                      NULL, t->signal);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-      while (hsa_signal_wait_scacquire(t->signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                         uint64_t(-1), HSA_WAIT_STATE_ACTIVE))
-      {}
+      while (hsa_signal_wait_scacquire(t->signal, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
+                                       HSA_WAIT_STATE_ACTIVE)) {
+      }
 
       copy_timer.StopTimer(index);
 
       hsa_signal_store_relaxed(s, 1);
 
-      err = AcquireAccess(dst_agent, sys_pool_,
-                    host_ptr_dst);
+      err = AcquireAccess(dst_agent, sys_pool_, host_ptr_dst);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
 
-      err = hsa_amd_memory_async_copy(host_ptr_dst, cpu_agent_, ptr_dst, dst_agent, Granularities[i].Size, 0,
-                                      NULL, s);
+      err = hsa_amd_memory_async_copy(host_ptr_dst, cpu_agent_, ptr_dst, dst_agent,
+                                      Granularities[i].Size, 0, NULL, s);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-      while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1,
-                                       uint64_t(-1), HSA_WAIT_STATE_ACTIVE))
-      {}
+      while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
+                                       HSA_WAIT_STATE_ACTIVE)) {
+      }
 
       err = AcquireAccess(cpu_agent_, sys_pool_, host_ptr_dst);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
@@ -468,11 +461,9 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
   }
 }
 
-size_t MemoryAsyncCopy::RealIterationNum(void) {
-  return num_iteration() * 1.2 + 1;
-}
+size_t MemoryAsyncCopy::RealIterationNum(void) { return num_iteration() * 1.2 + 1; }
 
-double MemoryAsyncCopy::GetMeanTime(std::vector<double> *vec) {
+double MemoryAsyncCopy::GetMeanTime(std::vector<double>* vec) {
   std::sort(vec->begin(), vec->end());
 
   vec->erase(vec->begin());
@@ -509,7 +500,7 @@ void MemoryAsyncCopy::DisplayResults(void) const {
   return;
 }
 
-void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
+void MemoryAsyncCopy::DisplayBenchmark(Transaction* t) const {
   hsa_status_t err;
   size_t src_alloc_size;
   size_t dst_alloc_size;
@@ -517,7 +508,7 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
   size_t size;
 
   size_t max_trans_size = t->max_size * 1024;
-  hsa_amd_memory_pool_t src_pool =  pool_info_[t->src]->pool_;
+  hsa_amd_memory_pool_t src_pool = pool_info_[t->src]->pool_;
   hsa_amd_memory_pool_t dst_pool = pool_info_[t->dst]->pool_;
 
   err = hsa_amd_memory_pool_get_info(src_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
@@ -528,12 +519,11 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
                                      &dst_alloc_size);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  max_alloc_size = (src_alloc_size < dst_alloc_size) ? src_alloc_size: dst_alloc_size;
+  max_alloc_size = (src_alloc_size < dst_alloc_size) ? src_alloc_size : dst_alloc_size;
 
-  size = (max_alloc_size/2 <= max_trans_size) ? max_alloc_size/2: max_trans_size;
+  size = (max_alloc_size / 2 <= max_trans_size) ? max_alloc_size / 2 : max_trans_size;
 
-  printf("=========================== PATH: From Pool %d To Pool %d (",
-                                                              t->src, t->dst);
+  printf("=========================== PATH: From Pool %d To Pool %d (", t->src, t->dst);
 
   switch (t->type) {
     case H2D:
@@ -561,8 +551,7 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
       break;
 
     default:
-      ASSERT_TRUE(false) << "Unexpected Transaction value:" << t->type <<
-                                                                    std::endl;
+      ASSERT_TRUE(false) << "Unexpected Transaction value:" << t->type << std::endl;
   }
 
   if ((*t->benchmark_copy_time).size() == 0) {
@@ -579,22 +568,24 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
     return;
   }
 
-  printf("Data Size             Avg Time(us)         Avg BW(GB/s)"
+  printf(
+      "Data Size             Avg Time(us)         Avg BW(GB/s)"
       "          Min Time(us)          Peak BW(GB/s)\n");
 
   for (int i = 0; i < kNumGranularity; i++) {
     if (Granularities[i].Size > size) {
-      printf("Notice: Data Size >= %s is skipped due to hard limit of 1/2 vram size \n\n", Granularities[i].Str);
+      printf("Notice: Data Size >= %s is skipped due to hard limit of 1/2 vram size \n\n",
+             Granularities[i].Str);
       break;
     }
 
-    double band_width =
-        static_cast<double>(Granularities[i].Size / (*(t->benchmark_copy_time))[i] / 1024 / 1024 / 1024);
+    double band_width = static_cast<double>(Granularities[i].Size / (*(t->benchmark_copy_time))[i] /
+                                            1024 / 1024 / 1024);
     double peak_band_width =
         static_cast<double>(Granularities[i].Size / (*(t->min_time))[i] / 1024 / 1024 / 1024);
-    printf("  %4s            %14lf        %14lf         %14lf         %14lf\n", Granularities[i].Str,
-           (*(t->benchmark_copy_time))[i] * 1e6, band_width, (*(t->min_time))[i] * 1e6,
-           peak_band_width);
+    printf("  %4s            %14lf        %14lf         %14lf         %14lf\n",
+           Granularities[i].Str, (*(t->benchmark_copy_time))[i] * 1e6, band_width,
+           (*(t->min_time))[i] * 1e6, peak_band_width);
   }
 
   return;
@@ -610,8 +601,7 @@ void MemoryAsyncCopy::Close() {
   // hwloc hack - hwloc uses OpenCL which loads ROCr.  As OpenCL does not have a shutdown routine it
   // can not free HSA state.  This will leak resources but is the only option short of isolating
   // hwloc in it's own process.
-  while (hsa_shut_down() == HSA_STATUS_SUCCESS)
-    ;
+  while (hsa_shut_down() == HSA_STATUS_SUCCESS);
   hsa_init();
 
   TestBase::Close();
@@ -622,8 +612,7 @@ static hsa_status_t GetPoolInfo(hsa_amd_memory_pool_t pool, void* data) {
   MemoryAsyncCopy* ptr = reinterpret_cast<MemoryAsyncCopy*>(data);
   // Query pool segment, only report global one
   hsa_amd_segment_t region_segment;
-  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT,
-                                     &region_segment);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &region_segment);
   RET_IF_HSA_ERR(err);
 
   if (region_segment != HSA_AMD_SEGMENT_GLOBAL) {
@@ -632,8 +621,8 @@ static hsa_status_t GetPoolInfo(hsa_amd_memory_pool_t pool, void* data) {
 
   // Check if the pool is alloc allowed, if not, discard this pool
   bool alloc_allowed = false;
-  err = hsa_amd_memory_pool_get_info(pool,
-              HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &alloc_allowed);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED,
+                                     &alloc_allowed);
   RET_IF_HSA_ERR(err);
 
   if (alloc_allowed != true) {
@@ -642,29 +631,25 @@ static hsa_status_t GetPoolInfo(hsa_amd_memory_pool_t pool, void* data) {
 
   // Query the pool size
   size_t size = 0;
-  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE,
-                                     &size);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &size);
   RET_IF_HSA_ERR(err);
 
   // Query the max allocable size
   size_t alloc_max_size = 0;
-  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                     &alloc_max_size);
+  err =
+      hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE, &alloc_max_size);
   RET_IF_HSA_ERR(err);
 
   // Check if the pool is fine-grained or coarse-grained
   uint32_t global_flag = 0;
-  err = hsa_amd_memory_pool_get_info(pool,
-                        HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &global_flag);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &global_flag);
   RET_IF_HSA_ERR(err);
 
-  bool is_fine_grained = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED
-                         & global_flag;
+  bool is_fine_grained = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED & global_flag;
 
   int pool_i = ptr->pool_index();
   int ag_ind = ptr->agent_index();
-  ptr->pool_info()->push_back(
-    new PoolInfo(pool, pool_i, region_segment, is_fine_grained, size,
+  ptr->pool_info()->push_back(new PoolInfo(pool, pool_i, region_segment, is_fine_grained, size,
                                            alloc_max_size, ptr->agent_info()->back()));
 
   // Construct node_info and push back to agent_info_
@@ -687,8 +672,7 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
   }
 
   uint32_t agent_bdf_id;
-  err = hsa_agent_get_info(agent,
-                (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &agent_bdf_id);
+  err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &agent_bdf_id);
   RET_IF_HSA_ERR(err);
 
   uint8_t bus = (agent_bdf_id & (0xFF << 8)) >> 8;
@@ -696,16 +680,17 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
 
   // The function part of the location_id hasn't been used yet
   // and may not contain a valid function number.
-  uint8_t function = 0; //(agent_bdf_id & 0x07);
+  uint8_t function = 0;  //(agent_bdf_id & 0x07);
 
-  if (ptr->verbosity() >  MemoryAsyncCopy::VERBOSE_STANDARD) {
+  if (ptr->verbosity() > MemoryAsyncCopy::VERBOSE_STANDARD) {
     char name[64];
     err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, name);
     RET_IF_HSA_ERR(err);
 
     const char* name2 = (HSA_DEVICE_TYPE_GPU == device_type) ? "GPU" : "CPU";
 
-    printf("The %s agent name located at PCIe Bus %x, Device %x, "
+    printf(
+        "The %s agent name located at PCIe Bus %x, Device %x, "
         "Function %x, is %s.\n",
         name2, bus, device, function, name);
   }
@@ -723,15 +708,14 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
   hwloc_obj_t gpu_numa_node = nullptr;
   if ((agent_bdf_id != kDtifBdfId) && !is_dxg) {
     hwloc_obj_t gpu_hwl_dev;
-    gpu_hwl_dev = hwloc_get_pcidev_by_busid(ptr->topology(), pci_domain_id, bus, device,
-                                                                      function);
+    gpu_hwl_dev = hwloc_get_pcidev_by_busid(ptr->topology(), pci_domain_id, bus, device, function);
 
     if (gpu_hwl_dev == nullptr) {
       return HSA_STATUS_ERROR;
     }
 
-    gpu_numa_node = hwloc_get_ancestor_obj_by_type(ptr->topology(),
-                                              HWLOC_OBJ_NUMANODE, gpu_hwl_dev);
+    gpu_numa_node =
+        hwloc_get_ancestor_obj_by_type(ptr->topology(), HWLOC_OBJ_NUMANODE, gpu_hwl_dev);
   }
 
   if (gpu_numa_node != nullptr) {
@@ -740,14 +724,12 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
     hwloc_bitmap_snprintf(s2, sizeof(s2), ptr->cpu_hwl_numa_nodeset());
     printf("gpu nodeset: %s\n", s1);
     printf("cpu nodeset: %s\n", s2);
-    if (!hwloc_bitmap_isequal(gpu_numa_node->nodeset,
-                                              ptr->cpu_hwl_numa_nodeset())) {
+    if (!hwloc_bitmap_isequal(gpu_numa_node->nodeset, ptr->cpu_hwl_numa_nodeset())) {
       if (ptr->gpu_remote_agent().handle == 0) {
         ptr->set_gpu_remote_agent(agent);
       }
 
-      if (ptr->gpu_local_agent1().handle != 0 &&
-                                          ptr->gpu_local_agent2().handle != 0) {
+      if (ptr->gpu_local_agent1().handle != 0 && ptr->gpu_local_agent2().handle != 0) {
         return HSA_STATUS_INFO_BREAK;
       } else {
         return HSA_STATUS_SUCCESS;
@@ -758,8 +740,7 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
       } else if (ptr->gpu_local_agent2().handle == 0) {
         ptr->set_gpu_local_agent2(agent);
       }
-      if (ptr->gpu_local_agent1().handle != 0 &&
-                                     ptr->gpu_local_agent2().handle != 0 &&
+      if (ptr->gpu_local_agent1().handle != 0 && ptr->gpu_local_agent2().handle != 0 &&
           ptr->gpu_remote_agent().handle != 0) {
         return HSA_STATUS_INFO_BREAK;
       } else {
@@ -767,8 +748,7 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
       }
     }
 
-    if (!hwloc_bitmap_isequal(gpu_numa_node->nodeset,
-                                               ptr->cpu_hwl_numa_nodeset())) {
+    if (!hwloc_bitmap_isequal(gpu_numa_node->nodeset, ptr->cpu_hwl_numa_nodeset())) {
       std::cout << "ASSERT: Unexpected unequal nodesets" << std::endl;
       return HSA_STATUS_ERROR;
     }
@@ -788,8 +768,7 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
     } else {
       ptr->set_gpu_local_agent2(agent);
       if (ptr->gpu_remote_agent().handle == 0) {
-        return (gpu_numa_node == nullptr ?
-                  HSA_STATUS_INFO_BREAK : HSA_STATUS_SUCCESS);
+        return (gpu_numa_node == nullptr ? HSA_STATUS_INFO_BREAK : HSA_STATUS_SUCCESS);
       } else {
         return HSA_STATUS_INFO_BREAK;
       }
@@ -827,17 +806,15 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
   //  hwloc_obj_t cpu_numa;
   hwloc_nodeset_t cpu_nodeset;
 
-  err = hsa_agent_get_info(ptr->cpu_agent(), HSA_AGENT_INFO_NODE,
-                                                           &cpu_numa_node_id);
+  err = hsa_agent_get_info(ptr->cpu_agent(), HSA_AGENT_INFO_NODE, &cpu_numa_node_id);
   RET_IF_HSA_ERR(err);
 
-  struct bitmask *numa_node_mask = numa_allocate_nodemask();
+  struct bitmask* numa_node_mask = numa_allocate_nodemask();
   cpu_nodeset = hwloc_bitmap_alloc();
 
   numa_bitmask_setbit(numa_node_mask, cpu_numa_node_id);
 
-  ret = hwloc_nodeset_from_linux_libnuma_bitmask(ptr->topology(),
-      cpu_nodeset, numa_node_mask);
+  ret = hwloc_nodeset_from_linux_libnuma_bitmask(ptr->topology(), cpu_nodeset, numa_node_mask);
   numa_free_nodemask(numa_node_mask);
 
   if (ret == -1) {
@@ -870,13 +847,11 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
     ptr->set_gpu_remote_agent(t);
     return HSA_STATUS_SUCCESS;
   }
-  auto add_agent = [&](hsa_agent_t ag, hsa_device_type_t dev_type,
-                                                                bool remote) {
+  auto add_agent = [&](hsa_agent_t ag, hsa_device_type_t dev_type, bool remote) {
     if (ag.handle == 0) {
       return;
     }
-    ptr->agent_info()->push_back(
-            new AgentInfo(ag, ptr->agent_index(), dev_type, remote));
+    ptr->agent_info()->push_back(new AgentInfo(ag, ptr->agent_index(), dev_type, remote));
 
     // Contruct a new NodeInfo structure and push back to agent_info_
     NodeInfo node;
@@ -898,25 +873,22 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
 void MemoryAsyncCopy::FindTopology() {
   hsa_status_t err;
 
-  hwloc_topology_set_flags(topology_, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM |
-                                         HWLOC_TOPOLOGY_FLAG_IO_DEVICES);
+  hwloc_topology_set_flags(topology_,
+                           HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM | HWLOC_TOPOLOGY_FLAG_IO_DEVICES);
 
   hwloc_topology_load(topology_);
 
   err = hsa_iterate_agents(GetAgentInfo, this);
 
   if (gpu_local_agent1_.handle == 0) {
-    std::cout << "**** No GPU found in same NUMA node as a CPU ****"
-                                                                 << std::endl;
+    std::cout << "**** No GPU found in same NUMA node as a CPU ****" << std::endl;
   }
   ASSERT_EQ(HSA_STATUS_INFO_BREAK, err);
 
   FindSystemPool();
 }
 
-void MemoryAsyncCopy::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void MemoryAsyncCopy::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void MemoryAsyncCopy::ConstructTransactionList(void) {
   hsa_status_t err;
@@ -932,9 +904,9 @@ void MemoryAsyncCopy::ConstructTransactionList(void) {
     Transaction t;
     t.src = from_indx;
     t.dst = to_indx;
-    t.max_size = kMaxCopySize/1024;
+    t.max_size = kMaxCopySize / 1024;
     t.type = type;
-    t.benchmark_copy_time = new  std::vector<double>;
+    t.benchmark_copy_time = new std::vector<double>;
     t.min_time = new std::vector<double>;
     err = hsa_signal_create(1, 0, NULL, &t.signal);
     ASSERT_EQ(HSA_STATUS_SUCCESS, err);
@@ -995,22 +967,19 @@ void MemoryAsyncCopy::PrintTopology(void) {
     std::cout << "Agent #" << node.agent.index_ << ":" << std::endl;
 
     if (HSA_DEVICE_TYPE_CPU == node.agent.device_type())
-      std::cout << "Agent Device Type:                             CPU"
-                << std::endl;
+      std::cout << "Agent Device Type:                             CPU" << std::endl;
     else if (HSA_DEVICE_TYPE_GPU == node.agent.device_type())
-      std::cout << "Agent Device Type:                             GPU"
-                << std::endl;
+      std::cout << "Agent Device Type:                             GPU" << std::endl;
 
     // Print pool info
     size_t pool_num = node.pool.size();
 
     for (uint32_t j = 0; j < pool_num; j++) {
-      std::cout << "    Memory Pool#" << node.pool.at(j).index_ << ":"
-                << std::endl;
+      std::cout << "    Memory Pool#" << node.pool.at(j).index_ << ":" << std::endl;
       std::cout << "        max allocable size in KB: \t\t"
                 << node.pool.at(j).allocable_size_ / 1024 << std::endl;
-      std::cout << "        is fine-grained: \t\t\t"
-                << node.pool.at(j).is_fine_grained_ << std::endl;
+      std::cout << "        is fine-grained: \t\t\t" << node.pool.at(j).is_fine_grained_
+                << std::endl;
     }
   }
 }

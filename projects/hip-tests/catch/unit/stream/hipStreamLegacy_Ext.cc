@@ -632,7 +632,7 @@ TEST_CASE("Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation", "[multigpu]") {
 
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArrDev1, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
-  
+
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i]
                        << " Expected value : 500 or 501 \n");

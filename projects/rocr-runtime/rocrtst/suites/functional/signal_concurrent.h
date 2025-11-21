@@ -52,34 +52,34 @@
 
 class SignalConcurrentTest : public TestBase {
  public:
-    SignalConcurrentTest(bool, bool, bool, bool);
+  SignalConcurrentTest(bool, bool, bool, bool);
 
-    // @Brief: Destructor for the SignalConcurrentTest class
-    virtual ~SignalConcurrentTest();
+  // @Brief: Destructor for the SignalConcurrentTest class
+  virtual ~SignalConcurrentTest();
 
-    // @Brief: Setup the environment for measurement
-    virtual void SetUp();
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-    // @Brief: Core measurement execution
-    virtual void Run();
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-    // @Brief: Clean up and retrive the resource
-    virtual void Close();
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
 
-    // @Brief: Display  results
-    virtual void DisplayResults() const;
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
 
-    // @Brief: Display information about what this test does
-    virtual void DisplayTestInfo(void);
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 
-    void TestSignalCreateConcurrent(void);
+  void TestSignalCreateConcurrent(void);
 
-    void TestSignalDestroyConcurrent(void);
+  void TestSignalDestroyConcurrent(void);
 
-    void TestSignalCreateMaxConsumers(void);
+  void TestSignalCreateMaxConsumers(void);
 
-    // @Brief: This is not implemented, created a member function for future reference
-    void TestSignalCPUCompletion(void);
+  // @Brief: This is not implemented, created a member function for future reference
+  void TestSignalCPUCompletion(void);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_SIGNAL_CONCURRENT_H_

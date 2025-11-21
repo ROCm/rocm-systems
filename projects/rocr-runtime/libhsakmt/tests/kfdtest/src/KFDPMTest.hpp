@@ -29,12 +29,12 @@
 
 class KFDPMTest : public KFDBaseComponentTest {
  public:
-    KFDPMTest() {}
-    ~KFDPMTest() {}
+  KFDPMTest() {}
+  ~KFDPMTest() {}
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 };
 
 #endif  // __KFDPMTEST_HPP__

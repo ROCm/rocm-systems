@@ -28,10 +28,10 @@
 #include <vector>
 
 typedef struct {
-        HSAuint64 timestamp;
-        HSAuint64 timeConsumption;
-        HSAuint64 timeBegin;
-        HSAuint64 timeEnd;
+  HSAuint64 timestamp;
+  HSAuint64 timeConsumption;
+  HSAuint64 timeBegin;
+  HSAuint64 timeEnd;
 } TimeStamp;
 
 /* We have three pattern to put timestamp packet,
@@ -42,29 +42,29 @@ typedef struct {
  *    It will look like |timestamp|packet|...|packet|timestamp|
  */
 typedef enum {
-    NOTS = 0,
-    ALLTS = 1,
-    HEAD_TAIL = 2,
+  NOTS = 0,
+  ALLTS = 1,
+  HEAD_TAIL = 2,
 } TSPattern;
 
 typedef struct {
-    /* input values*/
-    HSAuint32 node;
-    void *src;
-    void *dst;
-    HSAuint64 size;
-    /* input value for internal use.*/
-    HSAuint64 group;
-    /* output value*/
-    HSAuint64 timeConsumption;
-    HSAuint64 timeBegin;
-    HSAuint64 timeEnd;
-    /* private: Output values for internal use.*/
-    HSAuint64 queue_id;
-    HSAuint64 packet_id;
+  /* input values*/
+  HSAuint32 node;
+  void* src;
+  void* dst;
+  HSAuint64 size;
+  /* input value for internal use.*/
+  HSAuint64 group;
+  /* output value*/
+  HSAuint64 timeConsumption;
+  HSAuint64 timeBegin;
+  HSAuint64 timeEnd;
+  /* private: Output values for internal use.*/
+  HSAuint64 queue_id;
+  HSAuint64 packet_id;
 } SDMACopyParams;
 
-void sdma_multicopy(SDMACopyParams *array, int n,
-        HSAuint64 *speedSmall = 0, HSAuint64 *speedLarge = 0, std::stringstream *s = 0);
-void sdma_multicopy(std::vector<SDMACopyParams> &array, int mashup = 1, TSPattern tsp = ALLTS);
-#endif //__KFD__TEST__UTIL__QUEUE__H__
+void sdma_multicopy(SDMACopyParams* array, int n, HSAuint64* speedSmall = 0,
+                    HSAuint64* speedLarge = 0, std::stringstream* s = 0);
+void sdma_multicopy(std::vector<SDMACopyParams>& array, int mashup = 1, TSPattern tsp = ALLTS);
+#endif  //__KFD__TEST__UTIL__QUEUE__H__

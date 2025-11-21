@@ -91,10 +91,7 @@ void* __stdcall ThreadTrampoline(void* arg) {
 // Thread container allows multiple waits and separate close (destroy).
 class os_thread {
  public:
-  explicit os_thread(ThreadEntry function,
-                      void* threadArgument,
-                      uint stackSize,
-                      int priority)
+  explicit os_thread(ThreadEntry function, void* threadArgument, uint stackSize, int priority)
       : thread(0), lock(nullptr), state(RUNNING) {
     int err;
     lock = CreateMutex();
@@ -206,10 +203,11 @@ class os_thread {
 
       if (policy != SCHED_FIFO || param.sched_priority != set_priority)
         fprintf(stderr, "Failed to adjust thread priority (policy:%s requested:%d current:%d)\n",
-                          policy == SCHED_FIFO ? "FIFO" :
-                          policy == SCHED_OTHER ? "OTHER" :
-                          policy == SCHED_RR ? "RR" : "Unknown",
-                          set_priority, param.sched_priority);
+                policy == SCHED_FIFO        ? "FIFO"
+                    : policy == SCHED_OTHER ? "OTHER"
+                    : policy == SCHED_RR    ? "RR"
+                                            : "Unknown",
+                set_priority, param.sched_priority);
     }
   }
 
@@ -351,7 +349,8 @@ static int callback(struct dl_phdr_info* info, size_t size, void* data) {
         for (int j = 0;; j++) {
           if (dyn_section[j].d_tag == DT_NULL) break;
 
-          if (dyn_section[j].d_tag == DT_STRTAB) strings = (char*)ABS_ADDR(info->dlpi_addr, dyn_section[j].d_un.d_ptr);
+          if (dyn_section[j].d_tag == DT_STRTAB)
+            strings = (char*)ABS_ADDR(info->dlpi_addr, dyn_section[j].d_un.d_ptr);
 
           if (dyn_section[j].d_tag == DT_STRSZ) limit = dyn_section[j].d_un.d_val;
         }
@@ -396,20 +395,19 @@ std::vector<LibHandle> GetLoadedToolsLib() {
 }
 
 std::string GetLibraryName(LibHandle lib) {
-  link_map *map;
-  if(dlinfo(lib, RTLD_DI_LINKMAP, &map)!=0)
-    return "";
+  link_map* map;
+  if (dlinfo(lib, RTLD_DI_LINKMAP, &map) != 0) return "";
   return map->l_name;
 }
 
 Semaphore CreateSemaphore() {
-  sem_t *sem = new sem_t;
+  sem_t* sem = new sem_t;
   sem_init(sem, 0, 0);
   return *(Semaphore*)&sem;
 }
 
 bool WaitSemaphore(Semaphore sem) {
-  while(sem_wait(*(sem_t**)&sem))
+  while (sem_wait(*(sem_t**)&sem))
     if (errno != EINTR) return false;
 
   return true;
@@ -417,15 +415,12 @@ bool WaitSemaphore(Semaphore sem) {
 
 void PostSemaphore(Semaphore sem) {
   int waitval = 1;
-  if (sem_getvalue(*(sem_t**)&sem, &waitval))
-    assert(false && "Failed to get semaphore waiters");
+  if (sem_getvalue(*(sem_t**)&sem, &waitval)) assert(false && "Failed to get semaphore waiters");
 
   /* sem_getvalue return <= 0 when there are threads blocked on sem_wait */
-  if (waitval > 0)
-    return;
+  if (waitval > 0) return;
 
-  if (sem_post(*(sem_t**)&sem))
-    assert(false && "Failed to post semaphore");
+  if (sem_post(*(sem_t**)&sem)) assert(false && "Failed to post semaphore");
 }
 
 void DestroySemaphore(Semaphore sem) {
@@ -439,17 +434,11 @@ Mutex CreateMutex() {
   return *(Mutex*)&mutex;
 }
 
-bool TryAcquireMutex(Mutex lock) {
-  return pthread_mutex_trylock(*(pthread_mutex_t**)&lock) == 0;
-}
+bool TryAcquireMutex(Mutex lock) { return pthread_mutex_trylock(*(pthread_mutex_t**)&lock) == 0; }
 
-bool AcquireMutex(Mutex lock) {
-  return pthread_mutex_lock(*(pthread_mutex_t**)&lock) == 0;
-}
+bool AcquireMutex(Mutex lock) { return pthread_mutex_lock(*(pthread_mutex_t**)&lock) == 0; }
 
-void ReleaseMutex(Mutex lock) {
-  pthread_mutex_unlock(*(pthread_mutex_t**)&lock);
-}
+void ReleaseMutex(Mutex lock) { pthread_mutex_unlock(*(pthread_mutex_t**)&lock); }
 
 void DestroyMutex(Mutex lock) {
   pthread_mutex_destroy(*(pthread_mutex_t**)&lock);
@@ -491,9 +480,7 @@ void SetEnvVar(std::string env_var_name, std::string env_var_value) {
   setenv(env_var_name.c_str(), env_var_value.c_str(), 1);
 }
 
-int GetProcessId() {
-  return ::getpid();
-}
+int GetProcessId() { return ::getpid(); }
 
 std::string GetEnvVar(std::string env_var_name) {
   char* buff;
@@ -521,8 +508,7 @@ size_t GetUsablePhysicalHostMemorySize() {
     return 0;
   }
 
-  const size_t physical_size =
-      static_cast<size_t>(info.totalram * info.mem_unit);
+  const size_t physical_size = static_cast<size_t>(info.totalram * info.mem_unit);
   return std::min(GetUserModeVirtualMemorySize(), physical_size);
 }
 
@@ -539,8 +525,10 @@ typedef struct EventDescriptor_ {
 EventHandle CreateOsEvent(bool auto_reset, bool init_state) {
   EventDescriptor* eventDescrp;
   eventDescrp = (EventDescriptor*)malloc(sizeof(EventDescriptor));
-  
-  if(!eventDescrp) { return nullptr; }
+
+  if (!eventDescrp) {
+    return nullptr;
+  }
 
   pthread_mutex_init(&eventDescrp->mutex, NULL);
   pthread_cond_init(&eventDescrp->event, NULL);
@@ -578,7 +566,7 @@ int WaitForOsEvent(EventHandle event, unsigned int milli_seconds) {
       return 1;
     }
   } else {
-      pthread_mutex_lock(&eventDescrp->mutex);
+    pthread_mutex_lock(&eventDescrp->mutex);
   }
 
   int ret_code = 0;
@@ -606,8 +594,7 @@ int WaitForOsEvent(EventHandle event, unsigned int milli_seconds) {
         ts.tv_nsec = ts.tv_nsec - 1000000000;
       }
 
-      ret_code =
-          pthread_cond_timedwait(&eventDescrp->event, &eventDescrp->mutex, &ts);
+      ret_code = pthread_cond_timedwait(&eventDescrp->event, &eventDescrp->mutex, &ts);
       // Time out
       if (ret_code == 110) {
         ret_code = 0x14003;  // 1 means time out in HSA
@@ -888,9 +875,9 @@ void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
     int status = madvise(aligned, size, MADV_HUGEPAGE);
     if (status) {
       LogPrint(HSA_AMD_LOG_FLAG_INFO,
-              "madvise with advice MADV_HUGEPAGE"
-              " starting at address %p and page size 0x%zx, returned %d, errno: %s",
-              aligned, size, status, strerror(errno));
+               "madvise with advice MADV_HUGEPAGE"
+               " starting at address %p and page size 0x%zx, returned %d, errno: %s",
+               aligned, size, status, strerror(errno));
     }
   }
 
@@ -937,7 +924,7 @@ int Ctz(uint64_t i) { return __builtin_ctz(i); }
 
 char* DlError() { return dlerror(); }
 
-}   //  namespace os
-}   //  namespace rocr
+}  //  namespace os
+}  //  namespace rocr
 
 #endif

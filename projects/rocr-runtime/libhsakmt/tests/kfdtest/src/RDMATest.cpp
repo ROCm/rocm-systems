@@ -30,179 +30,178 @@
 #include "RDMAUtil.hpp"
 
 void RDMATest::SetUp() {
-    ROUTINE_START
+  ROUTINE_START
 
-    KFDBaseComponentTest::SetUp();
+  KFDBaseComponentTest::SetUp();
 
-    ROUTINE_END
+  ROUTINE_END
 }
 
 void RDMATest::TearDown() {
-    ROUTINE_START
+  ROUTINE_START
 
-    KFDBaseComponentTest::TearDown();
+  KFDBaseComponentTest::TearDown();
 
-    ROUTINE_END
+  ROUTINE_END
 }
 
 TEST_F(RDMATest, GPUDirect) {
-    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
-    TEST_START(TESTPROFILE_RUNALL);
-    HSAuint64 AlternateVAGPU;
+  TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+  TEST_START(TESTPROFILE_RUNALL);
+  HSAuint64 AlternateVAGPU;
 
-    PM4Queue queue;
-    unsigned int BufferSize = PAGE_SIZE;
-    int ret;
+  PM4Queue queue;
+  unsigned int BufferSize = PAGE_SIZE;
+  int ret;
 
-    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
-    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+  int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+  ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
 
-    HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true/*zero*/, false/*local*/, true/*exec*/);
-    HsaMemoryBuffer srcSysBuffer(BufferSize, defaultGPUNode, false);
-    HsaMemoryBuffer srcLocalBuffer(BufferSize, defaultGPUNode, false, true);
+  HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true /*zero*/, false /*local*/,
+                            true /*exec*/);
+  HsaMemoryBuffer srcSysBuffer(BufferSize, defaultGPUNode, false);
+  HsaMemoryBuffer srcLocalBuffer(BufferSize, defaultGPUNode, false, true);
 
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(srcSysBuffer.As<void*>(),
-                                        srcSysBuffer.Size(),
-                                        &AlternateVAGPU));
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(srcLocalBuffer.As<void*>(),
-                                        srcLocalBuffer.Size(),
-                                        &AlternateVAGPU));
+  ASSERT_SUCCESS(
+      hsaKmtMapMemoryToGPU(srcSysBuffer.As<void*>(), srcSysBuffer.Size(), &AlternateVAGPU));
+  ASSERT_SUCCESS(
+      hsaKmtMapMemoryToGPU(srcLocalBuffer.As<void*>(), srcLocalBuffer.Size(), &AlternateVAGPU));
 
-    /* Fill up srcSysBuffer */
-    srcSysBuffer.Fill(0xfe);
+  /* Fill up srcSysBuffer */
+  srcSysBuffer.Fill(0xfe);
 
-    /* Put 'copy dword' command to ISA buffer */
-    ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()));
+  /* Put 'copy dword' command to ISA buffer */
+  ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()));
 
 
-    ASSERT_SUCCESS(queue.Create(defaultGPUNode));
-    Dispatch dispatch(isaBuffer);
+  ASSERT_SUCCESS(queue.Create(defaultGPUNode));
+  Dispatch dispatch(isaBuffer);
 
-    /* Submit the command to GPU so GPU will copy from system memory
-     * (srcSysBuffer) to local memory(srcLocalBuffer)
-     */
-    dispatch.SetArgs(srcSysBuffer.As<void*>(), srcLocalBuffer.As<void*>());
-    dispatch.Submit(queue);
-    dispatch.Sync(g_TestTimeOut);  // GPU executed the command
+  /* Submit the command to GPU so GPU will copy from system memory
+   * (srcSysBuffer) to local memory(srcLocalBuffer)
+   */
+  dispatch.SetArgs(srcSysBuffer.As<void*>(), srcLocalBuffer.As<void*>());
+  dispatch.Submit(queue);
+  dispatch.Sync(g_TestTimeOut);  // GPU executed the command
 
-    EXPECT_SUCCESS(queue.Destroy());
+  EXPECT_SUCCESS(queue.Destroy());
 
-    LocalMemoryAccess Rdma;
+  LocalMemoryAccess Rdma;
 
-    Rdma.Open();
-    ASSERT_GE(Rdma.fd, 0) << "Failed to open RDMA";
+  Rdma.Open();
+  ASSERT_GE(Rdma.fd, 0) << "Failed to open RDMA";
 
-    /* GetPages asks the test driver to convert GPU virtual memory to DMA/
-     * Physical memory and save it in the list. rdma_mmap maps the memory to
-     * user space memory.
-     */
-    ret = Rdma.GetPages((uint64_t)srcLocalBuffer.As<void*>(), PAGE_SIZE);
-    ASSERT_EQ(ret, 0) << "Failed to get pages";
+  /* GetPages asks the test driver to convert GPU virtual memory to DMA/
+   * Physical memory and save it in the list. rdma_mmap maps the memory to
+   * user space memory.
+   */
+  ret = Rdma.GetPages((uint64_t)srcLocalBuffer.As<void*>(), PAGE_SIZE);
+  ASSERT_EQ(ret, 0) << "Failed to get pages";
 
-    void *gpuAddr = Rdma.MMap((uint64_t)srcLocalBuffer.As<void*>(), PAGE_SIZE);
-    ASSERT_GE((uint64_t)gpuAddr, 0) << "Failed to map RDMA address.";
+  void* gpuAddr = Rdma.MMap((uint64_t)srcLocalBuffer.As<void*>(), PAGE_SIZE);
+  ASSERT_GE((uint64_t)gpuAddr, 0) << "Failed to map RDMA address.";
 
-    /* Read the memory to confirm that application can read the local memory
-     * correctly from the mapped address.
-     */
-    EXPECT_EQ(memcmp(gpuAddr, srcSysBuffer.As<void*>(), 4), 0);
+  /* Read the memory to confirm that application can read the local memory
+   * correctly from the mapped address.
+   */
+  EXPECT_EQ(memcmp(gpuAddr, srcSysBuffer.As<void*>(), 4), 0);
 
-    Rdma.UnMap(gpuAddr, PAGE_SIZE);
-    Rdma.Close();
+  Rdma.UnMap(gpuAddr, PAGE_SIZE);
+  Rdma.Close();
 
-    TEST_END
+  TEST_END
 }
 
 TEST_F(RDMATest, ContiguousVRAMAllocation) {
-    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
-    TEST_START(TESTPROFILE_RUNALL);
+  TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+  TEST_START(TESTPROFILE_RUNALL);
 
-    HSAuint64 AlternateVAGPU;
+  HSAuint64 AlternateVAGPU;
 
-    PM4Queue queue;
-    unsigned long BufferSize = 4UL << 30;
+  PM4Queue queue;
+  unsigned long BufferSize = 4UL << 30;
 
-    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
-    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+  int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+  ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
 
-    if (GetVramSize(defaultGPUNode) < BufferSize + (1UL << 30)) {
-        LOG() << "no enough VRAM, skipping the test" << std::endl;
-        return;
-    }
+  if (GetVramSize(defaultGPUNode) < BufferSize + (1UL << 30)) {
+    LOG() << "no enough VRAM, skipping the test" << std::endl;
+    return;
+  }
 
-    HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true/*zero*/, false/*local*/, true/*exec*/);
-    HsaMemoryBuffer srcSysBuffer(PAGE_SIZE, defaultGPUNode, false);
-    void *LocalBuffer;
-    HsaMemFlags memFlags = {0};
-    int ret;
+  HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true /*zero*/, false /*local*/,
+                            true /*exec*/);
+  HsaMemoryBuffer srcSysBuffer(PAGE_SIZE, defaultGPUNode, false);
+  void* LocalBuffer;
+  HsaMemFlags memFlags = {0};
+  int ret;
 
-    memFlags.ui32.NonPaged = 1;
-    memFlags.ui32.Contiguous = 1;
-    ret = hsaKmtAllocMemory(defaultGPUNode, BufferSize, memFlags, &LocalBuffer);
-    if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
-        LOG() << "KFD does not support contiguous memory, skipping the test" << std::endl;
-        return;
-    }
+  memFlags.ui32.NonPaged = 1;
+  memFlags.ui32.Contiguous = 1;
+  ret = hsaKmtAllocMemory(defaultGPUNode, BufferSize, memFlags, &LocalBuffer);
+  if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
+    LOG() << "KFD does not support contiguous memory, skipping the test" << std::endl;
+    return;
+  }
 
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(srcSysBuffer.As<void*>(),
-                                        srcSysBuffer.Size(),
-                                        &AlternateVAGPU));
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(LocalBuffer, BufferSize, &AlternateVAGPU));
+  ASSERT_SUCCESS(
+      hsaKmtMapMemoryToGPU(srcSysBuffer.As<void*>(), srcSysBuffer.Size(), &AlternateVAGPU));
+  ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(LocalBuffer, BufferSize, &AlternateVAGPU));
 
-    /* Fill up srcSysBuffer */
-    srcSysBuffer.Fill(0xfe);
+  /* Fill up srcSysBuffer */
+  srcSysBuffer.Fill(0xfe);
 
-    /* Put 'copy dword' command to ISA buffer */
-    ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()));
+  /* Put 'copy dword' command to ISA buffer */
+  ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()));
 
-    ASSERT_SUCCESS(queue.Create(defaultGPUNode));
-    Dispatch dispatch(isaBuffer);
+  ASSERT_SUCCESS(queue.Create(defaultGPUNode));
+  Dispatch dispatch(isaBuffer);
 
-    /* Submit the command to GPU so GPU will copy from system memory
-     * (srcSysBuffer) to local memory(LocalBuffer)
-     */
-    dispatch.SetArgs(srcSysBuffer.As<void*>(), LocalBuffer);
-    dispatch.Submit(queue);
-    dispatch.Sync(g_TestTimeOut);  // GPU executed the command
+  /* Submit the command to GPU so GPU will copy from system memory
+   * (srcSysBuffer) to local memory(LocalBuffer)
+   */
+  dispatch.SetArgs(srcSysBuffer.As<void*>(), LocalBuffer);
+  dispatch.Submit(queue);
+  dispatch.Sync(g_TestTimeOut);  // GPU executed the command
 
-    EXPECT_SUCCESS(queue.Destroy());
+  EXPECT_SUCCESS(queue.Destroy());
 
-    LocalMemoryAccess Rdma;
-    void *gpuAddr;
+  LocalMemoryAccess Rdma;
+  void* gpuAddr;
 
-    Rdma.Open();
-    if (Rdma.fd < 0) {
-        LOG() << "amdp2ptest.ko driver not loaded, skipping RDMA getpages" << std::endl;
-        goto exit;
-    }
+  Rdma.Open();
+  if (Rdma.fd < 0) {
+    LOG() << "amdp2ptest.ko driver not loaded, skipping RDMA getpages" << std::endl;
+    goto exit;
+  }
 
-    /* GetPages asks the test driver to convert GPU virtual memory to DMA/
-     * Physical memory and save it in the list. rdma_mmap maps the memory to
-     * user space memory.
-     */
-    ret = Rdma.GetPages((uint64_t)LocalBuffer, BufferSize);
-    ASSERT_EQ(ret, 0) << "Failed to get pages";
+  /* GetPages asks the test driver to convert GPU virtual memory to DMA/
+   * Physical memory and save it in the list. rdma_mmap maps the memory to
+   * user space memory.
+   */
+  ret = Rdma.GetPages((uint64_t)LocalBuffer, BufferSize);
+  ASSERT_EQ(ret, 0) << "Failed to get pages";
 
-    gpuAddr = Rdma.MMap((uint64_t)LocalBuffer, BufferSize);
-    ASSERT_GE((int64_t)gpuAddr, 0) << "Failed to map RDMA address.";
+  gpuAddr = Rdma.MMap((uint64_t)LocalBuffer, BufferSize);
+  ASSERT_GE((int64_t)gpuAddr, 0) << "Failed to map RDMA address.";
 
-    printf("contiguous VRAM address %p size 0x%lx bytes\n", LocalBuffer, BufferSize);
-    printf("Pause to dump page table to check if allocation is contiguous\n");
-    printf("Press Enter key to continue\n");
-    getchar();
+  printf("contiguous VRAM address %p size 0x%lx bytes\n", LocalBuffer, BufferSize);
+  printf("Pause to dump page table to check if allocation is contiguous\n");
+  printf("Press Enter key to continue\n");
+  getchar();
 
-    /* Read the memory to confirm that application can read the local memory
-     * correctly from the mapped address.
-     */
-    EXPECT_EQ(memcmp(gpuAddr, srcSysBuffer.As<void*>(), 4), 0);
+  /* Read the memory to confirm that application can read the local memory
+   * correctly from the mapped address.
+   */
+  EXPECT_EQ(memcmp(gpuAddr, srcSysBuffer.As<void*>(), 4), 0);
 
-    Rdma.UnMap(gpuAddr, PAGE_SIZE);
-    Rdma.Close();
+  Rdma.UnMap(gpuAddr, PAGE_SIZE);
+  Rdma.Close();
 
 exit:
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(srcSysBuffer.As<void*>()));
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(LocalBuffer));
-    EXPECT_SUCCESS(hsaKmtFreeMemory(LocalBuffer, BufferSize));
+  EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(srcSysBuffer.As<void*>()));
+  EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(LocalBuffer));
+  EXPECT_SUCCESS(hsaKmtFreeMemory(LocalBuffer, BufferSize));
 
-    TEST_END
+  TEST_END
 }

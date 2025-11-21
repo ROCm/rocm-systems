@@ -114,9 +114,9 @@ find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t vers
                 _out_agents->push_back(std::move(tool_gpu_agent));
         }
 
-        ss << "[" << __FUNCTION__ << "] " << _agents[i]->name << " :: "
-           << "id=" << _agents[i]->id.handle << ", "
-           << "type=" << _agents[i]->type << "\n";
+        ss << "[" << __FUNCTION__ << "] " << _agents[i]->name
+           << " :: " << "id=" << _agents[i]->id.handle << ", " << "type=" << _agents[i]->type
+           << "\n";
     }
 
     *utils::get_output_stream() << ss.str() << "\n";
@@ -179,17 +179,14 @@ query_avail_configs_for_agent(tool_agent_info* agent_info)
     }
 
     ss << "The agent with the id: " << agent_info->agent_id.handle << " supports the "
-       << agent_info->avail_configs->size() << " configurations: "
-       << "\n";
+       << agent_info->avail_configs->size() << " configurations: " << "\n";
     size_t ind = 0;
     for(auto& cfg : *agent_info->avail_configs)
     {
-        ss << "(" << ++ind << ".) "
-           << "method: " << cfg.method << ", "
-           << "unit: " << cfg.unit << ", "
-           << "min_interval: " << cfg.min_interval << ", "
-           << "max_interval: " << cfg.max_interval << ", "
-           << "flags: " << std::hex << cfg.flags << std::dec
+        ss << "(" << ++ind << ".) " << "method: " << cfg.method << ", " << "unit: " << cfg.unit
+           << ", " << "min_interval: " << cfg.min_interval << ", "
+           << "max_interval: " << cfg.max_interval << ", " << "flags: " << std::hex << cfg.flags
+           << std::dec
            << ((cfg.flags == ROCPROFILER_PC_SAMPLING_CONFIGURATION_FLAGS_INTERVAL_POW2)
                    ? " (an interval value must be power of 2)"
                    : "")
@@ -299,16 +296,14 @@ void
 print_sample_common_fields(std::ostream& os, const PcSamplingRecordT* pc_sample)
 {
     os << "(code_obj_id, offset): (" << pc_sample->pc.code_object_id << ", 0x" << std::hex
-       << pc_sample->pc.code_object_offset << "), "
-       << "timestamp: " << std::dec << pc_sample->timestamp << ", "
-       << "exec: " << std::hex << std::setw(16) << pc_sample->exec_mask << ", "
-       << "workgroup_id_(x=" << std::dec << std::setw(5) << pc_sample->workgroup_id.x << ", "
-       << "y=" << std::setw(5) << pc_sample->workgroup_id.y << ", "
-       << "z=" << std::setw(5) << pc_sample->workgroup_id.z << "), "
+       << pc_sample->pc.code_object_offset << "), " << "timestamp: " << std::dec
+       << pc_sample->timestamp << ", " << "exec: " << std::hex << std::setw(16)
+       << pc_sample->exec_mask << ", " << "workgroup_id_(x=" << std::dec << std::setw(5)
+       << pc_sample->workgroup_id.x << ", " << "y=" << std::setw(5) << pc_sample->workgroup_id.y
+       << ", " << "z=" << std::setw(5) << pc_sample->workgroup_id.z << "), "
        << "wave_in_group: " << std::setw(2) << static_cast<unsigned int>(pc_sample->wave_in_group)
-       << ", "
-       << "chiplet: " << std::setw(2) << static_cast<unsigned int>(pc_sample->hw_id.chiplet) << ", "
-       << "dispatch_id: " << std::setw(7) << pc_sample->dispatch_id << ","
+       << ", " << "chiplet: " << std::setw(2) << static_cast<unsigned int>(pc_sample->hw_id.chiplet)
+       << ", " << "dispatch_id: " << std::setw(7) << pc_sample->dispatch_id << ","
        << "correlation: {internal=" << std::setw(7) << pc_sample->correlation_id.internal << ", "
        << "external=" << std::setw(5) << pc_sample->correlation_id.external.value << "}, ";
 }
@@ -355,9 +350,8 @@ print_sample(std::ostream& os, const rocprofiler_pc_sampling_record_stochastic_v
        << "FLAT: " << static_cast<unsigned int>(snapshot.arb_state_issue_flat) << ", "
        << "EXPORT: " << static_cast<unsigned int>(snapshot.arb_state_issue_exp) << ", "
        << "MISC: " << static_cast<unsigned int>(snapshot.arb_state_issue_misc) << "), "
-       << "pipe stalled: ("
-       << "VALU: " << static_cast<unsigned int>(snapshot.arb_state_stall_valu) << ", "
-       << "MATRIX: " << static_cast<unsigned int>(snapshot.arb_state_stall_matrix) << ", "
+       << "pipe stalled: (" << "VALU: " << static_cast<unsigned int>(snapshot.arb_state_stall_valu)
+       << ", " << "MATRIX: " << static_cast<unsigned int>(snapshot.arb_state_stall_matrix) << ", "
        << "LDS: " << static_cast<unsigned int>(snapshot.arb_state_stall_lds) << ", "
        << "LDS_DIRECT: " << static_cast<unsigned int>(snapshot.arb_state_stall_lds_direct) << ", "
        << "SCALAR: " << static_cast<unsigned int>(snapshot.arb_state_stall_scalar) << ", "

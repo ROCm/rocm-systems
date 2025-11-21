@@ -53,40 +53,40 @@ void Init_LLVM();
 void Shutdown_LLVM();
 
 class Assembler {
-  private:
-      const char* ArchName = "amdgcn";
-      const char* VendorName = "amd";
-      const char* OSName = "amdhsa";
-      char MCPU[ASM_MCPU_LEN];
+ private:
+  const char* ArchName = "amdgcn";
+  const char* VendorName = "amd";
+  const char* OSName = "amdhsa";
+  char MCPU[ASM_MCPU_LEN];
 
-      std::string TripleName;
-      std::string Error;
+  std::string TripleName;
+  std::string Error;
 
-      char* TextData;
-      size_t TextSize;
+  char* TextData;
+  size_t TextSize;
 
-      void SetTargetAsic(const uint32_t Gfxv);
+  void SetTargetAsic(const uint32_t Gfxv);
 
-      void FlushText();
-      void PrintELFHex(const std::string Data);
-      int ExtractELFText(const char* RawData);
+  void FlushText();
+  void PrintELFHex(const std::string Data);
+  int ExtractELFText(const char* RawData);
 
-  public:
-      Assembler(const uint32_t Gfxv);
-      ~Assembler();
+ public:
+  Assembler(const uint32_t Gfxv);
+  ~Assembler();
 
-      void PrintTextHex();
-      const char* GetTargetAsic();
+  void PrintTextHex();
+  const char* GetTargetAsic();
 
-      const char* GetInstrStream();
-      const size_t GetInstrStreamSize();
-      int CopyInstrStream(char* OutBuf, const size_t BufSize = PAGE_SIZE);
+  const char* GetInstrStream();
+  const size_t GetInstrStreamSize();
+  int CopyInstrStream(char* OutBuf, const size_t BufSize = PAGE_SIZE);
 
-      int RunAssemble(const char* const AssemblySource);
-      int RunAssembleBuf(const char* const AssemblySource, char* OutBuf,
-                         const size_t BufSize = PAGE_SIZE);
-      int RunAssembleBuf(const char* const AssemblySource, char* OutBuf,
-                         const size_t BufSize, const uint32_t Gfxv);
+  int RunAssemble(const char* const AssemblySource);
+  int RunAssembleBuf(const char* const AssemblySource, char* OutBuf,
+                     const size_t BufSize = PAGE_SIZE);
+  int RunAssembleBuf(const char* const AssemblySource, char* OutBuf, const size_t BufSize,
+                     const uint32_t Gfxv);
 };
 
 #endif  // _ASSEMBLE_H_

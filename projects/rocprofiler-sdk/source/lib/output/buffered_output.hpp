@@ -50,10 +50,10 @@ struct buffered_output
     static constexpr auto buffer_type_v = DomainT;
 
     explicit buffered_output(bool _enabled);
-    ~buffered_output()                          = default;
-    buffered_output(const buffered_output&)     = delete;
-    buffered_output(buffered_output&&) noexcept = delete;
-    buffered_output& operator=(const buffered_output&) = delete;
+    ~buffered_output()                                     = default;
+    buffered_output(const buffered_output&)                = delete;
+    buffered_output(buffered_output&&) noexcept            = delete;
+    buffered_output& operator=(const buffered_output&)     = delete;
     buffered_output& operator=(buffered_output&&) noexcept = delete;
 
     operator bool() const { return enabled; }

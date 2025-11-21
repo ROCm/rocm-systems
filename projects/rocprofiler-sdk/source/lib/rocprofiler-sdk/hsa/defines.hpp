@@ -80,9 +80,10 @@
         static constexpr auto operation_idx = HSA_API_ID;                                          \
         static constexpr auto name          = #HSA_FUNC;                                           \
                                                                                                    \
-        using this_type     = hsa_api_meta<table_idx, operation_idx>;                              \
-        using function_type = hsa_api_func<decltype(                                               \
-            std::declval<hsa_table_lookup<table_idx>::type>().HSA_FUNC_PTR)>::function_type;       \
+        using this_type = hsa_api_meta<table_idx, operation_idx>;                                  \
+        using function_type =                                                                      \
+            hsa_api_func<decltype(std::declval<hsa_table_lookup<table_idx>::type>()                \
+                                      .HSA_FUNC_PTR)>::function_type;                              \
                                                                                                    \
         static constexpr auto offset()                                                             \
         {                                                                                          \

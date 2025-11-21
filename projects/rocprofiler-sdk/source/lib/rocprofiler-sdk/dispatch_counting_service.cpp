@@ -25,7 +25,8 @@
 
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 
-extern "C" {
+extern "C"
+{
 /**
  * @brief Configure buffered dispatch profile Counting Service.
  *        Collects the counters in dispatch packets and stores them

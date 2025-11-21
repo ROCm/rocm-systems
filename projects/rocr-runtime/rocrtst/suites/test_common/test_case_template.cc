@@ -110,16 +110,17 @@
 
 static const uint32_t kNumBufferElements = rocrtst::isEmuModeEnabled() ? 4 : 256;
 
-#define RET_IF_HSA_ERR(err) { \
-  if ((err) != HSA_STATUS_SUCCESS) { \
-    const char* msg = 0; \
-    hsa_status_string(err, &msg); \
-    std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << \
-                          __FILE__ << ". Call returned " << err << std::endl; \
-    std::cout << msg << std::endl; \
-    return (err); \
-  } \
-}
+#define RET_IF_HSA_ERR(err)                                                                        \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
+                << ". Call returned " << err << std::endl;                                         \
+      std::cout << msg << std::endl;                                                               \
+      return (err);                                                                                \
+    }                                                                                              \
+  }
 
 // Many test cases want to perform an operation on memory sizes of various
 // granularities.
@@ -137,13 +138,13 @@ const size_t Size[kNumGranularity] = {
 
 static const int kMaxCopySize = Size[kNumGranularity - 1];
 #endif
-TestExample::TestExample(void) :
-    TestBase() {
+TestExample::TestExample(void) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
   set_title("Test Case Example");
-  set_description("Put a description of the test case here. Line breaks "
+  set_description(
+      "Put a description of the test case here. Line breaks "
       "will be taken care of on output, not here.");
 
   set_kernel_file_name("test_case_template_kernels.hsaco");
@@ -157,8 +158,7 @@ TestExample::TestExample(void) :
 #endif
 }
 
-TestExample::~TestExample(void) {
-}
+TestExample::~TestExample(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -208,9 +208,8 @@ void TestExample::SetUp(void) {
   hsa_agent_t ag_list[2] = {*gpu_device1(), *cpu_device()};
 
   // Allocate a few buffers for our example
-  err = hsa_amd_memory_pool_allocate(cpu_pool(),
-                                   kNumBufferElements*sizeof(uint32_t),
-                                   0, reinterpret_cast<void**>(&src_buffer_));
+  err = hsa_amd_memory_pool_allocate(cpu_pool(), kNumBufferElements * sizeof(uint32_t), 0,
+                                     reinterpret_cast<void**>(&src_buffer_));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_amd_agents_allow_access(2, ag_list, NULL, src_buffer_);
@@ -218,12 +217,11 @@ void TestExample::SetUp(void) {
 
   // Initialize the source buffer
   for (uint32_t i = 0; i < kNumBufferElements; ++i) {
-    reinterpret_cast<uint32_t *>(src_buffer_)[i] = i;
+    reinterpret_cast<uint32_t*>(src_buffer_)[i] = i;
   }
 
-  err = hsa_amd_memory_pool_allocate(cpu_pool(),
-                                   kNumBufferElements*sizeof(uint32_t),
-                                   0, reinterpret_cast<void**>(&dst_buffer_));
+  err = hsa_amd_memory_pool_allocate(cpu_pool(), kNumBufferElements * sizeof(uint32_t), 0,
+                                     reinterpret_cast<void**>(&dst_buffer_));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_amd_agents_allow_access(2, ag_list, NULL, dst_buffer_);
@@ -235,7 +233,7 @@ void TestExample::SetUp(void) {
   // This can be seen by executing
   // $ amdgcn-amd-amdhsa-readelf -aw ./binary_search_kernels.hsaco
   // The kernel code will expect the following arguments aligned as shown.
-//  typedef uint32_t uint4[4];
+  //  typedef uint32_t uint4[4];
   struct __attribute__((aligned(16))) local_args_t {
     uint32_t* dstArray;
     uint32_t* srcArray;
@@ -249,8 +247,8 @@ void TestExample::SetUp(void) {
     uint64_t completion_action;
   } local_args;
 
-  local_args.dstArray = reinterpret_cast<uint32_t *>(dst_buffer_);
-  local_args.srcArray = reinterpret_cast<uint32_t *>(src_buffer_);
+  local_args.dstArray = reinterpret_cast<uint32_t*>(dst_buffer_);
+  local_args.srcArray = reinterpret_cast<uint32_t*>(src_buffer_);
   local_args.size = kNumBufferElements;
   local_args.global_offset_x = 0;
   local_args.global_offset_y = 0;
@@ -269,20 +267,18 @@ void TestExample::SetUp(void) {
 // provided AQL packet. The provided AQL packet address should be in the
 // queue memory space.
 static inline void AtomicSetPacketHeader(uint16_t header, uint16_t setup,
-                                  hsa_kernel_dispatch_packet_t* queue_packet) {
-  __atomic_store_n(reinterpret_cast<uint32_t*>(queue_packet),
-                   header | (setup << 16), __ATOMIC_RELEASE);
+                                         hsa_kernel_dispatch_packet_t* queue_packet) {
+  __atomic_store_n(reinterpret_cast<uint32_t*>(queue_packet), header | (setup << 16),
+                   __ATOMIC_RELEASE);
 }
 
 // Do a few extra iterations as we toss out some of the inital and final
 // iterations when calculating statistics
-uint32_t TestExample::RealIterationNum(void) {
-  return num_iteration() * 1.2 + 1;
-}
+uint32_t TestExample::RealIterationNum(void) { return num_iteration() * 1.2 + 1; }
 
-static bool VerifyResult(uint32_t *ar, size_t sz) {
+static bool VerifyResult(uint32_t* ar, size_t sz) {
   for (size_t i = 0; i < sz; ++i) {
-    if (i*i != ar[i]) {
+    if (i * i != ar[i]) {
       return false;
     }
   }
@@ -304,7 +300,7 @@ void TestExample::Run(void) {
   std::vector<double> timer;
 
   int it = RealIterationNum();
-  hsa_kernel_dispatch_packet_t *queue_aql_packet;
+  hsa_kernel_dispatch_packet_t* queue_aql_packet;
 
   rocrtst::PerfTimer p_timer;
   uint64_t index;
@@ -314,14 +310,11 @@ void TestExample::Run(void) {
     // local AQL packet, except the the setup and header fields.
     queue_aql_packet = WriteAQLToQueue(this, &index);
     ASSERT_EQ(queue_aql_packet,
-              reinterpret_cast<hsa_kernel_dispatch_packet_t *>
-                                      (main_queue()->base_address) + index);
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(main_queue()->base_address) + index);
     uint32_t aql_header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
 
-    aql_header |= HSA_FENCE_SCOPE_SYSTEM <<
-                  HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
-    aql_header |= HSA_FENCE_SCOPE_SYSTEM <<
-                  HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+    aql_header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+    aql_header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
 
     // Create and start a timer for this iteration
     int id = p_timer.CreateTimer();
@@ -332,8 +325,8 @@ void TestExample::Run(void) {
     hsa_signal_store_screlease(main_queue()->doorbell_signal, index);
 
     // Wait on the dispatch signal until the kernel is finished.
-    while (hsa_signal_wait_scacquire(aql().completion_signal,
-         HSA_SIGNAL_CONDITION_LT, 1, (uint64_t) - 1, HSA_WAIT_STATE_ACTIVE)) {
+    while (hsa_signal_wait_scacquire(aql().completion_signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                     (uint64_t)-1, HSA_WAIT_STATE_ACTIVE)) {
     }
 
     // Stop the timer
@@ -343,8 +336,7 @@ void TestExample::Run(void) {
     timer.push_back(p_timer.ReadTimer(id));
     hsa_signal_store_screlease(aql().completion_signal, 1);
 
-    ASSERT_TRUE(VerifyResult(reinterpret_cast<uint32_t *>(dst_buffer_),
-                                                         kNumBufferElements));
+    ASSERT_TRUE(VerifyResult(reinterpret_cast<uint32_t*>(dst_buffer_), kNumBufferElements));
 
     // Pay attention to verbosity level for things like progress output
     if (verbosity() >= VERBOSE_PROGRESS) {
@@ -365,9 +357,7 @@ void TestExample::Run(void) {
   time_mean_ = rocrtst::CalcMean(timer);
 }
 
-void TestExample::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestExample::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestExample::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -377,8 +367,7 @@ void TestExample::DisplayResults(void) const {
   }
 
   TestBase::DisplayResults();
-  std::cout << "The average time was: " << time_mean_ * 1e6 <<
-                                                           " uS" << std::endl;
+  std::cout << "The average time was: " << time_mean_ * 1e6 << " uS" << std::endl;
   return;
 }
 

@@ -1605,4 +1605,3 @@ amd::Image* Image::FindView(cl_image_format format) const {
 }
 
 }  // namespace amd::roc
-

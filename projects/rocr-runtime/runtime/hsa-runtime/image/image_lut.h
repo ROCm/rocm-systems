@@ -74,7 +74,7 @@ class ImageLut {
   virtual uint32_t GetMaxArraySize(hsa_ext_image_geometry_t geometry) const = 0;
 
  private:
-   DISALLOW_COPY_AND_ASSIGN(ImageLut);
+  DISALLOW_COPY_AND_ASSIGN(ImageLut);
 };
 
 }  // namespace image

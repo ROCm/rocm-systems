@@ -138,7 +138,7 @@ TEST_CASE("Unit_hipIpcMemAccess_Semaphores") {
         }
       }
       for (int i = 0; i < Num_devices; ++i) {
-        
+
         HIP_CHECK(hipDeviceCanAccessPeer(&CanAccessPeer, i, shrd_mem->device));
         if (CanAccessPeer == 1) {
           HIP_CHECK(hipDeviceEnablePeerAccess(i, 0));

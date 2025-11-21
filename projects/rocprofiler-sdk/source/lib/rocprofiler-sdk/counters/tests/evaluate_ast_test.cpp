@@ -104,7 +104,7 @@ TEST(evaluate_ast, counter_expansion)
     {
         RawAST* ast = nullptr;
         auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                              : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast);
         asts.emplace(val, EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
@@ -139,7 +139,7 @@ TEST(evaluate_ast, counter_expansion_multi_derived)
     {
         RawAST* ast = nullptr;
         auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                              : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast);
         asts.emplace(val, EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
@@ -174,7 +174,7 @@ TEST(evaluate_ast, counter_expansion_order)
     {
         RawAST* ast = nullptr;
         auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                              : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast);
         asts.emplace(val, EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
@@ -208,7 +208,7 @@ TEST(evaluate_ast, counter_expansion_function)
     {
         RawAST* ast = nullptr;
         auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                              : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace(val, EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
@@ -258,7 +258,7 @@ TEST(evaluate_ast, counter_constants)
     {
         RawAST* ast = nullptr;
         auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                              : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
@@ -457,7 +457,7 @@ TEST(evaluate_ast, evaluate_simple_counters)
     {
         RawAST* ast = nullptr;
         auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                               : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
@@ -574,7 +574,7 @@ TEST(evaulate_ast, evaulate_hybrid_counters)
     {
         RawAST* ast = nullptr;
         auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                               : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
@@ -627,7 +627,7 @@ run_reduce_test(
     {
         RawAST* ast = nullptr;
         auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                              : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
@@ -684,8 +684,7 @@ TEST(evaluate_ast, counter_reduction_sum)
         return base_id;
     };
 
-    auto sum_vec = [](auto& a) -> auto&
-    {
+    auto sum_vec = [](auto& a) -> auto& {
         for(size_t i = 1; i < a.size(); i++)
         {
             a[0].counter_value += a[i].counter_value;
@@ -773,8 +772,7 @@ TEST(evaluate_ast, counter_reduction_min)
         return base_id;
     };
 
-    auto min_vec = [](auto& a) -> auto&
-    {
+    auto min_vec = [](auto& a) -> auto& {
         a[0].counter_value = std::min_element(a.begin(), a.end(), [](const auto& b, const auto& c) {
                                  return b.counter_value < c.counter_value;
                              })->counter_value;
@@ -861,8 +859,7 @@ TEST(evaluate_ast, counter_reduction_max)
         return base_id;
     };
 
-    auto max_vec = [](auto& a) -> auto&
-    {
+    auto max_vec = [](auto& a) -> auto& {
         a[0].counter_value = std::max_element(a.begin(), a.end(), [](const auto& b, const auto& c) {
                                  return b.counter_value < c.counter_value;
                              })->counter_value;
@@ -949,8 +946,7 @@ TEST(evaluate_ast, counter_reduction_avg)
         return base_id;
     };
 
-    auto avg_vec = [](auto& a) -> auto&
-    {
+    auto avg_vec = [](auto& a) -> auto& {
         for(size_t i = 1; i < a.size(); i++)
         {
             a[0].counter_value += a[i].counter_value;
@@ -1039,8 +1035,7 @@ TEST(evaluate_ast, evaluate_mixed_counters)
         return base_id;
     };
 
-    auto sum_vec = [](auto& a) -> auto&
-    {
+    auto sum_vec = [](auto& a) -> auto& {
         for(size_t i = 1; i < a.size(); i++)
         {
             a[0].counter_value += a[i].counter_value;
@@ -1131,7 +1126,7 @@ TEST(evaluate_ast, evaluate_mixed_counters)
     {
         RawAST* ast = nullptr;
         auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                              : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
@@ -1195,8 +1190,7 @@ TEST(evaluate_ast, derived_counter_reduction)
         return base_id;
     };
 
-    auto max_vec = [](auto&& a) -> auto&
-    {
+    auto max_vec = [](auto&& a) -> auto& {
         a[0].counter_value = std::max_element(a.begin(), a.end(), [](const auto& b, const auto& c) {
                                  return b.counter_value < c.counter_value;
                              })->counter_value;
@@ -1205,8 +1199,7 @@ TEST(evaluate_ast, derived_counter_reduction)
         return a;
     };
 
-    auto sum_vec = [](auto&& a) -> auto&
-    {
+    auto sum_vec = [](auto&& a) -> auto& {
         for(size_t i = 1; i < a.size(); i++)
         {
             a[0].counter_value += a[i].counter_value;
@@ -1234,7 +1227,7 @@ TEST(evaluate_ast, derived_counter_reduction)
     {
         RawAST* ast = nullptr;
         auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                              : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
@@ -1302,8 +1295,7 @@ TEST(evatuate_ast, evaluate_select)
     auto select_dim =
         [](auto                                 a,
            std::unordered_map<rocprofiler::counters::rocprofiler_profile_counter_instance_types,
-                              std::vector<int>> dims) -> auto
-    {
+                              std::vector<int>> dims) -> auto {
         if(a.empty()) return a;
         for(auto& dim_pair : dims)
         {
@@ -1367,7 +1359,7 @@ TEST(evatuate_ast, evaluate_select)
     {
         RawAST* ast = nullptr;
         auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                              : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
@@ -1436,8 +1428,7 @@ TEST(evaluate_ast, counter_reduction_dimension)
         return base_id;
     };
 
-    auto max_dim = [&](auto&& a) -> auto
-    {
+    auto max_dim = [&](auto&& a) -> auto {
         std::unordered_map<int64_t, rocprofiler_record_counter_t> groups_dim;
         std::vector<rocprofiler_record_counter_t>                 result;
         for(auto rec : a)
@@ -1463,8 +1454,7 @@ TEST(evaluate_ast, counter_reduction_dimension)
         return result;
     };
 
-    auto sum_dim = [&](auto&& a) -> auto
-    {
+    auto sum_dim = [&](auto&& a) -> auto {
         std::vector<rocprofiler_record_counter_t> result;
         double                                    counter_value = 0;
         result.push_back(a[0]);
@@ -1513,7 +1503,7 @@ TEST(evaluate_ast, counter_reduction_dimension)
     {
         RawAST* ast = nullptr;
         auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                 : metric.expression().c_str());
+                                                              : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})

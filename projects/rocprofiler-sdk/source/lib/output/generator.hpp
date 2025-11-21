@@ -87,9 +87,9 @@ struct generator
     generator()          = delete;
     virtual ~generator() = default;
 
-    generator(const generator&)     = delete;
-    generator(generator&&) noexcept = delete;
-    generator& operator=(const generator&) = delete;
+    generator(const generator&)                = delete;
+    generator(generator&&) noexcept            = delete;
+    generator& operator=(const generator&)     = delete;
     generator& operator=(generator&&) noexcept = delete;
 
     auto begin() { return m_pos.begin(); }
@@ -141,9 +141,9 @@ struct file_generator : public generator<Tp>
     file_generator()           = delete;
     ~file_generator() override = default;
 
-    file_generator(const file_generator&)     = delete;
-    file_generator(file_generator&&) noexcept = delete;
-    file_generator& operator=(const file_generator&) = delete;
+    file_generator(const file_generator&)                = delete;
+    file_generator(file_generator&&) noexcept            = delete;
+    file_generator& operator=(const file_generator&)     = delete;
     file_generator& operator=(file_generator&&) noexcept = delete;
 
     std::vector<Tp> get(size_t itr) const override;

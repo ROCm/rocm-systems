@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -72,8 +72,7 @@ class Blit {
   /// @param dst Memory address of the copy destination.
   /// @param src Memory address of the copy source.
   /// @param size Size of the data to be copied.
-  virtual hsa_status_t SubmitLinearCopyCommand(void* dst, const void* src,
-                                               size_t size) = 0;
+  virtual hsa_status_t SubmitLinearCopyCommand(void* dst, const void* src, size_t size) = 0;
 
   /// @brief Submit a linear copy command to the the underlying compute device's
   /// control block. The call is non blocking. The memory transfer will start
@@ -86,10 +85,10 @@ class Blit {
   /// @param dep_signals Arrays of dependent signal.
   /// @param out_signal Output signal.
   /// @param gang_signals Array of gang signals.
-  virtual hsa_status_t SubmitLinearCopyCommand(
-      void* dst, const void* src, size_t size,
-      std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
-      std::vector<core::Signal*>& gang_signals) = 0;
+  virtual hsa_status_t SubmitLinearCopyCommand(void* dst, const void* src, size_t size,
+                                               std::vector<core::Signal*>& dep_signals,
+                                               core::Signal& out_signal,
+                                               std::vector<core::Signal*>& gang_signals) = 0;
 
   /// @brief Submit a linear fill command to the the underlying compute device's
   /// control block. The call is blocking until the command execution is
@@ -98,8 +97,7 @@ class Blit {
   /// @param ptr Memory address of the fill destination.
   /// @param value Value to be set.
   /// @param num Number of uint32_t element to be set to the value.
-  virtual hsa_status_t SubmitLinearFillCommand(void* ptr, uint32_t value,
-                                               size_t num) = 0;
+  virtual hsa_status_t SubmitLinearFillCommand(void* ptr, uint32_t value, size_t num) = 0;
 
   /// @brief Enable profiling of the asynchronous copy command. The timestamp
   /// of each copy request will be stored in the completion signal structure.

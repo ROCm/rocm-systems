@@ -50,9 +50,7 @@ namespace rocrtst {
 
 static const uint64_t kNanosecondsPerSecond = 1000000000;
 
-PerfTimer::PerfTimer(void) {
-  freq_in_100mhz = MeasureTSCFreqHz();
-}
+PerfTimer::PerfTimer(void) { freq_in_100mhz = MeasureTSCFreqHz(); }
 
 PerfTimer::~PerfTimer() {
   while (!_timers.empty()) {
@@ -84,8 +82,7 @@ int PerfTimer::StartTimer(int index) {
 #ifndef _AMD
   struct timespec s;
   clock_gettime(CLOCK_MONOTONIC, &s);
-  _timers[index]->_start = (uint64_t) s.tv_sec * kNanosecondsPerSecond
-                           + (uint64_t) s.tv_nsec;
+  _timers[index]->_start = (uint64_t)s.tv_sec * kNanosecondsPerSecond + (uint64_t)s.tv_nsec;
 #else
 
   // AMD timing method
@@ -110,7 +107,7 @@ int PerfTimer::StopTimer(int index) {
 #ifndef _AMD
   struct timespec s;
   clock_gettime(CLOCK_MONOTONIC, &s);
-  n = (uint64_t) s.tv_sec * kNanosecondsPerSecond + (uint64_t) s.tv_nsec;
+  n = (uint64_t)s.tv_sec * kNanosecondsPerSecond + (uint64_t)s.tv_nsec;
 #else
   // AMD Linux timing
 
@@ -132,9 +129,7 @@ int PerfTimer::StopTimer(int index) {
   return 0;
 }
 
-void PerfTimer::Error(std::string str) {
-  std::cout << str << std::endl;
-}
+void PerfTimer::Error(std::string str) { std::cout << str << std::endl; }
 
 double PerfTimer::ReadTimer(int index) {
   if (index >= static_cast<int>(_timers.size())) {

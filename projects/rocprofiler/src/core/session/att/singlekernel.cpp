@@ -31,9 +31,8 @@ namespace rocprofiler {
 
 namespace att {
 
-std::pair<std::vector<bool>, bool>
-AttTracer::GetAllowedProfilesList(const void* packets, int pkt_count) {
-
+std::pair<std::vector<bool>, bool> AttTracer::GetAllowedProfilesList(const void* packets,
+                                                                     int pkt_count) {
   std::vector<bool> can_profile_packet;
   bool b_can_profile_anypacket = false;
   can_profile_packet.reserve(pkt_count);
@@ -59,8 +58,7 @@ AttTracer::GetAllowedProfilesList(const void* packets, int pkt_count) {
 
         // If no filters specified, auto profile this kernel
         if (kernel_profile_names.size() == 0 &&
-            kernel_name.find("__amd_rocclr_") == std::string::npos
-        ) {
+            kernel_name.find("__amd_rocclr_") == std::string::npos) {
           b_profile_this_object = true;
         } else {
           // Try to match the mangled kernel name with given matches in input.txt
@@ -77,20 +75,15 @@ AttTracer::GetAllowedProfilesList(const void* packets, int pkt_count) {
     can_profile_packet.push_back(b_profile_this_object);
   }
   // If we're going to skip all packets, need to update writer ID
-  if (!b_can_profile_anypacket)
-    WRITER_ID.store(current_writer_id, std::memory_order_release);
+  if (!b_can_profile_anypacket) WRITER_ID.store(current_writer_id, std::memory_order_release);
 
   return {can_profile_packet, b_can_profile_anypacket};
 }
 
-bool AttTracer::ATTSingleWriteInterceptor(
-  const void* packets,
-  uint64_t pkt_count,
-  uint64_t user_pkt_index,
-  queue::Queue& queue_info,
-  hsa_amd_queue_intercept_packet_writer writer,
-  rocprofiler_buffer_id_t buffer_id
-) {
+bool AttTracer::ATTSingleWriteInterceptor(const void* packets, uint64_t pkt_count,
+                                          uint64_t user_pkt_index, queue::Queue& queue_info,
+                                          hsa_amd_queue_intercept_packet_writer writer,
+                                          rocprofiler_buffer_id_t buffer_id) {
   static int KernelInterceptCount = 0;
   static const char* env_MAX_ATT_PROFILES = getenv("ROCPROFILER_MAX_ATT_PROFILES");
   static int MAX_ATT_PROFILES = env_MAX_ATT_PROFILES ? atoi(env_MAX_ATT_PROFILES) : 1;
@@ -144,7 +137,7 @@ bool AttTracer::ATTSingleWriteInterceptor(
       dummy_signal.handle = 0;
       start_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
       Packet::AddVendorSpecificPacket(&start_packet, &transformed_packets, dummy_signal);
-      Packet::CreateBarrierPacket(&transformed_packets, &start_packet.completion_signal, nullptr) ;
+      Packet::CreateBarrierPacket(&transformed_packets, &start_packet.completion_signal, nullptr);
     }
 
     auto& packet = transformed_packets.emplace_back(packets_arr[i]);
@@ -155,26 +148,18 @@ bool AttTracer::ATTSingleWriteInterceptor(
     // Adding the dispatch packet newly created signal to the pending signals
     // list to be processed by the signal interrupt
     uint64_t record_id = rocprofiler::ROCProfiler_Singleton::GetInstance().GetUniqueRecordId();
-    AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object), record_id);
+    AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object),
+                                record_id);
 
-    this->AddPendingSignals(
-      writer_id,
-      record_id,
-      original_packet.completion_signal,
-      packet.completion_signal,
-      session_id_,
-      buffer_id,
-      profile,
-      {0},
-      (uint32_t)syscall(__NR_gettid),
-      user_pkt_index
-    );
+    this->AddPendingSignals(writer_id, record_id, original_packet.completion_signal,
+                            packet.completion_signal, session_id_, buffer_id, profile, {0},
+                            (uint32_t)syscall(__NR_gettid), user_pkt_index);
 
     uint64_t IsGFX9 = HSASupport_Singleton::GetInstance()
-                        .GetHSAAgentInfo(queue_info.GetGPUAgent().handle)
-                        .GetDeviceInfo()
-                        .getName()
-                        .find("gfx9") != std::string::npos;
+                          .GetHSAAgentInfo(queue_info.GetGPUAgent().handle)
+                          .GetDeviceInfo()
+                          .getName()
+                          .find("gfx9") != std::string::npos;
     codeobj_record::make_capture(rocprofiler_record_id_t{record_id}, capturem, IsGFX9);
     codeobj_record::start_capture(rocprofiler_record_id_t{record_id});
     codeobj_record::stop_capture(rocprofiler_record_id_t{record_id});
@@ -184,10 +169,8 @@ bool AttTracer::ATTSingleWriteInterceptor(
       hsa_barrier_and_packet_t barrier{};
       barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
       barrier.dep_signal[0] = packet.completion_signal;
-      packet_t* __attribute__((__may_alias__)) pkt =
-          (reinterpret_cast<packet_t*>(&barrier));
-      transformed_packets.emplace_back(*pkt).completion_signal =
-          original_packet.completion_signal;
+      packet_t* __attribute__((__may_alias__)) pkt = (reinterpret_cast<packet_t*>(&barrier));
+      transformed_packets.emplace_back(*pkt).completion_signal = original_packet.completion_signal;
     }
 
     // Adding a barrier packet with the original packet's completion signal.
@@ -205,31 +188,25 @@ bool AttTracer::ATTSingleWriteInterceptor(
       hsa_barrier_and_packet_t barrier{};
       barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
       barrier.completion_signal = interrupt_signal;
-      packet_t* __attribute__((__may_alias__)) pkt =
-          (reinterpret_cast<packet_t*>(&barrier));
+      packet_t* __attribute__((__may_alias__)) pkt = (reinterpret_cast<packet_t*>(&barrier));
       transformed_packets.emplace_back(*pkt);
     }
 
     // Creating Async Handler to be called every time the interrupt signal is
     // marked complete
-    signalAsyncHandlerATT(interrupt_signal, new queue::queue_info_session_t{
-      queue_info.GetGPUAgent(),
-      session_id_,
-      queue_info.GetQueueID(),
-      writer_id,
-      interrupt_signal,
-      HSASupport_Singleton::GetInstance()
-                        .GetHSAAgentInfo(queue_info.GetGPUAgent().handle)
-                        .GetDeviceInfo()
-                        .getNumaNode()
-    });
+    signalAsyncHandlerATT(
+        interrupt_signal,
+        new queue::queue_info_session_t{queue_info.GetGPUAgent(), session_id_,
+                                        queue_info.GetQueueID(), writer_id, interrupt_signal,
+                                        HSASupport_Singleton::GetInstance()
+                                            .GetHSAAgentInfo(queue_info.GetGPUAgent().handle)
+                                            .GetDeviceInfo()
+                                            .getNumaNode()});
   }
   /* Write the transformed packets to the hardware queue.  */
   writer(&transformed_packets[0], transformed_packets.size());
   return true;
 }
-
-
 
 
 }  // namespace att

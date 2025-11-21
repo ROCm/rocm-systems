@@ -50,7 +50,8 @@ using rocprofiler_register_library_api_table_func_t =
     decltype(::rocprofiler_register_library_api_table)*;
 }
 
-extern "C" {
+extern "C"
+{
 #pragma weak rocprofiler_configure
 #pragma weak rocprofiler_set_api_table
 #pragma weak rocprofiler_attach
@@ -139,9 +140,9 @@ using rocprofiler_attach_set_api_table_t = decltype(::rocprofiler_attach_set_api
 using rocprofiler_attach_func_t          = decltype(::rocprofiler_attach)*;
 using rocprofiler_detach_func_t          = decltype(::rocprofiler_detach)*;
 using rocp_set_api_table_data_t          = std::tuple<void*,
-                                             rocprofiler_set_api_table_t,
-                                             rocprofiler_attach_func_t,
-                                             rocprofiler_detach_func_t>;
+                                                      rocprofiler_set_api_table_t,
+                                                      rocprofiler_attach_func_t,
+                                                      rocprofiler_detach_func_t>;
 
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
 
@@ -301,7 +302,8 @@ struct rocp_import
 };
 
 template <size_t... Idx>
-auto rocp_reg_get_imports(std::index_sequence<Idx...>)
+auto
+rocp_reg_get_imports(std::index_sequence<Idx...>)
 {
     auto _data        = std::vector<rocp_import>{};
     auto _import_scan = [&_data](auto _info) {
@@ -542,9 +544,9 @@ struct scoped_count
 
     ~scoped_count() { --global_count; }
 
-    scoped_count(const scoped_count&)     = delete;
-    scoped_count(scoped_count&&) noexcept = delete;
-    scoped_count& operator=(const scoped_count&) = delete;
+    scoped_count(const scoped_count&)                = delete;
+    scoped_count(scoped_count&&) noexcept            = delete;
+    scoped_count& operator=(const scoped_count&)     = delete;
     scoped_count& operator=(scoped_count&&) noexcept = delete;
 
     uint32_t value = 0;
@@ -707,7 +709,8 @@ register_functor(const char*                                 common_name,
 };
 }  // namespace
 
-extern "C" {
+extern "C"
+{
 rocprofiler_register_error_code_t
 rocprofiler_register_library_api_table(
     const char*                                 common_name,

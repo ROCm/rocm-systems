@@ -66,7 +66,7 @@ struct Shared {
 
 class IPCTest : public TestBase {
  public:
-    IPCTest();
+  IPCTest();
 
   // @Brief: Destructor for test case of TestExample
   virtual ~IPCTest();

@@ -99,4 +99,3 @@ class Settings : public device::Settings {
 
 /*@}*/  // namespace amd::roc
 }  // namespace amd::roc
-

@@ -122,9 +122,9 @@ ImageManager::ImageManager() {}
 
 ImageManager::~ImageManager() {}
 
-hsa_status_t ImageManager::CopyBufferToImage(
-    const void* src_memory, size_t src_row_pitch, size_t src_slice_pitch,
-    const Image& dst_image, const hsa_ext_image_region_t& image_region) {
+hsa_status_t ImageManager::CopyBufferToImage(const void* src_memory, size_t src_row_pitch,
+                                             size_t src_slice_pitch, const Image& dst_image,
+                                             const hsa_ext_image_region_t& image_region) {
   Image* src_image = Image::Create(dst_image.component);
 
   src_image->component = dst_image.component;
@@ -138,17 +138,17 @@ hsa_status_t ImageManager::CopyBufferToImage(
   const hsa_dim3_t src_origin = {0};
   const hsa_dim3_t copy_size = image_region.range;
 
-  hsa_status_t status = ImageManager::CopyImage(
-      dst_image, *src_image, dst_origin, src_origin, copy_size);
+  hsa_status_t status =
+      ImageManager::CopyImage(dst_image, *src_image, dst_origin, src_origin, copy_size);
 
   Image::Destroy(src_image);
 
   return status;
 }
 
-hsa_status_t ImageManager::CopyImageToBuffer(
-    const Image& src_image, void* dst_memory, size_t dst_row_pitch,
-    size_t dst_slice_pitch, const hsa_ext_image_region_t& image_region) {
+hsa_status_t ImageManager::CopyImageToBuffer(const Image& src_image, void* dst_memory,
+                                             size_t dst_row_pitch, size_t dst_slice_pitch,
+                                             const hsa_ext_image_region_t& image_region) {
   // Treat buffer as image since we don't tile our image anyway.
   Image* dst_image = Image::Create(src_image.component);
 
@@ -163,28 +163,26 @@ hsa_status_t ImageManager::CopyImageToBuffer(
   const hsa_dim3_t src_origin = image_region.offset;
   const hsa_dim3_t copy_size = image_region.range;
 
-  hsa_status_t status = ImageManager::CopyImage(
-      *dst_image, src_image, dst_origin, src_origin, copy_size);
+  hsa_status_t status =
+      ImageManager::CopyImage(*dst_image, src_image, dst_origin, src_origin, copy_size);
 
   Image::Destroy(dst_image);
 
   return status;
 }
 
-hsa_status_t ImageManager::CopyImage(const Image& dst_image,
-                                     const Image& src_image,
-                                     const hsa_dim3_t& dst_origin,
-                                     const hsa_dim3_t& src_origin,
+hsa_status_t ImageManager::CopyImage(const Image& dst_image, const Image& src_image,
+                                     const hsa_dim3_t& dst_origin, const hsa_dim3_t& src_origin,
                                      const hsa_dim3_t size) {
-  ImageProperty dst_image_prop = GetImageProperty(
-      dst_image.component, dst_image.desc.format, dst_image.desc.geometry);
+  ImageProperty dst_image_prop =
+      GetImageProperty(dst_image.component, dst_image.desc.format, dst_image.desc.geometry);
   assert(dst_image_prop.cap != HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED);
 
   const size_t dst_element_size = dst_image_prop.element_size;
   assert(dst_element_size != 0);
 
-  ImageProperty src_image_prop = GetImageProperty(
-      src_image.component, src_image.desc.format, src_image.desc.geometry);
+  ImageProperty src_image_prop =
+      GetImageProperty(src_image.component, src_image.desc.format, src_image.desc.geometry);
   assert(src_image_prop.cap != HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED);
 
   const size_t src_element_size = src_image_prop.element_size;
@@ -225,19 +223,15 @@ hsa_status_t ImageManager::CopyImage(const Image& dst_image,
   const size_t element_size = src_element_size;
 
   // row_pitch and slice_pitch in bytes.
-  const size_t dst_row_pitch =
-      std::max(dst_image.row_pitch, size.x * element_size);
+  const size_t dst_row_pitch = std::max(dst_image.row_pitch, size.x * element_size);
   const size_t dst_slice_pitch = std::max(
       dst_image.slice_pitch,
-      dst_row_pitch *
-          (dst_image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ? 1 : size.y));
+      dst_row_pitch * (dst_image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ? 1 : size.y));
 
-  const size_t src_row_pitch =
-      std::max(src_image.row_pitch, size.x * element_size);
+  const size_t src_row_pitch = std::max(src_image.row_pitch, size.x * element_size);
   const size_t src_slice_pitch = std::max(
       src_image.slice_pitch,
-      src_row_pitch *
-          (src_image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ? 1 : size.y));
+      src_row_pitch * (src_image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ? 1 : size.y));
 
   size_t src_offset = src_origin.x;
   size_t dst_offset = dst_origin.x;
@@ -266,8 +260,7 @@ hsa_status_t ImageManager::CopyImage(const Image& dst_image,
       size_t dst_offset_temp = dst_offset + slice * dst_slice_pitch;
 
       for (size_t rows = 0; rows < size.y; ++rows) {
-        std::memcpy((dst + dst_offset_temp), (src + src_offset_temp),
-                    copy_size);
+        std::memcpy((dst + dst_offset_temp), (src + src_offset_temp), copy_size);
         src_offset_temp += src_row_pitch;
         dst_offset_temp += dst_row_pitch;
       }
@@ -284,13 +277,10 @@ hsa_status_t ImageManager::CopyImage(const Image& dst_image,
 
         if (linear_to_standard_rgb) {
           for (size_t cols = 0; cols < size.x; ++cols) {
-            dst_pixel[0] =
-                Denormalize(LinearToStandardRGB(Normalize(src_pixel[0])));  // R
-            dst_pixel[1] =
-                Denormalize(LinearToStandardRGB(Normalize(src_pixel[1])));  // G
-            dst_pixel[2] =
-                Denormalize(LinearToStandardRGB(Normalize(src_pixel[2])));  // B
-            dst_pixel[3] = src_pixel[3];                                    // A
+            dst_pixel[0] = Denormalize(LinearToStandardRGB(Normalize(src_pixel[0])));  // R
+            dst_pixel[1] = Denormalize(LinearToStandardRGB(Normalize(src_pixel[1])));  // G
+            dst_pixel[2] = Denormalize(LinearToStandardRGB(Normalize(src_pixel[2])));  // B
+            dst_pixel[3] = src_pixel[3];                                               // A
 
             src_pixel += element_size;
             dst_pixel += element_size;
@@ -298,13 +288,10 @@ hsa_status_t ImageManager::CopyImage(const Image& dst_image,
         } else {
           assert(standard_to_linear_rgb);
           for (size_t cols = 0; cols < size.x; ++cols) {
-            dst_pixel[0] =
-                Denormalize(StandardToLinearRGB(Normalize(src_pixel[0])));  // R
-            dst_pixel[1] =
-                Denormalize(StandardToLinearRGB(Normalize(src_pixel[1])));  // G
-            dst_pixel[2] =
-                Denormalize(StandardToLinearRGB(Normalize(src_pixel[2])));  // B
-            dst_pixel[3] = src_pixel[3];                                    // A
+            dst_pixel[0] = Denormalize(StandardToLinearRGB(Normalize(src_pixel[0])));  // R
+            dst_pixel[1] = Denormalize(StandardToLinearRGB(Normalize(src_pixel[1])));  // G
+            dst_pixel[2] = Denormalize(StandardToLinearRGB(Normalize(src_pixel[2])));  // B
+            dst_pixel[3] = src_pixel[3];                                               // A
 
             src_pixel += element_size;
             dst_pixel += element_size;
@@ -361,12 +348,10 @@ uint16_t ImageManager::FloatToHalf(float in) {
       return (sign_bit_16);
     } else if (exp_32 < kMinExpNormal) {
       // Half subnormal.
-      return (sign_bit_16 |
-              ((0x0400 | (mantissa_32 >> 13)) >> (127 - exp_32 - 14)));
+      return (sign_bit_16 | ((0x0400 | (mantissa_32 >> 13)) >> (127 - exp_32 - 14)));
     } else {
       // Half normal.
-      return (sign_bit_16 |
-              (((exp_32 - 127 + 15) << 10) | (mantissa_32 >> 13)));
+      return (sign_bit_16 | (((exp_32 - 127 + 15) << 10) | (mantissa_32 >> 13)));
     }
   }
 }
@@ -377,17 +362,14 @@ float ImageManager::Normalize(uint8_t u_val) {
   } else if (u_val == UINT8_MAX) {
     return 1.0f;
   } else {
-    return std::min(
-        std::max(static_cast<float>(u_val) / static_cast<float>(UINT8_MAX),
-                 0.0f),
-        1.0f);
+    return std::min(std::max(static_cast<float>(u_val) / static_cast<float>(UINT8_MAX), 0.0f),
+                    1.0f);
   }
 }
 
 uint8_t ImageManager::Denormalize(float f_val) {
   const unsigned long kScale = UINT8_MAX;
-  return std::min(
-      static_cast<unsigned long>(std::max(lrintf(kScale * f_val), 0l)), kScale);
+  return std::min(static_cast<unsigned long>(std::max(lrintf(kScale * f_val), 0l)), kScale);
 }
 
 float ImageManager::StandardToLinearRGB(float s_val) {
@@ -395,8 +377,7 @@ float ImageManager::StandardToLinearRGB(float s_val) {
   // Manual version 1.0 Provisional, chapter 7.1.4.1.2  Standard RGB (s-Form).
   double l_val = (double)s_val;
 
-  l_val = (l_val <= 0.04045f) ? (l_val / 12.92f)
-                              : pow(((l_val + 0.055f) / 1.055f), 2.4f);
+  l_val = (l_val <= 0.04045f) ? (l_val / 12.92f) : pow(((l_val + 0.055f) / 1.055f), 2.4f);
 
   return l_val;
 }
@@ -425,8 +406,8 @@ float ImageManager::LinearToStandardRGB(float l_val) {
   return s_val;
 }
 
-void ImageManager::FormatPattern(const hsa_ext_image_format_t& format,
-                                 const void* pattern_in, void* pattern_out) {
+void ImageManager::FormatPattern(const hsa_ext_image_format_t& format, const void* pattern_in,
+                                 void* pattern_out) {
   const int kR = 0;
   const int kG = 1;
   const int kB = 2;
@@ -511,7 +492,7 @@ void ImageManager::FormatPattern(const hsa_ext_image_format_t& format,
   const int32_t* pattern_in_i32 = NULL;
   const uint32_t* pattern_in_ui32 = NULL;
 
-  float new_pattern_in_f[4] = { 0 };
+  float new_pattern_in_f[4] = {0};
   if ((format.channel_order == HSA_EXT_IMAGE_CHANNEL_ORDER_SRGB) ||
       (format.channel_order == HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBX) ||
       (format.channel_order == HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBA) ||
@@ -548,24 +529,23 @@ void ImageManager::FormatPattern(const hsa_ext_image_format_t& format,
         uint8_t* pattern_out_ui8 = reinterpret_cast<uint8_t*>(pattern_out);
         const unsigned long kScale = UINT8_MAX;
         const long conv = lrintf(kScale * pattern_in_f[index[c]]);
-        pattern_out_ui8[c] =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
+        pattern_out_ui8[c] = std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
       } break;
       case HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT16: {
         uint16_t* pattern_out_ui16 = reinterpret_cast<uint16_t*>(pattern_out);
         const unsigned long kScale = UINT16_MAX;
         const long conv = lrintf(kScale * pattern_in_f[index[c]]);
-        pattern_out_ui16[c] =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
+        pattern_out_ui16[c] = std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
       } break;
       case HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT24: {
-        typedef struct Order24 { uint32_t r : 24; } Order24;
+        typedef struct Order24 {
+          uint32_t r : 24;
+        } Order24;
 
         Order24* pattern_out_u24 = reinterpret_cast<Order24*>(pattern_out);
         const unsigned long kScale = 0xffffff;
         const long conv = lrintf(kScale * pattern_in_f[index[c]]);
-        pattern_out_u24[c].r =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
+        pattern_out_u24[c].r = std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
       } break;
       case HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_555: {
         typedef struct Order555 {
@@ -577,16 +557,13 @@ void ImageManager::FormatPattern(const hsa_ext_image_format_t& format,
         Order555* pattern_out_u555 = reinterpret_cast<Order555*>(pattern_out);
         const unsigned long kScale = 0x1f;
         long conv = lrintf(kScale * pattern_in_f[index[0]]);
-        pattern_out_u555->r =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
+        pattern_out_u555->r = std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
 
         conv = lrintf(kScale * pattern_in_f[index[1]]);
-        pattern_out_u555->g =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
+        pattern_out_u555->g = std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
 
         conv = lrintf(kScale * pattern_in_f[index[2]]);
-        pattern_out_u555->b =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
+        pattern_out_u555->b = std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
         return;
       } break;
       case HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_565: {
@@ -599,18 +576,15 @@ void ImageManager::FormatPattern(const hsa_ext_image_format_t& format,
         Order565* pattern_out_u565 = reinterpret_cast<Order565*>(pattern_out);
         unsigned long scale = 0x1f;
         long conv = lrintf(scale * pattern_in_f[index[0]]);
-        pattern_out_u565->r =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), scale);
+        pattern_out_u565->r = std::min(static_cast<unsigned long>(std::max(conv, 0l)), scale);
 
         scale = 0x3f;
         conv = lrintf(scale * pattern_in_f[index[1]]);
-        pattern_out_u565->g =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), scale);
+        pattern_out_u565->g = std::min(static_cast<unsigned long>(std::max(conv, 0l)), scale);
 
         scale = 0x1f;
         conv = lrintf(scale * pattern_in_f[index[2]]);
-        pattern_out_u565->b =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), scale);
+        pattern_out_u565->b = std::min(static_cast<unsigned long>(std::max(conv, 0l)), scale);
         return;
       } break;
       case HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010: {
@@ -620,20 +594,16 @@ void ImageManager::FormatPattern(const hsa_ext_image_format_t& format,
           uint32_t r : 10;
         } Order101010;
 
-        Order101010* pattern_out_u101010 =
-            reinterpret_cast<Order101010*>(pattern_out);
+        Order101010* pattern_out_u101010 = reinterpret_cast<Order101010*>(pattern_out);
         const unsigned long kScale = 0x3ff;
         long conv = lrintf(kScale * pattern_in_f[index[0]]);
-        pattern_out_u101010->r =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
+        pattern_out_u101010->r = std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
 
         conv = lrintf(kScale * pattern_in_f[index[1]]);
-        pattern_out_u101010->g =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
+        pattern_out_u101010->g = std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
 
         conv = lrintf(kScale * pattern_in_f[index[2]]);
-        pattern_out_u101010->b =
-            std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
+        pattern_out_u101010->b = std::min(static_cast<unsigned long>(std::max(conv, 0l)), kScale);
 
         return;
       } break;

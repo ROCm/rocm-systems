@@ -73,7 +73,7 @@ public:
     md5sum(md5sum&&)      = default;
 
     md5sum& operator=(const md5sum&) = default;
-    md5sum& operator=(md5sum&&) = default;
+    md5sum& operator=(md5sum&&)      = default;
 
     md5sum&      update(std::string_view inp);
     md5sum&      update(const unsigned char* buf, size_type length);

@@ -107,7 +107,8 @@ replace_all(std::string val, Tp from, std::string_view to)
 }  // namespace sql
 }  // namespace rocpd
 
-extern "C" {
+extern "C"
+{
 rocpd_status_t
 rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
                       rocpd_sql_schema_kind_t                   kind,

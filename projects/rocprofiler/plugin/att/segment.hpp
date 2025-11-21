@@ -26,52 +26,45 @@
 #include <set>
 #include <algorithm>
 
-struct address_range_t
-{
-    uint64_t addr{0};
-    uint64_t size{0};
-    uint64_t id{0};
+struct address_range_t {
+  uint64_t addr{0};
+  uint64_t size{0};
+  uint64_t id{0};
 
-    bool operator==(const address_range_t& other) const
-    {
-        return (addr >= other.addr && addr < other.addr + other.size) ||
-               (other.addr >= addr && other.addr < addr + size);
-    }
-    bool operator<(const address_range_t& other) const
-    {
-        if(*this == other) return false;
-        return addr < other.addr;
-    }
-    bool inrange(uint64_t _addr) const { return addr <= _addr && addr + size > _addr; };
+  bool operator==(const address_range_t& other) const {
+    return (addr >= other.addr && addr < other.addr + other.size) ||
+        (other.addr >= addr && other.addr < addr + size);
+  }
+  bool operator<(const address_range_t& other) const {
+    if (*this == other) return false;
+    return addr < other.addr;
+  }
+  bool inrange(uint64_t _addr) const { return addr <= _addr && addr + size > _addr; };
 };
 
 /**
  * @brief Finds a candidate codeobj for the given vaddr
  */
-class CodeobjTableTranslator : public std::set<address_range_t>
-{
-    using Super = std::set<address_range_t>;
+class CodeobjTableTranslator : public std::set<address_range_t> {
+  using Super = std::set<address_range_t>;
 
-public:
-    address_range_t find_codeobj_in_range(uint64_t addr)
-    {
-        if(!cached_segment.inrange(addr))
-        {
-            auto it = this->find(address_range_t{addr, 0, 0});
-            if(it == this->end()) throw std::exception();
-            cached_segment = *it;
-        }
-        return cached_segment;
+ public:
+  address_range_t find_codeobj_in_range(uint64_t addr) {
+    if (!cached_segment.inrange(addr)) {
+      auto it = this->find(address_range_t{addr, 0, 0});
+      if (it == this->end()) throw std::exception();
+      cached_segment = *it;
     }
+    return cached_segment;
+  }
 
-    void clear_cache() { cached_segment = {}; }
-    bool remove(const address_range_t& range)
-    {
-        clear_cache();
-        return this->erase(range) != 0;
-    }
-    bool remove(uint64_t addr) { return remove(address_range_t{addr, 0, 0}); }
+  void clear_cache() { cached_segment = {}; }
+  bool remove(const address_range_t& range) {
+    clear_cache();
+    return this->erase(range) != 0;
+  }
+  bool remove(uint64_t addr) { return remove(address_range_t{addr, 0, 0}); }
 
-private:
-    address_range_t cached_segment{};
+ private:
+  address_range_t cached_segment{};
 };

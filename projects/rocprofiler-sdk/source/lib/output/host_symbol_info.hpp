@@ -57,10 +57,10 @@ struct host_function_info : rocprofiler_host_kernel_symbol_data_t
     {}
 
     host_function_info();
-    ~host_function_info()                             = default;
-    host_function_info(const host_function_info&)     = default;
-    host_function_info(host_function_info&&) noexcept = default;
-    host_function_info& operator=(const host_function_info&) = default;
+    ~host_function_info()                                        = default;
+    host_function_info(const host_function_info&)                = default;
+    host_function_info(host_function_info&&) noexcept            = default;
+    host_function_info& operator=(const host_function_info&)     = default;
     host_function_info& operator=(host_function_info&&) noexcept = default;
 
     std::string formatted_host_function_name = {};

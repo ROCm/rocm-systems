@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -54,7 +54,7 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif // __cplusplus
+#endif  // __cplusplus
 
 struct BrigModuleHeader;
 typedef struct BrigModuleHeader* BrigModule_t;
@@ -151,12 +151,10 @@ typedef struct hsa_ext_program_s {
  * @p profile is invalid, @p default_float_rounding_mode is invalid, or
  * @p program is NULL.
  */
-hsa_status_t HSA_API hsa_ext_program_create(
-    hsa_machine_model_t machine_model,
-    hsa_profile_t profile,
-    hsa_default_float_rounding_mode_t default_float_rounding_mode,
-    const char *options,
-    hsa_ext_program_t *program);
+hsa_status_t HSA_API
+hsa_ext_program_create(hsa_machine_model_t machine_model, hsa_profile_t profile,
+                       hsa_default_float_rounding_mode_t default_float_rounding_mode,
+                       const char* options, hsa_ext_program_t* program);
 
 /**
  * @brief Destroy a HSAIL program.
@@ -178,8 +176,7 @@ hsa_status_t HSA_API hsa_ext_program_create(
  * @retval ::HSA_EXT_STATUS_ERROR_INVALID_PROGRAM The HSAIL program is
  * invalid.
  */
-hsa_status_t HSA_API hsa_ext_program_destroy(
-    hsa_ext_program_t program);
+hsa_status_t HSA_API hsa_ext_program_destroy(hsa_ext_program_t program);
 
 /**
  * @brief Add a HSAIL module to an existing HSAIL program.
@@ -224,9 +221,7 @@ hsa_status_t HSA_API hsa_ext_program_destroy(
  * definition compatibility mismatch. See the symbol compatibility rules in the
  * HSA Programming Reference Manual.
  */
-hsa_status_t HSA_API hsa_ext_program_add_module(
-    hsa_ext_program_t program,
-    hsa_ext_module_t module);
+hsa_status_t HSA_API hsa_ext_program_add_module(hsa_ext_program_t program, hsa_ext_module_t module);
 
 /**
  * @brief Iterate over the HSAIL modules in a program, and invoke an
@@ -254,8 +249,7 @@ hsa_status_t HSA_API hsa_ext_program_add_module(
  */
 hsa_status_t HSA_API hsa_ext_program_iterate_modules(
     hsa_ext_program_t program,
-    hsa_status_t (*callback)(hsa_ext_program_t program, hsa_ext_module_t module,
-                             void* data),
+    hsa_status_t (*callback)(hsa_ext_program_t program, hsa_ext_module_t module, void* data),
     void* data);
 
 /**
@@ -300,18 +294,16 @@ typedef enum {
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p attribute is an invalid
  * HSAIL program attribute, or @p value is NULL.
  */
-hsa_status_t HSA_API hsa_ext_program_get_info(
-    hsa_ext_program_t program,
-    hsa_ext_program_info_t attribute,
-    void *value);
+hsa_status_t HSA_API hsa_ext_program_get_info(hsa_ext_program_t program,
+                                              hsa_ext_program_info_t attribute, void* value);
 
 /**
  * @brief Finalizer-determined call convention.
  */
 typedef enum {
- /**
-  * Finalizer-determined call convention.
-  */
+  /**
+   * Finalizer-determined call convention.
+   */
   HSA_EXT_FINALIZER_CALL_CONVENTION_AUTO = -1
 } hsa_ext_finalizer_call_convention_t;
 
@@ -484,14 +476,12 @@ typedef struct hsa_ext_control_directives_s {
  * @retval ::HSA_EXT_STATUS_ERROR_FINALIZATION_FAILED The Finalizer
  * encountered an error while compiling a kernel or an indirect function.
  */
-hsa_status_t HSA_API hsa_ext_program_finalize(
-    hsa_ext_program_t program,
-    hsa_isa_t isa,
-    int32_t call_convention,
-    hsa_ext_control_directives_t control_directives,
-    const char *options,
-    hsa_code_object_type_t code_object_type,
-    hsa_code_object_t *code_object);
+hsa_status_t HSA_API hsa_ext_program_finalize(hsa_ext_program_t program, hsa_isa_t isa,
+                                              int32_t call_convention,
+                                              hsa_ext_control_directives_t control_directives,
+                                              const char* options,
+                                              hsa_code_object_type_t code_object_type,
+                                              hsa_code_object_t* code_object);
 
 /** @} */
 
@@ -500,32 +490,31 @@ hsa_status_t HSA_API hsa_ext_program_finalize(
 typedef struct hsa_ext_finalizer_1_00_pfn_s {
   hsa_status_t (*hsa_ext_program_create)(
       hsa_machine_model_t machine_model, hsa_profile_t profile,
-      hsa_default_float_rounding_mode_t default_float_rounding_mode,
-      const char *options, hsa_ext_program_t *program);
+      hsa_default_float_rounding_mode_t default_float_rounding_mode, const char* options,
+      hsa_ext_program_t* program);
 
   hsa_status_t (*hsa_ext_program_destroy)(hsa_ext_program_t program);
 
-  hsa_status_t (*hsa_ext_program_add_module)(hsa_ext_program_t program,
-                                                 hsa_ext_module_t module);
+  hsa_status_t (*hsa_ext_program_add_module)(hsa_ext_program_t program, hsa_ext_module_t module);
 
   hsa_status_t (*hsa_ext_program_iterate_modules)(
       hsa_ext_program_t program,
-      hsa_status_t (*callback)(hsa_ext_program_t program,
-                               hsa_ext_module_t module, void *data),
-      void *data);
+      hsa_status_t (*callback)(hsa_ext_program_t program, hsa_ext_module_t module, void* data),
+      void* data);
 
-  hsa_status_t (*hsa_ext_program_get_info)(
-      hsa_ext_program_t program, hsa_ext_program_info_t attribute,
-      void *value);
+  hsa_status_t (*hsa_ext_program_get_info)(hsa_ext_program_t program,
+                                           hsa_ext_program_info_t attribute, void* value);
 
-  hsa_status_t (*hsa_ext_program_finalize)(
-      hsa_ext_program_t program, hsa_isa_t isa, int32_t call_convention,
-      hsa_ext_control_directives_t control_directives, const char *options,
-      hsa_code_object_type_t code_object_type, hsa_code_object_t *code_object);
+  hsa_status_t (*hsa_ext_program_finalize)(hsa_ext_program_t program, hsa_isa_t isa,
+                                           int32_t call_convention,
+                                           hsa_ext_control_directives_t control_directives,
+                                           const char* options,
+                                           hsa_code_object_type_t code_object_type,
+                                           hsa_code_object_t* code_object);
 } hsa_ext_finalizer_1_00_pfn_t;
 
 #ifdef __cplusplus
-} // extern "C" block
-#endif // __cplusplus
+}  // extern "C" block
+#endif  // __cplusplus
 
-#endif // HSA_RUNTIME_INC_HSA_EXT_FINALIZE_H_
+#endif  // HSA_RUNTIME_INC_HSA_EXT_FINALIZE_H_

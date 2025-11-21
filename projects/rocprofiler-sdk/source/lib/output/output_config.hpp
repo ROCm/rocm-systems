@@ -53,11 +53,11 @@ constexpr auto perfetto_shmem_size_hint_kb = 64;
 
 struct output_config
 {
-    output_config()                         = default;
-    ~output_config()                        = default;
-    output_config(const output_config&)     = default;
-    output_config(output_config&&) noexcept = default;
-    output_config& operator=(const output_config&) = default;
+    output_config()                                    = default;
+    ~output_config()                                   = default;
+    output_config(const output_config&)                = default;
+    output_config(output_config&&) noexcept            = default;
+    output_config& operator=(const output_config&)     = default;
     output_config& operator=(output_config&&) noexcept = default;
 
     bool                     stats                       = false;

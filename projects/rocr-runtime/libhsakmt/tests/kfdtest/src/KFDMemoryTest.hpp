@@ -30,22 +30,22 @@
  * This class has no additional features to KFDBaseComponentTest
  * The separation was made so we are able to group all memory tests together
  */
-class KFDMemoryTest :  public KFDBaseComponentTest {
+class KFDMemoryTest : public KFDBaseComponentTest {
  public:
-    KFDMemoryTest(void) {}
-    ~KFDMemoryTest(void) {}
- protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  KFDMemoryTest(void) {}
+  ~KFDMemoryTest(void) {}
 
  protected:
-    friend void SearchLargestBuffer(int allocNode, const HsaMemFlags &memFlags,
-                                            HSAuint64 highMB, int nodeToMap,
-                                            HSAuint64 *lastSizeMB);
-    void AcquireReleaseTestRunCPU(HSAuint32 acquireNode, bool scalar);
-    void AcquireReleaseTestRun(HSAuint32 acquireNode, HSAuint32 releaseNode,
-                                          bool localToRemote, bool scalar);
-    void AcquireReleaseTest(bool withinGPU, bool localToRemote, bool scalar);
+  virtual void SetUp();
+  virtual void TearDown();
+
+ protected:
+  friend void SearchLargestBuffer(int allocNode, const HsaMemFlags& memFlags, HSAuint64 highMB,
+                                  int nodeToMap, HSAuint64* lastSizeMB);
+  void AcquireReleaseTestRunCPU(HSAuint32 acquireNode, bool scalar);
+  void AcquireReleaseTestRun(HSAuint32 acquireNode, HSAuint32 releaseNode, bool localToRemote,
+                             bool scalar);
+  void AcquireReleaseTest(bool withinGPU, bool localToRemote, bool scalar);
 };
 
 #endif  // __KFD_MEMORY_TEST__H__

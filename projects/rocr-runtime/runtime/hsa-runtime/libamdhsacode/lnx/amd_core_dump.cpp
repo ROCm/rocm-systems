@@ -75,7 +75,7 @@ namespace {
 [[nodiscard]] std::string custom_core_dump() {
   return core::Runtime::runtime_singleton_->flag().core_dump_pattern();
 }
-}
+}  // namespace
 
 /* Implementation details */
 namespace impl {
@@ -88,15 +88,14 @@ namespace {
 
   std::string line;
   while (std::getline(cgroup, line)) {
-    if (line.find("docker") != std::string::npos ||
-        line.find("lxc") != std::string::npos ||
+    if (line.find("docker") != std::string::npos || line.find("lxc") != std::string::npos ||
         line.find("kubepods") != std::string::npos) {
       return true;
     }
   }
   return false;
 }
-} // anonymous namespace
+}  // anonymous namespace
 
 // Read kernel core pattern from /proc/sys/kernel/core_pattern
 static std::string read_kernel_core_pattern() {
@@ -116,9 +115,8 @@ std::string substitute_core_pattern(const std::string& pattern) {
   std::string result;
   pid_t pid = getpid();
   // Use gettid() if available (glibc >= 2.30), otherwise fallback to syscall
-#if defined(__GLIBC__) && \
-       (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 30))
-    pid_t tid = gettid();
+#if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 30))
+  pid_t tid = gettid();
 #else
   pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
 #endif
@@ -197,7 +195,7 @@ namespace {
   }
   return true;
 }
-} // anonymous namespace
+}  // anonymous namespace
 
 // Parse command line for pipe handler
 namespace {
@@ -251,6 +249,7 @@ class PackageBuilder {
     for (i = 0; i < size; i++) debug_print("%02x ", 0xFF & ((uint8_t*)buf)[i]);
     debug_print("\n");
   }
+
  private:
   std::stringstream st_;
 };
@@ -283,11 +282,12 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     HsaVersionInfo versionInfo = {0};
 
     if (HSAKMT_CALL(hsaKmtDbgEnable(&runtime_ptr, &runtime_size))) {
-      fprintf(stderr, "Failed to enable debug interface, "
+      fprintf(stderr,
+              "Failed to enable debug interface, "
               "debugger might be already attached.\n");
       return HSA_STATUS_ERROR;
     }
-    std::unique_ptr<void, decltype(std::free) *> runtime_info(runtime_ptr, std::free);
+    std::unique_ptr<void, decltype(std::free)*> runtime_info(runtime_ptr, std::free);
 
     if (HSAKMT_CALL(hsaKmtGetVersion(&versionInfo))) {
       HSAKMT_CALL(hsaKmtDbgDisable());
@@ -304,24 +304,24 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     note_package_builder_.Write<uint64_t>(runtime_size);
 
     if (HSAKMT_CALL(hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size))) {
-       HSAKMT_CALL(hsaKmtDbgDisable());
-       fprintf(stderr, "Failed to fetch agents snapshot.\n");
-       return HSA_STATUS_ERROR;
+      HSAKMT_CALL(hsaKmtDbgDisable());
+      fprintf(stderr, "Failed to fetch agents snapshot.\n");
+      return HSA_STATUS_ERROR;
     }
     agents_size = n_entries * entry_size;
-    std::unique_ptr<void, decltype(std::free) *> agents_info(agents_ptr, std::free);
+    std::unique_ptr<void, decltype(std::free)*> agents_info(agents_ptr, std::free);
     /* Store n_agents in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(n_entries);
     /* Store agent_info_entry_size in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(entry_size);
 
     if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true))) {
-       HSAKMT_CALL(hsaKmtDbgDisable());
-       fprintf(stderr, "Failed to fetch queues snapshot.\n");
-       return HSA_STATUS_ERROR;
+      HSAKMT_CALL(hsaKmtDbgDisable());
+      fprintf(stderr, "Failed to fetch queues snapshot.\n");
+      return HSA_STATUS_ERROR;
     }
     queue_size = n_entries * entry_size;
-    std::unique_ptr<void, decltype(std::free) *> queues_info(queues_ptr, std::free);
+    std::unique_ptr<void, decltype(std::free)*> queues_info(queues_ptr, std::free);
     /* Store n_queues in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(n_entries);
     /* Store queue_info_entry_size in PT_NOTE package */
@@ -337,14 +337,14 @@ struct NoteSegmentBuilder : public SegmentBuilder {
 
     /* With note content, package this in the PT_NOTE.  */
     PackageBuilder noteHeaderBuilder;
-    noteHeaderBuilder.Write<uint32_t> (7);  /* namesz */
-    noteHeaderBuilder.Write<uint32_t> (note_package_builder_.Size());
-    noteHeaderBuilder.Write<uint32_t> (NT_AMDGPU_CORE_STATE);  /* type.  */
-    noteHeaderBuilder.Write<char[8]> ("AMDGPU\0");
+    noteHeaderBuilder.Write<uint32_t>(7); /* namesz */
+    noteHeaderBuilder.Write<uint32_t>(note_package_builder_.Size());
+    noteHeaderBuilder.Write<uint32_t>(NT_AMDGPU_CORE_STATE); /* type.  */
+    noteHeaderBuilder.Write<char[8]>("AMDGPU\0");
 
     raw_.resize(noteHeaderBuilder.Size() + note_package_builder_.Size());
-    if (!(noteHeaderBuilder.GetBuffer(raw_.data())
-          && note_package_builder_.GetBuffer(&raw_[noteHeaderBuilder.Size()]))) {
+    if (!(noteHeaderBuilder.GetBuffer(raw_.data()) &&
+          note_package_builder_.GetBuffer(&raw_[noteHeaderBuilder.Size()]))) {
       fprintf(stderr, "Failed to build the NT_AMDGPU_CORE_STATE note.\n");
       return HSA_STATUS_ERROR;
     }
@@ -361,7 +361,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
   }
 
   hsa_status_t Read(void* buf, size_t buf_size, off_t offset) override {
-    if (offset + buf_size >raw_.size ()) return HSA_STATUS_ERROR;
+    if (offset + buf_size > raw_.size()) return HSA_STATUS_ERROR;
     memcpy(buf, raw_.data() + offset, buf_size);
     return HSA_STATUS_SUCCESS;
   }
@@ -370,11 +370,10 @@ struct NoteSegmentBuilder : public SegmentBuilder {
   PackageBuilder note_package_builder_;
   std::vector<unsigned char> raw_;
 
-  void PushInfo(void *data, uint32_t size) {
+  void PushInfo(void* data, uint32_t size) {
     note_package_builder_.Write(data, size);
     size = alignUp(size, SNAPSHOT_INFO_ALIGNMENT) - size;
-    for (int i = 0; i < size; i++)
-      note_package_builder_.Write<uint8_t>(0);
+    for (int i = 0; i < size; i++) note_package_builder_.Write<uint8_t>(0);
   }
 };
 
@@ -394,7 +393,7 @@ struct LoadSegmentBuilder : public SegmentBuilder {
 
     std::string line;
     while (std::getline(maps, line)) {
-      std::istringstream isl{ line };
+      std::istringstream isl{line};
       std::string address, perms, offset, dev, inode, path;
       if (!(isl >> address >> perms >> offset >> dev >> inode)) {
         fprintf(stderr, "Failed to parse '%s'", maps_path.c_str());
@@ -423,9 +422,9 @@ struct LoadSegmentBuilder : public SegmentBuilder {
         s.flags = flags;
         s.builder = this;
         segments.push_back(s);
-       }
-     }
-     return HSA_STATUS_SUCCESS;
+      }
+    }
+    return HSA_STATUS_SUCCESS;
   }
 
   hsa_status_t Read(void* buf, size_t buf_size, off_t offset) override {
@@ -434,13 +433,11 @@ struct LoadSegmentBuilder : public SegmentBuilder {
     size_t done = 0;
     size_t read;
     do {
-      read = pread(fd_, static_cast<char *>(buf) + done, buf_size - done,
-                   offset + done);
+      read = pread(fd_, static_cast<char*>(buf) + done, buf_size - done, offset + done);
       if (read == -1 && errno != EINTR) {
         perror("Failed to read GPU memory");
         return HSA_STATUS_ERROR;
-      }
-      else if (read > 0)
+      } else if (read > 0)
         done += read;
     } while (read != 0 && done < buf_size);
 
@@ -459,8 +456,8 @@ struct LoadSegmentBuilder : public SegmentBuilder {
 // Write core dump to a file descriptor (for pipe handler)
 namespace {
 // Use size_limit of -1 for no limit (e.g, for pipes)
-hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
-                                          size_t size_limit, bool show_progress) {
+hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments, size_t size_limit,
+                                   bool show_progress) {
   if (!segments.size()) return HSA_STATUS_SUCCESS;
   auto copy_buffer = std::make_unique<unsigned char[]>(MAX_BUFFER_SIZE);
   SegmentInfo front = segments.front();
@@ -547,7 +544,7 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
           assert(false);
           return (uint32_t)0;
       }
-    } (seg.stype);
+    }(seg.stype);
     if (size_limit != -1 && (offset + seg.size > size_limit)) {
       if (show_progress) {
         printf("Core limit file reached during pipe write\n");
@@ -597,25 +594,21 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
   }
 
   return HSA_STATUS_SUCCESS;
-
 }
-} // anonymous namespace
+}  // anonymous namespace
 
-static hsa_status_t
-build_core_dump(const std::string& filename, const SegmentsInfo& segments,
-                                        size_t size_limit, bool show_progress);
+static hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& segments,
+                                    size_t size_limit, bool show_progress);
 // Handle pipe pattern - fork/exec handler and pipe dump to it
 namespace {
-hsa_status_t write_to_pipe_handler(const std::string& pattern,
-                                          const SegmentsInfo& segments,
-                                          size_t size_limit,
-                                          bool show_progress) {
+hsa_status_t write_to_pipe_handler(const std::string& pattern, const SegmentsInfo& segments,
+                                   size_t size_limit, bool show_progress) {
   // Check if we're in a container
   if (is_running_in_container() && custom_core_dump().empty()) {
     fprintf(stderr,
-      "GPU coredump: System pipe patterns not supported in containers.\n"
-      "Falling back to file-based dump. Use custom pattern (HSA_COREDUMP_FILE)"
-      " to override.\n");
+            "GPU coredump: System pipe patterns not supported in containers.\n"
+            "Falling back to file-based dump. Use custom pattern (HSA_COREDUMP_FILE)"
+            " to override.\n");
     // Fall back to file-based dump
     std::string filename = PREFIX_FILE_NAME + "." + std::to_string(getpid()) + ".gpu";
     return build_core_dump(filename, segments, size_limit, show_progress);
@@ -678,13 +671,13 @@ hsa_status_t write_to_pipe_handler(const std::string& pattern,
     }
     if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0) {
       fprintf(stderr, "GPU coredump: handler exited with error (status: %d)\n",
-                     WIFEXITED(child_status) ? WEXITSTATUS(child_status) : -1);
+              WIFEXITED(child_status) ? WEXITSTATUS(child_status) : -1);
       return HSA_STATUS_ERROR;
     }
     if (show_progress && status == HSA_STATUS_SUCCESS) {
       printf("GPU core dump sent to pipe handler\n");
     }
-      return status;
+    return status;
   }
 }
 }  // anonymous namespace
@@ -706,7 +699,7 @@ static hsa_status_t build_core_dump(const std::string& filename, const SegmentsI
 
   return result;
 }
-}   //  namespace impl
+}  //  namespace impl
 
 hsa_status_t dump_gpu_core() {
   if (core::Runtime::runtime_singleton_->flag().core_dump_disable()) {
@@ -776,6 +769,6 @@ hsa_status_t dump_gpu_core() {
     return impl::build_core_dump(filename, segments, rlimit.rlim_cur, show_progress);
   }
 }
-}   //  namespace coredump
-}   //  namespace amd
-}   //  namespace rocr
+}  //  namespace coredump
+}  //  namespace amd
+}  //  namespace rocr

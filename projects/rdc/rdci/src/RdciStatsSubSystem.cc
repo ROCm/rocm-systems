@@ -123,31 +123,21 @@ void RdciStatsSubSystem::show_help() const {
   std::cout << "Usage\n";
   std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] "
             << "-s <jobId> -g <groupId>\n";
-  std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] "
-            << "-x <jobId>\n";
-  std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] [-v] "
-            << "-j <jobId>\n";
-  std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] "
-            << "-r <jobId>\n";
+  std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] " << "-x <jobId>\n";
+  std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] [-v] " << "-j <jobId>\n";
+  std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] " << "-r <jobId>\n";
   std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] -a\n";
   std::cout << "\nFlags:\n";
   show_common_usage();
-  std::cout << "  --json                         "
-            << "Output using json.\n";
-  std::cout << "  -s  --jstart                   Start recording "
-            << "job statistics.\n";
+  std::cout << "  --json                         " << "Output using json.\n";
+  std::cout << "  -s  --jstart                   Start recording " << "job statistics.\n";
   std::cout << "  -g  --group-id                 The GPU group to query "
             << "on the specified host.\n";
-  std::cout << "  -x  --jstop                    Stop recording "
-            << "job statistics.\n";
-  std::cout << "  -j  --job                      Display "
-            << "job statistics.\n";
-  std::cout << "  -v  --verbose                  Show job information "
-            << "for each GPU.\n";
-  std::cout << "  -r  --jremove                  Remove "
-            << "job statistics.\n";
-  std::cout << "  -a  --jremoveall               Remove "
-            << "all job statistics.\n";
+  std::cout << "  -x  --jstop                    Stop recording " << "job statistics.\n";
+  std::cout << "  -j  --job                      Display " << "job statistics.\n";
+  std::cout << "  -v  --verbose                  Show job information " << "for each GPU.\n";
+  std::cout << "  -r  --jremove                  Remove " << "job statistics.\n";
+  std::cout << "  -a  --jremoveall               Remove " << "all job statistics.\n";
 }
 
 void RdciStatsSubSystem::show_job_stats_json(const rdc_gpu_usage_info_t& gpu_info) const {
@@ -214,8 +204,7 @@ void RdciStatsSubSystem::show_job_stats_json(const rdc_gpu_usage_info_t& gpu_inf
 }
 
 void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) const {
-  std::cout << "|------- Execution Stats ----------"
-            << "+------------------------------------\n";
+  std::cout << "|------- Execution Stats ----------" << "+------------------------------------\n";
   std::cout << "| Start Time                       | "
             << std::put_time(std::gmtime(reinterpret_cast<const time_t*>(&gpu_info.start_time)),
                              "%c %Z")
@@ -226,20 +215,17 @@ void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) co
             << "\n";
   std::cout << "| Total Execution Time (sec)       | " << (gpu_info.end_time - gpu_info.start_time)
             << "\n";
-  std::cout << "+------- Performance Stats --------"
-            << "+------------------------------------\n";
+  std::cout << "+------- Performance Stats --------" << "+------------------------------------\n";
   std::cout << "| Energy Consumed (Joules)         | " << gpu_info.energy_consumed << "\n";
-  std::cout << "| Power Usage (Watts)              | "
-            << "Max: " << gpu_info.power_usage.max_value
+  std::cout << "| Power Usage (Watts)              | " << "Max: " << gpu_info.power_usage.max_value
             << " Min: " << gpu_info.power_usage.min_value
             << " Avg: " << gpu_info.power_usage.average << " SD: " << std::fixed
             << std::setprecision(2) << gpu_info.power_usage.standard_deviation << "\n";
-  std::cout << "| GPU Clock (MHz)                  | "
-            << "Max: " << gpu_info.gpu_clock.max_value << " Min: " << gpu_info.gpu_clock.min_value
-            << " Avg: " << gpu_info.gpu_clock.average << " SD: " << std::fixed
-            << std::setprecision(2) << gpu_info.gpu_clock.standard_deviation << "\n";
-  std::cout << "| Memory Clock (MHz)               | "
-            << "Max: " << gpu_info.memory_clock.max_value
+  std::cout << "| GPU Clock (MHz)                  | " << "Max: " << gpu_info.gpu_clock.max_value
+            << " Min: " << gpu_info.gpu_clock.min_value << " Avg: " << gpu_info.gpu_clock.average
+            << " SD: " << std::fixed << std::setprecision(2)
+            << gpu_info.gpu_clock.standard_deviation << "\n";
+  std::cout << "| Memory Clock (MHz)               | " << "Max: " << gpu_info.memory_clock.max_value
             << " Min: " << gpu_info.memory_clock.min_value
             << " Avg: " << gpu_info.memory_clock.average << " SD: " << std::fixed
             << std::setprecision(2) << gpu_info.memory_clock.standard_deviation << "\n";
@@ -259,8 +245,7 @@ void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) co
             << " Min: " << gpu_info.gpu_temperature.min_value
             << " Avg: " << gpu_info.gpu_temperature.average << " SD: " << std::fixed
             << std::setprecision(2) << gpu_info.gpu_temperature.standard_deviation << "\n";
-  std::cout << "| PCIe Rx Bandwidth (megabytes)    | "
-            << "Max: "
+  std::cout << "| PCIe Rx Bandwidth (megabytes)    | " << "Max: "
             << (gpu_info.pcie_rx.max_value == std::numeric_limits<uint64_t>::max()
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_rx.max_value))
@@ -277,8 +262,7 @@ void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) co
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_rx.standard_deviation))
             << "\n";
-  std::cout << "| PCIe Tx Bandwidth (megabytes)    | "
-            << "Max: "
+  std::cout << "| PCIe Tx Bandwidth (megabytes)    | " << "Max: "
             << (gpu_info.pcie_tx.max_value == std::numeric_limits<uint64_t>::max()
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_tx.max_value))
@@ -295,14 +279,13 @@ void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) co
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_tx.standard_deviation))
             << "\n";
-  std::cout << "| PCIe Total Bandwidth (megabytes) | "
-            << "Max: " << gpu_info.pcie_total.max_value << " Min: " << gpu_info.pcie_total.min_value
-            << " Avg: " << gpu_info.pcie_total.average << " SD: " << std::fixed
-            << std::setprecision(2) << gpu_info.pcie_total.standard_deviation << "\n";
+  std::cout << "| PCIe Total Bandwidth (megabytes) | " << "Max: " << gpu_info.pcie_total.max_value
+            << " Min: " << gpu_info.pcie_total.min_value << " Avg: " << gpu_info.pcie_total.average
+            << " SD: " << std::fixed << std::setprecision(2)
+            << gpu_info.pcie_total.standard_deviation << "\n";
   std::cout << "| Correctable ECC Errors           | " << gpu_info.ecc_correct << "\n";
   std::cout << "| Uncorrectable ECC Errors         | " << gpu_info.ecc_uncorrect << "\n";
-  std::cout << "+----------------------------------"
-            << "+------------------------------------\n";
+  std::cout << "+----------------------------------" << "+------------------------------------\n";
 }
 
 void RdciStatsSubSystem::process() {
@@ -386,10 +369,8 @@ void RdciStatsSubSystem::process() {
       std::cout << ", \"processes\": [";
       for (uint32_t p = 0; p < job_info.num_processes; ++p) {
         auto& pr = job_info.processes[p];
-        std::cout << (p ? "," : "") << "{"
-                  << "\"pid\":" << pr.pid << ","
-                  << "\"process_name\":\"" << pr.process_name << "\","
-                  << "\"start_time\":" << pr.start_time / 1000 << ","
+        std::cout << (p ? "," : "") << "{" << "\"pid\":" << pr.pid << "," << "\"process_name\":\""
+                  << pr.process_name << "\"," << "\"start_time\":" << pr.start_time / 1000 << ","
                   << "\"stop_time\":" << pr.stop_time / 1000 << "}";
       }
       std::cout << "]";

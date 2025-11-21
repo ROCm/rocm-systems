@@ -24,13 +24,15 @@
 #define AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_
 
 #include <map>
-#include "rocm_smi/rocm_smi.h"
+
 #include "amd_smi/amdsmi.h"
+#include "rocm_smi/rocm_smi.h"
 
 #ifdef ENABLE_ESMI_LIB
 extern "C" {
-    #include <cstdint>
-    #include <e_smi/e_smi.h>
+#include <e_smi/e_smi.h>
+
+#include <cstdint>
 }
 #endif
 
@@ -64,20 +66,11 @@ const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
 };
 
 const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
-    {0, AMDSMI_VRAM_TYPE_UNKNOWN},
-    {1, AMDSMI_VRAM_TYPE_GDDR1},
-    {2, AMDSMI_VRAM_TYPE_DDR2},
-    {3, AMDSMI_VRAM_TYPE_GDDR3},
-    {4, AMDSMI_VRAM_TYPE_GDDR4},
-    {5, AMDSMI_VRAM_TYPE_GDDR5},
-    {6, AMDSMI_VRAM_TYPE_HBM},
-    {7, AMDSMI_VRAM_TYPE_DDR3},
-    {8, AMDSMI_VRAM_TYPE_DDR4},
-    {9, AMDSMI_VRAM_TYPE_GDDR6},
-    {10, AMDSMI_VRAM_TYPE_DDR5},
-    {11, AMDSMI_VRAM_TYPE_LPDDR4},
-    {12, AMDSMI_VRAM_TYPE_LPDDR5},
-    {13, AMDSMI_VRAM_TYPE_HBM3E},
+    {0, AMDSMI_VRAM_TYPE_UNKNOWN}, {1, AMDSMI_VRAM_TYPE_GDDR1},  {2, AMDSMI_VRAM_TYPE_DDR2},
+    {3, AMDSMI_VRAM_TYPE_GDDR3},   {4, AMDSMI_VRAM_TYPE_GDDR4},  {5, AMDSMI_VRAM_TYPE_GDDR5},
+    {6, AMDSMI_VRAM_TYPE_HBM},     {7, AMDSMI_VRAM_TYPE_DDR3},   {8, AMDSMI_VRAM_TYPE_DDR4},
+    {9, AMDSMI_VRAM_TYPE_GDDR6},   {10, AMDSMI_VRAM_TYPE_DDR5},  {11, AMDSMI_VRAM_TYPE_LPDDR4},
+    {12, AMDSMI_VRAM_TYPE_LPDDR5}, {13, AMDSMI_VRAM_TYPE_HBM3E},
 };
 
 amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status);
@@ -113,6 +106,6 @@ const std::map<esmi_status_t, amdsmi_status_t> esmi_status_map = {
 
 amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status);
 #endif
-} // namespace amd::smi
+}  // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_

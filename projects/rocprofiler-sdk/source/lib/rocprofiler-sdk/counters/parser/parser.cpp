@@ -89,8 +89,8 @@ yyerror(rocprofiler::counters::RawAST**, const char* s)
 #        define YY_CAST(Type, Val)             static_cast<Type>(Val)
 #        define YY_REINTERPRET_CAST(Type, Val) reinterpret_cast<Type>(Val)
 #    else
-#        define YY_CAST(Type, Val)             ((Type)(Val))
-#        define YY_REINTERPRET_CAST(Type, Val) ((Type)(Val))
+#        define YY_CAST(Type, Val)             ((Type) (Val))
+#        define YY_REINTERPRET_CAST(Type, Val) ((Type) (Val))
 #    endif
 #endif
 #ifndef YY_NULLPTR
@@ -168,18 +168,18 @@ typedef enum yysymbol_kind_t yysymbol_kind_t;
 
 #ifdef __INT_LEAST8_MAX__
 typedef __INT_LEAST8_TYPE__ yytype_int8;
-#elif defined               YY_STDINT_H
-typedef int_least8_t   yytype_int8;
+#elif defined YY_STDINT_H
+typedef int_least8_t yytype_int8;
 #else
-typedef signed char    yytype_int8;
+typedef signed char yytype_int8;
 #endif
 
 #ifdef __INT_LEAST16_MAX__
 typedef __INT_LEAST16_TYPE__ yytype_int16;
-#elif defined                YY_STDINT_H
-typedef int_least16_t  yytype_int16;
+#elif defined YY_STDINT_H
+typedef int_least16_t yytype_int16;
 #else
-typedef short          yytype_int16;
+typedef short yytype_int16;
 #endif
 
 /* Work around bug in HP-UX 11.23, which defines these macros
@@ -194,24 +194,24 @@ typedef short          yytype_int16;
 #    define UINT_LEAST16_MAX 65535
 #endif
 
-#if defined                  __UINT_LEAST8_MAX__ && __UINT_LEAST8_MAX__ <= __INT_MAX__
+#if defined __UINT_LEAST8_MAX__ && __UINT_LEAST8_MAX__ <= __INT_MAX__
 typedef __UINT_LEAST8_TYPE__ yytype_uint8;
 #elif(!defined __UINT_LEAST8_MAX__ && defined YY_STDINT_H && UINT_LEAST8_MAX <= INT_MAX)
-typedef uint_least8_t  yytype_uint8;
+typedef uint_least8_t yytype_uint8;
 #elif !defined __UINT_LEAST8_MAX__ && UCHAR_MAX <= INT_MAX
-typedef unsigned char  yytype_uint8;
+typedef unsigned char yytype_uint8;
 #else
 typedef short yytype_uint8;
 #endif
 
-#if defined                   __UINT_LEAST16_MAX__ && __UINT_LEAST16_MAX__ <= __INT_MAX__
+#if defined __UINT_LEAST16_MAX__ && __UINT_LEAST16_MAX__ <= __INT_MAX__
 typedef __UINT_LEAST16_TYPE__ yytype_uint16;
 #elif(!defined __UINT_LEAST16_MAX__ && defined YY_STDINT_H && UINT_LEAST16_MAX <= INT_MAX)
 typedef uint_least16_t yytype_uint16;
 #elif !defined __UINT_LEAST16_MAX__ && USHRT_MAX <= INT_MAX
 typedef unsigned short yytype_uint16;
 #else
-typedef int   yytype_uint16;
+typedef int yytype_uint16;
 #endif
 
 #ifndef YYPTRDIFF_T

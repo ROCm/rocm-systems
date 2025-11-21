@@ -73,8 +73,7 @@ hsa_status_t FindKernelArgPool(hsa_amd_memory_pool_t pool, void* data) {
 
   if (segment != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
 
-  err = AMD::hsa_amd_memory_pool_get_info(
-      pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
+  err = AMD::hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
   assert(err == HSA_STATUS_SUCCESS);
 
   err = AMD::hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &size);
@@ -84,7 +83,7 @@ hsa_status_t FindKernelArgPool(hsa_amd_memory_pool_t pool, void* data) {
     *(reinterpret_cast<hsa_amd_memory_pool_t*>(data)) = pool;
     // Found the kernarg pool, stop the iteration.
     return HSA_STATUS_INFO_BREAK;
-    }
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -100,7 +99,6 @@ hsa_status_t ImageRuntime::CreateImageManager(hsa_agent_t agent, void* data) {
   }
 
   if (hsa_device_type == HSA_DEVICE_TYPE_GPU) {
-
     uint32_t chip_id;
     hsa_error_code = GetGPUAsicID(agent, &chip_id);
     uint32_t major_ver = MajorVerFromDevID(chip_id);
@@ -108,21 +106,21 @@ hsa_status_t ImageRuntime::CreateImageManager(hsa_agent_t agent, void* data) {
     ImageManager* image_manager;
 
     switch (major_ver) {
-    case 12:
-      image_manager = new ImageManagerGfx12();
-      break;
-    case 11:
-      image_manager = new ImageManagerGfx11();
-      break;
-    case 10:
-      image_manager = new ImageManagerNv();
-      break;
-    case  9:
-      image_manager = new ImageManagerAi();
-      break;
-    default:
-      image_manager = new ImageManagerKv();
-      break;
+      case 12:
+        image_manager = new ImageManagerGfx12();
+        break;
+      case 11:
+        image_manager = new ImageManagerGfx11();
+        break;
+      case 10:
+        image_manager = new ImageManagerNv();
+        break;
+      case 9:
+        image_manager = new ImageManagerAi();
+        break;
+      default:
+        image_manager = new ImageManagerKv();
+        break;
     }
     hsa_error_code = image_manager->Initialize(agent);
 
@@ -207,8 +205,7 @@ void ImageRuntime::DestroySingleton() {
 }
 
 hsa_status_t ImageRuntime::GetImageInfoMaxDimension(hsa_agent_t component,
-                                                    hsa_agent_info_t attribute,
-                                                    void* value) {
+                                                    hsa_agent_info_t attribute, void* value) {
   uint32_t* value_u32 = NULL;
   uint32_t* value_u32_v2 = NULL;
   uint32_t* value_u32_v3 = NULL;
@@ -271,8 +268,8 @@ hsa_status_t ImageRuntime::GetImageInfoMaxDimension(hsa_agent_t component,
   // Image is only supported on a GPU device.
 
   if (device_type == HSA_DEVICE_TYPE_GPU) {
-    image_manager(component)->GetImageInfoMaxDimension(
-        component, geometry, width, height, depth, array_size);
+    image_manager(component)->GetImageInfoMaxDimension(component, geometry, width, height, depth,
+                                                       array_size);
   }
 
   if (value_u32_v3 != NULL) {
@@ -283,16 +280,16 @@ hsa_status_t ImageRuntime::GetImageInfoMaxDimension(hsa_agent_t component,
     value_u32_v2[0] = width;
     value_u32_v2[1] = height;
   } else {
-    *value_u32 = (image_attribute == HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS)
-                     ? array_size
-                     : width;
+    *value_u32 =
+        (image_attribute == HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS) ? array_size : width;
   }
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ImageRuntime::GetImageCapability(
-    hsa_agent_t component, const hsa_ext_image_format_t& format,
-    hsa_ext_image_geometry_t geometry, uint32_t& capability) {
+hsa_status_t ImageRuntime::GetImageCapability(hsa_agent_t component,
+                                              const hsa_ext_image_format_t& format,
+                                              hsa_ext_image_geometry_t geometry,
+                                              uint32_t& capability) {
   hsa_device_type_t device_type;
   hsa_status_t status = HSA::hsa_agent_get_info(component, HSA_AGENT_INFO_DEVICE, &device_type);
   if (status != HSA_STATUS_SUCCESS) {
@@ -310,26 +307,24 @@ hsa_status_t ImageRuntime::GetImageCapability(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ImageRuntime::GetImageSizeAndAlignment(
-    hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
-    hsa_ext_image_data_layout_t image_data_layout,
-    size_t image_data_row_pitch,
-    size_t image_data_slice_pitch,
-    hsa_ext_image_data_info_t& image_info) {
+hsa_status_t ImageRuntime::GetImageSizeAndAlignment(hsa_agent_t component,
+                                                    const hsa_ext_image_descriptor_t& desc,
+                                                    hsa_ext_image_data_layout_t image_data_layout,
+                                                    size_t image_data_row_pitch,
+                                                    size_t image_data_slice_pitch,
+                                                    hsa_ext_image_data_info_t& image_info) {
   image_info.alignment = 0;
   image_info.size = 0;
 
   // Validate the image format and geometry.
   uint32_t capability = 0;
-  hsa_status_t status =
-      GetImageCapability(component, desc.format, desc.geometry, capability);
+  hsa_status_t status = GetImageCapability(component, desc.format, desc.geometry, capability);
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
 
   if (capability == 0) {
-    return static_cast<hsa_status_t>(
-        HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED);
+    return static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED);
   }
 
   const hsa_ext_image_geometry_t geometry = desc.geometry;
@@ -341,26 +336,23 @@ hsa_status_t ImageRuntime::GetImageSizeAndAlignment(
   ImageManager* manager = image_manager(component);
 
   // Validate the image dimension.
-  manager->GetImageInfoMaxDimension(component, geometry, max_width, max_height,
-                                    max_depth, max_array_size);
+  manager->GetImageInfoMaxDimension(component, geometry, max_width, max_height, max_depth,
+                                    max_array_size);
 
-  if (desc.width > max_width || desc.height > max_height ||
-      desc.depth > max_depth || desc.array_size > max_array_size) {
-    return static_cast<hsa_status_t>(
-        HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED);
+  if (desc.width > max_width || desc.height > max_height || desc.depth > max_depth ||
+      desc.array_size > max_array_size) {
+    return static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED);
   }
 
-  return manager->CalculateImageSizeAndAlignment(component, desc,
-    image_data_layout, image_data_row_pitch, image_data_slice_pitch, image_info);
+  return manager->CalculateImageSizeAndAlignment(
+      component, desc, image_data_layout, image_data_row_pitch, image_data_slice_pitch, image_info);
 }
 
 hsa_status_t ImageRuntime::CreateImageHandle(
     hsa_agent_t component, const hsa_ext_image_descriptor_t& image_descriptor,
     const void* image_data, const hsa_access_permission_t access_permission,
-    hsa_ext_image_data_layout_t image_data_layout,
-    size_t image_data_row_pitch,
-    size_t image_data_slice_pitch,
-    hsa_ext_image_t& image_handle) {
+    hsa_ext_image_data_layout_t image_data_layout, size_t image_data_row_pitch,
+    size_t image_data_slice_pitch, hsa_ext_image_t& image_handle) {
   image_handle.handle = 0;
 
   assert(image_data != NULL);
@@ -368,16 +360,14 @@ hsa_status_t ImageRuntime::CreateImageHandle(
   // Validate image dimension.
   hsa_ext_image_data_info_t image_info = {0};
   hsa_status_t status =
-      GetImageSizeAndAlignment(component, image_descriptor,
-        image_data_layout, image_data_row_pitch, image_data_slice_pitch,
-        image_info);
+      GetImageSizeAndAlignment(component, image_descriptor, image_data_layout, image_data_row_pitch,
+                               image_data_slice_pitch, image_info);
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
 
   // Validate image address alignment.
-  if (!IsMultipleOf(reinterpret_cast<size_t>(image_data),
-                    image_info.alignment)) {
+  if (!IsMultipleOf(reinterpret_cast<size_t>(image_data), image_info.alignment)) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -411,21 +401,18 @@ hsa_status_t ImageRuntime::CreateImageHandle(
 }
 
 hsa_status_t ImageRuntime::CreateImageHandleWithLayout(
-  hsa_agent_t component, const hsa_ext_image_descriptor_t& image_descriptor,
-  const hsa_amd_image_descriptor_t* image_layout,
-  const void* image_data, const hsa_access_permission_t access_permission,
-  hsa_ext_image_t& image_handle)
-{
-  if(!IsMultipleOf(image_data, 256))
-    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    hsa_agent_t component, const hsa_ext_image_descriptor_t& image_descriptor,
+    const hsa_amd_image_descriptor_t* image_layout, const void* image_data,
+    const hsa_access_permission_t access_permission, hsa_ext_image_t& image_handle) {
+  if (!IsMultipleOf(image_data, 256)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  if(image_layout->version!=1)
+  if (image_layout->version != 1)
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
-  
+
   uint32_t id;
   HSA::hsa_agent_get_info(component, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CHIP_ID, &id);
 
-  if(image_layout->deviceID!=(0x1002<<16|id))
+  if (image_layout->deviceID != (0x1002 << 16 | id))
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
 
   const metadata_amd_t* desc = reinterpret_cast<const metadata_amd_t*>(image_layout);
@@ -436,8 +423,8 @@ hsa_status_t ImageRuntime::CreateImageHandleWithLayout(
   image->permission = access_permission;
   image->data = const_cast<void*>(image_data);
   image->tile_mode = Image::TILED;
-  hsa_status_t err=image_manager(component)->PopulateImageSrd(*image, desc);
-  if(err!=HSA_STATUS_SUCCESS) {
+  hsa_status_t err = image_manager(component)->PopulateImageSrd(*image, desc);
+  if (err != HSA_STATUS_SUCCESS) {
     Image::Destroy(image);
     return err;
   }
@@ -448,8 +435,7 @@ hsa_status_t ImageRuntime::CreateImageHandleWithLayout(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ImageRuntime::DestroyImageHandle(
-    const hsa_ext_image_t& image_handle) {
+hsa_status_t ImageRuntime::DestroyImageHandle(const hsa_ext_image_t& image_handle) {
   const Image* image = Image::Convert(image_handle.handle);
 
   if (image == NULL) {
@@ -461,10 +447,10 @@ hsa_status_t ImageRuntime::DestroyImageHandle(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ImageRuntime::CopyBufferToImage(
-    const void* src_memory, size_t src_row_pitch, size_t src_slice_pitch,
-    const hsa_ext_image_t& dst_image_handle,
-    const hsa_ext_image_region_t& image_region) {
+hsa_status_t ImageRuntime::CopyBufferToImage(const void* src_memory, size_t src_row_pitch,
+                                             size_t src_slice_pitch,
+                                             const hsa_ext_image_t& dst_image_handle,
+                                             const hsa_ext_image_region_t& image_region) {
   const Image* dst_image = Image::Convert(dst_image_handle.handle);
 
   if (dst_image == NULL) {
@@ -472,14 +458,14 @@ hsa_status_t ImageRuntime::CopyBufferToImage(
   }
 
   ImageManager* manager = image_manager(dst_image->component);
-  return manager->CopyBufferToImage(src_memory, src_row_pitch, src_slice_pitch,
-                                    *dst_image, image_region);
+  return manager->CopyBufferToImage(src_memory, src_row_pitch, src_slice_pitch, *dst_image,
+                                    image_region);
 }
 
-hsa_status_t ImageRuntime::CopyImageToBuffer(
-    const hsa_ext_image_t& src_image_handle, void* dst_memory,
-    size_t dst_row_pitch, size_t dst_slice_pitch,
-    const hsa_ext_image_region_t& image_region) {
+hsa_status_t ImageRuntime::CopyImageToBuffer(const hsa_ext_image_t& src_image_handle,
+                                             void* dst_memory, size_t dst_row_pitch,
+                                             size_t dst_slice_pitch,
+                                             const hsa_ext_image_region_t& image_region) {
   const Image* src_image = Image::Convert(src_image_handle.handle);
 
   if (src_image == NULL) {
@@ -487,14 +473,13 @@ hsa_status_t ImageRuntime::CopyImageToBuffer(
   }
 
   ImageManager* manager = image_manager(src_image->component);
-  return manager->CopyImageToBuffer(*src_image, dst_memory, dst_row_pitch,
-                                    dst_slice_pitch, image_region);
+  return manager->CopyImageToBuffer(*src_image, dst_memory, dst_row_pitch, dst_slice_pitch,
+                                    image_region);
 }
 
 hsa_status_t ImageRuntime::CopyImage(const hsa_ext_image_t& src_image_handle,
                                      const hsa_ext_image_t& dst_image_handle,
-                                     const hsa_dim3_t& src_origin,
-                                     const hsa_dim3_t& dst_origin,
+                                     const hsa_dim3_t& src_origin, const hsa_dim3_t& dst_origin,
                                      const hsa_dim3_t size) {
   const Image* src_image = Image::Convert(src_image_handle.handle);
 
@@ -513,13 +498,11 @@ hsa_status_t ImageRuntime::CopyImage(const hsa_ext_image_t& src_image_handle,
   }
 
   ImageManager* manager = image_manager(src_image->component);
-  return manager->CopyImage(*dst_image, *src_image, dst_origin, src_origin,
-                            size);
+  return manager->CopyImage(*dst_image, *src_image, dst_origin, src_origin, size);
 }
 
-hsa_status_t ImageRuntime::FillImage(
-    const hsa_ext_image_t& image_handle, const void* pattern,
-    const hsa_ext_image_region_t& image_region) {
+hsa_status_t ImageRuntime::FillImage(const hsa_ext_image_t& image_handle, const void* pattern,
+                                     const hsa_ext_image_region_t& image_region) {
   const Image* image = Image::Convert(image_handle.handle);
 
   if (image == NULL) {
@@ -531,8 +514,7 @@ hsa_status_t ImageRuntime::FillImage(
 }
 
 hsa_status_t ImageRuntime::CreateSamplerHandle(
-    hsa_agent_t component,
-    const hsa_ext_sampler_descriptor_v2_t& sampler_descriptor,
+    hsa_agent_t component, const hsa_ext_sampler_descriptor_v2_t& sampler_descriptor,
     hsa_ext_sampler_t& sampler_handle) {
   sampler_handle.handle = 0;
 
@@ -561,8 +543,7 @@ hsa_status_t ImageRuntime::CreateSamplerHandle(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ImageRuntime::DestroySamplerHandle(
-    hsa_ext_sampler_t& sampler_handle) {
+hsa_status_t ImageRuntime::DestroySamplerHandle(hsa_ext_sampler_t& sampler_handle) {
   const Sampler* sampler = Sampler::Convert(sampler_handle.handle);
 
   if (sampler == NULL) {
@@ -574,8 +555,7 @@ hsa_status_t ImageRuntime::DestroySamplerHandle(
   return HSA_STATUS_SUCCESS;
 }
 
-ImageRuntime::ImageRuntime()
-    : cpu_l2_cache_size_(0), kernarg_pool_({0}) {}
+ImageRuntime::ImageRuntime() : cpu_l2_cache_size_(0), kernarg_pool_({0}) {}
 
 ImageRuntime::~ImageRuntime() {}
 

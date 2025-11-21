@@ -199,7 +199,8 @@ template <size_t TableIdx,
           typename RetT,
           typename... Args,
           typename FuncT = RetT (*)(Args...)>
-FuncT create_write_functor(RetT (*func)(Args...))
+FuncT
+create_write_functor(RetT (*func)(Args...))
 {
     using function_type = FuncT;
 
@@ -264,7 +265,8 @@ template <size_t TableIdx,
           typename RetT,
           typename... Args,
           typename FuncT = RetT (*)(Args...)>
-FuncT create_destroy_functor(RetT (*func)(Args...))
+FuncT
+create_destroy_functor(RetT (*func)(Args...))
 {
     using function_type = FuncT;
 
@@ -327,7 +329,8 @@ template <size_t TableIdx,
           typename RetT,
           typename... Args,
           typename FuncT = RetT (*)(Args...)>
-FuncT create_read_functor(RetT (*func)(Args...))
+FuncT
+create_read_functor(RetT (*func)(Args...))
 {
     using function_type = FuncT;
 

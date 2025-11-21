@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -56,40 +56,41 @@
 template <class T>
 void __atomic_load(const T* object, typename std::remove_volatile<T>::type* ret, int arg) {
   if constexpr (sizeof(T) == 8) {
-    *ret = InterlockedOr64(
-      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      0);
+    *ret = InterlockedOr64(reinterpret_cast<volatile LONG64*>(
+                               const_cast<typename std::remove_const<T>::type*>(object)),
+                           0);
   } else {
     *ret = InterlockedOr(
-      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      0);
+        reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+        0);
   }
 }
 
 template <class T>
 void __atomic_store(const T* object, typename std::remove_volatile<T>::type* val, int arg) {
   if constexpr (sizeof(T) == 8) {
-    InterlockedExchange64(
-      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      *val);
+    InterlockedExchange64(reinterpret_cast<volatile LONG64*>(
+                              const_cast<typename std::remove_const<T>::type*>(object)),
+                          *val);
   } else {
     InterlockedExchange(
-      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      *val);
+        reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+        *val);
   }
 }
 
 template <class T>
-typename std::remove_volatile<T>::type __atomic_fetch_or(
-    const T* object, typename std::remove_volatile<T>::type val, int arg) {
+typename std::remove_volatile<T>::type __atomic_fetch_or(const T* object,
+                                                         typename std::remove_volatile<T>::type val,
+                                                         int arg) {
   if constexpr (sizeof(T) == 8) {
-    return InterlockedOr64(
-      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
+    return InterlockedOr64(reinterpret_cast<volatile LONG64*>(
+                               const_cast<typename std::remove_const<T>::type*>(object)),
+                           val);
   } else {
     return InterlockedOr(
-      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
+        reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+        val);
   }
 }
 
@@ -97,9 +98,9 @@ template <class T>
 typename std::remove_volatile<T>::type __atomic_fetch_and(
     const T* object, typename std::remove_volatile<T>::type val, int arg) {
   if constexpr (sizeof(T) == 8) {
-    return InterlockedAnd64(
-      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
+    return InterlockedAnd64(reinterpret_cast<volatile LONG64*>(
+                                const_cast<typename std::remove_const<T>::type*>(object)),
+                            val);
   } else {
     return InterlockedAnd(
         reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
@@ -111,13 +112,13 @@ template <class T>
 typename std::remove_volatile<T>::type __atomic_fetch_xor(
     const T* object, typename std::remove_volatile<T>::type val, int arg) {
   if constexpr (sizeof(T) == 8) {
-    return InterlockedXor64(
-      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
+    return InterlockedXor64(reinterpret_cast<volatile LONG64*>(
+                                const_cast<typename std::remove_const<T>::type*>(object)),
+                            val);
   } else {
     return InterlockedXor(
-      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
+        reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+        val);
   }
 }
 
@@ -125,13 +126,13 @@ template <class T>
 typename std::remove_volatile<T>::type __atomic_fetch_add(
     const T* object, typename std::remove_volatile<T>::type val, int arg) {
   if constexpr (sizeof(T) == 8) {
-    return InterlockedExchangeAdd64(
-      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
+    return InterlockedExchangeAdd64(reinterpret_cast<volatile LONG64*>(
+                                        const_cast<typename std::remove_const<T>::type*>(object)),
+                                    val);
   } else {
     return InterlockedExchangeAdd(
-      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
+        reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+        val);
   }
 }
 
@@ -139,26 +140,24 @@ template <class T>
 typename std::remove_volatile<T>::type __atomic_fetch_sub(
     const T* object, typename std::remove_volatile<T>::type val, int arg) {
   if constexpr (sizeof(T) == 8) {
-    return InterlockedExchangeAdd64(
-      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val * (-1));
+    return InterlockedExchangeAdd64(reinterpret_cast<volatile LONG64*>(
+                                        const_cast<typename std::remove_const<T>::type*>(object)),
+                                    val * (-1));
   } else {
     return InterlockedExchangeAdd(
-      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val * (-1));
+        reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
+        val * (-1));
   }
 }
 
 template <class T>
-void __atomic_compare_exchange(
-    T* object, typename std::remove_volatile<T>::type* expected,
-    typename std::remove_volatile<T>::type* val, int arg0, int arg1, int arg2) {
+void __atomic_compare_exchange(T* object, typename std::remove_volatile<T>::type* expected,
+                               typename std::remove_volatile<T>::type* val, int arg0, int arg1,
+                               int arg2) {
   if constexpr (sizeof(T) == 8) {
-    InterlockedCompareExchange64(reinterpret_cast<volatile LONG64*>(object),
-      *val, *expected);
+    InterlockedCompareExchange64(reinterpret_cast<volatile LONG64*>(object), *val, *expected);
   } else {
-    InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(object),
-      *val, *expected);
+    InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(object), *val, *expected);
   }
 }
 
@@ -177,8 +176,8 @@ void __atomic_exchange(T* object, typename std::remove_volatile<T>::type* val,
 
 #include <atomic>
 
-//ALWAYS_CONSERVATIVE will very likely overfence your code.
-//For use as a debugging aid only.
+// ALWAYS_CONSERVATIVE will very likely overfence your code.
+// For use as a debugging aid only.
 #define ALWAYS_CONSERVATIVE 0
 
 #if !ALWAYS_CONSERVATIVE
@@ -193,20 +192,19 @@ void __atomic_exchange(T* object, typename std::remove_volatile<T>::type* val,
 namespace rocr {
 namespace atomic {
 
-static constexpr int c11ToBuiltInFlags(std::memory_order order)
-{
+static constexpr int c11ToBuiltInFlags(std::memory_order order) {
 #if ALWAYS_CONSERVATIVE
   return __ATOMIC_RELAXED;
 #elif X64_ORDER_WC
   return __ATOMIC_RELAXED;
 #else
-  return (order == std::memory_order_relaxed) ? __ATOMIC_RELAXED :
-    (order == std::memory_order_acquire) ? __ATOMIC_ACQUIRE :
-    (order == std::memory_order_release) ? __ATOMIC_RELEASE :
-    (order == std::memory_order_seq_cst) ? __ATOMIC_SEQ_CST :
-    (order == std::memory_order_consume) ? __ATOMIC_CONSUME :
-    (order == std::memory_order_acq_rel) ? __ATOMIC_ACQ_REL :
-    __ATOMIC_SEQ_CST;
+  return (order == std::memory_order_relaxed) ? __ATOMIC_RELAXED
+      : (order == std::memory_order_acquire)  ? __ATOMIC_ACQUIRE
+      : (order == std::memory_order_release)  ? __ATOMIC_RELEASE
+      : (order == std::memory_order_seq_cst)  ? __ATOMIC_SEQ_CST
+      : (order == std::memory_order_consume)  ? __ATOMIC_CONSUME
+      : (order == std::memory_order_acq_rel)  ? __ATOMIC_ACQ_REL
+                                              : __ATOMIC_SEQ_CST;
 #endif
 }
 
@@ -251,7 +249,7 @@ static __forceinline void PostFence(std::memory_order order) {
 #endif
 }
 
-static __forceinline void Fence(std::memory_order order=std::memory_order_seq_cst) {
+static __forceinline void Fence(std::memory_order order = std::memory_order_seq_cst) {
 #if ALWAYS_CONSERVATIVE
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
 #elif X64_ORDER_WC
@@ -270,16 +268,14 @@ static __forceinline void Fence(std::memory_order order=std::memory_order_seq_cs
 #endif
 }
 
-template <class T>
-static __forceinline void BasicCheck(const T* ptr) {
+template <class T> static __forceinline void BasicCheck(const T* ptr) {
 #if defined(__linux__)
   constexpr bool value = __atomic_always_lock_free(sizeof(T), 0);
   static_assert(value, "Atomic type may not be compatible with peripheral atomics.");
 #endif
 };
 
-template <class T>
-static __forceinline void BasicCheck(const volatile T* ptr) {
+template <class T> static __forceinline void BasicCheck(const volatile T* ptr) {
 #if defined(__linux__)
   constexpr bool value = __atomic_always_lock_free(sizeof(T), 0);
   static_assert(value, "Atomic type may not be compatible with peripheral atomics.");
@@ -291,8 +287,7 @@ static __forceinline void BasicCheck(const volatile T* ptr) {
 /// @param: order(Input), memory order with atomic load, relaxed by default.
 /// @return: T, loaded value.
 template <class T>
-static __forceinline T
-    Load(const T* ptr, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Load(const T* ptr, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   T ret;
   PreFence(order);
@@ -306,9 +301,8 @@ static __forceinline T
 /// @param: order(Input), memory order with atomic load, relaxed by default.
 /// @return: T, loaded value.
 template <class T>
-static __forceinline T
-    Load(const volatile T* ptr,
-         std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Load(const volatile T* ptr,
+                            std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   T ret;
   PreFence(order);
@@ -323,8 +317,8 @@ static __forceinline T
 /// @param: order(Input), memory order with atomic store, relaxed by default.
 /// @return: void.
 template <class T>
-static __forceinline void Store(
-    T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline void Store(T* ptr, T val,
+                                std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   __atomic_store(ptr, &val, c11ToBuiltInFlags(order));
@@ -337,9 +331,8 @@ static __forceinline void Store(
 /// @param: order(Input), memory order with atomic store, relaxed by default.
 /// @return: void.
 template <class T>
-static __forceinline void Store(
-    volatile T* ptr, T val,
-    std::memory_order order = std::memory_order_relaxed) {
+static __forceinline void Store(volatile T* ptr, T val,
+                                std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   __atomic_store(ptr, &val, c11ToBuiltInFlags(order));
@@ -353,12 +346,12 @@ static __forceinline void Store(
 /// @param: order(Input), memory order with atomic operation.
 /// @return: T, observed value of type T.
 template <class T>
-static __forceinline T
-    Cas(T* ptr, T val, T expected,
-        std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Cas(T* ptr, T val, T expected,
+                           std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  __atomic_compare_exchange(ptr, &expected, &val, false, c11ToBuiltInFlags(order), __ATOMIC_RELAXED);
+  __atomic_compare_exchange(ptr, &expected, &val, false, c11ToBuiltInFlags(order),
+                            __ATOMIC_RELAXED);
   PostFence(order);
   return expected;
 }
@@ -370,12 +363,12 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, observed value of type T.
 template <class T>
-static __forceinline T
-    Cas(volatile T* ptr, T val, T expected,
-        std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Cas(volatile T* ptr, T val, T expected,
+                           std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  __atomic_compare_exchange(ptr, &expected, &val, false, c11ToBuiltInFlags(order), __ATOMIC_RELAXED);
+  __atomic_compare_exchange(ptr, &expected, &val, false, c11ToBuiltInFlags(order),
+                            __ATOMIC_RELAXED);
   PostFence(order);
   return expected;
 }
@@ -386,9 +379,8 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, the value prior to the exchange.
 template <class T>
-static __forceinline T
-    Exchange(T* ptr, T val,
-             std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Exchange(T* ptr, T val,
+                                std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   T ret;
   PreFence(order);
@@ -403,9 +395,8 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, the value prior to the exchange.
 template <class T>
-static __forceinline T
-    Exchange(volatile T* ptr, T val,
-             std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Exchange(volatile T* ptr, T val,
+                                std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   T ret;
   PreFence(order);
@@ -420,8 +411,7 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, the value of the variable prior to the addition.
 template <class T>
-static __forceinline T
-    Add(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Add(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_add(ptr, val, c11ToBuiltInFlags(order));
@@ -436,8 +426,7 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, value of the variable prior to the subtraction.
 template <class T>
-static __forceinline T
-    Sub(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Sub(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_sub(ptr, val, c11ToBuiltInFlags(order));
@@ -452,8 +441,7 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, value of variable prior to the operation.
 template <class T>
-static __forceinline T
-    And(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T And(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_and(ptr, val, c11ToBuiltInFlags(order));
@@ -467,8 +455,7 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, value of variable prior to the operation.
 template <class T>
-static __forceinline T
-    Or(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Or(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_or(ptr, val, c11ToBuiltInFlags(order));
@@ -483,8 +470,7 @@ static __forceinline T
 /// @order: order(Input), memory order which is relaxed by default.
 /// @return: T, valud of variable prior to the opertaion.
 template <class T>
-static __forceinline T
-    Xor(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Xor(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_xor(ptr, val, c11ToBuiltInFlags(order));
@@ -498,8 +484,7 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, value of variable prior to the operation.
 template <class T>
-static __forceinline T
-    Increment(T* ptr, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Increment(T* ptr, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_add(ptr, 1, c11ToBuiltInFlags(order));
@@ -513,8 +498,7 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, value of variable prior to the operation.
 template <class T>
-static __forceinline T
-    Decrement(T* ptr, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Decrement(T* ptr, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_sub(ptr, 1, c11ToBuiltInFlags(order));
@@ -528,9 +512,8 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, the value of the variable prior to the addition.
 template <class T>
-static __forceinline T
-    Add(volatile T* ptr, T val,
-        std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Add(volatile T* ptr, T val,
+                           std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_add(ptr, val, c11ToBuiltInFlags(order));
@@ -545,9 +528,8 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, value of the variable prior to the subtraction.
 template <class T>
-static __forceinline T
-    Sub(volatile T* ptr, T val,
-        std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Sub(volatile T* ptr, T val,
+                           std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_sub(ptr, val, c11ToBuiltInFlags(order));
@@ -562,9 +544,8 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, value of variable prior to the operation.
 template <class T>
-static __forceinline T
-    And(volatile T* ptr, T val,
-        std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T And(volatile T* ptr, T val,
+                           std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_and(ptr, val, c11ToBuiltInFlags(order));
@@ -594,9 +575,8 @@ static __forceinline T Or(volatile T* ptr, T val,
 /// @order: order(Input), memory order which is relaxed by default.
 /// @return: T, valud of variable prior to the opertaion.
 template <class T>
-static __forceinline T
-    Xor(volatile T* ptr, T val,
-        std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Xor(volatile T* ptr, T val,
+                           std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_xor(ptr, val, c11ToBuiltInFlags(order));
@@ -610,9 +590,8 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, value of variable prior to the operation.
 template <class T>
-static __forceinline T
-    Increment(volatile T* ptr,
-              std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Increment(volatile T* ptr,
+                                 std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_add(ptr, 1, c11ToBuiltInFlags(order));
@@ -626,17 +605,16 @@ static __forceinline T
 /// @param: order(Input), memory order which is relaxed by default.
 /// @return: T, value of variable prior to the operation.
 template <class T>
-static __forceinline T
-    Decrement(volatile T* ptr,
-              std::memory_order order = std::memory_order_relaxed) {
+static __forceinline T Decrement(volatile T* ptr,
+                                 std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
   T ret = __atomic_fetch_sub(ptr, 1, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
-}   //  namespace atomic
-}   //  namespace rocr
+}  //  namespace atomic
+}  //  namespace rocr
 
 #ifdef X64_ORDER_WC
 #undef X64_ORDER_WC

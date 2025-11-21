@@ -51,21 +51,21 @@
 namespace rocr {
 namespace AMD {
 
-    class SvmProfileControl {
-    public:
-      SvmProfileControl();
-      ~SvmProfileControl();
+class SvmProfileControl {
+ public:
+  SvmProfileControl();
+  ~SvmProfileControl();
 
-    private:
-      template <typename... Args> std::string format(const char* format, Args... arg);
-      void PollSmi();
-      static void PollSmiRun(void* profileControl);
-      int event;
-      bool exit;
-      os::Thread poll_smi_thread_;
-      std::vector<char> format_buffer;
-    };
+ private:
+  template <typename... Args> std::string format(const char* format, Args... arg);
+  void PollSmi();
+  static void PollSmiRun(void* profileControl);
+  int event;
+  bool exit;
+  os::Thread poll_smi_thread_;
+  std::vector<char> format_buffer;
+};
 
-} // namespace AMD
-} // namespace rocr
-#endif // header guard
+}  // namespace AMD
+}  // namespace rocr
+#endif  // header guard

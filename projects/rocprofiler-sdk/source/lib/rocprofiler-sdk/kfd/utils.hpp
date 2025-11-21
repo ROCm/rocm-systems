@@ -100,13 +100,15 @@ bitmask(size_t num)
 }
 
 template <size_t... Args>
-constexpr size_t bitmask(std::index_sequence<Args...>)
+constexpr size_t
+bitmask(std::index_sequence<Args...>)
 {
     return (bitmask(Args) | ...);
 }
 
 template <size_t... Ints>
-constexpr size_t kfd_bitmask(std::index_sequence<Ints...>)
+constexpr size_t
+kfd_bitmask(std::index_sequence<Ints...>)
 {
     return (kfd_event_info<Ints>::kfd_bitmask | ...);
 }

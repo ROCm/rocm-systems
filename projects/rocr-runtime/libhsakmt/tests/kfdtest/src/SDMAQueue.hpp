@@ -28,32 +28,32 @@
 
 class SDMAQueue : public BaseQueue {
  public:
-    SDMAQueue(void);
-    virtual ~SDMAQueue(void);
+  SDMAQueue(void);
+  virtual ~SDMAQueue(void);
 
-    // @brief Update queue write pointer and set the queue doorbell to the queue write pointer
-    virtual void SubmitPacket();
+  // @brief Update queue write pointer and set the queue doorbell to the queue write pointer
+  virtual void SubmitPacket();
 
-    /** Wait for all the packets submitted to the queue to be consumed. (i.e. wait until RPTR=WPTR).
-     *  Note that all packets being consumed is not the same as all packets being processed.
-     *  If event is set, wait all packets being processed.
-     *  And we can benefit from that as it has
-     *  1) Less CPU usage (process can sleep, waiting for interrupt).
-     *  2) Lower latency (GPU only updates RPTR in memory periodically).
-     */
-    virtual void Wait4PacketConsumption(HsaEvent *event = NULL, unsigned int timeOut = g_TestTimeOut);
+  /** Wait for all the packets submitted to the queue to be consumed. (i.e. wait until RPTR=WPTR).
+   *  Note that all packets being consumed is not the same as all packets being processed.
+   *  If event is set, wait all packets being processed.
+   *  And we can benefit from that as it has
+   *  1) Less CPU usage (process can sleep, waiting for interrupt).
+   *  2) Lower latency (GPU only updates RPTR in memory periodically).
+   */
+  virtual void Wait4PacketConsumption(HsaEvent* event = NULL, unsigned int timeOut = g_TestTimeOut);
 
  protected:
-    // @ return Write pointer modulo queue size in dwords
-    virtual unsigned int Wptr();
-    // @ return Read pointer modulo queue size in dwords
-    virtual unsigned int Rptr();
-    // @ return Expected m_Resources.Queue_read_ptr when all packets are consumed
-    virtual unsigned int RptrWhenConsumed();
+  // @ return Write pointer modulo queue size in dwords
+  virtual unsigned int Wptr();
+  // @ return Read pointer modulo queue size in dwords
+  virtual unsigned int Rptr();
+  // @ return Expected m_Resources.Queue_read_ptr when all packets are consumed
+  virtual unsigned int RptrWhenConsumed();
 
-    virtual PACKETTYPE PacketTypeSupported() { return PACKETTYPE_SDMA; }
+  virtual PACKETTYPE PacketTypeSupported() { return PACKETTYPE_SDMA; }
 
-    virtual _HSA_QUEUE_TYPE GetQueueType() { return HSA_QUEUE_SDMA; }
+  virtual _HSA_QUEUE_TYPE GetQueueType() { return HSA_QUEUE_SDMA; }
 };
 
 #endif  // __KFD_SDMA_QUEUE__H__

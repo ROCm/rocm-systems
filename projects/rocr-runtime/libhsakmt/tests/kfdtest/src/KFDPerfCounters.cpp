@@ -24,24 +24,24 @@
 #include "KFDPerfCounters.hpp"
 
 void KFDPerfCountersTest::SetUp() {
-    ROUTINE_START
+  ROUTINE_START
 
-    KFDBaseComponentTest::SetUp();
+  KFDBaseComponentTest::SetUp();
 
-    ROUTINE_END
+  ROUTINE_END
 }
 
 void KFDPerfCountersTest::TearDown() {
-    ROUTINE_START
+  ROUTINE_START
 
-    KFDBaseComponentTest::TearDown();
+  KFDBaseComponentTest::TearDown();
 
-    ROUTINE_END
+  ROUTINE_END
 }
 
 static struct block_name_table {
-    char name[32];
-    HSA_UUID uuid;
+  char name[32];
+  HSA_UUID uuid;
 } block_lookup_table[] = {
     {"CB     ", {0x9ba429c6, 0xaf2d, 0x4b38, 0xb3, 0x49, 0x15, 0x72, 0x71, 0xbe, 0xac, 0x6a}},
     {"CPF    ", {0x2b0ad2b5, 0x1c43, 0x4f46, 0xa7, 0xbc, 0xe1, 0x19, 0x41, 0x1e, 0xa6, 0xc9}},
@@ -66,245 +66,220 @@ static struct block_name_table {
     {"TD     ", {0x7d7c0fe4, 0xfe41, 0x4fea, 0x92, 0xc9, 0x45, 0x44, 0xd7, 0x70, 0x6d, 0xc6}},
     {"VGT    ", {0x0b6a8cb7, 0x7a01, 0x409f, 0xa2, 0x2c, 0x30, 0x14, 0x85, 0x4f, 0x13, 0x59}},
     {"WD     ", {0x0e176789, 0x46ed, 0x4b02, 0x97, 0x2a, 0x91, 0x6d, 0x2f, 0xac, 0x24, 0x4a}},
-    {"DRIVER ", {0xea9b5ae1, 0x6c3f, 0x44b3, 0x89, 0x54, 0xda, 0xf0, 0x75, 0x65, 0xa9, 0xa}}
-};
+    {"DRIVER ", {0xea9b5ae1, 0x6c3f, 0x44b3, 0x89, 0x54, 0xda, 0xf0, 0x75, 0x65, 0xa9, 0xa}}};
 
-static void GetBlockName(HSA_UUID uuid, char *name, uint32_t name_len,
-                                       char *uuid_str, uint32_t uuid_str_len) {
-    uint32_t i, table_size;
+static void GetBlockName(HSA_UUID uuid, char* name, uint32_t name_len, char* uuid_str,
+                         uint32_t uuid_str_len) {
+  uint32_t i, table_size;
 
-    table_size = sizeof(block_lookup_table) / sizeof(struct block_name_table);
+  table_size = sizeof(block_lookup_table) / sizeof(struct block_name_table);
 
-    snprintf(name, name_len, "unknown");
-    for (i = 0; i < table_size; i++) {
-        if (!memcmp(&block_lookup_table[i].uuid, &uuid, sizeof(HSA_UUID))) {
-            if (name)
-                snprintf(name, name_len, "%s", block_lookup_table[i].name);
-            break;
-        }
+  snprintf(name, name_len, "unknown");
+  for (i = 0; i < table_size; i++) {
+    if (!memcmp(&block_lookup_table[i].uuid, &uuid, sizeof(HSA_UUID))) {
+      if (name) snprintf(name, name_len, "%s", block_lookup_table[i].name);
+      break;
     }
+  }
 
-    if (uuid_str)
-        snprintf(uuid_str, uuid_str_len,
-                 "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                 uuid.Data1, uuid.Data2, uuid.Data3,
-                 uuid.Data4[0], uuid.Data4[1], uuid.Data4[2],
-                 uuid.Data4[3], uuid.Data4[4], uuid.Data4[5],
-                 uuid.Data4[6], uuid.Data4[7]);
+  if (uuid_str)
+    snprintf(uuid_str, uuid_str_len, "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x", uuid.Data1,
+             uuid.Data2, uuid.Data3, uuid.Data4[0], uuid.Data4[1], uuid.Data4[2], uuid.Data4[3],
+             uuid.Data4[4], uuid.Data4[5], uuid.Data4[6], uuid.Data4[7]);
 }
 
 static void GetCounterProperties(KFDTEST_PARAMETERS* pTestParamters) {
+  int gpuNode = pTestParamters->gpuNode;
+  KFDPerfCountersTest* pKFDPerfCountersTest = (KFDPerfCountersTest*)pTestParamters->pTestObject;
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDPerfCountersTest* pKFDPerfCountersTest =
-                         (KFDPerfCountersTest*)pTestParamters->pTestObject;
+  HsaCounterProperties* pProps = NULL;
+  ASSERT_SUCCESS(hsaKmtPmcGetCounterProperties(gpuNode, &pProps));
+  /* Verifying that there is at least one block */
+  ASSERT_NE(0, pProps->NumBlocks) << "No performance counters blocks";
 
-    HsaCounterProperties* pProps = NULL;
-    ASSERT_SUCCESS(hsaKmtPmcGetCounterProperties(gpuNode, &pProps));
-    /* Verifying that there is at least one block */
-    ASSERT_NE(0, pProps->NumBlocks) << "No performance counters blocks";
+  LOG() << std::dec << pProps->NumBlocks << " blocks found." << std::endl;
 
-    LOG() << std::dec << pProps->NumBlocks << " blocks found." << std::endl;
+  HsaCounterBlockProperties* block;
+  block = &pProps->Blocks[0];
+  for (HSAuint32 i = 0; i < pProps->NumBlocks; i++) {
+    char uuid_string[37] = "";
+    char name[32] = "";
+    GetBlockName(block->BlockId, name, 32, uuid_string, 37);
 
-    HsaCounterBlockProperties *block;
-    block = &pProps->Blocks[0];
-    for (HSAuint32 i = 0; i < pProps->NumBlocks; i++) {
-        char uuid_string[37] = "";
-        char name[32] = "";
-        GetBlockName(block->BlockId, name, 32, uuid_string, 37);
-
-        char type[32];
-        switch (block->Counters[0].Type) {
-        case HSA_PROFILE_TYPE_PRIVILEGED_IMMEDIATE:
-            snprintf(type, sizeof(type), "Priv Immediate");
-            break;
-        case HSA_PROFILE_TYPE_PRIVILEGED_STREAMING:
-            snprintf(type, sizeof(type), "Priv Streaming");
-            break;
-        case HSA_PROFILE_TYPE_NONPRIV_IMMEDIATE:
-            snprintf(type, sizeof(type), "Non-priv Immediate");
-            break;
-        case HSA_PROFILE_TYPE_NONPRIV_STREAMING:
-            snprintf(type, sizeof(type), "Non-priv Immediate");
-            break;
-        default:
-            snprintf(type, sizeof(type), "Unknown");
-            break;
-        }
-
-        LOG() << name << " (" << uuid_string << "): " << type << ", " <<
-            block->NumCounters << " counter IDs" << std::endl;
-        block = reinterpret_cast<HsaCounterBlockProperties *>(&block->Counters[block->NumCounters]);
+    char type[32];
+    switch (block->Counters[0].Type) {
+      case HSA_PROFILE_TYPE_PRIVILEGED_IMMEDIATE:
+        snprintf(type, sizeof(type), "Priv Immediate");
+        break;
+      case HSA_PROFILE_TYPE_PRIVILEGED_STREAMING:
+        snprintf(type, sizeof(type), "Priv Streaming");
+        break;
+      case HSA_PROFILE_TYPE_NONPRIV_IMMEDIATE:
+        snprintf(type, sizeof(type), "Non-priv Immediate");
+        break;
+      case HSA_PROFILE_TYPE_NONPRIV_STREAMING:
+        snprintf(type, sizeof(type), "Non-priv Immediate");
+        break;
+      default:
+        snprintf(type, sizeof(type), "Unknown");
+        break;
     }
+
+    LOG() << name << " (" << uuid_string << "): " << type << ", " << block->NumCounters
+          << " counter IDs" << std::endl;
+    block = reinterpret_cast<HsaCounterBlockProperties*>(&block->Counters[block->NumCounters]);
+  }
 }
 
 TEST_F(KFDPerfCountersTest, GetCounterProperties) {
-    TEST_START(TESTPROFILE_RUNALL)
+  TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(GetCounterProperties));
+  ASSERT_SUCCESS(KFDTest_Launch(GetCounterProperties));
 
-    TEST_END
+  TEST_END
 }
 
 static void RegisterTrace(KFDTEST_PARAMETERS* pTestParamters) {
+  HsaCounterProperties* pProps;
 
-    HsaCounterProperties* pProps;
+  int gpuNode = pTestParamters->gpuNode;
+  KFDPerfCountersTest* pKFDPerfCountersTest = (KFDPerfCountersTest*)pTestParamters->pTestObject;
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDPerfCountersTest* pKFDPerfCountersTest =
-                         (KFDPerfCountersTest*)pTestParamters->pTestObject;
+  HsaPmcTraceRoot root;
 
-    HsaPmcTraceRoot root;
+  pProps = NULL;
+  ASSERT_SUCCESS(hsaKmtPmcGetCounterProperties(gpuNode, &pProps));
 
-    pProps = NULL;
-    ASSERT_SUCCESS(hsaKmtPmcGetCounterProperties(gpuNode, &pProps));
+  /* Verifying that there is at least one block */
+  ASSERT_NE(0, pProps->NumBlocks) << "No performance counters blocks";
 
-    /* Verifying that there is at least one block */
-    ASSERT_NE(0, pProps->NumBlocks) << "No performance counters blocks";
-
-    HsaCounterBlockProperties *block = &pProps->Blocks[0];
-    bool priv_block_found = false;
-    for (HSAuint32 i = 0; i < pProps->NumBlocks; i++) {
-        if (block->Counters[0].Type <= HSA_PROFILE_TYPE_PRIVILEGED_STREAMING) {
-            priv_block_found = true;
-            break;
-        }
-        block = reinterpret_cast<HsaCounterBlockProperties *>(&block->Counters[block->NumCounters]);
+  HsaCounterBlockProperties* block = &pProps->Blocks[0];
+  bool priv_block_found = false;
+  for (HSAuint32 i = 0; i < pProps->NumBlocks; i++) {
+    if (block->Counters[0].Type <= HSA_PROFILE_TYPE_PRIVILEGED_STREAMING) {
+      priv_block_found = true;
+      break;
     }
+    block = reinterpret_cast<HsaCounterBlockProperties*>(&block->Counters[block->NumCounters]);
+  }
 
-    if (!priv_block_found) {
-        LOG() << "Skipping test: No privileged block is found."
-            << std::endl;
-        return;
-    }
+  if (!priv_block_found) {
+    LOG() << "Skipping test: No privileged block is found." << std::endl;
+    return;
+  }
 
-    /* Registering trace */
-    ASSERT_SUCCESS(hsaKmtPmcRegisterTrace(gpuNode,
-                                          block->NumConcurrent,
-                                          block->Counters,
-                                          &root));
-    EXPECT_SUCCESS(hsaKmtPmcUnregisterTrace(gpuNode, root.TraceId));
+  /* Registering trace */
+  ASSERT_SUCCESS(hsaKmtPmcRegisterTrace(gpuNode, block->NumConcurrent, block->Counters, &root));
+  EXPECT_SUCCESS(hsaKmtPmcUnregisterTrace(gpuNode, root.TraceId));
 }
 
 TEST_F(KFDPerfCountersTest, RegisterTrace) {
-    TEST_START(TESTPROFILE_RUNALL)
+  TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(RegisterTrace));
+  ASSERT_SUCCESS(KFDTest_Launch(RegisterTrace));
 
-    TEST_END
+  TEST_END
 }
 
-static const unsigned int START_STOP_DELAY = 10000;     // 10 sec tracing
+static const unsigned int START_STOP_DELAY = 10000;  // 10 sec tracing
 
-static void StartStopQueryTrace(KFDTEST_PARAMETERS* pTestParamters){
+static void StartStopQueryTrace(KFDTEST_PARAMETERS* pTestParamters) {
+  HsaPmcTraceRoot root;
+  HsaCounterProperties* pProps;
 
-    HsaPmcTraceRoot root;
-    HsaCounterProperties* pProps;
+  int gpuNode = pTestParamters->gpuNode;
+  KFDPerfCountersTest* pKFDPerfCountersTest = (KFDPerfCountersTest*)pTestParamters->pTestObject;
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDPerfCountersTest* pKFDPerfCountersTest =
-                         (KFDPerfCountersTest*)pTestParamters->pTestObject;
+  pProps = NULL;
+  ASSERT_SUCCESS(hsaKmtPmcGetCounterProperties(gpuNode, &pProps));
 
-    pProps = NULL;
-    ASSERT_SUCCESS(hsaKmtPmcGetCounterProperties(gpuNode, &pProps));
+  /* Verifying that there is at least one block */
+  ASSERT_NE(0, pProps->NumBlocks) << "No performance counters blocks";
 
-    /* Verifying that there is at least one block */
-    ASSERT_NE(0, pProps->NumBlocks) << "No performance counters blocks";
-
-    HsaCounterBlockProperties *block = &pProps->Blocks[0];
-    bool priv_block_found = false;
-    for (HSAuint32 i = 0; i < pProps->NumBlocks; i++) {
-        if (block->Counters[0].Type <= HSA_PROFILE_TYPE_PRIVILEGED_STREAMING) {
-            priv_block_found = true;
-            break;
-        }
-        block = reinterpret_cast<HsaCounterBlockProperties *>(&block->Counters[block->NumCounters]);
+  HsaCounterBlockProperties* block = &pProps->Blocks[0];
+  bool priv_block_found = false;
+  for (HSAuint32 i = 0; i < pProps->NumBlocks; i++) {
+    if (block->Counters[0].Type <= HSA_PROFILE_TYPE_PRIVILEGED_STREAMING) {
+      priv_block_found = true;
+      break;
     }
+    block = reinterpret_cast<HsaCounterBlockProperties*>(&block->Counters[block->NumCounters]);
+  }
 
-    if (!priv_block_found) {
-        LOG() << "Skipping test: No privileged block is found."
-             << std::endl;
-        return;
-    }
+  if (!priv_block_found) {
+    LOG() << "Skipping test: No privileged block is found." << std::endl;
+    return;
+  }
 
-    if (getuid()) { /* Non-root */
-        LOG() << "Skipping test: Privileged counters requires the user as root." << std::endl;
-        return;
-    }
+  if (getuid()) { /* Non-root */
+    LOG() << "Skipping test: Privileged counters requires the user as root." << std::endl;
+    return;
+  }
 
-    /* Registering trace */
-    ASSERT_SUCCESS(hsaKmtPmcRegisterTrace(gpuNode,
-                                          block->NumConcurrent,
-                                          block->Counters,
-                                          &root));
+  /* Registering trace */
+  ASSERT_SUCCESS(hsaKmtPmcRegisterTrace(gpuNode, block->NumConcurrent, block->Counters, &root));
 
-    /* Acquiring access for the trace */
-    ASSERT_SUCCESS(hsaKmtPmcAcquireTraceAccess(gpuNode, root.TraceId));
+  /* Acquiring access for the trace */
+  ASSERT_SUCCESS(hsaKmtPmcAcquireTraceAccess(gpuNode, root.TraceId));
 
-    /* Allocating memory buffer for the trace */
-    HsaMemoryBuffer membuf(PAGE_SIZE, gpuNode);
+  /* Allocating memory buffer for the trace */
+  HsaMemoryBuffer membuf(PAGE_SIZE, gpuNode);
 
-    /* Starting the trace */
-    ASSERT_SUCCESS(hsaKmtPmcStartTrace(root.TraceId,
-                                       membuf.As<void*>(),
-                                       membuf.Size()));
+  /* Starting the trace */
+  ASSERT_SUCCESS(hsaKmtPmcStartTrace(root.TraceId, membuf.As<void*>(), membuf.Size()));
 
-    /* Delay between START and STOP tracing */
-    Delay(START_STOP_DELAY);
+  /* Delay between START and STOP tracing */
+  Delay(START_STOP_DELAY);
 
-    /* Stopping the trace */
-    ASSERT_SUCCESS(hsaKmtPmcStopTrace(root.TraceId));
+  /* Stopping the trace */
+  ASSERT_SUCCESS(hsaKmtPmcStopTrace(root.TraceId));
 
-    /* Querying the trace */
-    ASSERT_SUCCESS(hsaKmtPmcQueryTrace(root.TraceId));
-    uint64_t *buf = membuf.As<uint64_t*>();
-    for (uint32_t i = 0; i < block->NumConcurrent; i++, buf++)
-        LOG() << "Counter " << std::dec << i << ": " << *buf << std::endl;
+  /* Querying the trace */
+  ASSERT_SUCCESS(hsaKmtPmcQueryTrace(root.TraceId));
+  uint64_t* buf = membuf.As<uint64_t*>();
+  for (uint32_t i = 0; i < block->NumConcurrent; i++, buf++)
+    LOG() << "Counter " << std::dec << i << ": " << *buf << std::endl;
 
-    /* Releasing the trace */
-    EXPECT_SUCCESS(hsaKmtPmcReleaseTraceAccess(0, root.TraceId));
+  /* Releasing the trace */
+  EXPECT_SUCCESS(hsaKmtPmcReleaseTraceAccess(0, root.TraceId));
 
-    EXPECT_SUCCESS(hsaKmtPmcUnregisterTrace(gpuNode, root.TraceId));
+  EXPECT_SUCCESS(hsaKmtPmcUnregisterTrace(gpuNode, root.TraceId));
 }
 
 TEST_F(KFDPerfCountersTest, StartStopQueryTrace) {
-    TEST_START(TESTPROFILE_RUNALL)
+  TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(RegisterTrace));
+  ASSERT_SUCCESS(KFDTest_Launch(RegisterTrace));
 
-    TEST_END
+  TEST_END
 }
 
-static void ClockCountersBasicTest(KFDTEST_PARAMETERS* pTestParamters){
+static void ClockCountersBasicTest(KFDTEST_PARAMETERS* pTestParamters) {
+  int gpuNode = pTestParamters->gpuNode;
+  KFDPerfCountersTest* pKFDPerfCountersTest = (KFDPerfCountersTest*)pTestParamters->pTestObject;
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDPerfCountersTest* pKFDPerfCountersTest =
-					  (KFDPerfCountersTest*)pTestParamters->pTestObject;
+  HsaClockCounters counters1;
+  HsaClockCounters counters2;
 
-    HsaClockCounters counters1;
-    HsaClockCounters counters2;
+  EXPECT_SUCCESS(hsaKmtGetClockCounters(gpuNode, &counters1));
 
-    EXPECT_SUCCESS(hsaKmtGetClockCounters(gpuNode, &counters1));
+  Delay(100);
 
-    Delay(100);
+  EXPECT_SUCCESS(hsaKmtGetClockCounters(gpuNode, &counters2));
 
-    EXPECT_SUCCESS(hsaKmtGetClockCounters(gpuNode, &counters2));
+  EXPECT_NE(0, counters1.GPUClockCounter);
+  EXPECT_NE(0, counters2.GPUClockCounter);
+  EXPECT_NE(0, counters1.SystemClockCounter);
+  EXPECT_NE(0, counters2.SystemClockCounter);
 
-    EXPECT_NE(0, counters1.GPUClockCounter);
-    EXPECT_NE(0, counters2.GPUClockCounter);
-    EXPECT_NE(0, counters1.SystemClockCounter);
-    EXPECT_NE(0, counters2.SystemClockCounter);
-
-    EXPECT_GT(counters2.GPUClockCounter, counters1.GPUClockCounter);
-    EXPECT_GT(counters2.SystemClockCounter, counters1.SystemClockCounter);
-
+  EXPECT_GT(counters2.GPUClockCounter, counters1.GPUClockCounter);
+  EXPECT_GT(counters2.SystemClockCounter, counters1.SystemClockCounter);
 }
 
 TEST_F(KFDPerfCountersTest, ClockCountersBasicTest) {
-    TEST_START(TESTPROFILE_RUNALL)
+  TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(ClockCountersBasicTest));
+  ASSERT_SUCCESS(KFDTest_Launch(ClockCountersBasicTest));
 
-    TEST_END
+  TEST_END
 }
-

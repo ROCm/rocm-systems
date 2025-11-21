@@ -231,9 +231,7 @@ void RdciConfigSubSystem::process() {
       }
 
       if (is_json_output()) {
-        json_ss << "{"
-                << "\"group_id\": \"" << group_id_ << "\", \"status\": \"ok\""
-                << "}";
+        json_ss << "{" << "\"group_id\": \"" << group_id_ << "\", \"status\": \"ok\"" << "}";
       } else {
         std::cout << "Successfully configured GPU Id belongs to group: " << group_id_ << std::endl;
       }
@@ -339,8 +337,7 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
   ss << std::setw(TABLE_COLUMN_WIDTH) << std::left << "configure" << std::setw(TABLE_COLUMN_WIDTH)
      << std::left << "gpu_index" << std::setw(TABLE_COLUMN_WIDTH) << std::left << "config_limit"
      << std::setw(TABLE_COLUMN_WIDTH) << std::left << "current_value" << std::endl;
-  json_ss << "\"group_id\": " << group_id_ << ","
-          << "\"config_list\" : [";
+  json_ss << "\"group_id\": " << group_id_ << "," << "\"config_list\" : [";
 
   result = rdc_group_gpu_get_info(rdc_handle_, group_id_, &rdc_group_info);
   if (result == RDC_ST_OK) {

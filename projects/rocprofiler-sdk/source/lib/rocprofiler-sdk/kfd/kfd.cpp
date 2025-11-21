@@ -139,11 +139,11 @@ using page_fault_start_ops_t =
 using page_fault_end_ops_t = std::index_sequence<ROCPROFILER_KFD_EVENT_PAGE_FAULT_END_PAGE_MIGRATED,
                                                  ROCPROFILER_KFD_EVENT_PAGE_FAULT_END_PAGE_UPDATED>;
 using queue_evict_ops_t    = std::index_sequence<ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SVM,
-                                              ROCPROFILER_KFD_EVENT_QUEUE_EVICT_USERPTR,
-                                              ROCPROFILER_KFD_EVENT_QUEUE_EVICT_TTM,
-                                              ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SUSPEND,
-                                              ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT,
-                                              ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE>;
+                                                 ROCPROFILER_KFD_EVENT_QUEUE_EVICT_USERPTR,
+                                                 ROCPROFILER_KFD_EVENT_QUEUE_EVICT_TTM,
+                                                 ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SUSPEND,
+                                                 ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT,
+                                                 ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE>;
 
 using queue_restore_ops_t = std::index_sequence<ROCPROFILER_KFD_EVENT_QUEUE_RESTORE>;
 
@@ -887,10 +887,10 @@ struct poll_kfd_t
         active = true;
     }
 
-    poll_kfd_t(const poll_kfd_t&) = delete;
+    poll_kfd_t(const poll_kfd_t&)            = delete;
     poll_kfd_t& operator=(const poll_kfd_t&) = delete;
 
-    poll_kfd_t(poll_kfd_t&&) noexcept = default;
+    poll_kfd_t(poll_kfd_t&&) noexcept            = default;
     poll_kfd_t& operator=(poll_kfd_t&&) noexcept = default;
 
     ~poll_kfd_t()
@@ -1434,7 +1434,8 @@ context_filter(const context::context* ctx)
 }
 
 template <size_t... Inxs>
-rocprofiler_status_t init(std::index_sequence<Inxs...>)
+rocprofiler_status_t
+init(std::index_sequence<Inxs...>)
 {
     static const small_vector<size_t> event_ids{Inxs...};
     // Check if version is more than 1.11

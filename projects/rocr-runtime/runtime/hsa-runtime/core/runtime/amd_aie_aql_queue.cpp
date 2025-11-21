@@ -73,18 +73,16 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
       agent_(*agent),
       active_(false) {
   if (agent_.device_type() != core::Agent::DeviceType::kAmdAieDevice) {
-    throw AMD::hsa_exception(
-        HSA_STATUS_ERROR_INVALID_AGENT,
-        "Attempting to create an AIE queue on a non-AIE agent.");
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
+                             "Attempting to create an AIE queue on a non-AIE agent.");
   }
   queue_size_bytes_ = req_size_pkts * sizeof(core::AqlPacket);
-  ring_buf_ = agent_.system_allocator()(queue_size_bytes_, 4096,
-                                        core::MemoryRegion::AllocateNoFlags);
+  ring_buf_ =
+      agent_.system_allocator()(queue_size_bytes_, 4096, core::MemoryRegion::AllocateNoFlags);
 
   if (!ring_buf_) {
-    throw AMD::hsa_exception(
-        HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
-        "Could not allocate a ring buffer for an AIE queue.");
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
+                             "Could not allocate a ring buffer for an AIE queue.");
   }
 
   // Populate hsa_queue_t fields.
@@ -135,9 +133,7 @@ hsa_status_t AieAqlQueue::Inactivate() {
   return status;
 }
 
-hsa_status_t AieAqlQueue::SetPriority(HSA_QUEUE_PRIORITY priority) {
-  return HSA_STATUS_SUCCESS;
-}
+hsa_status_t AieAqlQueue::SetPriority(HSA_QUEUE_PRIORITY priority) { return HSA_STATUS_SUCCESS; }
 
 void AieAqlQueue::Destroy() { delete this; }
 
@@ -159,53 +155,43 @@ uint64_t AieAqlQueue::LoadWriteIndexAcquire() {
 }
 
 void AieAqlQueue::StoreWriteIndexRelaxed(uint64_t value) {
-  atomic::Store(&amd_queue_.write_dispatch_id, value,
-                std::memory_order_relaxed);
+  atomic::Store(&amd_queue_.write_dispatch_id, value, std::memory_order_relaxed);
 }
 
 void AieAqlQueue::StoreWriteIndexRelease(uint64_t value) {
-  atomic::Store(&amd_queue_.write_dispatch_id, value,
-                std::memory_order_release);
+  atomic::Store(&amd_queue_.write_dispatch_id, value, std::memory_order_release);
 }
 
 uint64_t AieAqlQueue::CasWriteIndexRelaxed(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_relaxed);
+  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_relaxed);
 }
 
 uint64_t AieAqlQueue::CasWriteIndexAcquire(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_acquire);
+  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_acquire);
 }
 
 uint64_t AieAqlQueue::CasWriteIndexRelease(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_release);
+  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_release);
 }
 
 uint64_t AieAqlQueue::CasWriteIndexAcqRel(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_acq_rel);
+  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_acq_rel);
 }
 
 uint64_t AieAqlQueue::AddWriteIndexRelaxed(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_relaxed);
+  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_relaxed);
 }
 
 uint64_t AieAqlQueue::AddWriteIndexAcquire(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_acquire);
+  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_acquire);
 }
 
 uint64_t AieAqlQueue::AddWriteIndexRelease(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_release);
+  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_release);
 }
 
 uint64_t AieAqlQueue::AddWriteIndexAcqRel(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_acq_rel);
+  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_acq_rel);
 }
 
 void AieAqlQueue::StoreRelaxed(hsa_signal_value_t value) { SubmitPackets(); }
@@ -267,8 +253,7 @@ void AieAqlQueue::StoreRelease(hsa_signal_value_t value) {
   StoreRelaxed(value);
 }
 
-hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute,
-                                  void *value) {
+hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:
       *static_cast<hsa_agent_t*>(value) = agent_.public_handle();
@@ -283,24 +268,20 @@ hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AieAqlQueue::GetCUMasking(uint32_t num_cu_mask_count,
-                                       uint32_t *cu_mask) {
+hsa_status_t AieAqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) {
   assert(false && "AIE AQL queue does not support CU masking.");
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t AieAqlQueue::SetCUMasking(uint32_t num_cu_mask_count,
-                                       const uint32_t *cu_mask) {
+hsa_status_t AieAqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) {
   assert(false && "AIE AQL queue does not support CU masking.");
   return HSA_STATUS_ERROR;
 }
 
-void AieAqlQueue::ExecutePM4(uint32_t *cmd_data, size_t cmd_size_b,
-                             hsa_fence_scope_t acquireFence,
-                             hsa_fence_scope_t releaseFence,
-                             hsa_signal_t *signal) {
+void AieAqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
+                             hsa_fence_scope_t releaseFence, hsa_signal_t* signal) {
   assert(false && "AIE AQL queue does not support PM4 packets.");
 }
 
-} // namespace AMD
-} // namespace rocr
+}  // namespace AMD
+}  // namespace rocr

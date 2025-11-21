@@ -47,7 +47,7 @@ class ProxyQueue : public Queue {
   virtual void Submit(const packet_t* packet) = 0;
 
  protected:
-  virtual ~ProxyQueue(){};
+  virtual ~ProxyQueue() {};
 
  private:
   static bool rocp_type_;

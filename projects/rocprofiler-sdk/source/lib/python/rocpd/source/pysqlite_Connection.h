@@ -32,7 +32,8 @@
 
 #include <cstdint>
 
-extern "C" {
+extern "C"
+{
 struct pysqlite_state;
 struct sqlite3;
 

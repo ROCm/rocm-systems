@@ -44,64 +44,58 @@ PcieAccessApi* LoadPcieAccessLibAPI() {
   dlerror(); /* Clear any existing error */
 
   api = new PcieAccessApi();
-  api->pci_device_find_by_slot =
-      reinterpret_cast<pci_device_find_by_slot_handler_t>(dlsym(
-          libpciaccess_handle, "pci_device_find_by_slot"));
+  api->pci_device_find_by_slot = reinterpret_cast<pci_device_find_by_slot_handler_t>(
+      dlsym(libpciaccess_handle, "pci_device_find_by_slot"));
   if (api->pci_device_find_by_slot == nullptr) {
     fprintf(stderr,
-        "ROCProfiler: libpciaccess library corrupted, pci_device_find_by_slot() method is "
-        "expected\n");
+            "ROCProfiler: libpciaccess library corrupted, pci_device_find_by_slot() method is "
+            "expected\n");
     fprintf(stderr, "%s\n", dlerror());
     abort();
   }
   api->pci_device_probe =
-      reinterpret_cast<pci_device_probe_handler_t>(dlsym(
-          libpciaccess_handle, "pci_device_probe"));
+      reinterpret_cast<pci_device_probe_handler_t>(dlsym(libpciaccess_handle, "pci_device_probe"));
   if (api->pci_device_probe == nullptr) {
     fprintf(stderr,
-        "ROCProfiler: libpciaccess library corrupted, pci_device_probe() method is "
-        "expected\n");
+            "ROCProfiler: libpciaccess library corrupted, pci_device_probe() method is "
+            "expected\n");
     fprintf(stderr, "%s\n", dlerror());
     abort();
   }
-  api->pci_device_map_range =
-      reinterpret_cast<pci_device_map_range_handler_t>(dlsym(
-          libpciaccess_handle, "pci_device_map_range"));
+  api->pci_device_map_range = reinterpret_cast<pci_device_map_range_handler_t>(
+      dlsym(libpciaccess_handle, "pci_device_map_range"));
   if (api->pci_device_map_range == nullptr) {
     fprintf(stderr,
-        "ROCProfiler: libpciaccess library corrupted, pci_device_map_range() method is "
-        "expected\n");
+            "ROCProfiler: libpciaccess library corrupted, pci_device_map_range() method is "
+            "expected\n");
     fprintf(stderr, "%s\n", dlerror());
     abort();
   }
-  api->pci_device_unmap_range =
-      reinterpret_cast<pci_device_unmap_range_handler_t>(dlsym(
-          libpciaccess_handle, "pci_device_unmap_range"));
+  api->pci_device_unmap_range = reinterpret_cast<pci_device_unmap_range_handler_t>(
+      dlsym(libpciaccess_handle, "pci_device_unmap_range"));
 
   if (api->pci_device_unmap_range == nullptr) {
     fprintf(stderr,
-        "ROCProfiler: libpciaccess library corrupted, pci_device_unmap_range() method is "
-        "expected\n");
+            "ROCProfiler: libpciaccess library corrupted, pci_device_unmap_range() method is "
+            "expected\n");
     fprintf(stderr, "%s\n", dlerror());
     abort();
   }
   api->pci_system_init =
-      reinterpret_cast<pci_system_init_handler_t>(dlsym(
-          libpciaccess_handle, "pci_system_init"));
+      reinterpret_cast<pci_system_init_handler_t>(dlsym(libpciaccess_handle, "pci_system_init"));
   if (api->pci_system_init == nullptr) {
     fprintf(stderr,
-        "ROCProfiler: libpciaccess library corrupted, pci_system_init() method is "
-        "expected\n");
+            "ROCProfiler: libpciaccess library corrupted, pci_system_init() method is "
+            "expected\n");
     fprintf(stderr, "%s\n", dlerror());
     abort();
   }
-  api->pci_system_cleanup =
-      reinterpret_cast<pci_system_cleanup_handler_t>(dlsym(
-          libpciaccess_handle, "pci_system_cleanup"));
+  api->pci_system_cleanup = reinterpret_cast<pci_system_cleanup_handler_t>(
+      dlsym(libpciaccess_handle, "pci_system_cleanup"));
   if (api->pci_system_cleanup == nullptr) {
     fprintf(stderr,
-        "ROCProfiler: libpciaccess library corrupted, pci_system_cleanup() method is "
-        "expected\n");
+            "ROCProfiler: libpciaccess library corrupted, pci_system_cleanup() method is "
+            "expected\n");
     fprintf(stderr, "%s\n", dlerror());
     abort();
   }

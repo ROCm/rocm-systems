@@ -135,9 +135,9 @@ struct RocpdImportData
     RocpdImportData()  = default;
     ~RocpdImportData() = default;
 
-    RocpdImportData(const RocpdImportData&)     = default;
-    RocpdImportData(RocpdImportData&&) noexcept = default;
-    RocpdImportData& operator=(const RocpdImportData&) = default;
+    RocpdImportData(const RocpdImportData&)                = default;
+    RocpdImportData(RocpdImportData&&) noexcept            = default;
+    RocpdImportData& operator=(const RocpdImportData&)     = default;
     RocpdImportData& operator=(RocpdImportData&&) noexcept = default;
 
     RocpdImportData(const py::object& _obj, const std::vector<std::string>& _dbs)

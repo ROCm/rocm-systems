@@ -23,9 +23,9 @@
 #if defined(ROCPROFILER_LIB_ROCPROFILER_OMPT_OMPT_CPP_IMPL) &&                                     \
     ROCPROFILER_LIB_ROCPROFILER_OMPT_OMPT_CPP_IMPL == 1
 
+#    include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #    include "lib/common/mpl.hpp"
 #    include "lib/rocprofiler-sdk/ompt/defines.hpp"
-#    include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #    include "lib/rocprofiler-sdk/ompt/utils.hpp"
 
 #    include <rocprofiler-sdk/external_correlation.h>

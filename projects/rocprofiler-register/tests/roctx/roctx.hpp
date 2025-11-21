@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #pragma once
 
 #define ROCTX_VERSION_MAJOR 4
@@ -29,7 +28,8 @@
 
 #include <cstdint>
 
-extern "C" {
+extern "C"
+{
 void
 roctxRangePush(const char*) __attribute__((visibility("default")));
 void

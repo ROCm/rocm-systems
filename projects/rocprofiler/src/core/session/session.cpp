@@ -45,52 +45,44 @@ Session::Session(rocprofiler_replay_mode_t replay_mode, rocprofiler_session_id_t
   buffers_ = new std::map<uint64_t, Memory::GenericBuffer*>();
 }
 
-Session::~Session()
-{
-    std::lock_guard<std::mutex> lock(session_lock_);
-    if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION) && spmcounter_)
-      delete spmcounter_;
+Session::~Session() {
+  std::lock_guard<std::mutex> lock(session_lock_);
+  if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION) && spmcounter_) delete spmcounter_;
 
-    if (FindFilterWithKind(ROCPROFILER_API_TRACE) && tracer_)
-    {
-      delete tracer_;
-      tracer_ = nullptr;
-    }
-    if (FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION) && pc_sampler_)
-    {
-      delete pc_sampler_;
-      pc_sampler_ = nullptr;
-    }
+  if (FindFilterWithKind(ROCPROFILER_API_TRACE) && tracer_) {
+    delete tracer_;
+    tracer_ = nullptr;
+  }
+  if (FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION) && pc_sampler_) {
+    delete pc_sampler_;
+    pc_sampler_ = nullptr;
+  }
 
-    if (FindFilterWithKind(ROCPROFILER_COUNTERS_SAMPLER) && counters_sampler_)
-    {
-      delete counters_sampler_;
-      counters_sampler_ = nullptr;
-    }
-    if ((FindFilterWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION) ||
-         FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION)) && profiler_)
-    {
-      rocprofiler::queue::Queue::ResetSessionID();
-      delete profiler_;
-      profiler_ = nullptr;
-    }
-    if (FindFilterWithKind(ROCPROFILER_ATT_TRACE_COLLECTION) && att_tracer_)
-    {
-      delete att_tracer_;
-      att_tracer_ = nullptr;
-    }
-    for (auto& filter : filters_)
-    if (filter)
-      delete filter;
+  if (FindFilterWithKind(ROCPROFILER_COUNTERS_SAMPLER) && counters_sampler_) {
+    delete counters_sampler_;
+    counters_sampler_ = nullptr;
+  }
+  if ((FindFilterWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION) ||
+       FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION)) &&
+      profiler_) {
+    rocprofiler::queue::Queue::ResetSessionID();
+    delete profiler_;
+    profiler_ = nullptr;
+  }
+  if (FindFilterWithKind(ROCPROFILER_ATT_TRACE_COLLECTION) && att_tracer_) {
+    delete att_tracer_;
+    att_tracer_ = nullptr;
+  }
+  for (auto& filter : filters_)
+    if (filter) delete filter;
 
-    filters_.clear();
-    for (auto& buffer : *buffers_)
-    {
-      buffer.second->Flush();
-      if (buffer.second) delete buffer.second;
-    }
-    buffers_->clear();
-    if (buffers_) delete buffers_;
+  filters_.clear();
+  for (auto& buffer : *buffers_) {
+    buffer.second->Flush();
+    if (buffer.second) delete buffer.second;
+  }
+  buffers_->clear();
+  if (buffers_) delete buffers_;
 }
 
 void Session::DisableTools(rocprofiler_buffer_id_t buffer_id) {
@@ -104,50 +96,39 @@ void Session::DisableTools(rocprofiler_buffer_id_t buffer_id) {
   }
   if (FindFilterWithKind(ROCPROFILER_API_TRACE) &&
       GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetBufferId().value ==
-          buffer_id.value)
-  {
-    if (tracer_)
-      tracer_->DisableRoctracer();
+          buffer_id.value) {
+    if (tracer_) tracer_->DisableRoctracer();
   }
 }
 
-void Session::Start()
-{
+void Session::Start() {
   std::lock_guard<std::mutex> lock(session_lock_);
   if (is_active_) return;
 
-  if (!profiler_)
-  {
-    if (FindFilterWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION))
-    {
+  if (!profiler_) {
+    if (FindFilterWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION)) {
       profiler_ = new profiler::Profiler(
-          GetFilter(GetFilterIdWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION))
-              ->GetBufferId(),
+          GetFilter(GetFilterIdWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION))->GetBufferId(),
           GetFilter(GetFilterIdWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION))->GetId(),
           session_id_);
     }
-    if (FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION))
-    {
+    if (FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION)) {
       profiler_ = new profiler::Profiler(
           GetFilter(GetFilterIdWithKind(ROCPROFILER_COUNTERS_COLLECTION))->GetBufferId(),
           GetFilter(GetFilterIdWithKind(ROCPROFILER_COUNTERS_COLLECTION))->GetId(), session_id_);
     }
-  }
-  else
-  {
+  } else {
     rocprofiler::queue::Queue::ResetSessionID(session_id_);
   }
 
-  if (FindFilterWithKind(ROCPROFILER_ATT_TRACE_COLLECTION) && !att_tracer_)
-  {
+  if (FindFilterWithKind(ROCPROFILER_ATT_TRACE_COLLECTION) && !att_tracer_) {
     att_tracer_ = new att::AttTracer(
-          GetFilter(GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION))->GetBufferId(),
-          GetFilter(GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION))->GetId(), session_id_);
+        GetFilter(GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION))->GetBufferId(),
+        GetFilter(GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION))->GetId(), session_id_);
   }
 
   if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION)) {
-    if (!spm_started_)
-    {
+    if (!spm_started_) {
       rocprofiler_spm_parameter_t* spmparameter =
           GetFilter(GetFilterIdWithKind(ROCPROFILER_SPM_COLLECTION))->GetSpmParameterData();
       spmcounter_ = new spm::SpmCounters(
@@ -155,8 +136,7 @@ void Session::Start()
           GetFilter(GetFilterIdWithKind(ROCPROFILER_SPM_COLLECTION))->GetId(), spmparameter,
           session_id_);
     }
-    if (!profiler_)
-    {
+    if (!profiler_) {
       profiler_ = new profiler::Profiler(
           GetFilter(GetFilterIdWithKind(ROCPROFILER_SPM_COLLECTION))->GetBufferId(),
           GetFilter(GetFilterIdWithKind(ROCPROFILER_SPM_COLLECTION))->GetId(), session_id_);
@@ -164,38 +144,31 @@ void Session::Start()
     startSpm();
   }
 
-  if (FindFilterWithKind(ROCPROFILER_API_TRACE))
-  {
+  if (FindFilterWithKind(ROCPROFILER_API_TRACE)) {
     std::vector<rocprofiler_tracer_activity_domain_t> domains =
         GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetTraceData();
-    if (!tracer_)
-    {
+    if (!tracer_) {
       tracer_ = new tracer::Tracer(
           session_id_,
           (GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->HasCallback()
-                ? GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetCallback()
-                : nullptr),
+               ? GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetCallback()
+               : nullptr),
           GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetBufferId(), domains);
     }
     tracer_->StartRoctracer();
   }
 
-  if (FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION))
-  {
-    if (!pc_sampler_)
-    {
+  if (FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION)) {
+    if (!pc_sampler_) {
       pc_sampler_ = new pc_sampler::PCSampler(
           GetFilter(GetFilterIdWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION))->GetBufferId(),
-          GetFilter(GetFilterIdWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION))->GetId(),
-          session_id_);
+          GetFilter(GetFilterIdWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION))->GetId(), session_id_);
     }
     pc_sampler_->Start();
   }
 
-  if (FindFilterWithKind(ROCPROFILER_COUNTERS_SAMPLER))
-  {
-    if (!counters_sampler_)
-    {
+  if (FindFilterWithKind(ROCPROFILER_COUNTERS_SAMPLER)) {
+    if (!counters_sampler_) {
       counters_sampler_ = new CountersSampler(
           GetFilter(GetFilterIdWithKind(ROCPROFILER_COUNTERS_SAMPLER))->GetBufferId(),
           GetFilter(GetFilterIdWithKind(ROCPROFILER_COUNTERS_SAMPLER))->GetId(), session_id_);
@@ -207,37 +180,31 @@ void Session::Start()
   is_active_ = true;
 }
 
-void Session::Terminate()
-{
-  if (!is_active_.load(std::memory_order_acquire))
-    return;
+void Session::Terminate() {
+  if (!is_active_.load(std::memory_order_acquire)) return;
 
   rocprofiler::queue::Queue::ResetSessionID();
-  if (GetProfiler())
-    GetProfiler()->WaitForPendingAndDestroy();
-  if (GetAttTracer())
-    GetAttTracer()->WaitForPendingAndDestroy();
+  if (GetProfiler()) GetProfiler()->WaitForPendingAndDestroy();
+  if (GetAttTracer()) GetAttTracer()->WaitForPendingAndDestroy();
   Packet::AQLPacketProfile::WaitForProfileDeletion();
 
   std::lock_guard<std::mutex> lock(session_lock_);
   if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION)) {
-    { stopSpm(); }
+    {
+      stopSpm();
+    }
   }
-  if (FindFilterWithKind(ROCPROFILER_API_TRACE))
-  {
+  if (FindFilterWithKind(ROCPROFILER_API_TRACE)) {
     std::vector<rocprofiler_tracer_activity_domain_t> domains =
         GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetTraceData();
-    if (tracer_)
-      tracer_->StopRoctracer();
+    if (tracer_) tracer_->StopRoctracer();
   }
-  if (FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION) && pc_sampler_)
-    pc_sampler_->Stop();
+  if (FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION) && pc_sampler_) pc_sampler_->Stop();
 
   if (FindFilterWithKind(ROCPROFILER_COUNTERS_SAMPLER) && counters_sampler_)
     counters_sampler_->Stop();
 
-  for (auto& buffer : *buffers_)
-    buffer.second->Flush();
+  for (auto& buffer : *buffers_) buffer.second->Flush();
 
   is_active_.store(false, std::memory_order_relaxed);
 }
@@ -344,8 +311,7 @@ bool Session::FindBuffer(rocprofiler_buffer_id_t buffer_id) {
   }
 }
 
-void Session::DestroyTracer() { /* tracer_.reset(); */
-}
+void Session::DestroyTracer() { /* tracer_.reset(); */ }
 
 void Session::DestroyBuffer(rocprofiler_buffer_id_t buffer_id) {
   {

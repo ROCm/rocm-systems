@@ -150,47 +150,24 @@ static const formatconverstion_t FormatLUT[] = {
     {FMT_8_8_8_8, TYPE_SINT, CFMT_8_8_8_8_SINT},            // 55
     {FMT_8_8_8_8, TYPE_SRGB, CFMT_8_8_8_8_SRGB}             // 56
 };
-static const int FormatLUTSize = sizeof(FormatLUT)/sizeof(formatconverstion_t);
+static const int FormatLUTSize = sizeof(FormatLUT) / sizeof(formatconverstion_t);
 
-//Index in FormatLUT to start search, indexed by FMT enum.
-static const int FormatEntryPoint[] = {
-  57,
-  40,
-  5,
-  47,
-  26,
-  10,
-  57,
-  57,
-  1,
-  20,
-  52,
-  29,
-  15,
-  32,
-  35,
-  57,
-  39,
-  0,
-  38,
-  57,
-  45,
-  24
-};
+// Index in FormatLUT to start search, indexed by FMT enum.
+static const int FormatEntryPoint[] = {57, 40, 5,  47, 26, 10, 57, 57, 1,  20, 52,
+                                       29, 15, 32, 35, 57, 39, 0,  38, 57, 45, 24};
 
 static FORMAT GetCombinedFormat(uint8_t fmt, uint8_t type) {
-  assert(fmt < sizeof(FormatEntryPoint)/sizeof(int) && "FMT out of range.");
+  assert(fmt < sizeof(FormatEntryPoint) / sizeof(int) && "FMT out of range.");
   int start = FormatEntryPoint[fmt];
-  int stop = std::min(start + 6, FormatLUTSize); // Only 6 types are used in image_kv_lut.cpp
+  int stop = std::min(start + 6, FormatLUTSize);  // Only 6 types are used in image_kv_lut.cpp
 
-  for(int i=start; i<stop; i++) {
-    if((FormatLUT[i].fmt == fmt) && (FormatLUT[i].type == type))
-      return FormatLUT[i].format;
+  for (int i = start; i < stop; i++) {
+    if ((FormatLUT[i].fmt == fmt) && (FormatLUT[i].type == type)) return FormatLUT[i].format;
   }
   return CFMT_INVALID;
 };
 //-----------------------------------------------------------------------------
-// End workaround 
+// End workaround
 //-----------------------------------------------------------------------------
 
 ImageManagerNv::ImageManagerNv() : ImageManagerKv() {}
@@ -200,10 +177,8 @@ ImageManagerNv::~ImageManagerNv() {}
 // TODO(cfreehil) remove from class, make it a utility function
 hsa_status_t ImageManagerNv::CalculateImageSizeAndAlignment(
     hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
-    hsa_ext_image_data_layout_t image_data_layout,
-    size_t image_data_row_pitch,
-    size_t image_data_slice_pitch,
-    hsa_ext_image_data_info_t& image_info) const {
+    hsa_ext_image_data_layout_t image_data_layout, size_t image_data_row_pitch,
+    size_t image_data_slice_pitch, hsa_ext_image_data_info_t& image_info) const {
   ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
   hsa_profile_t profile;
 
@@ -212,24 +187,22 @@ hsa_status_t ImageManagerNv::CalculateImageSizeAndAlignment(
 
   Image::TileMode tileMode = Image::TileMode::LINEAR;
   if (image_data_layout == HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE) {
-    tileMode = (profile == HSA_PROFILE_BASE &&
-                desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)?
-      Image::TileMode::TILED : Image::TileMode::LINEAR;
+    tileMode = (profile == HSA_PROFILE_BASE && desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)
+        ? Image::TileMode::TILED
+        : Image::TileMode::LINEAR;
   }
-  if (GetAddrlibSurfaceInfoNv(component, desc, tileMode,
-        image_data_row_pitch, image_data_slice_pitch, out) ==
-                                                             (uint32_t)(-1)) {
+  if (GetAddrlibSurfaceInfoNv(component, desc, tileMode, image_data_row_pitch,
+                              image_data_slice_pitch, out) == (uint32_t)(-1)) {
     return HSA_STATUS_ERROR;
   }
 
-  size_t rowPitch   = (out.bpp >> 3) * out.pitch;
+  size_t rowPitch = (out.bpp >> 3) * out.pitch;
   size_t slicePitch = rowPitch * out.height;
   if (desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB &&
       image_data_layout == HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR &&
       ((image_data_row_pitch && (rowPitch != image_data_row_pitch)) ||
        (image_data_slice_pitch && (slicePitch != image_data_slice_pitch)))) {
-    return static_cast<hsa_status_t>(
-                                HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED);
+    return static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED);
   }
 
   image_info.size = out.surfSize;
@@ -240,26 +213,22 @@ hsa_status_t ImageManagerNv::CalculateImageSizeAndAlignment(
   return HSA_STATUS_SUCCESS;
 }
 
-bool ImageManagerNv::IsLocalMemory(const void* address) const {
-  return true;
-}
+bool ImageManagerNv::IsLocalMemory(const void* address) const { return true; }
 
 hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image,
-                                     const metadata_amd_t* descriptor) const {
-  const metadata_amd_nv_t* desc =
-                       reinterpret_cast<const metadata_amd_nv_t*>(descriptor);
+                                              const metadata_amd_t* descriptor) const {
+  const metadata_amd_nv_t* desc = reinterpret_cast<const metadata_amd_nv_t*>(descriptor);
   const void* image_data_addr = image.data;
 
   ImageProperty image_prop = ImageLut().MapFormat(image.desc.format, image.desc.geometry);
-  if ((image_prop.cap == HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED) ||
-     (image_prop.element_size == 0))
+  if ((image_prop.cap == HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED) || (image_prop.element_size == 0))
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
 
   const Swizzle swizzle = ImageLut().MapSwizzle(image.desc.format.channel_order);
 
   if (IsLocalMemory(image.data)) {
-    image_data_addr = reinterpret_cast<const void*>(
-        reinterpret_cast<uintptr_t>(image.data) - local_memory_base_address_);
+    image_data_addr = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(image.data) -
+                                                    local_memory_base_address_);
   }
 
   image.srd[0] = desc->word0.u32All;
@@ -305,23 +274,21 @@ hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image,
         PtrLow40Shift8(image_data_addr);
     reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&image.srd[1])->bits.BASE_ADDRESS_HI =
         PtrHigh64Shift40(image_data_addr);
-    reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&image.srd[1])->bits.FORMAT = GetCombinedFormat(image_prop.data_format, image_prop.data_type);
-    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.DST_SEL_X =
-                                                                    swizzle.x;
-    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.DST_SEL_Y =
-                                                                    swizzle.y;
-    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.DST_SEL_Z =
-                                                                    swizzle.z;
-    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.DST_SEL_W =
-                                                                    swizzle.w;
+    reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&image.srd[1])->bits.FORMAT =
+        GetCombinedFormat(image_prop.data_format, image_prop.data_type);
+    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.DST_SEL_X = swizzle.x;
+    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.DST_SEL_Y = swizzle.y;
+    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.DST_SEL_Z = swizzle.z;
+    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.DST_SEL_W = swizzle.w;
     if (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
         image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1D) {
       reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.TYPE =
           ImageLut().MapGeometry(image.desc.geometry);
     }
-    
+
     // Imported metadata holds the offset to metadata, add the image base address.
-    uintptr_t meta = uintptr_t(((SQ_IMG_RSRC_WORD7*)(&image.srd[7]))->bits.META_DATA_ADDRESS_HI) << 16;
+    uintptr_t meta = uintptr_t(((SQ_IMG_RSRC_WORD7*)(&image.srd[7]))->bits.META_DATA_ADDRESS_HI)
+        << 16;
     meta |= uintptr_t(((SQ_IMG_RSRC_WORD6*)(&image.srd[6]))->bits.META_DATA_ADDRESS) << 8;
     meta += reinterpret_cast<uintptr_t>(image_data_addr);
 
@@ -342,52 +309,52 @@ hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image,
 }
 
 static TEX_BC_SWIZZLE GetBcSwizzle(const Swizzle& swizzle) {
-    SEL r = (SEL)swizzle.x;
-    SEL g = (SEL)swizzle.y;
-    SEL b = (SEL)swizzle.z;
-    SEL a = (SEL)swizzle.w;
+  SEL r = (SEL)swizzle.x;
+  SEL g = (SEL)swizzle.y;
+  SEL b = (SEL)swizzle.z;
+  SEL a = (SEL)swizzle.w;
 
-    TEX_BC_SWIZZLE bcSwizzle = TEX_BC_Swizzle_XYZW;
+  TEX_BC_SWIZZLE bcSwizzle = TEX_BC_Swizzle_XYZW;
 
-    if (a == SEL_X) {
-        // Have to use either TEX_BC_Swizzle_WZYX or TEX_BC_Swizzle_WXYZ
-        //
-        // For the pre-defined border color values (white, opaque black,
-        // transparent black), the only thing that matters is that the alpha
-        // channel winds up in the correct place (because the RGB channels are
-        // all the same) so either of these TEX_BC_Swizzle enumerations will
-        // work.  Not sure what happens with border color palettes.
-        if (b == SEL_Y) {
-            // ABGR
-            bcSwizzle = TEX_BC_Swizzle_WZYX;
-        } else if ((r == SEL_X) && (g == SEL_X) && (b == SEL_X)) {
-            // RGBA
-            bcSwizzle = TEX_BC_Swizzle_XYZW;
-        } else {
-            // ARGB
-            bcSwizzle = TEX_BC_Swizzle_WXYZ;
-        }
-    } else if (r == SEL_X) {
-        // Have to use either TEX_BC_Swizzle_XYZW or TEX_BC_Swizzle_XWYZ
-        if (g == SEL_Y) {
-            // RGBA
-            bcSwizzle = TEX_BC_Swizzle_XYZW;
-        } else if ((g == SEL_X) && (b == SEL_X) && (a == SEL_W)) {
-            // RGBA
-            bcSwizzle = TEX_BC_Swizzle_XYZW;
-        } else {
-            // RAGB
-            bcSwizzle = TEX_BC_Swizzle_XWYZ;
-        }
-    } else if (g == SEL_X) {
-        // GRAB, have to use TEX_BC_Swizzle_YXWZ
-        bcSwizzle = TEX_BC_Swizzle_YXWZ;
-    } else if (b == SEL_X) {
-        // BGRA, have to use TEX_BC_Swizzle_ZYXW
-        bcSwizzle = TEX_BC_Swizzle_ZYXW;
+  if (a == SEL_X) {
+    // Have to use either TEX_BC_Swizzle_WZYX or TEX_BC_Swizzle_WXYZ
+    //
+    // For the pre-defined border color values (white, opaque black,
+    // transparent black), the only thing that matters is that the alpha
+    // channel winds up in the correct place (because the RGB channels are
+    // all the same) so either of these TEX_BC_Swizzle enumerations will
+    // work.  Not sure what happens with border color palettes.
+    if (b == SEL_Y) {
+      // ABGR
+      bcSwizzle = TEX_BC_Swizzle_WZYX;
+    } else if ((r == SEL_X) && (g == SEL_X) && (b == SEL_X)) {
+      // RGBA
+      bcSwizzle = TEX_BC_Swizzle_XYZW;
+    } else {
+      // ARGB
+      bcSwizzle = TEX_BC_Swizzle_WXYZ;
     }
+  } else if (r == SEL_X) {
+    // Have to use either TEX_BC_Swizzle_XYZW or TEX_BC_Swizzle_XWYZ
+    if (g == SEL_Y) {
+      // RGBA
+      bcSwizzle = TEX_BC_Swizzle_XYZW;
+    } else if ((g == SEL_X) && (b == SEL_X) && (a == SEL_W)) {
+      // RGBA
+      bcSwizzle = TEX_BC_Swizzle_XYZW;
+    } else {
+      // RAGB
+      bcSwizzle = TEX_BC_Swizzle_XWYZ;
+    }
+  } else if (g == SEL_X) {
+    // GRAB, have to use TEX_BC_Swizzle_YXWZ
+    bcSwizzle = TEX_BC_Swizzle_YXWZ;
+  } else if (b == SEL_X) {
+    // BGRA, have to use TEX_BC_Swizzle_ZYXW
+    bcSwizzle = TEX_BC_Swizzle_ZYXW;
+  }
 
-    return bcSwizzle;
+  return bcSwizzle;
 }
 
 
@@ -399,8 +366,8 @@ hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image) const {
   const void* image_data_addr = image.data;
 
   if (IsLocalMemory(image.data)) {
-    image_data_addr = reinterpret_cast<const void*>(
-        reinterpret_cast<uintptr_t>(image.data) - local_memory_base_address_);
+    image_data_addr = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(image.data) -
+                                                    local_memory_base_address_);
   }
 
   if (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
@@ -450,9 +417,8 @@ hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image) const {
 
     ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
-    uint32_t swizzleMode = GetAddrlibSurfaceInfoNv(
-         image.component, image.desc, image.tile_mode,
-                                     image.row_pitch, image.slice_pitch, out);
+    uint32_t swizzleMode = GetAddrlibSurfaceInfoNv(image.component, image.desc, image.tile_mode,
+                                                   image.row_pitch, image.slice_pitch, out);
     if (swizzleMode == (uint32_t)(-1)) {
       return HSA_STATUS_ERROR;
     }
@@ -486,21 +452,18 @@ hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image) const {
     word3.f.BC_SWIZZLE = GetBcSwizzle(swizzle);
     word3.f.TYPE = ImageLut().MapGeometry(image.desc.geometry);
 
-    const bool image_array =
-        (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
-         image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DA ||
-         image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DADEPTH);
+    const bool image_array = (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
+                              image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DA ||
+                              image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DADEPTH);
     const bool image_3d = (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_3D);
 
     word4.val = 0;
-    word4.f.DEPTH =
-        (image_array) // Doesn't hurt but isn't array_size already >0?
-            ? std::max(image.desc.array_size, static_cast<size_t>(1)) - 1
-            : (image_3d) ? image.desc.depth - 1 : 0;
+    word4.f.DEPTH = (image_array)  // Doesn't hurt but isn't array_size already >0?
+        ? std::max(image.desc.array_size, static_cast<size_t>(1)) - 1
+        : (image_3d) ? image.desc.depth - 1 : 0;
     uint32_t minor_ver = MinorVerFromDevID(chip_id_);
     // For 1d, 2d and 2d-msaa in gfx1030 and beyond this is pitch-1
-    if ((minor_ver >= 3) && !image_array && !image_3d)
-      word4.f.PITCH = out.pitch - 1;
+    if ((minor_ver >= 3) && !image_array && !image_3d) word4.f.PITCH = out.pitch - 1;
 
     word5.val = 0;
     word6.val = 0;
@@ -526,8 +489,8 @@ hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ImageManagerNv::ModifyImageSrd(
-    Image& image, hsa_ext_image_format_t& new_format) const {
+hsa_status_t ImageManagerNv::ModifyImageSrd(Image& image,
+                                            hsa_ext_image_format_t& new_format) const {
   image.desc.format = new_format;
 
   ImageProperty image_prop = ImageLut().MapFormat(image.desc.format, image.desc.geometry);
@@ -536,21 +499,18 @@ hsa_status_t ImageManagerNv::ModifyImageSrd(
 
   if (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
     const Swizzle swizzle = ImageLut().MapSwizzle(image.desc.format.channel_order);
-    SQ_BUF_RSRC_WORD3* word3 =
-        reinterpret_cast<SQ_BUF_RSRC_WORD3*>(&image.srd[3]);
+    SQ_BUF_RSRC_WORD3* word3 = reinterpret_cast<SQ_BUF_RSRC_WORD3*>(&image.srd[3]);
     word3->bits.DST_SEL_X = swizzle.x;
     word3->bits.DST_SEL_Y = swizzle.y;
     word3->bits.DST_SEL_Z = swizzle.z;
     word3->bits.DST_SEL_W = swizzle.w;
     word3->bits.FORMAT = GetCombinedFormat(image_prop.data_format, image_prop.data_type);
   } else {
-    SQ_IMG_RSRC_WORD1* word1 =
-        reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&image.srd[1]);
+    SQ_IMG_RSRC_WORD1* word1 = reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&image.srd[1]);
     word1->bits.FORMAT = GetCombinedFormat(image_prop.data_format, image_prop.data_type);
 
     const Swizzle swizzle = ImageLut().MapSwizzle(image.desc.format.channel_order);
-    SQ_IMG_RSRC_WORD3* word3 =
-        reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3]);
+    SQ_IMG_RSRC_WORD3* word3 = reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3]);
     word3->bits.DST_SEL_X = swizzle.x;
     word3->bits.DST_SEL_Y = swizzle.y;
     word3->bits.DST_SEL_Z = swizzle.z;
@@ -565,7 +525,7 @@ hsa_status_t ImageManagerNv::ModifyImageSrd(
 }
 
 hsa_status_t ImageManagerNv::PopulateSamplerSrd(Sampler& sampler) const {
-  const hsa_ext_sampler_descriptor_v2_t &sampler_descriptor = sampler.desc;
+  const hsa_ext_sampler_descriptor_v2_t& sampler_descriptor = sampler.desc;
 
   SQ_IMG_SAMP_WORD0 word0;
   SQ_IMG_SAMP_WORD1 word1;
@@ -573,11 +533,11 @@ hsa_status_t ImageManagerNv::PopulateSamplerSrd(Sampler& sampler) const {
   SQ_IMG_SAMP_WORD3 word3;
 
   word0.u32All = 0;
-  hsa_status_t status = convertAddressMode<SQ_IMG_SAMP_WORD0, SQ_TEX_CLAMP>
-                                       (word0, sampler_descriptor.address_modes);
+  hsa_status_t status =
+      convertAddressMode<SQ_IMG_SAMP_WORD0, SQ_TEX_CLAMP>(word0, sampler_descriptor.address_modes);
   if (status != HSA_STATUS_SUCCESS) return status;
-  word0.bits.FORCE_UNNORMALIZED = (sampler_descriptor.coordinate_mode ==
-                                  HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED);
+  word0.bits.FORCE_UNNORMALIZED =
+      (sampler_descriptor.coordinate_mode == HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED);
 
   word1.u32All = 0;
   word1.bits.MAX_LOD = 4095;
@@ -610,22 +570,21 @@ hsa_status_t ImageManagerNv::PopulateSamplerSrd(Sampler& sampler) const {
   return HSA_STATUS_SUCCESS;
 }
 
-uint32_t ImageManagerNv::GetAddrlibSurfaceInfoNv(
-    hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
-    Image::TileMode tileMode,
-    size_t image_data_row_pitch,
-    size_t image_data_slice_pitch,
-    ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out) const {
-  const ImageProperty image_prop =
-      GetImageProperty(component, desc.format, desc.geometry);
+uint32_t ImageManagerNv::GetAddrlibSurfaceInfoNv(hsa_agent_t component,
+                                                 const hsa_ext_image_descriptor_t& desc,
+                                                 Image::TileMode tileMode,
+                                                 size_t image_data_row_pitch,
+                                                 size_t image_data_slice_pitch,
+                                                 ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out) const {
+  const ImageProperty image_prop = GetImageProperty(component, desc.format, desc.geometry);
 
   const AddrFormat addrlib_format = GetAddrlibFormat(image_prop);
 
   const uint32_t width = static_cast<uint32_t>(desc.width);
   const uint32_t height = static_cast<uint32_t>(desc.height);
   static const size_t kMinNumSlice = 1;
-  const uint32_t num_slice = static_cast<uint32_t>(
-      std::max(kMinNumSlice, std::max(desc.array_size, desc.depth)));
+  const uint32_t num_slice =
+      static_cast<uint32_t>(std::max(kMinNumSlice, std::max(desc.array_size, desc.depth)));
 
   uint32_t minor_ver = MinorVerFromDevID(chip_id_);
   ADDR2_COMPUTE_SURFACE_INFO_INPUT in = {0};
@@ -636,8 +595,7 @@ uint32_t ImageManagerNv::GetAddrlibSurfaceInfoNv(
   in.height = height;
   in.numSlices = num_slice;
   // Custom Pitch is supported in gfx1030 and beyond
-  if (minor_ver >= 3)
-    in.pitchInElement = image_data_row_pitch / image_prop.element_size;
+  if (minor_ver >= 3) in.pitchInElement = image_data_row_pitch / image_prop.element_size;
   switch (desc.geometry) {
     case HSA_EXT_IMAGE_GEOMETRY_1D:
     case HSA_EXT_IMAGE_GEOMETRY_1DB:
@@ -652,70 +610,69 @@ uint32_t ImageManagerNv::GetAddrlibSurfaceInfoNv(
       in.resourceType = ADDR_RSRC_TEX_2D;
       break;
 
-    case HSA_EXT_IMAGE_GEOMETRY_3D:
-      {
-         in.resourceType = ADDR_RSRC_TEX_3D;
-         /*
-	  * 3D swizzle modes enforce alignment
-	  * of the number of slices  to the block depth.
-	  * If numSlices = 3 then the 3 slices are
-	  * interleaved for 3D locality among the 8 slices
-	  * that make up each block. This causes the memory
-	  * footprint to jump from an ideal size to 3x the size.
-	  * 'enable3DSwizzleMode' flag tests for env variable
-	  * HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG to enable or disable
-	  * 3D swizzle:
-	  * true: Keep view3dAs2dArray = 0 for real 3D interleaving.
-	  * false: Use view3dAs2dArray = 1 to avoid the alignment
-	  *       expansion.
-	  * 2D swizzle modes can lower size overhead but may yield
-	  * suboptimal cache behavior for fully 3D volumetric
-	  * operations.
-	  */
-	  bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
-	  if (enable3DSwizzleMode)
-	      in.flags.view3dAs2dArray = 0;
-	  else
-	      in.flags.view3dAs2dArray = 1;
+    case HSA_EXT_IMAGE_GEOMETRY_3D: {
+      in.resourceType = ADDR_RSRC_TEX_3D;
+      /*
+       * 3D swizzle modes enforce alignment
+       * of the number of slices  to the block depth.
+       * If numSlices = 3 then the 3 slices are
+       * interleaved for 3D locality among the 8 slices
+       * that make up each block. This causes the memory
+       * footprint to jump from an ideal size to 3x the size.
+       * 'enable3DSwizzleMode' flag tests for env variable
+       * HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG to enable or disable
+       * 3D swizzle:
+       * true: Keep view3dAs2dArray = 0 for real 3D interleaving.
+       * false: Use view3dAs2dArray = 1 to avoid the alignment
+       *       expansion.
+       * 2D swizzle modes can lower size overhead but may yield
+       * suboptimal cache behavior for fully 3D volumetric
+       * operations.
+       */
+      bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
+      if (enable3DSwizzleMode)
+        in.flags.view3dAs2dArray = 0;
+      else
+        in.flags.view3dAs2dArray = 1;
 
-	  break;
-      }
+      break;
+    }
   }
   in.flags.texture = 1;
 
-  ADDR2_GET_PREFERRED_SURF_SETTING_INPUT  prefSettingsInput = { 0 };
-  ADDR2_GET_PREFERRED_SURF_SETTING_OUTPUT prefSettingsOutput = { 0 };
+  ADDR2_GET_PREFERRED_SURF_SETTING_INPUT prefSettingsInput = {0};
+  ADDR2_GET_PREFERRED_SURF_SETTING_OUTPUT prefSettingsOutput = {0};
 
-  prefSettingsInput.size            = sizeof(prefSettingsInput);
-  prefSettingsInput.flags           = in.flags;
-  prefSettingsInput.bpp             = in.bpp;
-  prefSettingsInput.format          = in.format;
-  prefSettingsInput.width           = in.width;
-  prefSettingsInput.height          = in.height;
-  prefSettingsInput.numFrags        = in.numFrags;
-  prefSettingsInput.numSamples      = in.numSamples;
-  prefSettingsInput.numMipLevels    = in.numMipLevels;
-  prefSettingsInput.numSlices       = in.numSlices;
+  prefSettingsInput.size = sizeof(prefSettingsInput);
+  prefSettingsInput.flags = in.flags;
+  prefSettingsInput.bpp = in.bpp;
+  prefSettingsInput.format = in.format;
+  prefSettingsInput.width = in.width;
+  prefSettingsInput.height = in.height;
+  prefSettingsInput.numFrags = in.numFrags;
+  prefSettingsInput.numSamples = in.numSamples;
+  prefSettingsInput.numMipLevels = in.numMipLevels;
+  prefSettingsInput.numSlices = in.numSlices;
   prefSettingsInput.resourceLoction = ADDR_RSRC_LOC_UNDEF;
-  prefSettingsInput.resourceType    = in.resourceType;
+  prefSettingsInput.resourceType = in.resourceType;
 
   // Disallow all swizzles but linear.
   if (tileMode == Image::TileMode::LINEAR) {
-      prefSettingsInput.forbiddenBlock.macroThin4KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
-      prefSettingsInput.forbiddenBlock.micro = 1;
-      prefSettingsInput.forbiddenBlock.var = 1;
+    prefSettingsInput.forbiddenBlock.macroThin4KB = 1;
+    prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
+    prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
+    prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
+    prefSettingsInput.forbiddenBlock.micro = 1;
+    prefSettingsInput.forbiddenBlock.var = 1;
   }
 
   // but don't ever allow the 256b swizzle modes
-  //prefSettingsInput.forbiddenBlock.micro = 1;
+  // prefSettingsInput.forbiddenBlock.micro = 1;
   // and don't allow variable-size block modes
-  //prefSettingsInput.forbiddenBlock.var = 1;
+  // prefSettingsInput.forbiddenBlock.var = 1;
 
-  if (ADDR_OK != Addr2GetPreferredSurfaceSetting(addr_lib_,
-                                   &prefSettingsInput, &prefSettingsOutput)) {
+  if (ADDR_OK !=
+      Addr2GetPreferredSurfaceSetting(addr_lib_, &prefSettingsInput, &prefSettingsOutput)) {
     return (uint32_t)(-1);
   }
 
@@ -743,8 +700,7 @@ hsa_status_t ImageManagerNv::FillImage(const Image& image, const void* pattern,
   SQ_BUF_RSRC_WORD3* word3_buff = NULL;
   SQ_IMG_RSRC_WORD3* word3_image = NULL;
   uint32_t dst_sel_w_original = 0;
-  if (image_view->desc.format.channel_type ==
-      HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010) {
+  if (image_view->desc.format.channel_type == HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010) {
     // Force GPU to ignore the last two bits (alpha bits).
     if (image_view->desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
       word3_buff = reinterpret_cast<SQ_BUF_RSRC_WORD3*>(&image_view->srd[3]);

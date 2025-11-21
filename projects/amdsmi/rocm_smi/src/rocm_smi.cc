@@ -20,98 +20,96 @@
  * THE SOFTWARE.
  */
 
+#include "rocm_smi/rocm_smi.h"
+
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
-#include <cstddef>
-#include <string>
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
 #include <unistd.h>
-#include <cinttypes>
 
 #include <algorithm>
 #include <bitset>
 #include <cassert>
 #include <cctype>
 #include <cerrno>
+#include <cinttypes>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <string>
 #include <vector>
 
-#include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
-#include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_gpu_metrics.h"
-#include "rocm_smi/rocm_smi_main.h"
-#include "rocm_smi/rocm_smi_device.h"
-#include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_exception.h"
-#include "rocm_smi/rocm_smi_counters.h"
-#include "rocm_smi/rocm_smi_kfd.h"
-#include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi64Config.h"
-#include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_board_temp.h"
+#include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
+#include "rocm_smi/rocm_smi_counters.h"
+#include "rocm_smi/rocm_smi_device.h"
+#include "rocm_smi/rocm_smi_exception.h"
+#include "rocm_smi/rocm_smi_gpu_metrics.h"
+#include "rocm_smi/rocm_smi_io_link.h"
+#include "rocm_smi/rocm_smi_kfd.h"
+#include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_npm.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
-using amd::smi::monitorTypesToString;
-using amd::smi::getRSMIStatusString;
 using amd::smi::AMDGpuMetricTypeId_t;
+using amd::smi::getRSMIStatusString;
+using amd::smi::monitorTypesToString;
 
 static const uint32_t kMaxOverdriveLevel = 20;
 static const float kEnergyCounterResolution = 15.3F;
 
 static const std::map<rsmi_clk_type_t, std::string> kClkStateMap = {
-  { RSMI_CLK_TYPE_SYS, "SCLK" },
-  { RSMI_CLK_TYPE_DF, "DFCLK" },
-  { RSMI_CLK_TYPE_DCEF, "DCEFCLK" },
-  { RSMI_CLK_TYPE_SOC, "SOCCLK" },
-  { RSMI_CLK_TYPE_MEM, "MCLK" },
-  { RSMI_CLK_TYPE_PCIE, "PCIECLK" },
+    {RSMI_CLK_TYPE_SYS, "SCLK"},   {RSMI_CLK_TYPE_DF, "DFCLK"}, {RSMI_CLK_TYPE_DCEF, "DCEFCLK"},
+    {RSMI_CLK_TYPE_SOC, "SOCCLK"}, {RSMI_CLK_TYPE_MEM, "MCLK"}, {RSMI_CLK_TYPE_PCIE, "PCIECLK"},
 };
 
 static const std::map<rsmi_clk_type_t, amd::smi::DevInfoTypes> kClkTypeMap = {
-  { RSMI_CLK_TYPE_SYS, amd::smi::kDevGPUSClk },
-  { RSMI_CLK_TYPE_MEM, amd::smi::kDevGPUMClk },
-  { RSMI_CLK_TYPE_DF, amd::smi::kDevFClk },
-  { RSMI_CLK_TYPE_DCEF, amd::smi::kDevDCEFClk },
-  { RSMI_CLK_TYPE_SOC, amd::smi::kDevSOCClk },
+    {RSMI_CLK_TYPE_SYS, amd::smi::kDevGPUSClk}, {RSMI_CLK_TYPE_MEM, amd::smi::kDevGPUMClk},
+    {RSMI_CLK_TYPE_DF, amd::smi::kDevFClk},     {RSMI_CLK_TYPE_DCEF, amd::smi::kDevDCEFClk},
+    {RSMI_CLK_TYPE_SOC, amd::smi::kDevSOCClk},
 };
 
 #define TRY try {
-#define CATCH } catch (...) {return amd::smi::handleException();}
+#define CATCH                           \
+  }                                     \
+  catch (...) {                         \
+    return amd::smi::handleException(); \
+  }
 
 // declare pm metrics and register table function
 namespace amd::smi {
-int present_pmmetrics(const char* sysfs_file_name,
-        rsmi_name_value_t **kv, uint32_t *kvnum);
-int present_reg_state(const char* fname, rsmi_reg_type_t reg_type,
-        rsmi_name_value_t **kv, uint32_t *kvnum);
-}
+int present_pmmetrics(const char *sysfs_file_name, rsmi_name_value_t **kv, uint32_t *kvnum);
+int present_reg_state(const char *fname, rsmi_reg_type_t reg_type, rsmi_name_value_t **kv,
+                      uint32_t *kvnum);
+}  // namespace amd::smi
 
 static uint64_t get_multiplier_from_char(char units_char) {
   uint32_t multiplier = 0;
 
   switch (units_char) {
-    case 'G':   // GT or GHz
+    case 'G':  // GT or GHz
       multiplier = 1000000000;
       break;
 
-    case 'M':   // MT or MHz
+    case 'M':  // MT or MHz
       multiplier = 1000000;
       break;
 
-    case 'K':   // KT or KHz
-    case 'V':   // default unit for voltage is mV
+    case 'K':  // KT or KHz
+    case 'V':  // default unit for voltage is mV
       multiplier = 1000;
       break;
 
-    case 'T':   // Transactions
-    case 'H':   // Hertz
-    case 'm':   // mV (we will make mV the default unit for voltage)
+    case 'T':  // Transactions
+    case 'H':  // Hertz
+    case 'm':  // mV (we will make mV the default unit for voltage)
       multiplier = 1;
       break;
 
@@ -126,12 +124,11 @@ static uint64_t get_multiplier_from_char(char units_char) {
  * Parse a string of the form:
  *        "<int index>:  <int freq><freq. unit string> <|*>"
  */
-static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
-                                bool *is_curr, uint32_t lanes[], uint32_t i) {
+static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines, bool *is_curr,
+                                   uint32_t lanes[], uint32_t i) {
   assert(i < freq_lines.size());
   if (i >= freq_lines.size()) {
-    throw amd::smi::rsmi_exception(RSMI_STATUS_INPUT_OUT_OF_BOUNDS,
-                                                                __FUNCTION__);
+    throw amd::smi::rsmi_exception(RSMI_STATUS_INPUT_OUT_OF_BOUNDS, __FUNCTION__);
   }
 
   std::istringstream fs(freq_lines[i]);
@@ -175,11 +172,10 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
         throw amd::smi::rsmi_exception(RSMI_STATUS_NO_DATA, __FUNCTION__);
       }
 
-      lanes[i] =
-                static_cast<uint32_t>(std::stoi(star_str.substr(1), nullptr));
+      lanes[i] = static_cast<uint32_t>(std::stoi(star_str.substr(1), nullptr));
     }
   }
-  return static_cast<uint64_t>(freq*multiplier);
+  return static_cast<uint64_t>(freq * multiplier);
 }
 
 static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t *rg) {
@@ -202,18 +198,17 @@ static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t *rg) {
 
   long double multiplier = get_multiplier_from_char(lo_units_str[0]);
 
-  rg->lower_bound = static_cast<uint64_t>(lo*multiplier);
+  rg->lower_bound = static_cast<uint64_t>(lo * multiplier);
 
   multiplier = get_multiplier_from_char(hi_units_str[0]);
-  rg->upper_bound = static_cast<uint64_t>(hi*multiplier);
+  rg->upper_bound = static_cast<uint64_t>(hi * multiplier);
 }
 
 /**
  * Parse a string of the form "<int index> <mode name string> <|*>"
  */
-static rsmi_power_profile_preset_masks
-power_prof_string_to_int(std::string pow_prof_line, bool *is_curr,
-                                                          uint32_t *prof_ind) {
+static rsmi_power_profile_preset_masks power_prof_string_to_int(std::string pow_prof_line,
+                                                                bool *is_curr, uint32_t *prof_ind) {
   std::istringstream fs(pow_prof_line);
   std::string mode;
   size_t tmp;
@@ -241,14 +236,14 @@ power_prof_string_to_int(std::string pow_prof_line, bool *is_curr,
     }
   }
 
-  const std::unordered_map<std::string, std::function<void()>> mode_map {
-    {"BOOTUP_DEFAULT",   [&](){ ret = RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT; }},
-    {"3D_FULL_SCREEN",   [&](){ ret = RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK; }},
-    {"POWER_SAVING",   [&](){ ret = RSMI_PWR_PROF_PRST_POWER_SAVING_MASK; }},
-    {"VIDEO", [&](){ ret = RSMI_PWR_PROF_PRST_VIDEO_MASK; }},
-    {"VR", [&](){ ret = RSMI_PWR_PROF_PRST_VR_MASK; }},
-    {"COMPUTE", [&](){ ret = RSMI_PWR_PROF_PRST_COMPUTE_MASK; }},
-    {"CUSTOM", [&](){ ret = RSMI_PWR_PROF_PRST_CUSTOM_MASK; }},
+  const std::unordered_map<std::string, std::function<void()>> mode_map{
+      {"BOOTUP_DEFAULT", [&]() { ret = RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT; }},
+      {"3D_FULL_SCREEN", [&]() { ret = RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK; }},
+      {"POWER_SAVING", [&]() { ret = RSMI_PWR_PROF_PRST_POWER_SAVING_MASK; }},
+      {"VIDEO", [&]() { ret = RSMI_PWR_PROF_PRST_VIDEO_MASK; }},
+      {"VR", [&]() { ret = RSMI_PWR_PROF_PRST_VR_MASK; }},
+      {"COMPUTE", [&]() { ret = RSMI_PWR_PROF_PRST_COMPUTE_MASK; }},
+      {"CUSTOM", [&]() { ret = RSMI_PWR_PROF_PRST_CUSTOM_MASK; }},
   };
   auto mode_iter = mode_map.find(mode);
 
@@ -258,8 +253,8 @@ power_prof_string_to_int(std::string pow_prof_line, bool *is_curr,
   return ret;
 }
 
-static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type,
-                                      uint32_t dv_ind, std::string *val_str) {
+static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type, uint32_t dv_ind,
+                                       std::string *val_str) {
   assert(val_str != nullptr);
   if (val_str == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -269,27 +264,28 @@ static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type,
 
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
-static rsmi_status_t read_dev_port_map_file(amd::smi::DevInfoTypes type, uint32_t dv_ind, std::string *val_str) {
-    assert(val_str != nullptr);
-    if (val_str == nullptr) {
-        return RSMI_STATUS_INVALID_ARGS;
-    }
-    GET_DEV_FROM_INDX
-    std::string file_path = dev->get_sys_file_path_by_type(type);
-    if (file_path.empty()) {
-        return RSMI_STATUS_FILE_ERROR;
-    }
-    std::ifstream infile(file_path);
-    if (!infile) {
-        return RSMI_STATUS_FILE_ERROR;
-    }
-    std::ostringstream ss;
-    ss << infile.rdbuf();
-    *val_str = ss.str();
-    return RSMI_STATUS_SUCCESS;
+static rsmi_status_t read_dev_port_map_file(amd::smi::DevInfoTypes type, uint32_t dv_ind,
+                                            std::string *val_str) {
+  assert(val_str != nullptr);
+  if (val_str == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  GET_DEV_FROM_INDX
+  std::string file_path = dev->get_sys_file_path_by_type(type);
+  if (file_path.empty()) {
+    return RSMI_STATUS_FILE_ERROR;
+  }
+  std::ifstream infile(file_path);
+  if (!infile) {
+    return RSMI_STATUS_FILE_ERROR;
+  }
+  std::ostringstream ss;
+  ss << infile.rdbuf();
+  *val_str = ss.str();
+  return RSMI_STATUS_SUCCESS;
 }
-static rsmi_status_t get_dev_value_int(amd::smi::DevInfoTypes type,
-                                         uint32_t dv_ind, uint64_t *val_int) {
+static rsmi_status_t get_dev_value_int(amd::smi::DevInfoTypes type, uint32_t dv_ind,
+                                       uint64_t *val_int) {
   assert(val_int != nullptr);
   if (val_int == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -300,8 +296,8 @@ static rsmi_status_t get_dev_value_int(amd::smi::DevInfoTypes type,
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
-static rsmi_status_t get_dev_value_line(amd::smi::DevInfoTypes type,
-                                      uint32_t dv_ind, std::string *val_str) {
+static rsmi_status_t get_dev_value_line(amd::smi::DevInfoTypes type, uint32_t dv_ind,
+                                        std::string *val_str) {
   assert(val_str != nullptr);
   if (val_str == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -312,16 +308,15 @@ static rsmi_status_t get_dev_value_line(amd::smi::DevInfoTypes type,
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
-static rsmi_status_t set_dev_value(amd::smi::DevInfoTypes type,
-                                              uint32_t dv_ind, uint64_t val) {
+static rsmi_status_t set_dev_value(amd::smi::DevInfoTypes type, uint32_t dv_ind, uint64_t val) {
   GET_DEV_FROM_INDX
 
   int ret = dev->writeDevInfo(type, val);
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
-static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
-                         uint32_t dv_ind, uint32_t sensor_ind, int64_t *val) {
+static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type, uint32_t dv_ind,
+                                       uint32_t sensor_ind, int64_t *val) {
   assert(val != nullptr);
   if (val == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -341,28 +336,20 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
 
   if (val_str.empty()) {
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__
-    << " | ======= end ======= "
-    << " | Fail "
-    << " | Device #: " << dv_ind
-    << " | Type: " << monitorTypesToString.at(type)
-    << " | Cause: SYSFS read was empty"
-    << " | Returning = "
-    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+       << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(type)
+       << " | Cause: SYSFS read was empty"
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
     LOG_INFO(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   if (!amd::smi::IsInteger(val_str)) {
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__
-    << " | ======= end ======= "
-    << " | Fail "
-    << " | Device #: " << dv_ind
-    << " | Type: " << monitorTypesToString.at(type)
-    << " | Cause: Expected integer value from monitor, but got "<< val_str
-    << " | Returning = "
-    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+       << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(type)
+       << " | Cause: Expected integer value from monitor, but got " << val_str
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
     LOG_INFO(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
@@ -372,8 +359,8 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
   return RSMI_STATUS_SUCCESS;
 }
 
-static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
-                        uint32_t dv_ind, uint32_t sensor_ind, uint64_t *val) {
+static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type, uint32_t dv_ind,
+                                       uint32_t sensor_ind, uint64_t *val) {
   assert(val != nullptr);
   if (val == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -392,28 +379,20 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
 
   if (val_str.empty()) {
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__
-    << " | ======= end ======= "
-    << " | Fail "
-    << " | Device #: " << dv_ind
-    << " | Type: " << monitorTypesToString.at(type)
-    << " | Cause: SYSFS read was empty"
-    << " | Returning = "
-    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+       << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(type)
+       << " | Cause: SYSFS read was empty"
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
     LOG_INFO(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   if (!amd::smi::IsInteger(val_str)) {
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__
-    << " | ======= end ======= "
-    << " | Fail "
-    << " | Device #: " << dv_ind
-    << " | Type: " << monitorTypesToString.at(type)
-    << " | Cause: Expected integer value from monitor, but got "<< val_str
-    << " | Returning = "
-    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+       << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(type)
+       << " | Cause: Expected integer value from monitor, but got " << val_str
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
     LOG_INFO(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
@@ -424,15 +403,14 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
 }
 
 template <typename T>
-static rsmi_status_t set_dev_mon_value(amd::smi::MonitorTypes type,
-                                uint32_t dv_ind, uint32_t sensor_ind, T val) {
+static rsmi_status_t set_dev_mon_value(amd::smi::MonitorTypes type, uint32_t dv_ind,
+                                       uint32_t sensor_ind, T val) {
   GET_DEV_FROM_INDX
 
   if (dev->monitor() == nullptr) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
-  int ret = dev->monitor()->writeMonitor(type, sensor_ind,
-                                                         std::to_string(val));
+  int ret = dev->monitor()->writeMonitor(type, sensor_ind, std::to_string(val));
   /// If the sysfs file doesn't exist, it is not supported.
   if (ret == ENOENT) {
     return rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
@@ -440,9 +418,9 @@ static rsmi_status_t set_dev_mon_value(amd::smi::MonitorTypes type,
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
-static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
-                                      uint32_t dv_ind, uint64_t *val) {
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type, uint32_t dv_ind,
+                                         uint64_t *val) {
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
 
   if (dv_ind >= smi.devices().size() || val == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -462,14 +440,10 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
-static bool is_power_of_2(uint64_t n) {
-      return n && !(n & (n - 1));
-}
+static bool is_power_of_2(uint64_t n) { return n && !(n & (n - 1)); }
 
-rsmi_status_t
-rsmi_init(uint64_t flags) {
-  TRY
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+rsmi_status_t rsmi_init(uint64_t flags) {
+  TRY amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
   std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());
 
   if (smi.ref_count() == INT32_MAX) {
@@ -486,11 +460,10 @@ rsmi_init(uint64_t flags) {
   if (smi.ref_count() == 1) {
     try {
       smi.Initialize(flags);
-    } catch(const amd::smi::rsmi_exception& e) {
+    } catch (const amd::smi::rsmi_exception &e) {
       smi.Cleanup();
       if (e.error_code() == RSMI_INITIALIZATION_ERROR &&
-          !strcmp(e.what(),
-               "Failed to initialize rocm_smi library (KFD node discovery).")) {
+          !strcmp(e.what(), "Failed to initialize rocm_smi library (KFD node discovery).")) {
         // This system does not actually have ROCM drivers set up
         // We were probably just called through dependency, just report the
         // error and log without complaining loudly.
@@ -500,7 +473,7 @@ rsmi_init(uint64_t flags) {
         return RSMI_STATUS_NOT_SUPPORTED;
       }
       throw amd::smi::rsmi_exception(RSMI_STATUS_INIT_ERROR, __FUNCTION__);
-    } catch(...) {
+    } catch (...) {
       smi.Cleanup();
       throw amd::smi::rsmi_exception(RSMI_STATUS_INIT_ERROR, __FUNCTION__);
     }
@@ -513,11 +486,10 @@ rsmi_init(uint64_t flags) {
 
 // A call to rsmi_shut_down is not technically necessary at this time,
 // but may be in the future.
-rsmi_status_t
-rsmi_shut_down(void) {
+rsmi_status_t rsmi_shut_down(void) {
   TRY
 
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+      amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
   std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());
 
   if (smi.ref_count() == 0) {
@@ -534,11 +506,11 @@ rsmi_shut_down(void) {
     if (ret != EPERM) {  // We expect to get EPERM if the lock has already
                          // been released
       if (ret == 0) {
-        std::cout << "WARNING: Unlocked monitor_devices lock; " <<
-                    "it should have already been unlocked." << std::endl;
+        std::cout << "WARNING: Unlocked monitor_devices lock; "
+                  << "it should have already been unlocked." << std::endl;
       } else {
-      std::cout << "WARNING: pthread_mutex_unlock() returned " << ret <<
-                   " for device " << i << " in rsmi_shut_down()" << std::endl;
+        std::cout << "WARNING: pthread_mutex_unlock() returned " << ret << " for device " << i
+                  << " in rsmi_shut_down()" << std::endl;
       }
     }
 #else
@@ -555,12 +527,8 @@ rsmi_shut_down(void) {
   CATCH
 }
 
-
-rsmi_status_t rsmi_driver_status(rsmi_driver_state_t* state) {
-  TRY
-  if (state == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
+rsmi_status_t rsmi_driver_status(rsmi_driver_state_t *state) {
+  TRY if (state == nullptr) { return RSMI_STATUS_INVALID_ARGS; }
 
   // live, coming, going
   static const char *kDevInitStateID = "/sys/module/amdgpu/initstate";
@@ -582,25 +550,21 @@ rsmi_status_t rsmi_driver_status(rsmi_driver_state_t* state) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_num_monitor_devices(uint32_t *num_devices) {
-  TRY
-  assert(num_devices != nullptr);
+rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices) {
+  TRY assert(num_devices != nullptr);
   if (num_devices == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
 
   *num_devices = static_cast<uint32_t>(smi.devices().size());
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
-rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
-                                                    uint64_t *enabled_blks) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind, uint64_t *enabled_blks) {
+  TRY rsmi_status_t ret;
   std::string feature_line;
   std::string tmp_str;
   std::ostringstream ss;
@@ -614,8 +578,7 @@ rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
   ret = get_dev_value_line(amd::smi::kDevErrCntFeatures, dv_ind, &feature_line);
   if (ret != RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", returning get_dev_value_line() response = "
-       << amd::smi::getRSMIStatusString(ret);
+       << ", returning get_dev_value_line() response = " << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
   }
@@ -632,8 +595,7 @@ rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
   *enabled_blks = strtoul(tmp_str.c_str(), nullptr, 16);
   assert(errno == 0);
 
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", returning strtoul() response = "
+  ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", returning strtoul() response = "
      << amd::smi::getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(errno));
   LOG_TRACE(ss);
 
@@ -652,21 +614,19 @@ static const std::map<std::string, rsmi_ras_err_state_t> kRocmSMIStateMap = {
     {"on", RSMI_RAS_ERR_STATE_ENABLED},
 };
 static_assert(RSMI_RAS_ERR_STATE_LAST == RSMI_RAS_ERR_STATE_ENABLED,
-                 "rsmi_gpu_block_t and/or above name map need to be updated"
-                                                     " and then this assert");
+              "rsmi_gpu_block_t and/or above name map need to be updated"
+              " and then this assert");
 
 rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
-                                                 rsmi_ras_err_state_t *state) {
-  TRY
-  std::ostringstream ss;
+                                      rsmi_ras_err_state_t *state) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
   CHK_SUPPORT_NAME_ONLY(state)
 
   if (!is_power_of_2(block)) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", ret was not power of 2 "
+    ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", ret was not power of 2 "
        << "-> reporting RSMI_STATUS_INVALID_ARGS";
     LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
@@ -679,39 +639,35 @@ rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   ret = rsmi_dev_ecc_enabled_get(dv_ind, &features_mask);
 
   if (ret == RSMI_STATUS_FILE_ERROR) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", rsmi_dev_ecc_enabled_get() ret was RSMI_STATUS_FILE_ERROR "
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", rsmi_dev_ecc_enabled_get() ret was RSMI_STATUS_FILE_ERROR "
        << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
     LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", returning rsmi_dev_ecc_enabled_get() response = "
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", returning rsmi_dev_ecc_enabled_get() response = "
        << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
   }
 
-  *state = (features_mask & block) ?
-                     RSMI_RAS_ERR_STATE_ENABLED : RSMI_RAS_ERR_STATE_DISABLED;
+  *state = (features_mask & block) ? RSMI_RAS_ERR_STATE_ENABLED : RSMI_RAS_ERR_STATE_DISABLED;
 
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
+  ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", reporting RSMI_STATUS_SUCCESS";
   LOG_TRACE(ss);
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
-                                                     rsmi_error_count_t *ec) {
+rsmi_status_t rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
+                                     rsmi_error_count_t *ec) {
   std::vector<std::string> val_vec;
   rsmi_status_t ret(RSMI_STATUS_NOT_SUPPORTED);
   std::ostringstream ss;
 
-  TRY
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  TRY ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
   amd::smi::DevInfoTypes type;
@@ -745,8 +701,7 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
       break;
 
     default:
-      ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-         << ", default case -> reporting "
+      ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", default case -> reporting "
          << amd::smi::getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
       LOG_ERROR(ss);
       return RSMI_STATUS_NOT_SUPPORTED;
@@ -755,18 +710,18 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   DEVICE_MUTEX
 
   ret = GetDevValueVec(type, dv_ind, &val_vec);
-  if (val_vec.size() < 2 ) ret = RSMI_STATUS_FILE_ERROR;
+  if (val_vec.size() < 2) ret = RSMI_STATUS_FILE_ERROR;
 
   if (ret != RSMI_STATUS_SUCCESS) {
     if (ret == RSMI_STATUS_FILE_ERROR) {
-      ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-         << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
+      ss << __PRETTY_FUNCTION__
+         << " | ======= end =======" << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
          << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
       LOG_ERROR(ss);
       return RSMI_STATUS_NOT_SUPPORTED;
     }
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", GetDevValueVec() ret was not RSMI_STATUS_SUCCESS"
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", GetDevValueVec() ret was not RSMI_STATUS_SUCCESS"
        << " -> reporting " << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
@@ -796,24 +751,21 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
     if (junk == "de:") {
       fs3 >> ec->deferred_err;
     } else {
-      ss << __PRETTY_FUNCTION__
-       << "Trying to get the de count, but got " << junk
-       << " ignore the defer count";
-    LOG_ERROR(ss);
+      ss << __PRETTY_FUNCTION__ << "Trying to get the de count, but got " << junk
+         << " ignore the defer count";
+      LOG_ERROR(ss);
     }
   }
 
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting " << amd::smi::getRSMIStatusString(ret);
+  ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", reporting "
+     << amd::smi::getRSMIStatusString(ret);
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -840,29 +792,24 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
    * bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
    */
   assert((domain & 0xFFFFFFFF00000000) == 0);
-  (*bdfid) &= 0xFFFFFFFF;  // keep bottom 32 bits of pci_id
+  (*bdfid) &= 0xFFFFFFFF;                 // keep bottom 32 bits of pci_id
   *bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
   uint64_t pci_id = *bdfid;
   uint32_t node = UINT32_MAX;
   rsmi_dev_node_id_get(dv_ind, &node);
-  ss << __PRETTY_FUNCTION__ << " | kfd node = "
-  << std::to_string(node) << "\n"
-  << " returning pci_id = "
-  << std::to_string(pci_id) << " ("
-  << amd::smi::print_int_as_hex(pci_id) << ")";
+  ss << __PRETTY_FUNCTION__ << " | kfd node = " << std::to_string(node) << "\n"
+     << " returning pci_id = " << std::to_string(pci_id) << " ("
+     << amd::smi::print_int_as_hex(pci_id) << ")";
   LOG_INFO(ss);
 
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
+  ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", reporting RSMI_STATUS_SUCCESS";
   LOG_TRACE(ss);
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
-rsmi_status_t
-rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t *numa_node) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t *numa_node) {
+  TRY rsmi_status_t ret;
 
   DEVICE_MUTEX
   if (!numa_node) {
@@ -879,10 +826,8 @@ rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t *numa_node) {
   CATCH
 }
 
-static rsmi_status_t
-get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
-  TRY
-  std::string val_str;
+static rsmi_status_t get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
+  TRY std::string val_str;
   uint64_t val_u64;
 
   assert(id != nullptr);
@@ -913,10 +858,8 @@ get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
   CATCH
 }
 
-rsmi_status_t rsmi_ras_feature_info_get(
-  uint32_t dv_ind, rsmi_ras_feature_info_t *ras_feature) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_ras_feature_info_get(uint32_t dv_ind, rsmi_ras_feature_info_t *ras_feature) {
+  TRY rsmi_status_t ret;
   std::string feature_line;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
@@ -926,22 +869,19 @@ rsmi_status_t rsmi_ras_feature_info_get(
 
   DEVICE_MUTEX
 
-  ret = get_dev_value_line(amd::smi::kDevErrTableVersion,
-                dv_ind, &feature_line);
+  ret = get_dev_value_line(amd::smi::kDevErrTableVersion, dv_ind, &feature_line);
   if (ret != RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", returning get_dev_value_line() response = "
-       << amd::smi::getRSMIStatusString(ret);
+       << ", returning get_dev_value_line() response = " << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
   }
 
   // table version: 0x10000
-  const char* version_key = "table version: ";
+  const char *version_key = "table version: ";
   if (feature_line.rfind(version_key, 0) == 0) {
     errno = 0;
-    auto eeprom_version = strtoul(
-      feature_line.substr(strlen(version_key)).c_str(), nullptr, 16);
+    auto eeprom_version = strtoul(feature_line.substr(strlen(version_key)).c_str(), nullptr, 16);
     if (errno == 0) {
       ras_feature->ras_eeprom_version = static_cast<uint32_t>(eeprom_version);
     } else {
@@ -951,21 +891,18 @@ rsmi_status_t rsmi_ras_feature_info_get(
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
-  ret = get_dev_value_line(amd::smi::kDevErrRASSchema,
-                dv_ind, &feature_line);
+  ret = get_dev_value_line(amd::smi::kDevErrRASSchema, dv_ind, &feature_line);
   if (ret != RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", returning get_dev_value_line() response = "
-       << amd::smi::getRSMIStatusString(ret);
+       << ", returning get_dev_value_line() response = " << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
   }
   // schema: 0xf
-  const char* schema_key = "schema: ";
+  const char *schema_key = "schema: ";
   if (feature_line.rfind(schema_key, 0) == 0) {
     errno = 0;
-    auto schema = strtoul(
-      feature_line.substr(strlen(schema_key)).c_str(), nullptr, 16);
+    auto schema = strtoul(feature_line.substr(strlen(schema_key)).c_str(), nullptr, 16);
     if (errno == 0) {
       ras_feature->ecc_correction_schema_flag = static_cast<uint32_t>(schema);
     } else {
@@ -979,8 +916,7 @@ rsmi_status_t rsmi_ras_feature_info_get(
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
+rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
   std::ostringstream ss;
   rsmi_status_t ret;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -996,10 +932,9 @@ rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
   ret = get_id(dv_ind, amd::smi::kDevDevID, id);
   LOG_TRACE(ss);
   ss << __PRETTY_FUNCTION__
-     << (ret == RSMI_STATUS_SUCCESS ?
-          " | No fall back needed retrieved from KGD" : " | fall back needed")
-     << " | Device #: " << std::to_string(dv_ind)
-     << " | Data: device_id = " << std::to_string(*id)
+     << (ret == RSMI_STATUS_SUCCESS ? " | No fall back needed retrieved from KGD"
+                                    : " | fall back needed")
+     << " | Device #: " << std::to_string(dv_ind) << " | Data: device_id = " << std::to_string(*id)
      << " | ret = " << getRSMIStatusString(ret, false);
   LOG_DEBUG(ss);
   // If the device ID is not supported, use KFD's device ID
@@ -1016,8 +951,8 @@ rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
       *id = std::numeric_limits<uint16_t>::max();
       ret = RSMI_STATUS_NOT_SUPPORTED;
     }
-    ss << __PRETTY_FUNCTION__
-       << " | Issue: Could not read device from sysfs, falling back to KFD" << "\n"
+    ss << __PRETTY_FUNCTION__ << " | Issue: Could not read device from sysfs, falling back to KFD"
+       << "\n"
        << " ; Device #: " << std::to_string(dv_ind) << "\n"
        << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
        << " ; node: " << std::to_string(node_id) << "\n"
@@ -1028,8 +963,7 @@ rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
   return ret;
 }
 
-rsmi_status_t
-rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id) {
+rsmi_status_t rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id) {
   std::ostringstream ss;
   rsmi_status_t ret;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -1038,14 +972,14 @@ rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id) {
   *id = std::numeric_limits<uint16_t>::max();
 
   ret = get_id(dv_ind, amd::smi::kDevXGMIPhysicalID, id);
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting " << amd::smi::getRSMIStatusString(ret);
+  ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", reporting "
+     << amd::smi::getRSMIStatusString(ret);
   LOG_TRACE(ss);
   return ret;
 }
 
-rsmi_status_t
-rsmi_dev_xgmi_port_num_get(uint32_t dv_ind, uint32_t *count, uint16_t *link_to_dst_node) {
+rsmi_status_t rsmi_dev_xgmi_port_num_get(uint32_t dv_ind, uint32_t *count,
+                                         uint16_t *link_to_dst_node) {
   std::ostringstream ss;
   rsmi_status_t ret;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -1060,29 +994,28 @@ rsmi_dev_xgmi_port_num_get(uint32_t dv_ind, uint32_t *count, uint16_t *link_to_d
   std::string line;
   *count = 0;
   while (std::getline(iss, line)) {
-      if (line.empty()) continue;
-      std::istringstream f(line);
-      std::string src_token, arrow, dst_token;
-      if (f >> src_token >> arrow >> dst_token) {
-          size_t src_colon = src_token.find(':');
-          size_t dst_colon = dst_token.find(':');
-          if (src_colon != std::string::npos && dst_colon != std::string::npos) {
-              uint16_t src_link = static_cast<uint16_t>(std::stoi(src_token.substr(src_colon + 1)));
-              uint16_t dst_node = static_cast<uint16_t>(std::stoi(dst_token.substr(0, dst_colon)));
-              link_to_dst_node[src_link] = dst_node;
-              (*count)++;
-          }
+    if (line.empty()) continue;
+    std::istringstream f(line);
+    std::string src_token, arrow, dst_token;
+    if (f >> src_token >> arrow >> dst_token) {
+      size_t src_colon = src_token.find(':');
+      size_t dst_colon = dst_token.find(':');
+      if (src_colon != std::string::npos && dst_colon != std::string::npos) {
+        uint16_t src_link = static_cast<uint16_t>(std::stoi(src_token.substr(src_colon + 1)));
+        uint16_t dst_node = static_cast<uint16_t>(std::stoi(dst_token.substr(0, dst_colon)));
+        link_to_dst_node[src_link] = dst_node;
+        (*count)++;
       }
+    }
   }
 
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting " << amd::smi::getRSMIStatusString(ret);
+  ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", reporting "
+     << amd::smi::getRSMIStatusString(ret);
   LOG_TRACE(ss);
   return ret;
 }
 
-rsmi_status_t
-rsmi_dev_revision_get(uint32_t dv_ind, uint16_t *revision) {
+rsmi_status_t rsmi_dev_revision_get(uint32_t dv_ind, uint16_t *revision) {
   std::ostringstream outss;
   rsmi_status_t ret;
   outss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -1090,45 +1023,40 @@ rsmi_dev_revision_get(uint32_t dv_ind, uint16_t *revision) {
   CHK_SUPPORT_NAME_ONLY(revision)
 
   ret = get_id(dv_ind, amd::smi::kDevDevRevID, revision);
-  outss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting " << amd::smi::getRSMIStatusString(ret);
+  outss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", reporting "
+        << amd::smi::getRSMIStatusString(ret);
   LOG_TRACE(outss);
   return ret;
 }
 
-rsmi_status_t
-rsmi_dev_sku_get(uint32_t dv_ind, uint16_t *id) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_sku_get(uint32_t dv_ind, uint16_t *id) {
+  TRY std::ostringstream ss;
   rsmi_status_t ret;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(id)
   ret = get_id(dv_ind, amd::smi::kDevDevProdNum, id);
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting " << amd::smi::getRSMIStatusString(ret);
+  ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", reporting "
+     << amd::smi::getRSMIStatusString(ret);
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id) {
+rsmi_status_t rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(id)
   auto ret = get_id(dv_ind, amd::smi::kDevSubSysDevID, id);
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting " << amd::smi::getRSMIStatusString(ret, false);
+  ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", reporting "
+     << amd::smi::getRSMIStatusString(ret, false);
   LOG_INFO(ss);
   return ret;
 }
 
-rsmi_status_t
-rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   if (!id) {
@@ -1156,8 +1084,9 @@ rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
     }
   }
   ss << __PRETTY_FUNCTION__
-     << (need_fallback ? " | Needed to fallback to use KFD to read vendor_id" :
-      " | Read through SYSFS to read vendor_id") << "\n"
+     << (need_fallback ? " | Needed to fallback to use KFD to read vendor_id"
+                       : " | Read through SYSFS to read vendor_id")
+     << "\n"
      << " ; Device #: " << std::to_string(dv_ind) << "\n"
      << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
      << " ; node: " << std::to_string(node_id) << "\n"
@@ -1168,11 +1097,10 @@ rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_pcie_slot_type_get(uint32_t dv_ind, rsmi_pcie_slot_type_t* type) {
+rsmi_status_t rsmi_dev_pcie_slot_type_get(uint32_t dv_ind, rsmi_pcie_slot_type_t *type) {
   TRY
 
-  std::ostringstream ss;
+      std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(type)
@@ -1183,16 +1111,18 @@ rsmi_dev_pcie_slot_type_get(uint32_t dv_ind, rsmi_pcie_slot_type_t* type) {
   if (ret != 0) return RSMI_STATUS_NOT_SUPPORTED;
 
   *type = RSMI_PCIE_SLOT_PCIE;
-  if (value.compare("oam") == 0) *type=RSMI_PCIE_SLOT_OAM;
-  else if (value.compare("cem") == 0 ) *type=RSMI_PCIE_SLOT_CEM;
-  else if (value.compare("unknown") == 0 ) *type=RSMI_PCIE_SLOT_UNKNOWN;
+  if (value.compare("oam") == 0)
+    *type = RSMI_PCIE_SLOT_OAM;
+  else if (value.compare("cem") == 0)
+    *type = RSMI_PCIE_SLOT_CEM;
+  else if (value.compare("unknown") == 0)
+    *type = RSMI_PCIE_SLOT_UNKNOWN;
   return RSMI_STATUS_SUCCESS;
 
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_subsystem_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
+rsmi_status_t rsmi_dev_subsystem_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -1200,10 +1130,8 @@ rsmi_dev_subsystem_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
   return get_id(dv_ind, amd::smi::kDevSubSysVendorID, id);
 }
 
-rsmi_status_t
-rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level_t *perf) {
-  TRY
-  std::string val_str;
+rsmi_status_t rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level_t *perf) {
+  TRY std::string val_str;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -1214,8 +1142,7 @@ rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level_t *perf) {
   }
   CHK_SUPPORT_NAME_ONLY(perf)
 
-  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevPerfLevel, dv_ind,
-                                                                    &val_str);
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevPerfLevel, dv_ind, &val_str);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1226,27 +1153,22 @@ rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level_t *perf) {
   CATCH
 }
 
-static rsmi_status_t
-set_dev_range(uint32_t dv_ind, std::string range) {
+static rsmi_status_t set_dev_range(uint32_t dv_ind, std::string range) {
   GET_DEV_FROM_INDX
 
   int ret = dev->writeDevInfo(amd::smi::kDevPowerODVoltage, range);
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
-rsmi_status_t
-rsmi_perf_determinism_mode_set(uint32_t dv_ind, uint64_t clkvalue) {
-  TRY
-  DEVICE_MUTEX
-  std::ostringstream ss;
+rsmi_status_t rsmi_perf_determinism_mode_set(uint32_t dv_ind, uint64_t clkvalue) {
+  TRY DEVICE_MUTEX std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
   // Set perf. level to performance determinism so that we can then set the power profile
-  rsmi_status_t ret = rsmi_dev_perf_level_set_v1(dv_ind,
-                                          RSMI_DEV_PERF_LEVEL_DETERMINISM);
+  rsmi_status_t ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_DETERMINISM);
   if (ret != RSMI_STATUS_SUCCESS) {
-      return ret;
+    return ret;
   }
 
   // For clock frequency setting, enter a new value by writing a string that
@@ -1270,19 +1192,15 @@ rsmi_perf_determinism_mode_set(uint32_t dv_ind, uint64_t clkvalue) {
   CATCH
 }
 
-
-rsmi_status_t
-rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
-  TRY
-  std::string val_str;
+rsmi_status_t rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
+  TRY std::string val_str;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(od)
   DEVICE_MUTEX
 
-  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevOverDriveLevel, dv_ind,
-                                                                    &val_str);
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevOverDriveLevel, dv_ind, &val_str);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1301,18 +1219,15 @@ rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
-  TRY
-  std::string val_str;
+rsmi_status_t rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
+  TRY std::string val_str;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(od)
   DEVICE_MUTEX
 
-  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevMemOverDriveLevel, dv_ind,
-                                                                    &val_str);
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevMemOverDriveLevel, dv_ind, &val_str);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1331,18 +1246,15 @@ rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_overdrive_level_set(uint32_t dv_ind, uint32_t od) {
+rsmi_status_t rsmi_dev_overdrive_level_set(uint32_t dv_ind, uint32_t od) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   return rsmi_dev_overdrive_level_set_v1(static_cast<uint32_t>(dv_ind), od);
 }
 
-rsmi_status_t
-rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -1356,18 +1268,15 @@ rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_perf_level_set(uint32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
+rsmi_status_t rsmi_dev_perf_level_set(uint32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   return rsmi_dev_perf_level_set_v1(dv_ind, perf_level);
 }
 
-rsmi_status_t
-rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -1381,11 +1290,10 @@ rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
   CATCH
 }
 
-
 static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_t clk_type,
-            uint32_t dv_ind, rsmi_frequencies_t *f, uint32_t *lanes = nullptr) {
-  TRY
-  std::vector<std::string> val_vec;
+                                     uint32_t dv_ind, rsmi_frequencies_t *f,
+                                     uint32_t *lanes = nullptr) {
+  TRY std::vector<std::string> val_vec;
   rsmi_status_t ret;
 
   if (f == nullptr) {
@@ -1419,13 +1327,13 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
     // Our assumption is that frequencies are read in from lowest to highest.
     // Check that that is true.
     if (i > 0) {
-      if (f->frequency[i] < f->frequency[i-1]) {
+      if (f->frequency[i] < f->frequency[i - 1]) {
         std::string sysvalue;
         sysvalue += kClkStateMap.find(clk_type)->second;
         sysvalue += " Current Value";
         sysvalue += ' ' + std::to_string(f->frequency[i]);
         sysvalue += " Previous Value";
-        sysvalue += ' ' + std::to_string(f->frequency[i-1]);
+        sysvalue += ' ' + std::to_string(f->frequency[i - 1]);
         DEBUG_LOG("Frequencies are not read from lowest to highest. ", sysvalue);
       }
     }
@@ -1440,7 +1348,7 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
         sysvalue += ' ' + std::to_string(f->frequency[f->current]);
         DEBUG_LOG("More than one current clock. ", sysvalue);
       } else {
-          f->current = i;
+        f->current = i;
       }
     }
   }
@@ -1448,19 +1356,18 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   // Some older drivers will not have the current frequency set
   // assert(f->current < f->num_supported);
   if (f->current >= f->num_supported) {
-      f->current = -1;
-      return RSMI_STATUS_UNEXPECTED_DATA;
+    f->current = -1;
+    return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
-static rsmi_status_t get_power_profiles(uint32_t dv_ind,
-                                        rsmi_power_profile_status_t *p,
-               std::map<rsmi_power_profile_preset_masks_t, uint32_t> *ind_map) {
-  TRY
-  std::vector<std::string> val_vec;
+static rsmi_status_t get_power_profiles(
+    uint32_t dv_ind, rsmi_power_profile_status_t *p,
+    std::map<rsmi_power_profile_preset_masks_t, uint32_t> *ind_map) {
+  TRY std::vector<std::string> val_vec;
   rsmi_status_t ret;
 
   if (p == nullptr) {
@@ -1549,10 +1456,8 @@ an additional value followed by * at index 1 and max value at index 2.
 */
 constexpr uint32_t kMIN_VALID_LINES = 2;
 
-static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
-                                                  rsmi_od_volt_freq_data_t *p) {
-  TRY
-  std::vector<std::string> val_vec;
+static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_data_t *p) {
+  TRY std::vector<std::string> val_vec;
   rsmi_status_t ret;
 
   assert(p != nullptr);
@@ -1560,11 +1465,11 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-    // fill out rsmi_od_volt_freq_data_t p with default max values to indicate no valid data
-    p->curr_sclk_range.lower_bound = UINT64_MAX;
-    p->curr_sclk_range.upper_bound = UINT64_MAX;
-    p->curr_mclk_range.lower_bound = UINT64_MAX;
-    p->curr_mclk_range.upper_bound = UINT64_MAX;
+  // fill out rsmi_od_volt_freq_data_t p with default max values to indicate no valid data
+  p->curr_sclk_range.lower_bound = UINT64_MAX;
+  p->curr_sclk_range.upper_bound = UINT64_MAX;
+  p->curr_mclk_range.lower_bound = UINT64_MAX;
+  p->curr_mclk_range.upper_bound = UINT64_MAX;
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -1587,10 +1492,9 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   const std::string KTAG_FIRST_FREQ_IDX{"0:"};
 
   amd::smi::TextFileTagContents_t txt_power_dev_od_voltage(val_vec);
-  txt_power_dev_od_voltage
-    .set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
-    .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
-    .structure_content();
+  txt_power_dev_od_voltage.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
+      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
+      .structure_content();
 
   // Note:  For debug builds/purposes only.
   assert(txt_power_dev_od_voltage.contains_title_key(kTAG_GFXCLK) ||
@@ -1598,77 +1502,74 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   // Note:  For release builds/purposes.
   if (!txt_power_dev_od_voltage.contains_title_key(kTAG_GFXCLK) &&
       !txt_power_dev_od_voltage.contains_title_key(kTAG_OD_SCLK)) {
-      return rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    return rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   // Note: Quick helpers for getting 1st and last elements found
-  auto build_lower_bound = [&](const std::string& prim_key) {
-      auto lower_bound_data = txt_power_dev_od_voltage.get_structured_data_subkey_first(prim_key);
-      return std::vector<std::string>{lower_bound_data};
+  auto build_lower_bound = [&](const std::string &prim_key) {
+    auto lower_bound_data = txt_power_dev_od_voltage.get_structured_data_subkey_first(prim_key);
+    return std::vector<std::string>{lower_bound_data};
   };
 
-  auto build_upper_bound = [&](const std::string& prim_key) {
-      auto upper_bound_data = txt_power_dev_od_voltage.get_structured_data_subkey_last(prim_key);
-      return std::vector<std::string>{upper_bound_data};
+  auto build_upper_bound = [&](const std::string &prim_key) {
+    auto upper_bound_data = txt_power_dev_od_voltage.get_structured_data_subkey_last(prim_key);
+    return std::vector<std::string>{upper_bound_data};
   };
 
-    // track the number of keys found, if this goes down to 0 then that means that there is no valid data
-    const uint8_t kNumStructuredKeysToCheck = 6;
-    uint8_t structured_key_counter = kNumStructuredKeysToCheck;
-    // Validates 'OD_SCLK' is in the structure
-    if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK,
-                                                       KTAG_FIRST_FREQ_IDX)) {
-        p->curr_sclk_range.lower_bound = freq_string_to_int(build_lower_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
-        p->curr_sclk_range.upper_bound = freq_string_to_int(build_upper_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
-    }
-    else
-        structured_key_counter--;
-      // Validates 'OD_MCLK' is in the structure
-    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_MCLK,
-                                                        KTAG_FIRST_FREQ_IDX)) {
-        p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
-        p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
-    }
-    else
-        structured_key_counter--;
+  // track the number of keys found, if this goes down to 0 then that means that there is no valid
+  // data
+  const uint8_t kNumStructuredKeysToCheck = 6;
+  uint8_t structured_key_counter = kNumStructuredKeysToCheck;
+  // Validates 'OD_SCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK, KTAG_FIRST_FREQ_IDX)) {
+    p->curr_sclk_range.lower_bound =
+        freq_string_to_int(build_lower_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
+    p->curr_sclk_range.upper_bound =
+        freq_string_to_int(build_upper_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
+  } else
+    structured_key_counter--;
+  // Validates 'OD_MCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_MCLK, KTAG_FIRST_FREQ_IDX)) {
+    p->curr_mclk_range.lower_bound =
+        freq_string_to_int(build_lower_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
+    p->curr_mclk_range.upper_bound =
+        freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
+  } else
+    structured_key_counter--;
 
-    // Validates 'OD_RANGE' is in the structure
-    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
-                                                        KTAG_SCLK)) {
-        od_value_pair_str_to_range(txt_power_dev_od_voltage
-                                    .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_SCLK),
-                                    &p->sclk_freq_limits);
-    }
-    else
-        structured_key_counter--;
-    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
-                                                        KTAG_MCLK)) {
-        od_value_pair_str_to_range(txt_power_dev_od_voltage
-                                    .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
-                                    &p->mclk_freq_limits);
-    }
-    else
-        structured_key_counter--;
-    // Validates 'GFXCLK' is in the structure
-    if (txt_power_dev_od_voltage.contains_structured_key(kTAG_GFXCLK,
-                                                            KTAG_FIRST_FREQ_IDX)) {
-      p->curr_sclk_range.lower_bound = freq_string_to_int(build_lower_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
-      p->curr_sclk_range.upper_bound = freq_string_to_int(build_upper_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
-    }
-    else
-        structured_key_counter--;
-    // Validates 'MCLK' is in the structure
-    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_MCLK,
-                                                        KTAG_FIRST_FREQ_IDX)) {
-        p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_MCLK), nullptr, nullptr, 0);
-        p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_MCLK), nullptr, nullptr, 0);
-    }
-    else
-        structured_key_counter--;
+  // Validates 'OD_RANGE' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE, KTAG_SCLK)) {
+    od_value_pair_str_to_range(
+        txt_power_dev_od_voltage.get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_SCLK),
+        &p->sclk_freq_limits);
+  } else
+    structured_key_counter--;
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE, KTAG_MCLK)) {
+    od_value_pair_str_to_range(
+        txt_power_dev_od_voltage.get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
+        &p->mclk_freq_limits);
+  } else
+    structured_key_counter--;
+  // Validates 'GFXCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(kTAG_GFXCLK, KTAG_FIRST_FREQ_IDX)) {
+    p->curr_sclk_range.lower_bound =
+        freq_string_to_int(build_lower_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
+    p->curr_sclk_range.upper_bound =
+        freq_string_to_int(build_upper_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
+  } else
+    structured_key_counter--;
+  // Validates 'MCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_MCLK, KTAG_FIRST_FREQ_IDX)) {
+    p->curr_mclk_range.lower_bound =
+        freq_string_to_int(build_lower_bound(KTAG_MCLK), nullptr, nullptr, 0);
+    p->curr_mclk_range.upper_bound =
+        freq_string_to_int(build_upper_bound(KTAG_MCLK), nullptr, nullptr, 0);
+  } else
+    structured_key_counter--;
 
-    if (structured_key_counter == 0) {
-        return RSMI_STATUS_NOT_YET_IMPLEMENTED;
-    }
+  if (structured_key_counter == 0) {
+    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  }
 
   // Note: No curve entries.
   p->num_regions = 0;
@@ -1677,11 +1578,9 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   CATCH
 }
 
-rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level,
-                                        uint64_t clkvalue,
+rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level, uint64_t clkvalue,
                                         rsmi_clk_type_t clkType) {
- TRY
-  rsmi_status_t ret;
+  TRY rsmi_status_t ret;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -1694,8 +1593,8 @@ rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level,
   }
 
   std::map<rsmi_clk_type_t, std::string> clk_char_map = {
-    {RSMI_CLK_TYPE_SYS, "s"},
-    {RSMI_CLK_TYPE_MEM, "m"},
+      {RSMI_CLK_TYPE_SYS, "s"},
+      {RSMI_CLK_TYPE_MEM, "m"},
   };
   DEVICE_MUTEX
 
@@ -1729,11 +1628,9 @@ rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level,
   CATCH
 }
 
-rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue,
-                                        uint64_t maxclkvalue,
-                                        rsmi_clk_type_t clkType) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue, uint64_t maxclkvalue,
+                                     rsmi_clk_type_t clkType) {
+  TRY rsmi_status_t ret;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -1750,8 +1647,8 @@ rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue,
   std::string min_sysvalue;
   std::string max_sysvalue;
   std::map<rsmi_clk_type_t, std::string> clk_char_map = {
-    {RSMI_CLK_TYPE_SYS, "s"},
-    {RSMI_CLK_TYPE_MEM, "m"},
+      {RSMI_CLK_TYPE_SYS, "s"},
+      {RSMI_CLK_TYPE_MEM, "m"},
   };
   DEVICE_MUTEX
   assert(clkType == RSMI_CLK_TYPE_SYS || clkType == RSMI_CLK_TYPE_MEM);
@@ -1793,19 +1690,17 @@ rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue,
   CATCH
 }
 
-rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
-                                        uint64_t clkvalue,
-                                        rsmi_clk_type_t clkType) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level, uint64_t clkvalue,
+                                       rsmi_clk_type_t clkType) {
+  TRY rsmi_status_t ret;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
   std::string sysvalue;
   std::map<rsmi_clk_type_t, std::string> clk_char_map = {
-    {RSMI_CLK_TYPE_SYS, "s"},
-    {RSMI_CLK_TYPE_MEM, "m"},
+      {RSMI_CLK_TYPE_SYS, "s"},
+      {RSMI_CLK_TYPE_MEM, "m"},
   };
   DEVICE_MUTEX
 
@@ -1845,11 +1740,9 @@ rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
   CATCH
 }
 
-
-rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
-                                      uint64_t clkvalue, uint64_t voltvalue) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint, uint64_t clkvalue,
+                                        uint64_t voltvalue) {
+  TRY rsmi_status_t ret;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -1886,34 +1779,29 @@ rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
   CATCH
 }
 
-
-static void get_vc_region(const std::vector<std::string>& val_vec, rsmi_freq_volt_region_t& p)
-{
+static void get_vc_region(const std::vector<std::string> &val_vec, rsmi_freq_volt_region_t &p) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
   //
   amd::smi::TextFileTagContents_t txt_power_dev_od_voltage(val_vec);
-  txt_power_dev_od_voltage
-    .set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
-    .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
-    .structure_content();
+  txt_power_dev_od_voltage.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
+      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
+      .structure_content();
 
   const std::string KTAG_OD_RANGE{"OD_RANGE:"};
   const std::string KTAG_MCLK{"MCLK:"};
   const std::string KTAG_SCLK{"SCLK:"};
-  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
-                                                       KTAG_SCLK)) {
-      od_value_pair_str_to_range(txt_power_dev_od_voltage
-                                    .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_SCLK),
-                                 &p.freq_range);
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE, KTAG_SCLK)) {
+    od_value_pair_str_to_range(
+        txt_power_dev_od_voltage.get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_SCLK),
+        &p.freq_range);
   }
-  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
-                                                       KTAG_MCLK)) {
-      od_value_pair_str_to_range(txt_power_dev_od_voltage
-                                    .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
-                                 &p.volt_range);
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE, KTAG_MCLK)) {
+    od_value_pair_str_to_range(
+        txt_power_dev_od_voltage.get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
+        &p.volt_range);
   }
 }
 
@@ -1925,10 +1813,9 @@ static void get_vc_region(const std::vector<std::string>& val_vec, rsmi_freq_vol
  * values. Caller must make sure there is enough space for at least
  * *num_regions regions.
  */
-static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
-                            uint32_t *num_regions, rsmi_freq_volt_region_t *p) {
-  TRY
-  std::vector<std::string> val_vec;
+static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind, uint32_t *num_regions,
+                                                   rsmi_freq_volt_region_t *p) {
+  TRY std::vector<std::string> val_vec;
   rsmi_status_t ret;
   std::ostringstream ss;
 
@@ -1939,8 +1826,7 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | Issue: could not retreive kDevPowerODVoltage" << "; returning "
+    ss << __PRETTY_FUNCTION__ << " | Issue: could not retreive kDevPowerODVoltage" << "; returning "
        << getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
@@ -1949,17 +1835,14 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
   // This is a work-around to handle systems where kDevPowerODVoltage is not
   // fully supported yet.
   if (val_vec.size() < kMIN_VALID_LINES) {
-    ss << __PRETTY_FUNCTION__
-       << " | Issue: val_vec.size() < " << kMIN_VALID_LINES << "; returning "
+    ss << __PRETTY_FUNCTION__ << " | Issue: val_vec.size() < " << kMIN_VALID_LINES << "; returning "
        << getRSMIStatusString(RSMI_STATUS_NOT_YET_IMPLEMENTED);
     LOG_ERROR(ss);
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
   uint32_t val_vec_size = static_cast<uint32_t>(val_vec.size());
-  ss << __PRETTY_FUNCTION__
-     << " | val_vec_size = " << std::dec
-     << val_vec_size;
+  ss << __PRETTY_FUNCTION__ << " | val_vec_size = " << std::dec << val_vec_size;
   LOG_DEBUG(ss);
 
   // Note: No curve entries.
@@ -1971,13 +1854,11 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
   CATCH
 }
 
-static rsmi_status_t set_power_profile(uint32_t dv_ind,
-                                    rsmi_power_profile_preset_masks_t profile) {
+static rsmi_status_t set_power_profile(uint32_t dv_ind, rsmi_power_profile_preset_masks_t profile) {
   TRY
 
-  rsmi_status_t ret;
-  rsmi_power_profile_status_t avail_profiles =
-                                           {0, RSMI_PWR_PROF_PRST_INVALID, 0};
+      rsmi_status_t ret;
+  rsmi_power_profile_status_t avail_profiles = {0, RSMI_PWR_PROF_PRST_INVALID, 0};
 
   // Determine if the provided profile is valid
   if (!is_power_of_2(profile)) {
@@ -2003,49 +1884,44 @@ static rsmi_status_t set_power_profile(uint32_t dv_ind,
   }
 
   // Write the new profile
-  ret = set_dev_value(amd::smi::kDevPowerProfileMode, dv_ind,
-                                                            ind_map[profile]);
+  ret = set_dev_value(amd::smi::kDevPowerProfileMode, dv_ind, ind_map[profile]);
 
   return ret;
   CATCH
 }
 
-static rsmi_status_t topo_get_numa_node_number(uint32_t dv_ind,
-                     uint32_t *numa_node_number) {
+static rsmi_status_t topo_get_numa_node_number(uint32_t dv_ind, uint32_t *numa_node_number) {
   TRY
 
-  GET_DEV_AND_KFDNODE_FROM_INDX
+      GET_DEV_AND_KFDNODE_FROM_INDX
 
-  *numa_node_number = kfd_node->numa_node_number();
+          *numa_node_number = kfd_node->numa_node_number();
 
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
-static rsmi_status_t topo_get_numa_node_weight(uint32_t dv_ind,
-                     uint64_t *weight) {
+static rsmi_status_t topo_get_numa_node_weight(uint32_t dv_ind, uint64_t *weight) {
   TRY
 
-  GET_DEV_AND_KFDNODE_FROM_INDX
+      GET_DEV_AND_KFDNODE_FROM_INDX
 
-  *weight = kfd_node->numa_node_weight();
+          *weight = kfd_node->numa_node_weight();
 
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_type,
-                                                        rsmi_frequencies_t *f) {
-  TRY
-  amd::smi::DevInfoTypes dev_type;
+rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_type,
+                                        rsmi_frequencies_t *f) {
+  TRY amd::smi::DevInfoTypes dev_type;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
   CHK_SUPPORT_VAR(f, clk_type)
 
-  const auto & clk_type_it = kClkTypeMap.find(clk_type);
+  const auto &clk_type_it = kClkTypeMap.find(clk_type);
   if (clk_type_it != kClkTypeMap.end()) {
     dev_type = clk_type_it->second;
   } else {
@@ -2059,11 +1935,9 @@ rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_type,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
-                                                       uint64_t *fw_version) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
+                                            uint64_t *fw_version) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_VAR(fw_version, block)
@@ -2071,33 +1945,33 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
   amd::smi::DevInfoTypes dev_type;
 
   static const std::map<rsmi_fw_block_t, amd::smi::DevInfoTypes> kFWBlockTypeMap = {
-    { RSMI_FW_BLOCK_ASD, amd::smi::kDevFwVersionAsd },
-    { RSMI_FW_BLOCK_CE, amd::smi::kDevFwVersionCe },
-    { RSMI_FW_BLOCK_DMCU, amd::smi::kDevFwVersionDmcu },
-    { RSMI_FW_BLOCK_MC, amd::smi::kDevFwVersionMc },
-    { RSMI_FW_BLOCK_ME, amd::smi::kDevFwVersionMe },
-    { RSMI_FW_BLOCK_MEC, amd::smi::kDevFwVersionMec },
-    { RSMI_FW_BLOCK_MEC2, amd::smi::kDevFwVersionMec2 },
-    { RSMI_FW_BLOCK_MES, amd::smi::kDevFwVersionMes },
-    { RSMI_FW_BLOCK_MES_KIQ, amd::smi::kDevFwVersionMesKiq },
-    { RSMI_FW_BLOCK_PFP, amd::smi::kDevFwVersionPfp },
-    { RSMI_FW_BLOCK_RLC, amd::smi::kDevFwVersionRlc },
-    { RSMI_FW_BLOCK_RLC_SRLC, amd::smi::kDevFwVersionRlcSrlc },
-    { RSMI_FW_BLOCK_RLC_SRLG, amd::smi::kDevFwVersionRlcSrlg },
-    { RSMI_FW_BLOCK_RLC_SRLS, amd::smi::kDevFwVersionRlcSrls },
-    { RSMI_FW_BLOCK_SDMA, amd::smi::kDevFwVersionSdma },
-    { RSMI_FW_BLOCK_SDMA2, amd::smi::kDevFwVersionSdma2 },
-    { RSMI_FW_BLOCK_SMC, amd::smi::kDevFwVersionSmc },
-    { RSMI_FW_BLOCK_SOS, amd::smi::kDevFwVersionSos },
-    { RSMI_FW_BLOCK_TA_RAS, amd::smi::kDevFwVersionTaRas },
-    { RSMI_FW_BLOCK_TA_XGMI, amd::smi::kDevFwVersionTaXgmi },
-    { RSMI_FW_BLOCK_UVD, amd::smi::kDevFwVersionUvd },
-    { RSMI_FW_BLOCK_VCE, amd::smi::kDevFwVersionVce },
-    { RSMI_FW_BLOCK_VCN, amd::smi::kDevFwVersionVcn },
-    { RSMI_FW_BLOCK_PLDM_BUNDLE, amd::smi::kDevFwVersionPldmBundle},
+      {RSMI_FW_BLOCK_ASD, amd::smi::kDevFwVersionAsd},
+      {RSMI_FW_BLOCK_CE, amd::smi::kDevFwVersionCe},
+      {RSMI_FW_BLOCK_DMCU, amd::smi::kDevFwVersionDmcu},
+      {RSMI_FW_BLOCK_MC, amd::smi::kDevFwVersionMc},
+      {RSMI_FW_BLOCK_ME, amd::smi::kDevFwVersionMe},
+      {RSMI_FW_BLOCK_MEC, amd::smi::kDevFwVersionMec},
+      {RSMI_FW_BLOCK_MEC2, amd::smi::kDevFwVersionMec2},
+      {RSMI_FW_BLOCK_MES, amd::smi::kDevFwVersionMes},
+      {RSMI_FW_BLOCK_MES_KIQ, amd::smi::kDevFwVersionMesKiq},
+      {RSMI_FW_BLOCK_PFP, amd::smi::kDevFwVersionPfp},
+      {RSMI_FW_BLOCK_RLC, amd::smi::kDevFwVersionRlc},
+      {RSMI_FW_BLOCK_RLC_SRLC, amd::smi::kDevFwVersionRlcSrlc},
+      {RSMI_FW_BLOCK_RLC_SRLG, amd::smi::kDevFwVersionRlcSrlg},
+      {RSMI_FW_BLOCK_RLC_SRLS, amd::smi::kDevFwVersionRlcSrls},
+      {RSMI_FW_BLOCK_SDMA, amd::smi::kDevFwVersionSdma},
+      {RSMI_FW_BLOCK_SDMA2, amd::smi::kDevFwVersionSdma2},
+      {RSMI_FW_BLOCK_SMC, amd::smi::kDevFwVersionSmc},
+      {RSMI_FW_BLOCK_SOS, amd::smi::kDevFwVersionSos},
+      {RSMI_FW_BLOCK_TA_RAS, amd::smi::kDevFwVersionTaRas},
+      {RSMI_FW_BLOCK_TA_XGMI, amd::smi::kDevFwVersionTaXgmi},
+      {RSMI_FW_BLOCK_UVD, amd::smi::kDevFwVersionUvd},
+      {RSMI_FW_BLOCK_VCE, amd::smi::kDevFwVersionVce},
+      {RSMI_FW_BLOCK_VCN, amd::smi::kDevFwVersionVcn},
+      {RSMI_FW_BLOCK_PLDM_BUNDLE, amd::smi::kDevFwVersionPldmBundle},
   };
 
-  const auto & dev_type_it = kFWBlockTypeMap.find(block);
+  const auto &dev_type_it = kFWBlockTypeMap.find(block);
   if (dev_type_it != kFWBlockTypeMap.end()) {
     dev_type = dev_type_it->second;
   } else {
@@ -2109,8 +1983,7 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
   CATCH
 }
 
-static std::string bitfield_to_freq_string(uint64_t bitf,
-                                                     uint32_t num_supported) {
+static std::string bitfield_to_freq_string(uint64_t bitf, uint32_t num_supported) {
   std::string bf_str;
   std::bitset<RSMI_MAX_NUM_FREQUENCIES> bs(bitf);
 
@@ -2127,14 +2000,12 @@ static std::string bitfield_to_freq_string(uint64_t bitf,
   return bf_str;
 }
 
-rsmi_status_t
-rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
-                              rsmi_clk_type_t clk_type, uint64_t freq_bitmask) {
+rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_type,
+                                        uint64_t freq_bitmask) {
   rsmi_status_t ret;
   rsmi_frequencies_t freqs;
 
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -2155,15 +2026,13 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
 
   // Above call to rsmi_dev_get_gpu_clk_freq should have emitted an error if
   // assert below is not true
   assert(dv_ind < smi.devices().size());
 
-  std::string freq_enable_str =
-                   bitfield_to_freq_string(freq_bitmask, freqs.num_supported);
-
+  std::string freq_enable_str = bitfield_to_freq_string(freq_bitmask, freqs.num_supported);
 
   std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
   assert(dev != nullptr);
@@ -2176,21 +2045,22 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   rsmi_status_t status;
   amd::smi::DevInfoTypes dev_type;
 
-  const auto & clk_type_it = kClkTypeMap.find(clk_type);
+  const auto &clk_type_it = kClkTypeMap.find(clk_type);
   if (clk_type_it != kClkTypeMap.end()) {
     dev_type = clk_type_it->second;
   } else {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  status =  amd::smi::ErrnoToRsmiStatus(dev->writeDevInfo(dev_type, freq_enable_str));
+  status = amd::smi::ErrnoToRsmiStatus(dev->writeDevInfo(dev_type, freq_enable_str));
 
   // If an operation is not supported, the dev file, ie /sys/class/drm/card1/device/pp_dpm_pcie
-  // will have read-only perms, and the OS will deny access, before the request hits the driver level
-  if (status == RSMI_STATUS_PERMISSION){
+  // will have read-only perms, and the OS will deny access, before the request hits the driver
+  // level
+  if (status == RSMI_STATUS_PERMISSION) {
     bool read_only = false;
     amd::smi::isReadOnlyForAll(dev->path(), &read_only);
-    if(read_only){
+    if (read_only) {
       return RSMI_STATUS_NOT_SUPPORTED;
     }
   }
@@ -2200,12 +2070,9 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   CATCH
 }
 
-
-rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind,
-                             uint32_t* pisolate) {
+rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind, uint32_t *pisolate) {
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start ======= dev_ind:"
-    << dv_ind;
+  ss << __PRETTY_FUNCTION__ << "| ======= start ======= dev_ind:" << dv_ind;
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(pisolate)
 
@@ -2219,15 +2086,15 @@ rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind,
   std::string str_val;
   rsmi_status_t ret = get_dev_value_line(amd::smi::kDevProcessIsolation, dv_ind, &str_val);
   if (ret == RSMI_STATUS_FILE_ERROR) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", get_dev_value_str() ret was RSMI_STATUS_FILE_ERROR "
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", get_dev_value_str() ret was RSMI_STATUS_FILE_ERROR "
        << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
     LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", get_dev_value_str() ret was not RSMI_STATUS_SUCCESS"
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", get_dev_value_str() ret was not RSMI_STATUS_SUCCESS"
        << " -> reporting " << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
@@ -2242,24 +2109,19 @@ rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind,
   std::stringstream iss(str_val);
   int number;
   std::vector<int> partition_status;
-  while ( iss >> number )
-    partition_status.push_back(number);
+  while (iss >> number) partition_status.push_back(number);
   if (partition_status.size() <= partition_id) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-              << ", the sysfs line " << str_val
-              << " does not have the partition_id "
-              << partition_id;
-              LOG_ERROR(ss);
-              return RSMI_STATUS_UNEXPECTED_DATA;
+    ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", the sysfs line " << str_val
+       << " does not have the partition_id " << partition_id;
+    LOG_ERROR(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
   }
   *pisolate = partition_status[partition_id];
   return RSMI_STATUS_SUCCESS;
 }
 
-rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
-                             uint32_t pisolate) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind, uint32_t pisolate) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -2274,15 +2136,15 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
   std::string str_val;
   rsmi_status_t ret = get_dev_value_line(amd::smi::kDevProcessIsolation, dv_ind, &str_val);
   if (ret == RSMI_STATUS_FILE_ERROR) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", get_dev_value_str() ret was RSMI_STATUS_FILE_ERROR "
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", get_dev_value_str() ret was RSMI_STATUS_FILE_ERROR "
        << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
     LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", get_dev_value_str() ret was not RSMI_STATUS_SUCCESS"
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", get_dev_value_str() ret was not RSMI_STATUS_SUCCESS"
        << " -> reporting " << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
@@ -2293,16 +2155,14 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
   std::stringstream iss(str_val);
   int number;
   std::vector<int> partition_status;
-  while ( iss >> number ) {
+  while (iss >> number) {
     partition_status.push_back(number);
   }
 
   // (2) Validate the data
   if (partition_status.size() <= partition_id) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-              << ", the sysfs line " << str_val
-              << " does not have the partition_id "
-              << partition_id;
+    ss << __PRETTY_FUNCTION__ << " | ======= end =======" << ", the sysfs line " << str_val
+       << " does not have the partition_id " << partition_id;
     LOG_ERROR(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
@@ -2311,18 +2171,17 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
   partition_status[partition_id] = pisolate;
   std::stringstream result;
   std::copy(partition_status.begin(), partition_status.end(),
-        std::ostream_iterator<int>(result, " "));
+            std::ostream_iterator<int>(result, " "));
 
   std::string value = result.str().c_str();
-  int write_ret = dev->writeDevInfo(amd::smi::kDevProcessIsolation , value);
+  int write_ret = dev->writeDevInfo(amd::smi::kDevProcessIsolation, value);
   return amd::smi::ErrnoToRsmiStatus(write_ret);
 
   CATCH
 }
 
 rsmi_status_t rsmi_dev_gpu_run_cleaner_shader(uint32_t dv_ind) {
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -2334,15 +2193,13 @@ rsmi_status_t rsmi_dev_gpu_run_cleaner_shader(uint32_t dv_ind) {
   uint32_t partition_id = 0;
   rsmi_dev_partition_id_get(dv_ind, &partition_id);
   std::string value = std::to_string(partition_id);
-  int ret = dev->writeDevInfo(amd::smi::kDevShaderClean , value);
+  int ret = dev->writeDevInfo(amd::smi::kDevShaderClean, value);
   return amd::smi::ErrnoToRsmiStatus(ret);
 
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
-                      rsmi_dpm_policy_t* policy) {
+rsmi_status_t rsmi_dev_xgmi_plpd_get(uint32_t dv_ind, rsmi_dpm_policy_t *policy) {
   rsmi_status_t ret;
   std::vector<std::string> val_vec;
 
@@ -2352,23 +2209,22 @@ rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
 
   *policy = {};
 
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
   DEVICE_MUTEX
 
   ret = GetDevValueVec(amd::smi::kDevXgmiPlpd, dv_ind, &val_vec);
   if (ret == RSMI_STATUS_FILE_ERROR) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
        << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
     LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", GetDevValueVec() ret was not RSMI_STATUS_SUCCESS"
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", GetDevValueVec() ret was not RSMI_STATUS_SUCCESS"
        << " -> reporting " << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
@@ -2390,7 +2246,7 @@ rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
     std::istringstream f(current_line);
     std::string s;
     while (getline(f, s, ':')) {
-          tokens.push_back(s);
+      tokens.push_back(s);
     }
 
     int value = 0;
@@ -2401,30 +2257,29 @@ rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
 
     if (value < 0 || policy->num_supported >= RSMI_MAX_NUM_PM_POLICIES) {
       ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-          << ", Unexpected pstat data: the id is negative or too many plpd policies.";
-          LOG_ERROR(ss);
-          return RSMI_STATUS_UNEXPECTED_DATA;
+         << ", Unexpected pstat data: the id is negative or too many plpd policies.";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_UNEXPECTED_DATA;
     }
 
     policy->policies[policy->num_supported].policy_id = value;
     std::string description = amd::smi::trim(tokens[1]);
     if (current_line.back() == '*') {  // current policy
-        description.pop_back();  // remove last *
-        description = amd::smi::trim(description);
-        policy->current = policy->num_supported;
-        see_current = true;
+      description.pop_back();          // remove last *
+      description = amd::smi::trim(description);
+      policy->current = policy->num_supported;
+      see_current = true;
     }
-    strncpy(policy->policies[policy->num_supported].policy_description,
-          description.c_str(),
-          RSMI_MAX_POLICY_NAME-1);
+    strncpy(policy->policies[policy->num_supported].policy_description, description.c_str(),
+            RSMI_MAX_POLICY_NAME - 1);
     policy->num_supported++;
   }  //  end for
 
   if (!see_current) {
-      ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-          << ", Unexpected pstat data: cannot find the current xgmi_plpd policy.";
-          LOG_ERROR(ss);
-          return RSMI_STATUS_UNEXPECTED_DATA;
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+       << ", Unexpected pstat data: cannot find the current xgmi_plpd policy.";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -2432,11 +2287,8 @@ rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_xgmi_plpd_set(uint32_t dv_ind,
-                      uint32_t plpd_id) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_xgmi_plpd_set(uint32_t dv_ind, uint32_t plpd_id) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -2445,15 +2297,13 @@ rsmi_dev_xgmi_plpd_set(uint32_t dv_ind,
 
   // Need to add new line character
   std::string value = std::to_string(plpd_id) + "\n";
-  int ret = dev->writeDevInfo(amd::smi::kDevXgmiPlpd , value);
+  int ret = dev->writeDevInfo(amd::smi::kDevXgmiPlpd, value);
   return amd::smi::ErrnoToRsmiStatus(ret);
 
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_soc_pstate_get(uint32_t dv_ind,
-                      rsmi_dpm_policy_t* policy) {
+rsmi_status_t rsmi_dev_soc_pstate_get(uint32_t dv_ind, rsmi_dpm_policy_t *policy) {
   rsmi_status_t ret;
   std::vector<std::string> val_vec;
 
@@ -2463,23 +2313,22 @@ rsmi_dev_soc_pstate_get(uint32_t dv_ind,
 
   *policy = {};
 
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
   DEVICE_MUTEX
 
   ret = GetDevValueVec(amd::smi::kDevSocPstate, dv_ind, &val_vec);
   if (ret == RSMI_STATUS_FILE_ERROR) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
        << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
     LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", GetDevValueVec() ret was not RSMI_STATUS_SUCCESS"
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", GetDevValueVec() ret was not RSMI_STATUS_SUCCESS"
        << " -> reporting " << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
@@ -2502,7 +2351,7 @@ rsmi_dev_soc_pstate_get(uint32_t dv_ind,
     std::istringstream f(current_line);
     std::string s;
     while (getline(f, s, ':')) {
-          tokens.push_back(s);
+      tokens.push_back(s);
     }
 
     int value = 0;
@@ -2513,30 +2362,29 @@ rsmi_dev_soc_pstate_get(uint32_t dv_ind,
 
     if (value < 0 || policy->num_supported >= RSMI_MAX_NUM_PM_POLICIES) {
       ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-          << ", Unexpected pstat data: the id is negative or too many policies.";
-          LOG_ERROR(ss);
-          return RSMI_STATUS_UNEXPECTED_DATA;
+         << ", Unexpected pstat data: the id is negative or too many policies.";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_UNEXPECTED_DATA;
     }
 
     policy->policies[policy->num_supported].policy_id = value;
     std::string description = amd::smi::trim(tokens[1]);
     if (current_line.back() == '*') {  // current policy
-        description.pop_back();  // remove last *
-        description = amd::smi::trim(description);
-        policy->current = policy->num_supported;
-        see_current = true;
+      description.pop_back();          // remove last *
+      description = amd::smi::trim(description);
+      policy->current = policy->num_supported;
+      see_current = true;
     }
-    strncpy(policy->policies[policy->num_supported].policy_description,
-          description.c_str(),
-          RSMI_MAX_POLICY_NAME-1);
+    strncpy(policy->policies[policy->num_supported].policy_description, description.c_str(),
+            RSMI_MAX_POLICY_NAME - 1);
     policy->num_supported++;
   }  //  end for
 
   if (!see_current) {
-      ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-          << ", Unexpected pstat data: cannot find the current policy.";
-          LOG_ERROR(ss);
-          return RSMI_STATUS_UNEXPECTED_DATA;
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end =======" << ", Unexpected pstat data: cannot find the current policy.";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
   }
   // Cannot find it
   return RSMI_STATUS_SUCCESS;
@@ -2544,11 +2392,8 @@ rsmi_dev_soc_pstate_get(uint32_t dv_ind,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_soc_pstate_set(uint32_t dv_ind,
-                      uint32_t policy_id) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_soc_pstate_set(uint32_t dv_ind, uint32_t policy_id) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -2557,64 +2402,46 @@ rsmi_dev_soc_pstate_set(uint32_t dv_ind,
 
   // need to add new line character
   std::string value = std::to_string(policy_id) + "\n";
-  int ret = dev->writeDevInfo(amd::smi::kDevSocPstate , value);
+  int ret = dev->writeDevInfo(amd::smi::kDevSocPstate, value);
   return amd::smi::ErrnoToRsmiStatus(ret);
 
   CATCH
 }
 
-static std::vector<std::string> pci_name_files = {
-  "/usr/share/misc/pci.ids",
-  "/usr/share/hwdata/pci.ids",
-  "/usr/share/pci.ids",
-  "/var/lib/pciutils/pci.ids"
-};
+static std::vector<std::string> pci_name_files = {"/usr/share/misc/pci.ids",
+                                                  "/usr/share/hwdata/pci.ids", "/usr/share/pci.ids",
+                                                  "/var/lib/pciutils/pci.ids"};
 
-enum eNameStrType {
-  NAME_STR_VENDOR = 0,
-  NAME_STR_DEVICE,
-  NAME_STR_SUBSYS
-};
+enum eNameStrType { NAME_STR_VENDOR = 0, NAME_STR_DEVICE, NAME_STR_SUBSYS };
 
 static const std::map<std::string, rsmi_compute_partition_type_t>
-mapStringToRSMIComputePartitionTypes {
-  {"CPX", RSMI_COMPUTE_PARTITION_CPX},
-  {"SPX", RSMI_COMPUTE_PARTITION_SPX},
-  {"DPX", RSMI_COMPUTE_PARTITION_DPX},
-  {"TPX", RSMI_COMPUTE_PARTITION_TPX},
-  {"QPX", RSMI_COMPUTE_PARTITION_QPX}
-};
+    mapStringToRSMIComputePartitionTypes{{"CPX", RSMI_COMPUTE_PARTITION_CPX},
+                                         {"SPX", RSMI_COMPUTE_PARTITION_SPX},
+                                         {"DPX", RSMI_COMPUTE_PARTITION_DPX},
+                                         {"TPX", RSMI_COMPUTE_PARTITION_TPX},
+                                         {"QPX", RSMI_COMPUTE_PARTITION_QPX}};
 
 static const std::map<rsmi_compute_partition_type_t, std::string>
-mapRSMIToStringComputePartitionTypes {
-  {RSMI_COMPUTE_PARTITION_INVALID, "UNKNOWN"},
-  {RSMI_COMPUTE_PARTITION_CPX, "CPX"},
-  {RSMI_COMPUTE_PARTITION_SPX, "SPX"},
-  {RSMI_COMPUTE_PARTITION_DPX, "DPX"},
-  {RSMI_COMPUTE_PARTITION_TPX, "TPX"},
-  {RSMI_COMPUTE_PARTITION_QPX, "QPX"}
-};
+    mapRSMIToStringComputePartitionTypes{
+        {RSMI_COMPUTE_PARTITION_INVALID, "UNKNOWN"}, {RSMI_COMPUTE_PARTITION_CPX, "CPX"},
+        {RSMI_COMPUTE_PARTITION_SPX, "SPX"},         {RSMI_COMPUTE_PARTITION_DPX, "DPX"},
+        {RSMI_COMPUTE_PARTITION_TPX, "TPX"},         {RSMI_COMPUTE_PARTITION_QPX, "QPX"}};
 
 static const std::map<rsmi_memory_partition_type_t, std::string>
-mapRSMIToStringMemoryPartitionTypes {
-  {RSMI_MEMORY_PARTITION_UNKNOWN, "UNKNOWN"},
-  {RSMI_MEMORY_PARTITION_NPS1, "NPS1"},
-  {RSMI_MEMORY_PARTITION_NPS2, "NPS2"},
-  {RSMI_MEMORY_PARTITION_NPS4, "NPS4"},
-  {RSMI_MEMORY_PARTITION_NPS8, "NPS8"}
-};
+    mapRSMIToStringMemoryPartitionTypes{{RSMI_MEMORY_PARTITION_UNKNOWN, "UNKNOWN"},
+                                        {RSMI_MEMORY_PARTITION_NPS1, "NPS1"},
+                                        {RSMI_MEMORY_PARTITION_NPS2, "NPS2"},
+                                        {RSMI_MEMORY_PARTITION_NPS4, "NPS4"},
+                                        {RSMI_MEMORY_PARTITION_NPS8, "NPS8"}};
 
-static const std::map<std::string, rsmi_memory_partition_type_t>
-mapStringToMemoryPartitionTypes {
-  {"NPS1", RSMI_MEMORY_PARTITION_NPS1},
-  {"NPS2", RSMI_MEMORY_PARTITION_NPS2},
-  {"NPS4", RSMI_MEMORY_PARTITION_NPS4},
-  {"NPS8", RSMI_MEMORY_PARTITION_NPS8}
-};
+static const std::map<std::string, rsmi_memory_partition_type_t> mapStringToMemoryPartitionTypes{
+    {"NPS1", RSMI_MEMORY_PARTITION_NPS1},
+    {"NPS2", RSMI_MEMORY_PARTITION_NPS2},
+    {"NPS4", RSMI_MEMORY_PARTITION_NPS4},
+    {"NPS8", RSMI_MEMORY_PARTITION_NPS8}};
 
-static std::string
-get_id_name_str_from_line(uint64_t id, std::string ln,
-                                                 std::istringstream *ln_str) {
+static std::string get_id_name_str_from_line(uint64_t id, std::string ln,
+                                             std::istringstream *ln_str) {
   std::string token1;
   std::string ret_str;
 
@@ -2632,8 +2459,7 @@ get_id_name_str_from_line(uint64_t id, std::string ln,
 
     assert(pos >= 0);
     if (pos < 0) {
-      throw amd::smi::rsmi_exception(
-          RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
+      throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
     }
     size_t s_pos = ln.find_first_not_of("\t ", static_cast<size_t>(pos));
     ret_str = ln.substr(static_cast<uint32_t>(s_pos));
@@ -2666,11 +2492,9 @@ static rsmi_status_t get_backup_name(uint16_t id, char *name, size_t len) {
   return RSMI_STATUS_SUCCESS;
 }
 
-static rsmi_status_t get_dev_name_from_file(uint32_t dv_ind, char *name,
-                                               size_t len) {
+static rsmi_status_t get_dev_name_from_file(uint32_t dv_ind, char *name, size_t len) {
   std::string val_str;
-  rsmi_status_t ret =
-              get_dev_value_line(amd::smi::kDevDevProdName, dv_ind, &val_str);
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevDevProdName, dv_ind, &val_str);
 
   if (ret != 0) {
     return amd::smi::ErrnoToRsmiStatus(ret);
@@ -2694,7 +2518,7 @@ static std::string get_vendor_name_from_id(uint16_t vendor_id) {
 
     while (std::getline(id_file_strm, ln)) {
       // parse line
-      if (ln == ""  || ln[0] == '#' || ln[0] == '\t') {
+      if (ln == "" || ln[0] == '#' || ln[0] == '\t') {
         continue;
       }
       std::istringstream ln_str(ln);
@@ -2713,8 +2537,8 @@ static std::string get_vendor_name_from_id(uint16_t vendor_id) {
 // vendor  vendor_name
 //       device  device_name                             <-- single tab
 //               subvendor subdevice  subsystem_name     <-- two tabs
-static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
-                                               size_t len, eNameStrType typ) {
+static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name, size_t len,
+                                          eNameStrType typ) {
   std::string ln;
   rsmi_status_t ret;
   uint16_t device_id;
@@ -2757,7 +2581,7 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
     }
   }
 
-  for (const auto& fl : pci_name_files) {
+  for (const auto &fl : pci_name_files) {
     std::ifstream id_file_strm(fl);
 
     while (std::getline(id_file_strm, ln)) {
@@ -2807,8 +2631,7 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
           // subsystem we were looking for, so bail out.
           val_str.clear();
 
-          return get_backup_name(typ == NAME_STR_DEVICE ?
-                                            device_id : subsys_id, name, len);
+          return get_backup_name(typ == NAME_STR_DEVICE ? device_id : subsys_id, name, len);
         }
 
         val_str = get_id_name_str_from_line(vendor_id, ln, &ln_str);
@@ -2841,8 +2664,7 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
   return RSMI_STATUS_SUCCESS;
 }
 
-static rsmi_status_t
-get_dev_drm_render_minor(uint32_t dv_ind, uint32_t *minor) {
+static rsmi_status_t get_dev_drm_render_minor(uint32_t dv_ind, uint32_t *minor) {
   GET_DEV_FROM_INDX
 
   assert(minor != nullptr);
@@ -2851,18 +2673,15 @@ get_dev_drm_render_minor(uint32_t dv_ind, uint32_t *minor) {
   }
 
   *minor = dev->drm_render_minor();
-  if (*minor)
-    return RSMI_STATUS_SUCCESS;
+  if (*minor) return RSMI_STATUS_SUCCESS;
 
   return RSMI_STATUS_INIT_ERROR;
 }
 
-rsmi_status_t
-rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
+rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
   rsmi_status_t ret;
 
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -2883,12 +2702,10 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_pcie_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
+rsmi_status_t rsmi_dev_pcie_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
   rsmi_status_t ret;
 
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(name)
@@ -2907,15 +2724,13 @@ rsmi_dev_pcie_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
     return RSMI_STATUS_NOT_FOUND;
   }
   memset(name, 0, len);
-  strncpy(name, vendor_name.c_str(), len-1);
+  strncpy(name, vendor_name.c_str(), len - 1);
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(brand)
@@ -2924,14 +2739,9 @@ rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len) {
   }
   DEVICE_MUTEX
 
-  std::map<std::string, std::string> brand_names = {
-    {"D05121", "mi25"},
-    {"D05131", "mi25"},
-    {"D05133", "mi25"},
-    {"D05151", "mi25"},
-    {"D16304", "mi50"},
-    {"D16302", "mi60"}
-  };
+  std::map<std::string, std::string> brand_names = {{"D05121", "mi25"}, {"D05131", "mi25"},
+                                                    {"D05133", "mi25"}, {"D05151", "mi25"},
+                                                    {"D16304", "mi50"}, {"D16302", "mi60"}};
   std::map<std::string, std::string>::iterator it;
   std::string vbios_value;
   std::string sku_value;
@@ -2961,10 +2771,8 @@ rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_vram_vendor_get(uint32_t dv_ind, char *brand, uint32_t len) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_vram_vendor_get(uint32_t dv_ind, char *brand, uint32_t len) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(brand)
@@ -2992,12 +2800,10 @@ rsmi_dev_vram_vendor_get(uint32_t dv_ind, char *brand, uint32_t len) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len) {
+rsmi_status_t rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len) {
   rsmi_status_t ret;
 
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(name)
@@ -3013,12 +2819,10 @@ rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_drm_render_minor_get(uint32_t dv_ind, uint32_t *minor) {
+rsmi_status_t rsmi_dev_drm_render_minor_get(uint32_t dv_ind, uint32_t *minor) {
   rsmi_status_t ret;
 
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(minor)
@@ -3029,12 +2833,10 @@ rsmi_dev_drm_render_minor_get(uint32_t dv_ind, uint32_t *minor) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
+rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
   rsmi_status_t ret;
 
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   if (name == nullptr || len == 0) {
@@ -3050,60 +2852,48 @@ rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
   CATCH
 }
 
-rsmi_status_t rsmi_dev_pm_metrics_info_get(uint32_t dv_ind,
-                      rsmi_name_value_t** pm_metrics,
-                      uint32_t *num_of_metrics) {
-  TRY
-  DEVICE_MUTEX
-  CHK_SUPPORT_NAME_ONLY(num_of_metrics)
-  std::string file_path = dev->
-          get_sys_file_path_by_type(amd::smi::kDevPmMetrics);
+rsmi_status_t rsmi_dev_pm_metrics_info_get(uint32_t dv_ind, rsmi_name_value_t **pm_metrics,
+                                           uint32_t *num_of_metrics) {
+  TRY DEVICE_MUTEX CHK_SUPPORT_NAME_ONLY(num_of_metrics) std::string file_path =
+      dev->get_sys_file_path_by_type(amd::smi::kDevPmMetrics);
   if (file_path.empty()) {
-      return RSMI_STATUS_NOT_SUPPORTED;
+    return RSMI_STATUS_NOT_SUPPORTED;
   }
 
-  int ret = amd::smi::present_pmmetrics(
-          file_path.c_str(), pm_metrics, num_of_metrics);
+  int ret = amd::smi::present_pmmetrics(file_path.c_str(), pm_metrics, num_of_metrics);
   if (ret == 0) return RSMI_STATUS_SUCCESS;
   return RSMI_STATUS_NOT_SUPPORTED;
 
   CATCH
 }
 
-rsmi_status_t rsmi_dev_reg_table_info_get(uint32_t dv_ind,
-                      rsmi_reg_type_t reg_type,
-                      rsmi_name_value_t** reg_metrics,
-                      uint32_t *num_of_metrics) {
-  TRY
-  DEVICE_MUTEX
-  CHK_SUPPORT_NAME_ONLY(num_of_metrics)
-  std::string file_path = dev->
-          get_sys_file_path_by_type(amd::smi::kDevRegMetrics);
+rsmi_status_t rsmi_dev_reg_table_info_get(uint32_t dv_ind, rsmi_reg_type_t reg_type,
+                                          rsmi_name_value_t **reg_metrics,
+                                          uint32_t *num_of_metrics) {
+  TRY DEVICE_MUTEX CHK_SUPPORT_NAME_ONLY(num_of_metrics) std::string file_path =
+      dev->get_sys_file_path_by_type(amd::smi::kDevRegMetrics);
   if (file_path.empty()) {
-      return RSMI_STATUS_NOT_SUPPORTED;
+    return RSMI_STATUS_NOT_SUPPORTED;
   }
 
-  int ret = amd::smi::present_reg_state(
-          file_path.c_str(), reg_type, reg_metrics, num_of_metrics);
+  int ret = amd::smi::present_reg_state(file_path.c_str(), reg_type, reg_metrics, num_of_metrics);
   if (ret == 0) return RSMI_STATUS_SUCCESS;
   return RSMI_STATUS_NOT_SUPPORTED;
 
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
+rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
   rsmi_status_t ret;
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
   GET_DEV_AND_KFDNODE_FROM_INDX
   CHK_API_SUPPORT_ONLY((b), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
   DEVICE_MUTEX
-  ret = get_frequencies(amd::smi::kDevPCIEClk, RSMI_CLK_TYPE_PCIE, dv_ind,
-                                        &b->transfer_rate, b->lanes);
+  ret = get_frequencies(amd::smi::kDevPCIEClk, RSMI_CLK_TYPE_PCIE, dv_ind, &b->transfer_rate,
+                        b->lanes);
   if (ret == RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -3122,8 +2912,8 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
   // Hardcode based on PCIe specification: search PCI_Express on wikipedia
   const uint32_t link_width[] = {1, 2, 4, 8, 12, 16};
   const uint32_t link_speed[] = {25, 50, 80, 160};  // 0.1 Ghz
-  const uint32_t WIDTH_DATA_LENGTH = sizeof(link_width)/sizeof(uint32_t);
-  const uint32_t SPEED_DATA_LENGTH = sizeof(link_speed)/sizeof(uint32_t);
+  const uint32_t WIDTH_DATA_LENGTH = sizeof(link_width) / sizeof(uint32_t);
+  const uint32_t SPEED_DATA_LENGTH = sizeof(link_speed) / sizeof(uint32_t);
 
   // Calculate the index
   int32_t width_index = -1;
@@ -3146,10 +2936,11 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
   }
   // Set possible lanes and frequencies
   b->transfer_rate.num_supported = WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH;
-  b->transfer_rate.current = static_cast<uint32_t>(speed_index)*WIDTH_DATA_LENGTH + static_cast<uint32_t>(width_index);
+  b->transfer_rate.current =
+      static_cast<uint32_t>(speed_index) * WIDTH_DATA_LENGTH + static_cast<uint32_t>(width_index);
   for (cur_index = 0; cur_index < WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH; cur_index++) {
     b->transfer_rate.frequency[cur_index] =
-      static_cast<long>(link_speed[cur_index/WIDTH_DATA_LENGTH]) * 100 * 1000000L;
+        static_cast<long>(link_speed[cur_index / WIDTH_DATA_LENGTH]) * 100 * 1000000L;
     b->lanes[cur_index] = link_width[cur_index % WIDTH_DATA_LENGTH];
   }
   /*
@@ -3168,13 +2959,11 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
+rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
   rsmi_status_t ret;
   rsmi_pcie_bandwidth_t bws;
 
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -3188,14 +2977,14 @@ rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
 
   assert(bws.transfer_rate.num_supported <= RSMI_MAX_NUM_FREQUENCIES);
 
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
 
   // Above call to rsmi_dev_pci_bandwidth_get() should have emitted an error
   // if assert below is not true
   assert(dv_ind < smi.devices().size());
 
   std::string freq_enable_str =
-         bitfield_to_freq_string(bw_bitmask, bws.transfer_rate.num_supported);
+      bitfield_to_freq_string(bw_bitmask, bws.transfer_rate.num_supported);
 
   std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
   assert(dev != nullptr);
@@ -3216,11 +3005,9 @@ rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
-                                   uint64_t *received, uint64_t *max_pkt_sz) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent, uint64_t *received,
+                                          uint64_t *max_pkt_sz) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   rsmi_status_t ret;
@@ -3251,7 +3038,7 @@ rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
     fs_rng >> *max_pkt_sz;
   }
 
-  if ((sent && *sent == UINT64_MAX) || (received && *received == UINT64_MAX)){
+  if ((sent && *sent == UINT64_MAX) || (received && *received == UINT64_MAX)) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
@@ -3259,11 +3046,9 @@ rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
-                              rsmi_npm_info_t *npm_info) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
+                                    rsmi_npm_info_t *npm_info) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
   LOG_TRACE(ss);
 
@@ -3282,7 +3067,7 @@ rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  std::string *board_path_str = reinterpret_cast<std::string*>(node_handle);
+  std::string *board_path_str = reinterpret_cast<std::string *>(node_handle);
   if (board_path_str == nullptr || board_path_str->empty()) {
     ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
     LOG_ERROR(ss);
@@ -3294,16 +3079,15 @@ rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
 
   rsmi_status_t ret = amd::smi::get_npm_board_status(*board_path_str, &npm_status);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | get_npm_board_status failed: "
-       << getRSMIStatusString(ret);
+    ss << __PRETTY_FUNCTION__ << " | get_npm_board_status failed: " << getRSMIStatusString(ret);
     LOG_INFO(ss);
     return ret;
   }
 
   ret = amd::smi::get_npm_board_limit(*board_path_str, &npm_limit);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | get_npm_board_limit returned "
-       << getRSMIStatusString(ret) << " ; using sentinel limit";
+    ss << __PRETTY_FUNCTION__ << " | get_npm_board_limit returned " << getRSMIStatusString(ret)
+       << " ; using sentinel limit";
     LOG_DEBUG(ss);
     npm_limit = UINT64_MAX;
   }
@@ -3320,11 +3104,9 @@ rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
-                       rsmi_temperature_metric_t metric, int64_t *temperature) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
+                                       rsmi_temperature_metric_t metric, int64_t *temperature) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -3335,76 +3117,73 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
 
   // handle gpu board temp
   if (sensor_type >= RSMI_TEMP_TYPE_GPUBOARD_NODE_FIRST &&
-      sensor_type <= RSMI_TEMP_TYPE_GPUBOARD_LAST ) {
-        if (metric != RSMI_TEMP_CURRENT) {
-          LOG_ERROR("GPUBoard temperature only support RSMI_TEMP_CURRENT");
-          return RSMI_STATUS_NOT_SUPPORTED;
-        }
+      sensor_type <= RSMI_TEMP_TYPE_GPUBOARD_LAST) {
+    if (metric != RSMI_TEMP_CURRENT) {
+      LOG_ERROR("GPUBoard temperature only support RSMI_TEMP_CURRENT");
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
 
-        
-        std::string file_path = dev->get_sys_file_path_by_type(amd::smi::kDevGpuBoardTempMetrics);
-        if (file_path == "") {
-          LOG_ERROR("Failed to get GPU board temperature metrics file path");
-          return RSMI_STATUS_NOT_SUPPORTED;
-        }
+    std::string file_path = dev->get_sys_file_path_by_type(amd::smi::kDevGpuBoardTempMetrics);
+    if (file_path == "") {
+      LOG_ERROR("Failed to get GPU board temperature metrics file path");
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
 
-        amd::smi::amdgpu_gpuboard_temp_metrics_v1_0 gpuboard_metric;
-        ret = read_gpuboard_temp_metrics(file_path.c_str(), gpuboard_metric);
-        if (ret != RSMI_STATUS_SUCCESS) {
-          std::string err_msg = "Failed to read GPU board temperature metrics at " + file_path;
-          LOG_ERROR(err_msg);
-          return ret;
-        }
+    amd::smi::amdgpu_gpuboard_temp_metrics_v1_0 gpuboard_metric;
+    ret = read_gpuboard_temp_metrics(file_path.c_str(), gpuboard_metric);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      std::string err_msg = "Failed to read GPU board temperature metrics at " + file_path;
+      LOG_ERROR(err_msg);
+      return ret;
+    }
 
-        ret = get_gpuboard_temp_value(gpuboard_metric, 
-                static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
-        return ret;
+    ret = get_gpuboard_temp_value(gpuboard_metric,
+                                  static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    return ret;
   }
 
   // handle base board temp
   if (sensor_type >= RSMI_TEMP_TYPE_BASEBOARD_FIRST &&
-      sensor_type <= RSMI_TEMP_TYPE_BASEBOARD_LAST ) {
-        if (metric != RSMI_TEMP_CURRENT) {
-          LOG_ERROR("Baseboard temperature only supports RSMI_TEMP_CURRENT");
-          return RSMI_STATUS_NOT_SUPPORTED;
-        }
+      sensor_type <= RSMI_TEMP_TYPE_BASEBOARD_LAST) {
+    if (metric != RSMI_TEMP_CURRENT) {
+      LOG_ERROR("Baseboard temperature only supports RSMI_TEMP_CURRENT");
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
 
+    std::string file_path = dev->get_sys_file_path_by_type(amd::smi::kDevBaseBoardTempMetrics);
+    if (file_path.empty()) {
+      LOG_ERROR("Failed to get baseboard temperature metrics file path");
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
 
-        std::string file_path = dev->get_sys_file_path_by_type(amd::smi::kDevBaseBoardTempMetrics);
-        if (file_path.empty()) {
-          LOG_ERROR("Failed to get baseboard temperature metrics file path");
-          return RSMI_STATUS_NOT_SUPPORTED;
-        }
+    amd::smi::amdgpu_baseboard_temp_metrics_v1_0 baseboard_metric;
+    ret = read_baseboard_temp_metrics(file_path.c_str(), baseboard_metric);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      std::string err_msg = "Failed to read baseboard temperature metrics at " + file_path;
+      LOG_ERROR(err_msg);
+      return ret;
+    }
 
-        amd::smi::amdgpu_baseboard_temp_metrics_v1_0 baseboard_metric;
-        ret = read_baseboard_temp_metrics(file_path.c_str(), baseboard_metric);
-        if (ret != RSMI_STATUS_SUCCESS) {
-          std::string err_msg = "Failed to read baseboard temperature metrics at " + file_path;
-          LOG_ERROR(err_msg);
-          return ret;
-        }
-
-        ret = get_baseboard_temp_value(baseboard_metric,
-                static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
-        return ret;
+    ret = get_baseboard_temp_value(baseboard_metric,
+                                   static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    return ret;
   }
 
-  static const std::map<rsmi_temperature_metric_t, amd::smi::MonitorTypes>
-    kMetricTypeMap = {
-      { RSMI_TEMP_CURRENT, amd::smi::kMonTemp },
-      { RSMI_TEMP_MAX, amd::smi::kMonTempMax },
-      { RSMI_TEMP_MIN, amd::smi::kMonTempMin },
-      { RSMI_TEMP_MAX_HYST, amd::smi::kMonTempMaxHyst },
-      { RSMI_TEMP_MIN_HYST, amd::smi::kMonTempMinHyst },
-      { RSMI_TEMP_CRITICAL, amd::smi::kMonTempCritical },
-      { RSMI_TEMP_CRITICAL_HYST, amd::smi::kMonTempCriticalHyst },
-      { RSMI_TEMP_EMERGENCY, amd::smi::kMonTempEmergency },
-      { RSMI_TEMP_EMERGENCY_HYST, amd::smi::kMonTempEmergencyHyst },
-      { RSMI_TEMP_CRIT_MIN, amd::smi::kMonTempCritMin },
-      { RSMI_TEMP_CRIT_MIN_HYST, amd::smi::kMonTempCritMinHyst },
-      { RSMI_TEMP_OFFSET, amd::smi::kMonTempOffset },
-      { RSMI_TEMP_LOWEST, amd::smi::kMonTempLowest },
-      { RSMI_TEMP_HIGHEST, amd::smi::kMonTempHighest },
+  static const std::map<rsmi_temperature_metric_t, amd::smi::MonitorTypes> kMetricTypeMap = {
+      {RSMI_TEMP_CURRENT, amd::smi::kMonTemp},
+      {RSMI_TEMP_MAX, amd::smi::kMonTempMax},
+      {RSMI_TEMP_MIN, amd::smi::kMonTempMin},
+      {RSMI_TEMP_MAX_HYST, amd::smi::kMonTempMaxHyst},
+      {RSMI_TEMP_MIN_HYST, amd::smi::kMonTempMinHyst},
+      {RSMI_TEMP_CRITICAL, amd::smi::kMonTempCritical},
+      {RSMI_TEMP_CRITICAL_HYST, amd::smi::kMonTempCriticalHyst},
+      {RSMI_TEMP_EMERGENCY, amd::smi::kMonTempEmergency},
+      {RSMI_TEMP_EMERGENCY_HYST, amd::smi::kMonTempEmergencyHyst},
+      {RSMI_TEMP_CRIT_MIN, amd::smi::kMonTempCritMin},
+      {RSMI_TEMP_CRIT_MIN_HYST, amd::smi::kMonTempCritMinHyst},
+      {RSMI_TEMP_OFFSET, amd::smi::kMonTempOffset},
+      {RSMI_TEMP_LOWEST, amd::smi::kMonTempLowest},
+      {RSMI_TEMP_HIGHEST, amd::smi::kMonTempHighest},
   };
 
   const auto mon_type_it = kMetricTypeMap.find(metric);
@@ -3413,33 +3192,22 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   }
 
   if (temperature == nullptr) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
-       << " | Device #: " << dv_ind
-       << " | Type: " << monitorTypesToString.at(mon_type)
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+       << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(mon_type)
        << " | Cause: temperature was a null ptr reference"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
 
   // The HBM temperature is retrieved from the gpu_metrics
-  if (sensor_type == RSMI_TEMP_TYPE_HBM_0 ||
-      sensor_type == RSMI_TEMP_TYPE_HBM_1 ||
-      sensor_type == RSMI_TEMP_TYPE_HBM_2 ||
-      sensor_type == RSMI_TEMP_TYPE_HBM_3) {
-    if (metric != RSMI_TEMP_CURRENT) {   // only support RSMI_TEMP_CURRENT
-      ss << __PRETTY_FUNCTION__
-         << " | ======= end ======= "
-         << " | Fail "
-         << " | Device #: " << dv_ind
-         << " | Type: " << monitorTypesToString.at(mon_type)
-         << " | Cause: To retrieve HBM temp, we only support metric = "
-         << "RSMI_TEMP_CURRENT"
-         << " | Returning = "
-         << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+  if (sensor_type == RSMI_TEMP_TYPE_HBM_0 || sensor_type == RSMI_TEMP_TYPE_HBM_1 ||
+      sensor_type == RSMI_TEMP_TYPE_HBM_2 || sensor_type == RSMI_TEMP_TYPE_HBM_3) {
+    if (metric != RSMI_TEMP_CURRENT) {  // only support RSMI_TEMP_CURRENT
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+         << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(mon_type)
+         << " | Cause: To retrieve HBM temp, we only support metric = " << "RSMI_TEMP_CURRENT"
+         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
       LOG_ERROR(ss);
       return RSMI_STATUS_NOT_SUPPORTED;
     }
@@ -3447,15 +3215,10 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
     rsmi_gpu_metrics_t gpu_metrics;
     ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
     if (ret != RSMI_STATUS_SUCCESS) {
-      ss << __PRETTY_FUNCTION__
-         << " | ======= end ======= "
-         << " | Fail "
-         << " | Device #: " << dv_ind
-         << " | Type: " << monitorTypesToString.at(mon_type)
-         << " | Cause: rsmi_dev_gpu_metrics_info_get returned "
-         << getRSMIStatusString(ret)
-         << " | Returning = "
-         << getRSMIStatusString(ret) << " |";
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+         << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(mon_type)
+         << " | Cause: rsmi_dev_gpu_metrics_info_get returned " << getRSMIStatusString(ret)
+         << " | Returning = " << getRSMIStatusString(ret) << " |";
       LOG_ERROR(ss);
       return ret;
     }
@@ -3477,28 +3240,20 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
         return RSMI_STATUS_INVALID_ARGS;
     }
     if (val_ui16 == UINT16_MAX) {
-      ss << __PRETTY_FUNCTION__
-         << " | ======= end ======= "
-         << " | Fail "
-         << " | Device #: " << dv_ind
-         << " | Type: " << monitorTypesToString.at(mon_type)
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+         << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(mon_type)
          << " | Cause: Reached UINT16 max value, overflow"
-         << " | Returning = "
-         << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
       LOG_ERROR(ss);
       return RSMI_STATUS_NOT_SUPPORTED;
     }
 
-    *temperature =
-      static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
+    *temperature = static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
 
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Success "
-       << " | Device #: " << dv_ind
-       << " | Type: " << monitorTypesToString.at(mon_type)
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
+       << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(mon_type)
        << " | Data: " << *temperature
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " | ";
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " | ";
     LOG_INFO(ss);
     return RSMI_STATUS_SUCCESS;
   }  // end HBM temperature
@@ -3506,14 +3261,10 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   DEVICE_MUTEX
 
   if (dev->monitor() == nullptr) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
-       << " | Device #: " << dv_ind
-       << " | Type: " << monitorTypesToString.at(mon_type)
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+       << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(mon_type)
        << " | Cause: monitor returned nullptr"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
@@ -3521,32 +3272,24 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
 
   // getTempSensorIndex will throw an out of range exception if sensor_type is
   // not found
-  uint32_t sensor_index =
-     m->getTempSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
-
+  uint32_t sensor_index = m->getTempSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
 
   CHK_API_SUPPORT_ONLY(temperature, metric, sensor_index)
 
   ret = get_dev_mon_value(mon_type, dv_ind, sensor_index, temperature);
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-     << " | Success "
-     << " | Device #: " << dv_ind
-     << " | Sensor_index: " << sensor_index
-     << " | Type: " << monitorTypesToString.at(mon_type)
-     << " | Data: " << *temperature
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " | ";
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
+     << " | Device #: " << dv_ind << " | Sensor_index: " << sensor_index
+     << " | Type: " << monitorTypesToString.at(mon_type) << " | Data: " << *temperature
+     << " | Returning = " << getRSMIStatusString(ret) << " | ";
   LOG_INFO(ss);
 
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
-                       rsmi_voltage_metric_t metric, int64_t *voltage) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
+                                       rsmi_voltage_metric_t metric, int64_t *voltage) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -3595,8 +3338,7 @@ rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
   // not found
   uint32_t sensor_index;
   try {
-    sensor_index =
-      m->getVoltSensorIndex(sensor_type);
+    sensor_index = m->getVoltSensorIndex(sensor_type);
   } catch (...) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
@@ -3608,10 +3350,8 @@ rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64_t *speed) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64_t *speed) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -3629,10 +3369,8 @@ rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64_t *speed) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind, int64_t *speed) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind, int64_t *speed) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -3650,10 +3388,8 @@ rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind, int64_t *speed) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
+  TRY rsmi_status_t ret;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -3661,18 +3397,16 @@ rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
   ++sensor_ind;  // fan sysfs files have 1-based indices
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
-  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable,
-                                                       dv_ind, sensor_ind, 2);
+  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind, sensor_ind, 2);
   return ret;
 
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t speed) {
+rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t speed) {
   TRY
 
-  rsmi_status_t ret;
+      rsmi_status_t ret;
   uint64_t max_speed;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -3694,24 +3428,20 @@ rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t speed) {
   ++sensor_ind;  // fan sysfs files have 1-based indices
 
   // First need to set fan mode (pwm1_enable) to 1 (aka, "manual")
-  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind,
-                                                               sensor_ind, 1);
+  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind, sensor_ind, 1);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
 
-  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanSpeed, dv_ind,
-                                                           sensor_ind, speed);
+  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
   return ret;
 
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
-                                                        uint64_t *max_speed) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
+                                         uint64_t *max_speed) {
+  TRY rsmi_status_t ret;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -3720,16 +3450,14 @@ rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   DEVICE_MUTEX
 
   ret = get_dev_mon_value(amd::smi::kMonMaxFanSpeed, dv_ind, sensor_ind,
-                                      reinterpret_cast<int64_t *>(max_speed));
+                          reinterpret_cast<int64_t *>(max_speed));
 
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data_t *odv) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data_t *odv) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   DEVICE_MUTEX
@@ -3740,10 +3468,8 @@ rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data_t *odv) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_gpu_reset(uint32_t dv_ind) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_gpu_reset(uint32_t dv_ind) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -3764,8 +3490,7 @@ rsmi_dev_gpu_reset(uint32_t dv_ind) {
 }
 
 rsmi_status_t rsmi_dev_amdgpu_driver_reload(void) {
-  TRY
-  std::ostringstream ss;
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   // TODO(amdsmi_team): technically, we should block for all devices
@@ -3781,14 +3506,10 @@ rsmi_status_t rsmi_dev_amdgpu_driver_reload(void) {
   bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
   if (restartRet != RSMI_STATUS_SUCCESS) {
     if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__
-         << " | ======= end ======= "
-         << " | Fail - restart AMD GPU detected"
-         << " | Device #: " << dv_ind
-         << " | Type: AMDGPU Driver Reload"
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail - restart AMD GPU detected"
+         << " | Device #: " << dv_ind << " | Type: AMDGPU Driver Reload"
          << " | Cause: AMDGPU Driver Reload failed "
-         << " | Returning = "
-         << getRSMIStatusString(restartRet, false);
+         << " | Returning = " << getRSMIStatusString(restartRet, false);
       LOG_ERROR(ss);
     }
     return restartRet;
@@ -3796,12 +3517,9 @@ rsmi_status_t rsmi_dev_amdgpu_driver_reload(void) {
 
   if (is_logger_enabled) {
     ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Success - if restart completed successfully"
-       << " | Device #: " << dv_ind
-       << " | Type: AMDGPU Driver Reload"
-       << " | Returning = "
-       << getRSMIStatusString(restartRet, false);
+       << " | ======= end ======= " << " | Success - if restart completed successfully"
+       << " | Device #: " << dv_ind << " | Type: AMDGPU Driver Reload"
+       << " | Returning = " << getRSMIStatusString(restartRet, false);
     LOG_INFO(ss);
   }
   return restartRet;
@@ -3809,36 +3527,30 @@ rsmi_status_t rsmi_dev_amdgpu_driver_reload(void) {
   CATCH
 }
 
-rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
-                     uint32_t *num_regions, rsmi_freq_volt_region_t *buffer) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind, uint32_t *num_regions,
+                                                 rsmi_freq_volt_region_t *buffer) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  CHK_SUPPORT_NAME_ONLY((num_regions == nullptr || buffer == nullptr) ?
-                                                        nullptr : num_regions)
+  CHK_SUPPORT_NAME_ONLY((num_regions == nullptr || buffer == nullptr) ? nullptr : num_regions)
   if (*num_regions == 0) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
   DEVICE_MUTEX
-  rsmi_status_t ret = get_od_clk_volt_curve_regions(dv_ind, num_regions,
-                                                                      buffer);
+  rsmi_status_t ret = get_od_clk_volt_curve_regions(dv_ind, num_regions, buffer);
   if (*num_regions == 0) {
     ret = RSMI_STATUS_NOT_SUPPORTED;
   }
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
-     << getRSMIStatusString(ret);
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning " << getRSMIStatusString(ret);
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_power_max_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_power_max_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -3855,10 +3567,8 @@ rsmi_dev_power_max_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -3874,27 +3584,20 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power) {
+  TRY std::ostringstream ss;
   rsmi_status_t rsmiReturn = RSMI_STATUS_NOT_SUPPORTED;
   std::string val_str;
   uint32_t sensor_ind = 1;  // socket_power sysfs files have 1-based indices
   amd::smi::MonitorTypes mon_type = amd::smi::kMonPowerInput;
-  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind="
-     << std::to_string(dv_ind);
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind=" << std::to_string(dv_ind);
   LOG_TRACE(ss);
   if (socket_power == nullptr) {
     rsmiReturn = RSMI_STATUS_INVALID_ARGS;
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
-       << " | Device #: " << dv_ind
-       << " | Type: " << monitorTypesToString.at(mon_type)
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+       << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(mon_type)
        << " | Cause: socket_power was a null ptr reference"
-       << " | Returning = "
-       << getRSMIStatusString(rsmiReturn) << " |";
+       << " | Returning = " << getRSMIStatusString(rsmiReturn) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
@@ -3902,58 +3605,40 @@ rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power) {
   DEVICE_MUTEX
 
   if (dev->monitor() == nullptr) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
-       << " | Device #: " << dv_ind
-       << " | Type: " << monitorTypesToString.at(mon_type)
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+       << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(mon_type)
        << " | Cause: hwmon monitor was a null ptr reference"
-       << " | Returning = "
-       << getRSMIStatusString(rsmiReturn) << " |";
+       << " | Returning = " << getRSMIStatusString(rsmiReturn) << " |";
     LOG_ERROR(ss);
     return rsmiReturn;
   }
 
-  int ret = dev->monitor()->readMonitor(amd::smi::kMonPowerLabel,
-                                        sensor_ind, &val_str);
+  int ret = dev->monitor()->readMonitor(amd::smi::kMonPowerLabel, sensor_ind, &val_str);
   if (ret || val_str != "PPT" || val_str.size() != 3) {
     if (ret != 0) {
       rsmiReturn = amd::smi::ErrnoToRsmiStatus(ret);
     }
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
-       << " | Device #: " << dv_ind
-       << " | Type: " << monitorTypesToString.at(mon_type)
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+       << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(mon_type)
        << " | Cause: readMonitor() returned an error status"
-       << " or Socket Power label did not show PPT or size of label data was"
-       << " unexpected"
-       << " | Returning = "
-       << getRSMIStatusString(rsmiReturn) << " |";
+       << " or Socket Power label did not show PPT or size of label data was" << " unexpected"
+       << " | Returning = " << getRSMIStatusString(rsmiReturn) << " |";
     LOG_ERROR(ss);
     return rsmiReturn;
   }
-  rsmiReturn = get_dev_mon_value(mon_type, dv_ind, sensor_ind,
-                                 socket_power);
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
-     << " | Device #: " << dv_ind
-     << " | Type: " << monitorTypesToString.at(mon_type)
-     << " | Data: " << *socket_power
-     << " | Returning = "
-     << getRSMIStatusString(rsmiReturn) << " |";
+  rsmiReturn = get_dev_mon_value(mon_type, dv_ind, sensor_ind, socket_power);
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
+     << " | Device #: " << dv_ind << " | Type: " << monitorTypesToString.at(mon_type)
+     << " | Data: " << *socket_power << " | Returning = " << getRSMIStatusString(rsmiReturn)
+     << " |";
   LOG_TRACE(ss);
   return rsmiReturn;
   CATCH
 }
 
-rsmi_status_t rsmi_dev_power_get(uint32_t dv_ind, uint64_t *power,
-                                 RSMI_POWER_TYPE *type) {
-  TRY
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind="
-     << std::to_string(dv_ind);
+rsmi_status_t rsmi_dev_power_get(uint32_t dv_ind, uint64_t *power, RSMI_POWER_TYPE *type) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind=" << std::to_string(dv_ind);
   LOG_TRACE(ss);
   rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
   RSMI_POWER_TYPE temp_power_type = RSMI_INVALID_POWER;
@@ -3961,14 +3646,10 @@ rsmi_status_t rsmi_dev_power_get(uint32_t dv_ind, uint64_t *power,
 
   if (type == nullptr || power == nullptr) {
     ret = RSMI_STATUS_INVALID_ARGS;
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
-       << " | Device #: " << dv_ind
-       << " | Type: " << amd::smi::power_type_string(temp_power_type)
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+       << " | Device #: " << dv_ind << " | Type: " << amd::smi::power_type_string(temp_power_type)
        << " | Cause: power or monitor type was a null ptr reference"
-       << " | Returning = "
-       << getRSMIStatusString(ret) << " |";
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
     LOG_ERROR(ss);
     return ret;
   }
@@ -3987,30 +3668,22 @@ rsmi_status_t rsmi_dev_power_get(uint32_t dv_ind, uint64_t *power,
   }
   *power = temp_power;
   *type = temp_power_type;
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
-     << " | Device #: " << dv_ind
-     << " | Type: " << amd::smi::power_type_string(temp_power_type)
-     << " | Data: " << *power
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
+     << " | Device #: " << dv_ind << " | Type: " << amd::smi::power_type_string(temp_power_type)
+     << " | Data: " << *power << " | Returning = " << getRSMIStatusString(ret) << " |";
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t *power,
-                          float *counter_resolution, uint64_t *timestamp) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t *power, float *counter_resolution,
+                                        uint64_t *timestamp) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  if (power == nullptr ||
-      timestamp == nullptr) {
-      return RSMI_STATUS_INVALID_ARGS;
+  if (power == nullptr || timestamp == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
   }
 
   rsmi_status_t ret;
@@ -4024,21 +3697,19 @@ rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t *power,
   *timestamp = gpu_metrics.system_clock_counter;
   // hard-coded for now since all ASICs have same resolution. If it ASIC
   // dependent then this information should come from Kernel
-  if (counter_resolution)
-    *counter_resolution = kEnergyCounterResolution;
+  if (counter_resolution) *counter_resolution = kEnergyCounterResolution;
 
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *default_cap) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint32_t sensor_ind,
+                                             uint64_t *default_cap) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  uint32_t sensor_ind_adjust = sensor_ind + 1; // power sysfs files have 1-based indices
+  uint32_t sensor_ind_adjust = sensor_ind + 1;  // power sysfs files have 1-based indices
   CHK_SUPPORT_SUBVAR_ONLY(default_cap, sensor_ind_adjust)
 
   rsmi_status_t ret;
@@ -4050,10 +3721,8 @@ rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *d
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -4072,11 +3741,9 @@ rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind,
-                                               uint64_t *max, uint64_t *min) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *max,
+                                           uint64_t *min) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -4084,25 +3751,21 @@ rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind,
   if (max == nullptr || min == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
-  CHK_SUPPORT_SUBVAR_ONLY((min == nullptr || max == nullptr ?nullptr : min),
-                                                                   sensor_ind)
+  CHK_SUPPORT_SUBVAR_ONLY((min == nullptr || max == nullptr ? nullptr : min), sensor_ind)
   rsmi_status_t ret;
 
   DEVICE_MUTEX
   ret = get_dev_mon_value(amd::smi::kMonPowerCapMax, dv_ind, sensor_ind, max);
 
   if (ret == RSMI_STATUS_SUCCESS) {
-    ret = get_dev_mon_value(amd::smi::kMonPowerCapMin, dv_ind,
-                                                             sensor_ind, min);
+    ret = get_dev_mon_value(amd::smi::kMonPowerCapMin, dv_ind, sensor_ind, min);
   }
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap) {
+  TRY rsmi_status_t ret;
   uint64_t min;
   uint64_t max;
   std::ostringstream ss;
@@ -4125,18 +3788,15 @@ rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonPowerCap, dv_ind,
-                                                             sensor_ind, cap);
+  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonPowerCap, dv_ind, sensor_ind, cap);
 
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t reserved,
-                                        rsmi_power_profile_status_t *status) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t reserved,
+                                                 rsmi_power_profile_status_t *status) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -4150,16 +3810,15 @@ rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t reserved,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t dummy,
-                                  rsmi_power_profile_preset_masks_t profile) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t dummy,
+                                         rsmi_power_profile_preset_masks_t profile) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
 
-  (void)dummy;
+      (void)
+      dummy;
   DEVICE_MUTEX
   rsmi_status_t ret = set_power_profile(dv_ind, profile);
 
@@ -4167,11 +3826,10 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t dummy,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
-                                 uint32_t *sensor_inds, rsmi_power_cap_type_t *sensor_types) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
+                                               uint32_t *sensor_inds,
+                                               rsmi_power_cap_type_t *sensor_types) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -4183,7 +3841,8 @@ rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
 
   const uint8_t RSMI_MAX_POWER_CAP_SENSORS = 2;
   uint32_t sensor_count_local = 0;
-  // try to read the power*_label file. If the read succeeds, that indicates that exists and update the sensor count and sensor indices accordingly
+  // try to read the power*_label file. If the read succeeds, that indicates that exists and update
+  // the sensor count and sensor indices accordingly
   for (uint32_t i = 0; i < RSMI_MAX_POWER_CAP_SENSORS; ++i) {
     // skip if monitor doesn't exist (e.g., in virtualized/partitioned environments)
     if (dev->monitor() == nullptr) {
@@ -4193,16 +3852,17 @@ rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
     std::string val;
     // sensor_ind for power starts at 1
     uint32_t adjusted_index = i + 1;
-    rsmi_status_t ret = amd::smi::ErrnoToRsmiStatus(dev->monitor()->readMonitor(amd::smi::kMonPowerLabel, adjusted_index, &val));
+    rsmi_status_t ret = amd::smi::ErrnoToRsmiStatus(
+        dev->monitor()->readMonitor(amd::smi::kMonPowerLabel, adjusted_index, &val));
     if (ret != RSMI_STATUS_SUCCESS) {
-      // if the read fails, then the sensor does not exist or is otherwise inaccessible for some reason
+      // if the read fails, then the sensor does not exist or is otherwise inaccessible for some
+      // reason
       continue;
     }
     // if val is PPT, then sensor_type is PPT0. If val is PPT1 then sensor_type is PPT1
     if (val == "PPT") {
       sensor_types[sensor_count_local] = RSMI_POWER_CAP_TYPE_PPT0;
-    }
-    else if (val == "PPT1") {
+    } else if (val == "PPT1") {
       sensor_types[sensor_count_local] = RSMI_POWER_CAP_TYPE_PPT1;
     }
     sensor_inds[sensor_count_local] = i;
@@ -4219,11 +3879,9 @@ rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
-                                                            uint64_t *total) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
+                                        uint64_t *total) {
+  TRY rsmi_status_t ret;
   amd::smi::DevInfoTypes mem_type_file;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -4258,8 +3916,7 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
   if (mem_type == RSMI_MEM_TYPE_VRAM && (*total == 0 || ret != RSMI_STATUS_SUCCESS)) {
     GET_DEV_AND_KFDNODE_FROM_INDX
     if (kfd_node->get_total_memory(total) == 0 && *total > 0) {
-      ss << __PRETTY_FUNCTION__
-         << " | inside success fallback... "
+      ss << __PRETTY_FUNCTION__ << " | inside success fallback... "
          << " | Device #: " << std::to_string(dv_ind)
          << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
          << " | Data: total = " << std::to_string(*total)
@@ -4269,22 +3926,16 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
     }
   }
 
-  ss << __PRETTY_FUNCTION__
-     << " | after fallback... "
-     << " | Device #: " << std::to_string(dv_ind)
+  ss << __PRETTY_FUNCTION__ << " | after fallback... " << " | Device #: " << std::to_string(dv_ind)
      << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
-     << " | Data: total = " << std::to_string(*total)
-     << " | ret = " << getRSMIStatusString(ret);
+     << " | Data: total = " << std::to_string(*total) << " | ret = " << getRSMIStatusString(ret);
   LOG_DEBUG(ss);
   return ret;
   CATCH
 }
 
-
-rsmi_status_t rsmi_dev_cache_info_get(
-      uint32_t dv_ind, rsmi_gpu_cache_info_t *info) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_cache_info_get(uint32_t dv_ind, rsmi_gpu_cache_info_t *info) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -4298,11 +3949,9 @@ rsmi_status_t rsmi_dev_cache_info_get(
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
-                                                              uint64_t *used) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
+                                        uint64_t *used) {
+  TRY rsmi_status_t ret;
   amd::smi::DevInfoTypes mem_type_file;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -4339,19 +3988,16 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
     uint64_t total = 0;
     ret = get_dev_value_int(amd::smi::kDevMemTotVRAM, dv_ind, &total);
     if (total != 0) {
-      ss << __PRETTY_FUNCTION__
-         << " no fallback needed! - "
+      ss << __PRETTY_FUNCTION__ << " no fallback needed! - "
          << " | Device #: " << std::to_string(dv_ind)
          << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
          << " | Data: Used = " << std::to_string(*used)
-         << " | Data: total = " << std::to_string(total)
-         << " | ret = " << getRSMIStatusString(ret);
-    LOG_DEBUG(ss);
+         << " | Data: total = " << std::to_string(total) << " | ret = " << getRSMIStatusString(ret);
+      LOG_DEBUG(ss);
       return ret;  // do not need to fallback
     }
-    if ( kfd_node->get_used_memory(used) == 0 ) {
-      ss << __PRETTY_FUNCTION__
-         << " | in fallback == success ..."
+    if (kfd_node->get_used_memory(used) == 0) {
+      ss << __PRETTY_FUNCTION__ << " | in fallback == success ..."
          << " | Device #: " << std::to_string(dv_ind)
          << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
          << " | Data: Used = " << std::to_string(*used)
@@ -4361,22 +4007,18 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
       return RSMI_STATUS_SUCCESS;
     }
   }
-  ss << __PRETTY_FUNCTION__
-     << " | at end!!!! after fallback ..."
+  ss << __PRETTY_FUNCTION__ << " | at end!!!! after fallback ..."
      << " | Device #: " << std::to_string(dv_ind)
      << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
-     << " | Data: Used = " << std::to_string(*used)
-     << " | ret = " << getRSMIStatusString(ret);
+     << " | Data: Used = " << std::to_string(*used) << " | ret = " << getRSMIStatusString(ret);
   LOG_DEBUG(ss);
 
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
+  TRY rsmi_status_t ret;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -4396,130 +4038,146 @@ rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_status_string(rsmi_status_t status, const char **status_string) {
-  TRY
-  if (status_string == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
+rsmi_status_t rsmi_status_string(rsmi_status_t status, const char **status_string) {
+  TRY if (status_string == nullptr) { return RSMI_STATUS_INVALID_ARGS; }
 
   const size_t status_u = static_cast<size_t>(status);
   switch (status_u) {
     case RSMI_STATUS_SUCCESS:
-      *status_string = "RSMI_STATUS_SUCCESS: The function has been executed"
-                          " successfully.";
+      *status_string =
+          "RSMI_STATUS_SUCCESS: The function has been executed"
+          " successfully.";
       break;
 
     case RSMI_STATUS_INVALID_ARGS:
       *status_string =
           "RSMI_STATUS_INVALID_ARGS: The provided arguments do not"
-                " meet the preconditions required for calling this function.";
+          " meet the preconditions required for calling this function.";
       break;
 
     case RSMI_STATUS_NOT_SUPPORTED:
-      *status_string = "RSMI_STATUS_NOT_SUPPORTED: This function is not"
-                                     " supported in the current environment.";
+      *status_string =
+          "RSMI_STATUS_NOT_SUPPORTED: This function is not"
+          " supported in the current environment.";
       break;
 
     case RSMI_STATUS_FILE_ERROR:
       *status_string =
-        "RSMI_STATUS_FILE_ERROR: There was an error in finding or"
-        " opening a file or directory. The operation may not be supported by "
-        "this Linux kernel version.";
+          "RSMI_STATUS_FILE_ERROR: There was an error in finding or"
+          " opening a file or directory. The operation may not be supported by "
+          "this Linux kernel version.";
       break;
 
     case RSMI_STATUS_PERMISSION:
-      *status_string = "RSMI_STATUS_PERMISSION: The user ID of the calling"
-        " process does not have sufficient permission to execute a command."
-        "  Often this is fixed by running as root (sudo).";
+      *status_string =
+          "RSMI_STATUS_PERMISSION: The user ID of the calling"
+          " process does not have sufficient permission to execute a command."
+          "  Often this is fixed by running as root (sudo).";
       break;
 
     case RSMI_STATUS_OUT_OF_RESOURCES:
-      *status_string = "RSMI_STATUS_OUT_OF_RESOURCES: Unable to acquire memory "
-                       "or other resource";
+      *status_string =
+          "RSMI_STATUS_OUT_OF_RESOURCES: Unable to acquire memory "
+          "or other resource";
       break;
 
     case RSMI_STATUS_INTERNAL_EXCEPTION:
-      *status_string = "RSMI_STATUS_INTERNAL_EXCEPTION: An internal exception "
-                       "was caught";
+      *status_string =
+          "RSMI_STATUS_INTERNAL_EXCEPTION: An internal exception "
+          "was caught";
       break;
 
     case RSMI_STATUS_INPUT_OUT_OF_BOUNDS:
-      *status_string = "RSMI_STATUS_INPUT_OUT_OF_BOUNDS: The provided input is "
-                       "out of allowable or safe range";
+      *status_string =
+          "RSMI_STATUS_INPUT_OUT_OF_BOUNDS: The provided input is "
+          "out of allowable or safe range";
       break;
 
     case RSMI_STATUS_INIT_ERROR:
-      *status_string = "RSMI_STATUS_INIT_ERROR: An error occurred during "
-                       "initialization, during monitor discovery or when when "
-                       "initializing internal data structures";
+      *status_string =
+          "RSMI_STATUS_INIT_ERROR: An error occurred during "
+          "initialization, during monitor discovery or when when "
+          "initializing internal data structures";
       break;
 
     case RSMI_STATUS_NOT_YET_IMPLEMENTED:
-      *status_string = "RSMI_STATUS_NOT_YET_IMPLEMENTED: The called function "
-                        "has not been implemented in this system for this "
-                        "device type";
+      *status_string =
+          "RSMI_STATUS_NOT_YET_IMPLEMENTED: The called function "
+          "has not been implemented in this system for this "
+          "device type";
       break;
 
     case RSMI_STATUS_NOT_FOUND:
-      *status_string = "RSMI_STATUS_NOT_FOUND: An item required to complete "
-                       "the call was not found";
+      *status_string =
+          "RSMI_STATUS_NOT_FOUND: An item required to complete "
+          "the call was not found";
       break;
 
     case RSMI_STATUS_INSUFFICIENT_SIZE:
-      *status_string = "RSMI_STATUS_INSUFFICIENT_SIZE: Not enough resources "
-                       "were available to fully execute the call";
+      *status_string =
+          "RSMI_STATUS_INSUFFICIENT_SIZE: Not enough resources "
+          "were available to fully execute the call";
       break;
 
     case RSMI_STATUS_INTERRUPT:
-      *status_string = "RSMI_STATUS_INTERRUPT: An interrupt occurred while "
-                       "executing the function";
+      *status_string =
+          "RSMI_STATUS_INTERRUPT: An interrupt occurred while "
+          "executing the function";
       break;
 
     case RSMI_STATUS_UNEXPECTED_SIZE:
-      *status_string = "RSMI_STATUS_UNEXPECTED_SIZE: Data (usually from reading"
-                       " a file) was out of range from what was expected";
+      *status_string =
+          "RSMI_STATUS_UNEXPECTED_SIZE: Data (usually from reading"
+          " a file) was out of range from what was expected";
       break;
 
     case RSMI_STATUS_NO_DATA:
-      *status_string = "RSMI_STATUS_NO_DATA: No data was found (usually from "
-                       "reading a file) where data was expected";
+      *status_string =
+          "RSMI_STATUS_NO_DATA: No data was found (usually from "
+          "reading a file) where data was expected";
       break;
 
     case RSMI_STATUS_UNEXPECTED_DATA:
-      *status_string = "RSMI_STATUS_UNEXPECTED_DATA: Data read (usually from "
-                       "a file) or provided to function is "
-                       "not what was expected";
+      *status_string =
+          "RSMI_STATUS_UNEXPECTED_DATA: Data read (usually from "
+          "a file) or provided to function is "
+          "not what was expected";
       break;
 
     case RSMI_STATUS_BUSY:
-      *status_string = "RSMI_STATUS_BUSY: A resource or mutex could not be "
-                        "acquired because it is already being used";
-    break;
+      *status_string =
+          "RSMI_STATUS_BUSY: A resource or mutex could not be "
+          "acquired because it is already being used";
+      break;
 
     case RSMI_STATUS_REFCOUNT_OVERFLOW:
-      *status_string = "RSMI_STATUS_REFCOUNT_OVERFLOW: An internal reference "
-                       "counter exceeded INT32_MAX";
+      *status_string =
+          "RSMI_STATUS_REFCOUNT_OVERFLOW: An internal reference "
+          "counter exceeded INT32_MAX";
       break;
 
     case RSMI_STATUS_DIRECTORY_NOT_FOUND:
-      *status_string = "RSMI_STATUS_DIRECTORY_NOT_FOUND: Error when a "
-                       "directory is not found, maps to ENOTDIR";
+      *status_string =
+          "RSMI_STATUS_DIRECTORY_NOT_FOUND: Error when a "
+          "directory is not found, maps to ENOTDIR";
       break;
 
     case RSMI_STATUS_SETTING_UNAVAILABLE:
-      *status_string = "RSMI_STATUS_SETTING_UNAVAILABLE: Requested setting is "
-                        "unavailable for the current device";
+      *status_string =
+          "RSMI_STATUS_SETTING_UNAVAILABLE: Requested setting is "
+          "unavailable for the current device";
       break;
 
     case RSMI_STATUS_AMDGPU_RESTART_ERR:
-      *status_string = "RSMI_STATUS_AMDGPU_RESTART_ERR: Could not successfully "
-                        "restart the amdgpu driver";
+      *status_string =
+          "RSMI_STATUS_AMDGPU_RESTART_ERR: Could not successfully "
+          "restart the amdgpu driver";
       break;
 
     case RSMI_STATUS_UNKNOWN_ERROR:
-      *status_string = "RSMI_STATUS_UNKNOWN_ERROR: An unknown error prevented "
-                       "the call from completing successfully";
+      *status_string =
+          "RSMI_STATUS_UNKNOWN_ERROR: An unknown error prevented "
+          "the call from completing successfully";
       break;
 
     default:
@@ -4530,10 +4188,8 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
-  TRY
-  std::string val_str;
+rsmi_status_t rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
+  TRY std::string val_str;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -4541,8 +4197,7 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
   CHK_SUPPORT_NAME_ONLY(busy_percent)
 
   DEVICE_MUTEX
-  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevUsage, dv_ind,
-                                                                    &val_str);
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevUsage, dv_ind, &val_str);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -4560,16 +4215,13 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_utilization_count_get(uint32_t dv_ind,
-                rsmi_utilization_counter_t utilization_counters[],
-                uint32_t count,
-                uint64_t *timestamp) {
+rsmi_status_t rsmi_utilization_count_get(uint32_t dv_ind,
+                                         rsmi_utilization_counter_t utilization_counters[],
+                                         uint32_t count, uint64_t *timestamp) {
   TRY
 
-  if (timestamp == nullptr ||
-      utilization_counters == nullptr) {
-      return RSMI_STATUS_INVALID_ARGS;
+      if (timestamp == nullptr || utilization_counters == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
   }
 
   rsmi_status_t ret;
@@ -4581,19 +4233,22 @@ rsmi_utilization_count_get(uint32_t dv_ind,
     return ret;
   }
 
-  for (uint32_t index = 0 ; index < count; index++) {
+  for (uint32_t index = 0; index < count; index++) {
     switch (utilization_counters[index].type) {
-
       case RSMI_COARSE_GRAIN_GFX_ACTIVITY:
       case RSMI_FINE_GRAIN_GFX_ACTIVITY:
         val_counter = 1;
         utilization_counters[index].value = gpu_metrics.gfx_activity_acc;
         utilization_counters[index].fine_value[0] =
-          (gpu_metrics.gfx_activity_acc != std::numeric_limits<decltype(gpu_metrics.gfx_activity_acc)>::max())
-            ? gpu_metrics.gfx_activity_acc : std::numeric_limits<uint64_t>::max();
+            (gpu_metrics.gfx_activity_acc !=
+             std::numeric_limits<decltype(gpu_metrics.gfx_activity_acc)>::max())
+                ? gpu_metrics.gfx_activity_acc
+                : std::numeric_limits<uint64_t>::max();
         utilization_counters[index].fine_value_count =
-            (gpu_metrics.gfx_activity_acc == std::numeric_limits<decltype(gpu_metrics.gfx_activity_acc)>::max())
-            ? 0 : val_counter;
+            (gpu_metrics.gfx_activity_acc ==
+             std::numeric_limits<decltype(gpu_metrics.gfx_activity_acc)>::max())
+                ? 0
+                : val_counter;
         break;
 
       case RSMI_COARSE_GRAIN_MEM_ACTIVITY:
@@ -4601,38 +4256,42 @@ rsmi_utilization_count_get(uint32_t dv_ind,
         val_counter = 1;
         utilization_counters[index].value = gpu_metrics.mem_activity_acc;
         utilization_counters[index].fine_value[0] =
-          (gpu_metrics.mem_activity_acc != std::numeric_limits<decltype(gpu_metrics.mem_activity_acc)>::max())
-            ? gpu_metrics.mem_activity_acc : std::numeric_limits<uint64_t>::max();
+            (gpu_metrics.mem_activity_acc !=
+             std::numeric_limits<decltype(gpu_metrics.mem_activity_acc)>::max())
+                ? gpu_metrics.mem_activity_acc
+                : std::numeric_limits<uint64_t>::max();
         utilization_counters[index].fine_value_count =
-            (gpu_metrics.mem_activity_acc == std::numeric_limits<decltype(gpu_metrics.mem_activity_acc)>::max())
-            ? 0 : val_counter;
+            (gpu_metrics.mem_activity_acc ==
+             std::numeric_limits<decltype(gpu_metrics.mem_activity_acc)>::max())
+                ? 0
+                : val_counter;
         break;
 
       case RSMI_COARSE_DECODER_ACTIVITY:
-      case RSMI_FINE_DECODER_ACTIVITY:
-        {
-          auto value_count = uint16_t(0);
-          auto value_accum = uint64_t(0);
-          for (const auto& elem : gpu_metrics.vcn_activity) {
-            if (elem != std::numeric_limits<uint16_t>::max()) {
-              ++value_count;
-              value_accum += elem;
-            }
-
-            if (utilization_counters[index].type == RSMI_UTILIZATION_COUNTER_TYPE::RSMI_FINE_DECODER_ACTIVITY) {
-              utilization_counters[index].fine_value[value_count] = elem;
-            }
+      case RSMI_FINE_DECODER_ACTIVITY: {
+        auto value_count = uint16_t(0);
+        auto value_accum = uint64_t(0);
+        for (const auto &elem : gpu_metrics.vcn_activity) {
+          if (elem != std::numeric_limits<uint16_t>::max()) {
+            ++value_count;
+            value_accum += elem;
           }
 
-          utilization_counters[index].value = 0;
-          utilization_counters[index].fine_value_count = value_count;
-          if (utilization_counters[index].type == RSMI_UTILIZATION_COUNTER_TYPE::RSMI_COARSE_DECODER_ACTIVITY) {
-            if (value_count > 0) {
-              utilization_counters[index].value = (value_accum / value_count);
-            }
+          if (utilization_counters[index].type ==
+              RSMI_UTILIZATION_COUNTER_TYPE::RSMI_FINE_DECODER_ACTIVITY) {
+            utilization_counters[index].fine_value[value_count] = elem;
           }
         }
-        break;
+
+        utilization_counters[index].value = 0;
+        utilization_counters[index].fine_value_count = value_count;
+        if (utilization_counters[index].type ==
+            RSMI_UTILIZATION_COUNTER_TYPE::RSMI_COARSE_DECODER_ACTIVITY) {
+          if (value_count > 0) {
+            utilization_counters[index].value = (value_accum / value_count);
+          }
+        }
+      } break;
 
       default:
         return RSMI_STATUS_INVALID_ARGS;
@@ -4644,25 +4303,18 @@ rsmi_utilization_count_get(uint32_t dv_ind,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_activity_metric_get(uint32_t dv_ind,
-                             rsmi_activity_metric_t activity_metric_type,
-                             rsmi_activity_metric_counter_t* activity_metric_counter) {
-
-  TRY
-  std::ostringstream ostrstream;
+rsmi_status_t rsmi_dev_activity_metric_get(
+    uint32_t dv_ind, rsmi_activity_metric_t activity_metric_type,
+    rsmi_activity_metric_counter_t *activity_metric_counter) {
+  TRY std::ostringstream ostrstream;
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
   if (!activity_metric_counter) {
-    ostrstream << __PRETTY_FUNCTION__
-               << " | ======= end ======= "
-               << " | Fail "
-               << " | Device #: " << dv_ind
-               << " | Metric Type: " << activity_metric_type
+    ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+               << " | Device #: " << dv_ind << " | Metric Type: " << activity_metric_type
                << " | Cause: rsmi_activity_metric_counter_t was a null ptr reference"
-               << " | Returning = "
-               << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+               << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
     LOG_ERROR(ostrstream);
     return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
   }
@@ -4671,15 +4323,10 @@ rsmi_dev_activity_metric_get(uint32_t dv_ind,
   rsmi_gpu_metrics_t gpu_metrics;
   status_code = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
   if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    ostrstream << __PRETTY_FUNCTION__
-               << " | ======= end ======= "
-               << " | Fail "
-               << " | Device #: " << dv_ind
-               << " | Metric Type: " << activity_metric_type
+    ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
+               << " | Device #: " << dv_ind << " | Metric Type: " << activity_metric_type
                << " | Cause: rsmi_dev_gpu_metrics_info_get returned "
-               << getRSMIStatusString(status_code)
-               << " | Returning = "
-               << status_code << " |";
+               << getRSMIStatusString(status_code) << " | Returning = " << status_code << " |";
     LOG_ERROR(ostrstream);
     return status_code;
   }
@@ -4697,68 +4344,54 @@ rsmi_dev_activity_metric_get(uint32_t dv_ind,
     LOG_INFO(ostrstream);
   }
   if (activity_metric_type & rsmi_activity_metric_t::RSMI_ACTIVITY_MM) {
-    activity_metric_counter->average_mm_activity  = gpu_metrics.average_mm_activity;
+    activity_metric_counter->average_mm_activity = gpu_metrics.average_mm_activity;
     ostrstream << __PRETTY_FUNCTION__
                << " | For MM: " << activity_metric_counter->average_mm_activity;
     LOG_INFO(ostrstream);
   }
 
-  ostrstream << __PRETTY_FUNCTION__
-             << " | ======= end ======= "
-             << " | Success "
-             << " | Device #: " << dv_ind
-             << " | Metric Type: " << activity_metric_type
-             << " | Returning = "
-             << getRSMIStatusString(status_code) << " |";
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
+             << " | Device #: " << dv_ind << " | Metric Type: " << activity_metric_type
+             << " | Returning = " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
 
   return status_code;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_activity_avg_mm_get(uint32_t dv_ind, uint16_t* avg_activity) {
-
-  TRY
-  std::ostringstream ostrstream;
+rsmi_status_t rsmi_dev_activity_avg_mm_get(uint32_t dv_ind, uint16_t *avg_activity) {
+  TRY std::ostringstream ostrstream;
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
   if (!avg_activity) {
-    ostrstream << __PRETTY_FUNCTION__
-               << " | ======= end ======= "
-               << " | Fail "
+    ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
                << " | Device #: " << dv_ind
                << " | Metric Type: " << rsmi_activity_metric_t::RSMI_ACTIVITY_MM
                << " | Cause: avg_activity was a null ptr reference"
-               << " | Returning = "
-               << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+               << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
     LOG_ERROR(ostrstream);
     return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
   }
 
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
   rsmi_activity_metric_counter_t activity_metric_counter;
-  status_code = rsmi_dev_activity_metric_get(dv_ind, rsmi_activity_metric_t::RSMI_ACTIVITY_MM, &activity_metric_counter);
+  status_code = rsmi_dev_activity_metric_get(dv_ind, rsmi_activity_metric_t::RSMI_ACTIVITY_MM,
+                                             &activity_metric_counter);
   avg_activity = &activity_metric_counter.average_mm_activity;
 
-  ostrstream << __PRETTY_FUNCTION__
-             << " | ======= end ======= "
-             << " | Success "
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
              << " | Device #: " << dv_ind
              << " | Metric Type: " << rsmi_activity_metric_t::RSMI_ACTIVITY_MM
-             << " | Returning = "
-             << getRSMIStatusString(status_code) << " |";
+             << " | Returning = " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
 
   return status_code;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(vbios)
@@ -4788,10 +4421,8 @@ rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_vbios_build_number_get(uint32_t dv_ind, char *vbios_build, uint32_t len) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_vbios_build_number_get(uint32_t dv_ind, char *vbios_build, uint32_t len) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(vbios_build)
@@ -4821,11 +4452,10 @@ rsmi_dev_vbios_build_number_get(uint32_t dv_ind, char *vbios_build, uint32_t len
   CATCH
 }
 
-rsmi_status_t
-rsmi_version_get(rsmi_version_t *version) {
+rsmi_status_t rsmi_version_get(rsmi_version_t *version) {
   TRY
 
-  if (version == nullptr) {
+      if (version == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
   version->major = rocm_smi_VERSION_MAJOR;
@@ -4840,16 +4470,14 @@ rsmi_version_get(rsmi_version_t *version) {
 
 static const char *kROCmDriverVersionPath = "/sys/module/amdgpu/version";
 
-rsmi_status_t
-rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
-                                                               uint32_t len) {
+rsmi_status_t rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str, uint32_t len) {
   if (ver_str == nullptr || len == 0) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
   TRY
 
-  int err;
+      int err;
   std::string val_str;
   std::string ver_path;
 
@@ -4888,8 +4516,7 @@ rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
   CATCH
 }
 
-rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind,
-                                             char *serial_num, uint32_t len) {
+rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind, char *serial_num, uint32_t len) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -4898,12 +4525,10 @@ rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  TRY
-  DEVICE_MUTEX
+  TRY DEVICE_MUTEX
 
-  std::string val_str;
-  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevSerialNumber,
-                                                            dv_ind, &val_str);
+      std::string val_str;
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevSerialNumber, dv_ind, &val_str);
 
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
@@ -4921,10 +4546,8 @@ rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t *counter) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t *counter) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(counter)
@@ -4938,10 +4561,8 @@ rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t *counter) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
-  TRY
-  rsmi_status_t ret;
+rsmi_status_t rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
+  TRY rsmi_status_t ret;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -4954,8 +4575,8 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
   ret = get_dev_value_int(amd::smi::kDevUniqueId, dv_ind, unique_id);
 
   ss << __PRETTY_FUNCTION__
-     << (ret == RSMI_STATUS_SUCCESS ?
-      " | No fall back needed retrieved from KGD" : " | fall back needed")
+     << (ret == RSMI_STATUS_SUCCESS ? " | No fall back needed retrieved from KGD"
+                                    : " | fall back needed")
      << " | Device #: " << std::to_string(dv_ind)
      << " | Data: unique_id = " << std::to_string(*unique_id)
      << " | ret = " << getRSMIStatusString(ret, false);
@@ -4988,11 +4609,9 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
-                                           rsmi_event_handle_t *evnt_handle) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
+                                      rsmi_event_handle_t *evnt_handle) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -5001,8 +4620,7 @@ rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
   // the success of this call doesn't depend on a sysfs file existing.
   CHK_SUPPORT_NAME_ONLY(evnt_handle)
   DEVICE_MUTEX
-  *evnt_handle = reinterpret_cast<uintptr_t>(
-                                      new amd::smi::evt::Event(type, dv_ind));
+  *evnt_handle = reinterpret_cast<uintptr_t>(new amd::smi::evt::Event(type, dv_ind));
 
   if (evnt_handle == nullptr) {
     return RSMI_STATUS_OUT_OF_RESOURCES;
@@ -5012,10 +4630,8 @@ rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -5024,8 +4640,7 @@ rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
   }
 
   int ret = 0;
-  amd::smi::evt::Event *evt =
-                        reinterpret_cast<amd::smi::evt::Event *>(evnt_handle);
+  amd::smi::evt::Event *evt = reinterpret_cast<amd::smi::evt::Event *>(evnt_handle);
   uint32_t dv_ind = evt->dev_ind();
   DEVICE_MUTEX
   REQUIRE_ROOT_ACCESS
@@ -5033,17 +4648,16 @@ rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
   ret = evt->stopCounter();
 
   delete evt;
-  return amd::smi::ErrnoToRsmiStatus(ret);;
+  return amd::smi::ErrnoToRsmiStatus(ret);
+  ;
   CATCH
 }
 
-rsmi_status_t
-rsmi_counter_control(rsmi_event_handle_t evt_handle,
-                                 rsmi_counter_command_t cmd, void * /*unused*/) {
+rsmi_status_t rsmi_counter_control(rsmi_event_handle_t evt_handle, rsmi_counter_command_t cmd,
+                                   void * /*unused*/) {
   TRY
 
-  amd::smi::evt::Event *evt =
-                         reinterpret_cast<amd::smi::evt::Event *>(evt_handle);
+      amd::smi::evt::Event *evt = reinterpret_cast<amd::smi::evt::Event *>(evt_handle);
   amd::smi::pthread_wrap _pw(*amd::smi::GetMutex(evt->dev_ind()));
   amd::smi::ScopedPthread _lock(_pw);
 
@@ -5073,17 +4687,14 @@ rsmi_counter_control(rsmi_event_handle_t evt_handle,
   CATCH
 }
 
-rsmi_status_t
-rsmi_counter_read(rsmi_event_handle_t evt_handle,
-                                                rsmi_counter_value_t *value) {
+rsmi_status_t rsmi_counter_read(rsmi_event_handle_t evt_handle, rsmi_counter_value_t *value) {
   TRY
 
-  if (value == nullptr || evt_handle == 0) {
+      if (value == nullptr || evt_handle == 0) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  amd::smi::evt::Event *evt =
-                         reinterpret_cast<amd::smi::evt::Event *>(evt_handle);
+  amd::smi::evt::Event *evt = reinterpret_cast<amd::smi::evt::Event *>(evt_handle);
 
   uint32_t dv_ind = evt->dev_ind();
   DEVICE_MUTEX
@@ -5106,25 +4717,19 @@ rsmi_counter_read(rsmi_event_handle_t evt_handle,
   CATCH
 }
 
-rsmi_status_t
-rsmi_counter_available_counters_get(uint32_t dv_ind,
-                                rsmi_event_group_t grp, uint32_t *available) {
+rsmi_status_t rsmi_counter_available_counters_get(uint32_t dv_ind, rsmi_event_group_t grp,
+                                                  uint32_t *available) {
   rsmi_status_t ret;
 
-  TRY
-  CHK_SUPPORT_VAR(available, grp)
-  DEVICE_MUTEX
-  uint64_t val = 0;
+  TRY CHK_SUPPORT_VAR(available, grp) DEVICE_MUTEX uint64_t val = 0;
 
   switch (grp) {
     case RSMI_EVNT_GRP_XGMI:
     case RSMI_EVNT_GRP_XGMI_DATA_OUT:
 
       ret = get_dev_value_int(amd::smi::kDevDFCountersAvailable, dv_ind, &val);
-      if (ret != RSMI_STATUS_SUCCESS)
-        return ret;
-      if (val == UINT32_MAX)
-        return RSMI_STATUS_NOT_SUPPORTED;
+      if (ret != RSMI_STATUS_SUCCESS) return ret;
+      if (val == UINT32_MAX) return RSMI_STATUS_NOT_SUPPORTED;
       *available = static_cast<uint32_t>(val);
       break;
 
@@ -5135,10 +4740,8 @@ rsmi_counter_available_counters_get(uint32_t dv_ind,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   DEVICE_MUTEX
@@ -5154,12 +4757,10 @@ rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_compute_process_info_get(rsmi_process_info_t *procs,
-                                                        uint32_t *num_items) {
+rsmi_status_t rsmi_compute_process_info_get(rsmi_process_info_t *procs, uint32_t *num_items) {
   TRY
 
-  if (num_items == nullptr) {
+      if (num_items == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
@@ -5183,12 +4784,11 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs,
   CATCH
 }
 
-rsmi_status_t
-rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
-                                                      uint32_t *num_devices) {
+rsmi_status_t rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
+                                            uint32_t *num_devices) {
   TRY
 
-  if (num_devices == nullptr) {
+      if (num_devices == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
@@ -5200,10 +4800,10 @@ rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
   }
 
   uint32_t i = 0;
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
 
   // filter out the devices not visible to container
-  auto& nodes = smi.kfd_node_map();
+  auto &nodes = smi.kfd_node_map();
   for (auto nit = gpu_set.begin(); nit != gpu_set.end();) {
     uint64_t gpu_id_val = (*nit);
     auto kfd_ite = nodes.find(gpu_id_val);
@@ -5215,8 +4815,7 @@ rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
   }
 
   if (dv_indices != nullptr) {
-    for (auto it = gpu_set.begin(); i < *num_devices && it != gpu_set.end();
-                                                                  ++it, ++i) {
+    for (auto it = gpu_set.begin(); i < *num_devices && it != gpu_set.end(); ++it, ++i) {
       uint64_t gpu_id_val = (*it);
       dv_indices[i] = nodes[gpu_id_val]->amdgpu_dev_index();
     }
@@ -5238,11 +4837,9 @@ rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
-                                          rsmi_retired_page_record_t *records) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
+                                                 rsmi_retired_page_record_t *records) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -5314,17 +4911,15 @@ rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
   CATCH
 }
 
-rsmi_status_t
-rsmi_compute_process_info_by_pid_get(uint32_t pid,
-                                                  rsmi_process_info_t *proc) {
+rsmi_status_t rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_info_t *proc) {
   TRY
 
-  if (proc == nullptr) {
+      if (proc == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
   std::unordered_set<uint64_t> gpu_set;
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
   auto it = smi.kfd_node_map().begin();
 
   while (it != smi.kfd_node_map().end()) {
@@ -5344,13 +4939,9 @@ rsmi_compute_process_info_by_pid_get(uint32_t pid,
   CATCH
 }
 
-rsmi_status_t
-rsmi_compute_process_info_by_device_get(uint32_t pid, uint32_t dv_ind,
-                                          rsmi_process_info_t *proc) {
-  TRY
-  if (proc == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
+rsmi_status_t rsmi_compute_process_info_by_device_get(uint32_t pid, uint32_t dv_ind,
+                                                      rsmi_process_info_t *proc) {
+  TRY if (proc == nullptr) { return RSMI_STATUS_INVALID_ARGS; }
   // Check the device and kfdnode exist
   GET_DEV_AND_KFDNODE_FROM_INDX
 
@@ -5367,10 +4958,8 @@ rsmi_compute_process_info_by_device_get(uint32_t pid, uint32_t dv_ind,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(status)
@@ -5407,10 +4996,8 @@ rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_xgmi_error_reset(uint32_t dv_ind) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_xgmi_error_reset(uint32_t dv_ind) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   DEVICE_MUTEX
@@ -5425,10 +5012,8 @@ rsmi_dev_xgmi_error_reset(uint32_t dv_ind) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_xgmi_hive_id_get(uint32_t dv_ind, uint64_t *hive_id) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_xgmi_hive_id_get(uint32_t dv_ind, uint64_t *hive_id) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -5444,20 +5029,18 @@ rsmi_dev_xgmi_hive_id_get(uint32_t dv_ind, uint64_t *hive_id) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_topo_get_numa_node_number(uint32_t dv_ind, uint32_t *numa_node) {
+rsmi_status_t rsmi_topo_get_numa_node_number(uint32_t dv_ind, uint32_t *numa_node) {
   TRY
 
-  return topo_get_numa_node_number(dv_ind, numa_node);
+      return topo_get_numa_node_number(dv_ind, numa_node);
   CATCH
 }
 
-rsmi_status_t
-rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                          uint64_t *weight) {
+rsmi_status_t rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                                        uint64_t *weight) {
   TRY
 
-  uint32_t dv_ind = dv_ind_src;
+      uint32_t dv_ind = dv_ind_src;
   GET_DEV_AND_KFDNODE_FROM_INDX
   DEVICE_MUTEX
 
@@ -5496,8 +5079,7 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
         if (status == RSMI_STATUS_SUCCESS) {
           if (numa_number_src != numa_number_dst) {
             uint64_t io_link_weight;
-            ret = smi.get_io_link_weight(numa_number_src, numa_number_dst,
-                                         &io_link_weight);
+            ret = smi.get_io_link_weight(numa_number_src, numa_number_dst, &io_link_weight);
             if (ret == 0) {
               *weight = *weight + io_link_weight;
               // from src numa CPU node to dst numa CPU node
@@ -5526,12 +5108,11 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   CATCH
 }
 
- rsmi_status_t
- rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                           uint64_t *min_bandwidth, uint64_t *max_bandwidth) {
+rsmi_status_t rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                                        uint64_t *min_bandwidth, uint64_t *max_bandwidth) {
   TRY
 
-  uint32_t dv_ind = dv_ind_src;
+      uint32_t dv_ind = dv_ind_src;
   GET_DEV_AND_KFDNODE_FROM_INDX
   DEVICE_MUTEX
 
@@ -5551,16 +5132,14 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-
   amd::smi::IO_LINK_TYPE type;
   ret = kfd_node->get_io_link_type(node_ind_dst, &type);
-  if ( ret == 0 && type == amd::smi::IOLINK_TYPE_XGMI) {
-      ret = kfd_node->get_io_link_bandwidth(node_ind_dst,max_bandwidth,
-                                                               min_bandwidth);
-      if (ret == 0)
-        status = RSMI_STATUS_SUCCESS;
-      else
-        status = RSMI_STATUS_INIT_ERROR;
+  if (ret == 0 && type == amd::smi::IOLINK_TYPE_XGMI) {
+    ret = kfd_node->get_io_link_bandwidth(node_ind_dst, max_bandwidth, min_bandwidth);
+    if (ret == 0)
+      status = RSMI_STATUS_SUCCESS;
+    else
+      status = RSMI_STATUS_INIT_ERROR;
   } else {  // from src GPU to it's CPU node, or type not XGMI
     status = RSMI_STATUS_NOT_SUPPORTED;
   }
@@ -5569,12 +5148,11 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   CATCH
 }
 
-rsmi_status_t
-rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                        uint64_t *hops, RSMI_IO_LINK_TYPE *type) {
+rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, uint64_t *hops,
+                                      RSMI_IO_LINK_TYPE *type) {
   TRY
 
-  uint32_t dv_ind = dv_ind_src;
+      uint32_t dv_ind = dv_ind_src;
   GET_DEV_AND_KFDNODE_FROM_INDX
 
   if (hops == nullptr) {
@@ -5594,8 +5172,7 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
     if (kfd_node->numa_node_weight() == 0) {
       return RSMI_STATUS_NOT_SUPPORTED;
     }
-    amd::smi::IO_LINK_TYPE io_link_type =
-              kfd_node->numa_node_type();
+    amd::smi::IO_LINK_TYPE io_link_type = kfd_node->numa_node_type();
     switch (io_link_type) {
       case amd::smi::IOLINK_TYPE_XGMI:
         *type = RSMI_IOLINK_TYPE_XGMI;
@@ -5634,8 +5211,7 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
           *hops = 2;  // same CPU node
         } else {
           uint64_t io_link_weight;
-          ret = smi.get_io_link_weight(numa_number_src, numa_number_dst,
-                                       &io_link_weight);
+          ret = smi.get_io_link_weight(numa_number_src, numa_number_dst, &io_link_weight);
           if (ret == 0)
             *hops = 3;  // from src CPU node to dst CPU node
           else
@@ -5658,12 +5234,10 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   CATCH
 }
 
-rsmi_status_t
-rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                       bool *accessible) {
+rsmi_status_t rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst, bool *accessible) {
   TRY
 
-  uint32_t dv_ind = dv_ind_src;
+      uint32_t dv_ind = dv_ind_src;
   GET_DEV_AND_KFDNODE_FROM_INDX
 
   if (accessible == nullptr) {
@@ -5688,7 +5262,7 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   // Iterate over P2P links
   if (DiscoverP2PLinksPerNode(node_ind_src, &io_link_map_tmp) == 0) {
     for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
-      if(it->first == node_ind_dst) {
+      if (it->first == node_ind_dst) {
         *accessible = true;
         return RSMI_STATUS_SUCCESS;
       }
@@ -5701,7 +5275,7 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   // Iterate over IO links
   if (DiscoverIOLinksPerNode(node_ind_src, &io_link_map_tmp) == 0) {
     for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
-      if(it->first == node_ind_dst) {
+      if (it->first == node_ind_dst) {
         *accessible = true;
         return RSMI_STATUS_SUCCESS;
       }
@@ -5715,12 +5289,11 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   CATCH
 }
 
-rsmi_status_t
-rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                         RSMI_IO_LINK_TYPE *type, rsmi_p2p_capability_t *cap) {
+rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                                       RSMI_IO_LINK_TYPE *type, rsmi_p2p_capability_t *cap) {
   TRY
 
-  uint32_t dv_ind = dv_ind_src;
+      uint32_t dv_ind = dv_ind_src;
   GET_DEV_AND_KFDNODE_FROM_INDX
   DEVICE_MUTEX
 
@@ -5785,19 +5358,20 @@ rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
     /*
      *  Note: Adjust tmp_capability for the returned capabilities.
      *  Todo: We need to fix it directy as part of the KFD Nodes 'KFDNode::Initialize(void)'
-     *        However, it involves a more complex change, so we will discuss it and fix in in the future.
-     *          Ideally, due to the fact we would need to check every IO link (for each KFD node), and
-     *          considering the topology could change (ie; new GPUs added, partioning changed, etc), we
-     *          are looking into O(N^2) time complexity, no to mention the fact that the IO links then
-     *          need to be changed/updated too. I have some ideas about how to do this, but it will take
+     *        However, it involves a more complex change, so we will discuss it and fix in in the
+     * future. Ideally, due to the fact we would need to check every IO link (for each KFD node),
+     * and considering the topology could change (ie; new GPUs added, partioning changed, etc), we
+     *          are looking into O(N^2) time complexity, no to mention the fact that the IO links
+     * then need to be changed/updated too. I have some ideas about how to do this, but it will take
      *          some time to implement and test it, should we consider it is *really necessary*.
      *
      */
     auto tmp_capability = it->second->get_link_capability();
-    if (auto link_direction_result = amd::smi::DiscoverIOLinkPerNodeDirection(node_ind_src, node_ind_dst);
+    if (auto link_direction_result =
+            amd::smi::DiscoverIOLinkPerNodeDirection(node_ind_src, node_ind_dst);
         link_direction_result == amd::smi::IOLinkDirectionType_t::kBiDirectional) {
-        // 1 = true, 0 = false
-        tmp_capability.is_iolink_bi_directional = 1;
+      // 1 = true, 0 = false
+      tmp_capability.is_iolink_bi_directional = 1;
     }
     *cap = tmp_capability;
     return RSMI_STATUS_SUCCESS;
@@ -5808,18 +5382,16 @@ rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   CATCH
 }
 
-static rsmi_status_t get_compute_partition(uint32_t dv_ind,
-                                          std::string &compute_partition) {
-  TRY
-  std::ostringstream ss;
+static rsmi_status_t get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(compute_partition.c_str())
   std::string compute_partition_str;
 
   DEVICE_MUTEX
-  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevComputePartition,
-                                        dv_ind, &compute_partition_str);
+  rsmi_status_t ret =
+      get_dev_value_str(amd::smi::kDevComputePartition, dv_ind, &compute_partition_str);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -5843,130 +5415,94 @@ static rsmi_status_t get_compute_partition(uint32_t dv_ind,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
-                               uint32_t len) {
-  TRY
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind = "
-     << dv_ind;
+rsmi_status_t rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
+                                             uint32_t len) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind = " << dv_ind;
   LOG_TRACE(ss);
   if ((len == 0) || (compute_partition == nullptr)) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Cause: len was 0 or compute_partition variable was null"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
   CHK_SUPPORT_NAME_ONLY(compute_partition)
 
   std::string returning_compute_partition;
-  rsmi_status_t ret = get_compute_partition(dv_ind,
-                               returning_compute_partition);
+  rsmi_status_t ret = get_compute_partition(dv_ind, returning_compute_partition);
 
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Cause: could not retrieve current compute partition"
-       << " | Returning = "
-       << getRSMIStatusString(ret) << " |";
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
     LOG_ERROR(ss);
     return ret;
   }
 
-  std::size_t length = returning_compute_partition.copy(compute_partition, len-1);
-  compute_partition[length]='\0';
+  std::size_t length = returning_compute_partition.copy(compute_partition, len - 1);
+  compute_partition[length] = '\0';
 
   if (len < (returning_compute_partition.size() + 1)) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Cause: requested size was insufficient"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
-     << " | Data: " << compute_partition
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
+     << " | Data: " << compute_partition << " | Returning = " << getRSMIStatusString(ret) << " |";
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
-static rsmi_status_t
-is_available_compute_partition(uint32_t dv_ind,
-                               std::string new_compute_partition) {
-  TRY
-  std::ostringstream ss;
+static rsmi_status_t is_available_compute_partition(uint32_t dv_ind,
+                                                    std::string new_compute_partition) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   DEVICE_MUTEX
   std::string availableComputePartitions;
-  rsmi_status_t ret =
-      get_dev_value_line(amd::smi::kDevAvailableComputePartition,
-                         dv_ind, &availableComputePartitions);
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevAvailableComputePartition, dv_ind,
+                                         &availableComputePartitions);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | FAIL "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | FAIL "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
        << " | Data: could not retrieve requested data"
-       << " | Returning = "
-       << getRSMIStatusString(ret) << " |";
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
     LOG_ERROR(ss);
     return ret;
   }
 
   bool isComputePartitionAvailable =
-      amd::smi::containsString(availableComputePartitions,
-                               new_compute_partition);
+      amd::smi::containsString(availableComputePartitions, new_compute_partition);
 
-  ret = ((isComputePartitionAvailable) ? RSMI_STATUS_SUCCESS :
-                                         RSMI_STATUS_SETTING_UNAVAILABLE);
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ret = ((isComputePartitionAvailable) ? RSMI_STATUS_SUCCESS : RSMI_STATUS_SETTING_UNAVAILABLE);
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
      << " | Data: available_partitions = " << availableComputePartitions
      << " | Data: isComputePartitionAvailable = "
      << (isComputePartitionAvailable ? "True" : "False")
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
+     << " | Returning = " << getRSMIStatusString(ret) << " |";
   LOG_INFO(ss);
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_compute_partition_set(uint32_t dv_ind,
-                              rsmi_compute_partition_type_t compute_partition) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_compute_partition_set(uint32_t dv_ind,
+                                             rsmi_compute_partition_type_t compute_partition) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -5982,330 +5518,244 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
     case RSMI_COMPUTE_PARTITION_DPX:
     case RSMI_COMPUTE_PARTITION_TPX:
     case RSMI_COMPUTE_PARTITION_QPX:
-      newComputePartitionStr =
-        mapRSMIToStringComputePartitionTypes.at(compute_partition);
+      newComputePartitionStr = mapRSMIToStringComputePartitionTypes.at(compute_partition);
       break;
     case RSMI_COMPUTE_PARTITION_INVALID:
     default:
       newComputePartitionStr =
-        mapRSMIToStringComputePartitionTypes.at(RSMI_COMPUTE_PARTITION_INVALID);
-      ss << __PRETTY_FUNCTION__
-         << " | ======= end ======= "
-         << " | Fail "
+          mapRSMIToStringComputePartitionTypes.at(RSMI_COMPUTE_PARTITION_INVALID);
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
          << " | Device #: " << dv_ind
-         << " | Type: "
-         << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
-         << " | Data: " << newComputePartitionStr
-         << " | Cause: requested setting was invalid"
-         << " | Returning = "
-         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+         << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
+         << " | Data: " << newComputePartitionStr << " | Cause: requested setting was invalid"
+         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
       LOG_ERROR(ss);
       return RSMI_STATUS_INVALID_ARGS;
   }
 
   // Confirm what we are trying to set is available, otherwise provide
   // RSMI_STATUS_SETTING_UNAVAILABLE
-  rsmi_status_t available_ret =
-      is_available_compute_partition(dv_ind, newComputePartitionStr);
+  rsmi_status_t available_ret = is_available_compute_partition(dv_ind, newComputePartitionStr);
   if (available_ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Data: " << newComputePartitionStr
        << " | Cause: not an available compute partition setting"
-       << " | Returning = "
-       << getRSMIStatusString(available_ret) << " |";
+       << " | Returning = " << getRSMIStatusString(available_ret) << " |";
     LOG_ERROR(ss);
     return available_ret;
   }
 
   // do nothing if compute_partition is the current compute partition
-  rsmi_status_t ret_get =
-                        get_compute_partition(dv_ind, currentComputePartition);
+  rsmi_status_t ret_get = get_compute_partition(dv_ind, currentComputePartition);
   // we can try to set, even if we get unexpected data
-  if (ret_get != RSMI_STATUS_SUCCESS
-      && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+  if (ret_get != RSMI_STATUS_SUCCESS && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
-       << " | Cause: could retrieve current compute partition or retrieved"
-       << " unexpected data"
-       << " | Returning = "
-       << getRSMIStatusString(ret_get) << " |";
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
+       << " | Cause: could retrieve current compute partition or retrieved" << " unexpected data"
+       << " | Returning = " << getRSMIStatusString(ret_get) << " |";
     LOG_ERROR(ss);
     return ret_get;
   }
-  rsmi_compute_partition_type_t currRSMIComputePartition
-    = mapStringToRSMIComputePartitionTypes.at(currentComputePartition);
+  rsmi_compute_partition_type_t currRSMIComputePartition =
+      mapStringToRSMIComputePartitionTypes.at(currentComputePartition);
   if (currRSMIComputePartition == compute_partition) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Success - compute partition was already set at requested value"
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Data: " << newComputePartitionStr
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
     LOG_TRACE(ss);
     return RSMI_STATUS_SUCCESS;
   }
 
-  ss <<  __PRETTY_FUNCTION__ << " | about to try writing |"
-     << newComputePartitionStr
+  ss << __PRETTY_FUNCTION__ << " | about to try writing |" << newComputePartitionStr
      << "| size of string = " << newComputePartitionStr.size();
   LOG_DEBUG(ss);
   GET_DEV_FROM_INDX
   DEVICE_MUTEX
-  int ret = dev->writeDevInfo(amd::smi::kDevComputePartition,
-                              newComputePartitionStr);
+  int ret = dev->writeDevInfo(amd::smi::kDevComputePartition, newComputePartitionStr);
   rsmi_status_t returnResponse = amd::smi::ErrnoToRsmiStatus(ret);
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
      << " | Data: " << newComputePartitionStr
-     << " | Returning = "
-     << getRSMIStatusString(returnResponse) << " |";
+     << " | Returning = " << getRSMIStatusString(returnResponse) << " |";
   LOG_TRACE(ss);
 
   return returnResponse;
   CATCH
 }
 
-rsmi_status_t rsmi_dev_compute_partition_capabilities_get(
-      uint32_t dv_ind, char *compute_partition_caps, uint32_t len) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_compute_partition_capabilities_get(uint32_t dv_ind,
+                                                          char *compute_partition_caps,
+                                                          uint32_t len) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   DEVICE_MUTEX
   std::string availableComputePartitions;
-  rsmi_status_t ret =
-      get_dev_value_line(amd::smi::kDevAvailableComputePartition,
-                         dv_ind, &availableComputePartitions);
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevAvailableComputePartition, dv_ind,
+                                         &availableComputePartitions);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | FAIL "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | FAIL "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
        << " | Data: could not retrieve requested data"
-       << " | Returning = "
-       << getRSMIStatusString(ret) << " |";
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
     LOG_ERROR(ss);
     return ret;
   }
 
-  std::size_t length = availableComputePartitions.copy(compute_partition_caps, len-1);
-  compute_partition_caps[length]='\0';
+  std::size_t length = availableComputePartitions.copy(compute_partition_caps, len - 1);
+  compute_partition_caps[length] = '\0';
 
   if (len < (availableComputePartitions.size() + 1)) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
        << " | Cause: requested size was insufficient"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
-     << " | Data: " << compute_partition_caps
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
+     << " | Data: " << compute_partition_caps << " | Returning = " << getRSMIStatusString(ret)
+     << " |";
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
 rsmi_status_t rsmi_dev_compute_partition_supported_xcp_configs_get(uint32_t dv_ind,
-                    char *supported_configs, uint32_t len) {
-  TRY
-  std::ostringstream ss;
+                                                                   char *supported_configs,
+                                                                   uint32_t len) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   DEVICE_MUTEX
   std::string supported_xcp_configs;
   rsmi_status_t ret =
-      get_dev_value_line(amd::smi::kDevSupportedXcpConfigs,
-                         dv_ind, &supported_xcp_configs);
+      get_dev_value_line(amd::smi::kDevSupportedXcpConfigs, dv_ind, &supported_xcp_configs);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | FAIL "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | FAIL "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
        << " | Data: could not retrieve requested data"
-       << " | Returning = "
-       << getRSMIStatusString(ret) << " |";
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
     LOG_ERROR(ss);
     return ret;
   }
 
-  std::size_t length = supported_xcp_configs.copy(supported_configs, len-1);
-  supported_configs[length]='\0';
+  std::size_t length = supported_xcp_configs.copy(supported_configs, len - 1);
+  supported_configs[length] = '\0';
 
   if (len < (supported_xcp_configs.size() + 1)) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
        << " | Cause: requested size was insufficient"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
-     << " | Data: " << supported_configs
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
+     << " | Data: " << supported_configs << " | Returning = " << getRSMIStatusString(ret) << " |";
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
 rsmi_status_t rsmi_dev_compute_partition_supported_nps_configs_get(uint32_t dv_ind,
-                    char *supported_configs, uint32_t len) {
-  TRY
-  std::ostringstream ss;
+                                                                   char *supported_configs,
+                                                                   uint32_t len) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   DEVICE_MUTEX
   std::string supported_nps_configs;
   rsmi_status_t ret =
-      get_dev_value_line(amd::smi::kDevSupportedNpsConfigs,
-                         dv_ind, &supported_nps_configs);
+      get_dev_value_line(amd::smi::kDevSupportedNpsConfigs, dv_ind, &supported_nps_configs);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | FAIL "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | FAIL "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevSupportedNpsConfigs)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevSupportedNpsConfigs)
        << " | Data: could not retrieve requested data"
-       << " | Returning = "
-       << getRSMIStatusString(ret) << " |";
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
     LOG_ERROR(ss);
     return ret;
   }
 
-  std::size_t length = supported_nps_configs.copy(supported_configs, len-1);
-  supported_configs[length]='\0';
+  std::size_t length = supported_nps_configs.copy(supported_configs, len - 1);
+  supported_configs[length] = '\0';
 
   if (len < (supported_nps_configs.size() + 1)) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevSupportedNpsConfigs)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevSupportedNpsConfigs)
        << " | Cause: requested size was insufficient"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevSupportedNpsConfigs)
-     << " | Data: " << supported_configs
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevSupportedNpsConfigs)
+     << " | Data: " << supported_configs << " | Returning = " << getRSMIStatusString(ret) << " |";
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
-rsmi_status_t rsmi_dev_current_compute_xcp_config_get(
-      uint32_t dv_ind, char *current_xcp_config, uint32_t len) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_current_compute_xcp_config_get(uint32_t dv_ind, char *current_xcp_config,
+                                                      uint32_t len) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   DEVICE_MUTEX
   std::string currentXcpConfigStr;
-  rsmi_status_t ret =
-      get_dev_value_line(amd::smi::kDevXcpConfig,
-                         dv_ind, &currentXcpConfigStr);
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevXcpConfig, dv_ind, &currentXcpConfigStr);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | FAIL "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | FAIL "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
        << " | Data: could not retrieve requested data"
-       << " | Returning = "
-       << getRSMIStatusString(ret) << " |";
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
     LOG_ERROR(ss);
     return ret;
   }
 
-  std::size_t length = currentXcpConfigStr.copy(current_xcp_config, len-1);
-  current_xcp_config[length]='\0';
+  std::size_t length = currentXcpConfigStr.copy(current_xcp_config, len - 1);
+  current_xcp_config[length] = '\0';
 
   if (len < (currentXcpConfigStr.size() + 1)) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
        << " | Cause: requested size was insufficient"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
-     << " | Data: " << currentXcpConfigStr
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+     << " | Data: " << currentXcpConfigStr << " | Returning = " << getRSMIStatusString(ret) << " |";
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
-                                          rsmi_compute_partition_type_t xcp_config) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
+                                                        rsmi_compute_partition_type_t xcp_config) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -6324,23 +5774,16 @@ rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
     case RSMI_COMPUTE_PARTITION_DPX:
     case RSMI_COMPUTE_PARTITION_TPX:
     case RSMI_COMPUTE_PARTITION_QPX:
-      newXcpConfigStr =
-        mapRSMIToStringComputePartitionTypes.at(xcp_config);
+      newXcpConfigStr = mapRSMIToStringComputePartitionTypes.at(xcp_config);
       break;
     case RSMI_COMPUTE_PARTITION_INVALID:
     default:
-      newXcpConfigStr =
-        mapRSMIToStringComputePartitionTypes.at(RSMI_COMPUTE_PARTITION_INVALID);
-      ss << __PRETTY_FUNCTION__
-         << " | ======= end ======= "
-         << " | Fail "
+      newXcpConfigStr = mapRSMIToStringComputePartitionTypes.at(RSMI_COMPUTE_PARTITION_INVALID);
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
          << " | Device #: " << dv_ind
-         << " | Type: "
-         << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
-         << " | Data: " << newXcpConfigStr
-         << " | Cause: requested setting was invalid"
-         << " | Returning = "
-         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+         << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+         << " | Data: " << newXcpConfigStr << " | Cause: requested setting was invalid"
+         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
       LOG_ERROR(ss);
       return RSMI_STATUS_INVALID_ARGS;
   }
@@ -6350,31 +5793,23 @@ rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
   rsmi_status_t available_ret =
       rsmi_dev_compute_partition_supported_xcp_configs_get(dv_ind, available_xcp_configs, kLen30);
   if (available_ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
-       << " | Data: " << newXcpConfigStr
-       << " | Cause: could not find an available xcp configs file"
-       << " | Returning = "
-       << getRSMIStatusString(available_ret) << " |";
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
+       << " | Data: " << newXcpConfigStr << " | Cause: could not find an available xcp configs file"
+       << " | Returning = " << getRSMIStatusString(available_ret) << " |";
     LOG_ERROR(ss);
     return available_ret;
   } else {
     availableXcpConfigsStr = available_xcp_configs;
   }
 
-  bool isXcpConfigAvailable =
-      amd::smi::containsString(availableXcpConfigsStr,
-                               newXcpConfigStr);
+  bool isXcpConfigAvailable = amd::smi::containsString(availableXcpConfigsStr, newXcpConfigStr);
   if (!isXcpConfigAvailable) {
     ss << __PRETTY_FUNCTION__
        << " | Fail  - Detected that the requested xcp config is not available"
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
        << " | Data (newXcpConfigStr): " << newXcpConfigStr
        << " | Data (availableXcpConfigsStr): " << availableXcpConfigsStr;
     LOG_ERROR(ss);
@@ -6383,47 +5818,36 @@ rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
     // write will provide the correct error code
   }
 
-  ss <<  __PRETTY_FUNCTION__ << " | about to try writing |"
-     << newXcpConfigStr
+  ss << __PRETTY_FUNCTION__ << " | about to try writing |" << newXcpConfigStr
      << "| size of string = " << newXcpConfigStr.size();
   LOG_DEBUG(ss);
   GET_DEV_FROM_INDX
   DEVICE_MUTEX
-  int ret = dev->writeDevInfo(amd::smi::kDevXcpConfig,
-                              newXcpConfigStr);
+  int ret = dev->writeDevInfo(amd::smi::kDevXcpConfig, newXcpConfigStr);
   rsmi_status_t returnResponse = amd::smi::ErrnoToRsmiStatus(ret);
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
-     << " | Data: " << newXcpConfigStr
-     << " | Returning = "
-     << getRSMIStatusString(returnResponse) << " |";
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+     << " | Data: " << newXcpConfigStr << " | Returning = " << getRSMIStatusString(returnResponse)
+     << " |";
   LOG_TRACE(ss);
 
   return returnResponse;
   CATCH
 }
 
-rsmi_status_t rsmi_dev_compute_partition_resource_profile_get(uint32_t dv_ind,
-                                  rsmi_accelerator_partition_resource_type_t *type,
-                                  rsmi_accelerator_partition_resource_profile_t *profile) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_compute_partition_resource_profile_get(
+    uint32_t dv_ind, rsmi_accelerator_partition_resource_type_t *type,
+    rsmi_accelerator_partition_resource_profile_t *profile) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   if (type == nullptr) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
        << " | Cause: user sent invalid arguments, type was a null ptr"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
     LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
@@ -6443,15 +5867,11 @@ rsmi_status_t rsmi_dev_compute_partition_resource_profile_get(uint32_t dv_ind,
     }
   }
   if (isAcceleratorTypeValid == false) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
        << " | Cause: user sent invalid arguments, type was out of range"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
     LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
@@ -6573,36 +5993,28 @@ rsmi_status_t rsmi_dev_compute_partition_resource_profile_get(uint32_t dv_ind,
     }
   }
 
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type (partition_resource): "
-     << amd::smi::Device::get_type_string(dev_info_type_inst)
-     << " | Data: " << profile->partition_resource
-     << " | Type (num_partitions_share_resource): "
+     << " | Type (partition_resource): " << amd::smi::Device::get_type_string(dev_info_type_inst)
+     << " | Data: " << profile->partition_resource << " | Type (num_partitions_share_resource): "
      << amd::smi::Device::get_type_string(dev_info_type_shared)
      << " | Data: " << profile->num_partitions_share_resource
-     << " | Returning = "
-     << getRSMIStatusString(ret, false) << " |";
+     << " | Returning = " << getRSMIStatusString(ret, false) << " |";
   LOG_TRACE(ss);
 
   return ret;
   CATCH
 }
 
-static rsmi_status_t get_memory_partition(uint32_t dv_ind,
-                                          std::string &memory_partition) {
-  TRY
-  std::ostringstream ss;
+static rsmi_status_t get_memory_partition(uint32_t dv_ind, std::string &memory_partition) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(memory_partition.c_str())
   std::string val_str;
 
   DEVICE_MUTEX
-  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevMemoryPartition,
-                                        dv_ind, &val_str);
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevMemoryPartition, dv_ind, &val_str);
 
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
@@ -6626,11 +6038,9 @@ static rsmi_status_t get_memory_partition(uint32_t dv_ind,
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_memory_partition_set(uint32_t dv_ind,
-                              rsmi_memory_partition_type_t memory_partition) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
+                                            rsmi_memory_partition_type_t memory_partition) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
@@ -6649,53 +6059,38 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
       break;
     case RSMI_MEMORY_PARTITION_UNKNOWN:
     default:
-      ss << __PRETTY_FUNCTION__
-         << " | ======= end ======= "
-         << " | Fail "
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
          << " | Device #: " << dv_ind
-         << " | Type: "
-         << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+         << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
          << " | Cause: requested setting was invalid"
-         << " | Returning = "
-         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
+         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
       LOG_ERROR(ss);
       return RSMI_STATUS_INVALID_ARGS;
   }
-  std::string newMemoryPartition
-              = mapRSMIToStringMemoryPartitionTypes.at(memory_partition);
+  std::string newMemoryPartition = mapRSMIToStringMemoryPartitionTypes.at(memory_partition);
   std::string currentMemoryPartition;
 
   // do nothing if memory_partition is the current mode
   rsmi_status_t ret_get = get_memory_partition(dv_ind, currentMemoryPartition);
   // we can try to set, even if we get unexpected data
-  if (ret_get != RSMI_STATUS_SUCCESS
-      && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+  if (ret_get != RSMI_STATUS_SUCCESS && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: could retrieve current memory partition or retrieved"
-       << " unexpected data"
-       << " | Returning = "
-       << getRSMIStatusString(ret_get, false);
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Cause: could retrieve current memory partition or retrieved" << " unexpected data"
+       << " | Returning = " << getRSMIStatusString(ret_get, false);
     LOG_ERROR(ss);
     return ret_get;
   }
-  rsmi_memory_partition_type_t currRSMIMemoryPartition
-    = mapStringToMemoryPartitionTypes.at(currentMemoryPartition);
+  rsmi_memory_partition_type_t currRSMIMemoryPartition =
+      mapStringToMemoryPartitionTypes.at(currentMemoryPartition);
   if (currRSMIMemoryPartition == memory_partition) {
-    ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success - no change, current memory partition was already requested"
-     << " setting"
-     << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-     << " | Data: " << newMemoryPartition
-     << " | Returning = "
-     << getRSMIStatusString(RSMI_STATUS_SUCCESS, false);
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Success - no change, current memory partition was already requested" << " setting"
+       << " | Device #: " << dv_ind
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Data: " << newMemoryPartition
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS, false);
     LOG_TRACE(ss);
     return RSMI_STATUS_SUCCESS;
   }
@@ -6704,169 +6099,128 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   std::string memory_capabilities_str = "unknown";
   std::string user_requested_memory_partition = newMemoryPartition;
   std::transform(user_requested_memory_partition.begin(), user_requested_memory_partition.end(),
-                  user_requested_memory_partition.begin(), ::toupper);
-  rsmi_status_t caps_ret = rsmi_dev_memory_partition_capabilities_get(dv_ind,
-                              available_memory_capabilities, kMaxMemoryCapabilitiesSize);
+                 user_requested_memory_partition.begin(), ::toupper);
+  rsmi_status_t caps_ret = rsmi_dev_memory_partition_capabilities_get(
+      dv_ind, available_memory_capabilities, kMaxMemoryCapabilitiesSize);
   memory_capabilities_str = available_memory_capabilities;
   std::transform(memory_capabilities_str.begin(), memory_capabilities_str.end(),
-                  memory_capabilities_str.begin(), ::toupper);
-  ss << __PRETTY_FUNCTION__ << " | user_requested_memory_partition: "
-     << user_requested_memory_partition
+                 memory_capabilities_str.begin(), ::toupper);
+  ss << __PRETTY_FUNCTION__
+     << " | user_requested_memory_partition: " << user_requested_memory_partition
      << "; memory_capabilities_str: " << memory_capabilities_str
-     << "; rsmi_dev_memory_partition_capabilities_get(" << dv_ind
-     << ", " << user_requested_memory_partition << "): return = "
-     << amd::smi::getRSMIStatusString(caps_ret, false);
+     << "; rsmi_dev_memory_partition_capabilities_get(" << dv_ind << ", "
+     << user_requested_memory_partition
+     << "): return = " << amd::smi::getRSMIStatusString(caps_ret, false);
   LOG_DEBUG(ss);
-  if ((caps_ret == RSMI_STATUS_SUCCESS)
-      && (!memory_capabilities_str.empty())
-      && (!user_requested_memory_partition.empty())) {
-    bool is_available_mode = amd::smi::containsString(memory_capabilities_str,
-                                user_requested_memory_partition, true);
-    ss << __PRETTY_FUNCTION__
-       << " | is_available_mode: " << (is_available_mode ? "True": "False");
+  if ((caps_ret == RSMI_STATUS_SUCCESS) && (!memory_capabilities_str.empty()) &&
+      (!user_requested_memory_partition.empty())) {
+    bool is_available_mode =
+        amd::smi::containsString(memory_capabilities_str, user_requested_memory_partition, true);
+    ss << __PRETTY_FUNCTION__ << " | is_available_mode: " << (is_available_mode ? "True" : "False");
     LOG_DEBUG(ss);
     if (is_available_mode == false) {  // report RSMI_STATUS_INVALID_ARGS
-      ss << __PRETTY_FUNCTION__
-         << " | ======= Check if available mode ======= "
+      ss << __PRETTY_FUNCTION__ << " | ======= Check if available mode ======= "
          << " | WARNING: detected invalid mode to set to, will try to set anyways"
          << " | Device #: " << dv_ind
-         << " | Type: "
-         << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+         << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
          << " | Data (user requested mode): " << user_requested_memory_partition
          << " | Available Memory Partition Modes: " << memory_capabilities_str
          << " | Cause: requested setting was not an available mode"
-         << " | Returning = "
-         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
+         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
       LOG_INFO(ss);
     }
   }
 
   GET_DEV_FROM_INDX
-  int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition,
-                              newMemoryPartition);
+  int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition, newMemoryPartition);
   rsmi_status_t status = amd::smi::ErrnoToRsmiStatus(ret);
 
   if (status != RSMI_STATUS_SUCCESS) {
     if (status == RSMI_STATUS_PERMISSION) {
       status = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
     }
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: issue writing reqested setting of " + newMemoryPartition
-       << " | Returning = "
-       << getRSMIStatusString(status, false);
+       << " | Returning = " << getRSMIStatusString(status, false);
     LOG_ERROR(ss);
     return status;
   }
 
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
      << " | Data: " << newMemoryPartition
-     << " | Returning = "
-     << getRSMIStatusString(status, false);
+     << " | Returning = " << getRSMIStatusString(status, false);
   LOG_INFO(ss);
   return status;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
-                               uint32_t len) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition, uint32_t len) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   if ((len == 0) || (memory_partition == nullptr)) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: user sent invalid arguments, len = 0 or memory partition"
-       << " was a null ptr"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Cause: user sent invalid arguments, len = 0 or memory partition" << " was a null ptr"
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
   CHK_SUPPORT_NAME_ONLY(memory_partition)
 
   std::string returning_memory_partition;
-  rsmi_status_t ret = get_memory_partition(dv_ind,
-                               returning_memory_partition);
+  rsmi_status_t ret = get_memory_partition(dv_ind, returning_memory_partition);
 
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: could not successfully retrieve current memory partition "
-       << " | Returning = "
-       << getRSMIStatusString(ret) << " |";
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
     LOG_ERROR(ss);
     return ret;
   }
 
-  std::size_t buff_size =
-      returning_memory_partition.copy(memory_partition, len);
+  std::size_t buff_size = returning_memory_partition.copy(memory_partition, len);
   memory_partition[buff_size] = '\0';
 
   if (len < (returning_memory_partition.size() + 1)) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: could not successfully retrieve current memory partition "
-       << " | Returning = "
-       << getRSMIStatusString(ret) << " |";
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-     << " | Data: " << memory_partition
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+     << " | Data: " << memory_partition << " | Returning = " << getRSMIStatusString(ret) << " |";
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
-rsmi_status_t rsmi_dev_memory_partition_capabilities_get(
-      uint32_t dv_ind, char *memory_partition_caps, uint32_t len) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_memory_partition_capabilities_get(uint32_t dv_ind,
+                                                         char *memory_partition_caps,
+                                                         uint32_t len) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
 
   if ((len == 0) || (memory_partition_caps == nullptr)) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
        << " | Cause: user sent invalid arguments, len = 0 or memory_partition_caps"
        << " was a null ptr"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
     LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
@@ -6874,68 +6228,48 @@ rsmi_status_t rsmi_dev_memory_partition_capabilities_get(
   DEVICE_MUTEX
 
   std::string availableMemoryPartitions;
-  rsmi_status_t ret =
-      get_dev_value_line(amd::smi::kDevAvailableMemoryPartition,
-                         dv_ind, &availableMemoryPartitions);
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevAvailableMemoryPartition, dv_ind,
+                                         &availableMemoryPartitions);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | FAIL "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | FAIL "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
        << " | Data: could not retrieve requested data"
-       << " | Returning = "
-       << getRSMIStatusString(ret, false);
+       << " | Returning = " << getRSMIStatusString(ret, false);
     LOG_ERROR(ss);
     return ret;
   }
 
-  std::size_t length = availableMemoryPartitions.copy(memory_partition_caps, len-1);
-  memory_partition_caps[length]='\0';
+  std::size_t length = availableMemoryPartitions.copy(memory_partition_caps, len - 1);
+  memory_partition_caps[length] = '\0';
 
   if (len < (availableMemoryPartitions.size() + 1)) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Fail "
        << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
        << " | Cause: requested size was insufficient"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE, false);
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE, false);
     LOG_ERROR(ss);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success "
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success "
      << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
      << " | Data: " << memory_partition_caps
-     << " | Returning = "
-     << getRSMIStatusString(ret, false);
+     << " | Returning = " << getRSMIStatusString(ret, false);
   LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   if (partition_id == nullptr) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | FAIL"
-       << " | Device #: " << dv_ind
-       << " | Type: partition_id"
-       << " | Data: nullptr"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | FAIL" << " | Device #: " << dv_ind
+       << " | Type: partition_id" << " | Data: nullptr"
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
     LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
@@ -6947,15 +6281,15 @@ rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
     *partition_id = static_cast<uint32_t>((pci_id >> 28) & 0xf);
   }
   std::ostringstream bdf_sstream;
-  bdf_sstream << std::hex << std::setfill('0') << std::setw(4)
-  << ((pci_id >> 32) & 0xFFFFFFFF) << ":";
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(4) << ((pci_id >> 32) & 0xFFFFFFFF)
+              << ":";
   bdf_sstream << std::hex << std::setfill('0') << std::setw(2) << ((pci_id >> 8) & 0xFF) << ":";
   bdf_sstream << std::hex << std::setfill('0') << std::setw(2) << ((pci_id >> 3) & 0x1F) << ".";
   bdf_sstream << std::hex << std::setfill('0') << +(pci_id & 0x7);
   bdf_sstream << "\n[Option 1] Partition ID ((pci_id >> 28) & 0xf): " << std::dec
-  << static_cast<int>((pci_id >> 28) & 0xf);
+              << static_cast<int>((pci_id >> 28) & 0xf);
   bdf_sstream << "\n[Option 2] Partition ID (pci_id & 0x7): " << std::dec
-  << static_cast<int>(pci_id & 0x7);
+              << static_cast<int>(pci_id & 0x7);
   // std::cout << __PRETTY_FUNCTION__ << " BDF: " << bdf_sstream.str() << std::endl;
 
   /**
@@ -6977,17 +6311,13 @@ rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
   // If the partition_id is still not set (bits [31:28]), we will use the fallback
   // in function bits. We will use bits [2:0] as the partition ID.
   if (*partition_id != UINT32_MAX && *partition_id == 0 &&
-     static_cast<uint32_t>(pci_id & 0x7) != 0) {
+      static_cast<uint32_t>(pci_id & 0x7) != 0) {
     *partition_id = static_cast<uint32_t>(pci_id & 0x7);
   }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success"
-     << " | Device #: " << dv_ind
-     << " | Type: partition_id"
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | Success"
+     << " | Device #: " << dv_ind << " | Type: partition_id"
      << " | Data: " << static_cast<int>(*partition_id)
-     << " | Returning = "
-     << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |"
+     << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |"
      << "\n BDF: " << bdf_sstream.str() << std::endl;
   // std::cout << ss.str() << std::endl;
   LOG_INFO(ss);
@@ -6995,100 +6325,83 @@ rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
   CATCH
 }
 
-rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind,
-                                            uint64_t *gfx_version) {
-    TRY
-    std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | ======= start ======="
-       << " | Device #: " << dv_ind;
-    LOG_TRACE(ss);
-    rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
-    std::string version = "";
-    const uint64_t undefined_gfx_version = std::numeric_limits<uint64_t>::max();
-    if (gfx_version == nullptr) {
-      ret = RSMI_STATUS_INVALID_ARGS;
-    } else {
-      *gfx_version = undefined_gfx_version;
-      ret = amd::smi::rsmi_get_gfx_target_version(dv_ind , &version);
-    }
-    if (ret == RSMI_STATUS_SUCCESS) {
-      version = amd::smi::removeString(version, "gfx");
-      *gfx_version = uint64_t(std::stoull(version, nullptr, 16));
-    }
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Returning: " << getRSMIStatusString(ret, false)
-       << " | Device #: " << dv_ind
-       << " | Type: Target_graphics_version"
-       << " | Data: "
-       << ((gfx_version == nullptr) ? "nullptr" :
-           amd::smi::print_unsigned_hex_and_int(*gfx_version));
-    LOG_TRACE(ss);
-    return ret;
-    CATCH
+rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind, uint64_t *gfx_version) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======" << " | Device #: " << dv_ind;
+  LOG_TRACE(ss);
+  rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
+  std::string version = "";
+  const uint64_t undefined_gfx_version = std::numeric_limits<uint64_t>::max();
+  if (gfx_version == nullptr) {
+    ret = RSMI_STATUS_INVALID_ARGS;
+  } else {
+    *gfx_version = undefined_gfx_version;
+    ret = amd::smi::rsmi_get_gfx_target_version(dv_ind, &version);
+  }
+  if (ret == RSMI_STATUS_SUCCESS) {
+    version = amd::smi::removeString(version, "gfx");
+    *gfx_version = uint64_t(std::stoull(version, nullptr, 16));
+  }
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= " << " | Returning: " << getRSMIStatusString(ret, false)
+     << " | Device #: " << dv_ind << " | Type: Target_graphics_version" << " | Data: "
+     << ((gfx_version == nullptr) ? "nullptr" : amd::smi::print_unsigned_hex_and_int(*gfx_version));
+  LOG_TRACE(ss);
+  return ret;
+  CATCH
 }
 
 rsmi_status_t rsmi_dev_guid_get(uint32_t dv_ind, uint64_t *guid) {
-    TRY
-    std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | ======= start ======="
-       << " | Device #: " << dv_ind;
-    LOG_TRACE(ss);
-    GET_DEV_AND_KFDNODE_FROM_INDX
-    uint64_t kgd_gpu_id = 0;
-    rsmi_status_t resp = RSMI_STATUS_NOT_SUPPORTED;
-    int ret = kfd_node->KFDNode::get_gpu_id(&kgd_gpu_id);
-    resp = amd::smi::ErrnoToRsmiStatus(ret);
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======" << " | Device #: " << dv_ind;
+  LOG_TRACE(ss);
+  GET_DEV_AND_KFDNODE_FROM_INDX
+  uint64_t kgd_gpu_id = 0;
+  rsmi_status_t resp = RSMI_STATUS_NOT_SUPPORTED;
+  int ret = kfd_node->KFDNode::get_gpu_id(&kgd_gpu_id);
+  resp = amd::smi::ErrnoToRsmiStatus(ret);
 
-    if (guid == nullptr) {
-      resp = RSMI_STATUS_INVALID_ARGS;
-    } else {
-      *guid = kgd_gpu_id;
-    }
+  if (guid == nullptr) {
+    resp = RSMI_STATUS_INVALID_ARGS;
+  } else {
+    *guid = kgd_gpu_id;
+  }
 
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Returning: " << getRSMIStatusString(resp, false)
-       << " | Device #: " << dv_ind
-       << " | Type: GUID (gpu_id)"
-       << " | Data: " << ((guid == nullptr) ? "nullptr" :
-          amd::smi::print_unsigned_hex_and_int(*guid));
-    LOG_INFO(ss);
-    return resp;
-    CATCH
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= " << " | Returning: " << getRSMIStatusString(resp, false)
+     << " | Device #: " << dv_ind << " | Type: GUID (gpu_id)" << " | Data: "
+     << ((guid == nullptr) ? "nullptr" : amd::smi::print_unsigned_hex_and_int(*guid));
+  LOG_INFO(ss);
+  return resp;
+  CATCH
 }
 
 rsmi_status_t rsmi_dev_node_id_get(uint32_t dv_ind, uint32_t *node_id) {
-    TRY
-     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | ======= start ======="
-       << " | Device #: " << dv_ind;
-    LOG_TRACE(ss);
-    GET_DEV_AND_KFDNODE_FROM_INDX
-    uint32_t kfd_node_id = std::numeric_limits<uint32_t>::max();
-    rsmi_status_t resp = RSMI_STATUS_NOT_SUPPORTED;
-    int ret = kfd_node->KFDNode::get_node_id(&kfd_node_id);
-    resp = amd::smi::ErrnoToRsmiStatus(ret);
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======" << " | Device #: " << dv_ind;
+  LOG_TRACE(ss);
+  GET_DEV_AND_KFDNODE_FROM_INDX
+  uint32_t kfd_node_id = std::numeric_limits<uint32_t>::max();
+  rsmi_status_t resp = RSMI_STATUS_NOT_SUPPORTED;
+  int ret = kfd_node->KFDNode::get_node_id(&kfd_node_id);
+  resp = amd::smi::ErrnoToRsmiStatus(ret);
 
-    if (node_id == nullptr) {
-      resp = RSMI_STATUS_INVALID_ARGS;
-    } else {
-      *node_id = kfd_node_id;
-      if (kfd_node_id == std::numeric_limits<uint32_t>::max()) {
-        resp = RSMI_STATUS_NOT_SUPPORTED;
-      }
+  if (node_id == nullptr) {
+    resp = RSMI_STATUS_INVALID_ARGS;
+  } else {
+    *node_id = kfd_node_id;
+    if (kfd_node_id == std::numeric_limits<uint32_t>::max()) {
+      resp = RSMI_STATUS_NOT_SUPPORTED;
     }
+  }
 
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Returning: " << getRSMIStatusString(resp, false)
-       << " | Device #: " << dv_ind
-       << " | Type: node_id"
-       << " | Data: " << ((node_id == nullptr) ? "nullptr" :
-          amd::smi::print_unsigned_hex_and_int(*node_id));
-    LOG_INFO(ss);
-    return resp;
-    CATCH
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= " << " | Returning: " << getRSMIStatusString(resp, false)
+     << " | Device #: " << dv_ind << " | Type: node_id" << " | Data: "
+     << ((node_id == nullptr) ? "nullptr" : amd::smi::print_unsigned_hex_and_int(*node_id));
+  LOG_INFO(ss);
+  return resp;
+  CATCH
 }
 
 enum iterator_handle_type {
@@ -7097,11 +6410,9 @@ enum iterator_handle_type {
   SUBVARIANT_ITER,
 };
 
-rsmi_status_t
-rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
-                                         rsmi_func_id_iter_handle_t *handle) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
+                                                    rsmi_func_id_iter_handle_t *handle) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   GET_DEV_FROM_INDX
@@ -7133,20 +6444,16 @@ rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
   *supp_func_iter = dev->supported_funcs()->begin();
 
   (*handle)->func_id_iter = reinterpret_cast<uintptr_t>(supp_func_iter);
-  (*handle)->container_ptr =
-                        reinterpret_cast<uintptr_t>(dev->supported_funcs());
+  (*handle)->container_ptr = reinterpret_cast<uintptr_t>(dev->supported_funcs());
 
   return RSMI_STATUS_SUCCESS;
 
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_supported_variant_iterator_open(
-                                 rsmi_func_id_iter_handle_t parent_iter,
-                                       rsmi_func_id_iter_handle_t *var_iter) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_supported_variant_iterator_open(rsmi_func_id_iter_handle_t parent_iter,
+                                                       rsmi_func_id_iter_handle_t *var_iter) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -7172,8 +6479,7 @@ rsmi_dev_supported_variant_iterator_open(
 
   switch (parent_iter->id_type) {
     case FUNC_ITER:
-      func_iter =
-            reinterpret_cast<SupportedFuncMapIt *>(parent_iter->func_id_iter);
+      func_iter = reinterpret_cast<SupportedFuncMapIt *>(parent_iter->func_id_iter);
       var_map_container = (*func_iter)->second;
 
       if (var_map_container == nullptr) {
@@ -7184,14 +6490,12 @@ rsmi_dev_supported_variant_iterator_open(
       variant_itr = new VariantMapIt;
       *variant_itr = var_map_container->begin();
       (*var_iter)->func_id_iter = reinterpret_cast<uintptr_t>(variant_itr);
-      (*var_iter)->container_ptr =
-                         reinterpret_cast<uintptr_t>(var_map_container.get());
+      (*var_iter)->container_ptr = reinterpret_cast<uintptr_t>(var_map_container.get());
       (*var_iter)->id_type = VARIANT_ITER;
       break;
 
     case VARIANT_ITER:
-      variant_itr =
-                  reinterpret_cast<VariantMapIt *>(parent_iter->func_id_iter);
+      variant_itr = reinterpret_cast<VariantMapIt *>(parent_iter->func_id_iter);
       sub_var_map_container = (*variant_itr)->second;
 
       if (sub_var_map_container == nullptr) {
@@ -7202,8 +6506,7 @@ rsmi_dev_supported_variant_iterator_open(
       sub_var_itr = new SubVariantIt;
       *sub_var_itr = sub_var_map_container->begin();
       (*var_iter)->func_id_iter = reinterpret_cast<uintptr_t>(sub_var_itr);
-      (*var_iter)->container_ptr =
-                     reinterpret_cast<uintptr_t>(sub_var_map_container.get());
+      (*var_iter)->container_ptr = reinterpret_cast<uintptr_t>(sub_var_map_container.get());
       (*var_iter)->id_type = SUBVARIANT_ITER;
       break;
 
@@ -7216,10 +6519,8 @@ rsmi_dev_supported_variant_iterator_open(
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_supported_func_iterator_close(rsmi_func_id_iter_handle_t *handle) {
-  TRY
-  std::ostringstream ss;
+rsmi_status_t rsmi_dev_supported_func_iterator_close(rsmi_func_id_iter_handle_t *handle) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
@@ -7229,15 +6530,13 @@ rsmi_dev_supported_func_iterator_close(rsmi_func_id_iter_handle_t *handle) {
 
   if ((*handle)->id_type == FUNC_ITER) {
     SupportedFuncMapIt *supp_func_iter =
-              reinterpret_cast<SupportedFuncMapIt *>((*handle)->func_id_iter);
+        reinterpret_cast<SupportedFuncMapIt *>((*handle)->func_id_iter);
     delete supp_func_iter;
   } else if ((*handle)->id_type == VARIANT_ITER) {
-    VariantMapIt *var_iter =
-                    reinterpret_cast<VariantMapIt *>((*handle)->func_id_iter);
+    VariantMapIt *var_iter = reinterpret_cast<VariantMapIt *>((*handle)->func_id_iter);
     delete var_iter;
-  }  else if ((*handle)->id_type == SUBVARIANT_ITER) {
-    SubVariantIt *subvar_iter =
-                      reinterpret_cast<SubVariantIt *>((*handle)->func_id_iter);
+  } else if ((*handle)->id_type == SUBVARIANT_ITER) {
+    SubVariantIt *subvar_iter = reinterpret_cast<SubVariantIt *>((*handle)->func_id_iter);
     delete subvar_iter;
   } else {
     return RSMI_STATUS_INVALID_ARGS;
@@ -7252,13 +6551,9 @@ rsmi_dev_supported_func_iterator_close(rsmi_func_id_iter_handle_t *handle) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
-                                                rsmi_func_id_value_t *value) {
-  TRY
-  if (value == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
+rsmi_status_t rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
+                                       rsmi_func_id_value_t *value) {
+  TRY if (value == nullptr) { return RSMI_STATUS_INVALID_ARGS; }
 
   if (handle->func_id_iter == 0) {
     return RSMI_STATUS_NO_DATA;
@@ -7294,12 +6589,8 @@ rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
   return RSMI_STATUS_SUCCESS;
 }
 
-rsmi_status_t
-rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
-  TRY
-  if (handle->func_id_iter == 0) {
-    return RSMI_STATUS_NO_DATA;
-  }
+rsmi_status_t rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
+  TRY if (handle->func_id_iter == 0) { return RSMI_STATUS_NO_DATA; }
 
   SupportedFuncMapIt *func_iter;
   VariantMapIt *var_iter;
@@ -7310,8 +6601,7 @@ rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
       func_iter = reinterpret_cast<SupportedFuncMapIt *>(handle->func_id_iter);
       (*func_iter)++;
 
-      if (*func_iter ==
-         reinterpret_cast<SupportedFuncMap *>(handle->container_ptr)->end()) {
+      if (*func_iter == reinterpret_cast<SupportedFuncMap *>(handle->container_ptr)->end()) {
         return RSMI_STATUS_NO_DATA;
       }
       break;
@@ -7319,8 +6609,7 @@ rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
     case VARIANT_ITER:
       var_iter = reinterpret_cast<VariantMapIt *>(handle->func_id_iter);
       (*var_iter)++;
-      if (*var_iter ==
-               reinterpret_cast<VariantMap *>(handle->container_ptr)->end()) {
+      if (*var_iter == reinterpret_cast<VariantMap *>(handle->container_ptr)->end()) {
         return RSMI_STATUS_NO_DATA;
       }
       break;
@@ -7328,8 +6617,7 @@ rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
     case SUBVARIANT_ITER:
       sub_var_iter = reinterpret_cast<SubVariantIt *>(handle->func_id_iter);
       (*sub_var_iter)++;
-      if (*sub_var_iter ==
-               reinterpret_cast<SubVariant *>(handle->container_ptr)->end()) {
+      if (*sub_var_iter == reinterpret_cast<SubVariant *>(handle->container_ptr)->end()) {
         return RSMI_STATUS_NO_DATA;
       }
       break;
@@ -7342,7 +6630,6 @@ rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
 
   CATCH
 }
-
 
 static bool check_evt_notif_support(int kfd_fd) {
   struct kfd_ioctl_get_version_args args = {0, 0};
@@ -7359,13 +6646,11 @@ static bool check_evt_notif_support(int kfd_fd) {
 
 static const char *kPathKFDIoctl = "/dev/kfd";
 
-rsmi_status_t
-rsmi_event_notification_init(uint32_t dv_ind) {
-  TRY
-  GET_DEV_FROM_INDX
-  DEVICE_MUTEX
+rsmi_status_t rsmi_event_notification_init(uint32_t dv_ind) {
+  TRY GET_DEV_FROM_INDX DEVICE_MUTEX
 
-  std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
+      std::lock_guard<std::mutex>
+          guard(*smi.kfd_notif_evt_fh_mutex());
 
   if (dev->evt_notif_anon_fd() > 0 && dev->evt_notif_anon_file_ptr() != nullptr) {
     return RSMI_STATUS_SUCCESS;
@@ -7413,13 +6698,10 @@ rsmi_event_notification_init(uint32_t dv_ind) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask) {
-  TRY
-  GET_DEV_FROM_INDX
-  DEVICE_MUTEX
+rsmi_status_t rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask) {
+  TRY GET_DEV_FROM_INDX DEVICE_MUTEX
 
-  if (dev->evt_notif_anon_fd() == -1) {
+      if (dev->evt_notif_anon_fd() == -1) {
     return RSMI_INITIALIZATION_ERROR;
   }
   ssize_t ret = write(dev->evt_notif_anon_fd(), &mask, sizeof(uint64_t));
@@ -7432,12 +6714,11 @@ rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_event_notification_get(int timeout_ms,
-                     uint32_t *num_elem, rsmi_evt_notification_data_t *data) {
+rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t *num_elem,
+                                          rsmi_evt_notification_data_t *data) {
   TRY
 
-  if (num_elem == nullptr || data == nullptr || *num_elem == 0) {
+      if (num_elem == nullptr || data == nullptr || *num_elem == 0) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
@@ -7452,15 +6733,14 @@ rsmi_event_notification_get(int timeout_ms,
   //      short revents;    /* returned events */
   //  };
   std::vector<struct pollfd> fds;
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
   std::vector<uint32_t> fd_indx_to_dev_id;
 
   for (uint32_t i = 0; i < smi.devices().size(); ++i) {
     if (smi.devices()[i]->evt_notif_anon_fd() == -1) {
       continue;
     }
-    fds.push_back({smi.devices()[i]->evt_notif_anon_fd(),
-                                                     POLLIN | POLLRDNORM, 0});
+    fds.push_back({smi.devices()[i]->evt_notif_anon_fd(), POLLIN | POLLRDNORM, 0});
     fd_indx_to_dev_id.push_back(i);
   }
 
@@ -7477,7 +6757,7 @@ rsmi_event_notification_get(int timeout_ms,
       }
 
       const uint32_t dv_ind = fd_indx_to_dev_id[i];
-      auto& dev = *smi.devices()[dv_ind];
+      auto &dev = *smi.devices()[dv_ind];
 
       // Ensure protected access of anon_fp
       amd::smi::pthread_wrap pw(*amd::smi::GetMutex(dv_ind));
@@ -7490,11 +6770,10 @@ rsmi_event_notification_get(int timeout_ms,
         LOG_ERROR(ss);
         continue;
       }
-      
-      flockfile(anon_fp); // serialize stdio on this stream
 
-      data_item =
-           reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
+      flockfile(anon_fp);  // serialize stdio on this stream
+
+      data_item = reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
 
       uint32_t event;
       char event_in[MAX_EVENT_NOTIFICATION_MSG_SIZE];
@@ -7506,7 +6785,8 @@ rsmi_event_notification_get(int timeout_ms,
          */
         char message[MAX_EVENT_NOTIFICATION_MSG_SIZE] = {0};
         // parse the line here for event_number and rest of message_information
-        // sscanf(event_in, "%x %[^\n]\n", &event, message); // This is unsafe code and flagged by codeql. Replace with iss below:
+        // sscanf(event_in, "%x %[^\n]\n", &event, message); // This is unsafe code and flagged by
+        // codeql. Replace with iss below:
         std::istringstream iss(event_in);
         iss >> std::hex >> event;
         std::string message_str;
@@ -7514,39 +6794,36 @@ rsmi_event_notification_get(int timeout_ms,
         snprintf(message, sizeof(message), "%s", message_str.c_str());
 
         // parse message based on event received
-        switch (event){
+        switch (event) {
           case RSMI_EVT_NOTIF_NONE:
-            strncpy(reinterpret_cast<char *>(&data_item->message), "Event type None received", MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
+            strncpy(reinterpret_cast<char *>(&data_item->message), "Event type None received",
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
             break;
-          case RSMI_EVT_NOTIF_VMFAULT:
-          {
+          case RSMI_EVT_NOTIF_VMFAULT: {
             uint32_t pid;
             char task_name[MAX_EVENT_NOTIFICATION_MSG_SIZE];
             memset(task_name, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
             sscanf(message, "%x:%s\n", &pid, task_name);
             std::stringstream final_message;
-            final_message << "PID: " << std::to_string(pid).c_str()
-                          << "  task name: " << task_name;
+            final_message << "PID: " << std::to_string(pid).c_str() << "  task name: " << task_name;
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
-          case RSMI_EVT_NOTIF_THERMAL_THROTTLE:
-          {
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_THERMAL_THROTTLE: {
             uint64_t bitmask;
             uint64_t counter;
 
             sscanf(message, "%" PRIx64 ":%" PRIx64 "\n", &bitmask, &counter);
             std::stringstream final_message;
-            final_message << "bitmask: 0x" << std::hex << bitmask
-                          << "  counter: 0x" << std::hex << counter;
+            final_message << "bitmask: 0x" << std::hex << bitmask << "  counter: 0x" << std::hex
+                          << counter;
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
-          case RSMI_EVT_NOTIF_GPU_PRE_RESET:
-          {
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_GPU_PRE_RESET: {
             uint32_t reset_seq_num;
             char reset_cause[MAX_EVENT_NOTIFICATION_MSG_SIZE];
             memset(reset_cause, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
@@ -7556,11 +6833,10 @@ rsmi_event_notification_get(int timeout_ms,
             final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str()
                           << "  reset cause: " << reset_cause;
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
-          case RSMI_EVT_NOTIF_GPU_POST_RESET:
-          {
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_GPU_POST_RESET: {
             uint32_t reset_seq_num;
 
             char tmp[MAX_EVENT_NOTIFICATION_MSG_SIZE];
@@ -7568,11 +6844,10 @@ rsmi_event_notification_get(int timeout_ms,
             std::stringstream final_message;
             final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str();
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
-          case RSMI_EVT_NOTIF_EVENT_MIGRATE_START:
-          {
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_MIGRATE_START: {
             int64_t ns;
             int32_t pid;
             uint32_t start;
@@ -7583,23 +6858,22 @@ rsmi_event_notification_get(int timeout_ms,
             uint32_t preferred_loc;
             int32_t migrate_trigger;
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %x:%x %d\n", &ns, &pid, &start, &size, &from, &to, &prefetch_loc, &preferred_loc, &migrate_trigger);
+            sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %x:%x %d\n", &ns,
+                   &pid, &start, &size, &from, &to, &prefetch_loc, &preferred_loc,
+                   &migrate_trigger);
             std::stringstream final_message;
-            final_message << "nd: " << std::to_string(ns).c_str() 
-                          << "  pid: " << std::to_string(pid).c_str()
-                          << "  start: 0x" << std::hex << start
-                          << "  size: 0x" << std::hex << size
-                          << "  from: 0x" << std::hex << from
-                          << "  to: 0x" << std::hex << to
-                          << "  prefetch_loc: 0x" << std::hex << prefetch_loc
-                          << "  preferred_loc: 0x" << std::hex << preferred_loc
+            final_message << "nd: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str() << "  start: 0x" << std::hex
+                          << start << "  size: 0x" << std::hex << size << "  from: 0x" << std::hex
+                          << from << "  to: 0x" << std::hex << to << "  prefetch_loc: 0x"
+                          << std::hex << prefetch_loc << "  preferred_loc: 0x" << std::hex
+                          << preferred_loc
                           << "  migrate_trigger: " << std::to_string(migrate_trigger).c_str();
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
-          case RSMI_EVT_NOTIF_EVENT_MIGRATE_END:
-          {
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_MIGRATE_END: {
             int64_t ns;
             int32_t pid;
             uint32_t start;
@@ -7609,22 +6883,20 @@ rsmi_event_notification_get(int timeout_ms,
             uint32_t migrate_trigger;
             uint32_t error_code;
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %d %d\n", &ns, &pid, &start, &size, &from, &to, &migrate_trigger, &error_code);
+            sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %d %d\n", &ns, &pid,
+                   &start, &size, &from, &to, &migrate_trigger, &error_code);
             std::stringstream final_message;
-            final_message << "nd: " << std::to_string(ns).c_str() 
-                          << "  pid: " << std::to_string(pid).c_str()
-                          << "  start: 0x" << std::hex << start
-                          << "  size: 0x" << std::hex << size
-                          << "  from: 0x" << std::hex << from
-                          << "  to: 0x" << std::hex << to
+            final_message << "nd: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str() << "  start: 0x" << std::hex
+                          << start << "  size: 0x" << std::hex << size << "  from: 0x" << std::hex
+                          << from << "  to: 0x" << std::hex << to
                           << "  migrate_trigger: " << std::to_string(migrate_trigger).c_str()
                           << "  error_code: " << std::to_string(error_code).c_str();
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
-          case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START:
-          {
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START: {
             int64_t ns;
             int32_t pid;
             uint32_t addr;
@@ -7634,35 +6906,31 @@ rsmi_event_notification_get(int timeout_ms,
             sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, rw);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
-                          << "  pid: " << std::to_string(pid).c_str()
-                          << "  addr: 0x" << std::hex << addr
-                          << "  node: 0x" << std::hex << node
-                          << "  rw: " << rw;
+                          << "  pid: " << std::to_string(pid).c_str() << "  addr: 0x" << std::hex
+                          << addr << "  node: 0x" << std::hex << node << "  rw: " << rw;
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
-          case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END:
-          {
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END: {
             int64_t ns;
             int32_t pid;
             uint32_t addr;
             uint32_t node;
             char *migrate_update = "\0";
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, migrate_update);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node,
+                   migrate_update);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
-                          << "  pid: " << std::to_string(pid).c_str()
-                          << "  addr: 0x" << std::hex << addr
-                          << "  node: 0x" << std::hex << node
+                          << "  pid: " << std::to_string(pid).c_str() << "  addr: 0x" << std::hex
+                          << addr << "  node: 0x" << std::hex << node
                           << "  migrate_udpate: " << migrate_update;
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
-          case RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION:
-          {
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION: {
             int64_t ns;
             int32_t pid;
             uint32_t node;
@@ -7671,15 +6939,13 @@ rsmi_event_notification_get(int timeout_ms,
             sscanf(message, "%" PRId64 "-%d %x %d\n", &ns, &pid, &node, &evict_trigger);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
-                          << "  pid: " << std::to_string(pid).c_str()
-                          << "  node: 0x" << std::hex << node
-                          << "  evict_trigger: " << std::to_string(evict_trigger).c_str();
+                          << "  pid: " << std::to_string(pid).c_str() << "  node: 0x" << std::hex
+                          << node << "  evict_trigger: " << std::to_string(evict_trigger).c_str();
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
-          case RSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE:
-          {
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE: {
             int64_t ns;
             int32_t pid;
             uint32_t node;
@@ -7688,15 +6954,13 @@ rsmi_event_notification_get(int timeout_ms,
             sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, rescheduled);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
-                          << "  pid: " << std::to_string(pid).c_str()
-                          << "  node: 0x" << std::hex << node
-                          << "  rescheduled: " << rescheduled;
+                          << "  pid: " << std::to_string(pid).c_str() << "  node: 0x" << std::hex
+                          << node << "  rescheduled: " << rescheduled;
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
-          case RSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU:
-          {
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU: {
             int64_t ns;
             int32_t pid;
             uint32_t addr;
@@ -7704,35 +6968,34 @@ rsmi_event_notification_get(int timeout_ms,
             uint32_t node;
             uint32_t unmap_trigger;
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%" PRIx32 ") %x %d\n", &ns, &pid, &addr, &size, &node, &unmap_trigger);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%" PRIx32 ") %x %d\n", &ns, &pid, &addr,
+                   &size, &node, &unmap_trigger);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
-                          << "  pid: " << std::to_string(pid).c_str()
-                          << "  addr: 0x" <<std::hex << addr
-                          << "  size: 0x" <<std::hex << size
-                          << "  node: 0x" << std::hex << node
-                          << "  unmap_trigger: " << std::to_string(unmap_trigger).c_str();
+                          << "  pid: " << std::to_string(pid).c_str() << "  addr: 0x" << std::hex
+                          << addr << "  size: 0x" << std::hex << size << "  node: 0x" << std::hex
+                          << node << "  unmap_trigger: " << std::to_string(unmap_trigger).c_str();
 
-            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
-          }
-          break;
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
           case RSMI_EVT_NOTIF_EVENT_PROCESS_START:
-          case RSMI_EVT_NOTIF_EVENT_PROCESS_END:
-          {
-            uint32_t pid; char task[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+          case RSMI_EVT_NOTIF_EVENT_PROCESS_END: {
+            uint32_t pid;
+            char task[MAX_EVENT_NOTIFICATION_MSG_SIZE];
             int rc = sscanf(message, "%x %s", &pid, task);
             std::stringstream msg;
-            if (rc == 2){
+            if (rc == 2) {
               msg << "PID: " << pid << "  task: " << task;
-            } else{
+            } else {
               LOG_ERROR("Failed to parse process event payload");
               msg << "PID:UNKNOWN  task:UNKNOWN";
             }
             snprintf(data_item->message, MAX_EVENT_NOTIFICATION_MSG_SIZE, "%s", msg.str().c_str());
-          }
-          break;
+          } break;
           default:
-            strncpy(reinterpret_cast<char *>(&data_item->message), "Unknown event received", MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
+            strncpy(reinterpret_cast<char *>(&data_item->message), "Unknown event received",
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
             break;
         }
         data_item->event = (rsmi_evt_notification_type_t)event;
@@ -7745,10 +7008,9 @@ rsmi_event_notification_get(int timeout_ms,
         if (*num_elem >= buffer_size) {
           break;
         }
-        data_item =
-             reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
+        data_item = reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
       }
-      funlockfile(anon_fp); // // paired with flockfile; RAII unlock of device mutex on scope exit
+      funlockfile(anon_fp);  // // paired with flockfile; RAII unlock of device mutex on scope exit
     }
   };
 
@@ -7779,14 +7041,13 @@ rsmi_event_notification_get(int timeout_ms,
 }
 
 rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
-  TRY
-  GET_DEV_FROM_INDX
-  DEVICE_MUTEX
+  TRY GET_DEV_FROM_INDX DEVICE_MUTEX
 
-  std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
+      std::lock_guard<std::mutex>
+          guard(*smi.kfd_notif_evt_fh_mutex());
 
   FILE *anon_fp = smi.devices()[dv_ind]->evt_notif_anon_file_ptr();
-  int   anon_fd = smi.devices()[dv_ind]->evt_notif_anon_fd();
+  int anon_fd = smi.devices()[dv_ind]->evt_notif_anon_fd();
 
   // If nothing to close, success
   if (!anon_fp && anon_fd <= 0) {
@@ -7801,7 +7062,7 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
     if (fclose(anon_fp) != 0) {
       return amd::smi::ErrnoToRsmiStatus(errno);
     }
-  } else { // no FILE*, but fd was valid
+  } else {  // no FILE*, but fd was valid
     if (close(anon_fd) != 0) {
       return amd::smi::ErrnoToRsmiStatus(errno);
     }
@@ -7819,11 +7080,9 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_metrics_header_info_get(uint32_t dv_ind, metrics_table_header_t* header_value)
-{
-  TRY
-  std::ostringstream ostrstream;
+rsmi_status_t rsmi_dev_metrics_header_info_get(uint32_t dv_ind,
+                                               metrics_table_header_t *header_value) {
+  TRY std::ostringstream ostrstream;
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
@@ -7833,9 +7092,7 @@ rsmi_dev_metrics_header_info_get(uint32_t dv_ind, metrics_table_header_t* header
   }
 
   auto status_code = rsmi_dev_gpu_metrics_header_info_get(dv_ind, *header_value);
-  ostrstream << __PRETTY_FUNCTION__
-             << " | ======= end ======= "
-             << " | End Result "
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | End Result "
              << " | Device #:  " << dv_ind
              << " | Format Revision: " << header_value->format_revision
              << " | Content Revision: " << header_value->content_revision
@@ -7847,12 +7104,8 @@ rsmi_dev_metrics_header_info_get(uint32_t dv_ind, metrics_table_header_t* header
   CATCH
 }
 
-
-rsmi_status_t
-rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value)
-{
-  TRY
-  std::ostringstream ostrstream;
+rsmi_status_t rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t *xcd_counter_value) {
+  TRY std::ostringstream ostrstream;
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
@@ -7865,7 +7118,7 @@ rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value)
   rsmi_gpu_metrics_t gpu_metrics;
   auto status_code = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
   if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    for (const auto& gfxclk : gpu_metrics.current_gfxclks) {
+    for (const auto &gfxclk : gpu_metrics.current_gfxclks) {
       if (gfxclk == UINT16_MAX) {
         break;
       }
@@ -7876,11 +7129,8 @@ rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value)
   }
 
   *xcd_counter_value = xcd_counter;
-  ostrstream << __PRETTY_FUNCTION__
-             << " | ======= end ======= "
-             << " | End Result "
-             << " | Device #:  " << dv_ind
-             << " | XCDs counter: " << xcd_counter
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | End Result "
+             << " | Device #:  " << dv_ind << " | XCDs counter: " << xcd_counter
              << " | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
 
@@ -7888,21 +7138,15 @@ rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value)
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_metrics_log_get(uint32_t dv_ind)
-{
-  TRY
-  std::ostringstream ostrstream;
+rsmi_status_t rsmi_dev_metrics_log_get(uint32_t dv_ind) {
+  TRY std::ostringstream ostrstream;
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
   GET_DEV_FROM_INDX
   auto status_code = dev->dev_log_gpu_metrics(ostrstream);
-  ostrstream << __PRETTY_FUNCTION__
-             << " | ======= end ======= "
-             << " | End Result "
-             << " | Device #:  " << dv_ind
-             << " | Metric Type: " << "All GPU Metrics..."
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= " << " | End Result "
+             << " | Device #:  " << dv_ind << " | Metric Type: " << "All GPU Metrics..."
              << " | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
 
@@ -7911,9 +7155,8 @@ rsmi_dev_metrics_log_get(uint32_t dv_ind)
 }
 
 rsmi_status_t rsmi_dev_device_identifiers_get(uint32_t dv_ind,
-                  rsmi_device_identifiers_t *smi_device_identifiers) {
-  TRY
-  std::ostringstream ss;
+                                              rsmi_device_identifiers_t *smi_device_identifiers) {
+  TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   GET_DEV_FROM_INDX
@@ -7925,19 +7168,16 @@ rsmi_status_t rsmi_dev_device_identifiers_get(uint32_t dv_ind,
   CATCH
 }
 
-
 // UNDOCUMENTED FUNCTIONS
 // This functions are not declared in rocm_smi.h. They are either not fully
 // supported, or to be used for test purposes.
 
 // This function acquires a mutex and waits for a number of seconds
-rsmi_status_t
-rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
-//  DEVICE_MUTEX
+rsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
+  //  DEVICE_MUTEX
   amd::smi::pthread_wrap _pw(*amd::smi::GetMutex(dv_ind));
-  amd::smi::RocmSMI& smi_ = amd::smi::RocmSMI::getInstance();
-  bool blocking_ = !(smi_.init_options() &
-                      static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1));
+  amd::smi::RocmSMI &smi_ = amd::smi::RocmSMI::getInstance();
+  bool blocking_ = !(smi_.init_options() & static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1));
   amd::smi::ScopedPthread _lock(_pw, blocking_);
   if (!blocking_ && _lock.mutex_not_acquired()) {
     return RSMI_STATUS_BUSY;
@@ -7947,11 +7187,10 @@ rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
   return RSMI_STATUS_SUCCESS;
 }
 
-int32_t
-rsmi_test_refcount(uint64_t refcnt_type) {
+int32_t rsmi_test_refcount(uint64_t refcnt_type) {
   (void)refcnt_type;
 
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
   std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());
 
   if (smi.ref_count() == 0 && !smi.devices().empty()) {
@@ -7960,5 +7199,3 @@ rsmi_test_refcount(uint64_t refcnt_type) {
 
   return static_cast<int32_t>(smi.ref_count());
 }
-
-

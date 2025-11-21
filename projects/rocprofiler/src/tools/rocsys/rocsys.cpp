@@ -198,7 +198,7 @@ int main(int argc, char* argv[]) {
         env_vars.emplace_back(std::to_string(session_id));
       }
       for (argindex++; argindex < argc; argindex++) {
-       if (std::string(argv[argindex]).find("rocprofv2") != std::string::npos) {
+        if (std::string(argv[argindex]).find("rocprofv2") != std::string::npos) {
           fs::path command = bin_path;
           command.append("rocprofv2");
           env_vars.emplace_back(command.c_str());

@@ -32,16 +32,14 @@
 
 LIBELF_VCSID("$Id: elf_getarhdr.c 1341 2011-01-01 04:28:29Z jkoshy $");
 
-Elf_Arhdr *
-elf_getarhdr(Elf *e)
-{
-	if (e == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+Elf_Arhdr *elf_getarhdr(Elf *e) {
+  if (e == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	if (e->e_flags & LIBELF_F_AR_HEADER)
-		return (e->e_hdr.e_arhdr);
+  if (e->e_flags & LIBELF_F_AR_HEADER)
+    return (e->e_hdr.e_arhdr);
 
-	return (_libelf_ar_gethdr(e));
+  return (_libelf_ar_gethdr(e));
 }

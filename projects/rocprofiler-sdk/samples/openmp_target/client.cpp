@@ -311,8 +311,8 @@ tool_buffered_tracing_callback(rocprofiler_context_id_t      context,
             auto dt = (record->end_timestamp - record->start_timestamp);
             info << std::left << "tid=" << record->thread_id << ", cid=" << std::setw(3)
                  << record->correlation_id.internal << ", kind=" << std::setw(2) << record->kind
-                 << ", operation=" << std::setw(3) << record->operation << ", phase= "
-                 << ", dt_nsec=" << std::setw(8) << dt
+                 << ", operation=" << std::setw(3) << record->operation
+                 << ", phase= " << ", dt_nsec=" << std::setw(8) << dt
                  << ", agent_id=" << record->dispatch_info.agent_id.handle
                  << ", queue_id=" << record->dispatch_info.queue_id.handle
                  << ", kernel_id=" << record->dispatch_info.kernel_id
@@ -344,8 +344,8 @@ tool_buffered_tracing_callback(rocprofiler_context_id_t      context,
             auto dt = (record->end_timestamp - record->start_timestamp);
             info << std::left << "tid=" << record->thread_id << ", cid=" << std::setw(3)
                  << record->correlation_id.internal << ", kind=" << std::setw(2) << record->kind
-                 << ", operation=" << std::setw(3) << record->operation << ", phase= "
-                 << ", dt_nsec=" << std::setw(8) << dt
+                 << ", operation=" << std::setw(3) << record->operation
+                 << ", phase= " << ", dt_nsec=" << std::setw(8) << dt
                  << ", src_agent_id=" << record->src_agent_id.handle
                  << ", dst_agent_id=" << record->dst_agent_id.handle
                  << ", direction=" << record->operation << ", start=" << record->start_timestamp
@@ -375,8 +375,9 @@ tool_buffered_tracing_callback(rocprofiler_context_id_t      context,
             auto dt = (record->end_timestamp - record->start_timestamp);
             info << std::left << "tid=" << record->thread_id << ", cid=" << std::setw(3)
                  << record->correlation_id.internal << ", kind=" << std::setw(2) << record->kind
-                 << ", operation=" << std::setw(3) << record->operation << ", phase= "
-                 << ", dt_nsec=" << std::setw(8) << dt << ", agent_id=" << record->agent_id.handle
+                 << ", operation=" << std::setw(3) << record->operation
+                 << ", phase= " << ", dt_nsec=" << std::setw(8) << dt
+                 << ", agent_id=" << record->agent_id.handle
                  << ", queue_id=" << record->queue_id.handle << ", thread_id=" << record->thread_id
                  << ", elapsed=" << std::setprecision(3) << std::fixed << _elapsed
                  << " usec, flags=" << record->flags

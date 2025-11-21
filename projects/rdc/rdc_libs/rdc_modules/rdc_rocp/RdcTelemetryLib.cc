@@ -187,7 +187,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
   // Bulk fetch fields
   std::vector<rdc_gpu_field_value_t> bulk_results;
 
-  struct timeval tv{};
+  struct timeval tv {};
   gettimeofday(&tv, nullptr);
   const uint64_t curTime = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 

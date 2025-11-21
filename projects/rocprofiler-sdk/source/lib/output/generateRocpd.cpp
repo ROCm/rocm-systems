@@ -525,7 +525,7 @@ extract_flags_field(const Tp& _data)
 
 #define GENERATE_FIELD_ACCESSOR(FUNC_NAME, FIELD_NAME, DATA_TYPE, ...)                             \
     template <typename Tp, typename Up = Tp>                                                       \
-    auto FUNC_NAME(const Tp& _data, int)->decltype(std::declval<Up>().FIELD_NAME, DATA_TYPE{})     \
+    auto FUNC_NAME(const Tp& _data, int) -> decltype(std::declval<Up>().FIELD_NAME, DATA_TYPE{})   \
     {                                                                                              \
         return _data.FIELD_NAME;                                                                   \
     }                                                                                              \

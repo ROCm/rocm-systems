@@ -27,376 +27,356 @@
 
 #include "rbtree.h"
 
-static inline void rbtree_left_rotate(rbtree_node_t **root,
-		rbtree_node_t *sentinel, rbtree_node_t *node);
-static inline void rbtree_right_rotate(rbtree_node_t **root,
-		rbtree_node_t *sentinel, rbtree_node_t *node);
+static inline void rbtree_left_rotate(rbtree_node_t** root, rbtree_node_t* sentinel,
+                                      rbtree_node_t* node);
+static inline void rbtree_right_rotate(rbtree_node_t** root, rbtree_node_t* sentinel,
+                                       rbtree_node_t* node);
 
-static void
-hsakmt_rbtree_insert_value(rbtree_node_t *temp, rbtree_node_t *node,
-		rbtree_node_t *sentinel)
-{
-	rbtree_node_t  **p;
+static void hsakmt_rbtree_insert_value(rbtree_node_t* temp, rbtree_node_t* node,
+                                       rbtree_node_t* sentinel) {
+  rbtree_node_t** p;
 
-	for ( ;; ) {
+  for (;;) {
+    p = rbtree_key_compare(LKP_ALL, &node->key, &temp->key) < 0 ? &temp->left : &temp->right;
 
-		p = rbtree_key_compare(LKP_ALL, &node->key, &temp->key) < 0 ?
-			&temp->left : &temp->right;
+    if (*p == sentinel) {
+      break;
+    }
 
-		if (*p == sentinel) {
-			break;
-		}
+    temp = *p;
+  }
 
-		temp = *p;
-	}
-
-	*p = node;
-	node->parent = temp;
-	node->left = sentinel;
-	node->right = sentinel;
-	rbt_red(node);
+  *p = node;
+  node->parent = temp;
+  node->left = sentinel;
+  node->right = sentinel;
+  rbt_red(node);
 }
 
 
-void
-hsakmt_rbtree_insert(rbtree_t *tree, rbtree_node_t *node)
-{
-	rbtree_node_t  **root, *temp, *sentinel;
+void hsakmt_rbtree_insert(rbtree_t* tree, rbtree_node_t* node) {
+  rbtree_node_t **root, *temp, *sentinel;
 
-	/* a binary tree insert */
+  /* a binary tree insert */
 
-	root = &tree->root;
-	sentinel = &tree->sentinel;
+  root = &tree->root;
+  sentinel = &tree->sentinel;
 
-	if (*root == sentinel) {
-		node->parent = NULL;
-		node->left = sentinel;
-		node->right = sentinel;
-		rbt_black(node);
-		*root = node;
+  if (*root == sentinel) {
+    node->parent = NULL;
+    node->left = sentinel;
+    node->right = sentinel;
+    rbt_black(node);
+    *root = node;
 
-		return;
-	}
+    return;
+  }
 
-	hsakmt_rbtree_insert_value(*root, node, sentinel);
+  hsakmt_rbtree_insert_value(*root, node, sentinel);
 
-	/* re-balance tree */
+  /* re-balance tree */
 
-	while (node != *root && rbt_is_red(node->parent)) {
+  while (node != *root && rbt_is_red(node->parent)) {
+    if (node->parent == node->parent->parent->left) {
+      temp = node->parent->parent->right;
 
-		if (node->parent == node->parent->parent->left) {
-			temp = node->parent->parent->right;
+      if (rbt_is_red(temp)) {
+        rbt_black(node->parent);
+        rbt_black(temp);
+        rbt_red(node->parent->parent);
+        node = node->parent->parent;
 
-			if (rbt_is_red(temp)) {
-				rbt_black(node->parent);
-				rbt_black(temp);
-				rbt_red(node->parent->parent);
-				node = node->parent->parent;
+      } else {
+        if (node == node->parent->right) {
+          node = node->parent;
+          rbtree_left_rotate(root, sentinel, node);
+        }
 
-			} else {
-				if (node == node->parent->right) {
-					node = node->parent;
-					rbtree_left_rotate(root, sentinel, node);
-				}
+        rbt_black(node->parent);
+        rbt_red(node->parent->parent);
+        rbtree_right_rotate(root, sentinel, node->parent->parent);
+      }
 
-				rbt_black(node->parent);
-				rbt_red(node->parent->parent);
-				rbtree_right_rotate(root, sentinel, node->parent->parent);
-			}
+    } else {
+      temp = node->parent->parent->left;
 
-		} else {
-			temp = node->parent->parent->left;
+      if (rbt_is_red(temp)) {
+        rbt_black(node->parent);
+        rbt_black(temp);
+        rbt_red(node->parent->parent);
+        node = node->parent->parent;
 
-			if (rbt_is_red(temp)) {
-				rbt_black(node->parent);
-				rbt_black(temp);
-				rbt_red(node->parent->parent);
-				node = node->parent->parent;
+      } else {
+        if (node == node->parent->left) {
+          node = node->parent;
+          rbtree_right_rotate(root, sentinel, node);
+        }
 
-			} else {
-				if (node == node->parent->left) {
-					node = node->parent;
-					rbtree_right_rotate(root, sentinel, node);
-				}
+        rbt_black(node->parent);
+        rbt_red(node->parent->parent);
+        rbtree_left_rotate(root, sentinel, node->parent->parent);
+      }
+    }
+  }
 
-				rbt_black(node->parent);
-				rbt_red(node->parent->parent);
-				rbtree_left_rotate(root, sentinel, node->parent->parent);
-			}
-		}
-	}
-
-	rbt_black(*root);
+  rbt_black(*root);
 }
 
 
-void
-hsakmt_rbtree_delete(rbtree_t *tree, rbtree_node_t *node)
-{
-	unsigned int red;
-	rbtree_node_t  **root, *sentinel, *subst, *temp, *w;
+void hsakmt_rbtree_delete(rbtree_t* tree, rbtree_node_t* node) {
+  unsigned int red;
+  rbtree_node_t **root, *sentinel, *subst, *temp, *w;
 
-	/* a binary tree delete */
+  /* a binary tree delete */
 
-	root = &tree->root;
-	sentinel = &tree->sentinel;
+  root = &tree->root;
+  sentinel = &tree->sentinel;
 
-	if (node->left == sentinel) {
-		temp = node->right;
-		subst = node;
+  if (node->left == sentinel) {
+    temp = node->right;
+    subst = node;
 
-	} else if (node->right == sentinel) {
-		temp = node->left;
-		subst = node;
+  } else if (node->right == sentinel) {
+    temp = node->left;
+    subst = node;
 
-	} else {
-		subst = rbtree_min(node->right, sentinel);
+  } else {
+    subst = rbtree_min(node->right, sentinel);
 
-		if (subst->left != sentinel) {
-			temp = subst->left;
-		} else {
-			temp = subst->right;
-		}
-	}
+    if (subst->left != sentinel) {
+      temp = subst->left;
+    } else {
+      temp = subst->right;
+    }
+  }
 
-	if (subst == *root) {
-		*root = temp;
-		rbt_black(temp);
+  if (subst == *root) {
+    *root = temp;
+    rbt_black(temp);
 
-		return;
-	}
+    return;
+  }
 
-	red = rbt_is_red(subst);
+  red = rbt_is_red(subst);
 
-	if (subst == subst->parent->left) {
-		subst->parent->left = temp;
+  if (subst == subst->parent->left) {
+    subst->parent->left = temp;
 
-	} else {
-		subst->parent->right = temp;
-	}
+  } else {
+    subst->parent->right = temp;
+  }
 
-	if (subst == node) {
+  if (subst == node) {
+    temp->parent = subst->parent;
 
-		temp->parent = subst->parent;
+  } else {
+    if (subst->parent == node) {
+      temp->parent = subst;
 
-	} else {
+    } else {
+      temp->parent = subst->parent;
+    }
 
-		if (subst->parent == node) {
-			temp->parent = subst;
+    subst->left = node->left;
+    subst->right = node->right;
+    subst->parent = node->parent;
+    rbt_copy_color(subst, node);
 
-		} else {
-			temp->parent = subst->parent;
-		}
+    if (node == *root) {
+      *root = subst;
 
-		subst->left = node->left;
-		subst->right = node->right;
-		subst->parent = node->parent;
-		rbt_copy_color(subst, node);
+    } else {
+      if (node == node->parent->left) {
+        node->parent->left = subst;
+      } else {
+        node->parent->right = subst;
+      }
+    }
 
-		if (node == *root) {
-			*root = subst;
+    if (subst->left != sentinel) {
+      subst->left->parent = subst;
+    }
 
-		} else {
-			if (node == node->parent->left) {
-				node->parent->left = subst;
-			} else {
-				node->parent->right = subst;
-			}
-		}
+    if (subst->right != sentinel) {
+      subst->right->parent = subst;
+    }
+  }
 
-		if (subst->left != sentinel) {
-			subst->left->parent = subst;
-		}
+  if (red) {
+    return;
+  }
 
-		if (subst->right != sentinel) {
-			subst->right->parent = subst;
-		}
-	}
+  /* a delete fixup */
 
-	if (red) {
-		return;
-	}
+  while (temp != *root && rbt_is_black(temp)) {
+    if (temp == temp->parent->left) {
+      w = temp->parent->right;
 
-	/* a delete fixup */
+      if (rbt_is_red(w)) {
+        rbt_black(w);
+        rbt_red(temp->parent);
+        rbtree_left_rotate(root, sentinel, temp->parent);
+        w = temp->parent->right;
+      }
 
-	while (temp != *root && rbt_is_black(temp)) {
+      if (rbt_is_black(w->left) && rbt_is_black(w->right)) {
+        rbt_red(w);
+        temp = temp->parent;
 
-		if (temp == temp->parent->left) {
-			w = temp->parent->right;
+      } else {
+        if (rbt_is_black(w->right)) {
+          rbt_black(w->left);
+          rbt_red(w);
+          rbtree_right_rotate(root, sentinel, w);
+          w = temp->parent->right;
+        }
 
-			if (rbt_is_red(w)) {
-				rbt_black(w);
-				rbt_red(temp->parent);
-				rbtree_left_rotate(root, sentinel, temp->parent);
-				w = temp->parent->right;
-			}
+        rbt_copy_color(w, temp->parent);
+        rbt_black(temp->parent);
+        rbt_black(w->right);
+        rbtree_left_rotate(root, sentinel, temp->parent);
+        temp = *root;
+      }
 
-			if (rbt_is_black(w->left) && rbt_is_black(w->right)) {
-				rbt_red(w);
-				temp = temp->parent;
+    } else {
+      w = temp->parent->left;
 
-			} else {
-				if (rbt_is_black(w->right)) {
-					rbt_black(w->left);
-					rbt_red(w);
-					rbtree_right_rotate(root, sentinel, w);
-					w = temp->parent->right;
-				}
+      if (rbt_is_red(w)) {
+        rbt_black(w);
+        rbt_red(temp->parent);
+        rbtree_right_rotate(root, sentinel, temp->parent);
+        w = temp->parent->left;
+      }
 
-				rbt_copy_color(w, temp->parent);
-				rbt_black(temp->parent);
-				rbt_black(w->right);
-				rbtree_left_rotate(root, sentinel, temp->parent);
-				temp = *root;
-			}
+      if (rbt_is_black(w->left) && rbt_is_black(w->right)) {
+        rbt_red(w);
+        temp = temp->parent;
 
-		} else {
-			w = temp->parent->left;
+      } else {
+        if (rbt_is_black(w->left)) {
+          rbt_black(w->right);
+          rbt_red(w);
+          rbtree_left_rotate(root, sentinel, w);
+          w = temp->parent->left;
+        }
 
-			if (rbt_is_red(w)) {
-				rbt_black(w);
-				rbt_red(temp->parent);
-				rbtree_right_rotate(root, sentinel, temp->parent);
-				w = temp->parent->left;
-			}
+        rbt_copy_color(w, temp->parent);
+        rbt_black(temp->parent);
+        rbt_black(w->left);
+        rbtree_right_rotate(root, sentinel, temp->parent);
+        temp = *root;
+      }
+    }
+  }
 
-			if (rbt_is_black(w->left) && rbt_is_black(w->right)) {
-				rbt_red(w);
-				temp = temp->parent;
-
-			} else {
-				if (rbt_is_black(w->left)) {
-					rbt_black(w->right);
-					rbt_red(w);
-					rbtree_left_rotate(root, sentinel, w);
-					w = temp->parent->left;
-				}
-
-				rbt_copy_color(w, temp->parent);
-				rbt_black(temp->parent);
-				rbt_black(w->left);
-				rbtree_right_rotate(root, sentinel, temp->parent);
-				temp = *root;
-			}
-		}
-	}
-
-	rbt_black(temp);
+  rbt_black(temp);
 }
 
 
-static inline void
-rbtree_left_rotate(rbtree_node_t **root, rbtree_node_t *sentinel,
-		rbtree_node_t *node)
-{
-	rbtree_node_t  *temp;
+static inline void rbtree_left_rotate(rbtree_node_t** root, rbtree_node_t* sentinel,
+                                      rbtree_node_t* node) {
+  rbtree_node_t* temp;
 
-	temp = node->right;
-	node->right = temp->left;
+  temp = node->right;
+  node->right = temp->left;
 
-	if (temp->left != sentinel) {
-		temp->left->parent = node;
-	}
+  if (temp->left != sentinel) {
+    temp->left->parent = node;
+  }
 
-	temp->parent = node->parent;
+  temp->parent = node->parent;
 
-	if (node == *root) {
-		*root = temp;
+  if (node == *root) {
+    *root = temp;
 
-	} else if (node == node->parent->left) {
-		node->parent->left = temp;
+  } else if (node == node->parent->left) {
+    node->parent->left = temp;
 
-	} else {
-		node->parent->right = temp;
-	}
+  } else {
+    node->parent->right = temp;
+  }
 
-	temp->left = node;
-	node->parent = temp;
+  temp->left = node;
+  node->parent = temp;
 }
 
 
-static inline void
-rbtree_right_rotate(rbtree_node_t **root, rbtree_node_t *sentinel,
-		rbtree_node_t *node)
-{
-	rbtree_node_t  *temp;
+static inline void rbtree_right_rotate(rbtree_node_t** root, rbtree_node_t* sentinel,
+                                       rbtree_node_t* node) {
+  rbtree_node_t* temp;
 
-	temp = node->left;
-	node->left = temp->right;
+  temp = node->left;
+  node->left = temp->right;
 
-	if (temp->right != sentinel) {
-		temp->right->parent = node;
-	}
+  if (temp->right != sentinel) {
+    temp->right->parent = node;
+  }
 
-	temp->parent = node->parent;
+  temp->parent = node->parent;
 
-	if (node == *root) {
-		*root = temp;
+  if (node == *root) {
+    *root = temp;
 
-	} else if (node == node->parent->right) {
-		node->parent->right = temp;
+  } else if (node == node->parent->right) {
+    node->parent->right = temp;
 
-	} else {
-		node->parent->left = temp;
-	}
+  } else {
+    node->parent->left = temp;
+  }
 
-	temp->right = node;
-	node->parent = temp;
+  temp->right = node;
+  node->parent = temp;
 }
 
 
-rbtree_node_t *
-hsakmt_rbtree_next(rbtree_t *tree, rbtree_node_t *node)
-{
-	rbtree_node_t  *root, *sentinel, *parent;
+rbtree_node_t* hsakmt_rbtree_next(rbtree_t* tree, rbtree_node_t* node) {
+  rbtree_node_t *root, *sentinel, *parent;
 
-	sentinel = &tree->sentinel;
+  sentinel = &tree->sentinel;
 
-	if (node->right != sentinel) {
-		return rbtree_min(node->right, sentinel);
-	}
+  if (node->right != sentinel) {
+    return rbtree_min(node->right, sentinel);
+  }
 
-	root = tree->root;
+  root = tree->root;
 
-	for ( ;; ) {
-		parent = node->parent;
+  for (;;) {
+    parent = node->parent;
 
-		if (node == root) {
-			return NULL;
-		}
+    if (node == root) {
+      return NULL;
+    }
 
-		if (node == parent->left) {
-			return parent;
-		}
+    if (node == parent->left) {
+      return parent;
+    }
 
-		node = parent;
-	}
+    node = parent;
+  }
 }
 
-rbtree_node_t *
-hsakmt_rbtree_prev(rbtree_t *tree, rbtree_node_t *node)
-{
-	rbtree_node_t  *root, *sentinel, *parent;
+rbtree_node_t* hsakmt_rbtree_prev(rbtree_t* tree, rbtree_node_t* node) {
+  rbtree_node_t *root, *sentinel, *parent;
 
-	sentinel = &tree->sentinel;
+  sentinel = &tree->sentinel;
 
-	if (node->left != sentinel) {
-		return rbtree_max(node->left, sentinel);
-	}
+  if (node->left != sentinel) {
+    return rbtree_max(node->left, sentinel);
+  }
 
-	root = tree->root;
+  root = tree->root;
 
-	for ( ;; ) {
-		parent = node->parent;
+  for (;;) {
+    parent = node->parent;
 
-		if (node == root) {
-			return NULL;
-		}
+    if (node == root) {
+      return NULL;
+    }
 
-		if (node == parent->right) {
-			return parent;
-		}
+    if (node == parent->right) {
+      return parent;
+    }
 
-		node = parent;
-	}
+    node = parent;
+  }
 }

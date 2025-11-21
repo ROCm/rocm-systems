@@ -167,7 +167,8 @@ hip_init()
 bool _constructed = true;
 }  // namespace hip
 
-extern "C" {
+extern "C"
+{
 void
 hip_init(void)
 {

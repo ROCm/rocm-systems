@@ -241,7 +241,8 @@ metadata::metadata(inprocess)
  * For each non-CPU agent, this function calls `process_agent_counters` with a null filter,
  * ensuring that all counters supported by that agent are queried and stored in metadata.
  */
-void metadata::init(inprocess)
+void
+metadata::init(inprocess)
 {
     if(inprocess_init) return;
     inprocess_init = true;

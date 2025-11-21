@@ -31,180 +31,176 @@
 #include "SDMAQueue.hpp"
 #include "Dispatch.hpp"
 
-#define N_PROCESSES             (2)     /* number of processes running in parallel, at least 2 */
-#define ALLOCATE_BUF_SIZE_MB    (64)
-#define ALLOCATE_RETRY_TIMES    (3)
-#define MAX_WAVEFRONTS          (512)
+#define N_PROCESSES (2) /* number of processes running in parallel, at least 2 */
+#define ALLOCATE_BUF_SIZE_MB (64)
+#define ALLOCATE_RETRY_TIMES (3)
+#define MAX_WAVEFRONTS (512)
 
 void KFDSVMEvictTest::SetUp() {
-    ROUTINE_START
+  ROUTINE_START
 
-    KFDLocalMemoryTest::SetUp();
+  KFDLocalMemoryTest::SetUp();
 
-    SVMSetXNACKMode(GetParam());
+  SVMSetXNACKMode(GetParam());
 
-    ROUTINE_END
+  ROUTINE_END
 }
 
 void KFDSVMEvictTest::TearDown() {
-    ROUTINE_START
+  ROUTINE_START
 
-    SVMRestoreXNACKMode();
+  SVMRestoreXNACKMode();
 
-    KFDLocalMemoryTest::TearDown();
+  KFDLocalMemoryTest::TearDown();
 
-    ROUTINE_END
+  ROUTINE_END
 }
 
 HSAint32 KFDSVMEvictTest::GetBufferCounter(HSAuint64 vramSize, HSAuint64 vramBufSize) {
-    HSAuint64 vramBufSizeInPages = vramBufSize >> PAGE_SHIFT;
-    HSAuint64 sysMemSize = GetSysMemSize();
-    HSAuint64 size, sizeInPages;
-    HSAuint32 count;
+  HSAuint64 vramBufSizeInPages = vramBufSize >> PAGE_SHIFT;
+  HSAuint64 sysMemSize = GetSysMemSize();
+  HSAuint64 size, sizeInPages;
+  HSAuint32 count;
 
-    LOG() << "Found System RAM of " << std::dec << (sysMemSize >> 20) << "MB" << std::endl;
+  LOG() << "Found System RAM of " << std::dec << (sysMemSize >> 20) << "MB" << std::endl;
 
-    /* use one third of total system memory for eviction buffer to test
-     * limit max allocate size to double of vramSize
-     * count is zero if not enough memory for XNACK off case
-     */
-    size = MIN(sysMemSize / 3, vramSize / 2);
-    size += vramSize;
+  /* use one third of total system memory for eviction buffer to test
+   * limit max allocate size to double of vramSize
+   * count is zero if not enough memory for XNACK off case
+   */
+  size = MIN(sysMemSize / 3, vramSize / 2);
+  size += vramSize;
 
-    /* Check if there is enough system memory to pass test for XNACK off
-     * KFD system memory limit is 15/16.
-     */
-    HSAint32 xnack_enable = 0;
-    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
-    if (!xnack_enable && size > (sysMemSize - (sysMemSize >> 4)))
-        return 0;
+  /* Check if there is enough system memory to pass test for XNACK off
+   * KFD system memory limit is 15/16.
+   */
+  HSAint32 xnack_enable = 0;
+  EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
+  if (!xnack_enable && size > (sysMemSize - (sysMemSize >> 4))) return 0;
 
-    sizeInPages = size >> PAGE_SHIFT;
-    count = sizeInPages / (vramBufSizeInPages * N_PROCESSES);
+  sizeInPages = size >> PAGE_SHIFT;
+  count = sizeInPages / (vramBufSizeInPages * N_PROCESSES);
 
-    return count;
+  return count;
 }
 
 HSAint64 KFDSVMEvictTest::GetBufferSize(HSAuint64 vramSize, HSAuint32 count,
                                         HSAint32 xnack_enable) {
-    HSAuint64 sysMemSize = GetSysMemSize();
-    HSAuint64 size, sizeInPages;
-    HSAuint64 vramBufSizeInPages;
+  HSAuint64 sysMemSize = GetSysMemSize();
+  HSAuint64 size, sizeInPages;
+  HSAuint64 vramBufSizeInPages;
 
-    LOG() << "Found System RAM of " << std::dec << (sysMemSize >> 20) << "MB" << std::endl;
+  LOG() << "Found System RAM of " << std::dec << (sysMemSize >> 20) << "MB" << std::endl;
 
-    /* use up to one third of total system memory for eviction buffer to test
-     * limit max eviction size to 1/2 of vramSize.
-     */
-    size = MIN(sysMemSize / 3, vramSize / 2);
-    size += vramSize;
+  /* use up to one third of total system memory for eviction buffer to test
+   * limit max eviction size to 1/2 of vramSize.
+   */
+  size = MIN(sysMemSize / 3, vramSize / 2);
+  size += vramSize;
 
-    /* Check if there is enough system memory to pass test for XNACK off
-     * KFD system memory limit is 15/16.
-     */
-    if (!xnack_enable && size > (sysMemSize - (sysMemSize >> 4)))
-        return 0;
+  /* Check if there is enough system memory to pass test for XNACK off
+   * KFD system memory limit is 15/16.
+   */
+  if (!xnack_enable && size > (sysMemSize - (sysMemSize >> 4))) return 0;
 
-    sizeInPages = size >> PAGE_SHIFT;
-    vramBufSizeInPages = sizeInPages / (count * N_PROCESSES);
+  sizeInPages = size >> PAGE_SHIFT;
+  vramBufSizeInPages = sizeInPages / (count * N_PROCESSES);
 
-    return vramBufSizeInPages << PAGE_SHIFT;
+  return vramBufSizeInPages << PAGE_SHIFT;
 }
 
 void KFDSVMEvictTest::AllocBuffers(HSAuint32 defaultGPUNode, HSAuint32 count, HSAuint64 vramBufSize,
-        std::vector<void *> &pBuffers, HSAuint32 Granularity) {
-    HSAuint64   totalMB;
+                                   std::vector<void*>& pBuffers, HSAuint32 Granularity) {
+  HSAuint64 totalMB;
 
-    totalMB = N_PROCESSES * count * (vramBufSize >> 20);
-    if (m_IsParent) {
-        LOG() << "Testing " << N_PROCESSES << "*" << count << "*" << (vramBufSize>>20) << "(="<< totalMB << ")MB" << std::endl;
+  totalMB = N_PROCESSES * count * (vramBufSize >> 20);
+  if (m_IsParent) {
+    LOG() << "Testing " << N_PROCESSES << "*" << count << "*" << (vramBufSize >> 20)
+          << "(=" << totalMB << ")MB" << std::endl;
+  }
+  HSAKMT_STATUS ret;
+  HSAuint32 retry = 0;
+
+  for (HSAuint32 i = 0; i < count; i++) {
+    m_pBuf = mmap(0, vramBufSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    ASSERT_NE(MAP_FAILED, m_pBuf);
+
+    m_Flags = (HSA_SVM_FLAGS)0;
+  retry:
+    ret = RegisterSVMRange(defaultGPUNode, m_pBuf, vramBufSize, defaultGPUNode, m_Flags);
+    if (ret == HSAKMT_STATUS_SUCCESS) {
+      pBuffers.push_back(m_pBuf);
+      if (Granularity) EXPECT_SUCCESS(SVMRangSetGranularity(m_pBuf, vramBufSize, Granularity));
+      retry = 0;
+    } else {
+      if (retry++ > ALLOCATE_RETRY_TIMES) {
+        munmap(m_pBuf, vramBufSize);
+        break;
+      }
+      printf("retry %d allocate vram\n", retry);
+
+      /* wait for 1 second to try allocate again */
+      sleep(1);
+      goto retry;
     }
-    HSAKMT_STATUS ret;
-    HSAuint32 retry = 0;
-
-    for (HSAuint32 i = 0; i < count; i++) {
-        m_pBuf = mmap(0, vramBufSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-        ASSERT_NE(MAP_FAILED, m_pBuf);
-
-        m_Flags = (HSA_SVM_FLAGS)0;
-retry:
-        ret = RegisterSVMRange(defaultGPUNode, m_pBuf, vramBufSize, defaultGPUNode, m_Flags);
-        if (ret == HSAKMT_STATUS_SUCCESS) {
-            pBuffers.push_back(m_pBuf);
-            if (Granularity)
-                EXPECT_SUCCESS(SVMRangSetGranularity(m_pBuf, vramBufSize, Granularity));
-            retry = 0;
-        } else {
-            if (retry++ > ALLOCATE_RETRY_TIMES) {
-                munmap(m_pBuf, vramBufSize);
-                break;
-            }
-            printf("retry %d allocate vram\n", retry);
-
-            /* wait for 1 second to try allocate again */
-            sleep(1);
-            goto retry;
-        }
-    }
+  }
 }
 
-void KFDSVMEvictTest::FreeBuffers(std::vector<void *> &pBuffers, HSAuint64 vramBufSize) {
-    for (HSAuint32 i = 0; i < pBuffers.size(); i++) {
-        m_pBuf = pBuffers[i];
-        if (m_pBuf != NULL)
-            munmap(m_pBuf, vramBufSize);
-    }
+void KFDSVMEvictTest::FreeBuffers(std::vector<void*>& pBuffers, HSAuint64 vramBufSize) {
+  for (HSAuint32 i = 0; i < pBuffers.size(); i++) {
+    m_pBuf = pBuffers[i];
+    if (m_pBuf != NULL) munmap(m_pBuf, vramBufSize);
+  }
 }
 
 void KFDSVMEvictTest::ForkChildProcesses(int nprocesses) {
-    int i;
+  int i;
 
-    for (i = 0; i < nprocesses - 1; ++i) {
-        pid_t pid = fork();
-        ASSERT_GE(pid, 0);
+  for (i = 0; i < nprocesses - 1; ++i) {
+    pid_t pid = fork();
+    ASSERT_GE(pid, 0);
 
-        if (pid == 0) {
-            /* Child process */
-            /* Cleanup file descriptors copied from parent process
-             * then call SetUp->hsaKmtOpenKFD to create new process
-             */
-            m_psName = "Test process " + std::to_string(i) + " ";
-            TearDown();
-            SetUp();
-            m_ChildPids.clear();
-            m_IsParent = false;
-            return;
-        }
-
-        /* Parent process */
-        m_ChildPids.push_back(pid);
+    if (pid == 0) {
+      /* Child process */
+      /* Cleanup file descriptors copied from parent process
+       * then call SetUp->hsaKmtOpenKFD to create new process
+       */
+      m_psName = "Test process " + std::to_string(i) + " ";
+      TearDown();
+      SetUp();
+      m_ChildPids.clear();
+      m_IsParent = false;
+      return;
     }
 
-    m_psName = "Test process " + std::to_string(i) + " ";
+    /* Parent process */
+    m_ChildPids.push_back(pid);
+  }
+
+  m_psName = "Test process " + std::to_string(i) + " ";
 }
 
 void KFDSVMEvictTest::WaitChildProcesses() {
-    if (m_IsParent) {
-        /* only run by parent process */
-        int childStatus;
-        int childExitOkNum = 0;
-        int size = m_ChildPids.size();
+  if (m_IsParent) {
+    /* only run by parent process */
+    int childStatus;
+    int childExitOkNum = 0;
+    int size = m_ChildPids.size();
 
-        for (HSAuint32 i = 0; i < size; i++) {
-            pid_t pid = m_ChildPids.front();
+    for (HSAuint32 i = 0; i < size; i++) {
+      pid_t pid = m_ChildPids.front();
 
-            waitpid(pid, &childStatus, 0);
-            if (WIFEXITED(childStatus) == 1 && WEXITSTATUS(childStatus) == 0)
-                childExitOkNum++;
+      waitpid(pid, &childStatus, 0);
+      if (WIFEXITED(childStatus) == 1 && WEXITSTATUS(childStatus) == 0) childExitOkNum++;
 
-            m_ChildPids.erase(m_ChildPids.begin());
-        }
-
-        ASSERT_EQ(childExitOkNum, size);
+      m_ChildPids.erase(m_ChildPids.begin());
     }
 
-    /* child process or parent process finished successfullly */
-    m_ChildStatus = HSAKMT_STATUS_SUCCESS;
+    ASSERT_EQ(childExitOkNum, size);
+  }
+
+  /* child process or parent process finished successfullly */
+  m_ChildStatus = HSAKMT_STATUS_SUCCESS;
 }
 
 /* Evict and restore procedure basic test
@@ -230,60 +226,59 @@ void KFDSVMEvictTest::WaitChildProcesses() {
  *        they are done allocating memory
  */
 TEST_P(KFDSVMEvictTest, BasicTest) {
-    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
-    TEST_START(TESTPROFILE_RUNALL);
+  TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+  TEST_START(TESTPROFILE_RUNALL);
 
-    if (!SVMAPISupported())
-        return;
+  if (!SVMAPISupported()) return;
 
-    HSAint32 xnack_enable = 0;
-    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
-    if (!xnack_enable) {
-	    LOG() << std::hex << "Test is skipped with xnack off" << std::endl;
-            return;
-    }
+  HSAint32 xnack_enable = 0;
+  EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
+  if (!xnack_enable) {
+    LOG() << std::hex << "Test is skipped with xnack off" << std::endl;
+    return;
+  }
 
-    HSAuint32 defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
-    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
-    HSAuint64 vramBufSize = ALLOCATE_BUF_SIZE_MB * 1024 * 1024;
+  HSAuint32 defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+  ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+  HSAuint64 vramBufSize = ALLOCATE_BUF_SIZE_MB * 1024 * 1024;
 
-    const HsaNodeProperties *pNodeProperties = m_NodeInfo.HsaDefaultGPUNodeProperties();
+  const HsaNodeProperties* pNodeProperties = m_NodeInfo.HsaDefaultGPUNodeProperties();
 
-    if (pNodeProperties->Integrated) {
-        LOG() << "Skipping test on APU." << std::endl;
-        return;
-    }
+  if (pNodeProperties->Integrated) {
+    LOG() << "Skipping test on APU." << std::endl;
+    return;
+  }
 
-    HSAuint64 vramSize = GetVramSize(defaultGPUNode);
+  HSAuint64 vramSize = GetVramSize(defaultGPUNode);
 
-    if (!vramSize) {
-        LOG() << "No VRAM found, skipping the test" << std::endl;
-        return;
-    } else {
-        LOG() << "Found VRAM of " << std::dec << (vramSize >> 20) << "MB" << std::endl;
-    }
+  if (!vramSize) {
+    LOG() << "No VRAM found, skipping the test" << std::endl;
+    return;
+  } else {
+    LOG() << "Found VRAM of " << std::dec << (vramSize >> 20) << "MB" << std::endl;
+  }
 
-    HSAuint32 count = GetBufferCounter(vramSize, vramBufSize);
-    if (count == 0) {
-        LOG() << "Not enough system memory, skipping the test" << std::endl;
-        return;
-    }
+  HSAuint32 count = GetBufferCounter(vramSize, vramBufSize);
+  if (count == 0) {
+    LOG() << "Not enough system memory, skipping the test" << std::endl;
+    return;
+  }
 
-    /* Fork the child processes */
-    ForkChildProcesses(N_PROCESSES);
+  /* Fork the child processes */
+  ForkChildProcesses(N_PROCESSES);
 
-    std::vector<void *> pBuffers;
-    AllocBuffers(defaultGPUNode, count, vramBufSize, pBuffers, 0);
+  std::vector<void*> pBuffers;
+  AllocBuffers(defaultGPUNode, count, vramBufSize, pBuffers, 0);
 
-    /* wait for other processes to finish allocation, then free buffer */
-    sleep(ALLOCATE_RETRY_TIMES);
+  /* wait for other processes to finish allocation, then free buffer */
+  sleep(ALLOCATE_RETRY_TIMES);
 
-    LOG() << m_psName << "free buffer" << std::endl;
-    FreeBuffers(pBuffers, vramBufSize);
+  LOG() << m_psName << "free buffer" << std::endl;
+  FreeBuffers(pBuffers, vramBufSize);
 
-    WaitChildProcesses();
+  WaitChildProcesses();
 
-    TEST_END
+  TEST_END
 }
 
 /* Evict and restore queue test
@@ -304,127 +299,123 @@ TEST_P(KFDSVMEvictTest, BasicTest) {
  *    - check result buffer with specific value to confirm all wavefronts quit normally
  */
 TEST_P(KFDSVMEvictTest, QueueTest) {
-    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
-    TEST_START(TESTPROFILE_RUNALL)
+  TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+  TEST_START(TESTPROFILE_RUNALL)
 
-    if (!SVMAPISupported())
-        return;
+  if (!SVMAPISupported()) return;
 
-    HSAint32 xnack_enable = 0;
-    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
-    if (!xnack_enable) {
-	LOG() << std::hex << "Test is skipped with xnack off" << std::endl;
-        return;
-    }
+  HSAint32 xnack_enable = 0;
+  EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
+  if (!xnack_enable) {
+    LOG() << std::hex << "Test is skipped with xnack off" << std::endl;
+    return;
+  }
 
-    HSAuint32 defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
-    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
-    unsigned int count = MAX_WAVEFRONTS;
+  HSAuint32 defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+  ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+  unsigned int count = MAX_WAVEFRONTS;
 
-    const HsaNodeProperties *pNodeProperties = m_NodeInfo.HsaDefaultGPUNodeProperties();
+  const HsaNodeProperties* pNodeProperties = m_NodeInfo.HsaDefaultGPUNodeProperties();
 
-    /* Skip test for chip it doesn't have CWSR, which the test depends on */
-    if (m_FamilyId < FAMILY_VI || isTonga(pNodeProperties) || m_FamilyId >= FAMILY_NV) {
-        LOG() << std::hex << "Test is skipped for family ID 0x" << m_FamilyId << std::endl;
-        return;
-    }
+  /* Skip test for chip it doesn't have CWSR, which the test depends on */
+  if (m_FamilyId < FAMILY_VI || isTonga(pNodeProperties) || m_FamilyId >= FAMILY_NV) {
+    LOG() << std::hex << "Test is skipped for family ID 0x" << m_FamilyId << std::endl;
+    return;
+  }
 
-    if (pNodeProperties->Integrated) {
-        LOG() << "Skipping test on APU." << std::endl;
-        return;
-    }
+  if (pNodeProperties->Integrated) {
+    LOG() << "Skipping test on APU." << std::endl;
+    return;
+  }
 
-    uint32_t cu_num = pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU;
-    uint32_t wave_num = MIN(cu_num * 40,
-                        (pNodeProperties->NumShaderBanks / pNodeProperties->NumArrays) * 512);
-    if (wave_num < count * N_PROCESSES) {
-        LOG() << std::hex << "Test is skipped, wave_num " << wave_num << " not enough" << std::endl;
-        return;
-    }
+  uint32_t cu_num = pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU;
+  uint32_t wave_num =
+      MIN(cu_num * 40, (pNodeProperties->NumShaderBanks / pNodeProperties->NumArrays) * 512);
+  if (wave_num < count * N_PROCESSES) {
+    LOG() << std::hex << "Test is skipped, wave_num " << wave_num << " not enough" << std::endl;
+    return;
+  }
 
-    HSAuint32 i;
-    HSAuint64 vramSize = GetVramSize(defaultGPUNode);
+  HSAuint32 i;
+  HSAuint64 vramSize = GetVramSize(defaultGPUNode);
 
-    if (!vramSize) {
-        LOG() << "No VRAM found, skipping the test" << std::endl;
-        return;
-    } else {
-        LOG() << "Found VRAM of " << std::dec << (vramSize >> 20) << "MB." << std::endl;
-    }
+  if (!vramSize) {
+    LOG() << "No VRAM found, skipping the test" << std::endl;
+    return;
+  } else {
+    LOG() << "Found VRAM of " << std::dec << (vramSize >> 20) << "MB." << std::endl;
+  }
 
-    HSAuint64 vramBufSize = GetBufferSize(vramSize, count, xnack_enable);
-    if (vramBufSize == 0) {
-        LOG() << "Not enough system memory, skipping the test" << std::endl;
-        return;
-    }
-    /* assert all buffer address can be stored within one page
-     * because only one page host memory srcBuf is allocated
-     */
-    ASSERT_LE(count, PAGE_SIZE/sizeof(unsigned int *));
+  HSAuint64 vramBufSize = GetBufferSize(vramSize, count, xnack_enable);
+  if (vramBufSize == 0) {
+    LOG() << "Not enough system memory, skipping the test" << std::endl;
+    return;
+  }
+  /* assert all buffer address can be stored within one page
+   * because only one page host memory srcBuf is allocated
+   */
+  ASSERT_LE(count, PAGE_SIZE / sizeof(unsigned int*));
 
-    /* Fork the child processes */
-    ForkChildProcesses(N_PROCESSES);
+  /* Fork the child processes */
+  ForkChildProcesses(N_PROCESSES);
 
-    HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true/*zero*/, false/*local*/, true/*exec*/);
-    HsaMemoryBuffer addrBuffer(PAGE_SIZE, defaultGPUNode);
-    HsaMemoryBuffer resultBuffer(PAGE_SIZE, defaultGPUNode);
+  HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true /*zero*/, false /*local*/,
+                            true /*exec*/);
+  HsaMemoryBuffer addrBuffer(PAGE_SIZE, defaultGPUNode);
+  HsaMemoryBuffer resultBuffer(PAGE_SIZE, defaultGPUNode);
 
-    std::vector<void *> pBuffers;
-    HSAuint32 granularity = 0;
-    /* xnack is on, shadder code will trigger gpu page fault that bring data
-     * to vram. use granularity to move all data from system buffer to vram
-     * to reduce system ram pressure in order to avoid system ram oom in system
-     * that has less system ram.
-     */
-    if (xnack_enable)
-       granularity = 0xff;
-    AllocBuffers(defaultGPUNode, count, vramBufSize, pBuffers, granularity);
+  std::vector<void*> pBuffers;
+  HSAuint32 granularity = 0;
+  /* xnack is on, shadder code will trigger gpu page fault that bring data
+   * to vram. use granularity to move all data from system buffer to vram
+   * to reduce system ram pressure in order to avoid system ram oom in system
+   * that has less system ram.
+   */
+  if (xnack_enable) granularity = 0xff;
+  AllocBuffers(defaultGPUNode, count, vramBufSize, pBuffers, granularity);
 
-    unsigned int wavefront_num = pBuffers.size();
-    LOG() << m_psName << "wavefront number " << wavefront_num << std::endl;
+  unsigned int wavefront_num = pBuffers.size();
+  LOG() << m_psName << "wavefront number " << wavefront_num << std::endl;
 
-    void **localBufAddr = addrBuffer.As<void **>();
-    unsigned int *result = resultBuffer.As<uint32_t *>();
+  void** localBufAddr = addrBuffer.As<void**>();
+  unsigned int* result = resultBuffer.As<uint32_t*>();
 
-    for (i = 0; i < wavefront_num; i++)
-        *(localBufAddr + i) = pBuffers[i];
+  for (i = 0; i < wavefront_num; i++) *(localBufAddr + i) = pBuffers[i];
 
-    for (i = 0; i < wavefront_num; i++)
-        *(result + i) = vramBufSize;
+  for (i = 0; i < wavefront_num; i++) *(result + i) = vramBufSize;
 
-    ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(ReadMemoryIsa, isaBuffer.As<char*>()));
+  ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(ReadMemoryIsa, isaBuffer.As<char*>()));
 
-    PM4Queue pm4Queue;
-    ASSERT_SUCCESS(pm4Queue.Create(defaultGPUNode));
+  PM4Queue pm4Queue;
+  ASSERT_SUCCESS(pm4Queue.Create(defaultGPUNode));
 
-    Dispatch dispatch0(isaBuffer);
-    dispatch0.SetArgs(localBufAddr, result);
-    dispatch0.SetDim(wavefront_num, 1, 1);
-    /* submit the packet and start shader */
-    dispatch0.Submit(pm4Queue);
+  Dispatch dispatch0(isaBuffer);
+  dispatch0.SetArgs(localBufAddr, result);
+  dispatch0.SetDim(wavefront_num, 1, 1);
+  /* submit the packet and start shader */
+  dispatch0.Submit(pm4Queue);
 
-    /* doing evict/restore queue test for 5 seconds while queue is running */
-    sleep(5);
+  /* doing evict/restore queue test for 5 seconds while queue is running */
+  sleep(5);
 
-    /* LOG() << m_psName << "notify shader to quit" << std::endl; */
-    /* fill address buffer so shader quits */
-    addrBuffer.Fill(0x5678);
+  /* LOG() << m_psName << "notify shader to quit" << std::endl; */
+  /* fill address buffer so shader quits */
+  addrBuffer.Fill(0x5678);
 
-    /* wait for shader to finish or timeout if shade has vm page fault */
-    dispatch0.SyncWithStatus(g_TestTimeOut * 5);
+  /* wait for shader to finish or timeout if shade has vm page fault */
+  dispatch0.SyncWithStatus(g_TestTimeOut * 5);
 
-    ASSERT_SUCCESS(pm4Queue.Destroy());
-    /* LOG() << m_psName << "free buffer" << std::endl; */
-    /* cleanup */
-    FreeBuffers(pBuffers, vramBufSize);
+  ASSERT_SUCCESS(pm4Queue.Destroy());
+  /* LOG() << m_psName << "free buffer" << std::endl; */
+  /* cleanup */
+  FreeBuffers(pBuffers, vramBufSize);
 
-    /* check if all wavefronts finish successfully */
-    for (i = 0; i < wavefront_num; i++)
-        ASSERT_EQ(0x5678, *(result + i));
+  /* check if all wavefronts finish successfully */
+  for (i = 0; i < wavefront_num; i++) ASSERT_EQ(0x5678, *(result + i));
 
-    WaitChildProcesses();
+  WaitChildProcesses();
 
-    TEST_END
+  TEST_END
 }
 
-INSTANTIATE_TEST_CASE_P(, KFDSVMEvictTest,::testing::Values(0, 1));
+INSTANTIATE_TEST_CASE_P(, KFDSVMEvictTest, ::testing::Values(0, 1));

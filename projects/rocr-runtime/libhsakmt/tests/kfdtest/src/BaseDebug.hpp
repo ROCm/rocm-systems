@@ -31,36 +31,34 @@
 // @class BaseDebug
 class BaseDebug {
  public:
-    BaseDebug(void);
-    virtual ~BaseDebug(void);
+  BaseDebug(void);
+  virtual ~BaseDebug(void);
 
-    HSAKMT_STATUS Attach(struct kfd_runtime_info *rInfo,
-                         int rInfoSize,
-                         unsigned int pid,
-                         uint64_t exceptionEnable);
+  HSAKMT_STATUS Attach(struct kfd_runtime_info* rInfo, int rInfoSize, unsigned int pid,
+                       uint64_t exceptionEnable);
 
-    void Detach(void);
-    HSAKMT_STATUS SendRuntimeEvent(uint64_t exceptions, int gpuId, int queueId);
-    HSAKMT_STATUS QueryDebugEvent(uint64_t *exceptions,
-                                  uint32_t *gpuId, uint32_t *queueId,
-                                  int timeoutMsec);
-    void SetExceptionsEnabled(uint64_t exceptions);
-    HSAKMT_STATUS SuspendQueues(unsigned int *numQueues, HSA_QUEUEID *queues, uint32_t *queueIds,
-                                uint64_t exceptionsToClear);
-    HSAKMT_STATUS ResumeQueues(unsigned int *numQueues, HSA_QUEUEID *queues, uint32_t *queueIds);
-    HSAKMT_STATUS QueueSnapshot(uint64_t exceptionsToClear, uint64_t snapshotBufAddr,
-                                uint32_t *numSnapshots);
-    HSAKMT_STATUS DeviceSnapshot(uint64_t exceptionsToClear, uint64_t snapshotBuffAddr,
-                                 uint32_t *numSnapshots);
-    HSAKMT_STATUS SetWaveLaunchOverride(int mode, uint32_t *enableMask, uint32_t *supportMask);
-    HSAKMT_STATUS SetAddressWatch(uint64_t address, int mode, uint64_t mask, uint32_t gpuId, uint32_t *id);
-    HSAKMT_STATUS ClearAddressWatch(uint32_t gpuId, uint32_t id);
-    HSAKMT_STATUS SetFlags(uint32_t *flags);
+  void Detach(void);
+  HSAKMT_STATUS SendRuntimeEvent(uint64_t exceptions, int gpuId, int queueId);
+  HSAKMT_STATUS QueryDebugEvent(uint64_t* exceptions, uint32_t* gpuId, uint32_t* queueId,
+                                int timeoutMsec);
+  void SetExceptionsEnabled(uint64_t exceptions);
+  HSAKMT_STATUS SuspendQueues(unsigned int* numQueues, HSA_QUEUEID* queues, uint32_t* queueIds,
+                              uint64_t exceptionsToClear);
+  HSAKMT_STATUS ResumeQueues(unsigned int* numQueues, HSA_QUEUEID* queues, uint32_t* queueIds);
+  HSAKMT_STATUS QueueSnapshot(uint64_t exceptionsToClear, uint64_t snapshotBufAddr,
+                              uint32_t* numSnapshots);
+  HSAKMT_STATUS DeviceSnapshot(uint64_t exceptionsToClear, uint64_t snapshotBuffAddr,
+                               uint32_t* numSnapshots);
+  HSAKMT_STATUS SetWaveLaunchOverride(int mode, uint32_t* enableMask, uint32_t* supportMask);
+  HSAKMT_STATUS SetAddressWatch(uint64_t address, int mode, uint64_t mask, uint32_t gpuId,
+                                uint32_t* id);
+  HSAKMT_STATUS ClearAddressWatch(uint32_t gpuId, uint32_t id);
+  HSAKMT_STATUS SetFlags(uint32_t* flags);
 
  private:
-    unsigned int m_Pid;
-    struct pollfd m_Fd;
-    const char *m_Fd_Name = "/tmp/dbg_fifo";
+  unsigned int m_Pid;
+  struct pollfd m_Fd;
+  const char* m_Fd_Name = "/tmp/dbg_fifo";
 };
 
 #endif  // __KFD_BASE_DEBUG__H__

@@ -47,7 +47,6 @@ static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 namespace rocprofiler {
 
 
-
 // Constructor of ROCProfiler
 // Takes the buffer size, a buffer callback function and a buffer flush
 // interval to allocate a buffer pool using GenericStorage Also takes the
@@ -96,8 +95,7 @@ ROCProfiler_Singleton::~ROCProfiler_Singleton() {
   Counter::ClearBasicCounters();
 }
 ROCProfiler_Singleton& ROCProfiler_Singleton::GetInstance() {
-  static ROCProfiler_Singleton* rocprofiler_singleton_instance =
-      new ROCProfiler_Singleton;
+  static ROCProfiler_Singleton* rocprofiler_singleton_instance = new ROCProfiler_Singleton;
   return *rocprofiler_singleton_instance;
 }
 bool ROCProfiler_Singleton::FindAgent(rocprofiler_agent_id_t agent_id) { return true; }
@@ -254,7 +252,6 @@ bool ROCProfiler_Singleton::CheckFilterData(rocprofiler_filter_kind_t filter_kin
 }
 
 rocprofiler_timestamp_t ROCProfiler_Singleton::timestamp_ns() {
-
   static uint64_t sys_clock_period = 0;
   struct timespec ts;
   // We are not full on memory model. At worst each CPU can call it once.

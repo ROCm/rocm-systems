@@ -36,16 +36,14 @@ __global__ void vectoradd_float(float* __restrict__ a, const float* __restrict__
 }
 
 __global__ void add(int n, float* x, float* y) {
-
-  if(__hip_atomic_load(&counter, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) != 0){
+  if (__hip_atomic_load(&counter, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) != 0) {
     abort();
   }
   __hip_atomic_fetch_add(&counter, 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
   int index = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int i = index; i < n; i += stride) y[i] = x[i] + y[i];
-   __hip_atomic_fetch_add(&counter, -1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-
+  __hip_atomic_fetch_add(&counter, -1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
 // launches an empty kernel in profiler context
@@ -69,12 +67,11 @@ void LaunchMultiStreamKernels() {
     x[i] = 1.0f;
     y[i] = 2.0f;
   }
-  std::vector< hipStream_t> hip_streams;
-  for(int i = 0; i < 100; i++) {
+  std::vector<hipStream_t> hip_streams;
+  for (int i = 0; i < 100; i++) {
     hipStream_t stream;
-    hipStreamCreate	(&stream);
+    hipStreamCreate(&stream);
     hip_streams.push_back(stream);
-
   }
   HIP_ASSERT(hipMemcpy(d_x, x, N * sizeof(float), hipMemcpyHostToDevice));
   HIP_ASSERT(hipMemcpy(d_y, y, N * sizeof(float), hipMemcpyHostToDevice));
@@ -84,19 +81,19 @@ void LaunchMultiStreamKernels() {
   // This Kernel will always be launched with one wave
   int numBlocks = 1;
 
-  for(int i = 0; i < 100; i++) {
-    for(int j = 0; j < hip_streams.size(); j++)
-       hipLaunchKernelGGL(add, numBlocks, blockSize, 0, hip_streams[j], N, d_x, d_y);
+  for (int i = 0; i < 100; i++) {
+    for (int j = 0; j < hip_streams.size(); j++)
+      hipLaunchKernelGGL(add, numBlocks, blockSize, 0, hip_streams[j], N, d_x, d_y);
     HIP_ASSERT(hipDeviceSynchronize());
   }
 
-  //Wait for GPU to finish before accessing on host
+  // Wait for GPU to finish before accessing on host
   HIP_ASSERT(hipDeviceSynchronize());
 
   HIP_ASSERT(hipMemcpy(x, d_x, N * sizeof(float), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipMemcpy(y, d_y, N * sizeof(float), hipMemcpyDeviceToHost));
 
-    //   Free memory
+  //   Free memory
   HIP_ASSERT(hipFree(d_x));
   HIP_ASSERT(hipFree(d_y));
 

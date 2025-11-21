@@ -130,7 +130,7 @@ set_profiler_active_on_queue(hsa_amd_memory_pool_t             pool,
 
     // Query for cmd buffer size
     hsa_ven_amd_aqlprofile_info_type_t info_type =
-        (hsa_ven_amd_aqlprofile_info_type_t)((int) HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD);
+        (hsa_ven_amd_aqlprofile_info_type_t) ((int) HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD);
     if(hsa_ven_amd_aqlprofile_get_info(&profile, info_type, nullptr) != HSA_STATUS_SUCCESS)
     {
         return ROCPROFILER_STATUS_ERROR;

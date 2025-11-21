@@ -82,8 +82,7 @@ DeviceInfo::DeviceInfo(uint32_t topology_id, uint32_t gpu_id) {
       if (max_wave_size_ <= 0) rocprofiler::fatal("Invalid max_wave_size_ in the topology file");
     } else if (prop_name == "simd_count") {
       simd_count = static_cast<uint32_t>(prop_value);
-      if (simd_count <= 0)
-        rocprofiler::fatal("Invalid simd_count in the topology file");
+      if (simd_count <= 0) rocprofiler::fatal("Invalid simd_count in the topology file");
     } else if (prop_name == "array_count") {
       array_count = static_cast<uint32_t>(prop_value);
       if (array_count <= 0) rocprofiler::fatal("Invalid array_count in the topology file");
@@ -122,8 +121,7 @@ DeviceInfo::DeviceInfo(uint32_t topology_id, uint32_t gpu_id) {
   else
     minor_version_str = std::to_string(minor_version);
   if (major_version > 11 || (major_version == 9 && minor_version > 4))
-    rocprofiler::fatal(
-        "Unsupported hardware. Use rocprofv3 tool for navi4x, mi35x and later.");
+    rocprofiler::fatal("Unsupported hardware. Use rocprofv3 tool for navi4x, mi35x and later.");
   stepping = (gfx_target_version % 100);
   if (stepping > 9)
     stepping_str = std::string(1, convert(stepping));

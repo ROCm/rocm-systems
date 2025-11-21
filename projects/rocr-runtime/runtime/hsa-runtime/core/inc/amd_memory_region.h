@@ -61,14 +61,12 @@ class MemoryRegion : public core::MemoryRegion {
  public:
   /// @brief Convert this object into hsa_region_t.
   static __forceinline hsa_region_t Convert(MemoryRegion* region) {
-    const hsa_region_t region_handle = {
-        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(region))};
+    const hsa_region_t region_handle = {static_cast<uint64_t>(reinterpret_cast<uintptr_t>(region))};
     return region_handle;
   }
 
   static __forceinline const hsa_region_t Convert(const MemoryRegion* region) {
-    const hsa_region_t region_handle = {
-        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(region))};
+    const hsa_region_t region_handle = {static_cast<uint64_t>(reinterpret_cast<uintptr_t>(region))};
     return region_handle;
   }
 
@@ -82,7 +80,8 @@ class MemoryRegion : public core::MemoryRegion {
 
   ~MemoryRegion();
 
-  hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id = 0) const;
+  hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, void** address,
+                        int agent_node_id = 0) const;
 
   hsa_status_t Free(void* address, size_t size) const;
 
@@ -90,23 +89,20 @@ class MemoryRegion : public core::MemoryRegion {
 
   hsa_status_t GetInfo(hsa_region_info_t attribute, void* value) const;
 
-  hsa_status_t GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
-                           void* value) const;
+  hsa_status_t GetPoolInfo(hsa_amd_memory_pool_info_t attribute, void* value) const;
 
   hsa_status_t GetAgentPoolInfo(const core::Agent& agent,
-                                hsa_amd_agent_memory_pool_info_t attribute,
-                                void* value) const;
+                                hsa_amd_agent_memory_pool_info_t attribute, void* value) const;
 
-  hsa_status_t AllowAccess(uint32_t num_agents, const hsa_agent_t* agents,
-                           const void* ptr, size_t size) const;
+  hsa_status_t AllowAccess(uint32_t num_agents, const hsa_agent_t* agents, const void* ptr,
+                           size_t size) const;
 
   hsa_status_t CanMigrate(const MemoryRegion& dst, bool& result) const;
 
   hsa_status_t Migrate(uint32_t flag, const void* ptr) const;
 
-  hsa_status_t Lock(uint32_t num_agents, const hsa_agent_t* agents,
-                    void* host_ptr, size_t size, uint32_t flags,
-                                                      void** agent_ptr) const;
+  hsa_status_t Lock(uint32_t num_agents, const hsa_agent_t* agents, void* host_ptr, size_t size,
+                    uint32_t flags, void** agent_ptr) const;
 
   hsa_status_t Unlock(void* host_ptr) const;
 
@@ -141,21 +137,13 @@ class MemoryRegion : public core::MemoryRegion {
     return (mem_props_.HeapType == HSA_HEAPTYPE_DEVICE_SVM);
   }
 
-  __forceinline bool IsLDS() const {
-    return mem_props_.HeapType == HSA_HEAPTYPE_GPU_LDS;
-  }
+  __forceinline bool IsLDS() const { return mem_props_.HeapType == HSA_HEAPTYPE_GPU_LDS; }
 
-  __forceinline bool IsGDS() const {
-    return mem_props_.HeapType == HSA_HEAPTYPE_GPU_GDS;
-  }
+  __forceinline bool IsGDS() const { return mem_props_.HeapType == HSA_HEAPTYPE_GPU_GDS; }
 
-  __forceinline bool IsScratch() const {
-    return mem_props_.HeapType == HSA_HEAPTYPE_GPU_SCRATCH;
-  }
+  __forceinline bool IsScratch() const { return mem_props_.HeapType == HSA_HEAPTYPE_GPU_SCRATCH; }
 
-  __forceinline uint32_t BusWidth() const {
-    return static_cast<uint32_t>(mem_props_.Width);
-  }
+  __forceinline uint32_t BusWidth() const { return static_cast<uint32_t>(mem_props_.Width); }
 
   __forceinline uint32_t MaxMemCloc() const {
     return static_cast<uint32_t>(mem_props_.MemoryClockMax);
@@ -163,15 +151,13 @@ class MemoryRegion : public core::MemoryRegion {
 
   __forceinline static size_t GetPageSize() { return kPageSize_; }
 
-  __forceinline const HsaMemFlags &mem_flags() const { return mem_flag_; }
-  __forceinline const HsaMemMapFlags &map_flags() const { return map_flag_; }
+  __forceinline const HsaMemFlags& mem_flags() const { return mem_flag_; }
+  __forceinline const HsaMemMapFlags& map_flags() const { return map_flag_; }
 
-  void *fragment_alloc(size_t size) const {
-    return fragment_allocator_.alloc(size);
-  }
-  bool fragment_free(void *mem) const { return fragment_allocator_.free(mem); }
+  void* fragment_alloc(size_t size) const { return fragment_allocator_.alloc(size); }
+  bool fragment_free(void* mem) const { return fragment_allocator_.free(mem); }
 
-private:
+ private:
   const HsaMemoryProperties mem_props_;
 
   HsaMemFlags mem_flag_;
@@ -196,7 +182,8 @@ private:
                                              const core::Runtime::LinkInfo& link_info) const;
 
   // Operational body for Allocate.  Recursive.
-  hsa_status_t AllocateImpl(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id) const;
+  hsa_status_t AllocateImpl(size_t& size, AllocateFlags alloc_flags, void** address,
+                            int agent_node_id) const;
 
   // Operational body for Free.  Recursive.
   hsa_status_t FreeImpl(void* address, size_t size) const;
@@ -215,7 +202,7 @@ private:
   mutable SimpleHeap<BlockAllocator> fragment_allocator_;
 };
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr
 
 #endif  // header guard

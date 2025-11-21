@@ -1,6 +1,6 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -24,7 +24,7 @@ class MemoryAsyncCopyOnEngine : public MemoryAsyncCopy {
 
  protected:
   // @Brief: Run for Benchmark mode with verification
-  virtual void RunBenchmarkWithVerification(Transaction *t);
+  virtual void RunBenchmarkWithVerification(Transaction* t);
 };
 
-#endif // ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_ON_ENGINE_H_
+#endif  // ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_ON_ENGINE_H_

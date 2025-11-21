@@ -82,4 +82,3 @@ class Program : public device::Program {
 
 /*@}*/  // namespace amd::roc
 }  // namespace amd::roc
-

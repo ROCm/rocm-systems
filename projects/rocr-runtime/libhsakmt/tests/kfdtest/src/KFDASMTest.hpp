@@ -28,12 +28,12 @@
 
 class KFDASMTest : public testing::Test {
  public:
-    KFDASMTest() {}
-    ~KFDASMTest() {}
+  KFDASMTest() {}
+  ~KFDASMTest() {}
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 };
 
 #endif  // __KFD_ASM_TEST__H__

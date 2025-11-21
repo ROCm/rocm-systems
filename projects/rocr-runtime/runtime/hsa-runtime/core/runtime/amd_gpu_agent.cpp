@@ -117,34 +117,34 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       pcs_hosttrap_data_(),
       pcs_stochastic_data_(),
       xgmi_cpu_gpu_(false),
-      large_bar_enabled_(false){
+      large_bar_enabled_(false) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
   if (node_props.Capability.ui32.DoorbellType != 2)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Agent creation failed.\nThe GPU node uses a deprecated doorbell type\n");
+    throw AMD::hsa_exception(
+        HSA_STATUS_ERROR, "Agent creation failed.\nThe GPU node uses a deprecated doorbell type\n");
 
   hsa_status_t err = driver().GetClockCounters(node_id(), &t0_);
   t1_ = t0_;
   historical_clock_ratio_ = 0.0;
   assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 
-  const core::Isa *isa_base;
+  const core::Isa* isa_base;
 
   if (node_props.OverrideEngineId.Value != 0) {
-     isa_base = core::IsaRegistry::GetIsa(
-         core::Isa::Version(node_props.OverrideEngineId.ui32.Major,
-                            node_props.OverrideEngineId.ui32.Minor,
-                            node_props.OverrideEngineId.ui32.Stepping));
+    isa_base = core::IsaRegistry::GetIsa(core::Isa::Version(
+        node_props.OverrideEngineId.ui32.Major, node_props.OverrideEngineId.ui32.Minor,
+        node_props.OverrideEngineId.ui32.Stepping));
   } else {
-     isa_base = core::IsaRegistry::GetIsa(
-         core::Isa::Version(node_props.EngineId.ui32.Major,
-                            node_props.EngineId.ui32.Minor,
-                            node_props.EngineId.ui32.Stepping));
+    isa_base = core::IsaRegistry::GetIsa(core::Isa::Version(node_props.EngineId.ui32.Major,
+                                                            node_props.EngineId.ui32.Minor,
+                                                            node_props.EngineId.ui32.Stepping));
   }
 
   if (!isa_base) {
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ISA, "Agent creation failed.\nThe GPU node has an unrecognized id.\n");
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ISA,
+                             "Agent creation failed.\nThe GPU node has an unrecognized id.\n");
   }
 
   rocr::core::IsaFeature sramecc = rocr::core::IsaFeature::Unsupported;
@@ -166,19 +166,21 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   rocr::core::IsaFeature xnack = rocr::core::IsaFeature::Unsupported;
   if (isa_base->IsXnackSupported()) {
     // TODO: This needs to be obtained form KFD once HMM implemented.
-    xnack = xnack_mode ? core::IsaFeature::Enabled
-                      : core::IsaFeature::Disabled;
+    xnack = xnack_mode ? core::IsaFeature::Enabled : core::IsaFeature::Disabled;
   }
 
   if (node_props.OverrideEngineId.Value != 0) {
     isa_ = (core::Isa*)core::IsaRegistry::GetIsa(
-          core::Isa::Version(node_props.OverrideEngineId.ui32.Major, node_props.OverrideEngineId.ui32.Minor,
-                             node_props.OverrideEngineId.ui32.Stepping), sramecc, xnack);
+        core::Isa::Version(node_props.OverrideEngineId.ui32.Major,
+                           node_props.OverrideEngineId.ui32.Minor,
+                           node_props.OverrideEngineId.ui32.Stepping),
+        sramecc, xnack);
   } else {
-  // Set instruction set architecture via node property, only on GPU device.
+    // Set instruction set architecture via node property, only on GPU device.
     isa_ = (core::Isa*)core::IsaRegistry::GetIsa(
-          core::Isa::Version(node_props.EngineId.ui32.Major, node_props.EngineId.ui32.Minor,
-                             node_props.EngineId.ui32.Stepping), sramecc, xnack);
+        core::Isa::Version(node_props.EngineId.ui32.Major, node_props.EngineId.ui32.Minor,
+                           node_props.EngineId.ui32.Stepping),
+        sramecc, xnack);
   }
 
   assert(isa_ != nullptr && "ISA registry inconsistency.");
@@ -188,9 +190,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     supported_isas_.push_back(core::IsaRegistry::GetIsa(isa_->GetIsaGeneric()));
   }
 
-  current_coherency_type((profile_ == HSA_PROFILE_FULL)
-                             ? HSA_AMD_COHERENCY_TYPE_COHERENT
-                             : HSA_AMD_COHERENCY_TYPE_NONCOHERENT);
+  current_coherency_type((profile_ == HSA_PROFILE_FULL) ? HSA_AMD_COHERENCY_TYPE_COHERENT
+                                                        : HSA_AMD_COHERENCY_TYPE_NONCOHERENT);
 
   max_queues_ = core::Runtime::runtime_singleton_->flag().max_queues();
 #if !defined(HSA_LARGE_MODEL) || !defined(__linux__)
@@ -275,41 +276,41 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
   std::map<std::string, CompiledShader> compiled_shaders = {
       {"TrapHandler",
        {
-           {NULL, 0, 0, 0},                                                 // gfx7
-           {kCodeTrapHandler8, sizeof(kCodeTrapHandler8), 2, 4},            // gfx8
-           {kCodeTrapHandler9, sizeof(kCodeTrapHandler9), 2, 4},            // gfx9
-           {kCodeTrapHandler90a, sizeof(kCodeTrapHandler90a), 2, 4},        // gfx90a
-           {NULL, 0, 0, 0},                                                 // gfx942
-           {kCodeTrapHandler1010, sizeof(kCodeTrapHandler1010), 2, 4},      // gfx1010
-           {kCodeTrapHandler10, sizeof(kCodeTrapHandler10), 2, 4},          // gfx10
-           {NULL, 0, 0, 0},                                                 // gfx11
+           {NULL, 0, 0, 0},                                             // gfx7
+           {kCodeTrapHandler8, sizeof(kCodeTrapHandler8), 2, 4},        // gfx8
+           {kCodeTrapHandler9, sizeof(kCodeTrapHandler9), 2, 4},        // gfx9
+           {kCodeTrapHandler90a, sizeof(kCodeTrapHandler90a), 2, 4},    // gfx90a
+           {NULL, 0, 0, 0},                                             // gfx942
+           {kCodeTrapHandler1010, sizeof(kCodeTrapHandler1010), 2, 4},  // gfx1010
+           {kCodeTrapHandler10, sizeof(kCodeTrapHandler10), 2, 4},      // gfx10
+           {NULL, 0, 0, 0},                                             // gfx11
            // GFX12_TODO: Using one for GFX10 for now.
            //             If NULL is used (like GFX11), get an assert.
-           {kCodeTrapHandler10, sizeof(kCodeTrapHandler10), 2, 4},          // gfx12
+           {kCodeTrapHandler10, sizeof(kCodeTrapHandler10), 2, 4},  // gfx12
        }},
       {"TrapHandlerKfdExceptions",
        {
-           {NULL, 0, 0, 0},                                                 // gfx7
-           {kCodeTrapHandler8, sizeof(kCodeTrapHandler8), 2, 4},            // gfx8
-           {kCodeTrapHandlerV2_9, sizeof(kCodeTrapHandlerV2_9), 2, 4},      // gfx9
-           {kCodeTrapHandlerV2_9, sizeof(kCodeTrapHandlerV2_9), 2, 4},      // gfx90a
-           {kCodeTrapHandlerV2_942, sizeof(kCodeTrapHandlerV2_942), 2, 4},  // gfx942
-           {kCodeTrapHandlerV2_1010, sizeof(kCodeTrapHandlerV2_1010), 2, 4},// gfx1010
-           {kCodeTrapHandlerV2_10, sizeof(kCodeTrapHandlerV2_10), 2, 4},    // gfx10
-           {kCodeTrapHandlerV2_11, sizeof(kCodeTrapHandlerV2_11), 2, 4},    // gfx11
-           {kCodeTrapHandlerV2_12, sizeof(kCodeTrapHandlerV2_12), 2, 4},    // gfx12
+           {NULL, 0, 0, 0},                                                   // gfx7
+           {kCodeTrapHandler8, sizeof(kCodeTrapHandler8), 2, 4},              // gfx8
+           {kCodeTrapHandlerV2_9, sizeof(kCodeTrapHandlerV2_9), 2, 4},        // gfx9
+           {kCodeTrapHandlerV2_9, sizeof(kCodeTrapHandlerV2_9), 2, 4},        // gfx90a
+           {kCodeTrapHandlerV2_942, sizeof(kCodeTrapHandlerV2_942), 2, 4},    // gfx942
+           {kCodeTrapHandlerV2_1010, sizeof(kCodeTrapHandlerV2_1010), 2, 4},  // gfx1010
+           {kCodeTrapHandlerV2_10, sizeof(kCodeTrapHandlerV2_10), 2, 4},      // gfx10
+           {kCodeTrapHandlerV2_11, sizeof(kCodeTrapHandlerV2_11), 2, 4},      // gfx11
+           {kCodeTrapHandlerV2_12, sizeof(kCodeTrapHandlerV2_12), 2, 4},      // gfx12
        }},
       {"CopyAligned",
        {
-           {kCodeCopyAligned7, sizeof(kCodeCopyAligned7), 32, 12},          // gfx7
-           {kCodeCopyAligned8, sizeof(kCodeCopyAligned8), 32, 12},          // gfx8
-           {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx9
-           {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx90a
-           {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx942
-           {kCodeCopyAligned10, sizeof(kCodeCopyAligned10), 32, 12},        // gfx1010
-           {kCodeCopyAligned10, sizeof(kCodeCopyAligned10), 32, 12},        // gfx10
-           {kCodeCopyAligned11, sizeof(kCodeCopyAligned11), 32, 12},        // gfx11
-           {kCodeCopyAligned12, sizeof(kCodeCopyAligned12), 32, 12},        // gfx12
+           {kCodeCopyAligned7, sizeof(kCodeCopyAligned7), 32, 12},    // gfx7
+           {kCodeCopyAligned8, sizeof(kCodeCopyAligned8), 32, 12},    // gfx8
+           {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},    // gfx9
+           {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},    // gfx90a
+           {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},    // gfx942
+           {kCodeCopyAligned10, sizeof(kCodeCopyAligned10), 32, 12},  // gfx1010
+           {kCodeCopyAligned10, sizeof(kCodeCopyAligned10), 32, 12},  // gfx10
+           {kCodeCopyAligned11, sizeof(kCodeCopyAligned11), 32, 12},  // gfx11
+           {kCodeCopyAligned12, sizeof(kCodeCopyAligned12), 32, 12},  // gfx12
        }},
       {"CopyMisaligned",
        {
@@ -325,20 +326,19 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        }},
       {"Fill",
        {
-           {kCodeFill7, sizeof(kCodeFill7), 19, 8},                         // gfx7
-           {kCodeFill8, sizeof(kCodeFill8), 19, 8},                         // gfx8
-           {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx9
-           {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx90a
-           {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx942
-           {kCodeFill10, sizeof(kCodeFill10), 19, 8},                       // gfx1010
-           {kCodeFill10, sizeof(kCodeFill10), 19, 8},                       // gfx10
-           {kCodeFill11, sizeof(kCodeFill11), 19, 8},                       // gfx11
-           {kCodeFill12, sizeof(kCodeFill12), 19, 8},                       // gfx12
+           {kCodeFill7, sizeof(kCodeFill7), 19, 8},    // gfx7
+           {kCodeFill8, sizeof(kCodeFill8), 19, 8},    // gfx8
+           {kCodeFill9, sizeof(kCodeFill9), 19, 8},    // gfx9
+           {kCodeFill9, sizeof(kCodeFill9), 19, 8},    // gfx90a
+           {kCodeFill9, sizeof(kCodeFill9), 19, 8},    // gfx942
+           {kCodeFill10, sizeof(kCodeFill10), 19, 8},  // gfx1010
+           {kCodeFill10, sizeof(kCodeFill10), 19, 8},  // gfx10
+           {kCodeFill11, sizeof(kCodeFill11), 19, 8},  // gfx11
+           {kCodeFill12, sizeof(kCodeFill12), 19, 8},  // gfx12
        }}};
 
   auto compiled_shader_it = compiled_shaders.find(func_name);
-  assert(compiled_shader_it != compiled_shaders.end() &&
-         "Precompiled shader unavailable");
+  assert(compiled_shader_it != compiled_shaders.end() && "Precompiled shader unavailable");
 
   ASICShader* asic_shader = NULL;
 
@@ -350,37 +350,37 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       asic_shader = &compiled_shader_it->second.compute_8;
       break;
     case 9:
-      if((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) {
+      if ((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) {
         asic_shader = &compiled_shader_it->second.compute_90a;
-      } else if(isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5) {
+      } else if (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5) {
         asic_shader = &compiled_shader_it->second.compute_942;
       } else {
         asic_shader = &compiled_shader_it->second.compute_9;
       }
       break;
     case 10:
-      if(isa_->GetMinorVersion() == 1)
+      if (isa_->GetMinorVersion() == 1)
         asic_shader = &compiled_shader_it->second.compute_1010;
       else
         asic_shader = &compiled_shader_it->second.compute_10;
       break;
     case 11:
-        asic_shader = &compiled_shader_it->second.compute_11;
+      asic_shader = &compiled_shader_it->second.compute_11;
       break;
     case 12:
-        asic_shader = &compiled_shader_it->second.compute_12;
+      asic_shader = &compiled_shader_it->second.compute_12;
       break;
     default:
       assert(false && "Precompiled shader unavailable for target");
   }
 
   // Allocate a GPU-visible buffer for the shader.
-  size_t header_size =
-      (assemble_target == AssembleTarget::AQL ? sizeof(amd_kernel_code_t) : 0);
+  size_t header_size = (assemble_target == AssembleTarget::AQL ? sizeof(amd_kernel_code_t) : 0);
   code_buf_size = AlignUp(header_size + asic_shader->size, 0x1000);
 
   code_buf = system_allocator()(code_buf_size, 0x1000,
-    core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateExecutableBlitKernelObject);
+                                core::MemoryRegion::AllocateExecutable |
+                                    core::MemoryRegion::AllocateExecutableBlitKernelObject);
   assert(code_buf != NULL && "Code buffer allocation failed");
 
   memset(code_buf, 0, code_buf_size);
@@ -394,27 +394,22 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
 
     header->kernel_code_entry_byte_offset = sizeof(amd_kernel_code_t);
     AMD_HSA_BITS_SET(header->kernel_code_properties,
-                     AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    AMD_HSA_BITS_SET(header->compute_pgm_rsrc1,
+                     AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT, gran_sgprs);
+    AMD_HSA_BITS_SET(header->compute_pgm_rsrc1,
+                     AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT, gran_vgprs);
+    AMD_HSA_BITS_SET(header->compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_FLOAT_DENORM_MODE_16_64,
+                     3);
+    AMD_HSA_BITS_SET(header->compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_ENABLE_IEEE_MODE, 1);
+    AMD_HSA_BITS_SET(header->compute_pgm_rsrc2, AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT, 2);
+    AMD_HSA_BITS_SET(header->compute_pgm_rsrc2, AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X,
                      1);
-    AMD_HSA_BITS_SET(header->compute_pgm_rsrc1,
-                     AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                     gran_sgprs);
-    AMD_HSA_BITS_SET(header->compute_pgm_rsrc1,
-                     AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT,
-                     gran_vgprs);
-    AMD_HSA_BITS_SET(header->compute_pgm_rsrc1,
-                     AMD_COMPUTE_PGM_RSRC_ONE_FLOAT_DENORM_MODE_16_64, 3);
-    AMD_HSA_BITS_SET(header->compute_pgm_rsrc1,
-                     AMD_COMPUTE_PGM_RSRC_ONE_ENABLE_IEEE_MODE, 1);
-    AMD_HSA_BITS_SET(header->compute_pgm_rsrc2,
-                     AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT, 2);
-    AMD_HSA_BITS_SET(header->compute_pgm_rsrc2,
-                     AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, 1);
 
     // gfx90a, gfx942, gfx950
     if ((isa_->GetMajorVersion() == 9) &&
         (((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) ||
-        (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))) {
+         (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))) {
       // Program COMPUTE_PGM_RSRC3.ACCUM_OFFSET for 0 ACC VGPRs on gfx90a.
       // FIXME: Assemble code objects from source at build time
       int gran_accvgprs = ((gran_vgprs + 1) * 8) / 4 - 1;
@@ -423,8 +418,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
   }
 
   // Copy shader code into the GPU-visible buffer.
-  memcpy((void*)(uintptr_t(code_buf) + header_size), asic_shader->code,
-         asic_shader->size);
+  memcpy((void*)(uintptr_t(code_buf) + header_size), asic_shader->code, asic_shader->size);
 }
 
 void GpuAgent::ReleaseShader(void* code_buf, size_t code_buf_size) const {
@@ -436,8 +430,7 @@ void GpuAgent::InitRegionList() {
 
   std::vector<HsaMemoryProperties> mem_props(properties_.NumMemoryBanks);
   if (HSA_STATUS_SUCCESS == driver().GetMemoryProperties(node_id(), mem_props)) {
-    for (uint32_t mem_idx = 0; mem_idx < properties_.NumMemoryBanks;
-         ++mem_idx) {
+    for (uint32_t mem_idx = 0; mem_idx < properties_.NumMemoryBanks; ++mem_idx) {
       // Ignore the one(s) with unknown size.
       if (mem_props[mem_idx].SizeInBytes == 0) {
         continue;
@@ -493,24 +486,20 @@ void GpuAgent::InitRegionList() {
 }
 
 void GpuAgent::InitScratchPool() {
-
   if (!core::Runtime::runtime_singleton_->flag().enable_scratch()) {
-    scratch_pool_. ~SmallHeap();
+    scratch_pool_.~SmallHeap();
 
     // Reconstruct the object as default to allow ~GpuAgent to destruct the member variable
     new (&scratch_pool_) SmallHeap();
     return;
   }
 
-  scratch_per_thread_ =
-      core::Runtime::runtime_singleton_->flag().scratch_mem_size();
-  if (scratch_per_thread_ == 0)
-    scratch_per_thread_ = DEFAULT_SCRATCH_BYTES_PER_THREAD;
+  scratch_per_thread_ = core::Runtime::runtime_singleton_->flag().scratch_mem_size();
+  if (scratch_per_thread_ == 0) scratch_per_thread_ = DEFAULT_SCRATCH_BYTES_PER_THREAD;
 
   // Scratch length is: waves/CU * threads/wave * queues * #CUs *
   // scratch/thread
-  const uint32_t num_cu =
-      properties_.NumFComputeCores / properties_.NumSIMDPerCU;
+  const uint32_t num_cu = properties_.NumFComputeCores / properties_.NumSIMDPerCU;
   queue_scratch_len_ = AlignUp(32 * 64 * num_cu * scratch_per_thread_, 65536);
   size_t max_scratch_len = queue_scratch_len_ * max_queues_;
 
@@ -524,10 +513,9 @@ void GpuAgent::InitScratchPool() {
   void* scratch_base = nullptr;
   hsa_status_t err = driver().AllocateScratchMemory(node_id(), max_scratch_len, &scratch_base);
   assert(err == HSA_STATUS_SUCCESS && "AllocateScratchMemory failed");
-  assert(IsMultipleOf(scratch_base, 0x1000) &&
-         "Scratch base is not page aligned!");
+  assert(IsMultipleOf(scratch_base, 0x1000) && "Scratch base is not page aligned!");
 
-  scratch_pool_. ~SmallHeap();
+  scratch_pool_.~SmallHeap();
   if (HSA_STATUS_SUCCESS == err) {
     new (&scratch_pool_) SmallHeap(scratch_base, max_scratch_len);
   } else {
@@ -544,17 +532,16 @@ void GpuAgent::InitAsyncScratchThresholds() {
   if (!scratch_limit_async_threshold_) {
     // User did not set env var HSA_SCRATCH_SINGLE_LIMIT_ASYNC
     scratch_limit_async_threshold_ =
-      core::Runtime::runtime_singleton_->flag().DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC *
-      (uint64_t)(properties().NumXcc);
+        core::Runtime::runtime_singleton_->flag().DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC *
+        (uint64_t)(properties().NumXcc);
   }
 }
 
-void GpuAgent::ReserveScratch()
-{
+void GpuAgent::ReserveScratch() {
   size_t reserved_sz = core::Runtime::runtime_singleton_->flag().scratch_single_limit();
   if (reserved_sz > MaxScratchDevice()) {
     fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%lu max:%lu)!\n",
-                    reserved_sz, MaxScratchDevice());
+            reserved_sz, MaxScratchDevice());
     reserved_sz = MaxScratchDevice();
   }
 
@@ -609,15 +596,13 @@ void GpuAgent::InitLibDrm() {
   HsaAMDGPUDeviceHandle device_handle;
   status = driver().GetDeviceHandle(node_id(), &device_handle);
   if (status != HSA_STATUS_SUCCESS)
-    throw AMD::hsa_exception(status,
-                             "Agent creation failed.\nlibdrm get device handle failed.\n");
+    throw AMD::hsa_exception(status, "Agent creation failed.\nlibdrm get device handle failed.\n");
 
   ldrm_dev_ = (amdgpu_device_handle)device_handle;
 }
 
-hsa_status_t GpuAgent::IterateRegion(
-    hsa_status_t (*callback)(hsa_region_t region, void* data),
-    void* data) const {
+hsa_status_t GpuAgent::IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
+                                     void* data) const {
   return VisitRegion(true, callback, data);
 }
 
@@ -631,9 +616,8 @@ hsa_status_t GpuAgent::IterateCache(hsa_status_t (*callback)(hsa_cache_t cache, 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::IterateSupportedIsas(
-                    hsa_status_t (*callback)(hsa_isa_t isa, void* data),
-                                                          void* data) const {
+hsa_status_t GpuAgent::IterateSupportedIsas(hsa_status_t (*callback)(hsa_isa_t isa, void* data),
+                                            void* data) const {
   AMD::callback_t<decltype(callback)> call(callback);
   for (const auto& isa : supported_isas()) {
     hsa_status_t stat = call(core::Isa::Handle(isa), data);
@@ -643,8 +627,7 @@ hsa_status_t GpuAgent::IterateSupportedIsas(
 }
 
 hsa_status_t GpuAgent::VisitRegion(bool include_peer,
-                                   hsa_status_t (*callback)(hsa_region_t region,
-                                                            void* data),
+                                   hsa_status_t (*callback)(hsa_region_t region, void* data),
                                    void* data) const {
   if (include_peer) {
     // Only expose system, local, and LDS memory of the blit agent.
@@ -660,35 +643,29 @@ hsa_status_t GpuAgent::VisitRegion(bool include_peer,
 
     // Also expose system regions accessible by this agent.
     hsa_status_t stat =
-        VisitRegion(core::Runtime::runtime_singleton_->system_regions_fine(),
-                    callback, data);
+        VisitRegion(core::Runtime::runtime_singleton_->system_regions_fine(), callback, data);
     if (stat != HSA_STATUS_SUCCESS) {
       return stat;
     }
 
-    return VisitRegion(
-        core::Runtime::runtime_singleton_->system_regions_coarse(), callback,
-        data);
+    return VisitRegion(core::Runtime::runtime_singleton_->system_regions_coarse(), callback, data);
   }
 
   // Only expose system, local, and LDS memory of this agent.
   return VisitRegion(regions_, callback, data);
 }
 
-hsa_status_t GpuAgent::VisitRegion(
-    const std::vector<const core::MemoryRegion*>& regions,
-    hsa_status_t (*callback)(hsa_region_t region, void* data),
-    void* data) const {
+hsa_status_t GpuAgent::VisitRegion(const std::vector<const core::MemoryRegion*>& regions,
+                                   hsa_status_t (*callback)(hsa_region_t region, void* data),
+                                   void* data) const {
   AMD::callback_t<decltype(callback)> call(callback);
   for (const core::MemoryRegion* region : regions) {
     if (!region->user_visible()) continue;
 
-    const AMD::MemoryRegion* amd_region =
-        reinterpret_cast<const AMD::MemoryRegion*>(region);
+    const AMD::MemoryRegion* amd_region = reinterpret_cast<const AMD::MemoryRegion*>(region);
 
     // Only expose system, local, and LDS memory.
-    if (amd_region->IsSystem() || amd_region->IsLocalMemory() ||
-        amd_region->IsLDS()) {
+    if (amd_region->IsSystem() || amd_region->IsLocalMemory() || amd_region->IsLDS()) {
       hsa_region_t region_handle = core::MemoryRegion::Convert(region);
       hsa_status_t status = call(region_handle, data);
       if (status != HSA_STATUS_SUCCESS) {
@@ -724,13 +701,14 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   switch (isa_->GetMajorVersion()) {
     case 9:
       sdma = new BlitSdmaV4();
-      copy_size_override = (isa_->GetMinorVersion() == 0 && isa_->GetStepping() == 10) ?
-                            copy_size_overrides[1] : copy_size_overrides[0];
+      copy_size_override = (isa_->GetMinorVersion() == 0 && isa_->GetStepping() == 10)
+          ? copy_size_overrides[1]
+          : copy_size_overrides[0];
       break;
     case 10:
       sdma = new BlitSdmaV5();
-      copy_size_override = isa_->GetMinorVersion() < 3 ? copy_size_overrides[0] :
-                                                         copy_size_overrides[1];
+      copy_size_override =
+          isa_->GetMinorVersion() < 3 ? copy_size_overrides[0] : copy_size_overrides[1];
       break;
     case 11:
     case 12:
@@ -747,7 +725,7 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   }
 
   Flag::SDMA_OVERRIDE copy_size_override_setting =
-    core::Runtime::runtime_singleton_->flag().enable_sdma_copy_size_override();
+      core::Runtime::runtime_singleton_->flag().enable_sdma_copy_size_override();
   if (copy_size_override_setting == Flag::SDMA_DISABLE) copy_size_override = 0;
 
   rec_eng = uses_rec_sdma_eng_id_mask_ || !use_xgmi ? rec_eng : -1;
@@ -784,7 +762,7 @@ void GpuAgent::InitDma() {
     if (priority != HSA_QUEUE_PRIORITY_NORMAL)
       if (queue->SetPriority(priority) != HSA_STATUS_SUCCESS)
         throw AMD::hsa_exception(HSA_STATUS_ERROR,
-                                "Failed to increase queue priority for PC Sampling");
+                                 "Failed to increase queue priority for PC Sampling");
     return queue;
   };
 
@@ -796,10 +774,12 @@ void GpuAgent::InitDma() {
   // Dedicated compute queue for PC Sampling CP-DMA commands. We need a dedicated queue that runs at
   // highest priority because we do not want the CP-DMA commands to be delayed/blocked due to
   // other dispatches/barriers that could be in the other AQL queues.
-  queues_[QueuePCSampling].reset([queue_lambda]() { return queue_lambda(HSA_QUEUE_PRIORITY_MAXIMUM); });
+  queues_[QueuePCSampling].reset(
+      [queue_lambda]() { return queue_lambda(HSA_QUEUE_PRIORITY_MAXIMUM); });
 
   // Decide which engine to use for blits.
-  auto blit_lambda = [this](bool use_xgmi, lazy_ptr<core::Queue>& queue, bool isHostToDev, uint32_t rec_eng) {
+  auto blit_lambda = [this](bool use_xgmi, lazy_ptr<core::Queue>& queue, bool isHostToDev,
+                            uint32_t rec_eng) {
     Flag::SDMA_OVERRIDE sdma_override = core::Runtime::runtime_singleton_->flag().enable_sdma();
 
     // User SDMA queues are unstable on gfx8 and unsupported on gfx1013.
@@ -828,14 +808,13 @@ void GpuAgent::InitDma() {
 
       // Observing strange behavior when fixing host<->device engines
       // on GFX9 devices older than GFX90a, so bypass engine fix.
-      if (!use_xgmi && isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() == 0
-          && isa_->GetStepping() < 10)
+      if (!use_xgmi && isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() == 0 &&
+          isa_->GetStepping() < 10)
         rec_eng = -1;
 
       // devices without dedicated xGMI SDMA engines should not target specific
       // SDMA engines for queue creation as resources are limited
-      if (!properties_.NumSdmaXgmiEngines)
-        rec_eng = -1;
+      if (!properties_.NumSdmaXgmiEngines) rec_eng = -1;
 
       auto ret = CreateBlitSdma(use_xgmi, rec_eng);
       if (ret != nullptr) return ret;
@@ -845,8 +824,8 @@ void GpuAgent::InitDma() {
     // since there is no graceful way to handle lazy loading when the caller needs to know
     // the status of available SDMA HW resources without a fallback.
     // Call to isSDMA should be used as a proxy error check if !blit_copy_fallback.
-    auto ret = pending_copy_stat_check_ref_ ? new AMD::BlitKernel(NULL) :
-                                              CreateBlitKernel((*queue).get());
+    auto ret =
+        pending_copy_stat_check_ref_ ? new AMD::BlitKernel(NULL) : CreateBlitKernel((*queue).get());
     if (ret == nullptr)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Blit creation failed.");
     return ret;
@@ -884,8 +863,9 @@ void GpuAgent::InitDma() {
   // XGMI engines.
   for (uint32_t idx = DefaultBlitCount; idx < blit_cnt_; idx++) {
     const int eng = idx - 1;
-    blits_[idx].reset(
-        [blit_lambda, this, eng]() { return blit_lambda(true, queues_[QueueUtility], false, eng); });
+    blits_[idx].reset([blit_lambda, this, eng]() {
+      return blit_lambda(true, queues_[QueueUtility], false, eng);
+    });
   }
 
   // GWS queues.
@@ -895,7 +875,7 @@ void GpuAgent::InitDma() {
 void GpuAgent::InitGWS() {
   gws_queue_.queue_.reset([this]() {
     if (properties_.NumGws == 0) return (core::Queue*)nullptr;
-    const uint32_t defaultGWSQueueSize = 0x4000; // 16KB
+    const uint32_t defaultGWSQueueSize = 0x4000;  // 16KB
     std::unique_ptr<core::Queue> queue(CreateInterceptibleQueue(defaultGWSQueueSize));
     if (queue == nullptr)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
@@ -943,13 +923,11 @@ void GpuAgent::ReleaseResources() {
       driver().FreeMemory(scratch_pool_.base(), scratch_pool_.size());
     }
 
-    for (int i = 0; i < QueueCount; i++)
-      queues_[i].reset();
+    for (int i = 0; i < QueueCount; i++) queues_[i].reset();
 
     system_deallocator()(doorbell_queue_map_);
 
-    if (trap_code_buf_ != NULL)
-      system_deallocator()(trap_code_buf_);
+    if (trap_code_buf_ != NULL) system_deallocator()(trap_code_buf_);
   }
 }
 
@@ -974,8 +952,10 @@ void GpuAgent::SetCopyRequestRefCount(bool set) {
     os::YieldThread();
     blit_lock_.Acquire();
   }
-  if (!set && pending_copy_req_ref_) pending_copy_req_ref_--;
-  else pending_copy_req_ref_++;
+  if (!set && pending_copy_req_ref_)
+    pending_copy_req_ref_--;
+  else
+    pending_copy_req_ref_++;
 }
 
 void GpuAgent::SetCopyStatusCheckRefCount(bool set) {
@@ -985,8 +965,10 @@ void GpuAgent::SetCopyStatusCheckRefCount(bool set) {
     os::YieldThread();
     blit_lock_.Acquire();
   }
-  if (!set && pending_copy_stat_check_ref_) pending_copy_stat_check_ref_--;
-  else pending_copy_stat_check_ref_++;
+  if (!set && pending_copy_stat_check_ref_)
+    pending_copy_stat_check_ref_--;
+  else
+    pending_copy_stat_check_ref_++;
 }
 
 // Assign direct peer gang factor to GPU
@@ -997,25 +979,25 @@ void GpuAgent::RegisterGangPeer(core::Agent& peer, unsigned int max_bandwidth_fa
 // Assign direct peer recommended SDMA engine IDs to GPU
 void GpuAgent::RegisterRecSdmaEngIdMaskPeer(core::Agent& peer, uint32_t rec_sdma_eng_id_mask) {
   auto kfd_version = core::Runtime::runtime_singleton_->KfdVersion().version;
-  bool rec_eng_enabled = core::Runtime::runtime_singleton_->flag().enable_sdma_recommended_eng() !=
-                         Flag::SDMA_DISABLE;
+  bool rec_eng_enabled =
+      core::Runtime::runtime_singleton_->flag().enable_sdma_recommended_eng() != Flag::SDMA_DISABLE;
 
   // Assume all recommended masks with single recommended engine (IsPowerOfTwo)
   // will only support targeting that engine and will not gang.
   // Also assume support is uniform for every device in the system.
   uses_rec_sdma_eng_id_mask_ = (kfd_version.KernelInterfaceMajorVersion > 1 ||
-                                 (kfd_version.KernelInterfaceMajorVersion == 1 &&
-                                  kfd_version.KernelInterfaceMinorVersion >= 17)) &&
-                               isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() >= 4 &&
-                               IsPowerOfTwo(rec_sdma_eng_id_mask) && rec_eng_enabled;
+                                (kfd_version.KernelInterfaceMajorVersion == 1 &&
+                                 kfd_version.KernelInterfaceMinorVersion >= 17)) &&
+      isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() >= 4 &&
+      IsPowerOfTwo(rec_sdma_eng_id_mask) && rec_eng_enabled;
 
-  rec_sdma_eng_id_peers_info_[peer.public_handle().handle] = uses_rec_sdma_eng_id_mask_ ?
-                                                             rec_sdma_eng_id_mask : 0;
+  rec_sdma_eng_id_peers_info_[peer.public_handle().handle] =
+      uses_rec_sdma_eng_id_mask_ ? rec_sdma_eng_id_mask : 0;
 }
 
 // Destroy gang signal
-static bool GangCopyCompleteHandler(hsa_signal_value_t, void *arg ) {
-  core::Signal *gang_signal = reinterpret_cast<core::Signal*>(arg);
+static bool GangCopyCompleteHandler(hsa_signal_value_t, void* arg) {
+  core::Signal* gang_signal = reinterpret_cast<core::Signal*>(arg);
   if (gang_signal->IsValid()) {
     gang_signal->DestroySignal();
     if (!gang_signal->IsValid()) {
@@ -1025,17 +1007,15 @@ static bool GangCopyCompleteHandler(hsa_signal_value_t, void *arg ) {
   return true;
 }
 
-hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
-                               const void* src, core::Agent& src_agent,
-                               size_t size,
-                               std::vector<core::Signal*>& dep_signals,
-                               core::Signal& out_signal) {
+hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent, const void* src,
+                               core::Agent& src_agent, size_t size,
+                               std::vector<core::Signal*>& dep_signals, core::Signal& out_signal) {
   // Recommended SDMA engine copies only have gang factor 1
   uint32_t rec_sdma_eng =
-    rocr::os::Ffs(rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle]);
+      rocr::os::Ffs(rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle]);
   if (rec_sdma_eng)
-    return DmaCopyOnEngine(dst, dst_agent, src, src_agent, size,
-                           dep_signals, out_signal, rec_sdma_eng, false);
+    return DmaCopyOnEngine(dst, dst_agent, src, src_agent, size, dep_signals, out_signal,
+                           rec_sdma_eng, false);
 
   if (profiling_enabled()) {
     // Track the agent so we could translate the resulting timestamp to system
@@ -1050,13 +1030,11 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
     gang_factor = gang_peers_info_[dst_agent.public_handle().handle];
   // Use non-D2D (auxillary) SDMA engines in the event of xGMI D2D support
   // when xGMI SDMA context is not available.
-  bool has_aux_gang = gang_factor > 1 &&
-                      gang_factor >= properties_.NumSdmaEngines &&
-                      !!!properties_.NumSdmaXgmiEngines;
+  bool has_aux_gang = gang_factor > 1 && gang_factor >= properties_.NumSdmaEngines &&
+      !!!properties_.NumSdmaXgmiEngines;
   if (gang_factor > 1) {
-    gang_factor = has_aux_gang ?
-                      std::min(gang_factor, properties_.NumSdmaEngines) :
-                      std::min(gang_factor, properties_.NumSdmaXgmiEngines);
+    gang_factor = has_aux_gang ? std::min(gang_factor, properties_.NumSdmaEngines)
+                               : std::min(gang_factor, properties_.NumSdmaXgmiEngines);
   }
 
   ScopedAcquire<KernelMutex> lock(&sdma_gang_lock_);
@@ -1064,7 +1042,7 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   std::vector<core::Signal*> gang_signals;
   if (gang_factor > 1) {
     for (int i = 0; i < gang_factor - 1; i++) {
-      core::Signal *gang_signal;
+      core::Signal* gang_signal;
 
       // Initial value is 2 where 1 is for gang-leader to ack and
       // 1 for non-leader gang item to decrement
@@ -1078,9 +1056,8 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
       }
 
       core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
-                                         core::Signal::Convert(gang_signal),
-                                         HSA_SIGNAL_CONDITION_EQ, 0, GangCopyCompleteHandler,
-                                         reinterpret_cast<void*>(gang_signal));
+          core::Signal::Convert(gang_signal), HSA_SIGNAL_CONDITION_EQ, 0, GangCopyCompleteHandler,
+          reinterpret_cast<void*>(gang_signal));
       gang_signals.push_back(gang_signal);
     }
   }
@@ -1092,28 +1069,25 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
     // Set leader and gang status to blit
     SetCopyRequestRefCount(true);
     MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-    lazy_ptr<core::Blit>& blit = gang_factor > 1 ?
-                                 (has_aux_gang ? blits_[i + 1] : blits_[i + DefaultBlitCount]) :
-                                 GetBlitObject(dst_agent, src_agent, size);
+    lazy_ptr<core::Blit>& blit = gang_factor > 1
+        ? (has_aux_gang ? blits_[i + 1] : blits_[i + DefaultBlitCount])
+        : GetBlitObject(dst_agent, src_agent, size);
     blit->GangLeader(gang_factor > 1 && !i);
 
     hsa_status_t stat;
-    size_t chunk = std::min(remainder_size, (size + gang_factor - 1)/gang_factor);
+    size_t chunk = std::min(remainder_size, (size + gang_factor - 1) / gang_factor);
     if (!blit->GangLeader() && !gang_signals.empty()) {
-      stat = blit->SubmitLinearCopyCommand(reinterpret_cast<uint8_t*>(dst) + offset,
-                                           reinterpret_cast<const uint8_t*>(src) + offset,
-                                           chunk, dep_signals,
-                                           *gang_signals[gang_sig_count], gang_signals);
+      stat = blit->SubmitLinearCopyCommand(
+          reinterpret_cast<uint8_t*>(dst) + offset, reinterpret_cast<const uint8_t*>(src) + offset,
+          chunk, dep_signals, *gang_signals[gang_sig_count], gang_signals);
       gang_sig_count++;
     } else {
       stat = blit->SubmitLinearCopyCommand(reinterpret_cast<uint8_t*>(dst) + offset,
-                                           reinterpret_cast<const uint8_t*>(src) + offset,
-                                           chunk, dep_signals,
-                                           out_signal, gang_signals);
+                                           reinterpret_cast<const uint8_t*>(src) + offset, chunk,
+                                           dep_signals, out_signal, gang_signals);
     }
 
-    if (stat)
-      return stat;
+    if (stat) return stat;
 
     offset += chunk;
     remainder_size -= chunk;
@@ -1122,13 +1096,11 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
-                               const void* src, core::Agent& src_agent,
-                               size_t size,
-                               std::vector<core::Signal*>& dep_signals,
-                               core::Signal& out_signal,
-                               int engine_offset,
-                               bool force_copy_on_sdma) {
+hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent, const void* src,
+                                       core::Agent& src_agent, size_t size,
+                                       std::vector<core::Signal*>& dep_signals,
+                                       core::Signal& out_signal, int engine_offset,
+                                       bool force_copy_on_sdma) {
   // At this point it is guaranteed that one of
   // the two devices is a GPU, potentially both
   assert(((src_agent.device_type() == core::Agent::kAmdGpuDevice) ||
@@ -1141,13 +1113,13 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
 
   // check if dst and src are the same gpu or over xGMI.
   bool is_same_gpu = (src_agent.public_handle().handle == dst_agent.public_handle().handle) &&
-                     (dst_agent.public_handle().handle == public_handle_.handle);
+      (dst_agent.public_handle().handle == public_handle_.handle);
 
   bool is_p2p = !is_same_gpu && src_agent.device_type() == core::Agent::kAmdGpuDevice &&
-                                dst_agent.device_type() == core::Agent::kAmdGpuDevice;
+      dst_agent.device_type() == core::Agent::kAmdGpuDevice;
 
   if ((is_p2p &&
-      core::Runtime::runtime_singleton_->flag().enable_peer_sdma() == Flag::SDMA_DISABLE) ||
+       core::Runtime::runtime_singleton_->flag().enable_peer_sdma() == Flag::SDMA_DISABLE) ||
       core::Runtime::runtime_singleton_->flag().enable_sdma() == Flag::SDMA_DISABLE) {
     // Note  that VDI/HIP will call DmaCopy instead of DmaCopyOnEngine for P2P copies, but
     // we still want to handle force Blit Kernels in this function in case other libraries
@@ -1156,19 +1128,18 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     engine_offset = BlitDevToDev;
   } else {
     bool is_xgmi = is_p2p && dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
-                         properties_.NumSdmaXgmiEngines;
+        properties_.NumSdmaXgmiEngines;
 
     // Due to a RAS issue, GFX90a can only support H2D copies on SDMA0
     bool is_h2d_blit = (src_agent.device_type() == core::Agent::kAmdCpuDevice &&
-      dst_agent.device_type() == core::Agent::kAmdGpuDevice);
+                        dst_agent.device_type() == core::Agent::kAmdGpuDevice);
     bool limit_h2d_blit = isa_->GetVersion() == core::Isa::Version(9, 0, 10);
 
     // Ensure engine selection is within proper range based on transfer type
     if ((is_xgmi && !rec_sdma_eng_override_ && engine_offset <= properties_.NumSdmaEngines) ||
-        (!is_xgmi && engine_offset > (properties_.NumSdmaEngines +
-                                      properties_.NumSdmaXgmiEngines)) ||
-          (!is_h2d_blit && !is_same_gpu && limit_h2d_blit &&
-            engine_offset == BlitHostToDev)) {
+        (!is_xgmi &&
+         engine_offset > (properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines)) ||
+        (!is_h2d_blit && !is_same_gpu && limit_h2d_blit && engine_offset == BlitHostToDev)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
@@ -1187,8 +1158,8 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
 
   std::vector<core::Signal*> gang_signals(0);
 
-  hsa_status_t stat = blit->SubmitLinearCopyCommand(dst, src, size, dep_signals, out_signal,
-                                                    gang_signals);
+  hsa_status_t stat =
+      blit->SubmitLinearCopyCommand(dst, src, size, dep_signals, out_signal, gang_signals);
 
   return stat;
 }
@@ -1197,23 +1168,21 @@ bool GpuAgent::DmaEngineIsFree(uint32_t engine_offset) {
   SetCopyStatusCheckRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyStatusCheckRefCount(false); });
   bool is_free = !!!(sdma_blit_used_mask_ & (1 << engine_offset)) ||
-                    (blits_[engine_offset]->isSDMA() &&
-                     !!!blits_[engine_offset]->PendingBytes());
+      (blits_[engine_offset]->isSDMA() && !!!blits_[engine_offset]->PendingBytes());
   return is_free;
 }
 
 hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_agent,
-                                     uint32_t *engine_ids_mask) {
+                                     uint32_t* engine_ids_mask) {
   assert(((src_agent.device_type() == core::Agent::kAmdGpuDevice) ||
           (dst_agent.device_type() == core::Agent::kAmdGpuDevice)) &&
          ("Both devices are CPU agents which is not expected"));
 
   *engine_ids_mask = 0;
   if (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
-                   dst_agent.device_type() == core::Agent::kAmdGpuDevice &&
-                     dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
-                       properties_.NumSdmaXgmiEngines) {
-    //Find a free xGMI SDMA engine
+      dst_agent.device_type() == core::Agent::kAmdGpuDevice && dst_agent.HiveId() &&
+      src_agent.HiveId() == dst_agent.HiveId() && properties_.NumSdmaXgmiEngines) {
+    // Find a free xGMI SDMA engine
     if (rec_sdma_eng_override_) {
       for (int i = 0; i < (properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines); i++) {
         if (DmaEngineIsFree(BlitHostToDev + i)) {
@@ -1229,7 +1198,7 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
     }
   } else {
     bool is_h2d_blit = (src_agent.device_type() == core::Agent::kAmdCpuDevice &&
-      dst_agent.device_type() == core::Agent::kAmdGpuDevice);
+                        dst_agent.device_type() == core::Agent::kAmdGpuDevice);
     // Due to a RAS issue, GFX90a can only support H2D copies on SDMA0
     bool limit_h2d_blit = isa_->GetVersion() == core::Isa::Version(9, 0, 10);
 
@@ -1242,14 +1211,13 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
 
     // Check is D2H is free
     if (DmaEngineIsFree(BlitDevToHost)) {
-      *engine_ids_mask |= properties_.NumSdmaEngines > 1 ?
-                          HSA_AMD_SDMA_ENGINE_1 :
-                          HSA_AMD_SDMA_ENGINE_0;
+      *engine_ids_mask |=
+          properties_.NumSdmaEngines > 1 ? HSA_AMD_SDMA_ENGINE_1 : HSA_AMD_SDMA_ENGINE_0;
     }
     // Find a free xGMI SDMA engine for H2D/D2H though it may be lower bandwidth
     for (int i = 0; i < properties_.NumSdmaXgmiEngines; i++) {
       if (DmaEngineIsFree(DefaultBlitCount + i)) {
-         *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_2 << i);
+        *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_2 << i);
       }
     }
   }
@@ -1258,17 +1226,16 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
 }
 
 hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
-                                          uint32_t *recommended_ids_mask) {
+                                          uint32_t* recommended_ids_mask) {
   // From the collected data, gfx94x performance is better only for first 3 SDMA engines
   bool isGfx94x = (isa_->GetMajorVersion() == 9 &&
-                  (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5));
+                   (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5));
 
   if (isGfx94x &&
       ((src_agent.device_type() == core::Agent::kAmdCpuDevice &&
         dst_agent.device_type() == core::Agent::kAmdGpuDevice) ||
-        (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
+       (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
         dst_agent.device_type() == core::Agent::kAmdCpuDevice))) {
-
     if (src_agent.device_type() == core::Agent::kAmdCpuDevice) {
       // Host to Device: Use SDMA engine 0 if available
       *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_0;
@@ -1296,8 +1263,8 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-  lazy_ptr<core::Blit>& blit = GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev :
-                                                                        BlitDevToHost);
+  lazy_ptr<core::Blit>& blit =
+      GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev : BlitDevToHost);
 
   if (!blit->isSDMA()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1345,8 +1312,7 @@ void GpuAgent::GetInfoMemoryProperties(uint8_t value[8]) const {
   };
 
   // Fill the HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU flag
-  if (properties_.Integrated)
-      setFlag(HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
+  if (properties_.Integrated) setFlag(HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
 }
 
 hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
@@ -1357,7 +1323,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 
   const bool isa_has_image_support =
       (isa_->GetMajorVersion() == 9 &&
-      (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5)) ? false : true;
+       (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))
+      ? false
+      : true;
 
   switch (attribute_u) {
     case HSA_AGENT_INFO_NAME: {
@@ -1384,8 +1352,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       break;
     case HSA_AGENT_INFO_BASE_PROFILE_DEFAULT_FLOAT_ROUNDING_MODES:
     case HSA_AGENT_INFO_DEFAULT_FLOAT_ROUNDING_MODE:
-      *((hsa_default_float_rounding_mode_t*)value) =
-          HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
+      *((hsa_default_float_rounding_mode_t*)value) = HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
       break;
     case HSA_AGENT_INFO_FAST_F16_OPERATION:
       if (isa_->GetMajorVersion() >= 8) {
@@ -1445,11 +1412,11 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       const size_t num_cache = cache_props_.size();
       for (size_t i = 0; i < num_cache; ++i) {
         const uint32_t line_level = cache_props_[i].CacheLevel;
-          /*
-           * L1 Cache is per CU.
-           * For L2 Cache and above, we report total for the partition so we sum
-           * all the node entries.
-           */
+        /*
+         * L1 Cache is per CU.
+         * For L2 Cache and above, we report total for the partition so we sum
+         * all the node entries.
+         */
         if (line_level >= 2)
           reinterpret_cast<uint32_t*>(value)[line_level - 1] += cache_props_[i].CacheSize * 1024;
         else if (reinterpret_cast<uint32_t*>(value)[line_level - 1] == 0)
@@ -1534,8 +1501,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint32_t*)value) = 64;
       break;
     case HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT:
-      *((uint32_t*)value) =
-          (properties_.NumFComputeCores / properties_.NumSIMDPerCU);
+      *((uint32_t*)value) = (properties_.NumFComputeCores / properties_.NumSIMDPerCU);
       break;
     case HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY:
       *((uint32_t*)value) = properties_.MaxEngineClockMhzFCompute;
@@ -1544,8 +1510,8 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint32_t*)value) = node_id();
       break;
     case HSA_AMD_AGENT_INFO_MAX_ADDRESS_WATCH_POINTS:
-      *((uint32_t*)value) = static_cast<uint32_t>(
-          1 << properties_.Capability.ui32.WatchPointsTotalBits);
+      *((uint32_t*)value) =
+          static_cast<uint32_t>(1 << properties_.Capability.ui32.WatchPointsTotalBits);
       break;
     case HSA_AMD_AGENT_INFO_BDFID:
       *((uint32_t*)value) = static_cast<uint32_t>(properties_.LocationId);
@@ -1562,15 +1528,15 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_PRODUCT_NAME: {
       std::memset(value, 0, HSA_PUBLIC_NAME_SIZE);
       char* temp = reinterpret_cast<char*>(value);
-      for (uint32_t idx = 0;
-           properties_.MarketingName[idx] != 0 && idx < HSA_PUBLIC_NAME_SIZE - 1; idx++) {
+      for (uint32_t idx = 0; properties_.MarketingName[idx] != 0 && idx < HSA_PUBLIC_NAME_SIZE - 1;
+           idx++) {
         temp[idx] = (uint8_t)properties_.MarketingName[idx];
       }
       break;
     }
     case HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU:
-      *((uint32_t*)value) = static_cast<uint32_t>(
-          properties_.NumSIMDPerCU * properties_.MaxWavesPerSIMD);
+      *((uint32_t*)value) =
+          static_cast<uint32_t>(properties_.NumSIMDPerCU * properties_.MaxWavesPerSIMD);
       break;
     case HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU:
       *((uint32_t*)value) = properties_.NumSIMDPerCU;
@@ -1815,8 +1781,8 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 
   if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
-                                flags);
+  auto aql_queue =
+      new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data, flags);
   *queue = aql_queue;
   aql_queues_.push_back(aql_queue);
 
@@ -1877,9 +1843,9 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
   bool use_reclaim = true;
 
   large = (scratch.main_size > scratch.use_once_limit) ||
-          (!AsyncScratchReclaimEnabled() &&
-            ((scratch_pool_.size() - scratch_pool_.remaining() - scratch_cache_.free_bytes() +
-             scratch.main_size) > small_limit));
+      (!AsyncScratchReclaimEnabled() &&
+       ((scratch_pool_.size() - scratch_pool_.remaining() - scratch_cache_.free_bytes() +
+         scratch.main_size) > small_limit));
 
   if ((isa_->GetMajorVersion() < 8) ||
       core::Runtime::runtime_singleton_->flag().no_scratch_reclaim()) {
@@ -1998,8 +1964,8 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       waves_per_cu -= (waves_per_cu <= scratch.main_waves_per_group &&
                        se_per_xcc < scratch.main_waves_per_group &&
                        scratch.main_waves_per_group % se_per_xcc == 0)
-                       ? se_per_xcc
-                       : scratch.main_waves_per_group;
+          ? se_per_xcc
+          : scratch.main_waves_per_group;
     }
 
     // Failed to allocate minimal scratch
@@ -2221,9 +2187,7 @@ bool GpuAgent::current_coherency_type(hsa_amd_coherency_type_t type) {
   return true;
 }
 
-uint16_t GpuAgent::GetMicrocodeVersion() const {
-  return (properties_.EngineId.ui32.uCode);
-}
+uint16_t GpuAgent::GetMicrocodeVersion() const { return (properties_.EngineId.ui32.uCode); }
 
 uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
   return (properties_.uCodeEngineVersions.uCodeSDMA);
@@ -2234,7 +2198,8 @@ void GpuAgent::SyncClocks() {
   assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 }
 
-hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers, pcs_sampling_data_t* pcs_stochastic_buffers) {
+hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,
+                                                pcs_sampling_data_t* pcs_stochastic_buffers) {
   // Assemble the trap handler source code.
   void* tma_addr = nullptr;
   uint64_t tma_size = 0;
@@ -2269,7 +2234,8 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
     }
 
     /* On non-large BAR systems, we may not be able to access device memory, so do a DmaCopy */
-    if (DmaCopy(trap_handler_tma_region_, tma_region_host, 2 * sizeof(uint64_t)) != HSA_STATUS_SUCCESS)
+    if (DmaCopy(trap_handler_tma_region_, tma_region_host, 2 * sizeof(uint64_t)) !=
+        HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR;
 
     tma_size = 2 * sizeof(uint64_t);
@@ -2299,8 +2265,8 @@ void GpuAgent::BindTrapHandler() {
                    trap_code_buf_size_);
   } else {
     if (isa_->GetMajorVersion() >= 11 ||
-       (isa_->GetMajorVersion() == 9 &&
-        (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))) {
+        (isa_->GetMajorVersion() == 9 &&
+         (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))) {
       // No trap handler support without exception handling, soft error.
       return;
     }
@@ -2326,7 +2292,7 @@ void GpuAgent::BindTrapHandler() {
   assert(err == HSA_STATUS_SUCCESS && "SetTrapHandler() failed");
 }
 
-void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
+void GpuAgent::InvalidateCodeCaches(void* ptr, size_t size) {
   // Check for microcode cache invalidation support.
   // This is deprecated in later microcode builds.
   if (isa_->GetMajorVersion() == 7) {
@@ -2348,26 +2314,22 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   uint32_t cache_inv_size_dw;
 
   if (isa_->GetMajorVersion() < 10) {
-      cache_inv[1] = PM4_ACQUIRE_MEM_DW1_COHER_CNTL(
-          PM4_ACQUIRE_MEM_COHER_CNTL_SH_ICACHE_ACTION_ENA |
-          PM4_ACQUIRE_MEM_COHER_CNTL_SH_KCACHE_ACTION_ENA |
-          PM4_ACQUIRE_MEM_COHER_CNTL_TC_ACTION_ENA |
-          PM4_ACQUIRE_MEM_COHER_CNTL_TC_WB_ACTION_ENA);
+    cache_inv[1] = PM4_ACQUIRE_MEM_DW1_COHER_CNTL(PM4_ACQUIRE_MEM_COHER_CNTL_SH_ICACHE_ACTION_ENA |
+                                                  PM4_ACQUIRE_MEM_COHER_CNTL_SH_KCACHE_ACTION_ENA |
+                                                  PM4_ACQUIRE_MEM_COHER_CNTL_TC_ACTION_ENA |
+                                                  PM4_ACQUIRE_MEM_COHER_CNTL_TC_WB_ACTION_ENA);
 
-      cache_inv_size_dw = 7;
+    cache_inv_size_dw = 7;
   } else {
-      cache_inv[7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
-          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(1) |
-          PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV |
-          PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV |
-          PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV |
-          PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV);
+    cache_inv[7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
+        PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(1) | PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV |
+        PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV | PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV |
+        PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV);
 
-      cache_inv_size_dw = 8;
+    cache_inv_size_dw = 8;
   }
 
-  cache_inv[0] = PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, cache_inv_size_dw,
-             isa_->GetMajorVersion());
+  cache_inv[0] = PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, cache_inv_size_dw, isa_->GetMajorVersion());
 
   if (ptr) {
     size_t size_granule = (size + 0xFF) >> 8;
@@ -2419,8 +2381,7 @@ lazy_ptr<core::Blit>& GpuAgent::GetPcieBlit(const core::Agent& dst_agent,
 }
 
 lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(const core::Agent& dst_agent,
-                                              const core::Agent& src_agent,
-                                              const size_t size) {
+                                              const core::Agent& src_agent, const size_t size) {
   // At this point it is guaranteed that one of
   // the two devices is a GPU, potentially both
   assert(((src_agent.device_type() == core::Agent::kAmdGpuDevice) ||
@@ -2439,10 +2400,10 @@ lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(const core::Agent& dst_agent,
     return blits_[BlitDevToDev];
   }
 
-  if (core::Runtime::runtime_singleton_->flag().enable_peer_sdma() == Flag::SDMA_DISABLE
-      && src_agent.device_type() == core::Agent::kAmdGpuDevice
-      && dst_agent.device_type() == core::Agent::kAmdGpuDevice) {
-      return blits_[BlitDevToDev];
+  if (core::Runtime::runtime_singleton_->flag().enable_peer_sdma() == Flag::SDMA_DISABLE &&
+      src_agent.device_type() == core::Agent::kAmdGpuDevice &&
+      dst_agent.device_type() == core::Agent::kAmdGpuDevice) {
+    return blits_[BlitDevToDev];
   }
 
   // Acquire Hive Id of Src and Dst devices - ignore hive id for CPU devices.
@@ -2515,10 +2476,10 @@ void GpuAgent::InitAllocators() {
     auto region_allocator = [region](size_t size,
                                      MemoryRegion::AllocateFlags alloc_flags) -> void* {
       void* ptr = nullptr;
-       return (HSA_STATUS_SUCCESS ==
-               core::Runtime::runtime_singleton_->AllocateMemory(region, size, alloc_flags, &ptr))
-           ? ptr
-           : nullptr;
+      return (HSA_STATUS_SUCCESS ==
+              core::Runtime::runtime_singleton_->AllocateMemory(region, size, alloc_flags, &ptr))
+          ? ptr
+          : nullptr;
     };
 
     auto region_deallocator = [](void* ptr) { core::Runtime::runtime_singleton_->FreeMemory(ptr); };
@@ -2589,7 +2550,7 @@ hsa_status_t ConvertHsaKmtPcSamplingInfoToHsa(HsaPcSamplingInfo* hsaKmtPcSamplin
 
 hsa_status_t GpuAgent::PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configuration_callback_t cb,
                                                void* cb_data) {
-   uint32_t size = 0;
+  uint32_t size = 0;
 
   if (!core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging)
     return HSA_STATUS_ERROR;
@@ -2599,16 +2560,17 @@ hsa_status_t GpuAgent::PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configura
   if (ret != HSAKMT_STATUS_SUCCESS || size == 0) return HSA_STATUS_ERROR;
 
   std::vector<HsaPcSamplingInfo> sampleInfoList(size);
-  ret = HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id(), sampleInfoList.data(), sampleInfoList.size(),
-                                          &size));
+  ret = HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id(), sampleInfoList.data(),
+                                                      sampleInfoList.size(), &size));
 
   if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   for (uint32_t i = 0; i < size; i++) {
     hsa_ven_amd_pcs_configuration_t hsaPcSampling;
-    if (ConvertHsaKmtPcSamplingInfoToHsa(&sampleInfoList[i], &hsaPcSampling) == HSA_STATUS_SUCCESS
-        && cb(&hsaPcSampling, cb_data) == HSA_STATUS_INFO_BREAK)
-          return HSA_STATUS_SUCCESS;
+    if (ConvertHsaKmtPcSamplingInfoToHsa(&sampleInfoList[i], &hsaPcSampling) ==
+            HSA_STATUS_SUCCESS &&
+        cb(&hsaPcSampling, cb_data) == HSA_STATUS_INFO_BREAK)
+      return HSA_STATUS_SUCCESS;
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -2630,8 +2592,9 @@ hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& sess
   // sampling session.
   HSAKMT_STATUS retkmt = HSAKMT_CALL(hsaKmtPcSamplingCreate(node_id(), &sampleInfo, &thunkId));
   if (retkmt != HSAKMT_STATUS_SUCCESS) {
-    return (retkmt == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) ? (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY
-            : HSA_STATUS_ERROR;
+    return (retkmt == HSAKMT_STATUS_KERNEL_ALREADY_OPENED)
+        ? (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY
+        : HSA_STATUS_ERROR;
   }
 
   debug_print("Created PC sampling session with thunkId:%d\n", thunkId);
@@ -2761,77 +2724,76 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   if (session.buffer_size() > 2 * max_trap_buffer_size) {
     trap_buffer_size = max_trap_buffer_size;
     pcs_data->host_buffer_size = 2 * AlignUp(session.buffer_size(), trap_buffer_size);
-    } else {
-      trap_buffer_size = session.buffer_size() / 2;
-      pcs_data->host_buffer_size = 2 * session.buffer_size();
-    }
+  } else {
+    trap_buffer_size = session.buffer_size() / 2;
+    pcs_data->host_buffer_size = 2 * session.buffer_size();
+  }
 
-    pcs_data->host_buffer = (uint8_t*)system_allocator()(pcs_data->host_buffer_size, 0x1000, 0);
-    if (!pcs_data->host_buffer) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  pcs_data->host_buffer = (uint8_t*)system_allocator()(pcs_data->host_buffer_size, 0x1000, 0);
+  if (!pcs_data->host_buffer) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-    if (AMD::hsa_amd_agents_allow_access(1, &public_handle_, NULL, pcs_data->host_buffer) !=
-        HSA_STATUS_SUCCESS)
-      return HSA_STATUS_ERROR;
+  if (AMD::hsa_amd_agents_allow_access(1, &public_handle_, NULL, pcs_data->host_buffer) !=
+      HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
 
-    device_datahost->buf_size = trap_buffer_size / session.sample_size();
+  device_datahost->buf_size = trap_buffer_size / session.sample_size();
 
-    if (HSA::hsa_signal_create(1, 0, NULL, &device_datahost->done_sig0) != HSA_STATUS_SUCCESS)
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  if (HSA::hsa_signal_create(1, 0, NULL, &device_datahost->done_sig0) != HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-    if (HSA::hsa_signal_create(1, 0, NULL, &device_datahost->done_sig1) != HSA_STATUS_SUCCESS)
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  if (HSA::hsa_signal_create(1, 0, NULL, &device_datahost->done_sig1) != HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-    // TODO: Once we have things working and can measure
-    // latency after 2nd level trap handler decrements signals and set watermark accordingly
-    device_datahost->buf_watermark0 = 0.8 * device_datahost->buf_size;
-    device_datahost->buf_watermark1 = 0.8 * device_datahost->buf_size;
+  // TODO: Once we have things working and can measure
+  // latency after 2nd level trap handler decrements signals and set watermark accordingly
+  device_datahost->buf_watermark0 = 0.8 * device_datahost->buf_size;
+  device_datahost->buf_watermark1 = 0.8 * device_datahost->buf_size;
 
-    // Allocate device memory for 2nd level trap handler TMA
-    size_t deviceAllocSize = sizeof(pcs_sampling_data_t) + (2 * trap_buffer_size);
-    pcs_data->device_data = (pcs_sampling_data_t*)finegrain_allocator()(deviceAllocSize, 0);
-    if (pcs_data->device_data == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  // Allocate device memory for 2nd level trap handler TMA
+  size_t deviceAllocSize = sizeof(pcs_sampling_data_t) + (2 * trap_buffer_size);
+  pcs_data->device_data = (pcs_sampling_data_t*)finegrain_allocator()(deviceAllocSize, 0);
+  if (pcs_data->device_data == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-    // This cpuAgent is the owner of the system_allocator() pool
-    auto cpuAgent = GetNearestCpuAgent()->public_handle();
-    if (AMD::hsa_amd_agents_allow_access(1, &cpuAgent, NULL, pcs_data->device_data) != HSA_STATUS_SUCCESS)
-      return HSA_STATUS_ERROR;
+  // This cpuAgent is the owner of the system_allocator() pool
+  auto cpuAgent = GetNearestCpuAgent()->public_handle();
+  if (AMD::hsa_amd_agents_allow_access(1, &cpuAgent, NULL, pcs_data->device_data) !=
+      HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
 
-    if (DmaCopy(pcs_data->device_data, device_datahost, sizeof(*device_datahost)) !=
-        HSA_STATUS_SUCCESS) {
-      debug_print("Failed to dmaCopy!\n");
-      return HSA_STATUS_ERROR;
-    }
+  if (DmaCopy(pcs_data->device_data, device_datahost, sizeof(*device_datahost)) !=
+      HSA_STATUS_SUCCESS) {
+    debug_print("Failed to dmaCopy!\n");
+    return HSA_STATUS_ERROR;
+  }
 
-    uint8_t* device_buf_ptr =
-	reinterpret_cast<uint8_t*>(pcs_data->device_data) + sizeof(pcs_sampling_data_t);
-    size_t count_in_bytes = deviceAllocSize - sizeof(pcs_sampling_data_t);
-    size_t count_in_dwords = count_in_bytes / sizeof(uint32_t);
+  uint8_t* device_buf_ptr =
+      reinterpret_cast<uint8_t*>(pcs_data->device_data) + sizeof(pcs_sampling_data_t);
+  size_t count_in_bytes = deviceAllocSize - sizeof(pcs_sampling_data_t);
+  size_t count_in_dwords = count_in_bytes / sizeof(uint32_t);
 
-    if (DmaFill(device_buf_ptr, 0, count_in_dwords) !=
-	 HSA_STATUS_SUCCESS) {
-      debug_print("Failed to dmaFill!\n");
-      return HSA_STATUS_ERROR;
-    }
+  if (DmaFill(device_buf_ptr, 0, count_in_dwords) != HSA_STATUS_SUCCESS) {
+    debug_print("Failed to dmaFill!\n");
+    return HSA_STATUS_ERROR;
+  }
 
-    pcs_data->lost_sample_count = 0;
-    pcs_data->host_buffer_wrap_pos = 0;
-    pcs_data->host_write_ptr = pcs_data->host_buffer;
-    pcs_data->host_read_ptr = pcs_data->host_write_ptr;
+  pcs_data->lost_sample_count = 0;
+  pcs_data->host_buffer_wrap_pos = 0;
+  pcs_data->host_write_ptr = pcs_data->host_buffer;
+  pcs_data->host_read_ptr = pcs_data->host_write_ptr;
 
-    pcs_data->session = &session;
+  pcs_data->session = &session;
 
-    if (UpdateTrapHandlerWithPCS(
-            sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1 ? pcs_data->device_data : nullptr,
-            sampling_method == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1
-                ? pcs_data->device_data
-                : nullptr) != HSA_STATUS_SUCCESS)
-      return HSA_STATUS_ERROR;
+  if (UpdateTrapHandlerWithPCS(
+          sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1 ? pcs_data->device_data : nullptr,
+          sampling_method == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1 ? pcs_data->device_data
+                                                                  : nullptr) != HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
 
-    session.SetThunkId(ioctlId);
+  session.SetThunkId(ioctlId);
 
-    freeResources.Dismiss();
+  freeResources.Dismiss();
 
-    return HSA_STATUS_SUCCESS;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session) {
@@ -2921,7 +2883,7 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
 
           agent->PcSamplingThread(*pcs_data, thread_name);
         } catch (...) {
-	   fprintf(stdout, "Exception caught in PcSamplingThread. Exiting the thread!");
+          fprintf(stdout, "Exception caught in PcSamplingThread. Exiting the thread!");
         }
 
         delete thread_data;
@@ -2986,8 +2948,7 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
-    pcs::PcsRuntime::PcSamplingSession& session) {
+hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(pcs::PcsRuntime::PcSamplingSession& session) {
   pcs_data_t* pcs_data = nullptr;
 
   if (session.method() == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
@@ -3168,7 +3129,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   reset_write_val = (uint64_t)next_buffer << 63;
 
   unsigned int i = 0;
-  if (properties_.NumXcc > 1) i+= pred_exec_cmd_sz;
+  if (properties_.NumXcc > 1) i += pred_exec_cmd_sz;
   memset(cmd_data, 0, cmd_data_sz);
 
   /*
@@ -3201,16 +3162,15 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = PM4_COPY_DATA_DW5_DST_ADDR_HI(((uint64_t)old_val) >> 32);
 
   if (properties_.NumXcc > 1) {
-    cmd_data[0] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
-    cmd_data[1] =
-      PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
+    cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[1] = PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) |
+        PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
 
   HSA::hsa_signal_store_screlease(exec_pm4_signal, 1);
 
-  queues_[QueuePCSampling]->ExecutePM4(
-      cmd_data, i * sizeof(uint32_t), HSA_FENCE_SCOPE_NONE, HSA_FENCE_SCOPE_SYSTEM, &exec_pm4_signal);
+  queues_[QueuePCSampling]->ExecutePM4(cmd_data, i * sizeof(uint32_t), HSA_FENCE_SCOPE_NONE,
+                                       HSA_FENCE_SCOPE_SYSTEM, &exec_pm4_signal);
   do {
     hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
         exec_pm4_signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
@@ -3237,7 +3197,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   }
 
   i = 0;
-  if (properties_.NumXcc > 1) i+= pred_exec_cmd_sz;
+  if (properties_.NumXcc > 1) i += pred_exec_cmd_sz;
   memset(cmd_data, 0, cmd_data_sz);
 
   /*
@@ -3281,7 +3241,6 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   for (copy_bytes = std::min(to_copy, (uint32_t)CP_DMA_DATA_TRANSFER_CNT_MAX); 0 < to_copy;
        to_copy -= copy_bytes) {
-
     /* DMA_DATA PACKETS, copy buffer using CPDMA */
     cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, isa_->GetMajorVersion());
     cmd_data[i++] = PM4_DMA_DATA_DW1(PM4_DMA_DATA_DST_SEL_DST_ADDR_USING_L2 |
@@ -3310,10 +3269,9 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = PM4_WRITE_DATA_DW4_DATA(0);
 
   if (properties_.NumXcc > 1) {
-    cmd_data[0] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
-    cmd_data[1] =
-      PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
+    cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[1] = PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) |
+        PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
 
   HSA::hsa_signal_store_screlease(exec_pm4_signal, 1);
@@ -3358,14 +3316,15 @@ void GpuAgent::PcSamplingThread(pcs_data_t& pcs_data, const char* thread_name) {
       // Lock buffer to ensure thread-safe access
       std::lock_guard<std::mutex> lock(pcs_data.host_buffer_mutex);
       // Flush device buffers
-      if (PcSamplingFlushDeviceBuffers(session) != HSA_STATUS_SUCCESS)
-	    goto thread_exit;
+      if (PcSamplingFlushDeviceBuffers(session) != HSA_STATUS_SUCCESS) goto thread_exit;
 
       size_t bytes_before_wrap;
       size_t bytes_after_wrap;
 
-      assert(pcs_data.host_read_ptr >= host_buffer_begin && pcs_data.host_read_ptr < host_buffer_end);
-      assert(pcs_data.host_write_ptr >= host_buffer_begin && pcs_data.host_write_ptr < host_buffer_end);
+      assert(pcs_data.host_read_ptr >= host_buffer_begin &&
+             pcs_data.host_read_ptr < host_buffer_end);
+      assert(pcs_data.host_write_ptr >= host_buffer_begin &&
+             pcs_data.host_write_ptr < host_buffer_end);
       assert(pcs_data.host_buffer_wrap_pos ? (pcs_data.host_read_ptr > pcs_data.host_write_ptr)
                                            : (pcs_data.host_read_ptr <= pcs_data.host_write_ptr));
 
@@ -3419,13 +3378,13 @@ void GpuAgent::PcSamplingThread(pcs_data_t& pcs_data, const char* thread_name) {
         }
       }
     }
-thread_exit:
-  debug_print("%s::Exiting\n", thread_name);
-} catch (const std::exception& e) {
-  debug_print("Exception in %s: %s\n", thread_name, e.what());
-} catch (...) {
-  debug_print("Unknown exception in %s\n", thread_name);
-}
+  thread_exit:
+    debug_print("%s::Exiting\n", thread_name);
+  } catch (const std::exception& e) {
+    debug_print("Exception in %s: %s\n", thread_name, e.what());
+  } catch (...) {
+    debug_print("Unknown exception in %s\n", thread_name);
+  }
 }
 
 hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& session) {
@@ -3505,5 +3464,5 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
   return HSA_STATUS_SUCCESS;
 }
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr

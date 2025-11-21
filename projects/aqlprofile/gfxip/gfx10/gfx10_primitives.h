@@ -237,9 +237,14 @@ class gfx10_cntx_prim {
   }
 
   // GRBM SE/SH/WGP indexing
-  static uint32_t grbm_se_sh_wgp_index_value(const uint32_t&, const uint32_t&, const uint32_t&) { return 0; }
+  static uint32_t grbm_se_sh_wgp_index_value(const uint32_t&, const uint32_t&, const uint32_t&) {
+    return 0;
+  }
   // GRBM SE/SH/WGP/BlockInstance indexing
-  static uint32_t grbm_inst_se_sh_wgp_index_value(const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&) { return 0; }
+  static uint32_t grbm_inst_se_sh_wgp_index_value(const uint32_t&, const uint32_t&, const uint32_t&,
+                                                  const uint32_t&) {
+    return 0;
+  }
 
   // CP_PERFMON_CNTL value to reset counters
   static uint32_t cp_perfmon_cntl_reset_value() {

@@ -139,7 +139,7 @@ void RdciHealthSubSystem::parse_cmd_opts(int argc, char** argv) {
         }
 
         if (0 == components) {
-            throw RdcException(RDC_ST_BAD_PARAMETER, "No flags");
+          throw RdcException(RDC_ST_BAD_PARAMETER, "No flags");
         } else
           components_ = components;
         break;
@@ -207,31 +207,37 @@ void RdciHealthSubSystem::get_watches() const {
   if (is_json_output()) {
     std::cout << "\"heading\" : \"Health monitor systems status\", ";
     std::cout << "\"body\" : [";
-    std::cout << "{\"Component\" : \"PCIe\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_PCIE) ? on : off).c_str() << "\"},";
-    std::cout << "{\"Component\" : \"XGMI\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_XGMI) ? on : off).c_str() << "\"},";
-    std::cout << "{\"Component\" : \"Memory\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_MEM) ? on : off).c_str() << "\"},";
-    std::cout << "{\"Component\" : \"EEPROM\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_EEPROM) ? on : off).c_str() << "\"},";
-    std::cout << "{\"Component\" : \"Thermal\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_THERMAL) ? on : off).c_str() << "\"},";
-    std::cout << "{\"Component\" : \"Power\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_POWER) ? on : off).c_str() << "\"}";
+    std::cout << "{\"Component\" : \"PCIe\", \"Status\" : \""
+              << ((components & RDC_HEALTH_WATCH_PCIE) ? on : off).c_str() << "\"},";
+    std::cout << "{\"Component\" : \"XGMI\", \"Status\" : \""
+              << ((components & RDC_HEALTH_WATCH_XGMI) ? on : off).c_str() << "\"},";
+    std::cout << "{\"Component\" : \"Memory\", \"Status\" : \""
+              << ((components & RDC_HEALTH_WATCH_MEM) ? on : off).c_str() << "\"},";
+    std::cout << "{\"Component\" : \"EEPROM\", \"Status\" : \""
+              << ((components & RDC_HEALTH_WATCH_EEPROM) ? on : off).c_str() << "\"},";
+    std::cout << "{\"Component\" : \"Thermal\", \"Status\" : \""
+              << ((components & RDC_HEALTH_WATCH_THERMAL) ? on : off).c_str() << "\"},";
+    std::cout << "{\"Component\" : \"Power\", \"Status\" : \""
+              << ((components & RDC_HEALTH_WATCH_POWER) ? on : off).c_str() << "\"}";
     std::cout << "]";
   } else {
     std::cout << "Health monitor systems status:" << std::endl;
-    std::cout << "+--------------------+" //"-" width :20
-              << "---------------------------------------------------+\n"; //-" width :51
-    std::cout << "|" << std::setw(20) << std::left << " PCIe"    << "| "
-              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_PCIE) ? on : off).c_str() << "|\n";
-    std::cout << "|" << std::setw(20) << std::left << " XGMI"    << "| "
-              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_XGMI) ? on : off).c_str() << "|\n";
-    std::cout << "|" << std::setw(20) << std::left << " Memory"  << "| "
-              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_MEM) ? on : off).c_str() << "|\n";
-    std::cout << "|" << std::setw(20) << std::left << " EEPROM" << "| "
-              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_EEPROM) ? on : off).c_str() << "|\n";
-    std::cout << "|" << std::setw(20) << std::left << " Thermal" << "| "
-              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_THERMAL) ? on : off).c_str() << "|\n";
-    std::cout << "|" << std::setw(20) << std::left << " Power"   << "| "
-              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_POWER) ? on : off).c_str() << "|\n";
-    std::cout << "+--------------------+" //"-" width :20
-              << "---------------------------------------------------+\n"; //-" width :51
+    std::cout << "+--------------------+"                                   //"-" width :20
+              << "---------------------------------------------------+\n";  //-" width :51
+    std::cout << "|" << std::setw(20) << std::left << " PCIe" << "| " << std::setw(50) << std::left
+              << ((components & RDC_HEALTH_WATCH_PCIE) ? on : off).c_str() << "|\n";
+    std::cout << "|" << std::setw(20) << std::left << " XGMI" << "| " << std::setw(50) << std::left
+              << ((components & RDC_HEALTH_WATCH_XGMI) ? on : off).c_str() << "|\n";
+    std::cout << "|" << std::setw(20) << std::left << " Memory" << "| " << std::setw(50)
+              << std::left << ((components & RDC_HEALTH_WATCH_MEM) ? on : off).c_str() << "|\n";
+    std::cout << "|" << std::setw(20) << std::left << " EEPROM" << "| " << std::setw(50)
+              << std::left << ((components & RDC_HEALTH_WATCH_EEPROM) ? on : off).c_str() << "|\n";
+    std::cout << "|" << std::setw(20) << std::left << " Thermal" << "| " << std::setw(50)
+              << std::left << ((components & RDC_HEALTH_WATCH_THERMAL) ? on : off).c_str() << "|\n";
+    std::cout << "|" << std::setw(20) << std::left << " Power" << "| " << std::setw(50) << std::left
+              << ((components & RDC_HEALTH_WATCH_POWER) ? on : off).c_str() << "|\n";
+    std::cout << "+--------------------+"                                   //"-" width :20
+              << "---------------------------------------------------+\n";  //-" width :51
   }
 }
 
@@ -267,28 +273,28 @@ std::string RdciHealthSubSystem::health_string(rdc_health_result_t health) const
 }
 
 std::string RdciHealthSubSystem::component_string(rdc_health_system_t component) const {
-    switch (component) {
-      case RDC_HEALTH_WATCH_PCIE:
-        return "PCIe system: ";
+  switch (component) {
+    case RDC_HEALTH_WATCH_PCIE:
+      return "PCIe system: ";
 
-      case RDC_HEALTH_WATCH_XGMI:
-        return"XGMI system: ";
+    case RDC_HEALTH_WATCH_XGMI:
+      return "XGMI system: ";
 
-      case RDC_HEALTH_WATCH_MEM:
-        return "Memory system: ";
+    case RDC_HEALTH_WATCH_MEM:
+      return "Memory system: ";
 
-      case RDC_HEALTH_WATCH_EEPROM:
-        return "EEPROM system: ";
+    case RDC_HEALTH_WATCH_EEPROM:
+      return "EEPROM system: ";
 
-      case RDC_HEALTH_WATCH_THERMAL:
-        return "Thermal system:";
+    case RDC_HEALTH_WATCH_THERMAL:
+      return "Thermal system:";
 
-      case RDC_HEALTH_WATCH_POWER:
-        return "Power system: ";
+    case RDC_HEALTH_WATCH_POWER:
+      return "Power system: ";
 
-      default:
-        return "Unknown";
-    }
+    default:
+      return "Unknown";
+  }
 }
 
 void RdciHealthSubSystem::output_errstr(const std::string& input) const {
@@ -298,10 +304,10 @@ void RdciHealthSubSystem::output_errstr(const std::string& input) const {
 
   while (iss >> word) {
     if (line_size + word.size() >= width) {
-      std::cout << "|" << std::setw(20) << " " << "| "
-                << std::setw(width) << std::left << line_str << "|\n";
+      std::cout << "|" << std::setw(20) << " " << "| " << std::setw(width) << std::left << line_str
+                << "|\n";
 
-      //add new line string
+      // add new line string
       line_str = word;
       line_size = word.size();
     } else {
@@ -314,34 +320,30 @@ void RdciHealthSubSystem::output_errstr(const std::string& input) const {
         line_size += word.size();
       }
     }
-  } //end while
+  }  // end while
 
   if (0 < line_size)
-      std::cout << "|" << std::setw(20) << " " << "| "
-                << std::setw(width) << std::left << line_str << "|\n";
+    std::cout << "|" << std::setw(20) << " " << "| " << std::setw(width) << std::left << line_str
+              << "|\n";
 }
 
-unsigned int RdciHealthSubSystem::handle_one_component(rdc_health_response_t &response,
-                                                       unsigned int start_index,
-                                                       uint32_t gpu_index,
+unsigned int RdciHealthSubSystem::handle_one_component(rdc_health_response_t& response,
+                                                       unsigned int start_index, uint32_t gpu_index,
                                                        rdc_health_system_t component,
-                                                       rdc_health_result_t &component_health,
-                                                       std::vector<std::string> &err_str) const {
+                                                       rdc_health_result_t& component_health,
+                                                       std::vector<std::string>& err_str) const {
   unsigned int count = 0;
-  rdc_health_incidents_t *incident;
+  rdc_health_incidents_t* incident;
   std::string all_err_str;
 
   for (unsigned int i = start_index; i < response.incidents_count; i++) {
     incident = &response.incidents[i];
 
-    //same GPU Index, same component
-    if ((incident->gpu_index != gpu_index) ||
-        (incident->component != component))
-      break;
+    // same GPU Index, same component
+    if ((incident->gpu_index != gpu_index) || (incident->component != component)) break;
 
-    //set component health
-    if (incident->health > component_health)
-      component_health = incident->health;
+    // set component health
+    if (incident->health > component_health) component_health = incident->health;
 
     all_err_str = " - ";
     all_err_str += incident->error.msg;
@@ -353,11 +355,11 @@ unsigned int RdciHealthSubSystem::handle_one_component(rdc_health_response_t &re
   return count;
 }
 
-unsigned int RdciHealthSubSystem::handle_one_gpu(rdc_health_response_t &response,
+unsigned int RdciHealthSubSystem::handle_one_gpu(rdc_health_response_t& response,
                                                  unsigned int start_index,
                                                  uint32_t gpu_index) const {
   unsigned int count = 0, comp_count = 0;
-  rdc_health_incidents_t *incident;
+  rdc_health_incidents_t* incident;
   rdc_health_result_t gpu_health = RDC_HEALTH_RESULT_PASS;
   std::string component_str, health_str, gpu_health_str;
   typedef struct {
@@ -369,20 +371,19 @@ unsigned int RdciHealthSubSystem::handle_one_gpu(rdc_health_response_t &response
   for (unsigned int i = start_index; i < response.incidents_count; i++) {
     incident = &response.incidents[i];
 
-    //same GPU Index
-    if (incident->gpu_index != gpu_index)
-      break;
+    // same GPU Index
+    if (incident->gpu_index != gpu_index) break;
 
-    //set gpu health
-    if (incident->health > gpu_health)
-      gpu_health = incident->health;
+    // set gpu health
+    if (incident->health > gpu_health) gpu_health = incident->health;
 
-    //handle smae component
+    // handle smae component
     component_detail_t detail;
     detail.component_health = RDC_HEALTH_RESULT_PASS;
     detail.err_str.clear();
 
-    comp_count = handle_one_component(response, i, gpu_index, incident->component, detail.component_health, detail.err_str);
+    comp_count = handle_one_component(response, i, gpu_index, incident->component,
+                                      detail.component_health, detail.err_str);
     i += comp_count - 1;
     count += comp_count;
 
@@ -390,15 +391,15 @@ unsigned int RdciHealthSubSystem::handle_one_gpu(rdc_health_response_t &response
     component_detail_map.insert({incident->component, detail});
   }
 
-  //output gpu_index health result
+  // output gpu_index health result
   gpu_health_str = health_string(gpu_health);
 
   if (is_json_output()) {
     std::cout << "{\"Index\" : \"" << std::to_string(gpu_index) << "\", ";
-    std::cout <<  "\"Health\" : \"" << gpu_health_str << "\", ";
-    std::cout <<  "\"Error\" : [";
+    std::cout << "\"Health\" : \"" << gpu_health_str << "\", ";
+    std::cout << "\"Error\" : [";
 
-    unsigned int i = 0; 
+    unsigned int i = 0;
     for (auto ite : component_detail_map) {
       component_str = component_string(ite.first);
       health_str = health_string(ite.second.component_health);
@@ -407,41 +408,37 @@ unsigned int RdciHealthSubSystem::handle_one_gpu(rdc_health_response_t &response
       std::cout << "\"Health\" : \"" << health_str << "\", ";
 
       std::cout << "\"Message\" : [";
-      unsigned int j = 0; 
+      unsigned int j = 0;
       for (auto err_ite : ite.second.err_str) {
         std::cout << "\"" << err_ite << "\"";
         j++;
-        if (j < ite.second.err_str.size())
-          std::cout << ", ";
+        if (j < ite.second.err_str.size()) std::cout << ", ";
       }
-      std::cout << "]}"; //end Message
+      std::cout << "]}";  // end Message
 
       i++;
       if (i < component_detail_map.size()) {
         std::cout << ", ";
       }
     }
-    std::cout <<  "]}"; //end Error
+    std::cout << "]}";  // end Error
   } else {
     std::cout << "|" << std::setw(20) << " GPU ID: " + std::to_string(gpu_index) << "| "
               << std::setw(60) << std::left << gpu_health_str << "|\n";
-    std::cout << "|" << std::setw(20) << " " << "| "
-              << std::setw(60) << " " << "|\n";
+    std::cout << "|" << std::setw(20) << " " << "| " << std::setw(60) << " " << "|\n";
 
     for (auto ite : component_detail_map) {
       component_str = component_string(ite.first);
       health_str = health_string(ite.second.component_health);
-      std::cout << "|" << std::setw(20) << " " << "| "
-                << std::setw(60) << std::left << component_str + health_str << "|\n";
+      std::cout << "|" << std::setw(20) << " " << "| " << std::setw(60) << std::left
+                << component_str + health_str << "|\n";
 
-      for (auto msg : ite.second.err_str)
-        output_errstr(msg);
+      for (auto msg : ite.second.err_str) output_errstr(msg);
 
-      std::cout << "|" << std::setw(20) << " " << "| "
-                << std::setw(60) << " " << "|\n";
+      std::cout << "|" << std::setw(20) << " " << "| " << std::setw(60) << " " << "|\n";
     }
-    std::cout << "+--------------------+-" //"-" width :20
-              << "------------------------------------------------------------+\n"; //-" width :60
+    std::cout << "+--------------------+-"                                           //"-" width :20
+              << "------------------------------------------------------------+\n";  //-" width :60
   }
 
   return count;
@@ -471,37 +468,35 @@ void RdciHealthSubSystem::health_check() const {
     throw RdcException(result, rdc_status_string(result));
   }
 
-  //output headline
+  // output headline
   std::string overall_str = health_string(response.overall_health);
   if (is_json_output()) {
     std::cout << "\"heading\" : \"Health monitor report\", ";
     std::cout << "\"body\" : ";
-    std::cout <<  "{\"Group\" : \"" << std::to_string(group_id_) << "\", ";
-    std::cout <<   "\"Overall Health\" : \"" << overall_str << "\", ";
-    std::cout <<   "\"GPU\" : [";
+    std::cout << "{\"Group\" : \"" << std::to_string(group_id_) << "\", ";
+    std::cout << "\"Overall Health\" : \"" << overall_str << "\", ";
+    std::cout << "\"GPU\" : [";
   } else {
     std::cout << "Health monitor report:" << std::endl;
-    std::cout << "+--------------------+-" //"-" width :20
-              << "------------------------------------------------------------+\n"; //-" width :60
+    std::cout << "+--------------------+-"                                           //"-" width :20
+              << "------------------------------------------------------------+\n";  //-" width :60
     std::cout << "|" << std::setw(20) << std::left << " Group " + std::to_string(group_id_) << "| "
               << std::setw(60) << std::left << "Overall Health: " + overall_str << "|\n";
-    std::cout << "+====================+=" //"=" width :20
-              << "============================================================+\n"; //"=" width :60
+    std::cout << "+====================+="                                           //"=" width :20
+              << "============================================================+\n";  //"=" width :60
   }
 
-  //output health of per GPU
+  // output health of per GPU
   unsigned int index = 0;
   while (index < response.incidents_count) {
     uint32_t gpu_index = response.incidents[index].gpu_index;
 
     unsigned int count = handle_one_gpu(response, index, gpu_index);
     index += count;
-    if (is_json_output() && (index < response.incidents_count))
-      std::cout << ",";
+    if (is_json_output() && (index < response.incidents_count)) std::cout << ",";
   }
 
-  if (is_json_output())
-    std::cout <<  "]}"; //end Group
+  if (is_json_output()) std::cout << "]}";  // end Group
 }
 
 void RdciHealthSubSystem::health_clear() const {

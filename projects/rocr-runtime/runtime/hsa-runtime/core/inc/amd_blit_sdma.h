@@ -74,7 +74,8 @@ class BlitSdmaBase : public core::Blit {
 
   virtual hsa_status_t SubmitCommand(const void* cmds, size_t cmd_size, uint64_t size,
                                      const std::vector<core::Signal*>& dep_signals,
-                                     core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) = 0;
+                                     core::Signal& out_signal,
+                                     std::vector<core::Signal*>& gang_signals) = 0;
 };
 
 template <bool useGCR> class BlitSdma : public BlitSdmaBase {
@@ -106,8 +107,7 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   /// @param dst Memory address of the copy destination.
   /// @param src Memory address of the copy source.
   /// @param size Size of the data to be copied.
-  virtual hsa_status_t SubmitLinearCopyCommand(void* dst, const void* src,
-                                               size_t size) override;
+  virtual hsa_status_t SubmitLinearCopyCommand(void* dst, const void* src, size_t size) override;
 
   /// @brief Submit a linear copy command to the the underlying compute device's
   /// control block. The call is non blocking. The memory transfer will start
@@ -120,10 +120,10 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   /// @param dep_signals Arrays of dependent signal.
   /// @param out_signal Output signal.
   /// @param gang_signals Array of gang signals.
-  virtual hsa_status_t SubmitLinearCopyCommand(
-      void* dst, const void* src, size_t size,
-      std::vector<core::Signal*>& dep_signals,
-      core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) override;
+  virtual hsa_status_t SubmitLinearCopyCommand(void* dst, const void* src, size_t size,
+                                               std::vector<core::Signal*>& dep_signals,
+                                               core::Signal& out_signal,
+                                               std::vector<core::Signal*>& gang_signals) override;
 
   virtual hsa_status_t SubmitCopyRectCommand(const hsa_pitched_ptr_t* dst,
                                              const hsa_dim3_t* dst_offset,
@@ -137,8 +137,7 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   /// @param ptr Memory address of the fill destination.
   /// @param value Value to be set.
   /// @param count Number of uint32_t element to be set to the value.
-  virtual hsa_status_t SubmitLinearFillCommand(void* ptr, uint32_t value,
-                                               size_t count) override;
+  virtual hsa_status_t SubmitLinearFillCommand(void* ptr, uint32_t value, size_t count) override;
 
   virtual hsa_status_t EnableProfiling(bool enable) override;
 
@@ -188,14 +187,13 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   bool CanWriteUpto(uint64_t upto_index);
 
   /// @brief Build fence command
-  void BuildFenceCommand(char* fence_command_addr, uint32_t* fence,
-                         uint32_t fence_value);
+  void BuildFenceCommand(char* fence_command_addr, uint32_t* fence, uint32_t fence_value);
 
   /// @brief Build Hdp Flush command
   void BuildHdpFlushCommand(char* cmd_addr);
 
-  void BuildCopyCommand(char* cmd_addr, uint32_t num_copy_command, void* dst,
-                        const void* src, size_t size);
+  void BuildCopyCommand(char* cmd_addr, uint32_t num_copy_command, void* dst, const void* src,
+                        size_t size);
 
   void BuildCopyRectCommand(const std::function<void*(size_t)>& append,
                             const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
@@ -318,7 +316,7 @@ typedef BlitSdma<false> BlitSdmaV4;
 // SDMA is connected to gL2.
 typedef BlitSdma<true> BlitSdmaV5;
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr
 
 #endif  // header guard

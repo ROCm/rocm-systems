@@ -64,16 +64,15 @@ static const uint32_t kMaxQueue = 64;
 typedef struct test_validation_data_t {
   bool cb_triggered;
   hsa_queue_t** queue_pointer;
-  hsa_status_t  expected_status;
+  hsa_status_t expected_status;
 } test_validation_data;
 
-static void CallbackQueueErrorHandling(hsa_status_t status, hsa_queue_t *source, void *data);
+static void CallbackQueueErrorHandling(hsa_status_t status, hsa_queue_t* source, void* data);
 
-QueueValidation::QueueValidation(bool launch_InvalidDimension,
-                                 bool launch_InvalidGroupMemory,
-                                 bool launch_InvalidKernelObject,
-                                 bool launch_InvalidPacket,
-                                 bool launch_InvalidWorkGroupSize) :TestBase() {
+QueueValidation::QueueValidation(bool launch_InvalidDimension, bool launch_InvalidGroupMemory,
+                                 bool launch_InvalidKernelObject, bool launch_InvalidPacket,
+                                 bool launch_InvalidWorkGroupSize)
+    : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
@@ -81,29 +80,35 @@ QueueValidation::QueueValidation(bool launch_InvalidDimension,
   std::string desc;
 
   name = "RocR Queue Validation";
-  desc = "This series of tests submit different negative aql packet into the queue"
-         " and verifies that queue error handling callback called with proper exception.";
+  desc =
+      "This series of tests submit different negative aql packet into the queue"
+      " and verifies that queue error handling callback called with proper exception.";
 
   if (launch_InvalidDimension) {
     name += " For InvalidDimension";
-    desc += " This test verifies that if an aql packet specifies a dimension "
-            " value above 3, the queue's error handling callback will trigger";
+    desc +=
+        " This test verifies that if an aql packet specifies a dimension "
+        " value above 3, the queue's error handling callback will trigger";
   } else if (launch_InvalidGroupMemory) {
     name += " For InvalidGroupMemory";
-    desc += " This test verifies that if an aql packet specifies an invalid group"
-            " memory size, the queue's error handling.";
+    desc +=
+        " This test verifies that if an aql packet specifies an invalid group"
+        " memory size, the queue's error handling.";
   } else if (launch_InvalidKernelObject) {
     name += " ForInvalidKernelObject";
-    desc += " This test verifies that if an aql packet specifies an invalid"
-            " kernel object, the queue's error handling callback will trigger.";
+    desc +=
+        " This test verifies that if an aql packet specifies an invalid"
+        " kernel object, the queue's error handling callback will trigger.";
   } else if (launch_InvalidPacket) {
     name += " For InvalidPacket";
-    desc += " This test verifies that if an aql packet is invalid (bad packet type),"
-            " the queue's error handling callback will trigger.";
+    desc +=
+        " This test verifies that if an aql packet is invalid (bad packet type),"
+        " the queue's error handling callback will trigger.";
   } else if (launch_InvalidWorkGroupSize) {
     name += " For InvalidWorkGroupSize";
-    desc += " This test verifies that if an aql packet specifies an invalid"
-            " workgroup size, the queue's error handling callback will trigger.";
+    desc +=
+        " This test verifies that if an aql packet specifies an invalid"
+        " workgroup size, the queue's error handling callback will trigger.";
   }
   set_title(name);
   set_description(desc);
@@ -113,8 +118,7 @@ QueueValidation::QueueValidation(bool launch_InvalidDimension,
   set_kernel_name("empty_kernel");
 }
 
-QueueValidation::~QueueValidation(void) {
-}
+QueueValidation::~QueueValidation(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -133,8 +137,7 @@ void QueueValidation::SetUp(void) {
     rlimit_set.rlim_max = 0;
 
     /* Do not error if system does not allow disabling limit */
-    if (setrlimit(RLIMIT_CORE, &rlimit_set))
-      perror("Could not set core file size\n");
+    if (setrlimit(RLIMIT_CORE, &rlimit_set)) perror("Could not set core file size\n");
   }
 
   err = rocrtst::SetDefaultAgents(this);
@@ -158,9 +161,7 @@ void QueueValidation::Run(void) {
   TestBase::Run();
 }
 
-void QueueValidation::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void QueueValidation::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void QueueValidation::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -174,8 +175,7 @@ void QueueValidation::DisplayResults(void) const {
 
 void QueueValidation::Close() {
   /* Restore rlimit to initial value before test - do not error if fails */
-  if (setrlimit(RLIMIT_CORE, &rlimit_))
-      perror("Could not set core file size\n");
+  if (setrlimit(RLIMIT_CORE, &rlimit_)) perror("Could not set core file size\n");
 
   // This will close handles opened within rocrtst utility calls and call
   // hsa_shut_down(), so it should be done after other hsa cleanup
@@ -185,12 +185,12 @@ void QueueValidation::Close() {
 
 static const char kSubTestSeparator[] = "  **************************";
 
-static void PrintDebugSubtestHeader(const char *header) {
+static void PrintDebugSubtestHeader(const char* header) {
   std::cout << "  *** QueueValidation Subtest: " << header << " ***" << std::endl;
 }
 
 void QueueValidation::QueueValidationForInvalidDimension(hsa_agent_t cpuAgent,
-                                            hsa_agent_t gpuAgent) {
+                                                         hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // Create the executable, get symbol by name and load the code object
@@ -199,14 +199,13 @@ void QueueValidation::QueueValidationForInvalidDimension(hsa_agent_t cpuAgent,
 
   // get queue size
   uint32_t queue_max = 0;
-  err = hsa_agent_get_info(gpuAgent,
-                           HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max);
+  err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Adjust the size to the max of 1024
-  queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max: kMaxQueueSizeForAgent;
+  queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max : kMaxQueueSizeForAgent;
 
-  hsa_queue_t *queue[kMaxQueue];  // command queue
+  hsa_queue_t* queue[kMaxQueue];  // command queue
   uint32_t ii;
   test_validation_data user_data[kMaxQueue];
   for (ii = 0; ii < kMaxQueue; ++ii) {
@@ -218,9 +217,8 @@ void QueueValidation::QueueValidationForInvalidDimension(hsa_agent_t cpuAgent,
     user_data[ii].expected_status = HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
     // create queue
-    err = hsa_queue_create(gpuAgent,
-                       queue_max, HSA_QUEUE_TYPE_SINGLE,
-                       CallbackQueueErrorHandling, &user_data[ii], 0, 0, &queue[ii]);
+    err = hsa_queue_create(gpuAgent, queue_max, HSA_QUEUE_TYPE_SINGLE, CallbackQueueErrorHandling,
+                           &user_data[ii], 0, 0, &queue[ii]);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     // setting the dimesion more than 3
@@ -235,16 +233,14 @@ void QueueValidation::QueueValidationForInvalidDimension(hsa_agent_t cpuAgent,
     rocrtst::WriteAQLToQueueLoc(queue[ii], index, &aql());
 
     aql().header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-                 HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
-    aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-                 HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+    aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+    aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
 
     void* q_base = queue[ii]->base_address;
     // Set the Aql packet header
-    rocrtst::AtomicSetPacketHeader(aql().header, aql().setup,
-                        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
-                            (q_base))[index & queue_mask]);
+    rocrtst::AtomicSetPacketHeader(
+        aql().header, aql().setup,
+        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[index & queue_mask]);
 
 
     // ringdoor bell
@@ -263,7 +259,9 @@ void QueueValidation::QueueValidationForInvalidDimension(hsa_agent_t cpuAgent,
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // queue error handling callback  should be triggered
     ASSERT_EQ(user_data[ii].cb_triggered, true);
-    if (queue[ii]) { hsa_queue_destroy(queue[ii]); }
+    if (queue[ii]) {
+      hsa_queue_destroy(queue[ii]);
+    }
   }
 
   clear_code_object();
@@ -271,7 +269,7 @@ void QueueValidation::QueueValidationForInvalidDimension(hsa_agent_t cpuAgent,
 
 
 void QueueValidation::QueueValidationInvalidGroupMemory(hsa_agent_t cpuAgent,
-                                            hsa_agent_t gpuAgent) {
+                                                        hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // Create the executable, get symbol by name and load the code object
@@ -284,14 +282,13 @@ void QueueValidation::QueueValidationInvalidGroupMemory(hsa_agent_t cpuAgent,
 
   // get queue size
   uint32_t queue_max = 0;
-  err = hsa_agent_get_info(gpuAgent,
-                           HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max);
+  err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Adjust the size to the max of 1024
-  queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max: kMaxQueueSizeForAgent;
+  queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max : kMaxQueueSizeForAgent;
 
-  hsa_queue_t *queue[kMaxQueue];  // command queue
+  hsa_queue_t* queue[kMaxQueue];  // command queue
   test_validation_data user_data[kMaxQueue];
 
   uint32_t ii;
@@ -304,9 +301,8 @@ void QueueValidation::QueueValidationInvalidGroupMemory(hsa_agent_t cpuAgent,
     user_data[ii].expected_status = HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
     // create queue
-    err = hsa_queue_create(gpuAgent,
-                       queue_max, HSA_QUEUE_TYPE_SINGLE,
-                       CallbackQueueErrorHandling, &user_data[ii], 0, 0, &queue[ii]);
+    err = hsa_queue_create(gpuAgent, queue_max, HSA_QUEUE_TYPE_SINGLE, CallbackQueueErrorHandling,
+                           &user_data[ii], 0, 0, &queue[ii]);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     aql().kernel_object = kernel_object();
@@ -322,16 +318,14 @@ void QueueValidation::QueueValidationInvalidGroupMemory(hsa_agent_t cpuAgent,
     rocrtst::WriteAQLToQueueLoc(queue[ii], index, &aql());
 
     aql().header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-                 HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
-    aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-                 HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+    aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+    aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
 
     void* q_base = queue[ii]->base_address;
     // Set the Aql packet header
-    rocrtst::AtomicSetPacketHeader(aql().header, aql().setup,
-                        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
-                            (q_base))[index & queue_mask]);
+    rocrtst::AtomicSetPacketHeader(
+        aql().header, aql().setup,
+        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[index & queue_mask]);
 
 
     // ringdoor bell
@@ -350,14 +344,16 @@ void QueueValidation::QueueValidationInvalidGroupMemory(hsa_agent_t cpuAgent,
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // queue error handling callback  should be triggered
     ASSERT_EQ(user_data[ii].cb_triggered, true);
-    if (queue[ii]) { hsa_queue_destroy(queue[ii]); }
+    if (queue[ii]) {
+      hsa_queue_destroy(queue[ii]);
+    }
   }
 
   clear_code_object();
 }
 
 void QueueValidation::QueueValidationForInvalidKernelObject(hsa_agent_t cpuAgent,
-                                            hsa_agent_t gpuAgent) {
+                                                            hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // Create the executable, get symbol by name and load the code object
@@ -371,14 +367,13 @@ void QueueValidation::QueueValidationForInvalidKernelObject(hsa_agent_t cpuAgent
 
   // get queue size
   uint32_t queue_max = 0;
-  err = hsa_agent_get_info(gpuAgent,
-                           HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max);
+  err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Adjust the size to the max of 1024
-  queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max: kMaxQueueSizeForAgent;
+  queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max : kMaxQueueSizeForAgent;
 
-  hsa_queue_t *queue[kMaxQueue];  // command queue
+  hsa_queue_t* queue[kMaxQueue];  // command queue
   test_validation_data user_data[kMaxQueue];
   uint32_t ii;
   for (ii = 0; ii < kMaxQueue; ++ii) {
@@ -390,8 +385,7 @@ void QueueValidation::QueueValidationForInvalidKernelObject(hsa_agent_t cpuAgent
     user_data[ii].expected_status = HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
 
     // create queue
-    err = hsa_queue_create(gpuAgent,
-                           kMaxQueueSizeForAgent, HSA_QUEUE_TYPE_SINGLE,
+    err = hsa_queue_create(gpuAgent, kMaxQueueSizeForAgent, HSA_QUEUE_TYPE_SINGLE,
                            CallbackQueueErrorHandling, &user_data[ii], 0, 0, &queue[ii]);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
@@ -407,16 +401,14 @@ void QueueValidation::QueueValidationForInvalidKernelObject(hsa_agent_t cpuAgent
     rocrtst::WriteAQLToQueueLoc(queue[ii], index, &aql());
 
     aql().header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-                 HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
-    aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-                 HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+    aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+    aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
 
     void* q_base = queue[ii]->base_address;
     // Set the Aql packet header
-    rocrtst::AtomicSetPacketHeader(aql().header, aql().setup,
-                        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
-                            (q_base))[index & queue_mask]);
+    rocrtst::AtomicSetPacketHeader(
+        aql().header, aql().setup,
+        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[index & queue_mask]);
 
 
     // ringdoor bell
@@ -435,14 +427,15 @@ void QueueValidation::QueueValidationForInvalidKernelObject(hsa_agent_t cpuAgent
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // queue error handling callback  should be triggered
     ASSERT_EQ(user_data[ii].cb_triggered, true);
-    if (queue[ii]) { hsa_queue_destroy(queue[ii]); }
+    if (queue[ii]) {
+      hsa_queue_destroy(queue[ii]);
+    }
   }
 
   clear_code_object();
 }
 
-void QueueValidation::QueueValidationForInvalidPacket(hsa_agent_t cpuAgent,
-                                            hsa_agent_t gpuAgent) {
+void QueueValidation::QueueValidationForInvalidPacket(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // Create the executable, get symbol by name and load the code object
@@ -455,14 +448,13 @@ void QueueValidation::QueueValidationForInvalidPacket(hsa_agent_t cpuAgent,
 
   // get queue size
   uint32_t queue_max = 0;
-  err = hsa_agent_get_info(gpuAgent,
-                           HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max);
+  err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Adjust the size to the max of 1024
-  queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max: kMaxQueueSizeForAgent;
+  queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max : kMaxQueueSizeForAgent;
 
-  hsa_queue_t *queue[kMaxQueue];  // command queue
+  hsa_queue_t* queue[kMaxQueue];  // command queue
   uint32_t ii;
   test_validation_data user_data[kMaxQueue];
   for (ii = 0; ii < kMaxQueue; ++ii) {
@@ -474,9 +466,8 @@ void QueueValidation::QueueValidationForInvalidPacket(hsa_agent_t cpuAgent,
     user_data[ii].expected_status = HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
 
     // create queue
-    err = hsa_queue_create(gpuAgent,
-                       queue_max, HSA_QUEUE_TYPE_SINGLE,
-                       CallbackQueueErrorHandling, &user_data[ii], 0, 0, &queue[ii]);
+    err = hsa_queue_create(gpuAgent, queue_max, HSA_QUEUE_TYPE_SINGLE, CallbackQueueErrorHandling,
+                           &user_data[ii], 0, 0, &queue[ii]);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     const uint32_t queue_mask = queue[ii]->size - 1;
@@ -488,14 +479,14 @@ void QueueValidation::QueueValidationForInvalidPacket(hsa_agent_t cpuAgent,
     rocrtst::WriteAQLToQueueLoc(queue[ii], index, &aql());
     // setting the invalid packet type
     aql().header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    aql().header |=  0xFFFF << HSA_PACKET_HEADER_TYPE;
+    aql().header |= 0xFFFF << HSA_PACKET_HEADER_TYPE;
     aql().kernel_object = kernel_object();
 
     void* q_base = queue[ii]->base_address;
     // Set the Aql packet header
-    rocrtst::AtomicSetPacketHeader(aql().header, aql().setup,
-                        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
-                            (q_base))[index & queue_mask]);
+    rocrtst::AtomicSetPacketHeader(
+        aql().header, aql().setup,
+        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[index & queue_mask]);
 
 
     // ringdoor bell
@@ -514,14 +505,16 @@ void QueueValidation::QueueValidationForInvalidPacket(hsa_agent_t cpuAgent,
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // queue error handling callback  should be triggered
     ASSERT_EQ(user_data[ii].cb_triggered, true);
-    if (queue[ii]) { hsa_queue_destroy(queue[ii]); }
+    if (queue[ii]) {
+      hsa_queue_destroy(queue[ii]);
+    }
   }
 
   clear_code_object();
 }
 
 void QueueValidation::QueueValidationForInvalidWorkGroupSize(hsa_agent_t cpuAgent,
-                                            hsa_agent_t gpuAgent) {
+                                                             hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // Create the executable, get symbol by name and load the code object
@@ -534,14 +527,13 @@ void QueueValidation::QueueValidationForInvalidWorkGroupSize(hsa_agent_t cpuAgen
 
   // get queue size
   uint32_t queue_max = 0;
-  err = hsa_agent_get_info(gpuAgent,
-                           HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max);
+  err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Adjust the size to the max of 1024
-  queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max: kMaxQueueSizeForAgent;
+  queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max : kMaxQueueSizeForAgent;
 
-  hsa_queue_t *queue[kMaxQueue];  // command queue
+  hsa_queue_t* queue[kMaxQueue];  // command queue
   test_validation_data user_data[kMaxQueue][3];
   uint32_t ii;
   for (ii = 0; ii < kMaxQueue; ++ii) {
@@ -555,9 +547,8 @@ void QueueValidation::QueueValidationForInvalidWorkGroupSize(hsa_agent_t cpuAgen
       user_data[ii][jj - 1].expected_status = HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
       // create queue
-      err = hsa_queue_create(gpuAgent,
-              kMaxQueueSizeForAgent, HSA_QUEUE_TYPE_SINGLE,
-              CallbackQueueErrorHandling, &user_data[ii][jj - 1], 0, 0, &queue[ii]);
+      err = hsa_queue_create(gpuAgent, kMaxQueueSizeForAgent, HSA_QUEUE_TYPE_SINGLE,
+                             CallbackQueueErrorHandling, &user_data[ii][jj - 1], 0, 0, &queue[ii]);
       ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
       aql().setup |= jj << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
@@ -575,16 +566,14 @@ void QueueValidation::QueueValidationForInvalidWorkGroupSize(hsa_agent_t cpuAgen
 
       rocrtst::WriteAQLToQueueLoc(queue[ii], index, &aql());
       aql().header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-      aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-                    HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
-      aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-                    HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+      aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+      aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
 
       void* q_base = queue[ii]->base_address;
       // Set the Aql packet header
-      rocrtst::AtomicSetPacketHeader(aql().header, aql().setup,
-                          &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
-                          (q_base))[index & queue_mask]);
+      rocrtst::AtomicSetPacketHeader(
+          aql().header, aql().setup,
+          &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[index & queue_mask]);
 
 
       // ringdoor bell
@@ -598,7 +587,9 @@ void QueueValidation::QueueValidationForInvalidWorkGroupSize(hsa_agent_t cpuAgen
       ASSERT_EQ(completion, 1);
 
       hsa_signal_store_relaxed(aql().completion_signal, 1);
-      if (queue[ii]) { hsa_queue_destroy(queue[ii]); }
+      if (queue[ii]) {
+        hsa_queue_destroy(queue[ii]);
+      }
     }
   }
   sleep(1);
@@ -629,7 +620,7 @@ void QueueValidation::QueueValidationForInvalidDimension(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     QueueValidationForInvalidDimension(cpus[0], gpus[i]);
   }
 
@@ -656,7 +647,7 @@ void QueueValidation::QueueValidationInvalidGroupMemory(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     QueueValidationInvalidGroupMemory(cpus[0], gpus[i]);
   }
 
@@ -683,7 +674,7 @@ void QueueValidation::QueueValidationForInvalidKernelObject(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     QueueValidationForInvalidKernelObject(cpus[0], gpus[i]);
   }
 
@@ -710,7 +701,7 @@ void QueueValidation::QueueValidationForInvalidPacket(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     QueueValidationForInvalidPacket(cpus[0], gpus[i]);
   }
 
@@ -737,7 +728,7 @@ void QueueValidation::QueueValidationForInvalidWorkGroupSize(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     QueueValidationForInvalidWorkGroupSize(cpus[0], gpus[i]);
   }
 
@@ -752,8 +743,8 @@ void CallbackQueueErrorHandling(hsa_status_t status, hsa_queue_t* source, void* 
   ASSERT_NE(source, nullptr);
   ASSERT_NE(data, nullptr);
 
-  test_validation_data *debug_data = reinterpret_cast<test_validation_data*>(data);
-  hsa_queue_t * queue  = *(debug_data->queue_pointer);
+  test_validation_data* debug_data = reinterpret_cast<test_validation_data*>(data);
+  hsa_queue_t* queue = *(debug_data->queue_pointer);
   debug_data->cb_triggered = true;
   // check the status
   ASSERT_EQ(status, debug_data->expected_status);
@@ -761,4 +752,3 @@ void CallbackQueueErrorHandling(hsa_status_t status, hsa_queue_t* source, void* 
   ASSERT_EQ(source->id, queue->id);
   return;
 }
-

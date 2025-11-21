@@ -108,9 +108,9 @@ struct env_store
     explicit env_store(std::initializer_list<env_config>&& _container);
 
     ~env_store();
-    env_store(const env_store&)     = default;
-    env_store(env_store&&) noexcept = default;
-    env_store& operator=(const env_store&) = default;
+    env_store(const env_store&)                = default;
+    env_store(env_store&&) noexcept            = default;
+    env_store& operator=(const env_store&)     = default;
     env_store& operator=(env_store&&) noexcept = default;
 
     bool push();

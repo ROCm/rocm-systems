@@ -427,7 +427,8 @@ tool_fini(void* user_data)
 
     exit_toggle().store(true);
     while(exit_toggle().load() == true)
-    {};
+    {
+    };
 
     sampler->stop();
     sampler->flush();

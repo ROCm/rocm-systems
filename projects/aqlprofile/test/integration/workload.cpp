@@ -42,27 +42,24 @@ Collection::Collection(AgentInfo& agent, const std::vector<std::string>& counter
 
 Collection::~Collection() {}
 
-std::map<std::string, int64_t> Collection::iterate(Queue& queue, IWorkload& load)
-{
-    start(queue);
-    load.run();
-    stop(queue);
-    return packet->get();
+std::map<std::string, int64_t> Collection::iterate(Queue& queue, IWorkload& load) {
+  start(queue);
+  load.run();
+  stop(queue);
+  return packet->get();
 }
 
-void Collection::start(Queue& queue)
-{
-    assert(packet);
-    queue.flush();
-    queue.Submit(&packet->packets.start_packet);
+void Collection::start(Queue& queue) {
+  assert(packet);
+  queue.flush();
+  queue.Submit(&packet->packets.start_packet);
 }
 
-void Collection::stop(Queue& queue)
-{
-    assert(packet);
-    queue.flush();
+void Collection::stop(Queue& queue) {
+  assert(packet);
+  queue.flush();
 
-    queue.Submit(&packet->packets.read_packet);
-    queue.Submit(&packet->packets.stop_packet);
-    packet->iterate();
+  queue.Submit(&packet->packets.read_packet);
+  queue.Submit(&packet->packets.stop_packet);
+  packet->iterate();
 }

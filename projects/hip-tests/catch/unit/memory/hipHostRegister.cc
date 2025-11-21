@@ -127,7 +127,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset",
             "hipExtHostRegisterUncached | hipHostRegisterIoMemory") {
       HIP_CHECK(hipHostRegister(
           A, sizeBytes,
-          hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached | 
+          hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached |
           hipHostRegisterIoMemory));
     }
   }

@@ -56,10 +56,10 @@ public:
         using other = stateless_allocator<Up, Alignment, DeleterT>;
     };
 
-    stateless_allocator()                                   = default;
-    stateless_allocator(const stateless_allocator& rhs)     = default;
-    stateless_allocator(stateless_allocator&& rhs) noexcept = default;
-    stateless_allocator& operator=(const stateless_allocator& rhs) = default;
+    stateless_allocator()                                              = default;
+    stateless_allocator(const stateless_allocator& rhs)                = default;
+    stateless_allocator(stateless_allocator&& rhs) noexcept            = default;
+    stateless_allocator& operator=(const stateless_allocator& rhs)     = default;
     stateless_allocator& operator=(stateless_allocator&& rhs) noexcept = default;
 
     template <typename Up>

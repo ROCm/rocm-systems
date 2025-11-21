@@ -433,8 +433,8 @@ ring_buffer<Tp>::operator=(const ring_buffer<Tp>& rhs)
     if(this == &rhs) return *this;
 
     base_type::operator=(rhs);
-    size_t     _n      = rhs.count();
-    char*      _end    = static_cast<char*>(rhs.m_ptr) + rhs.m_size;
+    size_t _n   = rhs.count();
+    char*  _end = static_cast<char*>(rhs.m_ptr) + rhs.m_size;
     for(size_t i = 0; i < _n; ++i)
     {
         char* _addr = static_cast<char*>(rhs.read_ptr(m_read_count)) + (i * sizeof(Tp));

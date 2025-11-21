@@ -52,9 +52,9 @@
 #else /* !defined (TEST_HSA_TOOL_EXPORTS) */
 #define TEST_HSA_TOOL_API TEST_HSA_TOOL_EXPORT
 #endif /* !defined (TEST_HSA_TOOL_EXPORTS) */
-typedef int (*rocprofiler_onload_callback)(
-    void* table, uint64_t runtime_version, uint64_t failed_tool_count,
-    const char* const* failed_tool_names);
+typedef int (*rocprofiler_onload_callback)(void* table, uint64_t runtime_version,
+                                           uint64_t failed_tool_count,
+                                           const char* const* failed_tool_names);
 
 
 TEST_HSA_TOOL_API void SetHSACallback(rocprofiler_onload_callback callback);

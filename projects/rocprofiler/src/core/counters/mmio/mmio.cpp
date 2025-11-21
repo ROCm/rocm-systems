@@ -58,22 +58,23 @@ MMIO::MMIO(const HSAAgentInfo& info)
   const auto pci_domain = agent_info_->GetDeviceInfo().getPCIDomain();
   const auto pci_location_id = agent_info_->GetDeviceInfo().getPCILocationID();
 
-  pci_device_ =
-      GetPciAccessLibApi()->pci_device_find_by_slot(pci_domain, pci_location_id >> 8, pci_location_id & 0xFF, 0);
-  if (!pci_device_ || GetPciAccessLibApi()->pci_device_probe(pci_device_)) fatal("failed to probe the GPU device\n");
+  pci_device_ = GetPciAccessLibApi()->pci_device_find_by_slot(pci_domain, pci_location_id >> 8,
+                                                              pci_location_id & 0xFF, 0);
+  if (!pci_device_ || GetPciAccessLibApi()->pci_device_probe(pci_device_))
+    fatal("failed to probe the GPU device\n");
 
   // Look for a region between 256KB and 4096KB, 32-bit, non IO, and non prefetchable.
   for (size_t region = 0; region < sizeof(pci_device::regions) / sizeof(pci_device::regions[0]);
-       ++region){
+       ++region) {
     if (pci_device_->regions[region].is_64 == 0 &&
         pci_device_->regions[region].is_prefetchable == 0 &&
         pci_device_->regions[region].is_IO == 0 &&
         pci_device_->regions[region].size >= (256UL * 1024) &&
         pci_device_->regions[region].size <= (4096UL * 1024)) {
       pci_memory_size_ = pci_device_->regions[region].size;
-      int err = GetPciAccessLibApi()->pci_device_map_range(pci_device_, pci_device_->regions[region].base_addr,
-                                     pci_device_->regions[region].size, PCI_DEV_MAP_FLAG_WRITABLE,
-                                     (void**)&pci_memory_);
+      int err = GetPciAccessLibApi()->pci_device_map_range(
+          pci_device_, pci_device_->regions[region].base_addr, pci_device_->regions[region].size,
+          PCI_DEV_MAP_FLAG_WRITABLE, (void**)&pci_memory_);
       if (err) fatal("failed to map the registers. Error code: %d\n", err);
     }
   }
@@ -85,7 +86,8 @@ MMIO::MMIO(const HSAAgentInfo& info)
 
 MMIO::~MMIO() {
   if (pci_memory_) {
-    int err = GetPciAccessLibApi()->pci_device_unmap_range(pci_device_, pci_memory_, pci_memory_size_);
+    int err =
+        GetPciAccessLibApi()->pci_device_unmap_range(pci_device_, pci_memory_, pci_memory_size_);
     if (err) warning("failed to unmap the pci memory. Error code: %d\n", err);
   }
 }

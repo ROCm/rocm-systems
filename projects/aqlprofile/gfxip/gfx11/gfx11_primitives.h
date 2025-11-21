@@ -239,8 +239,7 @@ class gfx11_cntx_prim {
   }
 
   // GRBM SE/SH/WGP indexing
-  static uint32_t grbm_se_sh_wgp_index_value(const uint32_t& se_index,
-                                             const uint32_t& sa_index,
+  static uint32_t grbm_se_sh_wgp_index_value(const uint32_t& se_index, const uint32_t& sa_index,
                                              const uint32_t& wgp_index) {
     uint32_t grbm_gfx_index = SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SE_INDEX, se_index) |
                               SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SA_INDEX, sa_index) |
@@ -255,7 +254,8 @@ class gfx11_cntx_prim {
                                                   const uint32_t& wgp_index) {
     uint32_t grbm_gfx_index = SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SE_INDEX, se_index) |
                               SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SA_INDEX, sa_index) |
-                              SET_REG_FIELD_BITS(GRBM_GFX_INDEX, INSTANCE_INDEX, ((wgp_index << 2) | (instance_index << 1)));
+                              SET_REG_FIELD_BITS(GRBM_GFX_INDEX, INSTANCE_INDEX,
+                                                 ((wgp_index << 2) | (instance_index << 1)));
     return grbm_gfx_index;
   }
 
@@ -535,11 +535,10 @@ class gfx11_cntx_prim {
   // Enable Shader Array (SH) at index Zero to be used for fine-grained data
   static uint32_t sqtt_mask_value(uint32_t wgp, uint32_t simd, uint32_t vmid) {
 #if SQTT_PRIM_ENABLED
-    uint32_t sq_thread_trace_mask =
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SIMD_SEL, simd) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WGP_SEL, wgp) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SA_SEL, 0x0) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WTYPE_INCLUDE, 1 << 6);
+    uint32_t sq_thread_trace_mask = SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SIMD_SEL, simd) |
+                                    SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WGP_SEL, wgp) |
+                                    SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SA_SEL, 0x0) |
+                                    SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WTYPE_INCLUDE, 1 << 6);
     return sq_thread_trace_mask;
 #else
     return 0;

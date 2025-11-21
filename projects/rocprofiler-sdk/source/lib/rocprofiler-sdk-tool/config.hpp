@@ -105,10 +105,10 @@ struct config : output_config
 
     config();
 
-    ~config()                 = default;
-    config(const config&)     = default;
-    config(config&&) noexcept = default;
-    config& operator=(const config&) = default;
+    ~config()                            = default;
+    config(const config&)                = default;
+    config(config&&) noexcept            = default;
+    config& operator=(const config&)     = default;
     config& operator=(config&&) noexcept = default;
 
     bool   demangle                    = get_env("ROCPROF_DEMANGLE_KERNELS", true);

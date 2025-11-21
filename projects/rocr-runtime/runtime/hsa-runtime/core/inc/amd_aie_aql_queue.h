@@ -56,17 +56,11 @@ namespace AMD {
 /// @brief Encapsulates HW AIE AQL Command Processor functionality. It
 /// provides the interface for things such as doorbells, queue read and
 /// write pointers, and a buffer.
-class AieAqlQueue : public core::Queue,
-                    private core::LocalSignal,
-                    core::DoorbellSignal {
+class AieAqlQueue : public core::Queue, private core::LocalSignal, core::DoorbellSignal {
  public:
-  static __forceinline bool IsType(core::Signal *signal) {
-    return signal->IsType(&rtti_id());
-  }
+  static __forceinline bool IsType(core::Signal* signal) { return signal->IsType(&rtti_id()); }
 
-  static __forceinline bool IsType(core::Queue *queue) {
-    return queue->IsType(&rtti_id());
-  }
+  static __forceinline bool IsType(core::Queue* queue) { return queue->IsType(&rtti_id()); }
 
   AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
               uint32_t node_id, uint64_t flags);
@@ -95,8 +89,7 @@ class AieAqlQueue : public core::Queue,
   void StoreRelease(hsa_signal_value_t value) override;
 
   /// @brief Provide information about the queue.
-  hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute,
-                       void *value) override;
+  hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute, void* value) override;
 
   // AIE-specific API
 
@@ -105,14 +98,12 @@ class AieAqlQueue : public core::Queue,
 
   // GPU-specific queue functions are unsupported.
 
-  hsa_status_t GetCUMasking(uint32_t num_cu_mask_count,
-                            uint32_t *cu_mask) override;
-  hsa_status_t SetCUMasking(uint32_t num_cu_mask_count,
-                            const uint32_t *cu_mask) override;
-  void ExecutePM4(uint32_t *cmd_data, size_t cmd_size_b,
+  hsa_status_t GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) override;
+  hsa_status_t SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) override;
+  void ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b,
                   hsa_fence_scope_t acquireFence = HSA_FENCE_SCOPE_NONE,
                   hsa_fence_scope_t releaseFence = HSA_FENCE_SCOPE_NONE,
-                  hsa_signal_t *signal = NULL) override;
+                  hsa_signal_t* signal = NULL) override;
 
  private:
   HSA_QUEUEID queue_id_ = INVALID_QUEUEID;
@@ -125,10 +116,10 @@ class AieAqlQueue : public core::Queue,
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
  private:
-  AieAgent &agent_;
+  AieAgent& agent_;
 
   /// @brief Base of the queue's ring buffer storage.
-  void *ring_buf_ = nullptr;
+  void* ring_buf_ = nullptr;
 
   /// @brief Called when the doorbell is rung to submit all queued packets.
   void SubmitPackets();
@@ -139,10 +130,9 @@ class AieAqlQueue : public core::Queue,
     static int rtti_id_ = 0;
     return rtti_id_;
   }
-
 };
 
-} // namespace AMD
-} // namespace rocr
+}  // namespace AMD
+}  // namespace rocr
 
 #endif  // HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_

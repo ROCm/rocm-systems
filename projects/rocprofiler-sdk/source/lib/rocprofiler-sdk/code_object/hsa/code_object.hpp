@@ -57,7 +57,7 @@ struct code_object
     code_object(code_object&&) noexcept;
 
     code_object& operator=(const code_object&) = delete;
-    code_object& operator                      =(code_object&&) noexcept;
+    code_object& operator=(code_object&&) noexcept;
 
     bool                     beg_notified    = false;
     bool                     end_notified    = false;

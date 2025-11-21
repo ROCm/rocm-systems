@@ -67,21 +67,21 @@ typedef struct test_debug_data_t {
   hsa_queue_t** queue_pointer;
 } test_debug_data;
 
-static void TestDebugTrap(hsa_status_t status, hsa_queue_t *source, void *data);
+static void TestDebugTrap(hsa_status_t status, hsa_queue_t* source, void* data);
 
-#define RET_IF_HSA_ERR(err) { \
-  if ((err) != HSA_STATUS_SUCCESS) { \
-    const char* msg = 0; \
-    hsa_status_string(err, &msg); \
-    std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << \
-                          __FILE__ << ". Call returned " << err << std::endl; \
-    std::cout << msg << std::endl; \
-    return (err); \
-  } \
-}
+#define RET_IF_HSA_ERR(err)                                                                        \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
+                << ". Call returned " << err << std::endl;                                         \
+      std::cout << msg << std::endl;                                                               \
+      return (err);                                                                                \
+    }                                                                                              \
+  }
 
-DebugBasicTest::DebugBasicTest(void) :
-    TestBase() {
+DebugBasicTest::DebugBasicTest(void) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
@@ -92,8 +92,7 @@ DebugBasicTest::DebugBasicTest(void) :
   set_kernel_name("vector_add_debug_trap");
 }
 
-DebugBasicTest::~DebugBasicTest(void) {
-}
+DebugBasicTest::~DebugBasicTest(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -120,9 +119,7 @@ void DebugBasicTest::Run(void) {
   TestBase::Run();
 }
 
-void DebugBasicTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void DebugBasicTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void DebugBasicTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -141,80 +138,68 @@ void DebugBasicTest::Close() {
 }
 
 typedef struct __attribute__((aligned(16))) arguments_t {
-  const int *a;
-  const int *b;
-  const int *c;
-  int *d;
-  int *e;
+  const int* a;
+  const int* b;
+  const int* c;
+  int* d;
+  int* e;
 } arguments;
 
-arguments *vectorAddKernArgs = NULL;
+arguments* vectorAddKernArgs = NULL;
 
 static const char kSubTestSeparator[] = "  **************************";
 
-static void PrintDebugSubtestHeader(const char *header) {
+static void PrintDebugSubtestHeader(const char* header) {
   std::cout << "  *** Debug Basic Subtest: " << header << " ***" << std::endl;
 }
 
-void DebugBasicTest::VectorAddDebugTrapTest(hsa_agent_t cpuAgent,
-                                            hsa_agent_t gpuAgent) {
+void DebugBasicTest::VectorAddDebugTrapTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent) {
   hsa_status_t err;
-  hsa_queue_t *queue = NULL;  // command queue
+  hsa_queue_t* queue = NULL;  // command queue
   hsa_signal_t signal = {0};  // completion signal
 
-  int *M_IN0 = NULL;
-  int *M_IN1 = NULL;
-  int *M_RESULT_DEVICE = NULL;
+  int* M_IN0 = NULL;
+  int* M_IN1 = NULL;
+  int* M_RESULT_DEVICE = NULL;
   int M_RESULT_HOST[M_ORDER * M_ORDER];
 
   // get queue size
   uint32_t queue_size = 0;
-  err = hsa_agent_get_info(gpuAgent,
-                           HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
+  err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  test_debug_data user_data{.trap_triggered = false,
-                            .queue_pointer = &queue};
+  test_debug_data user_data{.trap_triggered = false, .queue_pointer = &queue};
 
   // create queue
-  err = hsa_queue_create(gpuAgent,
-                         queue_size, HSA_QUEUE_TYPE_MULTI,
-                         TestDebugTrap, &user_data, 0, 0, &queue);
+  err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_MULTI, TestDebugTrap, &user_data, 0,
+                         0, &queue);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Find a memory pool that supports kernel arguments.
   hsa_amd_memory_pool_t kernarg_pool;
-  err = hsa_amd_agent_iterate_memory_pools(cpuAgent,
-                                           rocrtst::GetKernArgMemoryPool,
-                                           &kernarg_pool);
+  err = hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetKernArgMemoryPool, &kernarg_pool);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Get System Memory Pool on the cpuAgent to allocate host side buffers
   hsa_amd_memory_pool_t global_pool;
-  err = hsa_amd_agent_iterate_memory_pools(cpuAgent,
-                                           rocrtst::GetGlobalMemoryPool,
-                                           &global_pool);
+  err = hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetGlobalMemoryPool, &global_pool);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // allocate input and output kernel arguments
-  err = hsa_amd_memory_pool_allocate(global_pool,
-                                     M_ORDER * M_ORDER * sizeof(int), 0,
+  err = hsa_amd_memory_pool_allocate(global_pool, M_ORDER * M_ORDER * sizeof(int), 0,
                                      reinterpret_cast<void**>(&M_IN0));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  err = hsa_amd_memory_pool_allocate(global_pool,
-                                     M_ORDER * M_ORDER * sizeof(int), 0,
+  err = hsa_amd_memory_pool_allocate(global_pool, M_ORDER * M_ORDER * sizeof(int), 0,
                                      reinterpret_cast<void**>(&M_IN1));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  err = hsa_amd_memory_pool_allocate(global_pool,
-                                     M_ORDER * M_ORDER * sizeof(int), 0,
+  err = hsa_amd_memory_pool_allocate(global_pool, M_ORDER * M_ORDER * sizeof(int), 0,
                                      reinterpret_cast<void**>(&M_RESULT_DEVICE));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // create kernel arguments
-  err = hsa_amd_memory_pool_allocate(kernarg_pool,
-                                     sizeof(arguments), 0,
+  err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(arguments), 0,
                                      reinterpret_cast<void**>(&vectorAddKernArgs));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
@@ -293,23 +278,21 @@ void DebugBasicTest::VectorAddDebugTrapTest(hsa_agent_t cpuAgent,
   rocrtst::WriteAQLToQueueLoc(queue, index, &aql);
 
   uint32_t aql_header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-  aql_header |= HSA_FENCE_SCOPE_SYSTEM <<
-                HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
-  aql_header |= HSA_FENCE_SCOPE_SYSTEM <<
-                HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+  aql_header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+  aql_header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
 
   void* q_base = queue->base_address;
-  rocrtst::AtomicSetPacketHeader(aql_header, aql.setup,
-                        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
-                            (q_base))[index & queue_mask]);
+  rocrtst::AtomicSetPacketHeader(
+      aql_header, aql.setup,
+      &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[index & queue_mask]);
 
   // ringdoor bell
   hsa_signal_store_relaxed(queue->doorbell_signal, index);
 
   // wait for the signal long enough for the debug trap event to happen
   hsa_signal_value_t completion;
-  completion = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                         0xffffff, HSA_WAIT_STATE_ACTIVE);
+  completion = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, 0xffffff,
+                                         HSA_WAIT_STATE_ACTIVE);
 
   // completion signal should not be changed.
   ASSERT_EQ(completion, 1);
@@ -319,12 +302,24 @@ void DebugBasicTest::VectorAddDebugTrapTest(hsa_agent_t cpuAgent,
 
   hsa_signal_store_relaxed(signal, 1);
 
-  if (M_IN0) { hsa_memory_free(M_IN0); }
-  if (M_IN1) { hsa_memory_free(M_IN1); }
-  if (M_RESULT_DEVICE) {hsa_memory_free(M_RESULT_DEVICE); }
-  if (vectorAddKernArgs) { hsa_memory_free(vectorAddKernArgs); }
-  if (signal.handle) { hsa_signal_destroy(signal); }
-  if (queue) { hsa_queue_destroy(queue); }
+  if (M_IN0) {
+    hsa_memory_free(M_IN0);
+  }
+  if (M_IN1) {
+    hsa_memory_free(M_IN1);
+  }
+  if (M_RESULT_DEVICE) {
+    hsa_memory_free(M_RESULT_DEVICE);
+  }
+  if (vectorAddKernArgs) {
+    hsa_memory_free(vectorAddKernArgs);
+  }
+  if (signal.handle) {
+    hsa_signal_destroy(signal);
+  }
+  if (queue) {
+    hsa_queue_destroy(queue);
+  }
   std::cout << kSubTestSeparator << std::endl;
 }
 
@@ -343,7 +338,7 @@ void DebugBasicTest::VectorAddDebugTrapTest(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     VectorAddDebugTrapTest(cpus[0], gpus[i]);
   }
 
@@ -353,20 +348,20 @@ void DebugBasicTest::VectorAddDebugTrapTest(void) {
   }
 }
 
-void TestDebugTrap(hsa_status_t status, hsa_queue_t *source, void *data) {
-  std::cout<< "runtime catched trap instruction successfully"<< std::endl;
+void TestDebugTrap(hsa_status_t status, hsa_queue_t* source, void* data) {
+  std::cout << "runtime catched trap instruction successfully" << std::endl;
   ASSERT_NE(source, nullptr);
   ASSERT_NE(data, nullptr);
 
-  test_debug_data *debug_data = reinterpret_cast<test_debug_data*>(data);
-  hsa_queue_t * queue  = *(debug_data->queue_pointer);
+  test_debug_data* debug_data = reinterpret_cast<test_debug_data*>(data);
+  hsa_queue_t* queue = *(debug_data->queue_pointer);
   debug_data->trap_triggered = true;
   // check the status
   ASSERT_EQ(status, HSA_STATUS_ERROR_EXCEPTION);
 
   // check the queue id and user data
   ASSERT_EQ(source->id, queue->id);
-  std::cout<< "custom queue error handler completed successfully"<< std::endl;
+  std::cout << "custom queue error handler completed successfully" << std::endl;
 }
 
 #undef RET_IF_HSA_ERR

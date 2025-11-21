@@ -162,7 +162,8 @@ rocdecode_init()
 }
 }  // namespace rocdecode
 
-extern "C" {
+extern "C"
+{
 void
 rocdecode_init(void)
 {

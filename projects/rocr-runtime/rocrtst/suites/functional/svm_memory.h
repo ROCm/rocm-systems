@@ -75,11 +75,10 @@ class SvmMemoryTestBasic : public TestBase {
 
   void TestCreateDestroy(void);
   void TestSVMPrefetch(void);
-  
+
  private:
   void TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestSVMPrefetch(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
-
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_SVM_MEMORY_H_

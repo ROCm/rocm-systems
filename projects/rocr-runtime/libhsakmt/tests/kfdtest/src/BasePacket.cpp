@@ -25,36 +25,33 @@
 #include "KFDTestUtil.hpp"
 #include "KFDBaseComponentTest.hpp"
 
-BasePacket::BasePacket(void): m_packetAllocation(NULL) {
-    m_FamilyId = g_baseTest->GetFamilyIdFromDefaultNode();
+BasePacket::BasePacket(void) : m_packetAllocation(NULL) {
+  m_FamilyId = g_baseTest->GetFamilyIdFromDefaultNode();
 }
 
 BasePacket::~BasePacket(void) {
-    if (m_packetAllocation)
-        free(m_packetAllocation);
+  if (m_packetAllocation) free(m_packetAllocation);
 }
 
 void BasePacket::Dump() const {
-    unsigned int size = SizeInDWords();
-    const HSAuint32 *packet = (const HSAuint32 *)GetPacket();
-    std::ostream &log = LOG();
-    unsigned int i;
+  unsigned int size = SizeInDWords();
+  const HSAuint32* packet = (const HSAuint32*)GetPacket();
+  std::ostream& log = LOG();
+  unsigned int i;
 
-    log << "Packet dump:" << std::hex;
-    for (i = 0; i < size; i++)
-        log << " " << std::setw(8) << std::setfill('0') << packet[i];
-    log << std::endl;
+  log << "Packet dump:" << std::hex;
+  for (i = 0; i < size; i++) log << " " << std::setw(8) << std::setfill('0') << packet[i];
+  log << std::endl;
 }
 
-void *BasePacket::AllocPacket(void) {
-    unsigned int size = SizeInBytes();
+void* BasePacket::AllocPacket(void) {
+  unsigned int size = SizeInBytes();
 
-    EXPECT_NE(0, size);
-    if (!size)
-        return NULL;
+  EXPECT_NE(0, size);
+  if (!size) return NULL;
 
-    m_packetAllocation = calloc(1, size);
-    EXPECT_NOTNULL(m_packetAllocation);
+  m_packetAllocation = calloc(1, size);
+  EXPECT_NOTNULL(m_packetAllocation);
 
-    return m_packetAllocation;
+  return m_packetAllocation;
 }

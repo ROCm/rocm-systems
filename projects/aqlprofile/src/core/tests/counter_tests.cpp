@@ -29,90 +29,89 @@
 namespace {
 
 struct MockMemory {
-    std::vector<uint8_t> data;
-    void* alloc(size_t size) {
-        data.resize(size);
-        return data.data();
-    }
-    void dealloc(void* /*ptr*/) {
-        // No-op for vector-backed memory
-    }
-    void copy(void* dst, const void* src, size_t size) {
-        memcpy(dst, src, size);
-    }
+  std::vector<uint8_t> data;
+  void* alloc(size_t size) {
+    data.resize(size);
+    return data.data();
+  }
+  void dealloc(void* /*ptr*/) {
+    // No-op for vector-backed memory
+  }
+  void copy(void* dst, const void* src, size_t size) { memcpy(dst, src, size); }
 };
 
 // Corrected mock_alloc matching aqlprofile_memory_alloc_callback_t
-hsa_status_t mock_alloc(void** ptr, uint64_t size, aqlprofile_buffer_desc_flags_t /*flags*/, void* userdata) {
-    auto* mem = static_cast<MockMemory*>(userdata);
-    *ptr = mem->alloc(size);
-    return HSA_STATUS_SUCCESS;
+hsa_status_t mock_alloc(void** ptr, uint64_t size, aqlprofile_buffer_desc_flags_t /*flags*/,
+                        void* userdata) {
+  auto* mem = static_cast<MockMemory*>(userdata);
+  *ptr = mem->alloc(size);
+  return HSA_STATUS_SUCCESS;
 }
 
 // Corrected mock_dealloc matching aqlprofile_memory_dealloc_callback_t
 void mock_dealloc(void* /*ptr*/, void* /*userdata*/) {
-    // No-op
+  // No-op
 }
 
 // Corrected mock_memcpy matching aqlprofile_memory_copy_t
 hsa_status_t mock_memcpy(void* dst, const void* src, size_t size, void* /*userdata*/) {
-    memcpy(dst, src, size);
-    return HSA_STATUS_SUCCESS;
+  memcpy(dst, src, size);
+  return HSA_STATUS_SUCCESS;
 }
 
-} // namespace
+}  // namespace
 
 // Test: CreatePacketsSuccess
 TEST(CountersTest, CreatePacketsSuccess) {
-    MockMemory mem;
-    aqlprofile_pmc_profile_t profile = {};
-    // Fill profile with minimal valid data
-    profile.agent.handle = 0; // Use a valid agent handle in real test
-    profile.events = nullptr;
-    profile.event_count = 0;
+  MockMemory mem;
+  aqlprofile_pmc_profile_t profile = {};
+  // Fill profile with minimal valid data
+  profile.agent.handle = 0;  // Use a valid agent handle in real test
+  profile.events = nullptr;
+  profile.event_count = 0;
 
-    aqlprofile_handle_t handle = {};
-    aqlprofile_pmc_aql_packets_t packets = {};
+  aqlprofile_handle_t handle = {};
+  aqlprofile_pmc_aql_packets_t packets = {};
 
-    hsa_status_t status = aqlprofile_pmc_create_packets(
-        &handle, &packets, profile, mock_alloc, mock_dealloc, mock_memcpy, &mem);
+  hsa_status_t status = aqlprofile_pmc_create_packets(&handle, &packets, profile, mock_alloc,
+                                                      mock_dealloc, mock_memcpy, &mem);
 
-    // Accept HSA_STATUS_ERROR if agent/event is not valid in this test context
-    EXPECT_TRUE(status == HSA_STATUS_SUCCESS || status == HSA_STATUS_ERROR);
+  // Accept HSA_STATUS_ERROR if agent/event is not valid in this test context
+  EXPECT_TRUE(status == HSA_STATUS_SUCCESS || status == HSA_STATUS_ERROR);
 }
 
 // Test: DeletePackets
 TEST(CountersTest, DeletePackets) {
-    MockMemory mem;
-    aqlprofile_pmc_profile_t profile = {};
-    profile.agent.handle = 0;
-    profile.events = nullptr;
-    profile.event_count = 0;
+  MockMemory mem;
+  aqlprofile_pmc_profile_t profile = {};
+  profile.agent.handle = 0;
+  profile.events = nullptr;
+  profile.event_count = 0;
 
-    aqlprofile_handle_t handle = {};
-    aqlprofile_pmc_aql_packets_t packets = {};
+  aqlprofile_handle_t handle = {};
+  aqlprofile_pmc_aql_packets_t packets = {};
 
-    hsa_status_t status = aqlprofile_pmc_create_packets(
-        &handle, &packets, profile, mock_alloc, mock_dealloc, mock_memcpy, &mem);
+  hsa_status_t status = aqlprofile_pmc_create_packets(&handle, &packets, profile, mock_alloc,
+                                                      mock_dealloc, mock_memcpy, &mem);
 
-    // Only proceed if creation succeeded
-    if (status == HSA_STATUS_SUCCESS) {
-        // This should not crash or throw
-        aqlprofile_pmc_delete_packets(handle);
-    }
+  // Only proceed if creation succeeded
+  if (status == HSA_STATUS_SUCCESS) {
+    // This should not crash or throw
+    aqlprofile_pmc_delete_packets(handle);
+  }
 }
 
 // Test: ValidateEvent
 TEST(CountersTest, ValidateEvent) {
-    aqlprofile_agent_handle_t agent = {};
-    agent.handle = 0;
+  aqlprofile_agent_handle_t agent = {};
+  agent.handle = 0;
 
-    aqlprofile_pmc_event_t event = {};
-    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM;
+  aqlprofile_pmc_event_t event = {};
+  event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM;
 
-    bool result = true;
-    hsa_status_t status = aqlprofile_validate_pmc_event(agent, &event, &result);
+  bool result = true;
+  hsa_status_t status = aqlprofile_validate_pmc_event(agent, &event, &result);
 
-    // In a mock environment, we can't guarantee validation, but we can check that it runs
-    EXPECT_TRUE(status == HSA_STATUS_SUCCESS || status == HSA_STATUS_ERROR);
+  // In a mock environment, we can't guarantee validation, but we can check that it runs
+  EXPECT_TRUE(status == HSA_STATUS_SUCCESS || status == HSA_STATUS_ERROR);
 }

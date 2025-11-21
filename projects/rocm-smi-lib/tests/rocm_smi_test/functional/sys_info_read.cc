@@ -43,27 +43,28 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/sys_info_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
-#include <string>
 #include <limits>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/sys_info_read.h"
 #include "rocm_smi_test/test_common.h"
 #include "rocm_smi_test/test_utils.h"
 
 TestSysInfoRead::TestSysInfoRead() : TestBase() {
   set_title("RSMI System Info Read Test");
-  set_description("This test verifies that system information such as the "
-             "BDFID, RSMI version, VBIOS version, etc. can be read properly.");
+  set_description(
+      "This test verifies that system information such as the "
+      "BDFID, RSMI version, VBIOS version, etc. can be read properly.");
 }
 
-TestSysInfoRead::~TestSysInfoRead(void) {
-}
+TestSysInfoRead::~TestSysInfoRead(void) {}
 
 void TestSysInfoRead::SetUp(void) {
   TestBase::SetUp();
@@ -71,9 +72,7 @@ void TestSysInfoRead::SetUp(void) {
   return;
 }
 
-void TestSysInfoRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestSysInfoRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestSysInfoRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -85,7 +84,6 @@ void TestSysInfoRead::Close() {
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestSysInfoRead::Run(void) {
   rsmi_status_t err;
@@ -109,8 +107,7 @@ void TestSysInfoRead::Run(void) {
     if (err != RSMI_STATUS_SUCCESS) {
       if ((err == RSMI_STATUS_FILE_ERROR) || (err == RSMI_STATUS_NOT_SUPPORTED)) {
         IF_VERB(STANDARD) {
-          std::cout << "\t**VBIOS read: Not supported on this machine"
-                                                                << std::endl;
+          std::cout << "\t**VBIOS read: Not supported on this machine" << std::endl;
         }
         // Verify api support checking functionality is working
         err = rsmi_dev_vbios_version_get(i, nullptr, 80);
@@ -123,9 +120,7 @@ void TestSysInfoRead::Run(void) {
         CHK_ERR_ASRT(err)
       }
     } else {
-      IF_VERB(STANDARD) {
-        std::cout << "\t**VBIOS Version: " << std::hex << buffer << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**VBIOS Version: " << std::hex << buffer << std::endl; }
     }
 
     err = rsmi_dev_pci_id_get(i, &val_ui64);
@@ -140,10 +135,9 @@ void TestSysInfoRead::Run(void) {
 
     err = rsmi_topo_numa_affinity_get(i, &val_i32);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**rsmi_topo_numa_affinity_get(): Not supported on this machine"
-                << std::endl;
+      std::cout << "\t**rsmi_topo_numa_affinity_get(): Not supported on this machine" << std::endl;
       ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
-    } else  {
+    } else {
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
         std::cout << "\t**NUMA NODE: 0x" << std::hex << val_i32;
@@ -156,35 +150,33 @@ void TestSysInfoRead::Run(void) {
 
     err = rsmi_dev_unique_id_get(i, &val_ui64);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        std::cout <<
-            "\t**rsmi_dev_unique_id() is not supported"
-            " on this machine" << std::endl;
+      std::cout << "\t**rsmi_dev_unique_id() is not supported"
+                   " on this machine"
+                << std::endl;
+      // Verify api support checking functionality is working
+      err = rsmi_dev_unique_id_get(i, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+    } else {
+      if (err == RSMI_STATUS_SUCCESS) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**GPU Unique ID : " << std::hex << val_ui64 << std::endl;
+        }
         // Verify api support checking functionality is working
         err = rsmi_dev_unique_id_get(i, nullptr);
-        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
-    } else {
-        if (err == RSMI_STATUS_SUCCESS) {
-            IF_VERB(STANDARD) {
-                std::cout << "\t**GPU Unique ID : " << std::hex << val_ui64 <<
-                std::endl;
-            }
-            // Verify api support checking functionality is working
-            err = rsmi_dev_unique_id_get(i, nullptr);
-            ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
-        } else {
-            std::cout << "rsmi_dev_unique_id_get() failed with error " <<
-                                                               err << std::endl;
-        }
+        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+      } else {
+        std::cout << "rsmi_dev_unique_id_get() failed with error " << err << std::endl;
+      }
     }
 
     err = rsmi_version_get(&ver);
     CHK_ERR_ASRT(err)
 
-    ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF &&
-                               ver.patch != 0xFFFFFFFF && ver.build != nullptr);
+    ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF && ver.patch != 0xFFFFFFFF &&
+                ver.build != nullptr);
     IF_VERB(STANDARD) {
-      std::cout << "\t**RocM SMI Library version: " << ver.major << "." <<
-         ver.minor << "." << ver.patch << " (" << ver.build << ")" << std::endl;
+      std::cout << "\t**RocM SMI Library version: " << ver.major << "." << ver.minor << "."
+                << ver.patch << " (" << ver.build << ")" << std::endl;
     }
 
     std::cout << std::setbase(10);
@@ -192,8 +184,8 @@ void TestSysInfoRead::Run(void) {
       rsmi_fw_block_t block = static_cast<rsmi_fw_block_t>(x);
       err = rsmi_dev_firmware_version_get(i, block, &val_ui64);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        std::cout << "\t**No FW block " << NameFromFWEnum(block) <<
-                                     " available on this system" << std::endl;
+        std::cout << "\t**No FW block " << NameFromFWEnum(block) << " available on this system"
+                  << std::endl;
 
         // Verify api support checking functionality is working
         err = rsmi_dev_firmware_version_get(i, block, nullptr);
@@ -202,8 +194,8 @@ void TestSysInfoRead::Run(void) {
       }
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << "\t**FW VERSION for " << NameFromFWEnum(block) <<
-                                                ": " << val_ui64 << std::endl;
+        std::cout << "\t**FW VERSION for " << NameFromFWEnum(block) << ": " << val_ui64
+                  << std::endl;
       }
       // Verify api support checking functionality is working
       err = rsmi_dev_firmware_version_get(i, block, nullptr);
@@ -211,34 +203,24 @@ void TestSysInfoRead::Run(void) {
     }
 
     err = rsmi_dev_target_graphics_version_get(i, &val_ui64);
-    IF_VERB(STANDARD) {
-        std::cout << "\t**Target GFX version: " << std::dec
-        << val_ui64 << "\n";
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Target GFX version: " << std::dec << val_ui64 << "\n"; }
     EXPECT_EQ(err, RSMI_STATUS_SUCCESS);
     EXPECT_NE(val_ui64, std::numeric_limits<uint64_t>::max());
     err = rsmi_dev_target_graphics_version_get(i, nullptr);
     EXPECT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
     err = rsmi_dev_guid_get(i, &val_ui64);
-    IF_VERB(STANDARD) {
-        std::cout << "\t**GUID: " << std::dec
-        << val_ui64 << "\n";
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**GUID: " << std::dec << val_ui64 << "\n"; }
     EXPECT_EQ(err, RSMI_STATUS_SUCCESS);
     EXPECT_NE(val_ui64, std::numeric_limits<uint64_t>::max());
     err = rsmi_dev_guid_get(i, nullptr);
     EXPECT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
     err = rsmi_dev_node_id_get(i, &val_ui32);
-    IF_VERB(STANDARD) {
-        std::cout << "\t**Node ID: " << std::dec
-        << val_ui32 << "\n";
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Node ID: " << std::dec << val_ui32 << "\n"; }
     EXPECT_EQ(err, RSMI_STATUS_SUCCESS);
     EXPECT_NE(val_ui32, std::numeric_limits<uint32_t>::max());
     err = rsmi_dev_node_id_get(i, nullptr);
     EXPECT_EQ(err, RSMI_STATUS_INVALID_ARGS);
-
   }
 }

@@ -37,7 +37,8 @@ namespace
 constexpr auto rocprofiler_context_none = ROCPROFILER_CONTEXT_NONE;
 }
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_create_context(rocprofiler_context_id_t* context_id)
 {

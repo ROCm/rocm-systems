@@ -33,11 +33,11 @@ namespace tool
 {
 struct node_info
 {
-    node_info()                     = default;
-    ~node_info()                    = default;
-    node_info(const node_info&)     = default;
-    node_info(node_info&&) noexcept = default;
-    node_info& operator=(const node_info&) = default;
+    node_info()                                = default;
+    ~node_info()                               = default;
+    node_info(const node_info&)                = default;
+    node_info(node_info&&) noexcept            = default;
+    node_info& operator=(const node_info&)     = default;
     node_info& operator=(node_info&&) noexcept = default;
 
     uint64_t    id            = 0;

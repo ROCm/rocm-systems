@@ -47,28 +47,27 @@ struct hsa_kfd_event_context;
  * context A cannot be used in context B directly. If resources need to be shared between
  * contexts, they must be explicitly exported and imported using the appropriate APIs.
  */
-typedef struct _HsaKFDContext
-{
-    /* File descriptor for the KFD device */
-    int fd;
+typedef struct _HsaKFDContext {
+  /* File descriptor for the KFD device */
+  int fd;
 
-    /* Queue context for managing user queues */
-    struct hsa_kfd_queue_context *queue_context;
+  /* Queue context for managing user queues */
+  struct hsa_kfd_queue_context* queue_context;
 
-    /* Memory management context for managing memory */
-    struct hsa_kfd_fmm_context *fmm_context;
+  /* Memory management context for managing memory */
+  struct hsa_kfd_fmm_context* fmm_context;
 
-    /* Event context for managing events */
-    struct hsa_kfd_event_context *event_context;
+  /* Event context for managing events */
+  struct hsa_kfd_event_context* event_context;
 } HsaKFDContext;
 
 // Initialize a pre-allocated HsaKFDContext with the given file descriptor
-void hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx);
+void hsakmt_kfdcontext_init_context(int fd, HsaKFDContext* ctx);
 // Release all resources associated with the given KFD context
-void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx);
+void hsakmt_kfdcontext_clear_context(HsaKFDContext* ctx);
 
-struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx);
-struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext *ctx);
-struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx);
+struct hsa_kfd_fmm_context* hsakmt_kfdcontext_get_fmm_context(HsaKFDContext* ctx);
+struct hsa_kfd_queue_context* hsakmt_kfdcontext_get_queue_context(HsaKFDContext* ctx);
+struct hsa_kfd_event_context* hsakmt_kfdcontext_get_event_context(HsaKFDContext* ctx);
 
 #endif /* _KFDCONTEXT_H_ */

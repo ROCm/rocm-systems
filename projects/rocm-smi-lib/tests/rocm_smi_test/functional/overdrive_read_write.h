@@ -49,7 +49,7 @@
 
 class TestOverdriveReadWrite : public TestBase {
  public:
-    TestOverdriveReadWrite();
+  TestOverdriveReadWrite();
 
   // @Brief: Destructor for test case of TestOverdriveReadWrite
   virtual ~TestOverdriveReadWrite();

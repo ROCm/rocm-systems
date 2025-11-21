@@ -1178,8 +1178,7 @@ write_perfetto(
                             tool_metadata.get_agent_index(info.agent_id, ocfg.agent_index_value);
                         auto track_name_ss = std::stringstream{};
                         track_name_ss << agent_index_info.label << " [" << agent_index_info.index
-                                      << "] "
-                                      << "PMC " << counter_id_to_name.at(counter_id);
+                                      << "] " << "PMC " << counter_id_to_name.at(counter_id);
 
                         auto track_name = track_name_ss.str();
 

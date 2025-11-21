@@ -80,21 +80,19 @@ static const int NumOfThreads = 100;  // Number of thread to be created
       EXPECT_EQ(HSA_STATUS_SUCCESS, err) << msg;                                                   \
       return (err);                                                                                \
     }                                                                                              \
-  \
-}
+  }
 
 ConcurrentInitShutdownTest::ConcurrentInitShutdownTest(void) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
-                        // This is a default value which can be overridden
-                        // on the command line.
+                          // This is a default value which can be overridden
+                          // on the command line.
   set_title("RocR Concurrent Init Test");
   set_description("This test initializes HSA runtime concurrently");
 }
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
-ConcurrentInitShutdownTest::~ConcurrentInitShutdownTest(void) {
-}
+ConcurrentInitShutdownTest::~ConcurrentInitShutdownTest(void) {}
 
 // Compare required profile for this test case with what we're actually
 // running on
@@ -115,9 +113,7 @@ void ConcurrentInitShutdownTest::Run(void) {
 
 // Compare required profile for this test case with what we're actually
 // running on
-void ConcurrentInitShutdownTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void ConcurrentInitShutdownTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void ConcurrentInitShutdownTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually

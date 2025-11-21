@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef ROCM_ASYNC_BW_MYTIME_H_
 #define ROCM_ASYNC_BW_MYTIME_H_
 
@@ -29,9 +29,7 @@ using namespace std;
 #define HSA_SUCCESS 0
 
 class PerfTimer {
-
  private:
-
   struct Timer {
     string name;       /* < name name of time object*/
     long long _freq;   /* < _freq frequency*/
@@ -43,12 +41,10 @@ class PerfTimer {
   double freq_in_100mhz;
 
  public:
-
   PerfTimer();
   ~PerfTimer();
 
  private:
-
   // AMD timing method
   uint64_t CoarseTimestampUs();
   uint64_t MeasureTSCFreqHz();
@@ -56,17 +52,15 @@ class PerfTimer {
   // General Linux timing method
 
  public:
-  
   int CreateTimer();
   int StartTimer(int index);
   int StopTimer(int index);
   void ResetTimer(int index);
 
  public:
- 
   // retrieve time
   double ReadTimer(int index);
-  
+
   // write into a file
   double WriteTimer(int index);
 
@@ -74,4 +68,4 @@ class PerfTimer {
   void Error(string str);
 };
 
-#endif    //  ROCM_ASYNC_BW_MYTIME_H_
+#endif  //  ROCM_ASYNC_BW_MYTIME_H_

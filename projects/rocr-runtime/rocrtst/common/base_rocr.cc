@@ -68,7 +68,6 @@ BaseRocR::BaseRocR(void) {
   set_title("unset_title");
 }
 
-BaseRocR::~BaseRocR() {
-}
+BaseRocR::~BaseRocR() {}
 
 }  // namespace rocrtst

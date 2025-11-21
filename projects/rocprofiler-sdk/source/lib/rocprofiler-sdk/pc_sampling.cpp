@@ -140,7 +140,8 @@ is_pc_sampling_explicitly_enabled()
 }
 }  // namespace
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
                                           rocprofiler_agent_id_t           agent_id,

@@ -72,7 +72,7 @@ namespace rocrtst {
     }                                                                                              \
   }
 
-#define RET_IF_HSA_UTILS_ERR_RET(err, ret)                                                             \
+#define RET_IF_HSA_UTILS_ERR_RET(err, ret)                                                         \
   {                                                                                                \
     if ((err) != HSA_STATUS_SUCCESS) {                                                             \
       const char* msg = 0;                                                                         \
@@ -129,7 +129,10 @@ hsa_status_t CommonCleanUp(BaseRocR* test) {
   return err;
 }
 
-static const char* PROFILE_STR[] = {"HSA_PROFILE_BASE", "HSA_PROFILE_FULL", };
+static const char* PROFILE_STR[] = {
+    "HSA_PROFILE_BASE",
+    "HSA_PROFILE_FULL",
+};
 
 /// Verify that the machine running the test has the required profile.
 /// This function will verify that the execution machine meets any specific
@@ -140,8 +143,7 @@ static const char* PROFILE_STR[] = {"HSA_PROFILE_BASE", "HSA_PROFILE_FULL", };
 ///          - false Machine does not meet test requirements
 bool CheckProfileAndInform(BaseRocR* test) {
   if (test->verbosity() > 0) {
-    std::cout << "Target HW Profile is "
-              << PROFILE_STR[test->profile()] << std::endl;
+    std::cout << "Target HW Profile is " << PROFILE_STR[test->profile()] << std::endl;
   }
 
   if (test->requires_profile() == -1) {
@@ -150,8 +152,7 @@ bool CheckProfileAndInform(BaseRocR* test) {
     }
     return true;
   } else {
-    std::cout << "Test requires " << PROFILE_STR[test->requires_profile()]
-              << ". ";
+    std::cout << "Test requires " << PROFILE_STR[test->requires_profile()] << ". ";
 
     if (test->requires_profile() != test->profile()) {
       std::cout << "Not Running." << std::endl;
@@ -185,29 +186,29 @@ static hsa_status_t ProcessIterateError(hsa_status_t err) {
 hsa_status_t SetPoolsTypical(BaseRocR* test) {
   hsa_status_t err;
   if (test->profile() == HSA_PROFILE_FULL) {
-    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(),
-          rocrtst::FindAPUStandardPool, &test->cpu_pool());
+    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(), rocrtst::FindAPUStandardPool,
+                                             &test->cpu_pool());
     RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
 
-    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(),
-          rocrtst::FindAPUStandardPool, &test->device_pool());
+    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(), rocrtst::FindAPUStandardPool,
+                                             &test->device_pool());
     RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
 
-    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(),
-          rocrtst::FindAPUStandardPool, &test->kern_arg_pool());
+    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(), rocrtst::FindAPUStandardPool,
+                                             &test->kern_arg_pool());
     RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
 
   } else {
-    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(),
-          rocrtst::FindStandardPool, &test->cpu_pool());
+    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(), rocrtst::FindStandardPool,
+                                             &test->cpu_pool());
     RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
 
-    err = hsa_amd_agent_iterate_memory_pools(*test->gpu_device1(),
-          rocrtst::FindStandardPool, &test->device_pool());
+    err = hsa_amd_agent_iterate_memory_pools(*test->gpu_device1(), rocrtst::FindStandardPool,
+                                             &test->device_pool());
     RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
 
-    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(),
-          rocrtst::FindKernArgPool, &test->kern_arg_pool());
+    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(), rocrtst::FindKernArgPool,
+                                             &test->kern_arg_pool());
     RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
   }
 
@@ -294,8 +295,7 @@ std::string LocateKernelFile(std::string filename, hsa_agent_t agent) {
   if (file_handle < 0) {
     obj_file = "./" + std::string(agent_name) + "/" + filename;
     file_handle = open(obj_file.c_str(), O_RDONLY);
-    if(file_handle < 0)
-      std::runtime_error("Could not open file.\n");
+    if (file_handle < 0) std::runtime_error("Could not open file.\n");
   }
 
   close(file_handle);
@@ -329,14 +329,14 @@ hsa_status_t LoadKernelFromObjFile(BaseRocR* test, hsa_agent_t* agent) {
   }
 
   obj_file = LocateKernelFile(test->kernel_file_name(), *agent);
-  Device *gpu = (Device*)(agent - offsetof(Device, agent));
+  Device* gpu = (Device*)(agent - offsetof(Device, agent));
   obj = new CodeObject(obj_file, *gpu);
   test->set_code_object(obj);
   kern_name = test->kernel_name() + ".kd";
 
-  if(!obj->GetKernel(kern_name, kern)) {
-      ADD_FAILURE();
-      return HSA_STATUS_ERROR;
+  if (!obj->GetKernel(kern_name, kern)) {
+    ADD_FAILURE();
+    return HSA_STATUS_ERROR;
   }
 
   test->set_kernel_object(kern.handle);
@@ -349,26 +349,23 @@ hsa_status_t LoadKernelFromObjFile(BaseRocR* test, hsa_agent_t* agent) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue,
-                         uint32_t num_pkts) {
+hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue, uint32_t num_pkts) {
   hsa_status_t err;
 
   if (num_pkts == 0) {
-    err = hsa_agent_get_info(device, HSA_AGENT_INFO_QUEUE_MAX_SIZE,
-                             &num_pkts);
+    err = hsa_agent_get_info(device, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &num_pkts);
     RET_IF_HSA_UTILS_ERR(err);
   }
 
-  err = hsa_queue_create(device, num_pkts, HSA_QUEUE_TYPE_MULTI, NULL,
-                         NULL, UINT32_MAX, UINT32_MAX, queue);
+  err = hsa_queue_create(device, num_pkts, HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX, UINT32_MAX,
+                         queue);
   RET_IF_HSA_UTILS_ERR(err);
 
   return HSA_STATUS_SUCCESS;
 }
 // Initialize the provided aql packet with standard default values, and
 // values from provided BaseRocR object.
-hsa_status_t InitializeAQLPacket(const BaseRocR* test,
-                         hsa_kernel_dispatch_packet_t* aql) {
+hsa_status_t InitializeAQLPacket(const BaseRocR* test, hsa_kernel_dispatch_packet_t* aql) {
   hsa_status_t err;
 
   assert(aql != nullptr);
@@ -376,7 +373,7 @@ hsa_status_t InitializeAQLPacket(const BaseRocR* test,
   if (aql == nullptr) {
     return HSA_STATUS_ERROR;
   }
-  
+
   // Initialize Packet type as Invalid
   // Update packet type to Kernel Dispatch
   // right before ringing doorbell
@@ -387,7 +384,7 @@ hsa_status_t InitializeAQLPacket(const BaseRocR* test,
   aql->workgroup_size_y = 1;
   aql->workgroup_size_z = 1;
 
-  aql->grid_size_x = (uint64_t) 256;  // manual_input*group_input; workg max sz
+  aql->grid_size_x = (uint64_t)256;  // manual_input*group_input; workg max sz
   aql->grid_size_y = 1;
   aql->grid_size_z = 1;
 
@@ -412,11 +409,11 @@ hsa_status_t InitializeAQLPacket(const BaseRocR* test,
 
 // Copy BaseRocR aql object values to the BaseRocR object queue in the
 // specified queue position (ind)
-hsa_kernel_dispatch_packet_t * WriteAQLToQueue(BaseRocR* test, uint64_t *ind) {
+hsa_kernel_dispatch_packet_t* WriteAQLToQueue(BaseRocR* test, uint64_t* ind) {
   assert(test);
   assert(test->main_queue());
 
-  void *queue_base = test->main_queue()->base_address;
+  void* queue_base = test->main_queue()->base_address;
   const uint32_t queue_mask = test->main_queue()->size - 1;
   uint64_t que_idx = hsa_queue_add_write_index_relaxed(test->main_queue(), 1);
   *ind = que_idx;
@@ -425,8 +422,7 @@ hsa_kernel_dispatch_packet_t * WriteAQLToQueue(BaseRocR* test, uint64_t *ind) {
   hsa_kernel_dispatch_packet_t* queue_aql_packet;
 
   queue_aql_packet =
-       &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue_base))
-                                                        [que_idx & queue_mask];
+      &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue_base))[que_idx & queue_mask];
 
   queue_aql_packet->workgroup_size_x = staging_aql_packet->workgroup_size_x;
   queue_aql_packet->workgroup_size_y = staging_aql_packet->workgroup_size_y;
@@ -434,10 +430,8 @@ hsa_kernel_dispatch_packet_t * WriteAQLToQueue(BaseRocR* test, uint64_t *ind) {
   queue_aql_packet->grid_size_x = staging_aql_packet->grid_size_x;
   queue_aql_packet->grid_size_y = staging_aql_packet->grid_size_y;
   queue_aql_packet->grid_size_z = staging_aql_packet->grid_size_z;
-  queue_aql_packet->private_segment_size =
-                                     staging_aql_packet->private_segment_size;
-  queue_aql_packet->group_segment_size =
-                                       staging_aql_packet->group_segment_size;
+  queue_aql_packet->private_segment_size = staging_aql_packet->private_segment_size;
+  queue_aql_packet->group_segment_size = staging_aql_packet->group_segment_size;
   queue_aql_packet->kernel_object = staging_aql_packet->kernel_object;
   queue_aql_packet->kernarg_address = staging_aql_packet->kernarg_address;
   queue_aql_packet->completion_signal = staging_aql_packet->completion_signal;
@@ -445,19 +439,16 @@ hsa_kernel_dispatch_packet_t * WriteAQLToQueue(BaseRocR* test, uint64_t *ind) {
   return queue_aql_packet;
 }
 
-void
-WriteAQLToQueueLoc(hsa_queue_t *queue, uint64_t indx,
-                                      hsa_kernel_dispatch_packet_t *aql_pkt) {
+void WriteAQLToQueueLoc(hsa_queue_t* queue, uint64_t indx, hsa_kernel_dispatch_packet_t* aql_pkt) {
   assert(queue);
   assert(aql_pkt);
 
-  void *queue_base = queue->base_address;
+  void* queue_base = queue->base_address;
   const uint32_t queue_mask = queue->size - 1;
   hsa_kernel_dispatch_packet_t* queue_aql_packet;
 
   queue_aql_packet =
-       &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue_base))
-                                                        [indx & queue_mask];
+      &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue_base))[indx & queue_mask];
 
   queue_aql_packet->workgroup_size_x = aql_pkt->workgroup_size_x;
   queue_aql_packet->workgroup_size_y = aql_pkt->workgroup_size_y;
@@ -465,10 +456,8 @@ WriteAQLToQueueLoc(hsa_queue_t *queue, uint64_t indx,
   queue_aql_packet->grid_size_x = aql_pkt->grid_size_x;
   queue_aql_packet->grid_size_y = aql_pkt->grid_size_y;
   queue_aql_packet->grid_size_z = aql_pkt->grid_size_z;
-  queue_aql_packet->private_segment_size =
-                                     aql_pkt->private_segment_size;
-  queue_aql_packet->group_segment_size =
-                                       aql_pkt->group_segment_size;
+  queue_aql_packet->private_segment_size = aql_pkt->private_segment_size;
+  queue_aql_packet->group_segment_size = aql_pkt->group_segment_size;
   queue_aql_packet->kernel_object = aql_pkt->kernel_object;
   queue_aql_packet->kernarg_address = aql_pkt->kernarg_address;
   queue_aql_packet->completion_signal = aql_pkt->completion_signal;
@@ -494,11 +483,10 @@ hsa_status_t AllocAndSetKernArgs(BaseRocR* test, void* args, size_t arg_size) {
 
   test->set_kernarg_buffer(kern_arg_buf);
 
-  void *adj_kern_arg_buf = rocrtst::AlignUp(kern_arg_buf, req_align);
+  void* adj_kern_arg_buf = rocrtst::AlignUp(kern_arg_buf, req_align);
 
   assert(arg_size >= test->kernarg_size());
-  assert(((uintptr_t)adj_kern_arg_buf + arg_size) <
-                                        ((uintptr_t)kern_arg_buf + buf_size));
+  assert(((uintptr_t)adj_kern_arg_buf + arg_size) < ((uintptr_t)kern_arg_buf + buf_size));
 
   hsa_agent_t ag_list[2] = {*test->gpu_device1(), *test->cpu_device()};
   err = hsa_amd_agents_allow_access(2, ag_list, NULL, kern_arg_buf);

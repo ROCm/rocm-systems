@@ -271,7 +271,7 @@ load_asts()
         {
             RawAST* ast = nullptr;
             auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                                     : metric.expression().c_str());
+                                                                   : metric.expression().c_str());
             yyparse(&ast);
             if(!ast)
             {
@@ -319,7 +319,7 @@ check_ast_generation(std::string_view arch, Metric metric)
 
     RawAST* ast = nullptr;
     auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                             : metric.expression().c_str());
+                                                           : metric.expression().c_str());
 
     auto delete_ast = [&]() {
         yy_delete_buffer(buf);

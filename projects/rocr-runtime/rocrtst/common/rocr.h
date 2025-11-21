@@ -57,11 +57,12 @@
 
 #include <vector>
 
-#define CHECK(err) [&](){                         \
-    if(err != HSA_STATUS_SUCCESS) {               \
-      EXPECT_EQ(HSA_STATUS_SUCCESS, err);         \
-      throw std::runtime_error("CHECK failure."); \
-    }                                             \
+#define CHECK(err)                                                                                 \
+  [&]() {                                                                                          \
+    if (err != HSA_STATUS_SUCCESS) {                                                               \
+      EXPECT_EQ(HSA_STATUS_SUCCESS, err);                                                          \
+      throw std::runtime_error("CHECK failure.");                                                  \
+    }                                                                                              \
   }();
 
 struct Device {
@@ -91,10 +92,10 @@ struct Kernel {
 // Assumes std::atomic<uint16_t> is binary compatible with uint16_t and uses HW atomics.
 union AqlHeader {
   struct {
-    uint16_t type     : 8;
-    uint16_t barrier  : 1;
-    uint16_t acquire  : 2;
-    uint16_t release  : 2;
+    uint16_t type : 8;
+    uint16_t barrier : 1;
+    uint16_t acquire : 2;
+    uint16_t release : 2;
     uint16_t reserved : 3;
   };
   uint16_t raw;
@@ -144,7 +145,7 @@ struct hip_hiddens {
 };
 
 class System {
-public:
+ public:
   std::vector<Device> cpu_, gpu_;
   std::vector<hsa_agent_t> all_devices_;
   Device::Memory kernarg_;
@@ -159,11 +160,12 @@ public:
 };
 
 class CodeObject {
-public:
+ public:
   CodeObject(std::string filename, Device& agent);
   ~CodeObject();
   bool GetKernel(std::string name, Kernel& kernel);
-private:
+
+ private:
   hsa_file_t file;
   hsa_code_object_reader_t code_obj_rdr;
   hsa_executable_t executable;

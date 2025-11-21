@@ -172,7 +172,7 @@ int main()
         hipDeviceptr_t ptr;
     } args{d_result};
     auto args_size = sizeof(args);
-    
+
     void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
                       HIP_LAUNCH_PARAM_BUFFER_SIZE, &args_size,
                       HIP_LAUNCH_PARAM_END};

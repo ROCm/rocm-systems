@@ -215,11 +215,9 @@ void RdciDmonSubSystem::show_help() const {
   //            ***** 20 Chars ****
   std::cout << " dmon -- Used to monitor GPUs and their stats.\n\n";
   std::cout << "Usage\n";
-  std::cout << "    rdci dmon [--host <IP/FQDN>:port] [-u] -f <fieldGroupId>"
-            << " -g <groupId>\n";
+  std::cout << "    rdci dmon [--host <IP/FQDN>:port] [-u] -f <fieldGroupId>" << " -g <groupId>\n";
   std::cout << "         [-d <delay>] [-c <count>]\n";
-  std::cout << "    rdci dmon [--host <IP/FQDN>:port] [-u] -e <fieldIds>"
-            << " -i <gpuIndexes>\n";
+  std::cout << "    rdci dmon [--host <IP/FQDN>:port] [-u] -e <fieldIds>" << " -i <gpuIndexes>\n";
   std::cout << "         [-d <delay>] [-c <count>]\n";
   std::cout << "    rdci dmon [--host <IP/FQDN>:port] [-u] -l \n";
   std::cout << "\nFlags:\n";
@@ -230,26 +228,19 @@ void RdciDmonSubSystem::show_help() const {
             << "on the specified host.\n";
   std::cout << "  -c  --count       count        Integer representing How"
             << " many times to loop\n"
-            << "                                 before exiting. [default "
-            << "= runs forever.]\n";
+            << "                                 before exiting. [default " << "= runs forever.]\n";
   std::cout << "  -e  --field-id    fieldIds     Comma-separated list "
             << "of field ids to monitor.\n";
   std::cout << "  -i  --gpu_index   gpuIndexes   Comma-separated list "
             << "of GPU indexes to monitor.\n";
-  std::cout << "  -d  --delay       delay        How often to query RDC "
-            << "in milli seconds. \n"
+  std::cout << "  -d  --delay       delay        How often to query RDC " << "in milli seconds. \n"
             << "                                 [default = 1000 msec, "
             << "Minimum value = 100 msec.]\n";
-  std::cout << "  -l  --list                     List to look up the long "
-            << "names and \n"
-            << "                                 descriptions of the field "
-            << "ids\n";
-  std::cout << "  -t  --time-stamp               Include timestamps in "
-            << "display\n";
-  std::cout << "  --list-all                     Same as -l, except this "
-            << "lists all possible\n"
-            << "                                 fields, including "
-            << "those that are less \n"
+  std::cout << "  -l  --list                     List to look up the long " << "names and \n"
+            << "                                 descriptions of the field " << "ids\n";
+  std::cout << "  -t  --time-stamp               Include timestamps in " << "display\n";
+  std::cout << "  --list-all                     Same as -l, except this " << "lists all possible\n"
+            << "                                 fields, including " << "those that are less \n"
             << "                                 commonly used.\n";
 }
 

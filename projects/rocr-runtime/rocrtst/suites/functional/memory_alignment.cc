@@ -63,14 +63,14 @@
 static const uint32_t kNumThreads = 4096;
 
 typedef struct control_block {
-    hsa_amd_memory_pool_t* pool;
+  hsa_amd_memory_pool_t* pool;
 } cb_t;
 
 // Callback function which will call upon when need
 // to allocate memory from the pool in the thread.
-static void CallbackVerifyPoolAlignmendFunc(void *data) {
+static void CallbackVerifyPoolAlignmendFunc(void* data) {
   hsa_status_t err;
-  cb_t *cb = reinterpret_cast<cb_t*>(data);
+  cb_t* cb = reinterpret_cast<cb_t*>(data);
 
   rocrtst::pool_info_t info;
   memset(&info, 0, sizeof(rocrtst::pool_info_t));
@@ -83,28 +83,27 @@ static void CallbackVerifyPoolAlignmendFunc(void *data) {
     EXPECT_TRUE(alignment_size);
     // Verifies the alignment attribute is a power of 2
     if (info.size != 0) {
-      EXPECT_TRUE((alignment_size&&(!(alignment_size&(alignment_size-1)))));
+      EXPECT_TRUE((alignment_size && (!(alignment_size & (alignment_size - 1)))));
     }
   }
   return;
 }
 
 
-MemoryAlignmentTest::MemoryAlignmentTest(void) :
-    TestBase() {
+MemoryAlignmentTest::MemoryAlignmentTest(void) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
 
   set_title("RocR Memory Alignment Test");
-  set_description(" This test verifies that each memory pool of the agent that"
-  " has HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED alloc memory, It is "
-  " aligned as specified by the HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT"
-  " and has the alignment attribute is a power of 2.");
+  set_description(
+      " This test verifies that each memory pool of the agent that"
+      " has HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED alloc memory, It is "
+      " aligned as specified by the HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT"
+      " and has the alignment attribute is a power of 2.");
 }
 
-MemoryAlignmentTest::~MemoryAlignmentTest(void) {
-}
+MemoryAlignmentTest::~MemoryAlignmentTest(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -131,9 +130,7 @@ void MemoryAlignmentTest::Run(void) {
   TestBase::Run();
 }
 
-void MemoryAlignmentTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void MemoryAlignmentTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void MemoryAlignmentTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -152,11 +149,9 @@ void MemoryAlignmentTest::Close() {
 }
 
 
-
-
 static const char kSubTestSeparator[] = "  **************************";
 
-static void PrintMemorySubtestHeader(const char *header) {
+static void PrintMemorySubtestHeader(const char* header) {
   std::cout << "  *** Memory Functional Subtest: " << header << " ***" << std::endl;
 }
 
@@ -186,15 +181,13 @@ static void PrintAgentNameAndType(hsa_agent_t agent) {
     case HSA_DEVICE_TYPE_AIE:
       std::cout << "AIE)";
       break;
-    }
+  }
   std::cout << std::endl;
   return;
 }
 
 
-
-void MemoryAlignmentTest::MemoryPoolAlignment(hsa_agent_t agent,
-                                                hsa_amd_memory_pool_t pool) {
+void MemoryAlignmentTest::MemoryPoolAlignment(hsa_agent_t agent, hsa_amd_memory_pool_t pool) {
   hsa_status_t err;
 
   rocrtst::pool_info_t pool_i;
@@ -211,7 +204,7 @@ void MemoryAlignmentTest::MemoryPoolAlignment(hsa_agent_t agent,
     EXPECT_TRUE(alignment_size);
     // Verifies the alignment attribute is a power of 2
     if (pool_i.size != 0) {
-      EXPECT_TRUE((alignment_size&&(!(alignment_size&(alignment_size-1)))));
+      EXPECT_TRUE((alignment_size && (!(alignment_size & (alignment_size - 1)))));
     }
 
     // verifies that alignment attribute is a power of 2 in different threads
@@ -269,4 +262,3 @@ void MemoryAlignmentTest::MemoryPoolAlignment(void) {
     std::cout << kSubTestSeparator << std::endl;
   }
 }
-

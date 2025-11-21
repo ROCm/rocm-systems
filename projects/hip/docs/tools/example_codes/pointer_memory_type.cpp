@@ -53,7 +53,7 @@ int main()
     if(attrHost.type == hipMemoryTypeHost)
         std::cout << "ptrHost is of type hipMemoryTypeHost" << std::endl;
     // [sphinx-end]
-    
+
     HIP_CHECK(hipFreeHost(ptrHost));
     HIP_CHECK(hipFree(ptr));
 

@@ -99,8 +99,7 @@ counter_callback_info::setup_counter_config(std::shared_ptr<counter_config>& pro
             config.asts.back().set_dimensions(config.agent->id);
         } catch(std::runtime_error& e)
         {
-            ROCP_ERROR << metric.name() << " has improper dimensions"
-                       << " " << e.what();
+            ROCP_ERROR << metric.name() << " has improper dimensions" << " " << e.what();
             return ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND;
         }
     }

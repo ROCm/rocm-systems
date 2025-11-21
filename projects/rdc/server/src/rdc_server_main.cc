@@ -544,7 +544,8 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts, int arg_cnt, char** arg_list
 
       case 'v':
 #ifdef CURRENT_GIT_HASH
-        std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << "+" << QUOTE(CURRENT_GIT_HASH) << std::endl;
+        std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << "+" << QUOTE(CURRENT_GIT_HASH)
+                  << std::endl;
 #else
         std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << std::endl;
 #endif
@@ -599,16 +600,16 @@ int main(int argc, char** argv) {
     if (cmd_line_opts.use_pinned_certs && (access(kDefaultRDCServerCertPinPath, R_OK) != 0 ||
                                            access(kDefaultRDCServerKeyPinPath, R_OK) != 0 ||
                                            access(kDefaultRDCClientCertPinPath, R_OK) != 0)) {
-      std::cerr << "The user needs read access to the pinned "
-                << "certificates and private key." << std::endl;
+      std::cerr << "The user needs read access to the pinned " << "certificates and private key."
+                << std::endl;
       return 1;
     }
 
     if (!cmd_line_opts.use_pinned_certs && (access(kDefaultRDCServerCertKeyPkiPath, R_OK) != 0 ||
                                             access(kDefaultRDCServerCertPemPkiPath, R_OK) != 0 ||
                                             access(kDefaultRDCClientCACertPemPkiPath, R_OK) != 0)) {
-      std::cerr << "The user needs read access to the PKI "
-                << "certificates and private key." << std::endl;
+      std::cerr << "The user needs read access to the PKI " << "certificates and private key."
+                << std::endl;
       return 1;
     }
   }
@@ -668,7 +669,7 @@ int main(int argc, char** argv) {
   // Detach the thread, sys will recycle the resource
   thr_ret = pthread_detach(sig_listen_thread);
   // Don't fail if detach is not successful
-  if (thr_ret !=0) {
+  if (thr_ret != 0) {
     std::cerr << "Failed to detach ProcessSignalLoop. pthread_detach() returned " << thr_ret;
   }
 

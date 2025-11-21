@@ -27,20 +27,16 @@ struct block_status_t {
   uint32_t group_index;
 };
 
-struct aqlprofile_event_t : public hsa_ven_amd_aqlprofile_event_t
-{
+struct aqlprofile_event_t : public hsa_ven_amd_aqlprofile_event_t {
   bool operator==(const aqlprofile_event_t& other) const {
-    return this->block_name == other.block_name &&
-           this->block_index == other.block_index &&
-           this->counter_id ==other.counter_id;
+    return this->block_name == other.block_name && this->block_index == other.block_index &&
+        this->counter_id == other.counter_id;
   }
 };
 
-template <>
-struct std::hash<aqlprofile_event_t>
-{
+template <> struct std::hash<aqlprofile_event_t> {
   std::size_t operator()(const aqlprofile_event_t& k) const {
-    return (int(k.block_name)<<20) ^ (int(k.counter_id)<<10) ^ int(k.block_index);
+    return (int(k.block_name) << 20) ^ (int(k.counter_id) << 10) ^ int(k.block_index);
   }
 };
 
@@ -55,8 +51,7 @@ hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
   callback_data_t* passed_data = reinterpret_cast<callback_data_t*>(data);
 
   auto it = passed_data->results.find(aqlprofile_event_t{info_data->pmc_data.event});
-  if (it == passed_data->results.end())
-    return HSA_STATUS_ERROR;
+  if (it == passed_data->results.end()) return HSA_STATUS_ERROR;
 
   auto* res = it->second;
   res->xcc_vals.push_back(info_data->pmc_data.result);
@@ -104,7 +99,8 @@ bool metrics::ExtractMetricEvents(
   */
   try {
     HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
-    size_t xcc_count = hsasupport_singleton.GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
+    size_t xcc_count =
+        hsasupport_singleton.GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
 
 
     for (size_t i = 0; i < metric_names.size(); i++) {
@@ -113,10 +109,10 @@ bool metrics::ExtractMetricEvents(
       //   const Metric* metric = metrics_dict->GetMetricByName(metric_names[i]);
       const Metric* metric = metrics_dict->Get(metric_names[i]);
       if (metric == nullptr) {
-          HSAAgentInfo& agentInfo = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle);
-          fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(),
-          agentInfo.GetDeviceInfo().getName().data());
-
+        HSAAgentInfo& agentInfo =
+            HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle);
+        fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(),
+              agentInfo.GetDeviceInfo().getName().data());
       }
 
       // adding result object for derived metric
@@ -189,26 +185,27 @@ bool metrics::ExtractMetricEvents(
 
 bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent,
                              std::vector<results_t*>& results_list) {
-  size_t gpu_xcc_count = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
+  size_t gpu_xcc_count = HSASupport_Singleton::GetInstance()
+                             .GetHSAAgentInfo(gpu_agent.handle)
+                             .GetDeviceInfo()
+                             .getXccCount();
 
   callback_data_t callback_data{};
-  for (auto* res : results_list)
-    callback_data.results[aqlprofile_event_t{res->event}] = res;
+  for (auto* res : results_list) callback_data.results[aqlprofile_event_t{res->event}] = res;
   hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(profile, pmcCallback, &callback_data);
 
-  for (auto& data : results_list)
-  {
-    size_t xcc_count = (data->event.block_name != HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_UMC) ? gpu_xcc_count : 1;
+  for (auto& data : results_list) {
+    size_t xcc_count =
+        (data->event.block_name != HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_UMC) ? gpu_xcc_count : 1;
     std::vector<double> xcc_results = std::move(data->xcc_vals);
     data->xcc_vals.clear();
     data->xcc_vals.reserve(xcc_count);
-    size_t split = (xcc_results.size()+xcc_count-1) / xcc_count;
+    size_t split = (xcc_results.size() + xcc_count - 1) / xcc_count;
 
     // Exploit the fact AQLprofile calls counter in order per XCC
-    for (size_t xcc=0; xcc < xcc_count; xcc++)
-    {
+    for (size_t xcc = 0; xcc < xcc_count; xcc++) {
       double accumulated = 0;
-      for (size_t s=xcc*split; s<std::min(xcc_results.size(), (xcc+1)*split); s++)
+      for (size_t s = xcc * split; s < std::min(xcc_results.size(), (xcc + 1) * split); s++)
         accumulated += xcc_results.at(s);
       data->xcc_vals.push_back(accumulated);
     }
@@ -242,11 +239,10 @@ void metrics::GetCountersAndMetricResultsByXcc(uint32_t xcc_index,
                                                std::map<std::string, results_t*>& results_map,
                                                std::vector<const Metric*>& metrics_list,
                                                uint64_t kernel_duration) {
-  for (auto* it : results_list) // set val_double to hold value for specific xcc
+  for (auto* it : results_list)  // set val_double to hold value for specific xcc
     it->val_double = it->xcc_vals[xcc_index];
 
-  for (auto& [str, it] : results_map)
-    it->val_double = it->xcc_vals[xcc_index];
+  for (auto& [str, it] : results_map) it->val_double = it->xcc_vals[xcc_index];
 
   GetMetricsData(results_map, metrics_list, kernel_duration);
 }

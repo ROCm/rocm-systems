@@ -58,41 +58,32 @@ HsaKFDContext hsakmt_primary_kfd_ctx = {.fd = -1};
  * because the process can fork without calling the fork function in
  * libc (using clone or calling the system call directly).
  */
-bool hsakmt_is_forked_child(void)
-{
-	pid_t cur_pid;
+bool hsakmt_is_forked_child(void) {
+  pid_t cur_pid;
 
-	if (hsakmt_forked)
-		return true;
+  if (hsakmt_forked) return true;
 
-	cur_pid = getpid();
+  cur_pid = getpid();
 
-	if (parent_pid == -1) {
-		parent_pid = cur_pid;
-		return false;
-	}
+  if (parent_pid == -1) {
+    parent_pid = cur_pid;
+    return false;
+  }
 
-	if (parent_pid != cur_pid) {
-		hsakmt_forked = true;
-		return true;
-	}
+  if (parent_pid != cur_pid) {
+    hsakmt_forked = true;
+    return true;
+  }
 
-	return false;
+  return false;
 }
 
 /* Callbacks from pthread_atfork */
-static void prepare_fork_handler(void)
-{
-	pthread_mutex_lock(&hsakmt_mutex);
-}
-static void parent_fork_handler(void)
-{
-	pthread_mutex_unlock(&hsakmt_mutex);
-}
-static void child_fork_handler(void)
-{
-	pthread_mutex_init(&hsakmt_mutex, NULL);
-	hsakmt_forked = true;
+static void prepare_fork_handler(void) { pthread_mutex_lock(&hsakmt_mutex); }
+static void parent_fork_handler(void) { pthread_mutex_unlock(&hsakmt_mutex); }
+static void child_fork_handler(void) {
+  pthread_mutex_init(&hsakmt_mutex, NULL);
+  hsakmt_forked = true;
 }
 
 /* Call this from the child process after fork. This will clear all
@@ -101,195 +92,177 @@ static void child_fork_handler(void)
  * The topology information is duplicated from the parent is valid
  * in the child process so it is not cleared
  */
-static void clear_after_fork(HsaKFDContext *ctx)
-{
-	hsakmt_clear_process_doorbells(ctx);
-	hsakmt_clear_events_page(ctx);
-	hsakmt_fmm_clear_all_mem(ctx);
-	hsakmt_destroy_device_debugging_memory();
+static void clear_after_fork(HsaKFDContext* ctx) {
+  hsakmt_clear_process_doorbells(ctx);
+  hsakmt_clear_events_page(ctx);
+  hsakmt_fmm_clear_all_mem(ctx);
+  hsakmt_destroy_device_debugging_memory();
 
-	int fd = ctx->fd;
-	if (fd >= 0) {
-		hsakmt_kfdcontext_clear_context(ctx);
-		close(fd);
- 	}
-	if (hsakmt_udmabuf_dev_fd > 0) {
-		close(hsakmt_udmabuf_dev_fd);
-		hsakmt_udmabuf_dev_fd = -1;
-	}
-	hsakmt_kfd_open_count = 0;
-	parent_pid = -1;
-	hsakmt_forked = false;
+  int fd = ctx->fd;
+  if (fd >= 0) {
+    hsakmt_kfdcontext_clear_context(ctx);
+    close(fd);
+  }
+  if (hsakmt_udmabuf_dev_fd > 0) {
+    close(hsakmt_udmabuf_dev_fd);
+    hsakmt_udmabuf_dev_fd = -1;
+  }
+  hsakmt_kfd_open_count = 0;
+  parent_pid = -1;
+  hsakmt_forked = false;
 }
 
-static inline void init_page_size(void)
-{
-	hsakmt_page_size = sysconf(_SC_PAGESIZE);
-	hsakmt_page_shift = ffs(hsakmt_page_size) - 1;
+static inline void init_page_size(void) {
+  hsakmt_page_size = sysconf(_SC_PAGESIZE);
+  hsakmt_page_shift = ffs(hsakmt_page_size) - 1;
 }
 
-static HSAKMT_STATUS init_vars_from_env(void)
-{
-	char *envvar;
-	int debug_level;
+static HSAKMT_STATUS init_vars_from_env(void) {
+  char* envvar;
+  int debug_level;
 
-	/* Normally libraries don't print messages. For debugging purpose, we'll
-	 * print messages if an environment variable, HSAKMT_DEBUG_LEVEL, is set.
-	 */
-	hsakmt_debug_level = HSAKMT_DEBUG_LEVEL_DEFAULT;
+  /* Normally libraries don't print messages. For debugging purpose, we'll
+   * print messages if an environment variable, HSAKMT_DEBUG_LEVEL, is set.
+   */
+  hsakmt_debug_level = HSAKMT_DEBUG_LEVEL_DEFAULT;
 
-	envvar = getenv("HSAKMT_DEBUG_LEVEL");
-	if (envvar) {
-		debug_level = atoi(envvar);
-		if (debug_level >= HSAKMT_DEBUG_LEVEL_ERR &&
-				debug_level <= HSAKMT_DEBUG_LEVEL_DEBUG)
-			hsakmt_debug_level = debug_level;
-	}
+  envvar = getenv("HSAKMT_DEBUG_LEVEL");
+  if (envvar) {
+    debug_level = atoi(envvar);
+    if (debug_level >= HSAKMT_DEBUG_LEVEL_ERR && debug_level <= HSAKMT_DEBUG_LEVEL_DEBUG)
+      hsakmt_debug_level = debug_level;
+  }
 
-	/* Check whether to support Zero frame buffer */
-	envvar = getenv("HSA_ZFB");
-	if (envvar)
-		hsakmt_zfb_support = atoi(envvar);
+  /* Check whether to support Zero frame buffer */
+  envvar = getenv("HSA_ZFB");
+  if (envvar) hsakmt_zfb_support = atoi(envvar);
 
-	return HSAKMT_STATUS_SUCCESS;
+  return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
-{
-	HSAKMT_STATUS result;
-	int fd = -1;
-	HsaSystemProperties sys_props;
-	char *error;
-	char *useSvmStr;
-	char *useUdmaBuf;
+HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext** pCtx) {
+  HSAKMT_STATUS result;
+  int fd = -1;
+  HsaSystemProperties sys_props;
+  char* error;
+  char* useSvmStr;
+  char* useUdmaBuf;
 
-	pthread_mutex_lock(&hsakmt_mutex);
+  pthread_mutex_lock(&hsakmt_mutex);
 
-	/* If the process has forked, the child process must re-initialize
-	 * it's connection to KFD. Any references tracked by hsakmt_kfd_open_count
-	 * belong to the parent
-	 */
-	if (hsakmt_is_forked_child())
-		clear_after_fork(&hsakmt_primary_kfd_ctx);
+  /* If the process has forked, the child process must re-initialize
+   * it's connection to KFD. Any references tracked by hsakmt_kfd_open_count
+   * belong to the parent
+   */
+  if (hsakmt_is_forked_child()) clear_after_fork(&hsakmt_primary_kfd_ctx);
 
-	if (hsakmt_kfd_open_count == 0) {
-		static bool atfork_installed = false;
+  if (hsakmt_kfd_open_count == 0) {
+    static bool atfork_installed = false;
 
-		hsakmt_fn_amdgpu_device_get_fd = dlsym(RTLD_DEFAULT, "amdgpu_device_get_fd");
-		if ((error = dlerror()) != NULL)
-			pr_err("amdgpu_device_get_fd is not available: %s\n", error);
-		else
-			pr_info("amdgpu_device_get_fd is available %p\n", hsakmt_fn_amdgpu_device_get_fd);
+    hsakmt_fn_amdgpu_device_get_fd = dlsym(RTLD_DEFAULT, "amdgpu_device_get_fd");
+    if ((error = dlerror()) != NULL)
+      pr_err("amdgpu_device_get_fd is not available: %s\n", error);
+    else
+      pr_info("amdgpu_device_get_fd is available %p\n", hsakmt_fn_amdgpu_device_get_fd);
 
-		result = init_vars_from_env();
-		if (result != HSAKMT_STATUS_SUCCESS)
-			goto open_failed;
+    result = init_vars_from_env();
+    if (result != HSAKMT_STATUS_SUCCESS) goto open_failed;
 
-		// Check if we are using the hsakmtmodel and setup initial state
-		model_init_env_vars();
+    // Check if we are using the hsakmtmodel and setup initial state
+    model_init_env_vars();
 
-		if (hsakmt_primary_kfd_ctx.fd < 0 && !hsakmt_use_model) {
-			fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
+    if (hsakmt_primary_kfd_ctx.fd < 0 && !hsakmt_use_model) {
+      fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
 
-			if (fd == -1) {
-				result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
-				goto open_failed;
-			}
-			hsakmt_kfdcontext_init_context(fd, &hsakmt_primary_kfd_ctx);
-		}
+      if (fd == -1) {
+        result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
+        goto open_failed;
+      }
+      hsakmt_kfdcontext_init_context(fd, &hsakmt_primary_kfd_ctx);
+    }
 
-		init_page_size();
+    init_page_size();
 
-		result = hsakmt_init_kfd_version();
-		if (result != HSAKMT_STATUS_SUCCESS)
-			goto kfd_version_failed;
+    result = hsakmt_init_kfd_version();
+    if (result != HSAKMT_STATUS_SUCCESS) goto kfd_version_failed;
 
-		/* check if udmabuf is enabled by env HSA_USE_UDMABUF */
-		useUdmaBuf = getenv("HSA_USE_UDMABUF");
-		if (useUdmaBuf && atoi(useUdmaBuf)) {
-			/* open udmabuf device */
-			hsakmt_udmabuf_dev_fd = open(kfd_udmabuf_device_name, 0);
-			if (hsakmt_udmabuf_dev_fd < 0)
-				pr_debug("running kernel does not support udmabuf\n");
-			else
-				pr_debug("udmabuf is enabled\n");
-		} else
-			pr_debug("udmabuf is not enabled\n");
+    /* check if udmabuf is enabled by env HSA_USE_UDMABUF */
+    useUdmaBuf = getenv("HSA_USE_UDMABUF");
+    if (useUdmaBuf && atoi(useUdmaBuf)) {
+      /* open udmabuf device */
+      hsakmt_udmabuf_dev_fd = open(kfd_udmabuf_device_name, 0);
+      if (hsakmt_udmabuf_dev_fd < 0)
+        pr_debug("running kernel does not support udmabuf\n");
+      else
+        pr_debug("udmabuf is enabled\n");
+    } else
+      pr_debug("udmabuf is not enabled\n");
 
-		useSvmStr = getenv("HSA_USE_SVM");
-		hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));
-		if(!hsakmt_use_model)
-			result = hsakmt_topology_sysfs_get_system_props(&hsakmt_primary_kfd_ctx, &sys_props);
+    useSvmStr = getenv("HSA_USE_SVM");
+    hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));
+    if (!hsakmt_use_model)
+      result = hsakmt_topology_sysfs_get_system_props(&hsakmt_primary_kfd_ctx, &sys_props);
 
-		if (result != HSAKMT_STATUS_SUCCESS)
-			goto topology_sysfs_failed;
+    if (result != HSAKMT_STATUS_SUCCESS) goto topology_sysfs_failed;
 
-		hsakmt_kfd_open_count = 1;
+    hsakmt_kfd_open_count = 1;
 
-		if (hsakmt_init_device_debugging_memory(sys_props.NumNodes) != HSAKMT_STATUS_SUCCESS)
-			pr_warn("Insufficient Memory. Debugging unavailable\n");
+    if (hsakmt_init_device_debugging_memory(sys_props.NumNodes) != HSAKMT_STATUS_SUCCESS)
+      pr_warn("Insufficient Memory. Debugging unavailable\n");
 
-		hsakmt_init_counter_props(sys_props.NumNodes);
-		*pCtx = &hsakmt_primary_kfd_ctx;
+    hsakmt_init_counter_props(sys_props.NumNodes);
+    *pCtx = &hsakmt_primary_kfd_ctx;
 
-		if (!atfork_installed) {
-			/* Atfork handlers cannot be uninstalled and
-			 * must be installed only once. Otherwise
-			 * prepare will deadlock when trying to take
-			 * the same lock multiple times.
-			 */
-			pthread_atfork(prepare_fork_handler,
-				       parent_fork_handler,
-				       child_fork_handler);
-			atfork_installed = true;
-		}
-	} else {
-		hsakmt_kfd_open_count++;
-		*pCtx = &hsakmt_primary_kfd_ctx;
-		result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
-	}
+    if (!atfork_installed) {
+      /* Atfork handlers cannot be uninstalled and
+       * must be installed only once. Otherwise
+       * prepare will deadlock when trying to take
+       * the same lock multiple times.
+       */
+      pthread_atfork(prepare_fork_handler, parent_fork_handler, child_fork_handler);
+      atfork_installed = true;
+    }
+  } else {
+    hsakmt_kfd_open_count++;
+    *pCtx = &hsakmt_primary_kfd_ctx;
+    result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
+  }
 
-	pthread_mutex_unlock(&hsakmt_mutex);
-	return result;
+  pthread_mutex_unlock(&hsakmt_mutex);
+  return result;
 topology_sysfs_failed:
 kfd_version_failed:
-	if (fd >= 0)
-		close(fd);
+  if (fd >= 0) close(fd);
 open_failed:
-	pthread_mutex_unlock(&hsakmt_mutex);
+  pthread_mutex_unlock(&hsakmt_mutex);
 
-	return result;
+  return result;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFDCtx(void)
-{
-	HSAKMT_STATUS result;
+HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFDCtx(void) {
+  HSAKMT_STATUS result;
 
-	pthread_mutex_lock(&hsakmt_mutex);
+  pthread_mutex_lock(&hsakmt_mutex);
 
-	if (hsakmt_kfd_open_count > 0)	{
-		if (--hsakmt_kfd_open_count == 0) {
-			hsakmt_destroy_counter_props();
-			hsakmt_destroy_device_debugging_memory();
-			hsakmt_fmm_clear_all_aperture(&hsakmt_primary_kfd_ctx);
-		}
+  if (hsakmt_kfd_open_count > 0) {
+    if (--hsakmt_kfd_open_count == 0) {
+      hsakmt_destroy_counter_props();
+      hsakmt_destroy_device_debugging_memory();
+      hsakmt_fmm_clear_all_aperture(&hsakmt_primary_kfd_ctx);
+    }
 
-		result = HSAKMT_STATUS_SUCCESS;
-	} else
-		result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
+    result = HSAKMT_STATUS_SUCCESS;
+  } else
+    result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
 
-	pthread_mutex_unlock(&hsakmt_mutex);
+  pthread_mutex_unlock(&hsakmt_mutex);
 
-	return result;
+  return result;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
-{
-	HsaKFDContext *pCtx = NULL;
-	return hsaKmtOpenKFDCtx(&pCtx);
+HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
+  HsaKFDContext* pCtx = NULL;
+  return hsaKmtOpenKFDCtx(&pCtx);
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
-{
-	return hsaKmtCloseKFDCtx();
-}
+HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) { return hsaKmtCloseKFDCtx(); }

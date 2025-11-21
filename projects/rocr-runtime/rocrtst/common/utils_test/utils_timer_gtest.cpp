@@ -1,6 +1,6 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -13,16 +13,12 @@
 using namespace std;
 
 class rocrtstUtilsTimerGtest : public ::testing::Test {
-
  protected:
-
   // No argument constructor called from Google Test Framework
-  rocrtstUtilsTimerGtest() { };
-
+  rocrtstUtilsTimerGtest() {};
 };
 
 TEST_F(rocrtstUtilsTimerGtest, TestingTimer101) {
-
   // Create a Hsa Perf Utils Timer Test object.
   // The test will iterate 108 times with sleep
   // time of 3 milliseconds per iteration

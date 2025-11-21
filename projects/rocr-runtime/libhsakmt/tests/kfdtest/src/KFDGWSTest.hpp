@@ -30,12 +30,12 @@
 
 class KFDGWSTest : public KFDBaseComponentTest {
  public:
-    KFDGWSTest() {}
-    ~KFDGWSTest() {}
+  KFDGWSTest() {}
+  ~KFDGWSTest() {}
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 };
 
 #endif  // __KFD_GWS_TEST__H__

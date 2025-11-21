@@ -60,25 +60,21 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
-enum memoryOrdering {
-  SCACQ_SCREL,
-  SCACQUIRE,
-  RELAXED,
-  SCRELEASE,
-  MEM_ORDERING_END};
+enum memoryOrdering { SCACQ_SCREL, SCACQUIRE, RELAXED, SCRELEASE, MEM_ORDERING_END };
 
 static const uint32_t kNumThreadsForAdd = 10;
 
-static const uint32_t kNumOfAddAtomic = 1*1024*1024;
+static const uint32_t kNumOfAddAtomic = 1 * 1024 * 1024;
 
 typedef struct write_index_add_atomic_data_s {
-    hsa_queue_t* queue;
-    int memory_ordering_type;
+  hsa_queue_t* queue;
+  int memory_ordering_type;
 } write_index_add_atomic_data_t;
 
 
 static void thread_proc_write_index_add_atomic(void* data) {
-  write_index_add_atomic_data_t* thread_data = reinterpret_cast<write_index_add_atomic_data_t*> (data);
+  write_index_add_atomic_data_t* thread_data =
+      reinterpret_cast<write_index_add_atomic_data_t*>(data);
   uint64_t ii;
   for (ii = 0; ii < kNumOfAddAtomic; ++ii) {
     switch (thread_data->memory_ordering_type) {
@@ -101,42 +97,47 @@ static void thread_proc_write_index_add_atomic(void* data) {
 }
 
 static const uint32_t kNumThreadsForCas = 4;
-static const uint32_t kNumOfCasAtomic = 1*1024*1024;
+static const uint32_t kNumOfCasAtomic = 1 * 1024 * 1024;
 typedef struct write_index_cas_thread_data_s {
-    hsa_queue_t* queue;
-    int thread_index;
-    int num_threads;
-    uint64_t termination_value;
-    int memory_ordering_type;
+  hsa_queue_t* queue;
+  int thread_index;
+  int num_threads;
+  uint64_t termination_value;
+  int memory_ordering_type;
 } write_index_cas_thread_data_t;
 
 static void thread_proc_write_index_cas_atomic(void* data) {
-  write_index_cas_thread_data_t* thread_data = reinterpret_cast<write_index_cas_thread_data_t*>(data);
+  write_index_cas_thread_data_t* thread_data =
+      reinterpret_cast<write_index_cas_thread_data_t*>(data);
 
   uint64_t ii;
-  for (ii = thread_data->thread_index; ii < thread_data->termination_value; ii += thread_data->num_threads) {
+  for (ii = thread_data->thread_index; ii < thread_data->termination_value;
+       ii += thread_data->num_threads) {
     switch (thread_data->memory_ordering_type) {
       case SCACQ_SCREL:
         while ((uint64_t)ii !=
-          hsa_queue_cas_write_index_scacq_screl(thread_data->queue, ii, ii + 1)) {}
-          break;
-     case SCACQUIRE:
-        while ((uint64_t)ii !=
-          hsa_queue_cas_write_index_scacquire(thread_data->queue, ii, ii + 1)) {}
-          break;
-     case RELAXED:
-        while ((uint64_t)ii !=
-          hsa_queue_cas_write_index_relaxed(thread_data->queue, ii, ii + 1)) {}
-          break;
-     case SCRELEASE:
-        while ((uint64_t)ii !=
-          hsa_queue_cas_write_index_screlease(thread_data->queue, ii, ii + 1)) {}
-          break;
+               hsa_queue_cas_write_index_scacq_screl(thread_data->queue, ii, ii + 1)) {
         }
+        break;
+      case SCACQUIRE:
+        while ((uint64_t)ii !=
+               hsa_queue_cas_write_index_scacquire(thread_data->queue, ii, ii + 1)) {
+        }
+        break;
+      case RELAXED:
+        while ((uint64_t)ii != hsa_queue_cas_write_index_relaxed(thread_data->queue, ii, ii + 1)) {
+        }
+        break;
+      case SCRELEASE:
+        while ((uint64_t)ii !=
+               hsa_queue_cas_write_index_screlease(thread_data->queue, ii, ii + 1)) {
+        }
+        break;
     }
+  }
 }
 
-static const uint32_t kNumOfLoadStoreAtomic = 1*1024*1024;
+static const uint32_t kNumOfLoadStoreAtomic = 1 * 1024 * 1024;
 // Use a 64-bit value to test the atomicity
 static uint64_t kStoreValue = UINT64_MAX;
 
@@ -156,7 +157,7 @@ typedef struct write_index_store_atomic_thread_data_s {
 static uint64_t const WRITE_INDEX_FAILURE = 2;
 void thread_proc_write_index_load_atomic(void* data) {
   write_index_load_atomic_thread_data_t* thread_data =
-              reinterpret_cast<write_index_load_atomic_thread_data_t*>(data);
+      reinterpret_cast<write_index_load_atomic_thread_data_t*>(data);
   uint32_t ii;
   for (ii = 0; ii < thread_data->num_iterations; ++ii) {
     uint64_t write_index = WRITE_INDEX_FAILURE;  // initalized with value other than kStoreValue
@@ -172,7 +173,7 @@ void thread_proc_write_index_load_atomic(void* data) {
 
 void thread_proc_write_index_store_atomic(void* data) {
   write_index_store_atomic_thread_data_t* thread_data =
-              reinterpret_cast<write_index_store_atomic_thread_data_t*>(data);
+      reinterpret_cast<write_index_store_atomic_thread_data_t*>(data);
   uint32_t ii;
   for (ii = 0; ii < thread_data->num_iterations; ++ii) {
     if (SCRELEASE == thread_data->memory_ordering_type) {
@@ -184,10 +185,10 @@ void thread_proc_write_index_store_atomic(void* data) {
 }
 
 
-
-QueueWriteIndexConcurrentTest::QueueWriteIndexConcurrentTest(bool launch_Concurrent_AddWriteIndex,
-                      bool launch_Concurrent_CasWriteIndex ,
-                      bool launch_Concurrent_LoadStoreWriteIndex) :TestBase() {
+QueueWriteIndexConcurrentTest::QueueWriteIndexConcurrentTest(
+    bool launch_Concurrent_AddWriteIndex, bool launch_Concurrent_CasWriteIndex,
+    bool launch_Concurrent_LoadStoreWriteIndex)
+    : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
@@ -200,25 +201,27 @@ QueueWriteIndexConcurrentTest::QueueWriteIndexConcurrentTest(bool launch_Concurr
 
   if (launch_Concurrent_AddWriteIndex) {
     name += " AddWriteIndex";
-    desc += " This test Verifies that the hsa_queue_write_index_add operations is atomic"
-            " and 'torn' adds do not occur when this API is executed concurrently.";
+    desc +=
+        " This test Verifies that the hsa_queue_write_index_add operations is atomic"
+        " and 'torn' adds do not occur when this API is executed concurrently.";
   } else if (launch_Concurrent_CasWriteIndex) {
     name += " CasWriteIndex";
-    desc += " This test Verifies that the hsa_queue_cas_write_index operations is atomic,"
-            " and 'torn' compare and swaps do not occur when this API is executed"
-            " concurrently.";
+    desc +=
+        " This test Verifies that the hsa_queue_cas_write_index operations is atomic,"
+        " and 'torn' compare and swaps do not occur when this API is executed"
+        " concurrently.";
   } else if (launch_Concurrent_LoadStoreWriteIndex) {
     name += " LoadStoreWriteIndex";
-    desc += " This test Verifies that the hsa_queue_write_index_load and store operations"
-            " are atomic, and 'torn' loads or stores do not occur when these APIs are executed"
-            " concurrently.";
+    desc +=
+        " This test Verifies that the hsa_queue_write_index_load and store operations"
+        " are atomic, and 'torn' loads or stores do not occur when these APIs are executed"
+        " concurrently.";
   }
   set_title(name);
   set_description(desc);
 }
 
-QueueWriteIndexConcurrentTest::~QueueWriteIndexConcurrentTest(void) {
-}
+QueueWriteIndexConcurrentTest::~QueueWriteIndexConcurrentTest(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -245,9 +248,7 @@ void QueueWriteIndexConcurrentTest::Run(void) {
   TestBase::Run();
 }
 
-void QueueWriteIndexConcurrentTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void QueueWriteIndexConcurrentTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void QueueWriteIndexConcurrentTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -266,20 +267,17 @@ void QueueWriteIndexConcurrentTest::Close() {
 }
 
 
-
-
 static const char kSubTestSeparator[] = "  **************************";
 
-static void PrintDebugSubtestHeader(const char *header) {
+static void PrintDebugSubtestHeader(const char* header) {
   std::cout << "  *** QueueWriteIndexConcurrent Subtest: " << header << " ***" << std::endl;
 }
-
 
 
 // This test verify check  memory can be
 // concurrently allocated from pool on ROCR agents
 void QueueWriteIndexConcurrentTest::QueueAddWriteIndexAtomic(hsa_agent_t cpuAgent,
-                                    hsa_agent_t gpuAgent) {
+                                                             hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // check if the gpuAgent supports kernel dispatch
@@ -298,11 +296,13 @@ void QueueWriteIndexConcurrentTest::QueueAddWriteIndexAtomic(hsa_agent_t cpuAgen
 
   // Create a queue
   hsa_queue_t* queue;
-  err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX, UINT32_MAX, &queue);
+  err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX,
+                         UINT32_MAX, &queue);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   int memory_ordering_type;
-  for (memory_ordering_type = SCACQ_SCREL; memory_ordering_type < MEM_ORDERING_END; ++memory_ordering_type) {
+  for (memory_ordering_type = SCACQ_SCREL; memory_ordering_type < MEM_ORDERING_END;
+       ++memory_ordering_type) {
     // Thread data
     write_index_add_atomic_data_t thread_data;
     thread_data.queue = queue;
@@ -346,11 +346,10 @@ void QueueWriteIndexConcurrentTest::QueueAddWriteIndexAtomic(hsa_agent_t cpuAgen
 }
 
 
-
-
 // This test verify check  memory can be
 // concurrently allocated from pool on ROCR agents
-void QueueWriteIndexConcurrentTest::QueueCasWriteIndexAtomic(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent) {
+void QueueWriteIndexConcurrentTest::QueueCasWriteIndexAtomic(hsa_agent_t cpuAgent,
+                                                             hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // check if the gpuAgent supports kernel dispatch
@@ -369,11 +368,13 @@ void QueueWriteIndexConcurrentTest::QueueCasWriteIndexAtomic(hsa_agent_t cpuAgen
 
   // Create a queue
   hsa_queue_t* queue;
-  err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX, UINT32_MAX, &queue);
+  err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX,
+                         UINT32_MAX, &queue);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   int memory_ordering_type;
-  for (memory_ordering_type = SCACQ_SCREL; memory_ordering_type < MEM_ORDERING_END; ++memory_ordering_type) {
+  for (memory_ordering_type = SCACQ_SCREL; memory_ordering_type < MEM_ORDERING_END;
+       ++memory_ordering_type) {
     // Thread data
     write_index_cas_thread_data_t thread_data[kNumThreadsForCas];
 
@@ -387,7 +388,8 @@ void QueueWriteIndexConcurrentTest::QueueCasWriteIndexAtomic(hsa_agent_t cpuAgen
       thread_data[kk].num_threads = kNumThreadsForCas;
       thread_data[kk].memory_ordering_type = memory_ordering_type;
       thread_data[kk].termination_value = kNumOfCasAtomic;
-      rocrtst::TestGroupAdd(tg_concurrent, &thread_proc_write_index_cas_atomic, thread_data + kk, 1);
+      rocrtst::TestGroupAdd(tg_concurrent, &thread_proc_write_index_cas_atomic, thread_data + kk,
+                            1);
     }
 
     // Create threads for each test
@@ -422,7 +424,8 @@ void QueueWriteIndexConcurrentTest::QueueCasWriteIndexAtomic(hsa_agent_t cpuAgen
 
 // This test verify if each Agent pool's attribute information
 // is consistent across multiple thread.
-void QueueWriteIndexConcurrentTest::QueueLoadStoreWriteIndexAtomic(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent) {
+void QueueWriteIndexConcurrentTest::QueueLoadStoreWriteIndexAtomic(hsa_agent_t cpuAgent,
+                                                                   hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // check if the gpuAgent supports kernel dispatch
@@ -441,16 +444,18 @@ void QueueWriteIndexConcurrentTest::QueueLoadStoreWriteIndexAtomic(hsa_agent_t c
 
   // Create a queue
   hsa_queue_t* queue;
-  err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX, UINT32_MAX, &queue);
+  err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX,
+                         UINT32_MAX, &queue);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Use a 64-bit value to test the atomicity
   kStoreValue = UINT64_MAX;
 
   int memory_ordering_type;
-  for (memory_ordering_type = RELAXED; memory_ordering_type < MEM_ORDERING_END; ++memory_ordering_type) {
+  for (memory_ordering_type = RELAXED; memory_ordering_type < MEM_ORDERING_END;
+       ++memory_ordering_type) {
     // Thread data
-    write_index_load_atomic_thread_data_t  load_thread_data[2];
+    write_index_load_atomic_thread_data_t load_thread_data[2];
     write_index_store_atomic_thread_data_t store_thread_data[2];
     load_thread_data[0].queue = queue;
     load_thread_data[0].num_iterations = kNumOfLoadStoreAtomic;
@@ -470,9 +475,12 @@ void QueueWriteIndexConcurrentTest::QueueLoadStoreWriteIndexAtomic(hsa_agent_t c
     // Create a test group
     rocrtst::test_group* tg_concurrent = rocrtst::TestGroupCreate(4);
     rocrtst::TestGroupAdd(tg_concurrent, &thread_proc_write_index_load_atomic, load_thread_data, 1);
-    rocrtst::TestGroupAdd(tg_concurrent, &thread_proc_write_index_load_atomic, load_thread_data  + 1, 1);
-    rocrtst::TestGroupAdd(tg_concurrent,  &thread_proc_write_index_store_atomic, store_thread_data, 1);
-    rocrtst::TestGroupAdd(tg_concurrent, &thread_proc_write_index_store_atomic, store_thread_data + 1, 1);
+    rocrtst::TestGroupAdd(tg_concurrent, &thread_proc_write_index_load_atomic, load_thread_data + 1,
+                          1);
+    rocrtst::TestGroupAdd(tg_concurrent, &thread_proc_write_index_store_atomic, store_thread_data,
+                          1);
+    rocrtst::TestGroupAdd(tg_concurrent, &thread_proc_write_index_store_atomic,
+                          store_thread_data + 1, 1);
 
 
     // Create threads for each test
@@ -514,7 +522,7 @@ void QueueWriteIndexConcurrentTest::QueueAddWriteIndexAtomic(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     QueueAddWriteIndexAtomic(cpus[0], gpus[i]);
   }
 
@@ -541,7 +549,7 @@ void QueueWriteIndexConcurrentTest::QueueCasWriteIndexAtomic(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     QueueCasWriteIndexAtomic(cpus[0], gpus[i]);
   }
 
@@ -568,7 +576,7 @@ void QueueWriteIndexConcurrentTest::QueueLoadStoreWriteIndexAtomic(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     QueueLoadStoreWriteIndexAtomic(cpus[0], gpus[i]);
   }
 
@@ -577,4 +585,3 @@ void QueueWriteIndexConcurrentTest::QueueLoadStoreWriteIndexAtomic(void) {
     std::cout << kSubTestSeparator << std::endl;
   }
 }
-

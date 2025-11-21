@@ -45,9 +45,9 @@ struct json_output
                 JSONOutputArchive::Options _opts);
     ~json_output();
 
-    json_output(const json_output&)     = delete;
-    json_output(json_output&&) noexcept = default;
-    json_output& operator=(const json_output&) = delete;
+    json_output(const json_output&)                = delete;
+    json_output(json_output&&) noexcept            = default;
+    json_output& operator=(const json_output&)     = delete;
     json_output& operator=(json_output&&) noexcept = default;
 
     template <typename... Args>

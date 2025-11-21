@@ -207,8 +207,9 @@ namespace impl
 {
 template <typename ContainerT, typename... Args>
 inline auto
-emplace(ContainerT& _c, int, Args&&... _args)
-    -> decltype(_c.emplace_back(std::forward<Args>(_args)...))
+emplace(ContainerT& _c,
+        int,
+        Args&&... _args) -> decltype(_c.emplace_back(std::forward<Args>(_args)...))
 {
     return _c.emplace_back(std::forward<Args>(_args)...);
 }

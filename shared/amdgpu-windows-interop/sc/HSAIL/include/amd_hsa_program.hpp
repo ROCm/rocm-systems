@@ -9,14 +9,14 @@
 #ifndef AMD_HSA_PROGRAM_HPP
 #define AMD_HSA_PROGRAM_HPP
 
+#include "Brig.h"
+#include "amd_hsa_code.hpp"
+#include "hsa.h"
+#include "hsa_ext_finalize.h"
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
-#include "amd_hsa_code.hpp"
-#include "Brig.h"
-#include "hsa.h"
-#include "hsa_ext_finalize.h"
 
 /// @brief Descriptive version of AMD HSA Program.
 #define AMD_HSA_PROGRAM_VERSION "AMD HSA Program v1.04 (August 3, 2015)"
@@ -29,15 +29,18 @@
 
 /// @brief Environment variable. If set, concatenates options parameter from
 /// Program::Create with contents of this environment variable.
-#define ENVVAR_AMD_HSA_PROGRAM_CREATE_OPTIONS_APPEND "AMD_HSA_PROGRAM_CREATE_OPTIONS_APPEND"
+#define ENVVAR_AMD_HSA_PROGRAM_CREATE_OPTIONS_APPEND                           \
+  "AMD_HSA_PROGRAM_CREATE_OPTIONS_APPEND"
 
 /// @brief Environment variable. If set, overrides options parameter from
 /// Program::Finalize with contents of this environment variable.
-#define ENVVAR_AMD_HSA_PROGRAM_FINALIZE_OPTIONS "AMD_HSA_PROGRAM_FINALIZE_OPTIONS"
+#define ENVVAR_AMD_HSA_PROGRAM_FINALIZE_OPTIONS                                \
+  "AMD_HSA_PROGRAM_FINALIZE_OPTIONS"
 
 /// @brief Environment variable. If set, concatenates options parameter from
 /// Program::Finalize with contents of this environment variable.
-#define ENVVAR_AMD_HSA_PROGRAM_FINALIZE_OPTIONS_APPEND "AMD_HSA_PROGRAM_FINALIZE_OPTIONS_APPEND"
+#define ENVVAR_AMD_HSA_PROGRAM_FINALIZE_OPTIONS_APPEND                         \
+  "AMD_HSA_PROGRAM_FINALIZE_OPTIONS_APPEND"
 
 /// @brief AMD HSA Program attributes (in addition to hsa_ext_program_info_t,
 /// which is defined in HSA Runtime Specification), enumeration values below
@@ -73,7 +76,7 @@ public:
   ///
   /// @returns Pointer to allocated code object memory on success, null pointer
   /// on failure.
-  virtual void* CodeObjectAlloc(size_t size, size_t align) = 0;
+  virtual void *CodeObjectAlloc(size_t size, size_t align) = 0;
 
   /// @brief Invoked when AMD HSA Program needs to copy @p size bytes from
   /// memory pointed to by @p src to code object memory pointed to by @p dst.
@@ -92,10 +95,11 @@ public:
   /// @param[in] size Requested deallocation size in bytes.
   virtual void CodeObjectFree(void *ptr, size_t size) = 0;
 
-  /// @brief Invoked when AMD HSA Finalizer and Program needs to reprot message or error
+  /// @brief Invoked when AMD HSA Finalizer and Program needs to reprot message
+  /// or error
   ///
   /// @param[in] str Message to report.
-  virtual void ReportMessage(const std::string& str) = 0;
+  virtual void ReportMessage(const std::string &str) = 0;
 
 protected:
   /// @brief Default constructor.
@@ -103,16 +107,16 @@ protected:
 
 private:
   /// @brief Copy constructor - not available.
-  Context(const Context&);
+  Context(const Context &);
 
   /// @brief Assignment operator - not available.
-  Context& operator=(const Context&);
+  Context &operator=(const Context &);
 };
 
 class Finalizer;
 
 /// @class Program
-class Program: public amd::hsa::common::Signed<0x71BB0A093D69DA92> {
+class Program : public amd::hsa::common::Signed<0x71BB0A093D69DA92> {
 public:
   /// @brief Constant BRIG Module iterator.
   typedef std::vector<hsa_ext_module_t>::const_iterator const_module_iterator;
@@ -138,7 +142,7 @@ public:
   /// @param[in] program_handle HSA Program Handle to convert. Can be invalid.
   ///
   /// @returns AMD HSA Program on success, null on failure.
-  static Program* Object(hsa_ext_program_t program_handle);
+  static Program *Object(hsa_ext_program_t program_handle);
 
   /// @returns Constant iterator to first BRIG Module in AMD HSA Program. If
   /// AMD HSA Program does not contain any BRIG Modules, returned constant
@@ -159,10 +163,10 @@ public:
   virtual module_iterator module_end() = 0;
 
   /// @returns Context associated with AMD HSA Program.
-  virtual Context* GetContext() const = 0;
+  virtual Context *GetContext() const = 0;
 
   /// @returns Finalizer associated with this AMD HSA Program.
-  virtual Finalizer* GetFinalizer() const = 0;
+  virtual Finalizer *GetFinalizer() const = 0;
 
   /// @brief Retrieves current value of specified AMD HSA Program's
   /// @p attribute.
@@ -179,7 +183,8 @@ public:
   ///
   /// @note If function failed to execute successfully, details of failure
   /// can be retrieved using Program::GetLog.
-  virtual hsa_status_t GetInfo(amd_hsa_program_info32_t attribute, void *value) const = 0;
+  virtual hsa_status_t GetInfo(amd_hsa_program_info32_t attribute,
+                               void *value) const = 0;
 
   /// @brief Adds specified BRIG Module @p module to AMD HSA Program.
   ///
@@ -246,13 +251,11 @@ public:
   ///
   /// @deprecated @p control_directives will be included in @p options starting
   /// AMD HSA Program v2.0.
-  virtual hsa_status_t Finalize(
-    const char *target,
-    int32_t call_convention,
-    const char *options,
-    hsa_ext_control_directives_t control_directives,
-    hsa_code_object_type_t code_object_type,
-    hsa_code_object_t *code_object) = 0;
+  virtual hsa_status_t Finalize(const char *target, int32_t call_convention,
+                                const char *options,
+                                hsa_ext_control_directives_t control_directives,
+                                hsa_code_object_type_t code_object_type,
+                                hsa_code_object_t *code_object) = 0;
 
 protected:
   /// @brief Default constructor.
@@ -260,12 +263,11 @@ protected:
 
 private:
   /// @brief Copy constructor - not available.
-  Program(const Program&);
+  Program(const Program &);
 
   /// @brief Assignment operator - not available.
-  Program& operator=(const Program&);
+  Program &operator=(const Program &);
 };
-
 
 /// @class Finalizer
 class Finalizer {
@@ -278,11 +280,12 @@ public:
   /// @param[in] context Context. Must not be null.
   ///
   /// @returns AMD HSA Finalizer on success, null on failure.
-  static Finalizer* CreateFinalizer(Context* context);
+  static Finalizer *CreateFinalizer(Context *context);
 
   /// @brief Destroys AMD HSA Finalizer @p finalizer_object.
   ///
-  /// @param[in] finalizer_object AMD HSA Finalizer to destroy. Must not be null.
+  /// @param[in] finalizer_object AMD HSA Finalizer to destroy. Must not be
+  /// null.
   static void DestroyFinalizer(Finalizer *finalizer_object);
 
   /// @brief Creates empty AMD HSA Program with specified @p profile,
@@ -297,13 +300,12 @@ public:
   /// @param[in] brig_minor Minor BRIG version. Must be valid.
   ///
   /// @returns AMD HSA Program on success, null on failure.
-  virtual Program* CreateProgram(
-    hsa_profile_t profile,
-    hsa_machine_model_t machine_model,
-    hsa_default_float_rounding_mode_t rounding_mode,
-    const char *options,
-    BrigVersion32_t brig_major = BRIG_VERSION_BRIG_MAJOR,
-    BrigVersion32_t brig_minor = BRIG_VERSION_BRIG_MINOR) = 0;
+  virtual Program *
+  CreateProgram(hsa_profile_t profile, hsa_machine_model_t machine_model,
+                hsa_default_float_rounding_mode_t rounding_mode,
+                const char *options,
+                BrigVersion32_t brig_major = BRIG_VERSION_BRIG_MAJOR,
+                BrigVersion32_t brig_minor = BRIG_VERSION_BRIG_MINOR) = 0;
 
   /// @brief Destroys AMD HSA Program @p program_object.
   ///
@@ -314,7 +316,7 @@ public:
   virtual void PrintFinalizerOptions() const = 0;
 
   /// @returns Context associated with Finalizer.
-  virtual Context* GetContext() const = 0;
+  virtual Context *GetContext() const = 0;
 
   /// @brief Enables code cache optimization.
   virtual void EnableCodeCache() = 0;
@@ -326,7 +328,7 @@ public:
   virtual bool IsCodeCacheEnabled() const = 0;
 
   /// @returns List of names for supported targets.
-  virtual const std::vector<std::string>& GetSupportedTargets() const = 0;
+  virtual const std::vector<std::string> &GetSupportedTargets() const = 0;
 
 protected:
   /// @brief Default constructor.
@@ -334,10 +336,10 @@ protected:
 
 private:
   /// @brief Copy constructor - not available.
-  Finalizer(const Finalizer&);
+  Finalizer(const Finalizer &);
 
   /// @brief Assignment operator - not available.
-  Finalizer& operator=(const Finalizer&);
+  Finalizer &operator=(const Finalizer &);
 };
 
 } // namespace program

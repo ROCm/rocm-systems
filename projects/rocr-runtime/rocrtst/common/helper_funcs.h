@@ -65,13 +65,13 @@
 
 namespace rocrtst {
 
-bool Compare(const float* refData, const float* data,
-             const int length, const float epsilon = 1e-6f);
-bool Compare(const double* refData, const double* data,
-             const int length, const double epsilon = 1e-6);
+bool Compare(const float* refData, const float* data, const int length,
+             const float epsilon = 1e-6f);
+bool Compare(const double* refData, const double* data, const int length,
+             const double epsilon = 1e-6);
 
 /// Calculate the mean number of the vector
-double CalcMean(const std::vector<double> &scores);
+double CalcMean(const std::vector<double>& scores);
 
 /// Calculate the mean time of difference of the two vectors
 double CalcMean(const std::vector<double>& v1, const std::vector<double>& v2);
@@ -79,28 +79,19 @@ double CalcMean(const std::vector<double>& v1, const std::vector<double>& v2);
 /// Return the median value of a vector of doubles
 /// \param[in] scores Vector of doubles
 /// \returns double Median value of provided vector
-double CalcMedian(const std::vector<double> &scores);
+double CalcMedian(const std::vector<double>& scores);
 
 /// Calculate the standard deviation of the vector
 double CalcStdDeviation(std::vector<double> scores, int score_mean);
 
 /// Display an array to std::out
-template<typename T>
-void PrintArray(
-  const std::string header,
-  const T* data,
-  const int width,
-  const int height);
+template <typename T>
+void PrintArray(const std::string header, const T* data, const int width, const int height);
 
 /// Fill an array with random values
-template<typename T>
-int FillRandom(
-  T* arrayPtr,
-  const int width,
-  const int height,
-  const T rangeMin,
-  const T rangeMax,
-  unsigned int seed = 123);
+template <typename T>
+int FillRandom(T* arrayPtr, const int width, const int height, const T rangeMin, const T rangeMax,
+               unsigned int seed = 123);
 
 intptr_t AlignDown(intptr_t value, size_t alignment);
 void* AlignDown(void* value, size_t alignment);
@@ -113,17 +104,13 @@ uint64_t RoundToPowerOf2(uint64_t val);
 bool IsPowerOf2(uint64_t val);
 
 // Count set bits.
-static __forceinline uint32_t popcount(uint32_t value) {
-  return __builtin_popcount(value);
-}
+static __forceinline uint32_t popcount(uint32_t value) { return __builtin_popcount(value); }
 
-template <typename lambda>
-class ScopeGuard {
+template <typename lambda> class ScopeGuard {
  public:
-  explicit __forceinline ScopeGuard(const lambda& release)
-      : release_(release), dismiss_(false) {}
+  explicit __forceinline ScopeGuard(const lambda& release) : release_(release), dismiss_(false) {}
 
-  ScopeGuard(const ScopeGuard& rhs) {*this = rhs; }
+  ScopeGuard(const ScopeGuard& rhs) { *this = rhs; }
 
   __forceinline ~ScopeGuard() {
     if (!dismiss_) release_();
@@ -140,20 +127,18 @@ class ScopeGuard {
   bool dismiss_;
 };
 
-template <typename lambda>
-static __forceinline ScopeGuard<lambda> MakeScopeGuard(lambda rel) {
+template <typename lambda> static __forceinline ScopeGuard<lambda> MakeScopeGuard(lambda rel) {
   return ScopeGuard<lambda>(rel);
 }
 
-#define MAKE_SCOPE_GUARD_HELPER(lname, sname, ...) \
-  auto lname = __VA_ARGS__;                        \
+#define MAKE_SCOPE_GUARD_HELPER(lname, sname, ...)                                                 \
+  auto lname = __VA_ARGS__;                                                                        \
   rocrtst::ScopeGuard<decltype(lname)> sname(lname);
-#define MAKE_SCOPE_GUARD(...)                                   \
-  MAKE_SCOPE_GUARD_HELPER(PASTE(scopeGuardLambda, __COUNTER__), \
-                          PASTE(scopeGuard, __COUNTER__), __VA_ARGS__)
-#define MAKE_NAMED_SCOPE_GUARD(name, ...)                             \
-  MAKE_SCOPE_GUARD_HELPER(PASTE(scopeGuardLambda, __COUNTER__), name, \
+#define MAKE_SCOPE_GUARD(...)                                                                      \
+  MAKE_SCOPE_GUARD_HELPER(PASTE(scopeGuardLambda, __COUNTER__), PASTE(scopeGuard, __COUNTER__),    \
                           __VA_ARGS__)
+#define MAKE_NAMED_SCOPE_GUARD(name, ...)                                                          \
+  MAKE_SCOPE_GUARD_HELPER(PASTE(scopeGuardLambda, __COUNTER__), name, __VA_ARGS__)
 
 #define ASSERT_SUCCESS(_val) ASSERT_EQ(HSA_STATUS_SUCCESS, (_val))
 

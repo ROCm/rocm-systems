@@ -101,7 +101,7 @@ class IPCSignal : private SharedMemorySignal, public BusyWaitSignal {
  private:
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;
-      return rtti_id_;
+    return rtti_id_;
   }
   static KernelMutex lock_;
 

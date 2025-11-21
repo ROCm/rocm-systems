@@ -233,8 +233,7 @@ TEST(contexts, callback_tracing)
     constexpr auto none = ROCPROFILER_CALLBACK_TRACING_NONE;
     constexpr auto last = ROCPROFILER_CALLBACK_TRACING_LAST;
 
-    auto get_tracer = []() -> auto*
-    {
+    auto get_tracer = []() -> auto* {
         static auto ctx = context::context{};
         ctx.callback_tracer.reset();
         ctx.callback_tracer = std::make_unique<context::callback_tracing_service>();
@@ -339,8 +338,7 @@ TEST(contexts, buffer_tracing)
     constexpr auto none = ROCPROFILER_BUFFER_TRACING_NONE;
     constexpr auto last = ROCPROFILER_BUFFER_TRACING_LAST;
 
-    auto get_tracer = []() -> auto*
-    {
+    auto get_tracer = []() -> auto* {
         static auto ctx = context::context{};
         ctx.buffered_tracer.reset();
         ctx.buffered_tracer = std::make_unique<context::buffer_tracing_service>();

@@ -37,7 +37,7 @@
 
 LIBELF_VCSID("$Id: libelf_ar.c 1341 2011-01-01 04:28:29Z jkoshy $");
 
-#define	LIBELF_NALLOC_SIZE	16
+#define LIBELF_NALLOC_SIZE 16
 
 /*
  * `ar' archive handling.
@@ -105,159 +105,151 @@ LIBELF_VCSID("$Id: libelf_ar.c 1341 2011-01-01 04:28:29Z jkoshy $");
  * Retrieve an archive header descriptor.
  */
 
-Elf_Arhdr *
-_libelf_ar_gethdr(Elf *e)
-{
-	Elf *parent;
-	char *namelen;
-	Elf_Arhdr *eh;
-	size_t n, nlen;
-	struct ar_hdr *arh;
+Elf_Arhdr *_libelf_ar_gethdr(Elf *e) {
+  Elf *parent;
+  char *namelen;
+  Elf_Arhdr *eh;
+  size_t n, nlen;
+  struct ar_hdr *arh;
 
-	if ((parent = e->e_parent) == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if ((parent = e->e_parent) == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	assert((e->e_flags & LIBELF_F_AR_HEADER) == 0);
+  assert((e->e_flags & LIBELF_F_AR_HEADER) == 0);
 
-	arh = (struct ar_hdr *) (uintptr_t) e->e_hdr.e_rawhdr;
+  arh = (struct ar_hdr *)(uintptr_t)e->e_hdr.e_rawhdr;
 
-	assert((uintptr_t) arh >= (uintptr_t) parent->e_rawfile + SARMAG);
-	assert((uintptr_t) arh <= (uintptr_t) parent->e_rawfile +
-	    parent->e_rawsize - sizeof(struct ar_hdr));
+  assert((uintptr_t)arh >= (uintptr_t)parent->e_rawfile + SARMAG);
+  assert((uintptr_t)arh <= (uintptr_t)parent->e_rawfile + parent->e_rawsize -
+                               sizeof(struct ar_hdr));
 
-	if ((eh = e->e_mem.alloc(sizeof(Elf_Arhdr))) == NULL) {
-		LIBELF_SET_ERROR(RESOURCE, 0);
-		return (NULL);
-	}
+  if ((eh = e->e_mem.alloc(sizeof(Elf_Arhdr))) == NULL) {
+    LIBELF_SET_ERROR(RESOURCE, 0);
+    return (NULL);
+  }
 
-	e->e_hdr.e_arhdr = eh;
-	e->e_flags |= LIBELF_F_AR_HEADER;
+  e->e_hdr.e_arhdr = eh;
+  e->e_flags |= LIBELF_F_AR_HEADER;
 
-	eh->ar_name = eh->ar_rawname = NULL;
+  eh->ar_name = eh->ar_rawname = NULL;
 
-	if ((eh->ar_name = _libelf_ar_get_translated_name(arh, parent)) ==
-	    NULL)
-		goto error;
+  if ((eh->ar_name = _libelf_ar_get_translated_name(arh, parent)) == NULL)
+    goto error;
 
-	if (_libelf_ar_get_number(arh->ar_uid, sizeof(arh->ar_uid), 10,
-	    &n) == 0)
-		goto error;
-	eh->ar_uid = (uid_t) n;
+  if (_libelf_ar_get_number(arh->ar_uid, sizeof(arh->ar_uid), 10, &n) == 0)
+    goto error;
+  eh->ar_uid = (uid_t)n;
 
-	if (_libelf_ar_get_number(arh->ar_gid, sizeof(arh->ar_gid), 10,
-	    &n) == 0)
-		goto error;
-	eh->ar_gid = (gid_t) n;
+  if (_libelf_ar_get_number(arh->ar_gid, sizeof(arh->ar_gid), 10, &n) == 0)
+    goto error;
+  eh->ar_gid = (gid_t)n;
 
-	if (_libelf_ar_get_number(arh->ar_mode, sizeof(arh->ar_mode), 8,
-	    &n) == 0)
-		goto error;
-	eh->ar_mode = (mode_t) n;
+  if (_libelf_ar_get_number(arh->ar_mode, sizeof(arh->ar_mode), 8, &n) == 0)
+    goto error;
+  eh->ar_mode = (mode_t)n;
 
-	if (_libelf_ar_get_number(arh->ar_size, sizeof(arh->ar_size), 10,
-	    &n) == 0)
-		goto error;
+  if (_libelf_ar_get_number(arh->ar_size, sizeof(arh->ar_size), 10, &n) == 0)
+    goto error;
 
-	/*
-	 * Get the true size of the member if extended naming is being used.
-	 */
-	if (IS_EXTENDED_BSD_NAME(arh->ar_name)) {
-		namelen = arh->ar_name +
-		    LIBELF_AR_BSD_EXTENDED_NAME_PREFIX_SIZE;
-		if (_libelf_ar_get_number(namelen, sizeof(arh->ar_name) -
-		    LIBELF_AR_BSD_EXTENDED_NAME_PREFIX_SIZE, 10, &nlen) == 0)
-			goto error;
-		n -= nlen;
-	}
+  /*
+   * Get the true size of the member if extended naming is being used.
+   */
+  if (IS_EXTENDED_BSD_NAME(arh->ar_name)) {
+    namelen = arh->ar_name + LIBELF_AR_BSD_EXTENDED_NAME_PREFIX_SIZE;
+    if (_libelf_ar_get_number(namelen,
+                              sizeof(arh->ar_name) -
+                                  LIBELF_AR_BSD_EXTENDED_NAME_PREFIX_SIZE,
+                              10, &nlen) == 0)
+      goto error;
+    n -= nlen;
+  }
 
-	eh->ar_size = n;
+  eh->ar_size = n;
 
-	if ((eh->ar_rawname = _libelf_ar_get_raw_name(arh)) == NULL)
-		goto error;
+  if ((eh->ar_rawname = _libelf_ar_get_raw_name(arh)) == NULL)
+    goto error;
 
-	eh->ar_flags = 0;
+  eh->ar_flags = 0;
 
-	return (eh);
+  return (eh);
 
- error:
-	if (eh) {
-		if (eh->ar_name)
-			e->e_mem.dealloc(eh->ar_name);
-		if (eh->ar_rawname)
-			e->e_mem.dealloc(eh->ar_rawname);
-		e->e_mem.dealloc(eh);
-	}
+error:
+  if (eh) {
+    if (eh->ar_name)
+      e->e_mem.dealloc(eh->ar_name);
+    if (eh->ar_rawname)
+      e->e_mem.dealloc(eh->ar_rawname);
+    e->e_mem.dealloc(eh);
+  }
 
-	e->e_flags &= ~LIBELF_F_AR_HEADER;
-	e->e_hdr.e_rawhdr = (char *) arh;
+  e->e_flags &= ~LIBELF_F_AR_HEADER;
+  e->e_hdr.e_rawhdr = (char *)arh;
 
-	return (NULL);
+  return (NULL);
 }
 
-Elf *
-_libelf_ar_open_member(int fd, Elf_Cmd c, Elf *elf, Elf_Mem* mem)
-{
-	Elf *e;
-	char *member, *namelen;
-	size_t nsz, sz;
-	off_t next;
-	struct ar_hdr *arh;
+Elf *_libelf_ar_open_member(int fd, Elf_Cmd c, Elf *elf, Elf_Mem *mem) {
+  Elf *e;
+  char *member, *namelen;
+  size_t nsz, sz;
+  off_t next;
+  struct ar_hdr *arh;
 
-	assert(elf->e_kind == ELF_K_AR);
+  assert(elf->e_kind == ELF_K_AR);
 
-	next = elf->e_u.e_ar.e_next;
+  next = elf->e_u.e_ar.e_next;
 
-	/*
-	 * `next' is only set to zero by elf_next() when the last
-	 * member of an archive is processed.
-	 */
-	if (next == (off_t) 0)
-		return (NULL);
+  /*
+   * `next' is only set to zero by elf_next() when the last
+   * member of an archive is processed.
+   */
+  if (next == (off_t)0)
+    return (NULL);
 
-	assert((next & 1) == 0);
+  assert((next & 1) == 0);
 
-	arh = (struct ar_hdr *) (elf->e_rawfile + next);
+  arh = (struct ar_hdr *)(elf->e_rawfile + next);
 
-	/*
-	 * Retrieve the size of the member.
-	 */
-	if (_libelf_ar_get_number(arh->ar_size, sizeof(arh->ar_size), 10,
-	    &sz) == 0) {
-		LIBELF_SET_ERROR(ARCHIVE, 0);
-		return (NULL);
-	}
+  /*
+   * Retrieve the size of the member.
+   */
+  if (_libelf_ar_get_number(arh->ar_size, sizeof(arh->ar_size), 10, &sz) == 0) {
+    LIBELF_SET_ERROR(ARCHIVE, 0);
+    return (NULL);
+  }
 
-	/*
-	 * Adjust the size field for members in BSD archives using
-	 * extended naming.
-	 */
-	if (IS_EXTENDED_BSD_NAME(arh->ar_name)) {
-		namelen = arh->ar_name +
-		    LIBELF_AR_BSD_EXTENDED_NAME_PREFIX_SIZE;
-		if (_libelf_ar_get_number(namelen, sizeof(arh->ar_name) -
-		    LIBELF_AR_BSD_EXTENDED_NAME_PREFIX_SIZE, 10, &nsz) == 0) {
-			LIBELF_SET_ERROR(ARCHIVE, 0);
-			return (NULL);
-		}
+  /*
+   * Adjust the size field for members in BSD archives using
+   * extended naming.
+   */
+  if (IS_EXTENDED_BSD_NAME(arh->ar_name)) {
+    namelen = arh->ar_name + LIBELF_AR_BSD_EXTENDED_NAME_PREFIX_SIZE;
+    if (_libelf_ar_get_number(namelen,
+                              sizeof(arh->ar_name) -
+                                  LIBELF_AR_BSD_EXTENDED_NAME_PREFIX_SIZE,
+                              10, &nsz) == 0) {
+      LIBELF_SET_ERROR(ARCHIVE, 0);
+      return (NULL);
+    }
 
-		member = (char *) (arh + 1) + nsz;
-		sz -= nsz;
-	} else
-		member = (char *) (arh + 1);
+    member = (char *)(arh + 1) + nsz;
+    sz -= nsz;
+  } else
+    member = (char *)(arh + 1);
 
-	if ((e = elf_memory((char *) member, sz, mem)) == NULL)
-		return (NULL);
+  if ((e = elf_memory((char *)member, sz, mem)) == NULL)
+    return (NULL);
 
-	e->e_fd = fd;
-	e->e_cmd = c;
-	e->e_hdr.e_rawhdr = (char *) arh;
+  e->e_fd = fd;
+  e->e_cmd = c;
+  e->e_hdr.e_rawhdr = (char *)arh;
 
-	elf->e_u.e_ar.e_nchildren++;
-	e->e_parent = elf;
+  elf->e_u.e_ar.e_nchildren++;
+  e->e_parent = elf;
 
-	return (e);
+  return (e);
 }
 
 /*
@@ -276,96 +268,95 @@ _libelf_ar_open_member(int fd, Elf_Cmd c, Elf *elf, Elf_Mem* mem)
  * memcpy() since the source pointer may be misaligned with respect to
  * the natural alignment for a C 'long'.
  */
-#define	GET_LONG(P, V)do {				\
-		memcpy(&(V), (P), sizeof(long));	\
-		(P) += sizeof(long);			\
-	} while (0)
+#define GET_LONG(P, V)                                                         \
+  do {                                                                         \
+    memcpy(&(V), (P), sizeof(long));                                           \
+    (P) += sizeof(long);                                                       \
+  } while (0)
 
-Elf_Arsym *
-_libelf_ar_process_bsd_symtab(Elf *e, size_t *count)
-{
-	Elf_Arsym *symtab, *sym;
-	unsigned char *end, *p, *p0, *s, *s0;
-	const unsigned int entrysize = 2 * sizeof(long);
-	long arraysize, fileoffset, n, nentries, stroffset, strtabsize;
+Elf_Arsym *_libelf_ar_process_bsd_symtab(Elf *e, size_t *count) {
+  Elf_Arsym *symtab, *sym;
+  unsigned char *end, *p, *p0, *s, *s0;
+  const unsigned int entrysize = 2 * sizeof(long);
+  long arraysize, fileoffset, n, nentries, stroffset, strtabsize;
 
-	assert(e != NULL);
-	assert(count != NULL);
-	assert(e->e_u.e_ar.e_symtab == NULL);
+  assert(e != NULL);
+  assert(count != NULL);
+  assert(e->e_u.e_ar.e_symtab == NULL);
 
-	symtab = NULL;
+  symtab = NULL;
 
-	/*
-	 * The BSD symbol table always contains the count fields even
-	 * if there are no entries in it.
-	 */
-	if (e->e_u.e_ar.e_rawsymtabsz < 2 * sizeof(long))
-		goto symtaberror;
+  /*
+   * The BSD symbol table always contains the count fields even
+   * if there are no entries in it.
+   */
+  if (e->e_u.e_ar.e_rawsymtabsz < 2 * sizeof(long))
+    goto symtaberror;
 
-	p = p0 = (unsigned char *) e->e_u.e_ar.e_rawsymtab;
-	end = p0 + e->e_u.e_ar.e_rawsymtabsz;
+  p = p0 = (unsigned char *)e->e_u.e_ar.e_rawsymtab;
+  end = p0 + e->e_u.e_ar.e_rawsymtabsz;
 
-	/*
-	 * Retrieve the size of the array of ranlib descriptors and
-	 * check it for validity.
-	 */
-	GET_LONG(p, arraysize);
+  /*
+   * Retrieve the size of the array of ranlib descriptors and
+   * check it for validity.
+   */
+  GET_LONG(p, arraysize);
 
-	if (p0 + arraysize >= end || (arraysize % entrysize != 0))
-		goto symtaberror;
+  if (p0 + arraysize >= end || (arraysize % entrysize != 0))
+    goto symtaberror;
 
-	/*
-	 * Check the value of the string table size.
-	 */
-	s = p + arraysize;
-	GET_LONG(s, strtabsize);
+  /*
+   * Check the value of the string table size.
+   */
+  s = p + arraysize;
+  GET_LONG(s, strtabsize);
 
-	s0 = s;			/* Start of string table. */
-	if (s0 + strtabsize > end)
-		goto symtaberror;
+  s0 = s; /* Start of string table. */
+  if (s0 + strtabsize > end)
+    goto symtaberror;
 
-	nentries = arraysize / entrysize;
+  nentries = arraysize / entrysize;
 
-	/*
-	 * Allocate space for the returned Elf_Arsym array.
-	 */
-	if ((symtab = e->e_mem.alloc(sizeof(Elf_Arsym) * (nentries + 1))) == NULL) {
-		LIBELF_SET_ERROR(RESOURCE, 0);
-		return (NULL);
-	}
+  /*
+   * Allocate space for the returned Elf_Arsym array.
+   */
+  if ((symtab = e->e_mem.alloc(sizeof(Elf_Arsym) * (nentries + 1))) == NULL) {
+    LIBELF_SET_ERROR(RESOURCE, 0);
+    return (NULL);
+  }
 
-	/* Read in symbol table entries. */
-	for (n = 0, sym = symtab; n < nentries; n++, sym++) {
-		GET_LONG(p, stroffset);
-		GET_LONG(p, fileoffset);
+  /* Read in symbol table entries. */
+  for (n = 0, sym = symtab; n < nentries; n++, sym++) {
+    GET_LONG(p, stroffset);
+    GET_LONG(p, fileoffset);
 
-		s = s0 + stroffset;
+    s = s0 + stroffset;
 
-		if (s >= end)
-			goto symtaberror;
+    if (s >= end)
+      goto symtaberror;
 
-		sym->as_off = fileoffset;
-		sym->as_hash = elf_hash((char *) s);
-		sym->as_name = (char *) s;
-	}
+    sym->as_off = fileoffset;
+    sym->as_hash = elf_hash((char *)s);
+    sym->as_name = (char *)s;
+  }
 
-	/* Fill up the sentinel entry. */
-	sym->as_name = NULL;
-	sym->as_hash = ~0UL;
-	sym->as_off = (off_t) 0;
+  /* Fill up the sentinel entry. */
+  sym->as_name = NULL;
+  sym->as_hash = ~0UL;
+  sym->as_off = (off_t)0;
 
-	/* Remember the processed symbol table. */
-	e->e_u.e_ar.e_symtab = symtab;
+  /* Remember the processed symbol table. */
+  e->e_u.e_ar.e_symtab = symtab;
 
-	*count = e->e_u.e_ar.e_symtabsz = nentries + 1;
+  *count = e->e_u.e_ar.e_symtabsz = nentries + 1;
 
-	return (symtab);
+  return (symtab);
 
 symtaberror:
-	if (symtab)
-		e->e_mem.dealloc(symtab);
-	LIBELF_SET_ERROR(ARCHIVE, 0);
-	return (NULL);
+  if (symtab)
+    e->e_mem.dealloc(symtab);
+  LIBELF_SET_ERROR(ARCHIVE, 0);
+  return (NULL);
 }
 
 /*
@@ -377,82 +368,84 @@ symtaberror:
  * - Following this, there are 'n' null-terminated strings.
  */
 
-#define	GET_WORD(P, V) do {			\
-		(V) = 0;			\
-		(V) = (P)[0]; (V) <<= 8;	\
-		(V) += (P)[1]; (V) <<= 8;	\
-		(V) += (P)[2]; (V) <<= 8;	\
-		(V) += (P)[3];			\
-	} while (0)
+#define GET_WORD(P, V)                                                         \
+  do {                                                                         \
+    (V) = 0;                                                                   \
+    (V) = (P)[0];                                                              \
+    (V) <<= 8;                                                                 \
+    (V) += (P)[1];                                                             \
+    (V) <<= 8;                                                                 \
+    (V) += (P)[2];                                                             \
+    (V) <<= 8;                                                                 \
+    (V) += (P)[3];                                                             \
+  } while (0)
 
-#define	INTSZ	4
+#define INTSZ 4
 
-Elf_Arsym *
-_libelf_ar_process_svr4_symtab(Elf *e, size_t *count)
-{
-	size_t n, nentries, off;
-	Elf_Arsym *symtab, *sym;
-	char *p, *s, *end;
+Elf_Arsym *_libelf_ar_process_svr4_symtab(Elf *e, size_t *count) {
+  size_t n, nentries, off;
+  Elf_Arsym *symtab, *sym;
+  char *p, *s, *end;
 
-	assert(e != NULL);
-	assert(count != NULL);
-	assert(e->e_u.e_ar.e_symtab == NULL);
+  assert(e != NULL);
+  assert(count != NULL);
+  assert(e->e_u.e_ar.e_symtab == NULL);
 
-	symtab = NULL;
+  symtab = NULL;
 
-	if (e->e_u.e_ar.e_rawsymtabsz < INTSZ)
-		goto symtaberror;
+  if (e->e_u.e_ar.e_rawsymtabsz < INTSZ)
+    goto symtaberror;
 
-	p = e->e_u.e_ar.e_rawsymtab;
-	end = p + e->e_u.e_ar.e_rawsymtabsz;
+  p = e->e_u.e_ar.e_rawsymtab;
+  end = p + e->e_u.e_ar.e_rawsymtabsz;
 
-	GET_WORD(p, nentries);
-	p += INTSZ;
+  GET_WORD(p, nentries);
+  p += INTSZ;
 
-	if (nentries == 0 || p + nentries * INTSZ >= end)
-		goto symtaberror;
+  if (nentries == 0 || p + nentries * INTSZ >= end)
+    goto symtaberror;
 
-	/* Allocate space for a nentries + a sentinel. */
-	if ((symtab = e->e_mem.alloc(sizeof(Elf_Arsym) * (nentries+1))) == NULL) {
-		LIBELF_SET_ERROR(RESOURCE, 0);
-		return (NULL);
-	}
+  /* Allocate space for a nentries + a sentinel. */
+  if ((symtab = e->e_mem.alloc(sizeof(Elf_Arsym) * (nentries + 1))) == NULL) {
+    LIBELF_SET_ERROR(RESOURCE, 0);
+    return (NULL);
+  }
 
-	s = p + (nentries * INTSZ); /* start of the string table. */
+  s = p + (nentries * INTSZ); /* start of the string table. */
 
-	for (n = nentries, sym = symtab; n > 0; n--) {
+  for (n = nentries, sym = symtab; n > 0; n--) {
 
-		if (s >= end)
-			goto symtaberror;
+    if (s >= end)
+      goto symtaberror;
 
-		off = 0;
+    off = 0;
 
-		GET_WORD(p, off);
+    GET_WORD(p, off);
 
-		sym->as_off = off;
-		sym->as_hash = elf_hash((char *) s);
-		sym->as_name = (char *) s;
+    sym->as_off = off;
+    sym->as_hash = elf_hash((char *)s);
+    sym->as_name = (char *)s;
 
-		p += INTSZ;
-		sym++;
+    p += INTSZ;
+    sym++;
 
-		for (; s < end && *s++ != '\0';) /* skip to next string */
-			;
-	}
+    for (; s < end && *s++ != '\0';) /* skip to next string */
+      ;
+  }
 
-	/* Fill up the sentinel entry. */
-	sym->as_name = NULL;
-	sym->as_hash = ~0UL;
-	sym->as_off = (off_t) 0;
+  /* Fill up the sentinel entry. */
+  sym->as_name = NULL;
+  sym->as_hash = ~0UL;
+  sym->as_off = (off_t)0;
 
-	*count = e->e_u.e_ar.e_symtabsz = nentries + 1;
-	e->e_u.e_ar.e_symtab = symtab;
+  *count = e->e_u.e_ar.e_symtabsz = nentries + 1;
+  e->e_u.e_ar.e_symtab = symtab;
 
-	return (symtab);
+  return (symtab);
 
 symtaberror:
-	if (symtab)
-		e->e_mem.dealloc(symtab);
-	LIBELF_SET_ERROR(ARCHIVE, 0);
-	return (NULL);
+  if (symtab)
+    e->e_mem.dealloc(symtab);
+  LIBELF_SET_ERROR(ARCHIVE, 0);
+  return (NULL);
 }

@@ -116,35 +116,31 @@ bool Profiler::HasActivePass() {
   return true;
 }
 
-void Profiler::AddPendingSignals(
-    uint32_t writer_id, uint64_t kernel_object, const hsa_signal_t& original_completion_signal,
-    const hsa_signal_t& new_completion_signal, rocprofiler_session_id_t session_id,
-    rocprofiler_buffer_id_t buffer_id,
-    uint64_t session_data_count, std::unique_ptr<Packet::AQLPacketProfile>&& profile,
-    rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id, uint64_t queue_index,
-    uint64_t correlation_id)
-{
+void Profiler::AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
+                                 const hsa_signal_t& original_completion_signal,
+                                 const hsa_signal_t& new_completion_signal,
+                                 rocprofiler_session_id_t session_id,
+                                 rocprofiler_buffer_id_t buffer_id, uint64_t session_data_count,
+                                 std::unique_ptr<Packet::AQLPacketProfile>&& profile,
+                                 rocprofiler_kernel_properties_t kernel_properties,
+                                 uint32_t thread_id, uint64_t queue_index,
+                                 uint64_t correlation_id) {
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
 
   if (sessions_pending_signals_.find(writer_id) == sessions_pending_signals_.end())
     sessions_pending_signals_.emplace(writer_id, std::vector<pending_signal_ptr_t>{});
 
   sessions_pending_signals_.at(writer_id).emplace_back(
-    new pending_signal_t{
-      kernel_object, original_completion_signal, new_completion_signal,
-      session_id, buffer_id, session_data_count, std::move(profile),
-      kernel_properties, thread_id, queue_index, correlation_id
-    }
-  );
+      new pending_signal_t{kernel_object, original_completion_signal, new_completion_signal,
+                           session_id, buffer_id, session_data_count, std::move(profile),
+                           kernel_properties, thread_id, queue_index, correlation_id});
 }
 
-std::vector<pending_signal_ptr_t> Profiler::MovePendingSignals(uint32_t writer_id)
-{
+std::vector<pending_signal_ptr_t> Profiler::MovePendingSignals(uint32_t writer_id) {
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
 
   auto it = sessions_pending_signals_.find(writer_id);
-  if (it == sessions_pending_signals_.end())
-    return {};
+  if (it == sessions_pending_signals_.end()) return {};
 
   auto move_pending = std::move(it->second);
   sessions_pending_signals_.erase(writer_id);
@@ -154,16 +150,13 @@ std::vector<pending_signal_ptr_t> Profiler::MovePendingSignals(uint32_t writer_i
   return move_pending;
 }
 
-void Profiler::WaitForPendingAndDestroy()
-{
+void Profiler::WaitForPendingAndDestroy() {
   std::unique_lock<std::mutex> lk(sessions_pending_signals_lock_);
   bIsSessionDestroying.store(true);
-  if (sessions_pending_signals_.size() == 0)
-    return;
+  if (sessions_pending_signals_.size() == 0) return;
 
-  has_session_pending_cv.wait_for(lk, std::chrono::seconds(2), [this] () {
-    return this->sessions_pending_signals_.size() == 0;
-  });
+  has_session_pending_cv.wait_for(lk, std::chrono::seconds(2),
+                                  [this]() { return this->sessions_pending_signals_.size() == 0; });
 }
 
 }  // namespace profiler

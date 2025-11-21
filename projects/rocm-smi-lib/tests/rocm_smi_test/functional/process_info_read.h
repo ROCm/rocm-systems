@@ -49,7 +49,7 @@
 
 class TestProcInfoRead : public TestBase {
  public:
-    TestProcInfoRead();
+  TestProcInfoRead();
 
   // @Brief: Destructor for test case of TestProcInfoRead
   virtual ~TestProcInfoRead();

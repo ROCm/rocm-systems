@@ -59,17 +59,18 @@ static const int N = 8;
 static const int M = 32;
 static const int INI_VAL = 0;
 static const int CMP_VAL = 1;
-hsa_signal_t *signals;
+hsa_signal_t* signals;
 
-#define ASSERT_MSG(C, err) { \
-  if (C == 1) { \
-    std::cout << err << std::endl; \
-  } \
-}
+#define ASSERT_MSG(C, err)                                                                         \
+  {                                                                                                \
+    if (C == 1) {                                                                                  \
+      std::cout << err << std::endl;                                                               \
+    }                                                                                              \
+  }
 
-static void TestSignalCreateFunction(void *data) {
+static void TestSignalCreateFunction(void* data) {
   hsa_status_t status;
-  int* offset = reinterpret_cast<int *>(data);
+  int* offset = reinterpret_cast<int*>(data);
   int i;
   for (i = 0; i < M; ++i) {
     status = hsa_signal_create(INI_VAL, 0, NULL, &signals[*offset + i]);
@@ -78,7 +79,7 @@ static void TestSignalCreateFunction(void *data) {
   return;
 }
 
-static void signals_wait_host_func(void *data) {
+static void signals_wait_host_func(void* data) {
   int i;
   for (i = 0; i < M * N; ++i) {
     hsa_signal_wait_scacquire(signals[i], HSA_SIGNAL_CONDITION_EQ, CMP_VAL, UINT64_MAX,
@@ -87,7 +88,7 @@ static void signals_wait_host_func(void *data) {
   return;
 }
 
-static void signals_wait_component_func(void *data) {
+static void signals_wait_component_func(void* data) {
   int i;
   for (i = 0; i < M * N; ++i) {
     // Launch a kernel with signal_wait_func
@@ -99,7 +100,7 @@ static void signals_wait_component_func(void *data) {
 
 static void TestSignalDestroyFunction(void* data) {
   hsa_status_t status;
-  int *offset = reinterpret_cast<int*>(data);
+  int* offset = reinterpret_cast<int*>(data);
   int i;
   for (i = 0; i < M; i++) {
     status = hsa_signal_destroy(signals[*offset + i]);
@@ -107,22 +108,24 @@ static void TestSignalDestroyFunction(void* data) {
   }
 }
 
-static void signal_wait_host_func(void *data) {
-  hsa_signal_t *signal_ptr = reinterpret_cast<hsa_signal_t*>(data);
-  hsa_signal_wait_scacquire(*signal_ptr, HSA_SIGNAL_CONDITION_EQ, CMP_VAL, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+static void signal_wait_host_func(void* data) {
+  hsa_signal_t* signal_ptr = reinterpret_cast<hsa_signal_t*>(data);
+  hsa_signal_wait_scacquire(*signal_ptr, HSA_SIGNAL_CONDITION_EQ, CMP_VAL, UINT64_MAX,
+                            HSA_WAIT_STATE_BLOCKED);
   return;
 }
 
-static void signal_wait_component_func(void *data) {
-  hsa_signal_t *signal_ptr = reinterpret_cast<hsa_signal_t*>(data);
-  hsa_signal_wait_scacquire(*signal_ptr, HSA_SIGNAL_CONDITION_EQ, CMP_VAL, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+static void signal_wait_component_func(void* data) {
+  hsa_signal_t* signal_ptr = reinterpret_cast<hsa_signal_t*>(data);
+  hsa_signal_wait_scacquire(*signal_ptr, HSA_SIGNAL_CONDITION_EQ, CMP_VAL, UINT64_MAX,
+                            HSA_WAIT_STATE_BLOCKED);
   return;
 }
 SignalConcurrentTest::SignalConcurrentTest(bool destroy, bool max_consumer, bool cpu, bool create)
     : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
-                        // This is a default value which can be overridden
-                        // on the command line.
+                          // This is a default value which can be overridden
+                          // on the command line.
   if (destroy) {
     set_title("RocR Signal Destroy Concurrent Test");
     set_description("This test destroy signals concurrently");
@@ -138,8 +141,7 @@ SignalConcurrentTest::SignalConcurrentTest(bool destroy, bool max_consumer, bool
   }
 }
 
-SignalConcurrentTest::~SignalConcurrentTest(void) {
-}
+SignalConcurrentTest::~SignalConcurrentTest(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -165,9 +167,7 @@ void SignalConcurrentTest::Run(void) {
   TestBase::Run();
 }
 
-void SignalConcurrentTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void SignalConcurrentTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void SignalConcurrentTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -198,14 +198,14 @@ void SignalConcurrentTest::TestSignalCreateConcurrent(void) {
 
   EXPECT_NE(offset, nullptr);
   if (!offset) {
-	  free(signals);
-	  return;
+    free(signals);
+    return;
   }
 
   for (i = 0; i < N; ++i) {
     offset[i] = i * M;
     rocrtst::TestGroupAdd(tg_sg_create, &TestSignalCreateFunction, offset + i, 1);
-    }
+  }
   rocrtst::TestGroupThreadCreate(tg_sg_create);
   rocrtst::TestGroupStart(tg_sg_create);
   rocrtst::TestGroupWait(tg_sg_create);
@@ -215,42 +215,42 @@ void SignalConcurrentTest::TestSignalCreateConcurrent(void) {
   std::vector<hsa_agent_t> gpus;
   status = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status);
-    struct rocrtst::test_group *tg_sg_wait = rocrtst::TestGroupCreate(gpus.size());
-    for (i = 0; i < gpus.size(); ++i) {
-      hsa_device_type_t device_type;
-      status = hsa_agent_get_info(gpus[i], HSA_AGENT_INFO_DEVICE, &device_type);
-      ASSERT_EQ(HSA_STATUS_SUCCESS, status);
-      if (device_type == HSA_DEVICE_TYPE_CPU) {
-        rocrtst::TestGroupAdd(tg_sg_wait, &signals_wait_host_func, &(gpus[i]), 1);
-      } else if (device_type == HSA_DEVICE_TYPE_GPU) {
-        rocrtst::TestGroupAdd(tg_sg_wait, &signals_wait_component_func, &(gpus[i]), 1);
-      } else if (device_type == HSA_DEVICE_TYPE_DSP) {
-        ASSERT_MSG(1, "ERROR: DSP_AGENT NOT SUPPORTED\n");
-      } else {
-        ASSERT_MSG(1, "ERROR: UNKNOWN DEVICE\n");
-      }
+  struct rocrtst::test_group* tg_sg_wait = rocrtst::TestGroupCreate(gpus.size());
+  for (i = 0; i < gpus.size(); ++i) {
+    hsa_device_type_t device_type;
+    status = hsa_agent_get_info(gpus[i], HSA_AGENT_INFO_DEVICE, &device_type);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, status);
+    if (device_type == HSA_DEVICE_TYPE_CPU) {
+      rocrtst::TestGroupAdd(tg_sg_wait, &signals_wait_host_func, &(gpus[i]), 1);
+    } else if (device_type == HSA_DEVICE_TYPE_GPU) {
+      rocrtst::TestGroupAdd(tg_sg_wait, &signals_wait_component_func, &(gpus[i]), 1);
+    } else if (device_type == HSA_DEVICE_TYPE_DSP) {
+      ASSERT_MSG(1, "ERROR: DSP_AGENT NOT SUPPORTED\n");
+    } else {
+      ASSERT_MSG(1, "ERROR: UNKNOWN DEVICE\n");
     }
+  }
 
-    rocrtst::TestGroupThreadCreate(tg_sg_wait);
-    rocrtst::TestGroupStart(tg_sg_wait);
+  rocrtst::TestGroupThreadCreate(tg_sg_wait);
+  rocrtst::TestGroupStart(tg_sg_wait);
 
-    for (i = 0; i < N * M; ++i) {
-      hsa_signal_store_relaxed(signals[i], CMP_VAL);
-    }
-    rocrtst::TestGroupWait(tg_sg_wait);
-    rocrtst::TestGroupExit(tg_sg_wait);
-    rocrtst::TestGroupDestroy(tg_sg_wait);
+  for (i = 0; i < N * M; ++i) {
+    hsa_signal_store_relaxed(signals[i], CMP_VAL);
+  }
+  rocrtst::TestGroupWait(tg_sg_wait);
+  rocrtst::TestGroupExit(tg_sg_wait);
+  rocrtst::TestGroupDestroy(tg_sg_wait);
 
-    for (i = 0; i < N * M; ++i) {
-      status = hsa_signal_destroy(signals[i]);
-      ASSERT_EQ(HSA_STATUS_SUCCESS, status);
-    }
+  for (i = 0; i < N * M; ++i) {
+    status = hsa_signal_destroy(signals[i]);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, status);
+  }
 
-    free(signals);
-    free(offset);
+  free(signals);
+  free(offset);
 }
 
- /*
+/*
  * Test Name: TestSignalDestroyConcurrent
  * Scope: Conformance
  *
@@ -275,16 +275,15 @@ void SignalConcurrentTest::TestSignalCreateConcurrent(void) {
 void SignalConcurrentTest::TestSignalDestroyConcurrent(void) {
   int i;
 
-  signals = reinterpret_cast<hsa_signal_t *>(malloc(sizeof(hsa_signal_t) * N * M));
+  signals = reinterpret_cast<hsa_signal_t*>(malloc(sizeof(hsa_signal_t) * N * M));
 
   ASSERT_NE(signals, nullptr);
 
-  struct rocrtst::test_group *tg_sg_destroy = rocrtst::TestGroupCreate(N);
-  int *offset = reinterpret_cast<int *>(malloc(sizeof(int) * N));
+  struct rocrtst::test_group* tg_sg_destroy = rocrtst::TestGroupCreate(N);
+  int* offset = reinterpret_cast<int*>(malloc(sizeof(int) * N));
 
   EXPECT_NE(offset, nullptr);
-  if (!offset)
-    return;
+  if (!offset) return;
 
   for (i = 0; i < N; ++i) {
     int j;
@@ -346,7 +345,7 @@ void SignalConcurrentTest::TestSignalCreateMaxConsumers(void) {
   status = hsa_signal_create(INI_VAL, 0, NULL, &signal);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status);
 
-  struct rocrtst::test_group *tg_sg_wait = rocrtst::TestGroupCreate(gpus.size());
+  struct rocrtst::test_group* tg_sg_wait = rocrtst::TestGroupCreate(gpus.size());
   for (i = 0; i < gpus.size(); ++i) {
     hsa_device_type_t device_type;
     hsa_agent_get_info(gpus[i], HSA_AGENT_INFO_DEVICE, &device_type);

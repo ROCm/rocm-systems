@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 #include "rocm_async.hpp"
 
@@ -11,10 +11,8 @@
 #include <sstream>
 #include <algorithm>
 
-static void printRecord(uint32_t size, double avg_time,
-                        double bandwidth, double min_time,
+static void printRecord(uint32_t size, double avg_time, double bandwidth, double min_time,
                         double peak_bandwidth) {
-
   std::stringstream size_str;
   size_str << size << " MB";
 
@@ -33,13 +31,12 @@ static void printRecord(uint32_t size, double avg_time,
   std::cout << std::endl;
 }
 
-static void printCopyBanner(uint32_t src_pool_id, uint32_t src_agent_type,
-                            uint32_t dst_pool_id, uint32_t dst_agent_type) {
-
+static void printCopyBanner(uint32_t src_pool_id, uint32_t src_agent_type, uint32_t dst_pool_id,
+                            uint32_t dst_agent_type) {
   std::stringstream src_type;
   std::stringstream dst_type;
-  (src_agent_type == 0) ? src_type <<  "Cpu" : src_type << "Gpu";
-  (dst_agent_type == 0) ? dst_type <<  "Cpu" : dst_type << "Gpu";
+  (src_agent_type == 0) ? src_type << "Cpu" : src_type << "Gpu";
+  (dst_agent_type == 0) ? dst_type << "Cpu" : dst_type << "Gpu";
 
   std::cout << std::endl;
   std::cout << "================";
@@ -74,13 +71,11 @@ static void printCopyBanner(uint32_t src_pool_id, uint32_t src_agent_type,
 }
 
 double RocmAsync::GetMinTime(std::vector<double>& vec) {
-
   std::sort(vec.begin(), vec.end());
   return vec.at(0);
 }
 
 double RocmAsync::GetMeanTime(std::vector<double>& vec) {
-
   std::sort(vec.begin(), vec.end());
   vec.erase(vec.begin());
   vec.erase(vec.begin(), vec.begin() + num_iteration_ * 0.1);
@@ -96,7 +91,6 @@ double RocmAsync::GetMeanTime(std::vector<double>& vec) {
 }
 
 void RocmAsync::Display() const {
-
   // Iterate through list of transactions and display its timing data
   uint32_t trans_size = trans_list_.size();
   if (trans_size == 0) {
@@ -116,24 +110,19 @@ void RocmAsync::Display() const {
 
   for (uint32_t idx = 0; idx < trans_size; idx++) {
     async_trans_t trans = trans_list_[idx];
-    if ((trans.req_type_ == REQ_COPY_BIDIR) ||
-        (trans.req_type_ == REQ_COPY_UNIDIR)) {
+    if ((trans.req_type_ == REQ_COPY_BIDIR) || (trans.req_type_ == REQ_COPY_UNIDIR)) {
       DisplayCopyTime(trans);
     }
-    if ((trans.req_type_ == REQ_READ) ||
-        (trans.req_type_ == REQ_WRITE)) {
+    if ((trans.req_type_ == REQ_READ) || (trans.req_type_ == REQ_WRITE)) {
       DisplayIOTime(trans);
     }
   }
   std::cout << std::endl;
 }
 
-void RocmAsync::DisplayIOTime(async_trans_t& trans) const {
-
-}
+void RocmAsync::DisplayIOTime(async_trans_t& trans) const {}
 
 void RocmAsync::DisplayCopyTime(async_trans_t& trans) const {
-  
   // Print Benchmark Header
   uint32_t src_idx = trans.copy.src_idx_;
   uint32_t dst_idx = trans.copy.dst_idx_;
@@ -142,17 +131,15 @@ void RocmAsync::DisplayCopyTime(async_trans_t& trans) const {
   uint32_t dst_dev_idx = pool_list_[dst_idx].agent_index_;
   hsa_device_type_t dst_dev_type = agent_list_[dst_dev_idx].device_type_;
   printCopyBanner(src_idx, src_dev_type, dst_idx, dst_dev_type);
-  
+
   uint32_t size_len = size_list_.size();
   for (uint32_t idx = 0; idx < size_len; idx++) {
-    printRecord(size_list_[idx], trans.avg_time_[idx],
-                trans.avg_bandwidth_[idx], trans.min_time_[idx],
-                trans.peak_bandwidth_[idx]);
+    printRecord(size_list_[idx], trans.avg_time_[idx], trans.avg_bandwidth_[idx],
+                trans.min_time_[idx], trans.peak_bandwidth_[idx]);
   }
 }
 
 void RocmAsync::DisplayCopyTimeMatrix() const {
-  
   double* avg_matrix = new double[agent_index_ * agent_index_]();
   double* peak_matrix = new double[agent_index_ * agent_index_]();
   uint32_t trans_size = trans_list_.size();
@@ -260,4 +247,3 @@ void RocmAsync::DisplayCopyTimeMatrix() const {
   std::cout << std::endl;
   */
 }
-

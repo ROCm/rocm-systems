@@ -108,7 +108,9 @@
 #endif
 
 #ifdef __cplusplus
-#    define ROCPD_EXTERN_C_INIT extern "C" {
+#    define ROCPD_EXTERN_C_INIT                                                                    \
+        extern "C"                                                                                 \
+        {
 #    define ROCPD_EXTERN_C_FINI }
 #else
 #    define ROCPD_EXTERN_C_INIT

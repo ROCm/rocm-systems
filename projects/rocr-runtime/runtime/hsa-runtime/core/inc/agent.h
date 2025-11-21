@@ -66,8 +66,7 @@ namespace core {
 class Driver;
 class Signal;
 
-typedef void (*HsaEventCallback)(hsa_status_t status, hsa_queue_t* source,
-                                 void* data);
+typedef void (*HsaEventCallback)(hsa_status_t status, hsa_queue_t* source, void* data);
 
 // Agent is intended to be an pure interface class and may be wrapped or
 // replaced by tools libraries. All funtions other than Convert, node_id,
@@ -82,8 +81,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   //
   // @retval hsa_agent_t
   static __forceinline hsa_agent_t Convert(Agent* agent) {
-    const hsa_agent_t agent_handle = {
-        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(agent))};
+    const hsa_agent_t agent_handle = {static_cast<uint64_t>(reinterpret_cast<uintptr_t>(agent))};
     return agent_handle;
   }
 
@@ -93,8 +91,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   //
   // @retval const hsa_agent_t
   static __forceinline const hsa_agent_t Convert(const Agent* agent) {
-    const hsa_agent_t agent_handle = {
-        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(agent))};
+    const hsa_agent_t agent_handle = {static_cast<uint64_t>(reinterpret_cast<uintptr_t>(agent))};
     return agent_handle;
   }
 
@@ -108,19 +105,17 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   }
 
   // Lightweight RTTI for vendor specific implementations.
-  enum DeviceType {
-    kAmdGpuDevice = 0,
-    kAmdCpuDevice = 1,
-    kAmdAieDevice = 2,
-    kUnknownDevice = 3
-  };
+  enum DeviceType { kAmdGpuDevice = 0, kAmdCpuDevice = 1, kAmdAieDevice = 2, kUnknownDevice = 3 };
 
   // @brief Agent class contructor.
   //
   // @param [in] type CPU or GPU or other.
-  explicit Agent(Driver &driver, uint32_t node_id, DeviceType type)
-      : node_id_(node_id), device_type_(uint32_t(type)), driver_(&driver),
-        profiling_enabled_(false), enabled_(false) {
+  explicit Agent(Driver& driver, uint32_t node_id, DeviceType type)
+      : node_id_(node_id),
+        device_type_(uint32_t(type)),
+        driver_(&driver),
+        profiling_enabled_(false),
+        enabled_(false) {
     public_handle_ = Convert(this);
   }
 
@@ -137,9 +132,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   // @param [in] size Copy size in bytes.
   //
   // @retval HSA_STATUS_SUCCESS The memory copy is finished and successful.
-  virtual hsa_status_t DmaCopy(void* dst, const void* src, size_t size) {
-    return HSA_STATUS_ERROR;
-  }
+  virtual hsa_status_t DmaCopy(void* dst, const void* src, size_t size) { return HSA_STATUS_ERROR; }
 
   // @brief Submit DMA copy command to move data from src to dst. This call
   // does not wait until the copy is finished
@@ -159,11 +152,9 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   // @param [in] out_signal Completion signal.
   //
   // @retval HSA_STATUS_SUCCESS The memory copy is finished and successful.
-  virtual hsa_status_t DmaCopy(void* dst, core::Agent& dst_agent,
-                               const void* src, core::Agent& src_agent,
-                               size_t size,
-                               std::vector<core::Signal*>& dep_signals,
-                               core::Signal& out_signal) {
+  virtual hsa_status_t DmaCopy(void* dst, core::Agent& dst_agent, const void* src,
+                               core::Agent& src_agent, size_t size,
+                               std::vector<core::Signal*>& dep_signals, core::Signal& out_signal) {
     return HSA_STATUS_ERROR;
   }
 
@@ -178,13 +169,11 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   //
   //
   // @retval HSA_STATUS_SUCCESS The memory copy is finished and successful.
-  virtual hsa_status_t DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
-                               const void* src, core::Agent& src_agent,
-                               size_t size,
-                               std::vector<core::Signal*>& dep_signals,
-                               core::Signal& out_signal,
-                               int engine_offset,
-                               bool force_copy_on_sdma) {
+  virtual hsa_status_t DmaCopyOnEngine(void* dst, core::Agent& dst_agent, const void* src,
+                                       core::Agent& src_agent, size_t size,
+                                       std::vector<core::Signal*>& dep_signals,
+                                       core::Signal& out_signal, int engine_offset,
+                                       bool force_copy_on_sdma) {
     return HSA_STATUS_ERROR;
   }
 
@@ -197,7 +186,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   // @retval HSA_STATUS_SUCCESS DMA engines are available
   // @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES DMA engines are not available
   virtual hsa_status_t DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_agent,
-                                     uint32_t *engine_ids_mask) {
+                                     uint32_t* engine_ids_mask) {
     return HSA_STATUS_ERROR;
   }
 
@@ -223,9 +212,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   // @param [in] count Number of uint32_t element to be set.
   //
   // @retval HSA_STATUS_SUCCESS The memory fill is finished and successful.
-  virtual hsa_status_t DmaFill(void* ptr, uint32_t value, size_t count) {
-    return HSA_STATUS_ERROR;
-  }
+  virtual hsa_status_t DmaFill(void* ptr, uint32_t value, size_t count) { return HSA_STATUS_ERROR; }
 
   // @brief Invoke the user provided callback for each region accessible by
   // this agent.
@@ -235,9 +222,8 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   //
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // region returns ::HSA_STATUS_SUCCESS.
-  virtual hsa_status_t IterateRegion(
-      hsa_status_t (*callback)(hsa_region_t region, void* data),
-      void* data) const = 0;
+  virtual hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
+                                     void* data) const = 0;
 
   // @brief Invoke the user provided callback for each isa supported by
   // this agent.
@@ -247,9 +233,8 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   //
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // isa returns ::HSA_STATUS_SUCCESS.
-  virtual hsa_status_t IterateSupportedIsas(
-      hsa_status_t (*callback)(hsa_isa_t isa, void* data),
-      void* data) const = 0;
+  virtual hsa_status_t IterateSupportedIsas(hsa_status_t (*callback)(hsa_isa_t isa, void* data),
+                                            void* data) const = 0;
 
   // @brief Invoke the callback for each cache useable by this agent.
   virtual hsa_status_t IterateCache(hsa_status_t (*callback)(hsa_cache_t cache, void* data),
@@ -287,8 +272,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   //
   // @param HSA_STATUS_SUCCESS @p value has been filled with the value of the
   // attribute.
-  virtual hsa_status_t GetInfo(hsa_agent_info_t attribute,
-                               void* value) const = 0;
+  virtual hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const = 0;
 
   // @brief Returns an array of regions owned by the agent.
   virtual const std::vector<const core::MemoryRegion*>& regions() const = 0;
@@ -297,7 +281,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   // @details The returned vector is a list of pointers to the supported ISA,
   // ordered from most specific (and performant) to most generic. For CPU
   // and AIE agents, this list will be empty.
-  virtual const std::vector<const core::Isa *>& supported_isas() const = 0;
+  virtual const std::vector<const core::Isa*>& supported_isas() const = 0;
 
   virtual uint64_t HiveId() const { return 0; }
 
@@ -339,21 +323,18 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
     for (auto region : regions()) region->Trim();
   }
 
-  virtual void ReleaseResources() { }
+  virtual void ReleaseResources() {}
 
-protected:
+ protected:
   // Intention here is to have a polymorphic update procedure for public_handle_
   // which is callable on any Agent* but only from some class dervied from
   // Agent*.  do_set_public_handle should remain protected or private in all
   // derived types.
-  static __forceinline void set_public_handle(Agent* agent,
-                                              hsa_agent_t handle) {
+  static __forceinline void set_public_handle(Agent* agent, hsa_agent_t handle) {
     agent->do_set_public_handle(handle);
   }
 
-  virtual void do_set_public_handle(hsa_agent_t handle) {
-    public_handle_ = handle;
-  }
+  virtual void do_set_public_handle(hsa_agent_t handle) { public_handle_ = handle; }
 
   // @brief Enable profiling of the asynchronous DMA copy. The timestamp
   // of each copy request will be stored in the completion signal structure.
@@ -362,12 +343,10 @@ protected:
   //
   // @retval HSA_STATUS_SUCCESS The profiling is enabled and the
   // timing of subsequent async copy will be measured.
-  virtual hsa_status_t EnableDmaProfiling(bool enable) {
-    return HSA_STATUS_SUCCESS;
-  }
+  virtual hsa_status_t EnableDmaProfiling(bool enable) { return HSA_STATUS_SUCCESS; }
 
   hsa_agent_t public_handle_;
-  std::vector<const core::Isa *> supported_isas_;
+  std::vector<const core::Isa*> supported_isas_;
 
  private:
   // @brief Node id.
@@ -375,7 +354,7 @@ protected:
 
   const uint32_t device_type_;
 
-  Driver *driver_;
+  Driver* driver_;
 
   bool profiling_enabled_;
 

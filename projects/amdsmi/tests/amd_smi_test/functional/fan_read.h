@@ -27,7 +27,7 @@
 
 class TestFanRead : public TestBase {
  public:
-    TestFanRead();
+  TestFanRead();
 
   // @Brief: Destructor for test case of TestFanRead
   virtual ~TestFanRead();

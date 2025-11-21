@@ -43,9 +43,16 @@
 #ifndef HSA_RUNTIME_CORE_LOADER_EXECUTABLE_HPP_
 #define HSA_RUNTIME_CORE_LOADER_EXECUTABLE_HPP_
 
+#include "amd_hsa_code.hpp"
+#include "amd_hsa_kernel_code.h"
+#include "amd_hsa_loader.hpp"
+#include "amd_hsa_locks.hpp"
+#include "hsa.h"
+#include "hsa_ext_image.h"
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <libelf.h>
 #include <limits.h>
@@ -54,13 +61,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <cstring>
-#include "hsa.h"
-#include "hsa_ext_image.h"
-#include "amd_hsa_loader.hpp"
-#include "amd_hsa_code.hpp"
-#include "amd_hsa_kernel_code.h"
-#include "amd_hsa_locks.hpp"
 
 #if defined(_WIN32) || defined(_WIN64)
 #if _WIN64
@@ -74,9 +74,9 @@
 
 /* We use this macro to refer to ELF types independent of the native wordsize.
    `ElfW(TYPE)' is used in place of `Elf32_TYPE' or `Elf64_TYPE'.  */
-#define ElfW(type)     _ElfW (Elf, __ELF_NATIVE_CLASS, type)
-#define _ElfW(e,w,t)   _ElfW_1 (e, w, _##t)
-#define _ElfW_1(e,w,t) e##w##t
+#define ElfW(type) _ElfW(Elf, __ELF_NATIVE_CLASS, type)
+#define _ElfW(e, w, t) _ElfW_1(e, w, _##t)
+#define _ElfW_1(e, w, t) e##w##t
 
 /* Structure describing a loaded shared object.  The `l_next' and `l_prev'
    members form a chain of all the shared objects loaded at startup.
@@ -84,45 +84,42 @@
    These data structures exist in space used by the run-time dynamic linker;
    modifying them may have disastrous results.  */
 
-struct link_map
-  {
-    /* These first few members are part of the protocol with the debugger.
-       This is the same format used in SVR4.  */
+struct link_map {
+  /* These first few members are part of the protocol with the debugger.
+     This is the same format used in SVR4.  */
 
-    ElfW(Addr) l_addr;          /* Difference between the address in the ELF
-                                   file and the addresses in memory.  */
-    char *l_name;               /* Absolute file name object was found in.  */
-    ElfW(Dyn) *l_ld;            /* Dynamic section of the shared object.  */
-    struct link_map *l_next, *l_prev; /* Chain of loaded objects.  */
-  };
+  ElfW(Addr) l_addr; /* Difference between the address in the ELF
+                        file and the addresses in memory.  */
+  char *l_name;      /* Absolute file name object was found in.  */
+  ElfW(Dyn) * l_ld;  /* Dynamic section of the shared object.  */
+  struct link_map *l_next, *l_prev; /* Chain of loaded objects.  */
+};
 
 /* The legacy rendezvous structure used by the run-time dynamic linker to
    communicate details of shared object loading to the debugger.  */
 
-struct r_debug
-  {
-    /* Version number for this protocol.  It should be greater than 0.  */
-    int r_version;
+struct r_debug {
+  /* Version number for this protocol.  It should be greater than 0.  */
+  int r_version;
 
-    struct link_map *r_map;	/* Head of the chain of loaded objects.  */
+  struct link_map *r_map; /* Head of the chain of loaded objects.  */
 
-    /* This is the address of a function internal to the run-time linker,
-       that will always be called when the linker begins to map in a
-       library or unmap it, and again when the mapping change is complete.
-       The debugger can set a breakpoint at this address if it wants to
-       notice shared object mapping changes.  */
-    ElfW(Addr) r_brk;
-    enum RT
-      {
-        /* This state value describes the mapping change taking place when
-           the `r_brk' address is called.  */
-        RT_CONSISTENT,    /* Mapping change is complete.  */
-        RT_ADD,           /* Beginning to add a new object.  */
-        RT_DELETE         /* Beginning to remove an object mapping.  */
-      } r_state;
+  /* This is the address of a function internal to the run-time linker,
+     that will always be called when the linker begins to map in a
+     library or unmap it, and again when the mapping change is complete.
+     The debugger can set a breakpoint at this address if it wants to
+     notice shared object mapping changes.  */
+  ElfW(Addr) r_brk;
+  enum RT {
+    /* This state value describes the mapping change taking place when
+       the `r_brk' address is called.  */
+    RT_CONSISTENT, /* Mapping change is complete.  */
+    RT_ADD,        /* Beginning to add a new object.  */
+    RT_DELETE      /* Beginning to remove an object mapping.  */
+  } r_state;
 
-    ElfW(Addr) r_ldbase;  /* Base address the linker is loaded at.  */
-  };
+  ElfW(Addr) r_ldbase; /* Base address the linker is loaded at.  */
+};
 
 /* This is the symbol of that structure provided by the dynamic linker.  */
 extern struct r_debug _r_debug;
@@ -143,16 +140,12 @@ class ExecutableImpl;
 
 typedef uint32_t symbol_attribute32_t;
 
-class SymbolImpl: public Symbol {
+class SymbolImpl : public Symbol {
 public:
   virtual ~SymbolImpl() {}
 
-  bool IsKernel() const {
-    return HSA_SYMBOL_KIND_KERNEL == kind;
-  }
-  bool IsVariable() const {
-    return HSA_SYMBOL_KIND_VARIABLE == kind;
-  }
+  bool IsKernel() const { return HSA_SYMBOL_KIND_KERNEL == kind; }
+  bool IsVariable() const { return HSA_SYMBOL_KIND_VARIABLE == kind; }
 
   bool is_loaded;
   hsa_symbol_kind_t kind;
@@ -163,67 +156,49 @@ public:
   uint64_t address;
   hsa_agent_t agent;
 
-  hsa_agent_t GetAgent() override {
-    return agent;
-  }
+  hsa_agent_t GetAgent() override { return agent; }
 
 protected:
-  SymbolImpl(const bool &_is_loaded,
-             const hsa_symbol_kind_t &_kind,
-             const std::string &_module_name,
-             const std::string &_symbol_name,
-             const hsa_symbol_linkage_t &_linkage,
-             const bool &_is_definition,
+  SymbolImpl(const bool &_is_loaded, const hsa_symbol_kind_t &_kind,
+             const std::string &_module_name, const std::string &_symbol_name,
+             const hsa_symbol_linkage_t &_linkage, const bool &_is_definition,
              const uint64_t &_address = 0)
-    : is_loaded(_is_loaded)
-    , kind(_kind)
-    , module_name(_module_name)
-    , symbol_name(_symbol_name)
-    , linkage(_linkage)
-    , is_definition(_is_definition)
-    , address(_address) {}
+      : is_loaded(_is_loaded), kind(_kind), module_name(_module_name),
+        symbol_name(_symbol_name), linkage(_linkage),
+        is_definition(_is_definition), address(_address) {}
 
-  virtual bool GetInfo(hsa_symbol_info32_t symbol_info, void* value) override;
+  virtual bool GetInfo(hsa_symbol_info32_t symbol_info, void *value) override;
 
 private:
   SymbolImpl(const SymbolImpl &s);
-  SymbolImpl& operator=(const SymbolImpl &s);
+  SymbolImpl &operator=(const SymbolImpl &s);
 };
 
 //===----------------------------------------------------------------------===//
 // KernelSymbol.                                                              //
 //===----------------------------------------------------------------------===//
 
-class KernelSymbol final: public SymbolImpl {
+class KernelSymbol final : public SymbolImpl {
 public:
-  KernelSymbol(const bool &_is_loaded,
-               const std::string &_module_name,
+  KernelSymbol(const bool &_is_loaded, const std::string &_module_name,
                const std::string &_symbol_name,
-               const hsa_symbol_linkage_t &_linkage,
-               const bool &_is_definition,
+               const hsa_symbol_linkage_t &_linkage, const bool &_is_definition,
                const uint32_t &_kernarg_segment_size,
                const uint32_t &_kernarg_segment_alignment,
                const uint32_t &_group_segment_size,
                const uint32_t &_private_segment_size,
-               const bool &_is_dynamic_callstack,
-               const uint32_t &_size,
-               const uint32_t &_alignment,
-               const uint64_t &_address = 0)
-    : SymbolImpl(_is_loaded,
-                 HSA_SYMBOL_KIND_KERNEL,
-                 _module_name,
-                 _symbol_name,
-                 _linkage,
-                 _is_definition,
-                 _address)
-    , full_name(_module_name.empty() ? _symbol_name : _module_name + "::" + _symbol_name)
-    , kernarg_segment_size(_kernarg_segment_size)
-    , kernarg_segment_alignment(_kernarg_segment_alignment)
-    , group_segment_size(_group_segment_size)
-    , private_segment_size(_private_segment_size)
-    , is_dynamic_callstack(_is_dynamic_callstack)
-    , size(_size)
-    , alignment(_alignment) {}
+               const bool &_is_dynamic_callstack, const uint32_t &_size,
+               const uint32_t &_alignment, const uint64_t &_address = 0)
+      : SymbolImpl(_is_loaded, HSA_SYMBOL_KIND_KERNEL, _module_name,
+                   _symbol_name, _linkage, _is_definition, _address),
+        full_name(_module_name.empty() ? _symbol_name
+                                       : _module_name + "::" + _symbol_name),
+        kernarg_segment_size(_kernarg_segment_size),
+        kernarg_segment_alignment(_kernarg_segment_alignment),
+        group_segment_size(_group_segment_size),
+        private_segment_size(_private_segment_size),
+        is_dynamic_callstack(_is_dynamic_callstack), size(_size),
+        alignment(_alignment) {}
 
   ~KernelSymbol() {}
 
@@ -241,40 +216,28 @@ public:
 
 private:
   KernelSymbol(const KernelSymbol &ks);
-  KernelSymbol& operator=(const KernelSymbol &ks);
+  KernelSymbol &operator=(const KernelSymbol &ks);
 };
 
 //===----------------------------------------------------------------------===//
 // VariableSymbol.                                                            //
 //===----------------------------------------------------------------------===//
 
-class VariableSymbol final: public SymbolImpl {
+class VariableSymbol final : public SymbolImpl {
 public:
-  VariableSymbol(const bool &_is_loaded,
-                 const std::string &_module_name,
+  VariableSymbol(const bool &_is_loaded, const std::string &_module_name,
                  const std::string &_symbol_name,
                  const hsa_symbol_linkage_t &_linkage,
                  const bool &_is_definition,
                  const hsa_variable_allocation_t &_allocation,
-                 const hsa_variable_segment_t &_segment,
-                 const uint32_t &_size,
-                 const uint32_t &_alignment,
-                 const bool &_is_constant,
-                 const bool &_is_external = false,
-                 const uint64_t &_address = 0)
-    : SymbolImpl(_is_loaded,
-                 HSA_SYMBOL_KIND_VARIABLE,
-                 _module_name,
-                 _symbol_name,
-                 _linkage,
-                 _is_definition,
-                 _address)
-    , allocation(_allocation)
-    , segment(_segment)
-    , size(_size)
-    , alignment(_alignment)
-    , is_constant(_is_constant)
-    , is_external(_is_external) {}
+                 const hsa_variable_segment_t &_segment, const uint32_t &_size,
+                 const uint32_t &_alignment, const bool &_is_constant,
+                 const bool &_is_external = false, const uint64_t &_address = 0)
+      : SymbolImpl(_is_loaded, HSA_SYMBOL_KIND_VARIABLE, _module_name,
+                   _symbol_name, _linkage, _is_definition, _address),
+        allocation(_allocation), segment(_segment), size(_size),
+        alignment(_alignment), is_constant(_is_constant),
+        is_external(_is_external) {}
 
   ~VariableSymbol() {}
 
@@ -289,7 +252,7 @@ public:
 
 private:
   VariableSymbol(const VariableSymbol &vs);
-  VariableSymbol& operator=(const VariableSymbol &vs);
+  VariableSymbol &operator=(const VariableSymbol &vs);
 };
 
 //===----------------------------------------------------------------------===//
@@ -300,8 +263,7 @@ class Logger final {
 public:
   Logger(std::ostream &Stream = std::cerr) : OutStream(Stream) {}
 
-  template <typename T>
-  Logger &operator<<(const T &Data) {
+  template <typename T> Logger &operator<<(const T &Data) {
     if (!IsLoggingEnabled())
       return *this;
     OutStream << Data;
@@ -314,7 +276,7 @@ public:
 
 private:
   Logger(const Logger &L);
-  Logger& operator=(const Logger &L);
+  Logger &operator=(const Logger &L);
 
   bool IsLoggingEnabled() const {
     const char *enable_logging = getenv("LOADER_ENABLE_LOGGING");
@@ -343,45 +305,46 @@ protected:
 
 public:
   ExecutableObject(ExecutableImpl *owner_, hsa_agent_t agent_)
-    : owner(owner_), agent(agent_) { }
+      : owner(owner_), agent(agent_) {}
 
-  ExecutableImpl* Owner() const { return owner; }
+  ExecutableImpl *Owner() const { return owner; }
   hsa_agent_t Agent() const { return agent; }
-  virtual void Print(std::ostream& out) = 0;
+  virtual void Print(std::ostream &out) = 0;
   virtual void Destroy() = 0;
 
-  virtual ~ExecutableObject() { }
+  virtual ~ExecutableObject() {}
 };
 
 class LoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject {
-friend class AmdHsaCodeLoader;
+  friend class AmdHsaCodeLoader;
+
 private:
-  LoadedCodeObjectImpl(const LoadedCodeObjectImpl&);
-  LoadedCodeObjectImpl& operator=(const LoadedCodeObjectImpl&);
+  LoadedCodeObjectImpl(const LoadedCodeObjectImpl &);
+  LoadedCodeObjectImpl &operator=(const LoadedCodeObjectImpl &);
 
   const void *elf_data;
   const size_t elf_size;
-  std::vector<Segment*> loaded_segments;
+  std::vector<Segment *> loaded_segments;
 
 public:
-  LoadedCodeObjectImpl(ExecutableImpl *owner_, hsa_agent_t agent_, const void *elf_data_, size_t elf_size_)
-    : ExecutableObject(owner_, agent_), elf_data(elf_data_), elf_size(elf_size_) {
-      memset(&r_debug_info, 0, sizeof(r_debug_info));
-    }
+  LoadedCodeObjectImpl(ExecutableImpl *owner_, hsa_agent_t agent_,
+                       const void *elf_data_, size_t elf_size_)
+      : ExecutableObject(owner_, agent_), elf_data(elf_data_),
+        elf_size(elf_size_) {
+    memset(&r_debug_info, 0, sizeof(r_debug_info));
+  }
 
-  const void* ElfData() const { return elf_data; }
+  const void *ElfData() const { return elf_data; }
   size_t ElfSize() const { return elf_size; }
-  std::vector<Segment*>& LoadedSegments() { return loaded_segments; }
+  std::vector<Segment *> &LoadedSegments() { return loaded_segments; }
 
   bool GetInfo(amd_loaded_code_object_info_t attribute, void *value) override;
 
   hsa_status_t IterateLoadedSegments(
-    hsa_status_t (*callback)(
-      amd_loaded_segment_t loaded_segment,
-      void *data),
-    void *data) override;
+      hsa_status_t (*callback)(amd_loaded_segment_t loaded_segment, void *data),
+      void *data) override;
 
-  void Print(std::ostream& out) override;
+  void Print(std::ostream &out) override;
 
   void Destroy() override {}
 
@@ -408,27 +371,32 @@ private:
   size_t storage_offset;
 
 public:
-  Segment(ExecutableImpl *owner_, hsa_agent_t agent_, amdgpu_hsa_elf_segment_t segment_, void* ptr_, size_t size_, uint64_t vaddr_, size_t storage_offset_)
-    : ExecutableObject(owner_, agent_), segment(segment_),
-      ptr(ptr_), size(size_), vaddr(vaddr_), frozen(false), storage_offset(storage_offset_) { }
+  Segment(ExecutableImpl *owner_, hsa_agent_t agent_,
+          amdgpu_hsa_elf_segment_t segment_, void *ptr_, size_t size_,
+          uint64_t vaddr_, size_t storage_offset_)
+      : ExecutableObject(owner_, agent_), segment(segment_), ptr(ptr_),
+        size(size_), vaddr(vaddr_), frozen(false),
+        storage_offset(storage_offset_) {}
 
   amdgpu_hsa_elf_segment_t ElfSegment() const { return segment; }
-  void* Ptr() const { return ptr; }
+  void *Ptr() const { return ptr; }
   size_t Size() const { return size; }
   uint64_t VAddr() const { return vaddr; }
-  size_t StorageOffset() const { return storage_offset;  }
+  size_t StorageOffset() const { return storage_offset; }
 
   bool GetInfo(amd_loaded_segment_info_t attribute, void *value) override;
 
-  uint64_t Offset(uint64_t addr); // Offset within segment. Used together with ptr with loader context functions.
+  uint64_t Offset(uint64_t addr); // Offset within segment. Used together with
+                                  // ptr with loader context functions.
 
-  void* Address(uint64_t addr); // Address in segment. Used for relocations and valid on agent.
+  void *Address(uint64_t addr); // Address in segment. Used for relocations and
+                                // valid on agent.
 
   bool Freeze();
 
   bool IsAddressInSegment(uint64_t addr);
-  void Copy(uint64_t addr, const void* src, size_t size);
-  void Print(std::ostream& out) override;
+  void Copy(uint64_t addr, const void *src, size_t size);
+  void Print(std::ostream &out) override;
   void Destroy() override;
 };
 
@@ -438,8 +406,8 @@ private:
 
 public:
   Sampler(ExecutableImpl *owner, hsa_agent_t agent, hsa_ext_sampler_t samp_)
-    : ExecutableObject(owner, agent), samp(samp_) { }
-  void Print(std::ostream& out) override;
+      : ExecutableObject(owner, agent), samp(samp_) {}
+  void Print(std::ostream &out) override;
   void Destroy() override;
 };
 
@@ -449,13 +417,13 @@ private:
 
 public:
   Image(ExecutableImpl *owner, hsa_agent_t agent, hsa_ext_image_t img_)
-    : ExecutableObject(owner, agent), img(img_) { }
-  void Print(std::ostream& out) override;
+      : ExecutableObject(owner, agent), img(img_) {}
+  void Print(std::ostream &out) override;
   void Destroy() override;
 };
 
 typedef std::string ProgramSymbol;
-typedef std::unordered_map<ProgramSymbol, SymbolImpl*> ProgramSymbolMap;
+typedef std::unordered_map<ProgramSymbol, SymbolImpl *> ProgramSymbolMap;
 
 typedef std::pair<std::string, hsa_agent_t> AgentSymbol;
 struct ASC {
@@ -470,69 +438,56 @@ struct ASH {
     return h ^ (i << 1);
   }
 };
-typedef std::unordered_map<AgentSymbol, SymbolImpl*, ASH, ASC> AgentSymbolMap;
+typedef std::unordered_map<AgentSymbol, SymbolImpl *, ASH, ASC> AgentSymbolMap;
 
-class ExecutableImpl final: public Executable {
-friend class AmdHsaCodeLoader;
+class ExecutableImpl final : public Executable {
+  friend class AmdHsaCodeLoader;
+
 public:
-  const hsa_profile_t& profile() const {
-    return profile_;
-  }
-  const hsa_executable_state_t& state() const {
-    return state_;
-  }
+  const hsa_profile_t &profile() const { return profile_; }
+  const hsa_executable_state_t &state() const { return state_; }
 
-  ExecutableImpl(
-      const hsa_profile_t &_profile,
-      Context *context,
-      size_t id,
-      hsa_default_float_rounding_mode_t default_float_rounding_mode);
+  ExecutableImpl(const hsa_profile_t &_profile, Context *context, size_t id,
+                 hsa_default_float_rounding_mode_t default_float_rounding_mode);
 
   ~ExecutableImpl();
 
-  hsa_status_t GetInfo(hsa_executable_info_t executable_info, void *value) override;
+  hsa_status_t GetInfo(hsa_executable_info_t executable_info,
+                       void *value) override;
 
-  hsa_status_t DefineProgramExternalVariable(
-    const char *name, void *address) override;
+  hsa_status_t DefineProgramExternalVariable(const char *name,
+                                             void *address) override;
 
-  hsa_status_t DefineAgentExternalVariable(
-    const char *name,
-    hsa_agent_t agent,
-    hsa_variable_segment_t segment,
-    void *address) override;
+  hsa_status_t DefineAgentExternalVariable(const char *name, hsa_agent_t agent,
+                                           hsa_variable_segment_t segment,
+                                           void *address) override;
 
-  hsa_status_t LoadCodeObject(
-    hsa_agent_t agent,
-    hsa_code_object_t code_object,
-    const char *options,
-    hsa_loaded_code_object_t *loaded_code_object) override;
+  hsa_status_t
+  LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                 const char *options,
+                 hsa_loaded_code_object_t *loaded_code_object) override;
 
-  hsa_status_t LoadCodeObject(
-    hsa_agent_t agent,
-    hsa_code_object_t code_object,
-    size_t code_object_size,
-    const char *options,
-    hsa_loaded_code_object_t *loaded_code_object) override;
+  hsa_status_t
+  LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                 size_t code_object_size, const char *options,
+                 hsa_loaded_code_object_t *loaded_code_object) override;
 
-  hsa_status_t LoadCodeObject(
-    hsa_agent_t agent,
-    hsa_code_object_t code_object,
-    const char *options,
-    const std::string &uri,
-    hsa_loaded_code_object_t *loaded_code_object) override;
+  hsa_status_t
+  LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                 const char *options, const std::string &uri,
+                 hsa_loaded_code_object_t *loaded_code_object) override;
 
-  hsa_status_t LoadCodeObject(
-    hsa_agent_t agent,
-    hsa_code_object_t code_object,
-    size_t code_object_size,
-    const char *options,
-    const std::string &uri,
-    hsa_loaded_code_object_t *loaded_code_object) override;
+  hsa_status_t
+  LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                 size_t code_object_size, const char *options,
+                 const std::string &uri,
+                 hsa_loaded_code_object_t *loaded_code_object) override;
 
   hsa_status_t Freeze(const char *options) override;
 
   hsa_status_t Validate(uint32_t *result) override {
-    amd::hsa::common::ReaderLockGuard<amd::hsa::common::ReaderWriterLock> reader_lock(rw_lock_);
+    amd::hsa::common::ReaderLockGuard<amd::hsa::common::ReaderWriterLock>
+        reader_lock(rw_lock_);
     assert(result);
     *result = 0;
     return HSA_STATUS_SUCCESS;
@@ -542,63 +497,54 @@ public:
   /// @todo remove during loader refactoring.
   bool IsProgramSymbol(const char *symbol_name) override;
 
-  Symbol* GetSymbol(
-    const char *symbol_name,
-    const hsa_agent_t *agent) override;
+  Symbol *GetSymbol(const char *symbol_name, const hsa_agent_t *agent) override;
 
-  hsa_status_t IterateSymbols(
-    iterate_symbols_f callback, void *data) override;
+  hsa_status_t IterateSymbols(iterate_symbols_f callback, void *data) override;
 
   /// @since hsa v1.1.
   hsa_status_t IterateAgentSymbols(
       hsa_agent_t agent,
-      hsa_status_t (*callback)(hsa_executable_t exec,
-                               hsa_agent_t agent,
-                               hsa_executable_symbol_t symbol,
-                               void *data),
+      hsa_status_t (*callback)(hsa_executable_t exec, hsa_agent_t agent,
+                               hsa_executable_symbol_t symbol, void *data),
       void *data) override;
 
   /// @since hsa v1.1.
   hsa_status_t IterateProgramSymbols(
       hsa_status_t (*callback)(hsa_executable_t exec,
-                               hsa_executable_symbol_t symbol,
-                               void *data),
+                               hsa_executable_symbol_t symbol, void *data),
       void *data) override;
 
   hsa_status_t IterateLoadedCodeObjects(
-    hsa_status_t (*callback)(
-      hsa_executable_t executable,
-      hsa_loaded_code_object_t loaded_code_object,
-      void *data),
-    void *data) override;
+      hsa_status_t (*callback)(hsa_executable_t executable,
+                               hsa_loaded_code_object_t loaded_code_object,
+                               void *data),
+      void *data) override;
 
   size_t GetNumSegmentDescriptors() override;
 
   size_t QuerySegmentDescriptors(
-    hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
-    size_t total_num_segment_descriptors,
-    size_t first_empty_segment_descriptor) override;
+      hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
+      size_t total_num_segment_descriptors,
+      size_t first_empty_segment_descriptor) override;
 
   uint64_t FindHostAddress(uint64_t device_address) override;
 
   void EnableReadOnlyMode();
   void DisableReadOnlyMode();
 
-  void Print(std::ostream& out) override;
-  bool PrintToFile(const std::string& filename) override;
+  void Print(std::ostream &out) override;
+  bool PrintToFile(const std::string &filename) override;
 
-  Context* context() { return context_; }
+  Context *context() { return context_; }
   size_t id() { return id_; }
 
 private:
   ExecutableImpl(const ExecutableImpl &e);
-  ExecutableImpl& operator=(const ExecutableImpl &e);
+  ExecutableImpl &operator=(const ExecutableImpl &e);
 
   std::unique_ptr<amd::hsa::code::AmdHsaCode> code;
 
-  Symbol* GetSymbolInternal(
-    const char *symbol_name,
-    const hsa_agent_t *agent);
+  Symbol *GetSymbolInternal(const char *symbol_name, const hsa_agent_t *agent);
 
   hsa_status_t LoadSegments(hsa_agent_t agent, const code::AmdHsaCode *c,
                             uint32_t majorVersion);
@@ -608,21 +554,33 @@ private:
   hsa_status_t LoadSegmentV2(const code::Segment *data_segment,
                              loader::Segment *load_segment);
 
-  hsa_status_t LoadSymbol(hsa_agent_t agent, amd::hsa::code::Symbol* sym, uint32_t majorVersion);
-  hsa_status_t LoadDefinitionSymbol(hsa_agent_t agent, amd::hsa::code::Symbol* sym, uint32_t majorVersion);
-  hsa_status_t LoadDeclarationSymbol(hsa_agent_t agent, amd::hsa::code::Symbol* sym, uint32_t majorVersion);
+  hsa_status_t LoadSymbol(hsa_agent_t agent, amd::hsa::code::Symbol *sym,
+                          uint32_t majorVersion);
+  hsa_status_t LoadDefinitionSymbol(hsa_agent_t agent,
+                                    amd::hsa::code::Symbol *sym,
+                                    uint32_t majorVersion);
+  hsa_status_t LoadDeclarationSymbol(hsa_agent_t agent,
+                                     amd::hsa::code::Symbol *sym,
+                                     uint32_t majorVersion);
 
-  hsa_status_t ApplyRelocations(hsa_agent_t agent, amd::hsa::code::AmdHsaCode *c);
-  hsa_status_t ApplyStaticRelocationSection(hsa_agent_t agent, amd::hsa::code::RelocationSection* sec);
-  hsa_status_t ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::code::Relocation *rel);
-  hsa_status_t ApplyDynamicRelocationSection(hsa_agent_t agent, amd::hsa::code::RelocationSection* sec);
-  hsa_status_t ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa::code::Relocation *rel);
+  hsa_status_t ApplyRelocations(hsa_agent_t agent,
+                                amd::hsa::code::AmdHsaCode *c);
+  hsa_status_t
+  ApplyStaticRelocationSection(hsa_agent_t agent,
+                               amd::hsa::code::RelocationSection *sec);
+  hsa_status_t ApplyStaticRelocation(hsa_agent_t agent,
+                                     amd::hsa::code::Relocation *rel);
+  hsa_status_t
+  ApplyDynamicRelocationSection(hsa_agent_t agent,
+                                amd::hsa::code::RelocationSection *sec);
+  hsa_status_t ApplyDynamicRelocation(hsa_agent_t agent,
+                                      amd::hsa::code::Relocation *rel);
 
-  Segment* VirtualAddressSegment(uint64_t vaddr);
-  uint64_t SymbolAddress(hsa_agent_t agent, amd::hsa::code::Symbol* sym);
-  uint64_t SymbolAddress(hsa_agent_t agent, amd::elf::Symbol* sym);
-  Segment* SymbolSegment(hsa_agent_t agent, amd::hsa::code::Symbol* sym);
-  Segment* SectionSegment(hsa_agent_t agent, amd::hsa::code::Section* sec);
+  Segment *VirtualAddressSegment(uint64_t vaddr);
+  uint64_t SymbolAddress(hsa_agent_t agent, amd::hsa::code::Symbol *sym);
+  uint64_t SymbolAddress(hsa_agent_t agent, amd::elf::Symbol *sym);
+  Segment *SymbolSegment(hsa_agent_t agent, amd::hsa::code::Symbol *sym);
+  Segment *SectionSegment(hsa_agent_t agent, amd::hsa::code::Section *sec);
 
   amd::hsa::common::ReaderWriterLock rw_lock_;
   hsa_profile_t profile_;
@@ -634,46 +592,44 @@ private:
 
   ProgramSymbolMap program_symbols_;
   AgentSymbolMap agent_symbols_;
-  std::vector<ExecutableObject*> objects;
+  std::vector<ExecutableObject *> objects;
   Segment *program_allocation_segment;
-  std::vector<LoadedCodeObjectImpl*> loaded_code_objects;
+  std::vector<LoadedCodeObjectImpl *> loaded_code_objects;
 };
 
 class AmdHsaCodeLoader : public Loader {
 private:
-  Context* context;
-  std::vector<Executable*> executables;
+  Context *context;
+  std::vector<Executable *> executables;
   amd::hsa::common::ReaderWriterLock rw_lock_;
 
 public:
-  AmdHsaCodeLoader(Context* context_)
-    : context(context_) { assert(context); }
+  AmdHsaCodeLoader(Context *context_) : context(context_) { assert(context); }
 
-  Context* GetContext() const override { return context; }
+  Context *GetContext() const override { return context; }
 
-  Executable* CreateExecutable(
-      hsa_profile_t profile,
-      const char *options,
-      hsa_default_float_rounding_mode_t default_float_rounding_mode = HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT) override;
+  Executable *CreateExecutable(
+      hsa_profile_t profile, const char *options,
+      hsa_default_float_rounding_mode_t default_float_rounding_mode =
+          HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT) override;
 
-  hsa_status_t FreezeExecutable(Executable *executable, const char *options) override;
+  hsa_status_t FreezeExecutable(Executable *executable,
+                                const char *options) override;
   void DestroyExecutable(Executable *executable) override;
 
   hsa_status_t IterateExecutables(
-    hsa_status_t (*callback)(
-      hsa_executable_t executable,
-      void *data),
-    void *data) override;
+      hsa_status_t (*callback)(hsa_executable_t executable, void *data),
+      void *data) override;
 
   hsa_status_t QuerySegmentDescriptors(
-    hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
-    size_t *num_segment_descriptors) override;
+      hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
+      size_t *num_segment_descriptors) override;
 
   hsa_executable_t FindExecutable(uint64_t device_address) override;
 
   uint64_t FindHostAddress(uint64_t device_address) override;
 
-  void PrintHelp(std::ostream& out) override;
+  void PrintHelp(std::ostream &out) override;
 
   void EnableReadOnlyMode();
   void DisableReadOnlyMode();

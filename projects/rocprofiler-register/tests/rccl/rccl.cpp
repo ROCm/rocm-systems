@@ -162,7 +162,8 @@ rccl_init()
 }
 }  // namespace rccl
 
-extern "C" {
+extern "C"
+{
 void
 rccl_init(void)
 {

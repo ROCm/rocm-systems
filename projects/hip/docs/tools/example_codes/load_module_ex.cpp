@@ -90,7 +90,7 @@ int main()
     HIP_CHECK(hipMemcpyHtoD(d_B, B.data(), size_bytes));
 
     // Load module
-    
+
     // For AMD the module file has to contain architecture specific object code
     // For NVIDIA the module file has to contain PTX, found in e.g. "myKernel.ptx"
     // [sphinx-start]

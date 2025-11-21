@@ -57,7 +57,7 @@ class TestBase : public rocrtst::BaseRocR {
 
   virtual ~TestBase(void);
 
-  enum VerboseLevel {VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS};
+  enum VerboseLevel { VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS };
 
   // @Brief: Before run the core measure codes, do something to set up
   // i.e. init runtime, prepare packet...
@@ -75,7 +75,7 @@ class TestBase : public rocrtst::BaseRocR {
   // @Brief: Display information about the test
   virtual void DisplayTestInfo(void);
 
-  const std::string & description(void) const {return description_;}
+  const std::string& description(void) const { return description_; }
 
   void set_description(std::string d);
 

@@ -48,7 +48,7 @@ class Gfx9CmdBuilder : public CmdBuilder {
   }
 
  public:
-  Gfx9CmdBuilder(const reg_base_offset_table* _table) : CmdBuilder(_table){};
+  Gfx9CmdBuilder(const reg_base_offset_table* _table) : CmdBuilder(_table) {};
 
   static constexpr bool IsPrivilegedConfigReg(uint32_t addr) {
     return ((addr >= CONFIG_SPACE_START) && (addr <= CONFIG_SPACE_END));
@@ -396,8 +396,7 @@ class Gfx9CmdBuilder : public CmdBuilder {
     APPEND_COMMAND_WRAPPER(cmdbuf, pm4_mec_atomic_mem_cmd);
   }
 
-  void BuildPrimeL2(CmdBuffer* cmdBuf, uint64_t addr) override
-  {
+  void BuildPrimeL2(CmdBuffer* cmdBuf, uint64_t addr) override {
 #ifdef PM4_MEC_PRIME_ATCL2_DEFINED
     PM4_MEC_PRIME_ATCL2 prime{};
     prime.header = MakePacket3Header(IT_PRIME_UTCL2, sizeof(prime));
@@ -447,8 +446,7 @@ class Gfx9CmdBuilder : public CmdBuilder {
     BuildCopyRegDataPacket(cmd, get_addr(reg), dst_addr, size, wait);
   }
 
-  std::array<uint32_t, 6> ClockRetrievePacket(uint64_t* dst)
-  {
+  std::array<uint32_t, 6> ClockRetrievePacket(uint64_t* dst) {
     auto addr = reinterpret_cast<uint64_t>(dst);
 
     uint32_t header = MakePacket3Header(PACKET3_COPY_DATA, 6 * sizeof(uint32_t));
@@ -467,8 +465,7 @@ class Gfx9CmdBuilder : public CmdBuilder {
     return {header, dword2, 0, 0, dword5, dword6};
   }
 
-  std::array<uint32_t, 6> UserdataLoPacket(uint32_t userdata_addr)
-  {
+  std::array<uint32_t, 6> UserdataLoPacket(uint32_t userdata_addr) {
     uint32_t header = MakePacket3Header(PACKET3_COPY_DATA, 6 * sizeof(uint32_t));
 
     uint32_t dword2 =
@@ -482,23 +479,23 @@ class Gfx9CmdBuilder : public CmdBuilder {
     return {header, dword2, 0, 0, userdata_addr, 0};
   }
 
-  std::array<uint32_t, 6> TraceDataMem32Packet(uint32_t userdata_addr, uint32_t* addr)
-  {
+  std::array<uint32_t, 6> TraceDataMem32Packet(uint32_t userdata_addr, uint32_t* addr) {
     uint32_t header = MakePacket3Header(PACKET3_COPY_DATA, 6 * sizeof(uint32_t));
-    uint32_t dword2 = PACKET3_COPY_DATA__SRC_SEL(PACKET3_COPY_DATA__SRC_SEL__MEMORY) |
-                      PACKET3_COPY_DATA__SRC_CACHE_POLICY(PACKET3_COPY_DATA__SRC_CACHE_POLICY__STREAM) |
-                      PACKET3_COPY_DATA__DST_SEL(PACKET3_COPY_DATA__DST_SEL__MEM_MAPPED_REGISTER) |
-                      PACKET3_COPY_DATA__DST_CACHE_POLICY(PACKET3_COPY_DATA__DST_CACHE_POLICY__STREAM) |
-                      PACKET3_COPY_DATA__WR_CONFIRM(PACKET3_COPY_DATA__WR_CONFIRM__DO_NOT_WAIT_FOR_CONFIRMATION) |
-                      PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA);
+    uint32_t dword2 =
+        PACKET3_COPY_DATA__SRC_SEL(PACKET3_COPY_DATA__SRC_SEL__MEMORY) |
+        PACKET3_COPY_DATA__SRC_CACHE_POLICY(PACKET3_COPY_DATA__SRC_CACHE_POLICY__STREAM) |
+        PACKET3_COPY_DATA__DST_SEL(PACKET3_COPY_DATA__DST_SEL__MEM_MAPPED_REGISTER) |
+        PACKET3_COPY_DATA__DST_CACHE_POLICY(PACKET3_COPY_DATA__DST_CACHE_POLICY__STREAM) |
+        PACKET3_COPY_DATA__WR_CONFIRM(PACKET3_COPY_DATA__WR_CONFIRM__DO_NOT_WAIT_FOR_CONFIRMATION) |
+        PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA);
     uint32_t dword3 = PACKET3_COPY_DATA__SRC_32B_ADDR_LO(PtrLow32(addr) >> 2);
     uint32_t dword4 = PACKET3_COPY_DATA__SRC_MEMTC_ADDR_HI(PtrHigh32(addr));
-    
+
     return {header, dword2, dword3, dword4, userdata_addr, 0};
   };
 
-  void BuildGPUClockPacket(CmdBuffer* cmdBuf, uint64_t* dst, const Register& userdata_addr, uint32_t header) override
-  {
+  void BuildGPUClockPacket(CmdBuffer* cmdBuf, uint64_t* dst, const Register& userdata_addr,
+                           uint32_t header) override {
     uint32_t addr = get_addr(userdata_addr);
 
     BuildWriteUConfigRegPacket(cmdBuf, addr, header);

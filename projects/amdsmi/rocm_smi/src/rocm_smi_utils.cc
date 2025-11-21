@@ -20,20 +20,22 @@
  * THE SOFTWARE.
  */
 
-#define _GNU_SOURCE 1 // REQUIRED: to utilize some GNU features/functions, see
-                      // _GNU_SOURCE functions which check
-#include <cassert>
-#include <cerrno>
-#include <sys/stat.h>
-#include <unistd.h>
+#define _GNU_SOURCE \
+  1  // REQUIRED: to utilize some GNU features/functions, see
+     // _GNU_SOURCE functions which check
+#include "rocm_smi/rocm_smi_utils.h"
+
 #include <dirent.h>
-#include <glob.h>
-#include <sys/utsname.h>
 #include <dlfcn.h>
+#include <glob.h>
+#include <sys/stat.h>
+#include <sys/utsname.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -43,15 +45,12 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <cmath>
 
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_exception.h"
-#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
+#include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_logger.h"
-
+#include "rocm_smi/rocm_smi_main.h"
 
 namespace amd::smi {
 const std::string kTmpFilePrefix = "rocmsmi_";
@@ -64,20 +63,20 @@ int SameFile(const std::string fileA, const std::string fileB) {
 
   ret = stat(fileA.c_str(), &aStat);
   if (ret) {
-      return -1;
+    return -1;
   }
 
   ret = stat(fileB.c_str(), &bStat);
   if (ret) {
-      return -1;
+    return -1;
   }
 
   if (aStat.st_dev != bStat.st_dev) {
-      return 1;
+    return 1;
   }
 
   if (aStat.st_ino != bStat.st_ino) {
-      return 1;
+    return 1;
   }
 
   return 0;
@@ -91,9 +90,8 @@ bool FileExists(char const *filename) {
 static inline void debugFilesDiscovered(std::vector<std::string> files) {
   std::ostringstream ss;
   int numberOfFilesFound = static_cast<int>(files.size());
-  ss << "fileName.size() = " << numberOfFilesFound
-     << "; Files discovered = {";
-  if(numberOfFilesFound > 0) {
+  ss << "fileName.size() = " << numberOfFilesFound << "; Files discovered = {";
+  if (numberOfFilesFound > 0) {
     for (auto it = begin(files); it != end(files); ++it) {
       auto nextElement = std::next(it);
       if (nextElement != files.end()) {
@@ -113,7 +111,7 @@ static inline void debugFilesDiscovered(std::vector<std::string> files) {
 // example: globFilesExist("/etc/*release")
 // Return a vector containing file paths that matched
 // You can obtain if files exist by doing globFilesExist(...).size() > 0
-std::vector<std::string> globFilesExist(const std::string& filePattern) {
+std::vector<std::string> globFilesExist(const std::string &filePattern) {
   std::ostringstream ss;
   std::vector<std::string> fileNames;
   glob_t result_glob;
@@ -126,7 +124,7 @@ std::vector<std::string> globFilesExist(const std::string& filePattern) {
     return fileNames;
   }
 
-  for(size_t i = 0; i < result_glob.gl_pathc; ++i) {
+  for (size_t i = 0; i < result_glob.gl_pathc; ++i) {
     fileNames.emplace_back(result_glob.gl_pathv[i]);
   }
   globfree(&result_glob);
@@ -152,7 +150,7 @@ int isRegularFile(std::string fname, bool *is_reg) {
   return 0;
 }
 
-int isReadOnlyForAll(const std::string& fname, bool *is_read_only){
+int isReadOnlyForAll(const std::string &fname, bool *is_read_only) {
   struct stat file_stat;
   int ret;
 
@@ -162,7 +160,8 @@ int isReadOnlyForAll(const std::string& fname, bool *is_read_only){
   }
 
   if (is_read_only != nullptr) {
-    *is_read_only = (file_stat.st_mode & (S_IRUSR | S_IRGRP | S_IROTH)) && !(file_stat.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH));
+    *is_read_only = (file_stat.st_mode & (S_IRUSR | S_IRGRP | S_IROTH)) &&
+                    !(file_stat.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH));
   } else {
     ret = 1;
   }
@@ -186,9 +185,8 @@ int WriteSysfsStr(std::string path, std::string val) {
   if (!fs.is_open()) {
     ret = errno;
     errno = 0;
-    ss << "Could not write/open SYSFS file (" << path << ") string = " << val
-       << ", returning " << std::to_string(ret) << " ("
-       << std::strerror(ret) << ")";
+    ss << "Could not write/open SYSFS file (" << path << ") string = " << val << ", returning "
+       << std::to_string(ret) << " (" << std::strerror(ret) << ")";
     LOG_ERROR(ss);
     return ret;
   }
@@ -223,10 +221,8 @@ int ReadSysfsStr(std::string path, std::string *retStr) {
   if (!fs.is_open()) {
     ret = errno;
     errno = 0;
-    oss << __PRETTY_FUNCTION__
-      << " | Fail | Cause: file does not exist or permissions issue"
-      << " | SYSFS file: " << path
-      << " | Returning: " <<  std::strerror(ret) << " |";
+    oss << __PRETTY_FUNCTION__ << " | Fail | Cause: file does not exist or permissions issue"
+        << " | SYSFS file: " << path << " | Returning: " << std::strerror(ret) << " |";
     LOG_ERROR(oss);
     return ret;
   }
@@ -235,27 +231,24 @@ int ReadSysfsStr(std::string path, std::string *retStr) {
 
   *retStr = ss.str();
 
-  retStr->erase(std::remove(retStr->begin(), retStr->end(), '\n'),
-                                                               retStr->end());
-  oss << "Successfully read SYSFS file (" << path << ")"
-      << ", returning str = " << *retStr;
+  retStr->erase(std::remove(retStr->begin(), retStr->end(), '\n'), retStr->end());
+  oss << "Successfully read SYSFS file (" << path << ")" << ", returning str = " << *retStr;
   LOG_INFO(oss);
   return ret;
 }
 
-bool IsInteger(const std::string & n_str) {
-  if (n_str.empty() || ((!isdigit(n_str[0])) && (n_str[0] != '-')
-                                                      && (n_str[0] != '+'))) {
+bool IsInteger(const std::string &n_str) {
+  if (n_str.empty() || ((!isdigit(n_str[0])) && (n_str[0] != '-') && (n_str[0] != '+'))) {
     return false;
   }
 
-  char * tmp;
+  char *tmp;
   strtol(n_str.c_str(), &tmp, 10);
 
   return (*tmp == 0);
 }
 
-bool stringToInteger(const std::string & n_str, int& value) {
+bool stringToInteger(const std::string &n_str, int &value) {
   try {
     value = std::stoi(trim(n_str), nullptr);
     return true;
@@ -268,16 +261,16 @@ bool stringToInteger(const std::string & n_str, int& value) {
 rsmi_status_t handleException() {
   try {
     throw;
-  } catch (const std::bad_alloc& e) {
+  } catch (const std::bad_alloc &e) {
     debug_print("RSMI exception: BadAlloc\n");
     return RSMI_STATUS_OUT_OF_RESOURCES;
-  } catch (const amd::smi::rsmi_exception& e) {
+  } catch (const amd::smi::rsmi_exception &e) {
     debug_print("Exception caught: %s.\n", e.what());
     return e.error_code();
-  } catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     debug_print("Exception caught: %s\n", e.what());
     return RSMI_STATUS_INTERNAL_EXCEPTION;
-  } catch (const std::nested_exception& e) {
+  } catch (const std::nested_exception &e) {
     debug_print("Callback threw.\n");
     return RSMI_STATUS_INTERNAL_EXCEPTION;
   } catch (...) {
@@ -287,7 +280,7 @@ rsmi_status_t handleException() {
 }
 
 pthread_mutex_t *GetMutex(uint32_t dv_ind) {
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
 
   if (dv_ind >= smi.devices().size()) {
     return nullptr;
@@ -298,8 +291,8 @@ pthread_mutex_t *GetMutex(uint32_t dv_ind) {
   return dev->mutex();
 }
 
-rsmi_status_t GetDevValueVec(amd::smi::DevInfoTypes type,
-                         uint32_t dv_ind, std::vector<std::string> *val_vec) {
+rsmi_status_t GetDevValueVec(amd::smi::DevInfoTypes type, uint32_t dv_ind,
+                             std::vector<std::string> *val_vec) {
   assert(val_vec != nullptr);
   if (val_vec == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -310,9 +303,8 @@ rsmi_status_t GetDevValueVec(amd::smi::DevInfoTypes type,
   return ErrnoToRsmiStatus(ret);
 }
 
-rsmi_status_t
-GetDevBinaryBlob(amd::smi::DevInfoTypes type,
-  uint32_t dv_ind, std::size_t b_size, void* p_binary_data) {
+rsmi_status_t GetDevBinaryBlob(amd::smi::DevInfoTypes type, uint32_t dv_ind, std::size_t b_size,
+                               void *p_binary_data) {
   assert(p_binary_data != nullptr);
   if (p_binary_data == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -325,20 +317,32 @@ GetDevBinaryBlob(amd::smi::DevInfoTypes type,
 
 rsmi_status_t ErrnoToRsmiStatus(int err) {
   switch (err) {
-    case 0:       return RSMI_STATUS_SUCCESS;
-    case ESRCH:   return RSMI_STATUS_NOT_FOUND;
-    case EACCES:  return RSMI_STATUS_PERMISSION;
+    case 0:
+      return RSMI_STATUS_SUCCESS;
+    case ESRCH:
+      return RSMI_STATUS_NOT_FOUND;
+    case EACCES:
+      return RSMI_STATUS_PERMISSION;
     case EPERM:
-    case ENOENT:  return RSMI_STATUS_NOT_SUPPORTED;
+    case ENOENT:
+      return RSMI_STATUS_NOT_SUPPORTED;
     case EBADF:
-    case EISDIR:  return RSMI_STATUS_FILE_ERROR;
-    case EINTR:   return RSMI_STATUS_INTERRUPT;
-    case EIO:     return RSMI_STATUS_UNEXPECTED_SIZE;
-    case ENXIO:   return RSMI_STATUS_UNEXPECTED_DATA;
-    case EBUSY:   return RSMI_STATUS_BUSY;
-    case EINVAL:  return RSMI_STATUS_INVALID_ARGS;
-    case ENOTDIR: return RSMI_STATUS_DIRECTORY_NOT_FOUND;
-    default:     return RSMI_STATUS_UNKNOWN_ERROR;
+    case EISDIR:
+      return RSMI_STATUS_FILE_ERROR;
+    case EINTR:
+      return RSMI_STATUS_INTERRUPT;
+    case EIO:
+      return RSMI_STATUS_UNEXPECTED_SIZE;
+    case ENXIO:
+      return RSMI_STATUS_UNEXPECTED_DATA;
+    case EBUSY:
+      return RSMI_STATUS_BUSY;
+    case EINVAL:
+      return RSMI_STATUS_INVALID_ARGS;
+    case ENOTDIR:
+      return RSMI_STATUS_DIRECTORY_NOT_FOUND;
+    default:
+      return RSMI_STATUS_UNKNOWN_ERROR;
   }
 }
 
@@ -411,12 +415,10 @@ std::string removeWhitespace(const std::string &s) {
 
 // Given original string and string to remove (removeMe)
 // Return will provide the resulting modified string with the removed string(s)
-std::string removeString(const std::string origStr,
-                         const std::string &removeMe) {
+std::string removeString(const std::string origStr, const std::string &removeMe) {
   std::string modifiedStr = origStr;
   std::string::size_type l = removeMe.length();
-  for (std::string::size_type i = modifiedStr.find(removeMe);
-       i != std::string::npos;
+  for (std::string::size_type i = modifiedStr.find(removeMe); i != std::string::npos;
        i = modifiedStr.find(removeMe)) {
     modifiedStr.erase(i, l);
   }
@@ -459,15 +461,12 @@ std::pair<bool, std::string> executeCommand(std::string command, bool stdOut) {
 // originalString - string to search for substring
 // substring - string looking to find
 // displayComparisons = defaults to false, set to true to see debug prints
-bool containsString(std::string originalString, std::string substring,
-                  bool displayComparisons) {
+bool containsString(std::string originalString, std::string substring, bool displayComparisons) {
   std::ostringstream ss;
   bool found = originalString.find(substring) != std::string::npos;
   if (displayComparisons) {
-    ss << __PRETTY_FUNCTION__
-       << " | originalString: " << originalString
-       << " | substring: " << substring
-       << " | found: " << (found ? "True": "False");
+    ss << __PRETTY_FUNCTION__ << " | originalString: " << originalString
+       << " | substring: " << substring << " | found: " << (found ? "True" : "False");
     LOG_TRACE(ss);
   }
   return found;
@@ -491,16 +490,15 @@ bool containsString(std::string originalString, std::string substring,
 // parameterName - name of parameter stored
 // stateName - state at which the stored value captures
 // storageData - string value of data to be stored
-rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName,
-                           std::string stateName, std::string storageData) {
+rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName, std::string stateName,
+                           std::string storageData) {
   // Required tags needed to store our files
   // Files name format:
   // <app prefix>_<stateName>_<parameterName>_<device id>
-  std::string fullFileName = kTmpFilePrefix + stateName + "_" +
-                             parameterName + "_" + std::to_string(dv_ind);
+  std::string fullFileName =
+      kTmpFilePrefix + stateName + "_" + parameterName + "_" + std::to_string(dv_ind);
   bool doesFileExist;
-  std::tie(doesFileExist, std::ignore) =
-        readTmpFile(dv_ind, stateName, parameterName);
+  std::tie(doesFileExist, std::ignore) = readTmpFile(dv_ind, stateName, parameterName);
   if (doesFileExist) {
     // do not store, if file already exists
     return RSMI_STATUS_SUCCESS;
@@ -513,7 +511,7 @@ rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName,
     return RSMI_STATUS_FILE_ERROR;
   }
 
-  chmod(fileName, S_IRUSR|S_IRGRP|S_IROTH);
+  chmod(fileName, S_IRUSR | S_IRGRP | S_IROTH);
   ssize_t rc_write = write(fd, storageData.c_str(), storageData.size());
   close(fd);
   if (rc_write == -1) {
@@ -588,8 +586,7 @@ void displayAppTmpFilesContent() {
                 << "; Contained content: " << out << std::endl;
     }
   } else {
-    std::cout << __PRETTY_FUNCTION__ << " | No temporary files were found"
-              << std::endl;
+    std::cout << __PRETTY_FUNCTION__ << " | No temporary files were found" << std::endl;
   }
 }
 
@@ -598,7 +595,7 @@ std::string debugVectorContent(std::vector<std::string> v) {
   std::ostringstream ss;
   ss << "Vector = {";
   if (!v.empty()) {
-    for (auto it=v.begin(); it < v.end(); it++) {
+    for (auto it = v.begin(); it < v.end(); it++) {
       ss << *it;
       auto temp_it = it;
       if (++temp_it != v.end()) {
@@ -616,7 +613,7 @@ std::string displayAllDevicePaths(std::vector<std::shared_ptr<Device>> v) {
   std::ostringstream ss;
   ss << "Vector = {";
   if (!v.empty()) {
-    for (auto it=v.begin(); it < v.end(); it++) {
+    for (auto it = v.begin(); it < v.end(); it++) {
       ss << (*it)->path();
       auto temp_it = it;
       if (++temp_it != v.end()) {
@@ -640,16 +637,15 @@ std::string displayAllDevicePaths(std::vector<std::shared_ptr<Device>> v) {
 // boolean - if temporary file exists
 // string - content of temporary file, if it exists (otherwise, an empty
 // string is returned)
-std::tuple<bool, std::string> readTmpFile(uint32_t dv_ind,
-                                          std::string stateName,
+std::tuple<bool, std::string> readTmpFile(uint32_t dv_ind, std::string stateName,
                                           std::string parameterName) {
   bool fileExists = false;
-  std::string tmpFileName = kTmpFilePrefix + stateName + "_" +parameterName +
-                            "_" + std::to_string(dv_ind);
+  std::string tmpFileName =
+      kTmpFilePrefix + stateName + "_" + parameterName + "_" + std::to_string(dv_ind);
   std::string fileContent;
   std::vector<std::string> tmpFiles = getListOfAppTmpFiles();
   if (!tmpFiles.empty()) {
-    for (auto &x: tmpFiles) {
+    for (auto &x : tmpFiles) {
       if (containsString(x, tmpFileName)) {
         fileContent = readFile(x);
         fileExists = true;
@@ -696,10 +692,10 @@ std::string getRSMIStatusString(rsmi_status_t ret, bool fullStatus) {
 // string rocm_build_type = Release or debug
 // string rocm_build_date = Creation date of library
 // string dev_gfx_versions = GPU target graphics version
-std::tuple<bool, std::string, std::string, std::string, std::string,
-           std::string, std::string, std::string, std::string,
-           std::string, std::string, std::string, std::string, std::string>
-           getSystemDetails(void) {
+std::tuple<bool, std::string, std::string, std::string, std::string, std::string, std::string,
+           std::string, std::string, std::string, std::string, std::string, std::string,
+           std::string>
+getSystemDetails(void) {
   struct utsname buf;
   bool errorDetected = false;
   std::string temp_data;
@@ -725,16 +721,16 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
     release = buf.release;
     version = buf.version;
     machine = buf.machine;
-    #ifdef _GNU_SOURCE
-      domainName = buf.domainname;
-    #endif
+#ifdef _GNU_SOURCE
+    domainName = buf.domainname;
+#endif
   }
 
   std::string filePath = "/etc/os-release";
   bool fileExists = FileExists(filePath.c_str());
   if (fileExists) {
     std::vector<std::string> fileContent = readEntireFile(filePath);
-    for (auto &line: fileContent) {
+    for (auto &line : fileContent) {
       if (line.find("PRETTY_NAME=") != std::string::npos) {
         temp_data = removeString(line, "PRETTY_NAME=");
         temp_data = removeString(temp_data, "\"");
@@ -744,11 +740,13 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
     }
   }
   if (isSystemBigEndian()) {
-    endianness = "Big Endian, multi-bit symbols encoded as"
-                 " big endian (MSB first)";
+    endianness =
+        "Big Endian, multi-bit symbols encoded as"
+        " big endian (MSB first)";
   } else {
-    endianness = "Little Endian, multi-bit symbols encoded as"
-                 " little endian (LSB first)";
+    endianness =
+        "Little Endian, multi-bit symbols encoded as"
+        " little endian (LSB first)";
   }
   rocm_build_type = getBuildType();
   rocm_lib_path = getMyLibPath();
@@ -762,9 +760,8 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
       devGraphicsVersions.pop();
     }
   }
-  return std::make_tuple(errorDetected, sysname, nodename, release,
-                         version, machine, domainName, os_distribution,
-                         endianness, rocm_build_type, rocm_lib_path,
+  return std::make_tuple(errorDetected, sysname, nodename, release, version, machine, domainName,
+                         os_distribution, endianness, rocm_build_type, rocm_lib_path,
                          rocm_build_date, rocm_env_variables, dev_gfx_versions);
 }
 
@@ -773,12 +770,11 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
 void logSystemDetails(void) {
   std::ostringstream ss;
   bool errorDetected;
-  std::string sysname, node, release, version, machine, domain, distName,
-              endianness, rocm_build_type, lib_path, build_date, rocm_env_vars,
-              dev_gfx_versions;
-  std::tie(errorDetected, sysname, node, release, version, machine, domain,
-           distName, endianness, rocm_build_type, lib_path, build_date,
-           rocm_env_vars, dev_gfx_versions) = getSystemDetails();
+  std::string sysname, node, release, version, machine, domain, distName, endianness,
+      rocm_build_type, lib_path, build_date, rocm_env_vars, dev_gfx_versions;
+  std::tie(errorDetected, sysname, node, release, version, machine, domain, distName, endianness,
+           rocm_build_type, lib_path, build_date, rocm_env_vars, dev_gfx_versions) =
+      getSystemDetails();
   if (errorDetected == false) {
     ss << "====== Gathered system details ============\n"
        << "SYSTEM NAME: " << sysname << "\n"
@@ -792,8 +788,8 @@ void logSystemDetails(void) {
        << "ROCM BUILD TYPE: " << rocm_build_type << "\n"
        << "ROCM-SMI-LIB PATH: " << lib_path << "\n"
        << "ROCM-SMI-LIB BUILD DATE: " << build_date << "\n"
-       << "ROCM ENV VARIABLES: " << rocm_env_vars
-       << "AMD GFX VERSIONS: " << dev_gfx_versions << "\n";
+       << "ROCM ENV VARIABLES: " << rocm_env_vars << "AMD GFX VERSIONS: " << dev_gfx_versions
+       << "\n";
     LOG_INFO(ss);
   } else {
     ss << "====== Gathered system details ============\n"
@@ -808,8 +804,7 @@ void logSystemDetails(void) {
 //         addr:    the address to start dumping from.
 //         len:     the number of bytes to dump.
 //         bytesPerLine: number of bytes on each output line.
-void logHexDump(
-  const char *desc, const void *addr, const size_t len, size_t bytesPerLine) {
+void logHexDump(const char *desc, const void *addr, const size_t len, size_t bytesPerLine) {
   // UNCOMMENT: printf lines if you want to see directly to stdout
   std::ostringstream ss;
   // Silently ignore per-line values.
@@ -817,8 +812,8 @@ void logHexDump(
 
   size_t i;
   unsigned char buff[bytesPerLine + 1];
-  const unsigned char *pc           // ptr to data (char, 1 byte sized data)
-                          = (const unsigned char *) addr;
+  const unsigned char *pc  // ptr to data (char, 1 byte sized data)
+      = (const unsigned char *)addr;
 
   // Output description if given.
   // if (desc != NULL) printf("%s:\n", desc);
@@ -833,11 +828,13 @@ void logHexDump(
   }
   std::string endianness = "<undefined>";
   if (isSystemBigEndian()) {
-    endianness = "** System is Big Endian, multi-bit symbols encoded as"
-                 " big endian (MSB first) **";
+    endianness =
+        "** System is Big Endian, multi-bit symbols encoded as"
+        " big endian (MSB first) **";
   } else {
-    endianness = "** System is Little Endian, multi-bit symbols encoded as"
-                 " little endian (LSB first) **";
+    endianness =
+        "** System is Little Endian, multi-bit symbols encoded as"
+        " little endian (LSB first) **";
   }
   ss << "\t" << endianness << "\n";
 
@@ -856,12 +853,11 @@ void logHexDump(
     // Now the hex code for the specific character.
     // printf(" %02x", pc[i]);
 
-    ss << " " << std::setw(2) << std::setfill('0') << std::hex
-       << static_cast<unsigned>(pc[i]);
+    ss << " " << std::setw(2) << std::setfill('0') << std::hex << static_cast<unsigned>(pc[i]);
 
     // And buffer a printable ASCII character for later.
     // x20 = 32 || x7e = 126 (ascii table range)
-    if ((pc[i] < 0x20) || (pc[i] > 0x7e)) { // isprint() may be better.
+    if ((pc[i] < 0x20) || (pc[i] > 0x7e)) {  // isprint() may be better.
       buff[i % bytesPerLine] = '.';
     } else {
       buff[i % bytesPerLine] = pc[i];
@@ -891,8 +887,7 @@ bool isSystemBigEndian() {
   return isBigEndian;
 }
 
-rsmi_status_t getBDFWithDomain(uint64_t bdf_id, std::string& bfd_str)
-{
+rsmi_status_t getBDFWithDomain(uint64_t bdf_id, std::string &bfd_str) {
   auto result = rsmi_status_t::RSMI_STATUS_SUCCESS;
   auto domain_id = static_cast<uint32_t>(bdf_id >> 32);
   auto bus_id = static_cast<uint8_t>((bdf_id & 0x0000FF00) >> 8);
@@ -947,12 +942,11 @@ std::string getMyLibPath(void) {
 std::string getFileCreationDate(std::string path) {
   struct stat t_stat;
   stat(path.c_str(), &t_stat);
-  struct tm *timeinfo = localtime(&t_stat.st_ctime); // NOLINT
-  return removeNewLines(std::string(asctime(timeinfo))); // NOLINT
+  struct tm *timeinfo = localtime(&t_stat.st_ctime);      // NOLINT
+  return removeNewLines(std::string(asctime(timeinfo)));  // NOLINT
 }
 
-rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str)
-{
+rsmi_status_t getBDFString(uint64_t bdf_id, std::string &bfd_str) {
   auto result = rsmi_status_t::RSMI_STATUS_SUCCESS;
   auto bus_id = static_cast<uint8_t>((bdf_id & 0x0000FF00) >> 8);
   auto dev_id = static_cast<uint8_t>((bdf_id & 0x000000F8) >> 3);
@@ -1004,92 +998,52 @@ int subDirectoryCountInPath(const std::string path) {
 
 std::string monitor_type_string(MonitorTypes type) {
   const std::map<MonitorTypes, std::string> monitorTypesToString{
-      {kMonName,
-       "MonitorTypes::kMonName"},
-      {kMonTemp,
-       "MonitorTypes::kMonTemp"},
-      {kMonFanSpeed,
-       "MonitorTypes::kMonFanSpeed"},
-      {kMonMaxFanSpeed,
-      "MonitorTypes::kMonMaxFanSpeed"},
-      {kMonFanRPMs,
-      "MonitorTypes::kMonFanRPMs"},
-      {kMonFanCntrlEnable,
-      "MonitorTypes::kMonFanCntrlEnable"},
-      {kMonPowerCap,
-      "MonitorTypes::kMonPowerCap"},
-      {kMonPowerCapDefault,
-      "MonitorTypes::kMonPowerCapDefault"},
-      {kMonPowerCapMax,
-      "MonitorTypes::kMonPowerCapMax"},
-      {kMonPowerCapMin,
-      "MonitorTypes::kMonPowerCapMin"},
-      {kMonPowerAve,
-      "MonitorTypes::kMonPowerAve"},
-      {kMonPowerInput,
-      "MonitorTypes::kMonPowerInput"},
-      {kMonPowerLabel,
-      "MonitorTypes::kMonPowerLabel"},
-      {kMonTempMax,
-      "MonitorTypes::kMonTempMax"},
-      {kMonTempMin,
-      "MonitorTypes::kMonTempMin"},
-      {kMonTempMaxHyst,
-      "MonitorTypes::kMonTempMaxHyst"},
-      {kMonTempMinHyst,
-      "MonitorTypes::kMonTempMinHyst"},
-      {kMonTempCritical,
-      "MonitorTypes::kMonTempCritical"},
-      {kMonTempCriticalHyst,
-      "MonitorTypes::kMonTempCriticalHyst"},
-      {kMonTempEmergency,
-      "MonitorTypes::kMonTempEmergency"},
-      {kMonTempEmergencyHyst,
-       "MonitorTypes::kMonTempEmergencyHyst"},
-      {kMonTempCritMin,
-      "MonitorTypes::kMonTempCritMin"},
-      {kMonTempCritMinHyst,
-      "MonitorTypes::kMonTempCritMinHyst"},
-      {kMonTempOffset,
-      "MonitorTypes::kMonTempOffset"},
-      {kMonTempLowest,
-      "MonitorTypes::kMonTempLowest"},
-      {kMonTempHighest,
-      "MonitorTypes::kMonTempHighest"},
-      {kMonTempLabel,
-      "MonitorTypes::kMonTempLabel"},
-      {kMonVolt,
-      "MonitorTypes::kMonVolt"},
-      {kMonVoltMax,
-      "MonitorTypes::kMonVoltMax"},
-      {kMonVoltMinCrit,
-      "MonitorTypes::kMonVoltMinCrit"},
-      {kMonVoltMin,
-      "MonitorTypes::kMonVoltMin"},
-      {kMonVoltMaxCrit,
-      "MonitorTypes::kMonVoltMaxCrit"},
-      {kMonVoltAverage,
-      "MonitorTypes::kMonVoltAverage"},
-      {kMonVoltLowest,
-      "MonitorTypes::kMonVoltLowest"},
-      {kMonVoltHighest,
-      "MonitorTypes::kMonVoltHighest"},
-      {kMonVoltLabel,
-      "MonitorTypes::kMonVoltLabel"},
-      {kMonInvalid,
-      "MonitorTypes::kMonInvalid"},
+      {kMonName, "MonitorTypes::kMonName"},
+      {kMonTemp, "MonitorTypes::kMonTemp"},
+      {kMonFanSpeed, "MonitorTypes::kMonFanSpeed"},
+      {kMonMaxFanSpeed, "MonitorTypes::kMonMaxFanSpeed"},
+      {kMonFanRPMs, "MonitorTypes::kMonFanRPMs"},
+      {kMonFanCntrlEnable, "MonitorTypes::kMonFanCntrlEnable"},
+      {kMonPowerCap, "MonitorTypes::kMonPowerCap"},
+      {kMonPowerCapDefault, "MonitorTypes::kMonPowerCapDefault"},
+      {kMonPowerCapMax, "MonitorTypes::kMonPowerCapMax"},
+      {kMonPowerCapMin, "MonitorTypes::kMonPowerCapMin"},
+      {kMonPowerAve, "MonitorTypes::kMonPowerAve"},
+      {kMonPowerInput, "MonitorTypes::kMonPowerInput"},
+      {kMonPowerLabel, "MonitorTypes::kMonPowerLabel"},
+      {kMonTempMax, "MonitorTypes::kMonTempMax"},
+      {kMonTempMin, "MonitorTypes::kMonTempMin"},
+      {kMonTempMaxHyst, "MonitorTypes::kMonTempMaxHyst"},
+      {kMonTempMinHyst, "MonitorTypes::kMonTempMinHyst"},
+      {kMonTempCritical, "MonitorTypes::kMonTempCritical"},
+      {kMonTempCriticalHyst, "MonitorTypes::kMonTempCriticalHyst"},
+      {kMonTempEmergency, "MonitorTypes::kMonTempEmergency"},
+      {kMonTempEmergencyHyst, "MonitorTypes::kMonTempEmergencyHyst"},
+      {kMonTempCritMin, "MonitorTypes::kMonTempCritMin"},
+      {kMonTempCritMinHyst, "MonitorTypes::kMonTempCritMinHyst"},
+      {kMonTempOffset, "MonitorTypes::kMonTempOffset"},
+      {kMonTempLowest, "MonitorTypes::kMonTempLowest"},
+      {kMonTempHighest, "MonitorTypes::kMonTempHighest"},
+      {kMonTempLabel, "MonitorTypes::kMonTempLabel"},
+      {kMonVolt, "MonitorTypes::kMonVolt"},
+      {kMonVoltMax, "MonitorTypes::kMonVoltMax"},
+      {kMonVoltMinCrit, "MonitorTypes::kMonVoltMinCrit"},
+      {kMonVoltMin, "MonitorTypes::kMonVoltMin"},
+      {kMonVoltMaxCrit, "MonitorTypes::kMonVoltMaxCrit"},
+      {kMonVoltAverage, "MonitorTypes::kMonVoltAverage"},
+      {kMonVoltLowest, "MonitorTypes::kMonVoltLowest"},
+      {kMonVoltHighest, "MonitorTypes::kMonVoltHighest"},
+      {kMonVoltLabel, "MonitorTypes::kMonVoltLabel"},
+      {kMonInvalid, "MonitorTypes::kMonInvalid"},
   };
   return monitorTypesToString.at(type);
 }
 
 std::string power_type_string(RSMI_POWER_TYPE type) {
   const std::map<RSMI_POWER_TYPE, std::string> powerTypesToString{
-      {RSMI_AVERAGE_POWER,
-      "RSMI_POWER_TYPE::RSMI_AVERAGE_POWER"},
-      {RSMI_CURRENT_POWER,
-      "RSMI_POWER_TYPE::RSMI_CURRENT_POWER"},
-      {RSMI_INVALID_POWER,
-      "RSMI_POWER_TYPE::RSMI_INVALID_POWER"},
+      {RSMI_AVERAGE_POWER, "RSMI_POWER_TYPE::RSMI_AVERAGE_POWER"},
+      {RSMI_CURRENT_POWER, "RSMI_POWER_TYPE::RSMI_CURRENT_POWER"},
+      {RSMI_INVALID_POWER, "RSMI_POWER_TYPE::RSMI_INVALID_POWER"},
   };
   return powerTypesToString.at(type);
 }
@@ -1107,7 +1061,7 @@ std::string splitString(std::string str, char delim) {
     tokens.push_back(token);
     return token;  // return 1st match
   }
-    return "";
+  return "";
 }
 
 static std::string pt_rng_Mhz(std::string title, rsmi_range *r) {
@@ -1118,8 +1072,7 @@ static std::string pt_rng_Mhz(std::string title, rsmi_range *r) {
   }
 
   ss << title;
-  ss << r->lower_bound/1000000 << " to "
-     << r->upper_bound/1000000 << " MHz" << "\n";
+  ss << r->lower_bound / 1000000 << " to " << r->upper_bound / 1000000 << " MHz" << "\n";
   return ss.str();
 }
 
@@ -1131,8 +1084,7 @@ static std::string pt_rng_mV(std::string title, rsmi_range *r) {
   }
 
   ss << title;
-  ss << r->lower_bound << " to " << r->upper_bound
-     << " mV" << "\n";
+  ss << r->lower_bound << " to " << r->upper_bound << " mV" << "\n";
   return ss.str();
 }
 
@@ -1145,10 +1097,8 @@ std::string print_rsmi_od_volt_freq_data_t(rsmi_od_volt_freq_data_t *odv) {
 
   ss << pt_rng_Mhz("\t**Current SCLK frequency range: ", &odv->curr_sclk_range);
   ss << pt_rng_Mhz("\t**Current MCLK frequency range: ", &odv->curr_mclk_range);
-  ss << pt_rng_Mhz("\t**Min/Max Possible SCLK frequency range: ",
-                   &odv->sclk_freq_limits);
-  ss << pt_rng_Mhz("\t**Min/Max Possible MCLK frequency range: ",
-                   &odv->mclk_freq_limits);
+  ss << pt_rng_Mhz("\t**Min/Max Possible SCLK frequency range: ", &odv->sclk_freq_limits);
+  ss << pt_rng_Mhz("\t**Min/Max Possible MCLK frequency range: ", &odv->mclk_freq_limits);
 
   ss << "\t**Current Freq/Volt. curve: " << "\n";
   ss << "\t\t N/A" << "\n";
@@ -1186,8 +1136,8 @@ bool is_sudo_user() {
   if ((myUID == myPrivledges) && (myPrivledges == 0)) {
     isRunningWithSudo = true;
   }
-  ss << __PRETTY_FUNCTION__ << (isRunningWithSudo ? " | running as sudoer" :
-     " | NOT running as sudoer");
+  ss << __PRETTY_FUNCTION__
+     << (isRunningWithSudo ? " | running as sudoer" : " | NOT running as sudoer");
   LOG_DEBUG(ss);
   return isRunningWithSudo;
 }
@@ -1212,14 +1162,12 @@ rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind, std::string *gfx_vers
 
     ss << std::hex << rev;
     std::string revision = ss.str();
-    *gfx_version = "gfx" + std::to_string((major + minor)/10) + revision;
+    *gfx_version = "gfx" + std::to_string((major + minor) / 10) + revision;
 
     ss.str("");
-    ss << __PRETTY_FUNCTION__
-    << " | " << std::dec << "kfd_target_version = " << orig_target_version
-    << "; major = " << major << "; minor = " << minor << "; rev = "
-    << rev << "\nReporting rsmi_get_gfx_target_version = " << *gfx_version
-    << "\n";
+    ss << __PRETTY_FUNCTION__ << " | " << std::dec << "kfd_target_version = " << orig_target_version
+       << "; major = " << major << "; minor = " << minor << "; rev = " << rev
+       << "\nReporting rsmi_get_gfx_target_version = " << *gfx_version << "\n";
     LOG_INFO(ss);
     return RSMI_STATUS_SUCCESS;
   } else {
@@ -1228,14 +1176,13 @@ rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind, std::string *gfx_vers
   }
 }
 
-rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t* num_computes)
-{
+rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t *num_computes) {
   GET_DEV_AND_KFDNODE_FROM_INDX
 
   auto tmp_simd_per_cu = uint64_t(0);
   auto tmp_simd_count = uint64_t(0);
   auto ret_simd_per_cu = kfd_node->get_simd_per_cu(&tmp_simd_per_cu);
-  auto ret_simd_count  = kfd_node->get_simd_count(&tmp_simd_count);
+  auto ret_simd_count = kfd_node->get_simd_count(&tmp_simd_count);
 
   if (((ret_simd_per_cu != 0) || (ret_simd_count != 0)) ||
       ((tmp_simd_per_cu == 0) || (tmp_simd_count == 0))) {
@@ -1245,7 +1192,6 @@ rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t* num_com
   *num_computes = static_cast<uint32_t>((tmp_simd_count / tmp_simd_per_cu));
   return rsmi_status_t::RSMI_STATUS_SUCCESS;
 }
-
 
 std::queue<std::string> getAllDeviceGfxVers() {
   uint32_t num_monitor_devs = 0;
@@ -1262,7 +1208,7 @@ std::queue<std::string> getAllDeviceGfxVers() {
   }
 
   for (uint32_t i = 0; i < num_monitor_devs; ++i) {
-    ret = amd::smi::rsmi_get_gfx_target_version(i , &dev_gfx_ver);
+    ret = amd::smi::rsmi_get_gfx_target_version(i, &dev_gfx_ver);
     response = "Device[" + std::to_string(i) + "]: ";
     if (ret != RSMI_STATUS_SUCCESS) {
       deviceGfxVersions.push(response + getRSMIStatusString(ret, false));
@@ -1284,19 +1230,16 @@ void system_wait(int milli_seconds) {
   // Attempting to speed up processing time
   bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
   if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | "
-       << "** Waiting for " << std::dec << waitTime
-       << " us (" << waitTime/1000 << " milli-seconds) **";
+    ss << __PRETTY_FUNCTION__ << " | " << "** Waiting for " << std::dec << waitTime << " us ("
+       << waitTime / 1000 << " milli-seconds) **";
     LOG_DEBUG(ss);
   }
 
   usleep(waitTime);
   auto stop = std::chrono::high_resolution_clock::now();
-  auto duration =
-      std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | "
-       << "** Waiting took " << duration.count() / 1000
+    ss << __PRETTY_FUNCTION__ << " | " << "** Waiting took " << duration.count() / 1000
        << " milli-seconds **";
     LOG_DEBUG(ss);
   }
@@ -1310,22 +1253,22 @@ uint64_t get_multiplier_from_char(char units_char) {
   uint32_t multiplier = 0;
 
   switch (units_char) {
-    case 'G':   // GT or GHz
+    case 'G':  // GT or GHz
       multiplier = 1000000000;
       break;
 
-    case 'M':   // MT or MHz
+    case 'M':  // MT or MHz
       multiplier = 1000000;
       break;
 
-    case 'K':   // KT or KHz
-    case 'V':   // default unit for voltage is mV
+    case 'K':  // KT or KHz
+    case 'V':  // default unit for voltage is mV
       multiplier = 1000;
       break;
 
-    case 'T':   // Transactions
-    case 'H':   // Hertz
-    case 'm':   // mV (we will make mV the default unit for voltage)
+    case 'T':  // Transactions
+    case 'H':  // Hertz
+    case 'm':  // mV (we will make mV the default unit for voltage)
       multiplier = 1;
       break;
 
@@ -1336,4 +1279,4 @@ uint64_t get_multiplier_from_char(char units_char) {
   return multiplier;
 }
 
-} // namespace amd::smi
+}  // namespace amd::smi

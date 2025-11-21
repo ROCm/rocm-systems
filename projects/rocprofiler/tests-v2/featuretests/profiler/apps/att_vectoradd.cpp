@@ -38,14 +38,12 @@ THE SOFTWARE.
 #define THREADS_PER_BLOCK_Z 1
 
 __global__ void vectoradd_att(float* __restrict__ a, const float* __restrict__ b,
-                                const float* __restrict__ c, int width, int height)
-  {
+                              const float* __restrict__ c, int width, int height) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
 
   int i = y * width + x;
-  if (i < width * height)
-    a[i] = b[i] + c[i];
+  if (i < width * height) a[i] = b[i] + c[i];
 }
 
 int main() {
@@ -77,10 +75,9 @@ int main() {
   hipMemcpy(deviceB, hostB, NUM * sizeof(float), hipMemcpyHostToDevice);
   hipMemcpy(deviceC, hostC, NUM * sizeof(float), hipMemcpyHostToDevice);
 
-  hipLaunchKernelGGL(vectoradd_att,
-                    dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
-                    dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
-                    0, 0, deviceA, deviceB, deviceC, WIDTH, HEIGHT);
+  hipLaunchKernelGGL(vectoradd_att, dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
+                     dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, deviceA, deviceB,
+                     deviceC, WIDTH, HEIGHT);
 
   hipMemcpy(hostA, deviceA, NUM * sizeof(float), hipMemcpyDeviceToHost);
 

@@ -48,8 +48,7 @@ namespace rocr {
 namespace core {
 
 Driver::Driver(DriverType kernel_driver_type, std::string devnode_name)
-    : kernel_driver_type_(std::move(kernel_driver_type)),
-      devnode_name_(std::move(devnode_name)) {}
+    : kernel_driver_type_(std::move(kernel_driver_type)), devnode_name_(std::move(devnode_name)) {}
 
-} // namespace core
-} // namespace rocr
+}  // namespace core
+}  // namespace rocr

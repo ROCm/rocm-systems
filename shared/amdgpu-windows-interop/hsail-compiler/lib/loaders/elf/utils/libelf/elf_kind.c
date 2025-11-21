@@ -32,13 +32,10 @@
 
 LIBELF_VCSID("$Id: elf_kind.c 189 2008-07-20 10:38:08Z jkoshy $");
 
-Elf_Kind
-elf_kind(Elf *e)
-{
-	if (e == NULL)
-		return (ELF_K_NONE);
-	if (e->e_kind == ELF_K_AR ||
-	    e->e_kind == ELF_K_ELF)
-		return (e->e_kind);
-	return (ELF_K_NONE);
+Elf_Kind elf_kind(Elf *e) {
+  if (e == NULL)
+    return (ELF_K_NONE);
+  if (e->e_kind == ELF_K_AR || e->e_kind == ELF_K_ELF)
+    return (e->e_kind);
+  return (ELF_K_NONE);
 }

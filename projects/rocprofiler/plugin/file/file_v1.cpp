@@ -336,7 +336,9 @@ class file_plugin_t {
     }
     if (operation_name_c) *output_file << ",\"" << operation_name_c << "\"";
     if (tracer_record.name && tracer_record.domain != ACTIVITY_DOMAIN_ROCTX) {
-      *output_file << ",\"" << rocprofiler::truncate_name(rocprofiler::cxx_demangle(tracer_record.name)) << "\"";
+      *output_file << ",\""
+                   << rocprofiler::truncate_name(rocprofiler::cxx_demangle(tracer_record.name))
+                   << "\"";
     } else if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS) {
       *output_file << ",";
     }
@@ -402,8 +404,7 @@ class file_plugin_t {
         }
       }
     }
-    *output_file << ",0,"
-                 << std::to_string(profiler_record->timestamps.begin.value) << ","
+    *output_file << ",0," << std::to_string(profiler_record->timestamps.begin.value) << ","
                  << std::to_string(profiler_record->timestamps.end.value) << ",0";
     *output_file << '\n';
     if (kernel_name_c) {

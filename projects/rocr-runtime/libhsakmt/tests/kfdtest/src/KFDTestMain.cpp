@@ -31,22 +31,22 @@
 #define KFD_TEST_DEFAULT_TIMEOUT 60000
 #define MAX_GPU 64
 
-std::ostream& operator << (std::ostream& out, TESTPROFILE profile) {
-    switch (profile) {
+std::ostream& operator<<(std::ostream& out, TESTPROFILE profile) {
+  switch (profile) {
     case TESTPROFILE_DEV:
-        out << "Developer Test";
-        break;
+      out << "Developer Test";
+      break;
     case TESTPROFILE_PROMO:
-        out << "Promotion Test";
-        break;
+      out << "Promotion Test";
+      break;
     case TESTPROFILE_RUNALL:
-        out << "Full Test";
-        break;
+      out << "Full Test";
+      break;
     default:
-        out << "INVALID";
-    }
+      out << "INVALID";
+  }
 
-    return out;
+  return out;
 }
 
 unsigned int g_TestGPUsNum = 0;
@@ -61,71 +61,70 @@ unsigned int g_SleepTime;
 unsigned int g_TestGPUFamilyId;
 std::string g_ConcurrentNodes = "";
 std::vector<int> g_SelectedNodes;
-class KFDBaseComponentTest *g_baseTest;
+class KFDBaseComponentTest* g_baseTest;
 
-GTEST_API_ int main(int argc, char **argv) {
-    // Default values for run parameters
-    g_TestRunProfile = TESTPROFILE_RUNALL;
-    g_TestENVCaps = ENVCAPS_NOADDEDCAPS | ENVCAPS_64BITLINUX;
-    g_TestTimeOut = KFD_TEST_DEFAULT_TIMEOUT;
+GTEST_API_ int main(int argc, char** argv) {
+  // Default values for run parameters
+  g_TestRunProfile = TESTPROFILE_RUNALL;
+  g_TestENVCaps = ENVCAPS_NOADDEDCAPS | ENVCAPS_64BITLINUX;
+  g_TestTimeOut = KFD_TEST_DEFAULT_TIMEOUT;
 
-    testing::InitGoogleTest(&argc, argv);
+  testing::InitGoogleTest(&argc, argv);
 
-    CommandLineArguments args;
+  CommandLineArguments args;
 
-    bool success = GetCommandLineArguments(argc, argv, args);
+  bool success = GetCommandLineArguments(argc, argv, args);
 
-    if (success) {
-        int r;
-        if ((GetHwCapabilityHWS() || args.HwsEnabled == HWCAP__FORCE_ENABLED) &&
-                (args.HwsEnabled != HWCAP__FORCE_DISABLED))
-            g_TestENVCaps |= ENVCAPS_HWSCHEDULING;
+  if (success) {
+    int r;
+    if ((GetHwCapabilityHWS() || args.HwsEnabled == HWCAP__FORCE_ENABLED) &&
+        (args.HwsEnabled != HWCAP__FORCE_DISABLED))
+      g_TestENVCaps |= ENVCAPS_HWSCHEDULING;
 
-        g_TestRunProfile = args.TestProfile;
-        g_IsChildProcess = args.ChildProcess;
+    g_TestRunProfile = args.TestProfile;
+    g_IsChildProcess = args.ChildProcess;
 
-        if ( args.TimeOut > 0 )
-            g_TestTimeOut = args.TimeOut;
+    if (args.TimeOut > 0) g_TestTimeOut = args.TimeOut;
 
-        g_SleepTime = 0x00;
-        if (args.SleepTime > 0) {
-            g_SleepTime = args.SleepTime;
-        }
-
-        g_TestDstNodeId = args.DstNodeId;
-
-        // If --node is not specified, then args.NodeId == -1
-        if (!args.ConcurrentNodes.empty()) {
-            g_ConcurrentNodes = args.ConcurrentNodes;
-        } else if (args.TestNodeNum > 0) {
-            g_TestGPUsNum = args.TestNodeNum;
-        } else {
-            g_TestNodeId = args.NodeId;
-            g_TestGPUsNum = 1;
-        }
-        
-        g_IsEmuMode = CheckEmuModeEnabled();
-
-        LOG() << "Profile: " << (TESTPROFILE)g_TestRunProfile << std::endl;
-        LOG() << "HW capabilities: 0x" << std::hex << g_TestENVCaps << std::endl;
-        if (g_IsEmuMode)
-        {
-            LOG() << "Emulation Mode Enabled" << std::endl;
-        }
-
-        if (g_SleepTime > 0) {
-            LOG() << "Sleep time in seconds as specified by user: " << std::dec << g_SleepTime << std::endl;
-        }
-
-        /* init LLVM one time*/
-        Init_LLVM();
-
-        r = RUN_ALL_TESTS();
-
-        /* shutdown LLVM after tests finish */
-        Shutdown_LLVM();
-
-        LOG() << "kfdtest finished with return code: " << r << std::endl;
-        return r;
+    g_SleepTime = 0x00;
+    if (args.SleepTime > 0) {
+      g_SleepTime = args.SleepTime;
     }
+
+    g_TestDstNodeId = args.DstNodeId;
+
+    // If --node is not specified, then args.NodeId == -1
+    if (!args.ConcurrentNodes.empty()) {
+      g_ConcurrentNodes = args.ConcurrentNodes;
+    } else if (args.TestNodeNum > 0) {
+      g_TestGPUsNum = args.TestNodeNum;
+    } else {
+      g_TestNodeId = args.NodeId;
+      g_TestGPUsNum = 1;
+    }
+
+    g_IsEmuMode = CheckEmuModeEnabled();
+
+    LOG() << "Profile: " << (TESTPROFILE)g_TestRunProfile << std::endl;
+    LOG() << "HW capabilities: 0x" << std::hex << g_TestENVCaps << std::endl;
+    if (g_IsEmuMode) {
+      LOG() << "Emulation Mode Enabled" << std::endl;
+    }
+
+    if (g_SleepTime > 0) {
+      LOG() << "Sleep time in seconds as specified by user: " << std::dec << g_SleepTime
+            << std::endl;
+    }
+
+    /* init LLVM one time*/
+    Init_LLVM();
+
+    r = RUN_ALL_TESTS();
+
+    /* shutdown LLVM after tests finish */
+    Shutdown_LLVM();
+
+    LOG() << "kfdtest finished with return code: " << r << std::endl;
+    return r;
+  }
 }

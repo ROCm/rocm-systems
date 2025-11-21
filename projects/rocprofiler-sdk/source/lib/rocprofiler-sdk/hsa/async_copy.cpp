@@ -216,10 +216,10 @@ async_copy_data::get_buffered_record(const context_t* _ctx,
 struct active_signals
 {
     active_signals();
-    ~active_signals()                         = default;
-    active_signals(const active_signals&)     = delete;
-    active_signals(active_signals&&) noexcept = delete;
-    active_signals& operator=(const active_signals&) = delete;
+    ~active_signals()                                    = default;
+    active_signals(const active_signals&)                = delete;
+    active_signals(active_signals&&) noexcept            = delete;
+    active_signals& operator=(const active_signals&)     = delete;
     active_signals& operator=(active_signals&&) noexcept = delete;
 
     void create();          // create hsa signal
@@ -742,7 +742,8 @@ async_copy_impl(Args... args)
 }
 
 template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args>
-auto get_async_copy_impl(RetT (*)(Args...))
+auto
+get_async_copy_impl(RetT (*)(Args...))
 {
     return &async_copy_impl<TableIdx, OpIdx, Args...>;
 }

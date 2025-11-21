@@ -33,38 +33,38 @@ extern bool g_IsChildProcess;
 extern bool g_IsEmuMode;
 
 // Each test should call TEST_START with the test custom profile and HW scheduling
-enum TESTPROFILE{
-    TESTPROFILE_DEV =          0x1,
-    TESTPROFILE_PROMO =    0x2,
-    // 0x4 - 0x8000 - unused flags
-    // Can add any flag that will mark only part of the tests to run
-    TESTPROFILE_RUNALL = 0xFFFF
+enum TESTPROFILE {
+  TESTPROFILE_DEV = 0x1,
+  TESTPROFILE_PROMO = 0x2,
+  // 0x4 - 0x8000 - unused flags
+  // Can add any flag that will mark only part of the tests to run
+  TESTPROFILE_RUNALL = 0xFFFF
 };
 
-enum ENVCAPS{
-    ENVCAPS_NOADDEDCAPS    =  0x0,
-    ENVCAPS_HWSCHEDULING   =  0x1,
-    ENVCAPS_16BITPASID             =  0x2,
-    ENVCAPS_32BITLINUX              =  0x4,
-    ENVCAPS_64BITLINUX              =  0x8
-    // 0x8 - 0x8000 - unused flags
-    // Can add any flag that will mark specific hw limitation or capability
+enum ENVCAPS {
+  ENVCAPS_NOADDEDCAPS = 0x0,
+  ENVCAPS_HWSCHEDULING = 0x1,
+  ENVCAPS_16BITPASID = 0x2,
+  ENVCAPS_32BITLINUX = 0x4,
+  ENVCAPS_64BITLINUX = 0x8
+  // 0x8 - 0x8000 - unused flags
+  // Can add any flag that will mark specific hw limitation or capability
 };
 
 enum KfdFamilyId {
-    FAMILY_UNKNOWN = 0,
-    FAMILY_CI,    // Sea Islands: Hawaii (P), Maui (P), Bonaire (M)
-    FAMILY_KV,    // Fusion Kaveri: Spectre, Spooky; Fusion Kabini: Kalindi
-    FAMILY_VI,    // Volcanic Islands: Iceland (V), Tonga (M)
-    FAMILY_CZ,    // Carrizo, Nolan, Amur
-    FAMILY_AI,    // Arctic Islands
-    FAMILY_RV,    // Raven
-    FAMILY_AR,    // Arcturus
-    FAMILY_AL,    // Aldebaran
-    FAMILY_AV,    // Aqua Vanjaram
-    FAMILY_NV,    // Navi10
-    FAMILY_GFX11, // GFX11
-    FAMILY_GFX12, // GFX12
+  FAMILY_UNKNOWN = 0,
+  FAMILY_CI,     // Sea Islands: Hawaii (P), Maui (P), Bonaire (M)
+  FAMILY_KV,     // Fusion Kaveri: Spectre, Spooky; Fusion Kabini: Kalindi
+  FAMILY_VI,     // Volcanic Islands: Iceland (V), Tonga (M)
+  FAMILY_CZ,     // Carrizo, Nolan, Amur
+  FAMILY_AI,     // Arctic Islands
+  FAMILY_RV,     // Raven
+  FAMILY_AR,     // Arcturus
+  FAMILY_AL,     // Aldebaran
+  FAMILY_AV,     // Aqua Vanjaram
+  FAMILY_NV,     // Navi10
+  FAMILY_GFX11,  // GFX11
+  FAMILY_GFX12,  // GFX12
 };
 
 #endif  //  __KFD_TEST_FLAGS__H__

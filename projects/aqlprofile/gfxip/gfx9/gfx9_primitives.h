@@ -66,7 +66,8 @@ class gfx9_cntx_prim {
   static constexpr Register GRBM_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
   static constexpr Register COMPUTE_PERFCOUNT_ENABLE_ADDR =
       REG_32B_ADDR(GC, 0, regCOMPUTE_PERFCOUNT_ENABLE);
-  static constexpr Register RLC_PERFMON_CLK_CNTL_ADDR = REG_32B_ADDR(GC, 0, regRLC_PERFMON_CLK_CNTL);
+  static constexpr Register RLC_PERFMON_CLK_CNTL_ADDR =
+      REG_32B_ADDR(GC, 0, regRLC_PERFMON_CLK_CNTL);
   static constexpr Register CP_PERFMON_CNTL_ADDR = REG_32B_ADDR(GC, 0, regCP_PERFMON_CNTL);
 
   static const uint32_t MC_PERFCOUNTER_RSLT_CNTL__ENABLE_ANY_MASK_PRM = 0x01000000L;
@@ -77,32 +78,39 @@ class gfx9_cntx_prim {
   static constexpr Register SQ_PERFCOUNTER_CTRL2_ADDR{};
   static constexpr Register COMPUTE_THREAD_TRACE_ENABLE_ADDR{};
   static constexpr Register SQ_PERFCOUNTER_MASK_ADDR = REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_MASK);
-  static constexpr Register SQ_THREAD_TRACE_MASK_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_MASK);
+  static constexpr Register SQ_THREAD_TRACE_MASK_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_MASK);
   static constexpr Register SQ_THREAD_TRACE_PERF_MASK_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_PERF_MASK);
   static constexpr Register SQ_THREAD_TRACE_TOKEN_MASK_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_TOKEN_MASK);
   static constexpr Register SQ_THREAD_TRACE_TOKEN_MASK2_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_TOKEN_MASK2);
-  static constexpr Register SQ_THREAD_TRACE_MODE_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_MODE);
+  static constexpr Register SQ_THREAD_TRACE_MODE_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_MODE);
   static constexpr Register SQ_THREAD_TRACE_BUF0_BASE_LO_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BUF0_SIZE_ADDR{};
-  static constexpr Register SQ_THREAD_TRACE_BASE_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BASE);
+  static constexpr Register SQ_THREAD_TRACE_BASE_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BASE);
   static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BUF1_SIZE_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BASE2_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BASE2);
-  static constexpr Register SQ_THREAD_TRACE_SIZE_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_SIZE);
-  static constexpr Register SQ_THREAD_TRACE_CTRL_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_CTRL);
+  static constexpr Register SQ_THREAD_TRACE_SIZE_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_SIZE);
+  static constexpr Register SQ_THREAD_TRACE_CTRL_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_CTRL);
   static constexpr Register SQ_THREAD_TRACE_HIWATER_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_HIWATER);
   static const uint32_t SQ_THREAD_TRACE_HIWATER_VAL = 0x6;
   static constexpr Register SQ_THREAD_TRACE_STATUS_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
-  static constexpr Register SQ_THREAD_TRACE_CNTR_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_CNTR);
-  static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_WPTR);
+  static constexpr Register SQ_THREAD_TRACE_CNTR_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_CNTR);
+  static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_WPTR);
   static constexpr Register SQ_THREAD_TRACE_STATUS2_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_STATUS_OFFSET = []() {
     Register reg = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
@@ -255,9 +263,14 @@ class gfx9_cntx_prim {
   }
 
   // GRBM SE/SH/WGP indexing
-  static uint32_t grbm_se_sh_wgp_index_value(const uint32_t&, const uint32_t&, const uint32_t&) { return 0; }
+  static uint32_t grbm_se_sh_wgp_index_value(const uint32_t&, const uint32_t&, const uint32_t&) {
+    return 0;
+  }
   // GRBM SE/SH/WGP/BlockInstance indexing
-  static uint32_t grbm_inst_se_sh_wgp_index_value(const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&) { return 0; }
+  static uint32_t grbm_inst_se_sh_wgp_index_value(const uint32_t&, const uint32_t&, const uint32_t&,
+                                                  const uint32_t&) {
+    return 0;
+  }
 
   // CP_PERFMON_CNTL value to reset counters
   static uint32_t cp_perfmon_cntl_reset_value() {
@@ -510,7 +523,7 @@ class gfx9_cntx_prim {
   }
 
   static uint32_t rlc_spm_perfmon_cntl_value(const uint32_t& sampling_rate) {
-    const uint32_t ring_mode = 3; // Stall and send Interrupt
+    const uint32_t ring_mode = 3;  // Stall and send Interrupt
     uint32_t rlc_spm_perfmon_cntl =
         SET_REG_FIELD_BITS(RLC_SPM_PERFMON_CNTL, PERFMON_SAMPLE_INTERVAL, sampling_rate) |
         SET_REG_FIELD_BITS(RLC_SPM_PERFMON_CNTL, PERFMON_RING_MODE, ring_mode);

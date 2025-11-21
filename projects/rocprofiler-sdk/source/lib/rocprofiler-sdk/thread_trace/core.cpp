@@ -107,16 +107,17 @@ public:
         WaitOn();
         hsa::get_core_table()->hsa_signal_destroy_fn(signal);
     }
-    Signal(Signal& other)       = delete;
-    Signal(const Signal& other) = delete;
-    Signal& operator=(Signal& other) = delete;
+    Signal(Signal& other)                  = delete;
+    Signal(const Signal& other)            = delete;
+    Signal& operator=(Signal& other)       = delete;
     Signal& operator=(const Signal& other) = delete;
 
     void WaitOn() const
     {
         auto wait_fn = hsa::get_core_table()->hsa_signal_wait_scacquire_fn;
         while(wait_fn(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
-        {}
+        {
+        }
     }
 
     hsa_signal_t      signal;

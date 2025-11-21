@@ -116,7 +116,7 @@ struct OCLHiddenArgs {
 };
 
 static void* Allocate(hsa_agent_t agent, size_t size) {
-  //use the host accessible kernarg pool
+  // use the host accessible kernarg pool
   hsa_amd_memory_pool_t pool = ImageRuntime::instance()->kernarg_pool();
 
   void* ptr = NULL;
@@ -136,17 +136,14 @@ static void* Allocate(hsa_agent_t agent, size_t size) {
   return ptr;
 }
 
-BlitKernel::BlitKernel() {
-}
+BlitKernel::BlitKernel() {}
 
 BlitKernel::~BlitKernel() {}
 
 hsa_status_t BlitKernel::Initialize() { return HSA_STATUS_SUCCESS; }
 
 hsa_status_t BlitKernel::Cleanup() {
-
-  for (std::pair<const uint64_t, hsa_executable_t> pair :
-       code_executable_map_) {
+  for (std::pair<const uint64_t, hsa_executable_t> pair : code_executable_map_) {
     HSA::hsa_executable_destroy(pair.second);
   }
 
@@ -157,8 +154,8 @@ hsa_status_t BlitKernel::Cleanup() {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t BlitKernel::BuildBlitCode(
-    hsa_agent_t agent, std::vector<BlitCodeInfo>& blit_code_catalog) {
+hsa_status_t BlitKernel::BuildBlitCode(hsa_agent_t agent,
+                                       std::vector<BlitCodeInfo>& blit_code_catalog) {
   // Find existing kernels in the list that have compatible ISA.
   hsa_isa_t agent_isa = {0};
   hsa_status_t status = HSA::hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &agent_isa);
@@ -229,16 +226,18 @@ hsa_status_t BlitKernel::BuildBlitCode(
   return PopulateKernelCode(agent, executable, blit_code_catalog);
 }
 
-hsa_status_t BlitKernel::CopyBufferToImage(
-    BlitQueue& blit_queue, const std::vector<BlitCodeInfo>& blit_code_catalog,
-    const void* src_memory, size_t src_row_pitch, size_t src_slice_pitch,
-    const Image& dst_image, const hsa_ext_image_region_t& image_region) {
+hsa_status_t BlitKernel::CopyBufferToImage(BlitQueue& blit_queue,
+                                           const std::vector<BlitCodeInfo>& blit_code_catalog,
+                                           const void* src_memory, size_t src_row_pitch,
+                                           size_t src_slice_pitch, const Image& dst_image,
+                                           const hsa_ext_image_region_t& image_region) {
   if (dst_image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
     ImageManager* manager = ImageRuntime::instance()->image_manager(dst_image.component);
 
     const uint32_t element_size =
-        manager->GetImageProperty(dst_image.component, dst_image.desc.format,
-                                  dst_image.desc.geometry).element_size;
+        manager
+            ->GetImageProperty(dst_image.component, dst_image.desc.format, dst_image.desc.geometry)
+            .element_size;
 
     const size_t dst_origin = image_region.offset.x * element_size;
     char* dst_memory = reinterpret_cast<char*>(dst_image.data) + dst_origin;
@@ -256,10 +255,9 @@ hsa_status_t BlitKernel::CopyBufferToImage(
 
   assert(dst_image_view != NULL);
 
-  hsa_kernel_dispatch_packet_t packet = { };
+  hsa_kernel_dispatch_packet_t packet = {};
 
-  const BlitCodeInfo& blit_code =
-      blit_code_catalog.at(KERNEL_OP_COPY_BUFFER_TO_IMAGE);
+  const BlitCodeInfo& blit_code = blit_code_catalog.at(KERNEL_OP_COPY_BUFFER_TO_IMAGE);
   packet.kernel_object = blit_code.code_handle_;
   packet.group_segment_size = blit_code.group_segment_size_;
   packet.private_segment_size = blit_code.private_segment_size_;
@@ -287,8 +285,7 @@ hsa_status_t BlitKernel::CopyBufferToImage(
   assert(args != NULL);
   memset(args, 0, sizeof(KernelArgs));
   args->buffer = src_memory;
-  for(auto& img : args->image)
-    img = dst_image_view->Convert();
+  for (auto& img : args->image) img = dst_image_view->Convert();
   args->pixelOrigin[0] = image_region.offset.x;
   args->pixelOrigin[1] = image_region.offset.y;
   args->pixelOrigin[2] = image_region.offset.z;
@@ -296,9 +293,10 @@ hsa_status_t BlitKernel::CopyBufferToImage(
   ImageManager* manager = ImageRuntime::instance()->image_manager(dst_image_view->component);
 
   const uint32_t element_size =
-      manager->GetImageProperty(dst_image_view->component,
-                                dst_image_view->desc.format,
-                                dst_image_view->desc.geometry).element_size;
+      manager
+          ->GetImageProperty(dst_image_view->component, dst_image_view->desc.format,
+                             dst_image_view->desc.geometry)
+          .element_size;
 
   // Try to minimize the read operation to buffer by reading the buffer
   // up to one DWORD at a time.
@@ -314,9 +312,8 @@ hsa_status_t BlitKernel::CopyBufferToImage(
   args->format[3] = dst_image_view->desc.geometry;
 
   unsigned long buffer_pitch[2] = {0, 0};
-  CalcBufferRowSlicePitchesInPixel(dst_image_view->desc.geometry, element_size,
-                                   image_region.range, src_row_pitch,
-                                   src_slice_pitch, buffer_pitch);
+  CalcBufferRowSlicePitchesInPixel(dst_image_view->desc.geometry, element_size, image_region.range,
+                                   src_row_pitch, src_slice_pitch, buffer_pitch);
 
   args->pitch = buffer_pitch[0];
   args->slice_pitch = buffer_pitch[1];
@@ -336,20 +333,21 @@ hsa_status_t BlitKernel::CopyBufferToImage(
   return status;
 }
 
-hsa_status_t BlitKernel::CopyImageToBuffer(
-    BlitQueue& blit_queue, const std::vector<BlitCodeInfo>& blit_code_catalog,
-    const Image& src_image, void* dst_memory, size_t dst_row_pitch,
-    size_t dst_slice_pitch, const hsa_ext_image_region_t& image_region) {
+hsa_status_t BlitKernel::CopyImageToBuffer(BlitQueue& blit_queue,
+                                           const std::vector<BlitCodeInfo>& blit_code_catalog,
+                                           const Image& src_image, void* dst_memory,
+                                           size_t dst_row_pitch, size_t dst_slice_pitch,
+                                           const hsa_ext_image_region_t& image_region) {
   if (src_image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
     ImageManager* manager = ImageRuntime::instance()->image_manager(src_image.component);
 
     const uint32_t element_size =
-        manager->GetImageProperty(src_image.component, src_image.desc.format,
-                                  src_image.desc.geometry).element_size;
+        manager
+            ->GetImageProperty(src_image.component, src_image.desc.format, src_image.desc.geometry)
+            .element_size;
 
     const size_t src_origin = image_region.offset.x * element_size;
-    const char* src_memory =
-        reinterpret_cast<const char*>(src_image.data) + src_origin;
+    const char* src_memory = reinterpret_cast<const char*>(src_image.data) + src_origin;
     const size_t size = image_region.range.x * element_size;
 
     return HSA::hsa_memory_copy(dst_memory, src_memory, size);
@@ -364,10 +362,9 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
 
   assert(src_image_view != NULL);
 
-  hsa_kernel_dispatch_packet_t packet = { };
+  hsa_kernel_dispatch_packet_t packet = {};
 
-  const BlitCodeInfo& blit_code =
-      blit_code_catalog.at(KERNEL_OP_COPY_IMAGE_TO_BUFFER);
+  const BlitCodeInfo& blit_code = blit_code_catalog.at(KERNEL_OP_COPY_IMAGE_TO_BUFFER);
   packet.kernel_object = blit_code.code_handle_;
   packet.group_segment_size = blit_code.group_segment_size_;
   packet.private_segment_size = blit_code.private_segment_size_;
@@ -394,8 +391,7 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
   KernelArgs* args = (KernelArgs*)Allocate(src_image_view->component, sizeof(KernelArgs));
   assert(args != NULL);
   memset(args, 0, sizeof(KernelArgs));
-  for(auto &img : args->image)
-    img = src_image_view->Convert();
+  for (auto& img : args->image) img = src_image_view->Convert();
   args->buffer = dst_memory;
   args->pixelOrigin[0] = image_region.offset.x;
   args->pixelOrigin[1] = image_region.offset.y;
@@ -404,9 +400,10 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
   ImageManager* manager = ImageRuntime::instance()->image_manager(src_image_view->component);
 
   const uint32_t element_size =
-      manager->GetImageProperty(src_image_view->component,
-                                src_image_view->desc.format,
-                                src_image_view->desc.geometry).element_size;
+      manager
+          ->GetImageProperty(src_image_view->component, src_image_view->desc.format,
+                             src_image_view->desc.geometry)
+          .element_size;
 
   // Try to minimize the write operation to buffer by reading the buffer
   // up to one DWORD at a time.
@@ -422,9 +419,8 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
   args->format[3] = src_image_view->desc.geometry;
 
   unsigned long buffer_pitch[2] = {0, 0};
-  CalcBufferRowSlicePitchesInPixel(src_image_view->desc.geometry, element_size,
-                                   image_region.range, dst_row_pitch,
-                                   dst_slice_pitch, buffer_pitch);
+  CalcBufferRowSlicePitchesInPixel(src_image_view->desc.geometry, element_size, image_region.range,
+                                   dst_row_pitch, dst_slice_pitch, buffer_pitch);
 
   args->pitch = buffer_pitch[0];
   args->slice_pitch = buffer_pitch[1];
@@ -444,11 +440,11 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
   return status;
 }
 
-hsa_status_t BlitKernel::CopyImage(
-    BlitQueue& blit_queue, const std::vector<BlitCodeInfo>& blit_code_catalog,
-    const Image& dst_image, const Image& src_image,
-    const hsa_dim3_t& dst_origin, const hsa_dim3_t& src_origin,
-    const hsa_dim3_t size, KernelOp copy_type) {
+hsa_status_t BlitKernel::CopyImage(BlitQueue& blit_queue,
+                                   const std::vector<BlitCodeInfo>& blit_code_catalog,
+                                   const Image& dst_image, const Image& src_image,
+                                   const hsa_dim3_t& dst_origin, const hsa_dim3_t& src_origin,
+                                   const hsa_dim3_t size, KernelOp copy_type) {
   assert(src_image.component.handle == dst_image.component.handle);
 
   const Image* src_image_view = &src_image;
@@ -475,8 +471,7 @@ hsa_status_t BlitKernel::CopyImage(
     const hsa_ext_image_geometry_t src_geometry = src_image_view->desc.geometry;
     const hsa_ext_image_geometry_t dst_geometry = dst_image_view->desc.geometry;
 
-    if (src_geometry != HSA_EXT_IMAGE_GEOMETRY_1DB &&
-        dst_geometry != HSA_EXT_IMAGE_GEOMETRY_1DB) {
+    if (src_geometry != HSA_EXT_IMAGE_GEOMETRY_1DB && dst_geometry != HSA_EXT_IMAGE_GEOMETRY_1DB) {
       blit_code = &blit_code_catalog.at(KERNEL_OP_COPY_IMAGE_DEFAULT);
     } else if (src_geometry == HSA_EXT_IMAGE_GEOMETRY_1DB &&
                dst_geometry != HSA_EXT_IMAGE_GEOMETRY_1DB) {
@@ -491,7 +486,7 @@ hsa_status_t BlitKernel::CopyImage(
     blit_code = &blit_code_catalog.at(copy_type);
   }
 
-  hsa_kernel_dispatch_packet_t packet = { };
+  hsa_kernel_dispatch_packet_t packet = {};
 
   packet.kernel_object = blit_code->code_handle_;
   packet.group_segment_size = blit_code->group_segment_size_;
@@ -512,15 +507,13 @@ hsa_status_t BlitKernel::CopyImage(
   assert(args != NULL);
   memset(args, 0, sizeof(KernelArgs));
 
-  for(auto& img : args->src)
-    img = src_image_view->Convert();
+  for (auto& img : args->src) img = src_image_view->Convert();
   args->srcFormat = src_image_view->desc.geometry;
   args->srcOrigin[0] = src_origin.x;
   args->srcOrigin[1] = src_origin.y;
   args->srcOrigin[2] = src_origin.z;
 
-  for(auto& img : args->dst)
-    img = dst_image_view->Convert();
+  for (auto& img : args->dst) img = dst_image_view->Convert();
   args->dstFormat = dst_image_view->desc.geometry;
   args->dstOrigin[0] = dst_origin.x;
   args->dstOrigin[1] = dst_origin.y;
@@ -546,16 +539,15 @@ hsa_status_t BlitKernel::CopyImage(
   return status;
 }
 
-hsa_status_t BlitKernel::FillImage(
-    BlitQueue& blit_queue, const std::vector<BlitCodeInfo>& blit_code_catalog,
-    const Image& image, const void* pattern,
-    const hsa_ext_image_region_t& region) {
-  hsa_kernel_dispatch_packet_t packet = { };
+hsa_status_t BlitKernel::FillImage(BlitQueue& blit_queue,
+                                   const std::vector<BlitCodeInfo>& blit_code_catalog,
+                                   const Image& image, const void* pattern,
+                                   const hsa_ext_image_region_t& region) {
+  hsa_kernel_dispatch_packet_t packet = {};
 
-  const BlitCodeInfo& blit_code =
-      (image.desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)
-          ? blit_code_catalog.at(KERNEL_OP_CLEAR_IMAGE)
-          : blit_code_catalog.at(KERNEL_OP_CLEAR_IMAGE_1DB);
+  const BlitCodeInfo& blit_code = (image.desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)
+      ? blit_code_catalog.at(KERNEL_OP_CLEAR_IMAGE)
+      : blit_code_catalog.at(KERNEL_OP_CLEAR_IMAGE_1DB);
   packet.kernel_object = blit_code.code_handle_;
   packet.group_segment_size = blit_code.group_segment_size_;
   packet.private_segment_size = blit_code.private_segment_size_;
@@ -574,11 +566,9 @@ hsa_status_t BlitKernel::FillImage(
   assert(args != NULL);
   memset(args, 0, sizeof(KernelArgs));
 
-  for(auto &img : args->image)
-    img = image.Convert();
+  for (auto& img : args->image) img = image.Convert();
   args->format = image.desc.geometry;
-  for(int i=0; i<4; i++)
-    args->data[i] = ((const uint32_t*)pattern)[i];
+  for (int i = 0; i < 4; i++) args->data[i] = ((const uint32_t*)pattern)[i];
   args->origin[0] = region.offset.x;
   args->origin[1] = region.offset.y;
   args->origin[2] = region.offset.z;
@@ -596,33 +586,30 @@ hsa_status_t BlitKernel::FillImage(
   return status;
 }
 
-const char *BlitKernel::kernel_name_[KERNEL_OP_COUNT] = {
-      "&__copy_image_to_buffer_kernel",
-      "&__copy_buffer_to_image_kernel",
-      "&__copy_image_default_kernel",
-      "&__copy_image_linear_to_standard_kernel",
-      "&__copy_image_standard_to_linear_kernel",
-      "&__copy_image_1db_kernel",
-      "&__copy_image_1db_to_reg_kernel",
-      "&__copy_image_reg_to_1db_kernel",
-      "&__clear_image_kernel",
-      "&__clear_image_1db_kernel"};
+const char* BlitKernel::kernel_name_[KERNEL_OP_COUNT] = {"&__copy_image_to_buffer_kernel",
+                                                         "&__copy_buffer_to_image_kernel",
+                                                         "&__copy_image_default_kernel",
+                                                         "&__copy_image_linear_to_standard_kernel",
+                                                         "&__copy_image_standard_to_linear_kernel",
+                                                         "&__copy_image_1db_kernel",
+                                                         "&__copy_image_1db_to_reg_kernel",
+                                                         "&__copy_image_reg_to_1db_kernel",
+                                                         "&__clear_image_kernel",
+                                                         "&__clear_image_1db_kernel"};
 
-const char *BlitKernel::ocl_kernel_name_[KERNEL_OP_COUNT] = {
-      "copy_image_to_buffer.kd",
-      "copy_buffer_to_image.kd",
-      "copy_image_default.kd",
-      "copy_image_linear_to_standard.kd",
-      "copy_image_standard_to_linear.kd",
-      "copy_image_1db.kd",
-      "copy_image_1db_to_reg.kd",
-      "copy_image_reg_to_1db.kd",
-      "clear_image.kd",
-      "clear_image_1db.kd"};
+const char* BlitKernel::ocl_kernel_name_[KERNEL_OP_COUNT] = {"copy_image_to_buffer.kd",
+                                                             "copy_buffer_to_image.kd",
+                                                             "copy_image_default.kd",
+                                                             "copy_image_linear_to_standard.kd",
+                                                             "copy_image_standard_to_linear.kd",
+                                                             "copy_image_1db.kd",
+                                                             "copy_image_1db_to_reg.kd",
+                                                             "copy_image_reg_to_1db.kd",
+                                                             "clear_image.kd",
+                                                             "clear_image_1db.kd"};
 
-hsa_status_t BlitKernel::PopulateKernelCode(
-    hsa_agent_t agent, hsa_executable_t executable,
-    std::vector<BlitCodeInfo>& blit_code_catalog) {
+hsa_status_t BlitKernel::PopulateKernelCode(hsa_agent_t agent, hsa_executable_t executable,
+                                            std::vector<BlitCodeInfo>& blit_code_catalog) {
   blit_code_catalog.clear();
 
   for (int i = 0; i < KERNEL_OP_COUNT; ++i) {
@@ -669,23 +656,17 @@ hsa_status_t BlitKernel::PopulateKernelCode(
 }
 
 void BlitKernel::CalcBufferRowSlicePitchesInPixel(
-    hsa_ext_image_geometry_t geometry, uint32_t element_size,
-    const hsa_dim3_t& copy_size, size_t in_row_pitch_byte,
-    size_t in_slice_pitch_byte, unsigned long* out_pitch_pixel) {
-  const bool is_1d_array =
-      (geometry == HSA_EXT_IMAGE_GEOMETRY_1DA) ? true : false;
+    hsa_ext_image_geometry_t geometry, uint32_t element_size, const hsa_dim3_t& copy_size,
+    size_t in_row_pitch_byte, size_t in_slice_pitch_byte, unsigned long* out_pitch_pixel) {
+  const bool is_1d_array = (geometry == HSA_EXT_IMAGE_GEOMETRY_1DA) ? true : false;
 
-  out_pitch_pixel[0] =
-      std::max(static_cast<unsigned long>(copy_size.x),
-               static_cast<unsigned long>(in_row_pitch_byte / element_size));
+  out_pitch_pixel[0] = std::max(static_cast<unsigned long>(copy_size.x),
+                                static_cast<unsigned long>(in_row_pitch_byte / element_size));
 
-  out_pitch_pixel[1] =
-      (is_1d_array)
-          ? out_pitch_pixel[0]
-          : (std::max(
-                static_cast<unsigned long>(out_pitch_pixel[0] * copy_size.y),
-                static_cast<unsigned long>(in_slice_pitch_byte /
-                                           element_size)));
+  out_pitch_pixel[1] = (is_1d_array)
+      ? out_pitch_pixel[0]
+      : (std::max(static_cast<unsigned long>(out_pitch_pixel[0] * copy_size.y),
+                  static_cast<unsigned long>(in_slice_pitch_byte / element_size)));
 
   assert((out_pitch_pixel[0] <= out_pitch_pixel[1]));
 }
@@ -797,8 +778,7 @@ void BlitKernel::CalcWorkingSize(const Image& image, const hsa_dim3_t& range,
 }
 
 void BlitKernel::CalcWorkingSize(const Image& src_image, const Image& dst_image,
-                                 const hsa_dim3_t& range,
-                                 hsa_kernel_dispatch_packet_t& packet) {
+                                 const hsa_dim3_t& range, hsa_kernel_dispatch_packet_t& packet) {
   if (GetDimSize(src_image) < GetDimSize(dst_image)) {
     CalcWorkingSize(src_image, range, packet);
   } else {
@@ -806,30 +786,29 @@ void BlitKernel::CalcWorkingSize(const Image& src_image, const Image& dst_image,
   }
 }
 
-hsa_status_t BlitKernel::ConvertImage(const Image& original_image,
-                                      const Image** new_image) {
+hsa_status_t BlitKernel::ConvertImage(const Image& original_image, const Image** new_image) {
   // To simplify the kernel, some particular image channel types are converted
   // to a new channel type, while preserving the actual per pixel size.
   // E.g.: a UNORM SIGNED INT8 is converted into UNSIGNED INT8. This way the
   // kernel can just use read_imageui on all images.
 
   static const uint32_t kTypeConvertTable[] = {
-      HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8,  // HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8
+      HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8,   // HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8
       HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16,  // HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT16
-      HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8,  // HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8
+      HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8,   // HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8
       HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16,  // HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT16
-      HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT24,  // HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT24
+      HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT24,     // HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT24
       HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16,  // HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_555
       HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16,  // HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_565
       HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32,  // HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010
-      HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8,  // HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT8
+      HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8,   // HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT8
       HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16,  // HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT16
       HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32,  // HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT32
-      HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8,  // HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8
+      HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8,   // HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8
       HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16,  // HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16
       HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32,  // HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32
       HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16,  // HSA_EXT_IMAGE_CHANNEL_TYPE_HALF_FLOAT
-      HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32  // HSA_EXT_IMAGE_CHANNEL_TYPE_FLOAT
+      HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32   // HSA_EXT_IMAGE_CHANNEL_TYPE_FLOAT
   };
 
   // To simplify the kernel, some particular image channel orders are converted
@@ -853,10 +832,10 @@ hsa_status_t BlitKernel::ConvertImage(const Image& original_image,
       HSA_EXT_IMAGE_CHANNEL_ORDER_RGBA,  // HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBX
       HSA_EXT_IMAGE_CHANNEL_ORDER_RGBA,  // HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBA
       HSA_EXT_IMAGE_CHANNEL_ORDER_RGBA,  // HSA_EXT_IMAGE_CHANNEL_ORDER_SBGRA
-      HSA_EXT_IMAGE_CHANNEL_ORDER_R,  // HSA_EXT_IMAGE_CHANNEL_ORDER_INTENSITY
-      HSA_EXT_IMAGE_CHANNEL_ORDER_R,  // HSA_EXT_IMAGE_CHANNEL_ORDER_LUMINANCE
-      HSA_EXT_IMAGE_CHANNEL_ORDER_R,  // HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH
-      HSA_EXT_IMAGE_CHANNEL_ORDER_RG  // HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH_STENCIL
+      HSA_EXT_IMAGE_CHANNEL_ORDER_R,     // HSA_EXT_IMAGE_CHANNEL_ORDER_INTENSITY
+      HSA_EXT_IMAGE_CHANNEL_ORDER_R,     // HSA_EXT_IMAGE_CHANNEL_ORDER_LUMINANCE
+      HSA_EXT_IMAGE_CHANNEL_ORDER_R,     // HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH
+      HSA_EXT_IMAGE_CHANNEL_ORDER_RG     // HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH_STENCIL
   };
 
   const uint32_t current_type = original_image.desc.format.channel_type;
@@ -870,15 +849,14 @@ hsa_status_t BlitKernel::ConvertImage(const Image& original_image,
   }
 
   // Handle formats that drop channels on conversion, only usable with RGB(X)
-  if((current_type == HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_555) ||
-     (current_type == HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_565) ||
-     (current_type == HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010)) {
+  if ((current_type == HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_555) ||
+      (current_type == HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_565) ||
+      (current_type == HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010)) {
     converted_order = HSA_EXT_IMAGE_CHANNEL_ORDER_R;
   }
 
   // For internal book keeping, depth isn't a HW type.
-  const hsa_ext_image_geometry_t current_geometry =
-      original_image.desc.geometry;
+  const hsa_ext_image_geometry_t current_geometry = original_image.desc.geometry;
   hsa_ext_image_geometry_t converted_geometry = current_geometry;
   if (converted_geometry == HSA_EXT_IMAGE_GEOMETRY_2DDEPTH) {
     converted_geometry = HSA_EXT_IMAGE_GEOMETRY_2D;
@@ -886,12 +864,11 @@ hsa_status_t BlitKernel::ConvertImage(const Image& original_image,
     converted_geometry = HSA_EXT_IMAGE_GEOMETRY_2DA;
   }
 
-  hsa_ext_image_format_t new_format = {
-      static_cast<hsa_ext_image_channel_type_t>(converted_type),
-      static_cast<hsa_ext_image_channel_order_t>(converted_order)};
+  hsa_ext_image_format_t new_format = {static_cast<hsa_ext_image_channel_type_t>(converted_type),
+                                       static_cast<hsa_ext_image_channel_order_t>(converted_order)};
 
   Image* new_image_handle = Image::Create(original_image.component);
-  *new_image_handle=original_image;
+  *new_image_handle = original_image;
   new_image_handle->desc.geometry = converted_geometry;
 
   hsa_status_t status = ImageRuntime::instance()
@@ -906,8 +883,7 @@ hsa_status_t BlitKernel::ConvertImage(const Image& original_image,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t BlitKernel::LaunchKernel(BlitQueue& blit_queue,
-                                      hsa_kernel_dispatch_packet_t& packet) {
+hsa_status_t BlitKernel::LaunchKernel(BlitQueue& blit_queue, hsa_kernel_dispatch_packet_t& packet) {
   static const uint16_t kInvalidPacketHeader = HSA_PACKET_TYPE_INVALID;
 
   static const uint16_t kDispatchPacketHeader =
@@ -974,8 +950,7 @@ hsa_status_t BlitKernel::LaunchKernel(BlitQueue& blit_queue,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t BlitKernel::GetPatchedBlitObject(const char* agent_name,
-                                              uint8_t** blit_code_object) {
+hsa_status_t BlitKernel::GetPatchedBlitObject(const char* agent_name, uint8_t** blit_code_object) {
   std::string sname(agent_name);
 
   if (sname == "gfx700") {

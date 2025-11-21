@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef __ROCM_ASYNC_BW_H__
 #define __ROCM_ASYNC_BW_H__
 
@@ -17,16 +17,14 @@ using namespace std;
 
 // Structure to encapsulate a RocR agent and its index in a list
 typedef struct agent_info {
-
-  agent_info(hsa_agent_t agent,
-             uint32_t index, hsa_device_type_t device_type) {
+  agent_info(hsa_agent_t agent, uint32_t index, hsa_device_type_t device_type) {
     agent_ = agent;
     index_ = index;
     device_type_ = device_type;
   }
 
   agent_info() {}
-  
+
   uint32_t index_;
   hsa_agent_t agent_;
   hsa_device_type_t device_type_;
@@ -34,13 +32,10 @@ typedef struct agent_info {
 } agent_info_t;
 
 typedef struct pool_info {
-
-  pool_info(hsa_agent_t agent, uint32_t agent_index,
-            hsa_amd_memory_pool_t pool, hsa_amd_segment_t segment,
-            size_t size, size_t alloc_max_size, uint32_t index,
+  pool_info(hsa_agent_t agent, uint32_t agent_index, hsa_amd_memory_pool_t pool,
+            hsa_amd_segment_t segment, size_t size, size_t alloc_max_size, uint32_t index,
             bool is_fine_grained, bool is_kernarg, bool access_to_all,
             hsa_amd_memory_pool_access_t owner_access) {
-
     pool_ = pool;
     index_ = index;
     segment_ = segment;
@@ -72,17 +67,15 @@ typedef struct pool_info {
 
 // Used to print out topology info
 typedef struct agent_pool_info {
-
   agent_pool_info() {}
-  
+
   agent_info agent;
-  
+
   vector<pool_info_t> pool_list;
 
 } agent_pool_info_t;
 
 typedef struct async_trans {
-
   uint32_t req_type_;
   union {
     struct {
@@ -138,9 +131,7 @@ typedef enum Request_Type {
 } Request_Type;
 
 class RocmAsync : public BaseTest {
-
  public:
-
   // @brief: Constructor for test case of RocmAsync
   RocmAsync(int argc, char** argv);
 
@@ -160,7 +151,6 @@ class RocmAsync : public BaseTest {
   virtual void Display() const;
 
  private:
-
   // @brief: Print Help Menu Screen
   void PrintHelpScreen();
 
@@ -179,7 +169,7 @@ class RocmAsync : public BaseTest {
   // @brief: Parse the arguments provided by user to
   // build list of transactions
   void ParseArguments();
-  
+
   // @brief: Print the list of transactions
   void PrintTransList();
 
@@ -203,20 +193,19 @@ class RocmAsync : public BaseTest {
   void DisplayCopyTime(async_trans_t& trans) const;
   void DisplayCopyTimeMatrix() const;
 
-  private:
-
+ private:
   // @brief: Validate the arguments passed in by user
   bool ValidateArguments();
   bool ValidateReadReq();
   bool ValidateWriteReq();
   bool ValidateReadOrWriteReq(vector<uint32_t>& in_list);
-  
+
   bool ValidateBidirCopyReq();
   bool ValidateUnidirCopyReq();
   bool ValidateCopyReq(vector<uint32_t>& in_list);
   void PrintIOAccessError(uint32_t agent_idx, uint32_t pool_idx);
   void PrintCopyAccessError(uint32_t src_pool_idx, uint32_t dst_pool_idx);
-  
+
   bool PoolIsPresent(vector<uint32_t>& in_list);
   bool PoolIsDuplicated(vector<uint32_t>& in_list);
 
@@ -229,38 +218,30 @@ class RocmAsync : public BaseTest {
   bool BuildUnidirCopyTrans();
   bool BuildAllPoolsBidirCopyTrans();
   bool BuildAllPoolsUnidirCopyTrans();
-  bool BuildReadOrWriteTrans(uint32_t req_type,
-                             vector<uint32_t>& in_list);
-  bool BuildCopyTrans(uint32_t req_type,
-                      vector<uint32_t>& src_list,
-                      vector<uint32_t>& dst_list);
+  bool BuildReadOrWriteTrans(uint32_t req_type, vector<uint32_t>& in_list);
+  bool BuildCopyTrans(uint32_t req_type, vector<uint32_t>& src_list, vector<uint32_t>& dst_list);
 
-  void AllocateCopyBuffers(bool bidir, uint32_t size,
-                           void*& src_fwd, hsa_amd_memory_pool_t src_pool_fwd,
-                           void*& dst_fwd, hsa_amd_memory_pool_t dst_pool_fwd,
-                           hsa_agent_t src_agent_fwd, hsa_agent_t dst_agent_fwd,
-                           void*& src_rev, hsa_amd_memory_pool_t src_pool_rev,
-                           void*& dst_rev, hsa_amd_memory_pool_t dst_pool_rev,
-                           hsa_agent_t src_agent_rev, hsa_agent_t dst_agent_rev,
-                           hsa_signal_t& signal_fwd, hsa_signal_t& signal_rev);
-  void ReleaseBuffers(bool bidir,
-                      void* src_fwd, void* src_rev,
-                      void* dst_fwd, void* dst_rev,
+  void AllocateCopyBuffers(bool bidir, uint32_t size, void*& src_fwd,
+                           hsa_amd_memory_pool_t src_pool_fwd, void*& dst_fwd,
+                           hsa_amd_memory_pool_t dst_pool_fwd, hsa_agent_t src_agent_fwd,
+                           hsa_agent_t dst_agent_fwd, void*& src_rev,
+                           hsa_amd_memory_pool_t src_pool_rev, void*& dst_rev,
+                           hsa_amd_memory_pool_t dst_pool_rev, hsa_agent_t src_agent_rev,
+                           hsa_agent_t dst_agent_rev, hsa_signal_t& signal_fwd,
+                           hsa_signal_t& signal_rev);
+  void ReleaseBuffers(bool bidir, void* src_fwd, void* src_rev, void* dst_fwd, void* dst_rev,
                       hsa_signal_t signal_fwd, hsa_signal_t signal_rev);
   double GetGpuCopyTime(bool bidir, hsa_signal_t signal_fwd, hsa_signal_t signal_rev);
-  void AllocateHostBuffers(bool bidir, uint32_t size,
-                                    void*& src_fwd, void*& dst_fwd,
-                                    void* buf_src_fwd, void* buf_dst_fwd,
-                                    hsa_agent_t src_agent_fwd, hsa_agent_t dst_agent_fwd,
-                                    void*& src_rev, void*& dst_rev,
-                                    void* buf_src_rev, void* buf_dst_rev,
-                                    hsa_agent_t src_agent_rev, hsa_agent_t dst_agent_rev,
-                                    hsa_signal_t& signal_fwd, hsa_signal_t& signal_rev);
-  void copy_buffer(void* dst, hsa_agent_t dst_agent,
-                   void* src, hsa_agent_t src_agent,
-                   size_t size, hsa_signal_t signal);
+  void AllocateHostBuffers(bool bidir, uint32_t size, void*& src_fwd, void*& dst_fwd,
+                           void* buf_src_fwd, void* buf_dst_fwd, hsa_agent_t src_agent_fwd,
+                           hsa_agent_t dst_agent_fwd, void*& src_rev, void*& dst_rev,
+                           void* buf_src_rev, void* buf_dst_rev, hsa_agent_t src_agent_rev,
+                           hsa_agent_t dst_agent_rev, hsa_signal_t& signal_fwd,
+                           hsa_signal_t& signal_rev);
+  void copy_buffer(void* dst, hsa_agent_t dst_agent, void* src, hsa_agent_t src_agent, size_t size,
+                   hsa_signal_t signal);
 
-  // @brief: Check if agent and access memory pool, if so, set 
+  // @brief: Check if agent and access memory pool, if so, set
   // access to the agent, if not, exit
   void AcquireAccess(hsa_agent_t agent, void* ptr);
 
@@ -270,7 +251,6 @@ class RocmAsync : public BaseTest {
   friend hsa_status_t MemPoolInfo(hsa_amd_memory_pool_t pool, void* data);
 
  protected:
-  
   // More variables declared for testing
   // vector<transaction> tran_;
 
@@ -308,12 +288,12 @@ class RocmAsync : public BaseTest {
   // two agents, the first agent hosts the memory pool
   // while the second agent executes the read operation
   vector<uint32_t> read_list_;
-  
+
   // List of agents involved in write operation. Has
   // two agents, the first agent hosts the memory pool
   // while the second agent executes the write operation
   vector<uint32_t> write_list_;
-  
+
   // List of sizes to use in copy and read/write transactions
   // Size is specified in terms of Megabytes
   vector<uint32_t> size_list_;
@@ -356,10 +336,9 @@ class RocmAsync : public BaseTest {
 
   // System region
   hsa_amd_memory_pool_t sys_pool_;
- 
-  static const uint32_t SIZE_LIST[4];
-  //static const uint32_t SIZE_LIST[9];
 
+  static const uint32_t SIZE_LIST[4];
+  // static const uint32_t SIZE_LIST[9];
 };
 
 #endif

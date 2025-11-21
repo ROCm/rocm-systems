@@ -112,7 +112,7 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       //
       // -- Compiler --|-- Runtime --|-- IP --|-- Target --|-- Target Properties --
       //               |  Supported  | Version|  Features  |
-      // --------------|-------------|--------|------------|-----------------------               
+      // --------------|-------------|--------|------------|-----------------------
       //   Target ID   |   ROC PAL   | Major  |  SRAMECC   | SIMD/CU
       //               |             |  Minor |   XNACK    |  SIMD Width
       //               |             |   Step |            |   Instr Width

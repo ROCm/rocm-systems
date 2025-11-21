@@ -22,30 +22,29 @@
 #include <pciaccess.h>
 
 namespace rocprofiler {
-    typedef struct pci_device * (*pci_device_find_by_slot_handler_t)(uint32_t, 
-        uint32_t, uint32_t, uint32_t);
-    typedef int (*pci_device_probe_handler_t)(struct pci_device *);
-    typedef int (*pci_device_map_range_handler_t)(struct pci_device *, pciaddr_t,
-        pciaddr_t, unsigned, void **);
-    typedef int (*pci_device_unmap_range_handler_t) (struct pci_device *, void *,
-        pciaddr_t);
-    typedef int (*pci_system_init_handler_t)();
-    typedef void (*pci_system_cleanup_handler_t)();
+typedef struct pci_device* (*pci_device_find_by_slot_handler_t)(uint32_t, uint32_t, uint32_t,
+                                                                uint32_t);
+typedef int (*pci_device_probe_handler_t)(struct pci_device*);
+typedef int (*pci_device_map_range_handler_t)(struct pci_device*, pciaddr_t, pciaddr_t, unsigned,
+                                              void**);
+typedef int (*pci_device_unmap_range_handler_t)(struct pci_device*, void*, pciaddr_t);
+typedef int (*pci_system_init_handler_t)();
+typedef void (*pci_system_cleanup_handler_t)();
 
-    struct PcieAccessApi{
-        pci_device_find_by_slot_handler_t pci_device_find_by_slot;
-        pci_device_probe_handler_t pci_device_probe;
-        pci_device_map_range_handler_t pci_device_map_range;
-        pci_device_unmap_range_handler_t pci_device_unmap_range;
-        pci_system_init_handler_t pci_system_init;
-        pci_system_cleanup_handler_t pci_system_cleanup;
-    };
+struct PcieAccessApi {
+  pci_device_find_by_slot_handler_t pci_device_find_by_slot;
+  pci_device_probe_handler_t pci_device_probe;
+  pci_device_map_range_handler_t pci_device_map_range;
+  pci_device_unmap_range_handler_t pci_device_unmap_range;
+  pci_system_init_handler_t pci_system_init;
+  pci_system_cleanup_handler_t pci_system_cleanup;
+};
 
-    
-    // A function just to load all the libpciaccess symbols
-    PcieAccessApi* LoadPcieAccessLibAPI();
-    // A simple getter function for easy access to the API table
-    const PcieAccessApi* GetPciAccessLibApi();
-    // Sets all API table functions to null and calls dlclose
-    void UnLoadPcieAccessLibAPI();
+
+// A function just to load all the libpciaccess symbols
+PcieAccessApi* LoadPcieAccessLibAPI();
+// A simple getter function for easy access to the API table
+const PcieAccessApi* GetPciAccessLibApi();
+// Sets all API table functions to null and calls dlclose
+void UnLoadPcieAccessLibAPI();
 }  // namespace rocprofiler

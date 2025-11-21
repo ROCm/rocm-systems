@@ -93,12 +93,9 @@ class InterruptSignal : private LocalSignal, public Signal {
 
   /// @brief Determines if a Signal* can be safely converted to an
   /// InterruptSignal* via static_cast.
-  static __forceinline bool IsType(Signal* ptr) {
-    return ptr->IsType(&rtti_id());
-  }
+  static __forceinline bool IsType(Signal* ptr) { return ptr->IsType(&rtti_id()); }
 
-  explicit InterruptSignal(hsa_signal_value_t initial_value,
-                           HsaEvent* use_event = NULL);
+  explicit InterruptSignal(hsa_signal_value_t initial_value, HsaEvent* use_event = NULL);
 
   ~InterruptSignal();
 
@@ -114,12 +111,10 @@ class InterruptSignal : private LocalSignal, public Signal {
 
   void StoreRelease(hsa_signal_value_t value);
 
-  hsa_signal_value_t WaitRelaxed(hsa_signal_condition_t condition,
-                                 hsa_signal_value_t compare_value,
+  hsa_signal_value_t WaitRelaxed(hsa_signal_condition_t condition, hsa_signal_value_t compare_value,
                                  uint64_t timeout, hsa_wait_state_t wait_hint);
 
-  hsa_signal_value_t WaitAcquire(hsa_signal_condition_t condition,
-                                 hsa_signal_value_t compare_value,
+  hsa_signal_value_t WaitAcquire(hsa_signal_condition_t condition, hsa_signal_value_t compare_value,
                                  uint64_t timeout, hsa_wait_state_t wait_hint);
 
   void AndRelaxed(hsa_signal_value_t value);
@@ -170,17 +165,13 @@ class InterruptSignal : private LocalSignal, public Signal {
 
   hsa_signal_value_t ExchAcqRel(hsa_signal_value_t value);
 
-  hsa_signal_value_t CasRelaxed(hsa_signal_value_t expected,
-                                hsa_signal_value_t value);
+  hsa_signal_value_t CasRelaxed(hsa_signal_value_t expected, hsa_signal_value_t value);
 
-  hsa_signal_value_t CasAcquire(hsa_signal_value_t expected,
-                                hsa_signal_value_t value);
+  hsa_signal_value_t CasAcquire(hsa_signal_value_t expected, hsa_signal_value_t value);
 
-  hsa_signal_value_t CasRelease(hsa_signal_value_t expected,
-                                hsa_signal_value_t value);
+  hsa_signal_value_t CasRelease(hsa_signal_value_t expected, hsa_signal_value_t value);
 
-  hsa_signal_value_t CasAcqRel(hsa_signal_value_t expected,
-                               hsa_signal_value_t value);
+  hsa_signal_value_t CasAcqRel(hsa_signal_value_t expected, hsa_signal_value_t value);
 
   /// @brief See base class Signal.
   __forceinline hsa_signal_value_t* ValueLocation() const {

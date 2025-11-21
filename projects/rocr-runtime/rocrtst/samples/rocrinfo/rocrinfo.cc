@@ -48,22 +48,23 @@
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
 
-#define RET_IF_HSA_ERR(err) { \
-  if ((err) != HSA_STATUS_SUCCESS) { \
-    printf("hsa api call failure at line %d, file: %s. Call returned %d\n", \
-                                                   __LINE__, __FILE__, err); \
-    return (err); \
-  } \
-}
+#define RET_IF_HSA_ERR(err)                                                                        \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      printf("hsa api call failure at line %d, file: %s. Call returned %d\n", __LINE__, __FILE__,  \
+             err);                                                                                 \
+      return (err);                                                                                \
+    }                                                                                              \
+  }
 
 // This structure holds system information acquired through hsa info related
 // calls, and is later used for reference when displaying the information.
 struct system_info_t {
-    uint16_t major, minor;
-    uint64_t timestamp_frequency = 0;
-    uint64_t max_wait = 0;
-    hsa_endianness_t endianness;
-    hsa_machine_model_t machine_model;
+  uint16_t major, minor;
+  uint64_t timestamp_frequency = 0;
+  uint64_t max_wait = 0;
+  hsa_endianness_t endianness;
+  hsa_machine_model_t machine_model;
 };
 
 // This structure holds agent information acquired through hsa info related
@@ -101,58 +102,56 @@ struct agent_info_t {
 // related calls, and is later used for reference when displaying the
 // information.
 struct pool_info_t {
-    uint32_t segment;
-    size_t pool_size;
-    bool alloc_allowed;
-    size_t alloc_granule;
-    size_t alloc_recommended_granule;
-    size_t pool_alloc_alignment;
-    bool pl_access;
-    uint32_t global_flag;
+  uint32_t segment;
+  size_t pool_size;
+  bool alloc_allowed;
+  size_t alloc_granule;
+  size_t alloc_recommended_granule;
+  size_t pool_alloc_alignment;
+  bool pl_access;
+  uint32_t global_flag;
 };
 
 // This structure holds ISA information acquired through hsa info
 // related calls, and is later used for reference when displaying the
 // information.
 struct isa_info_t {
-    char *name_str;
-    uint32_t workgroup_max_size;
-    hsa_dim3_t grid_max_dim;
-    uint64_t grid_max_size;
-    uint32_t fbarrier_max_size;
-    uint16_t workgroup_max_dim[3];
-    bool def_rounding_modes[3];
-    bool base_rounding_modes[3];
-    bool mach_models[2];
-    bool profiles[2];
-    bool fast_f16;
+  char* name_str;
+  uint32_t workgroup_max_size;
+  hsa_dim3_t grid_max_dim;
+  uint64_t grid_max_size;
+  uint32_t fbarrier_max_size;
+  uint16_t workgroup_max_dim[3];
+  bool def_rounding_modes[3];
+  bool base_rounding_modes[3];
+  bool mach_models[2];
+  bool profiles[2];
+  bool fast_f16;
 };
 
 // This structure holds cache information acquired through hsa info
 // related calls, and is later used for reference when displaying the
 // information.
 struct cache_info_t {
-    char *name_str;
-    uint8_t level;
-    uint32_t size;
+  char* name_str;
+  uint8_t level;
+  uint32_t size;
 };
 
 static const uint32_t kLabelFieldSize = 25;
 static const uint32_t kValueFieldSize = 35;
 static const uint32_t kIndentSize = 2;
 
-static void printLabelInt(char const *l, int d, uint32_t indent_lvl = 0) {
+static void printLabelInt(char const* l, int d, uint32_t indent_lvl = 0) {
   std::string ind(kIndentSize * indent_lvl, ' ');
 
   printf("%s%-*s%-*u\n", ind.c_str(), kLabelFieldSize, l, kValueFieldSize, d);
 }
-static void printLabelStr(char const *l, char const *s,
-                                                    uint32_t indent_lvl = 0) {
+static void printLabelStr(char const* l, char const* s, uint32_t indent_lvl = 0) {
   std::string ind(kIndentSize * indent_lvl, ' ');
   printf("%s%-*s%-*s\n", ind.c_str(), kLabelFieldSize, l, kValueFieldSize, s);
 }
-static void printLabel(char const *l, bool newline = false,
-                                                    uint32_t indent_lvl = 0) {
+static void printLabel(char const* l, bool newline = false, uint32_t indent_lvl = 0) {
   std::string ind(kIndentSize * indent_lvl, ' ');
 
   printf("%s%-*s", ind.c_str(), kLabelFieldSize, l);
@@ -161,12 +160,12 @@ static void printLabel(char const *l, bool newline = false,
     printf("\n");
   }
 }
-static void printValueStr(char const *s, bool newline = true) {
+static void printValueStr(char const* s, bool newline = true) {
   printf("%-*s\n", kValueFieldSize, s);
 }
 
 // Acquire system information
-static hsa_status_t AcquireSystemInfo(system_info_t *sys_info) {
+static hsa_status_t AcquireSystemInfo(system_info_t* sys_info) {
   hsa_status_t err;
 
   // Get Major and Minor version of runtime
@@ -176,13 +175,11 @@ static hsa_status_t AcquireSystemInfo(system_info_t *sys_info) {
   RET_IF_HSA_ERR(err);
 
   // Get timestamp frequency
-  err = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY,
-                                              &sys_info->timestamp_frequency);
+  err = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sys_info->timestamp_frequency);
   RET_IF_HSA_ERR(err);
 
   // Get maximum duration of a signal wait operation
-  err = hsa_system_get_info(HSA_SYSTEM_INFO_SIGNAL_MAX_WAIT,
-                                                         &sys_info->max_wait);
+  err = hsa_system_get_info(HSA_SYSTEM_INFO_SIGNAL_MAX_WAIT, &sys_info->max_wait);
   RET_IF_HSA_ERR(err);
 
   // Get Endianness of the system
@@ -190,13 +187,12 @@ static hsa_status_t AcquireSystemInfo(system_info_t *sys_info) {
   RET_IF_HSA_ERR(err);
 
   // Get machine model info
-  err = hsa_system_get_info(HSA_SYSTEM_INFO_MACHINE_MODEL,
-                                                     &sys_info->machine_model);
+  err = hsa_system_get_info(HSA_SYSTEM_INFO_MACHINE_MODEL, &sys_info->machine_model);
   RET_IF_HSA_ERR(err);
   return err;
 }
 
-static void DisplaySystemInfo(system_info_t const *sys_info) {
+static void DisplaySystemInfo(system_info_t const* sys_info) {
   printLabel("Runtime Version:");
   printf("%d.%d\n", sys_info->major, sys_info->minor);
   printLabel("System Timestamp Freq.:");
@@ -220,49 +216,41 @@ static void DisplaySystemInfo(system_info_t const *sys_info) {
   printf("\n");
 }
 
-static hsa_status_t
-AcquireAgentInfo(hsa_agent_t agent, agent_info_t *agent_i) {
+static hsa_status_t AcquireAgentInfo(hsa_agent_t agent, agent_info_t* agent_i) {
   hsa_status_t err;
   // Get agent name and vendor
   err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_i->name);
   RET_IF_HSA_ERR(err);
-  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_VENDOR_NAME,
-                                                       &agent_i->vendor_name);
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_VENDOR_NAME, &agent_i->vendor_name);
   RET_IF_HSA_ERR(err);
 
   // Get agent feature
-  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_FEATURE,
-                                                     &agent_i->agent_feature);
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_FEATURE, &agent_i->agent_feature);
   RET_IF_HSA_ERR(err);
 
   // Get profile supported by the agent
-  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE,
-                                                     &agent_i->agent_profile);
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_i->agent_profile);
   RET_IF_HSA_ERR(err);
 
   // Get floating-point rounding mode
   err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEFAULT_FLOAT_ROUNDING_MODE,
-                                               &agent_i->float_rounding_mode);
+                           &agent_i->float_rounding_mode);
   RET_IF_HSA_ERR(err);
 
   // Get max number of queue
-  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUES_MAX,
-                                                         &agent_i->max_queue);
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUES_MAX, &agent_i->max_queue);
   RET_IF_HSA_ERR(err);
 
   // Get queue min size
-  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MIN_SIZE,
-                                                    &agent_i->queue_min_size);
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MIN_SIZE, &agent_i->queue_min_size);
   RET_IF_HSA_ERR(err);
 
   // Get queue max size
-  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE,
-                                                    &agent_i->queue_max_size);
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_i->queue_max_size);
   RET_IF_HSA_ERR(err);
 
   // Get queue type
-  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_TYPE,
-                                                        &agent_i->queue_type);
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_TYPE, &agent_i->queue_type);
   RET_IF_HSA_ERR(err);
 
   // Get agent node
@@ -270,8 +258,7 @@ AcquireAgentInfo(hsa_agent_t agent, agent_info_t *agent_i) {
   RET_IF_HSA_ERR(err);
 
   // Get device type
-  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE,
-                                                       &agent_i->device_type);
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &agent_i->device_type);
   RET_IF_HSA_ERR(err);
 
   if (HSA_DEVICE_TYPE_GPU == agent_i->device_type) {
@@ -280,91 +267,77 @@ AcquireAgentInfo(hsa_agent_t agent, agent_info_t *agent_i) {
   }
 
   // Get cache size
-  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_CACHE_SIZE,
-                                                        agent_i->cache_size);
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_CACHE_SIZE, agent_i->cache_size);
   RET_IF_HSA_ERR(err);
 
   // Get chip id
-  err = hsa_agent_get_info(agent,
-                           (hsa_agent_info_t) HSA_AMD_AGENT_INFO_CHIP_ID,
-                                                           &agent_i->chip_id);
+  err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CHIP_ID, &agent_i->chip_id);
   RET_IF_HSA_ERR(err);
 
   // Get cacheline size
-  err = hsa_agent_get_info(agent,
-                       (hsa_agent_info_t) HSA_AMD_AGENT_INFO_CACHELINE_SIZE,
-                                                    &agent_i->cacheline_size);
+  err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CACHELINE_SIZE,
+                           &agent_i->cacheline_size);
   RET_IF_HSA_ERR(err);
 
   // Get Max clock frequency
-  err = hsa_agent_get_info(agent,
-                  (hsa_agent_info_t) HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY,
-                                                    &agent_i->max_clock_freq);
+  err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY,
+                           &agent_i->max_clock_freq);
   RET_IF_HSA_ERR(err);
 
   // Get Agent BDFID
-  err = hsa_agent_get_info(agent,
-                (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &agent_i->bdf_id);
+  err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &agent_i->bdf_id);
   RET_IF_HSA_ERR(err);
 
   // Get number of Compute Unit
-  err = hsa_agent_get_info(agent,
-                   (hsa_agent_info_t) HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT,
-                                                      &agent_i->compute_unit);
+  err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT,
+                           &agent_i->compute_unit);
   RET_IF_HSA_ERR(err);
 
   // Check if the agent is kernel agent
   if (agent_i->agent_feature & HSA_AGENT_FEATURE_KERNEL_DISPATCH) {
     // Get flaf of fast_f16 operation
-    err = hsa_agent_get_info(agent,
-                       HSA_AGENT_INFO_FAST_F16_OPERATION, &agent_i->fast_f16);
+    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_FAST_F16_OPERATION, &agent_i->fast_f16);
     RET_IF_HSA_ERR(err);
 
     // Get wavefront size
-    err = hsa_agent_get_info(agent,
-                     HSA_AGENT_INFO_WAVEFRONT_SIZE, &agent_i->wavefront_size);
+    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &agent_i->wavefront_size);
     RET_IF_HSA_ERR(err);
 
     // Get max total number of work-items in a workgroup
-    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_WORKGROUP_MAX_SIZE,
-                                                &agent_i->workgroup_max_size);
+    err =
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_WORKGROUP_MAX_SIZE, &agent_i->workgroup_max_size);
     RET_IF_HSA_ERR(err);
 
     // Get max number of work-items of each dimension of a work-group
-    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_WORKGROUP_MAX_DIM,
-                                                 &agent_i->workgroup_max_dim);
+    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_WORKGROUP_MAX_DIM, &agent_i->workgroup_max_dim);
     RET_IF_HSA_ERR(err);
 
     // Get max number of a grid per dimension
-    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_GRID_MAX_DIM,
-                                                      &agent_i->grid_max_dim);
+    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_GRID_MAX_DIM, &agent_i->grid_max_dim);
     RET_IF_HSA_ERR(err);
 
     // Get max total number of work-items in a grid
-    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_GRID_MAX_SIZE,
-                                                     &agent_i->grid_max_size);
+    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_GRID_MAX_SIZE, &agent_i->grid_max_size);
     RET_IF_HSA_ERR(err);
 
     // Get max number of fbarriers per work group
-    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_FBARRIER_MAX_SIZE,
-                                                 &agent_i->fbarrier_max_size);
+    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_FBARRIER_MAX_SIZE, &agent_i->fbarrier_max_size);
     RET_IF_HSA_ERR(err);
 
-    err = hsa_agent_get_info(agent,
-                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU,
-                                                      &agent_i->waves_per_cu);
+    err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU,
+                             &agent_i->waves_per_cu);
     RET_IF_HSA_ERR(err);
   }
   return err;
 }
 
-static void DisplayAgentInfo(agent_info_t *agent_i) {
+static void DisplayAgentInfo(agent_info_t* agent_i) {
   printLabelStr("Name:", agent_i->name, 1);
   printLabelStr("Vendor Name:", agent_i->vendor_name, 1);
 
   printLabel("Feature:", false, 1);
-  if (agent_i->agent_feature & HSA_AGENT_FEATURE_KERNEL_DISPATCH
-      && agent_i->agent_feature & HSA_AGENT_FEATURE_AGENT_DISPATCH) {
+  if (agent_i->agent_feature & HSA_AGENT_FEATURE_KERNEL_DISPATCH &&
+      agent_i->agent_feature & HSA_AGENT_FEATURE_AGENT_DISPATCH) {
     printValueStr("KERNEL_DISPATCH & AGENT_DISPATCH");
   } else if (agent_i->agent_feature & HSA_AGENT_FEATURE_KERNEL_DISPATCH) {
     printValueStr("KERNEL_DISPATCH");
@@ -386,8 +359,7 @@ static void DisplayAgentInfo(agent_info_t *agent_i) {
   printLabel("Float Round Mode:", false, 1);
   if (HSA_DEFAULT_FLOAT_ROUNDING_MODE_ZERO == agent_i->float_rounding_mode) {
     printValueStr("ZERO");
-  } else if (HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR ==
-                                               agent_i->float_rounding_mode) {
+  } else if (HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR == agent_i->float_rounding_mode) {
     printValueStr("NEAR");
   } else {
     printValueStr("Not Supported");
@@ -421,11 +393,11 @@ static void DisplayAgentInfo(agent_info_t *agent_i) {
   for (int i = 0; i < 4; i++) {
     if (agent_i->cache_size[i]) {
       std::string tmp_str("L");
-      tmp_str += std::to_string(i+1);
+      tmp_str += std::to_string(i + 1);
       tmp_str += ":";
       printLabel(tmp_str.c_str(), false, 2);
 
-      tmp_str = std::to_string(agent_i->cache_size[i]/1024);
+      tmp_str = std::to_string(agent_i->cache_size[i] / 1024);
       tmp_str += "KB";
       printValueStr(tmp_str.c_str());
     }
@@ -450,7 +422,7 @@ static void DisplayAgentInfo(agent_info_t *agent_i) {
   printf("\n");
 
   if (agent_i->agent_feature & HSA_AGENT_FEATURE_KERNEL_DISPATCH) {
-    printLabelStr("Fast F16 Operation:", agent_i->fast_f16 ? "TRUE":"FALSE", 1);
+    printLabelStr("Fast F16 Operation:", agent_i->fast_f16 ? "TRUE" : "FALSE", 1);
 
     printLabelInt("Wavefront Size:", agent_i->wavefront_size, 1);
     printLabelInt("Workgroup Max Size:", agent_i->workgroup_max_size, 1);
@@ -459,65 +431,53 @@ static void DisplayAgentInfo(agent_info_t *agent_i) {
     std::string dim;
     for (int i = 0; i < 3; i++) {
       dim = "Dim[" + std::to_string(i) + "]:";
-      printLabelInt(dim.c_str(),
-              reinterpret_cast<uint32_t*>(&agent_i->workgroup_max_dim)[i], 2);
+      printLabelInt(dim.c_str(), reinterpret_cast<uint32_t*>(&agent_i->workgroup_max_dim)[i], 2);
     }
     printLabelInt("Grid Max Size:", agent_i->grid_max_size, 1);
     printLabelInt("Waves Per CU:", agent_i->waves_per_cu, 1);
-    printLabelInt("Max Work-item Per CU:",
-                            agent_i->wavefront_size*agent_i->waves_per_cu, 1);
+    printLabelInt("Max Work-item Per CU:", agent_i->wavefront_size * agent_i->waves_per_cu, 1);
     printLabel("Grid Max Size per Dimension:", true, 1);
     for (int i = 0; i < 3; i++) {
       dim = "Dim[" + std::to_string(i) + "]:";
-      printLabelInt(dim.c_str(),
-                 reinterpret_cast<uint32_t*>(&agent_i->grid_max_dim)[i], 2);
+      printLabelInt(dim.c_str(), reinterpret_cast<uint32_t*>(&agent_i->grid_max_dim)[i], 2);
     }
 
-    printLabelInt("Max number Of fbarriers Per Workgroup:",
-                                             agent_i->fbarrier_max_size, 1);
+    printLabelInt("Max number Of fbarriers Per Workgroup:", agent_i->fbarrier_max_size, 1);
   }
 }
 
-static hsa_status_t AcquirePoolInfo(hsa_amd_memory_pool_t pool,
-                                                        pool_info_t *pool_i) {
+static hsa_status_t AcquirePoolInfo(hsa_amd_memory_pool_t pool, pool_info_t* pool_i) {
   hsa_status_t err;
 
-  err = hsa_amd_memory_pool_get_info(pool,
-                  HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &pool_i->global_flag);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
+                                     &pool_i->global_flag);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT,
-                                                             &pool_i->segment);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &pool_i->segment);
   RET_IF_HSA_ERR(err);
 
   // Get the size of the POOL
-  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE,
-                                                          &pool_i->pool_size);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &pool_i->pool_size);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_amd_memory_pool_get_info(pool,
-             HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED,
-                                                      &pool_i->alloc_allowed);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED,
+                                     &pool_i->alloc_allowed);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_amd_memory_pool_get_info(pool,
-             HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE,
-                                                      &pool_i->alloc_granule);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE,
+                                     &pool_i->alloc_granule);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_amd_memory_pool_get_info(pool,
-                           HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT,
-                                               &pool_i->pool_alloc_alignment);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT,
+                                     &pool_i->pool_alloc_alignment);
   RET_IF_HSA_ERR(err);
 
-  err =
-      hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE,
-                                   &pool_i->alloc_recommended_granule);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE,
+                                     &pool_i->alloc_recommended_granule);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_amd_memory_pool_get_info(pool,
-                      HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL,
-                                                          &pool_i->pl_access);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL,
+                                     &pool_i->pl_access);
   RET_IF_HSA_ERR(err);
 
   return HSA_STATUS_SUCCESS;
@@ -549,7 +509,7 @@ static void MakeGlobalFlagsString(uint32_t global_flag, std::string* out_str) {
   }
 }
 
-static void DumpSegment(pool_info_t *pool_i, uint32_t ind_lvl) {
+static void DumpSegment(pool_info_t* pool_i, uint32_t ind_lvl) {
   std::string seg_str;
   std::string tmp_str;
 
@@ -580,26 +540,23 @@ static void DumpSegment(pool_info_t *pool_i, uint32_t ind_lvl) {
   printValueStr(seg_str.c_str());
 }
 
-static void DisplayPoolInfo(pool_info_t *pool_i, uint32_t indent) {
+static void DisplayPoolInfo(pool_info_t* pool_i, uint32_t indent) {
   DumpSegment(pool_i, indent);
 
-  std::string sz_str = std::to_string(pool_i->pool_size/1024) + "KB";
+  std::string sz_str = std::to_string(pool_i->pool_size / 1024) + "KB";
   printLabelStr("Size:", sz_str.c_str(), indent);
-  printLabelStr("Allocatable:", (pool_i->alloc_allowed ? "TRUE" : "FALSE"),
-                                                                      indent);
-  std::string gr_str = std::to_string(pool_i->alloc_granule/1024)+"KB";
+  printLabelStr("Allocatable:", (pool_i->alloc_allowed ? "TRUE" : "FALSE"), indent);
+  std::string gr_str = std::to_string(pool_i->alloc_granule / 1024) + "KB";
   printLabelStr("Alloc Granule:", gr_str.c_str(), indent);
 
-  std::string al_str = std::to_string(pool_i->pool_alloc_alignment/1024)+"KB";
+  std::string al_str = std::to_string(pool_i->pool_alloc_alignment / 1024) + "KB";
   printLabelStr("Alloc Alignment:", al_str.c_str(), indent);
 
-  printLabelStr("Acessible by all:", (pool_i->pl_access ? "TRUE" : "FALSE"),
-                                                                      indent);
+  printLabelStr("Acessible by all:", (pool_i->pl_access ? "TRUE" : "FALSE"), indent);
 }
 
-static hsa_status_t
-AcquireAndDisplayMemPoolInfo(const hsa_amd_memory_pool_t pool,
-                                                            uint32_t indent) {
+static hsa_status_t AcquireAndDisplayMemPoolInfo(const hsa_amd_memory_pool_t pool,
+                                                 uint32_t indent) {
   hsa_status_t err;
   pool_info_t pool_i;
 
@@ -626,7 +583,7 @@ static hsa_status_t get_pool_info(hsa_amd_memory_pool_t pool, void* data) {
   return err;
 }
 
-static hsa_status_t AcquireISAInfo(hsa_isa_t isa, isa_info_t *isa_i) {
+static hsa_status_t AcquireISAInfo(hsa_isa_t isa, isa_info_t* isa_i) {
   hsa_status_t err;
   uint32_t name_len;
   err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &name_len);
@@ -640,50 +597,42 @@ static hsa_status_t AcquireISAInfo(hsa_isa_t isa, isa_info_t *isa_i) {
   err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_i->name_str);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_MACHINE_MODELS,
-                                                          isa_i->mach_models);
+  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_MACHINE_MODELS, isa_i->mach_models);
   RET_IF_HSA_ERR(err);
 
   err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_PROFILES, isa_i->profiles);
   RET_IF_HSA_ERR(err);
 
   err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_DEFAULT_FLOAT_ROUNDING_MODES,
-                                                   isa_i->def_rounding_modes);
+                             isa_i->def_rounding_modes);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_isa_get_info_alt(isa,
-                    HSA_ISA_INFO_BASE_PROFILE_DEFAULT_FLOAT_ROUNDING_MODES,
-                                                  isa_i->base_rounding_modes);
+  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_BASE_PROFILE_DEFAULT_FLOAT_ROUNDING_MODES,
+                             isa_i->base_rounding_modes);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_FAST_F16_OPERATION,
-                                                            &isa_i->fast_f16);
+  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_FAST_F16_OPERATION, &isa_i->fast_f16);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_WORKGROUP_MAX_DIM,
-                                                   &isa_i->workgroup_max_dim);
+  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_WORKGROUP_MAX_DIM, &isa_i->workgroup_max_dim);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_WORKGROUP_MAX_SIZE,
-                                                  &isa_i->workgroup_max_size);
+  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_WORKGROUP_MAX_SIZE, &isa_i->workgroup_max_size);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_GRID_MAX_DIM,
-                                                        &isa_i->grid_max_dim);
+  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_GRID_MAX_DIM, &isa_i->grid_max_dim);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_GRID_MAX_SIZE,
-                                                        &isa_i->grid_max_size);
+  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_GRID_MAX_SIZE, &isa_i->grid_max_size);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_FBARRIER_MAX_SIZE,
-                                                    &isa_i->fbarrier_max_size);
+  err = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_FBARRIER_MAX_SIZE, &isa_i->fbarrier_max_size);
   RET_IF_HSA_ERR(err);
 
   return err;
 }
 
-static void DisplayISAInfo(isa_info_t *isa_i, uint32_t indent) {
+static void DisplayISAInfo(isa_info_t* isa_i, uint32_t indent) {
   printLabelStr("Name:", isa_i->name_str, indent);
 
   std::string models("");
@@ -734,23 +683,22 @@ static void DisplayISAInfo(isa_info_t *isa_i, uint32_t indent) {
   std::string dim;
   for (int i = 0; i < 3; i++) {
     dim = "Dim[" + std::to_string(i) + "]:";
-    printLabelInt(dim.c_str(),
-         reinterpret_cast<uint32_t*>(&isa_i->workgroup_max_dim)[i], indent+1);
+    printLabelInt(dim.c_str(), reinterpret_cast<uint32_t*>(&isa_i->workgroup_max_dim)[i],
+                  indent + 1);
   }
 
   printLabelInt("Workgroup Max Size:", isa_i->workgroup_max_size, indent);
 
   printLabel("Grid Max Dimension:", true, indent);
-  printLabelInt("x", isa_i->grid_max_dim.x, indent+1);
-  printLabelInt("y", isa_i->grid_max_dim.y, indent+1);
-  printLabelInt("z", isa_i->grid_max_dim.z, indent+1);
+  printLabelInt("x", isa_i->grid_max_dim.x, indent + 1);
+  printLabelInt("y", isa_i->grid_max_dim.y, indent + 1);
+  printLabelInt("z", isa_i->grid_max_dim.z, indent + 1);
 
   printLabelInt("Grid Max Size:", isa_i->grid_max_size, indent);
   printLabelInt("FBarrier Max Size:", isa_i->fbarrier_max_size, indent);
 }
 
-static hsa_status_t
-AcquireAndDisplayISAInfo(const hsa_isa_t isa, uint32_t indent) {
+static hsa_status_t AcquireAndDisplayISAInfo(const hsa_isa_t isa, uint32_t indent) {
   hsa_status_t err;
   isa_info_t isa_i;
 
@@ -761,7 +709,7 @@ AcquireAndDisplayISAInfo(const hsa_isa_t isa, uint32_t indent) {
   DisplayISAInfo(&isa_i, 3);
 
   if (isa_i.name_str != nullptr) {
-    delete []isa_i.name_str;
+    delete[] isa_i.name_str;
   }
   return err;
 }
@@ -782,14 +730,14 @@ static hsa_status_t get_isa_info(hsa_isa_t isa, void* data) {
 // Cache info dump is ifdef'd out as it generates a lot of output that is
 // not that interesting. Define ENABLE_CACHE_DUMP if this is of interest.
 #ifdef ENABLE_CACHE_DUMP
-static void DisplayCacheInfo(cache_info_t *cache_i, uint32_t indent) {
+static void DisplayCacheInfo(cache_info_t* cache_i, uint32_t indent) {
   printLabelStr("Name:", cache_i->name_str, indent);
 
   printLabelInt("Level:", cache_i->level, indent);
   printLabelInt("Size:", cache_i->size, indent);
 }
 
-static hsa_status_t AcquireCacheInfo(hsa_cache_t cache, cache_info_t *cache_i) {
+static hsa_status_t AcquireCacheInfo(hsa_cache_t cache, cache_info_t* cache_i) {
   hsa_status_t err;
   uint32_t name_len;
   err = hsa_cache_get_info(cache, HSA_CACHE_INFO_NAME_LENGTH, &name_len);
@@ -811,8 +759,7 @@ static hsa_status_t AcquireCacheInfo(hsa_cache_t cache, cache_info_t *cache_i) {
   return err;
 }
 
-static hsa_status_t
-AcquireAndDisplayCacheInfo(const hsa_cache_t cache, uint32_t indent) {
+static hsa_status_t AcquireAndDisplayCacheInfo(const hsa_cache_t cache, uint32_t indent) {
   hsa_status_t err;
   cache_info_t cache_i;
 
@@ -822,7 +769,7 @@ AcquireAndDisplayCacheInfo(const hsa_cache_t cache, uint32_t indent) {
   DisplayCacheInfo(&cache_i, 3);
 
   if (cache_i.name_str != nullptr) {
-    delete []cache_i.name_str;
+    delete[] cache_i.name_str;
   }
 
   return err;
@@ -843,15 +790,14 @@ static hsa_status_t get_cache_info(hsa_cache_t cache, void* data) {
   return err;
 }
 #endif  // ENABLE_CACHE_DUMP
-static hsa_status_t
-AcquireAndDisplayAgentInfo(hsa_agent_t agent, void* data) {
+static hsa_status_t AcquireAndDisplayAgentInfo(hsa_agent_t agent, void* data) {
   int pool_number = 0;
   int isa_number = 0;
 
   hsa_status_t err;
   agent_info_t agent_i;
 
-  int *agent_number = reinterpret_cast<int*>(data);
+  int* agent_number = reinterpret_cast<int*>(data);
   (*agent_number)++;
 
   err = AcquireAgentInfo(agent, &agent_i);

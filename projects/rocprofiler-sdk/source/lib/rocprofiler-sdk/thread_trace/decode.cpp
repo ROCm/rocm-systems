@@ -77,7 +77,8 @@ get_dl(rocprofiler_thread_trace_decoder_id_t handle)
 }
 }  // namespace
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_thread_trace_decoder_create(rocprofiler_thread_trace_decoder_id_t* handle,
                                         const char*                            path)
@@ -219,7 +220,8 @@ trace_callback(rocprofiler_thread_trace_decoder_record_type_t record_type_id,
 
 }  // namespace
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_id_t       handle,
                          rocprofiler_thread_trace_decoder_callback_t user_callback,

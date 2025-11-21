@@ -404,8 +404,8 @@ tool_fini(void*)
         if(actual_size && *actual_size != expected)
         {
             std::clog << (*actual_size == expected ? "" : "[ERROR]") << "Counter ID: " << counter_id
-                      << " (" << name << ")"
-                      << " expected " << expected << " instances and got " << *actual_size << "\n";
+                      << " (" << name << ")" << " expected " << expected << " instances and got "
+                      << *actual_size << "\n";
         }
         else if(!actual_size)
         {
@@ -421,8 +421,8 @@ tool_fini(void*)
             if(!PRINT_ONLY_FAILING || !passed)
             {
                 std::clog << (passed ? "[OK] " : "[ERROR] ") << "Counter ID: " << counter_id << " ("
-                          << name << ")"
-                          << " Expected: " << expected << " Got: " << *actual_size << "\n";
+                          << name << ")" << " Expected: " << expected << " Got: " << *actual_size
+                          << "\n";
                 std::clog << ss.str();
             }
         }

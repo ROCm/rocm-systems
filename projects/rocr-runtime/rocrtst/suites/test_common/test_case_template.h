@@ -76,8 +76,8 @@ class TestExample : public TestBase {
   uint32_t RealIterationNum(void);
 
   double time_mean_;
-  void *src_buffer_;
-  void *dst_buffer_;
+  void* src_buffer_;
+  void* dst_buffer_;
 };
 
 #endif  // ROCRTST_SUITES_TEST_COMMON_TEST_CASE_TEMPLATE_H_

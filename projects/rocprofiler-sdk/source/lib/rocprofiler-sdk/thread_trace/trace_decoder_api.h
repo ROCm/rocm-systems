@@ -25,7 +25,8 @@
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 typedef enum

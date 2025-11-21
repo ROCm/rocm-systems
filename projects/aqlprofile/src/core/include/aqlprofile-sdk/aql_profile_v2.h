@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #pragma once
 
 #include <hsa/hsa.h>
@@ -138,31 +137,27 @@ typedef enum {
   AQLPROFILE_ACCUMULATION_LAST,
 } aqlprofile_accumulation_type_t;
 
-typedef enum
-{
-    AQLPROFILE_SPM_DEPTH_NONE,
-    AQLPROFILE_SPM_DEPTH_16_BITS,
-    AQLPROFILE_SPM_DEPTH_32_BITS,
-    AQLPROFILE_SPM_DEPTH_64_BITS
+typedef enum {
+  AQLPROFILE_SPM_DEPTH_NONE,
+  AQLPROFILE_SPM_DEPTH_16_BITS,
+  AQLPROFILE_SPM_DEPTH_32_BITS,
+  AQLPROFILE_SPM_DEPTH_64_BITS
 } aqlprofile_spm_depth_t;
 
 /**
  * @brief Special flags indicating additional properties to a counter. E.g. Accumulation metrics
  */
-typedef union
-{
-    uint32_t raw;
-    struct
-    {
-        uint32_t accum     : 3; /**< One of aqlprofile_accumulation_type_t */
-        uint32_t _reserved : 25;
-        uint32_t depth     : 4; /**< One of aqlprofile_spm_depth_t */
-    } sq_flags;
-    struct
-    {
-        uint32_t _reserved : 28;
-        uint32_t depth     : 4; /**< One of aqlprofile_spm_depth_t */
-    } spm_flags;
+typedef union {
+  uint32_t raw;
+  struct {
+    uint32_t accum : 3; /**< One of aqlprofile_accumulation_type_t */
+    uint32_t _reserved : 25;
+    uint32_t depth : 4; /**< One of aqlprofile_spm_depth_t */
+  } sq_flags;
+  struct {
+    uint32_t _reserved : 28;
+    uint32_t depth : 4; /**< One of aqlprofile_spm_depth_t */
+  } spm_flags;
 } aqlprofile_pmc_event_flags_t;
 
 /**
@@ -283,15 +278,13 @@ typedef enum {
 hsa_status_t aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
                                      aqlprofile_pmc_info_type_t attribute, void* value);
 
-typedef enum aqlprofile_att_parameter_rt_timestamp_t
-{
+typedef enum aqlprofile_att_parameter_rt_timestamp_t {
   AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DEFAULT = 0,
   AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_ENABLE,
   AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DISABLE
 } aqlprofile_att_parameter_rt_timestamp_t;
 
-typedef enum aqlprofile_att_parameter_name_ext_t
-{
+typedef enum aqlprofile_att_parameter_name_ext_t {
   /**
    * HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE + 1
    */
@@ -455,7 +448,7 @@ void aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
  * The caller must pool information by sending a query_status packet, followed by a call
  * to aqlprofile_att_get_buffer_status(). If aqlprofile_att_buffer_status_t.is_full, then
  * a buffer_swap packet must be inserted into the queue.
- * 
+ *
  * @param[out] header If not zero, must be inserted as first 8 bytes.
  * @param[out] query_status To be inserted before calls to aqlprofile_att_get_buffer_status
  * @param[out] buffer_swap array of AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS transition packets
@@ -470,19 +463,17 @@ hsa_status_t aqlprofile_att_get_buffer_packets(uint64_t* header,
                                                hsa_ext_amd_aql_pm4_packet_t* query_status,
                                                hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
                                                uint64_t* num_buffer_swap,
-                                               aqlprofile_handle_t handle,
-                                               int shader_engine_id,
+                                               aqlprofile_handle_t handle, int shader_engine_id,
                                                int flags);
 
-struct aqlprofile_att_buffer_status_t
-{
-  uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_t)
-  void*    data;        // Read data from, if is full
-  uint64_t read_size;   // Number of bytes to read, if is full
-  uint64_t num_swaps;   // For verification purposes. Number of swaps previously executed.
-  bool     needs_swap;  // If buffer requires swap
-  bool     is_too_late;
-  bool     error;
+struct aqlprofile_att_buffer_status_t {
+  uint64_t _size;      // sizeof(aqlprofile_att_buffer_status_t)
+  void* data;          // Read data from, if is full
+  uint64_t read_size;  // Number of bytes to read, if is full
+  uint64_t num_swaps;  // For verification purposes. Number of swaps previously executed.
+  bool needs_swap;     // If buffer requires swap
+  bool is_too_late;
+  bool error;
 };
 
 /**
@@ -496,8 +487,7 @@ struct aqlprofile_att_buffer_status_t
  * @retval HSA_STATUS_ERROR otherwise
  */
 hsa_status_t aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
-                                                 aqlprofile_handle_t handle,
-                                                 int shader_engine_id,
+                                                 aqlprofile_handle_t handle, int shader_engine_id,
                                                  int flags);
 
 /**
@@ -577,56 +567,51 @@ hsa_status_t aqlprofile_att_codeobj_marker(hsa_ext_amd_aql_pm4_packet_t* packet,
 /**
  * @brief Struct to be returned by aqlprofile_spm_create_packets
  */
-typedef struct
-{
-    hsa_ext_amd_aql_pm4_packet_t start_packet;
-    hsa_ext_amd_aql_pm4_packet_t stop_packet;
+typedef struct {
+  hsa_ext_amd_aql_pm4_packet_t start_packet;
+  hsa_ext_amd_aql_pm4_packet_t stop_packet;
 } aqlprofile_spm_aql_packets_t;
 
-typedef struct
-{
-    void*  data;  // Valid until delete_packets() is scalled. Caller must save contents otherwise.
-    size_t size;  // Size of "data"
+typedef struct {
+  void* data;   // Valid until delete_packets() is scalled. Caller must save contents otherwise.
+  size_t size;  // Size of "data"
 } aqlprofile_spm_buffer_desc_t;
 
-typedef enum
-{
-    AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE = 0,
-    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL,
-    AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,
-    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
-    AQLPROFILE_SPM_PARAMETER_TYPE_LAST,
+typedef enum {
+  AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE = 0,
+  AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL,
+  AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,
+  AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
+  AQLPROFILE_SPM_PARAMETER_TYPE_LAST,
 } aqlprofile_spm_parameter_type_t;
 
-typedef enum
-{
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK = 0,
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK
+typedef enum {
+  AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK = 0,
+  AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK
 } aqlprofile_spm_parameter_interval_mode_t;
 
-typedef struct
-{
-    aqlprofile_spm_parameter_type_t type;
-    uint64_t                        value;
+typedef struct {
+  aqlprofile_spm_parameter_type_t type;
+  uint64_t value;
 } aqlprofile_spm_parameter_t;
 
 /**
  * @brief AQLprofile struct containing information for SPM counter events
  */
-typedef struct
-{
-    aqlprofile_agent_handle_t     aql_agent;
-    hsa_agent_t                   hsa_agent;
-    const aqlprofile_pmc_event_t* events;
-    size_t                        event_count;
-    aqlprofile_spm_parameter_t*   parameters;
-    size_t                        parameter_count;
-    size_t                        reserved;  // For future use
+typedef struct {
+  aqlprofile_agent_handle_t aql_agent;
+  hsa_agent_t hsa_agent;
+  const aqlprofile_pmc_event_t* events;
+  size_t event_count;
+  aqlprofile_spm_parameter_t* parameters;
+  size_t parameter_count;
+  size_t reserved;  // For future use
 
-    aqlprofile_memory_alloc_callback_t alloc_cb;  // Memory allocation, usually a wrapper for hsa_amd_memory_pool_allocate
-    aqlprofile_memory_dealloc_callback_t dealloc_cb;  // Frees memory allocated by alloc_cb
-    aqlprofile_memory_copy_t memcpy_cb;  // Copy memory in and out of GPU memory allocated by alloc_cb
-    void* userdata;   // Passed back to user in the memory callbacks
+  aqlprofile_memory_alloc_callback_t
+      alloc_cb;  // Memory allocation, usually a wrapper for hsa_amd_memory_pool_allocate
+  aqlprofile_memory_dealloc_callback_t dealloc_cb;  // Frees memory allocated by alloc_cb
+  aqlprofile_memory_copy_t memcpy_cb;  // Copy memory in and out of GPU memory allocated by alloc_cb
+  void* userdata;                      // Passed back to user in the memory callbacks
 } aqlprofile_spm_profile_t;
 
 /**
@@ -644,26 +629,22 @@ typedef struct
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT for invalid parameter or event
  * @retval HSA_STATUS_ERROR_INVALID_AGENT    for invalid agent handle
  */
-hsa_status_t
-aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
-                              aqlprofile_spm_buffer_desc_t* desc,
-                              aqlprofile_spm_aql_packets_t* packets,
-                              aqlprofile_spm_profile_t      profile,
-                              size_t                        flags);
+hsa_status_t aqlprofile_spm_create_packets(aqlprofile_handle_t* handle,
+                                           aqlprofile_spm_buffer_desc_t* desc,
+                                           aqlprofile_spm_aql_packets_t* packets,
+                                           aqlprofile_spm_profile_t profile, size_t flags);
 
 /**
  * @brief Destroys resources allocated by aqlprofile_spm_create_packets()
  * Implicitly calls aqlprofile_spm_stop. The descriptor pointer is invalid after this call.
  * @param[in] handle Handle
  */
-void
-aqlprofile_spm_delete_packets(aqlprofile_handle_t handle);
+void aqlprofile_spm_delete_packets(aqlprofile_handle_t handle);
 
 typedef size_t aqlprofile_spm_buffer_handle_t;
 
-typedef enum
-{
-    AQLPROFILE_SPM_DATA_FLAGS_DATA_LOSS = 0,
+typedef enum {
+  AQLPROFILE_SPM_DATA_FLAGS_DATA_LOSS = 0,
 } aqlprofile_spm_data_flags_t;
 
 /**
@@ -675,10 +656,8 @@ typedef enum
  * @param[in] userdata Data returned to user
  */
 typedef void (*aqlprofile_spm_data_callback_t)(aqlprofile_spm_buffer_handle_t handle,
-                                               void*                          spm_data,
-                                               size_t                         size,
-                                               int                            flags,
-                                               void*                          userdata);
+                                               void* spm_data, size_t size, int flags,
+                                               void* userdata);
 
 /**
  * @brief Starts processing of SPM buffer
@@ -689,10 +668,8 @@ typedef void (*aqlprofile_spm_data_callback_t)(aqlprofile_spm_buffer_handle_t ha
  * @retval HSA_STATUS_ERROR generic error
  * @retval HSA_STATUS_ERROR_NOT_INITIALIZED for invalid handle
  */
-hsa_status_t
-aqlprofile_spm_start(aqlprofile_handle_t            handle,
-                     aqlprofile_spm_data_callback_t data_cb,
-                     void*                          userdata);
+hsa_status_t aqlprofile_spm_start(aqlprofile_handle_t handle,
+                                  aqlprofile_spm_data_callback_t data_cb, void* userdata);
 
 /**
  * @brief Flushes remaining SPM data and stops processing of SPM buffer
@@ -701,14 +678,11 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
  * @retval HSA_STATUS_ERROR generic error
  * @retval HSA_STATUS_ERROR_NOT_INITIALIZED for invalid handle
  */
-hsa_status_t
-aqlprofile_spm_stop(aqlprofile_handle_t handle);
+hsa_status_t aqlprofile_spm_stop(aqlprofile_handle_t handle);
 
-typedef void (*aqlprofile_spm_decode_callback_v1_t)(uint64_t timestamp,
-                                                    uint64_t value,
-                                                    uint64_t index,
-                                                    int      shader_engine,
-                                                    void*    userdata);
+typedef void (*aqlprofile_spm_decode_callback_v1_t)(uint64_t timestamp, uint64_t value,
+                                                    uint64_t index, int shader_engine,
+                                                    void* userdata);
 
 /**
  * @brief Decodes a raw buffer returned by aqlprofile_spm_data_callback_t.
@@ -721,29 +695,23 @@ typedef void (*aqlprofile_spm_decode_callback_v1_t)(uint64_t timestamp,
  * @retval HSA_STATUS_SUCCESS if decode successful
  * @retval HSA_STATUS_ERROR   for generic error
  */
-hsa_status_t
-aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t        desc,
-                                aqlprofile_spm_decode_callback_v1_t decode_cb,
-                                void*                               data,
-                                size_t                              size,
-                                void*                               userdata);
+hsa_status_t aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t desc,
+                                             aqlprofile_spm_decode_callback_v1_t decode_cb,
+                                             void* data, size_t size, void* userdata);
 
-enum aqlprofile_spm_decode_query_t
-{
-    AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE = 0,
-    AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC,
-    AQLPROFILE_SPM_DECODE_QUERY_EVENT_COUNT,
-    AQLPROFILE_SPM_DECODE_QUERY_COUNTER_MAP_BYTE_OFFSET,
-    AQLPROFILE_SPM_DECODE_QUERY_LAST
+enum aqlprofile_spm_decode_query_t {
+  AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE = 0,
+  AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC,
+  AQLPROFILE_SPM_DECODE_QUERY_EVENT_COUNT,
+  AQLPROFILE_SPM_DECODE_QUERY_COUNTER_MAP_BYTE_OFFSET,
+  AQLPROFILE_SPM_DECODE_QUERY_LAST
 };
 
-hsa_status_t
-aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,
-                            aqlprofile_spm_decode_query_t query,
-                            uint64_t*                     param_out);
+hsa_status_t aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t desc,
+                                         aqlprofile_spm_decode_query_t query, uint64_t* param_out);
 
-bool
-aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pmc_event_t event);
+bool aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent,
+                                       aqlprofile_pmc_event_t event);
 
 #ifdef __cplusplus
 }

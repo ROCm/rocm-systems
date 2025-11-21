@@ -32,22 +32,20 @@
 
 LIBELF_VCSID("$Id: elf_rawfile.c 189 2008-07-20 10:38:08Z jkoshy $");
 
-char *
-elf_rawfile(Elf *e, size_t *sz)
-{
-	char *ptr;
-	size_t size;
+char *elf_rawfile(Elf *e, size_t *sz) {
+  char *ptr;
+  size_t size;
 
-	size = e ? e->e_rawsize : 0;
-	ptr = NULL;
+  size = e ? e->e_rawsize : 0;
+  ptr = NULL;
 
-	if (e == NULL)
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-	else if ((ptr = e->e_rawfile) == NULL && e->e_cmd == ELF_C_WRITE)
-		LIBELF_SET_ERROR(SEQUENCE, 0);
+  if (e == NULL)
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+  else if ((ptr = e->e_rawfile) == NULL && e->e_cmd == ELF_C_WRITE)
+    LIBELF_SET_ERROR(SEQUENCE, 0);
 
-	if (sz)
-		*sz = size;
+  if (sz)
+    *sz = size;
 
-	return (ptr);
+  return (ptr);
 }

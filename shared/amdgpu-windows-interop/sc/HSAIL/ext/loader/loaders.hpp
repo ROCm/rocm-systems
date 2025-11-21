@@ -44,71 +44,77 @@
 #define LOADERS_HPP_
 
 #include "amd_hsa_loader.hpp"
-#include <set>
 #include <iostream>
+#include <set>
 
 namespace amd {
 namespace hsa {
 namespace loader {
 
-  class OfflineLoaderContext : public amd::hsa::loader::Context {
-  private:
-    hsa_isa_t invalid;
-    hsa_isa_t gfx700, gfx701, gfx800, gfx801, gfx802, gfx803, gfx804, gfx810;
-    hsa_isa_t gfx900, gfx901, gfx902, gfx903;
-    hsa_isa_t gfx904, gfx905;
-    hsa_isa_t gfx906, gfx907;
-    hsa_isa_t gfx1000, gfx1001, gfx1010, gfx1011, gfx1012;
-    hsa_isa_t gfx1030;
-    hsa_isa_t gfx4000;
+class OfflineLoaderContext : public amd::hsa::loader::Context {
+private:
+  hsa_isa_t invalid;
+  hsa_isa_t gfx700, gfx701, gfx800, gfx801, gfx802, gfx803, gfx804, gfx810;
+  hsa_isa_t gfx900, gfx901, gfx902, gfx903;
+  hsa_isa_t gfx904, gfx905;
+  hsa_isa_t gfx906, gfx907;
+  hsa_isa_t gfx1000, gfx1001, gfx1010, gfx1011, gfx1012;
+  hsa_isa_t gfx1030;
+  hsa_isa_t gfx4000;
 #if defined(GFX11_BUILD)
-    hsa_isa_t gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151;
+  hsa_isa_t gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151;
 #endif // GFX11_BUILD
-    std::ostream& out;
-    typedef std::set<void*> PointerSet;
-    PointerSet pointers;
+  std::ostream &out;
+  typedef std::set<void *> PointerSet;
+  PointerSet pointers;
 
-  public:
-    OfflineLoaderContext();
+public:
+  OfflineLoaderContext();
 
-    hsa_isa_t IsaFromName(const char *name) override;
+  hsa_isa_t IsaFromName(const char *name) override;
 
-    bool IsaSupportedByAgent(hsa_agent_t agent, hsa_isa_t isa) override;
+  bool IsaSupportedByAgent(hsa_agent_t agent, hsa_isa_t isa) override;
 
-    void* SegmentAlloc(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, size_t size, size_t align, bool zero) override;
+  void *SegmentAlloc(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
+                     size_t size, size_t align, bool zero) override;
 
-    bool SegmentCopy(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, void* dst, size_t offset, const void* src, size_t size) override;
-    
-    void SegmentFree(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, void* seg, size_t size = 0) override;
+  bool SegmentCopy(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
+                   void *dst, size_t offset, const void *src,
+                   size_t size) override;
 
-    void* SegmentAddress(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, void* seg, size_t offset) override;
+  void SegmentFree(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
+                   void *seg, size_t size = 0) override;
 
-    void* SegmentHostAddress(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, void* seg, size_t offset) override;
+  void *SegmentAddress(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
+                       void *seg, size_t offset) override;
 
-    bool SegmentFreeze(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, void* seg, size_t size) override;
+  void *SegmentHostAddress(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
+                           void *seg, size_t offset) override;
 
-    bool ImageExtensionSupported() override;
+  bool SegmentFreeze(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
+                     void *seg, size_t size) override;
 
-    hsa_status_t ImageCreate(
-      hsa_agent_t agent,
-      hsa_access_permission_t image_permission,
-      const hsa_ext_image_descriptor_t *image_descriptor,
-      const void *image_data,
-      hsa_ext_image_t *image_handle) override;
+  bool ImageExtensionSupported() override;
 
-    hsa_status_t ImageDestroy(
-      hsa_agent_t agent, hsa_ext_image_t image_handle) override;
+  hsa_status_t ImageCreate(hsa_agent_t agent,
+                           hsa_access_permission_t image_permission,
+                           const hsa_ext_image_descriptor_t *image_descriptor,
+                           const void *image_data,
+                           hsa_ext_image_t *image_handle) override;
 
-    hsa_status_t SamplerCreate(
-      hsa_agent_t agent,
-      const hsa_ext_sampler_descriptor_t *sampler_descriptor,
-      hsa_ext_sampler_t *sampler_handle) override;
+  hsa_status_t ImageDestroy(hsa_agent_t agent,
+                            hsa_ext_image_t image_handle) override;
 
-    hsa_status_t SamplerDestroy(
-      hsa_agent_t agent, hsa_ext_sampler_t sampler_handle) override;
-  };
-}
-}
-}
+  hsa_status_t
+  SamplerCreate(hsa_agent_t agent,
+                const hsa_ext_sampler_descriptor_t *sampler_descriptor,
+                hsa_ext_sampler_t *sampler_handle) override;
+
+  hsa_status_t SamplerDestroy(hsa_agent_t agent,
+                              hsa_ext_sampler_t sampler_handle) override;
+};
+} // namespace loader
+} // namespace hsa
+} // namespace amd
 
 #endif // LOADERS_HPP_

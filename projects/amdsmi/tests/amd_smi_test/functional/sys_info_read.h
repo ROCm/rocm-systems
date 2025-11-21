@@ -27,7 +27,7 @@
 
 class TestSysInfoRead : public TestBase {
  public:
-    TestSysInfoRead();
+  TestSysInfoRead();
 
   // @Brief: Destructor for test case of TestSysInfoRead
   virtual ~TestSysInfoRead();

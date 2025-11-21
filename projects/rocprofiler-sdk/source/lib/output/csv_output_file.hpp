@@ -57,7 +57,7 @@ struct csv_output_file
 
     ~csv_output_file();
 
-    csv_output_file(const csv_output_file&) = delete;
+    csv_output_file(const csv_output_file&)            = delete;
     csv_output_file& operator=(const csv_output_file&) = delete;
 
     std::string name() const { return m_name; }

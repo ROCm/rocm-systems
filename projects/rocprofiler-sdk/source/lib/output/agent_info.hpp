@@ -41,11 +41,11 @@ struct agent_info : rocprofiler_agent_v0_t
     : base_type{_base}
     {}
 
-    agent_info()                      = default;
-    ~agent_info()                     = default;
-    agent_info(const agent_info&)     = default;
-    agent_info(agent_info&&) noexcept = default;
-    agent_info& operator=(const agent_info&) = default;
+    agent_info()                                 = default;
+    ~agent_info()                                = default;
+    agent_info(const agent_info&)                = default;
+    agent_info(agent_info&&) noexcept            = default;
+    agent_info& operator=(const agent_info&)     = default;
     agent_info& operator=(agent_info&&) noexcept = default;
 
     int64_t gpu_index =

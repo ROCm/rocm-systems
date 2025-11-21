@@ -152,8 +152,7 @@ void RdciPolicySubSystem::show_help() const {
             << "the policy defined on a GPU group.\n";
   std::cout << "  --reg                          can register "
             << "the rdci to listen for those events.\n";
-  std::cout << "  -h  --help                     Displays usage "
-            << "information and exits.\n";
+  std::cout << "  -h  --help                     Displays usage " << "information and exits.\n";
   std::cout << "  -M  --max                      Specify the maximum number "
             << "of retired pages for the Page Retirement event.\n";
   std::cout << "  -T  --temp                     Specify the maximum "
@@ -260,32 +259,25 @@ void RdciPolicySubSystem::process() {
       result = rdc_policy_get(rdc_handle_, group_id_, &count, policies);
       if (result == RDC_ST_OK) {
         std::cout << "Policy information \n";
-        std::cout << "+------------------------+"
-                  << "-----------------------------"
+        std::cout << "+------------------------+" << "-----------------------------"
                   << "-----------------+\n";
-        std::cout << "| Policy Name     \t "
-                  << "| Threshold\t\t"
-                  << "| Action\t\t|\n";
+        std::cout << "| Policy Name     \t " << "| Threshold\t\t" << "| Action\t\t|\n";
         std::cout << "+========================+"
-                  << "============================="
-                  << "=================+\n";
+                  << "=============================" << "=================+\n";
 
         for (unsigned int i = 0; i < count; i++) {
           if (policies[i].condition.type == RDC_POLICY_COND_MAX_PAGE_RETRIED) {
-            std::cout << "| Page Retirement\t "
-                      << "|   " << policies[i].condition.value;
+            std::cout << "| Page Retirement\t " << "|   " << policies[i].condition.value;
             if (policies[i].condition.value < 100) {
               std::cout << "\t";
             }
           } else if (policies[i].condition.type == RDC_POLICY_COND_THERMAL) {
-            std::cout << "| Temperature Limit\t "
-                      << "|   " << policies[i].condition.value / 1000;
+            std::cout << "| Temperature Limit\t " << "|   " << policies[i].condition.value / 1000;
             if (policies[i].condition.value / 1000 < 100) {
               std::cout << "\t";
             }
           } else if (policies[i].condition.type == RDC_POLICY_COND_POWER) {
-            std::cout << "| Power Limit     \t "
-                      << "|   " << policies[i].condition.value / 1000000;
+            std::cout << "| Power Limit     \t " << "|   " << policies[i].condition.value / 1000000;
             if (policies[i].condition.value / 1000000 < 100) {
               std::cout << "\t";
             }
@@ -299,8 +291,7 @@ void RdciPolicySubSystem::process() {
           }
         }
         std::cout << "+========================+"
-                  << "============================="
-                  << "=================+\n";
+                  << "=============================" << "=================+\n";
       }
       break;
     }

@@ -138,8 +138,8 @@ void DeallocationNotifierTest::SetUp(void) {
 }
 
 void DeallocationNotifierTest::Run(void) {
-// Compare required profile for this test case with what we're actually
-// running on
+  // Compare required profile for this test case with what we're actually
+  // running on
   if (!rocrtst::CheckProfile(this)) {
     return;
   }

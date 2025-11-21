@@ -127,7 +127,8 @@ void read_pc_samples_v9(const device_t& dev, PCSampler* sampler) {
 
         // Iterate over all the waves in the compute unit.
         for (uint32_t simd = 0; simd < dev.agent_info_.GetDeviceInfo().getSimdCountPerCU(); ++simd)
-          for (uint32_t wave_id = 0; wave_id < dev.agent_info_.GetDeviceInfo().getWaveSlotsPerSimd(); ++wave_id) {
+          for (uint32_t wave_id = 0;
+               wave_id < dev.agent_info_.GetDeviceInfo().getWaveSlotsPerSimd(); ++wave_id) {
             // FatalHalt the wave
             data = REG_SET_FIELD(0, SQ_CMD, CMD, SQ_IND_CMD_CMD_SETFATALHALT);
             data = REG_SET_FIELD(data, SQ_CMD, MODE, SQ_IND_CMD_MODE_SINGLE);
@@ -213,7 +214,8 @@ void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler* sampler) {
 
         // Iterate over all the waves in the compute unit.
         for (uint32_t simd = 0; simd < dev.agent_info_.GetDeviceInfo().getSimdCountPerCU(); ++simd)
-          for (uint32_t wave_id = 0; wave_id < dev.agent_info_.GetDeviceInfo().getWaveSlotsPerSimd(); ++wave_id) {
+          for (uint32_t wave_id = 0;
+               wave_id < dev.agent_info_.GetDeviceInfo().getWaveSlotsPerSimd(); ++wave_id) {
             // FatalHalt the wave
             data = REG_SET_FIELD(0, SQ_CMD, CMD, SQ_IND_CMD_CMD_SETFATALHALT);
             data = REG_SET_FIELD(data, SQ_CMD, MODE, SQ_IND_CMD_MODE_SINGLE);

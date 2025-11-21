@@ -781,7 +781,7 @@ static inline uint64_t
 rocprofiler_record_header_compute_hash(uint32_t category, uint32_t kind)
 {
     uint64_t value = category;
-    value |= ((uint64_t)(kind)) << 32;
+    value |= ((uint64_t) (kind)) << 32;
     return value;
 }
 

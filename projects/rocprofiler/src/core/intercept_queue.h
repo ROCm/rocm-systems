@@ -212,7 +212,8 @@ class InterceptQueue {
 
         // Calling dispatch callback
         rocprofiler_group_t group = {};
-        hsa_status_t status = (dispatch_callback_.load())(&data, get_persistent().callback_data_, &group);
+        hsa_status_t status =
+            (dispatch_callback_.load())(&data, get_persistent().callback_data_, &group);
         Context* context = reinterpret_cast<Context*>(group.context);
         // Injecting profiling start/stop packets
         if ((status == HSA_STATUS_SUCCESS) && (context != NULL)) {
@@ -350,7 +351,8 @@ class InterceptQueue {
 
         // Calling dispatch callback
         rocprofiler_group_t group = {};
-        hsa_status_t status = (dispatch_callback_.load())(&data, get_persistent().callback_data_, &group);
+        hsa_status_t status =
+            (dispatch_callback_.load())(&data, get_persistent().callback_data_, &group);
         // Injecting profiling start/stop/read packets
         if ((status != HSA_STATUS_SUCCESS) || (group.context == NULL)) {
           if (tracker_entry != NULL) {
@@ -500,7 +502,8 @@ class InterceptQueue {
 
         // Calling dispatch callback
         rocprofiler_group_t group = {};
-        hsa_status_t status = (dispatch_callback_.load())(&data, get_persistent().callback_data_, &group);
+        hsa_status_t status =
+            (dispatch_callback_.load())(&data, get_persistent().callback_data_, &group);
 
         // Injecting profiling start/stop packets
         if ((status == HSA_STATUS_SUCCESS) && (group.context != NULL)) {
@@ -621,8 +624,7 @@ class InterceptQueue {
     obj_map_t::const_iterator it = get_persistent().obj_map_.find((uint64_t)queue);
     if (it != get_persistent().obj_map_.end()) {
       obj = it->second.get();
-      if (obj)
-        assert(queue == obj->queue_);
+      if (obj) assert(queue == obj->queue_);
     }
     return obj;
   }
@@ -644,8 +646,7 @@ class InterceptQueue {
 
   static const packet_word_t header_type_mask = (1ul << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
 
-  typedef struct
-  {
+  typedef struct {
     mutex_t mutex_{};
     obj_map_t obj_map_{};
     rocprofiler_queue_callbacks_t callbacks_{};

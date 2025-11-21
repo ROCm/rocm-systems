@@ -54,22 +54,22 @@
 #include <hsa/amd_hsa_elf.h>
 
 #define THROW_COMGR(call)                                                                          \
-if (amd_comgr_status_s status = call) {                                                            \
-  const char* reason = "";                                                                         \
-  amd_comgr_status_string(status, &reason);                                                        \
-  std::cerr << __FILE__ << ':' << __LINE__ << " code: "                                            \
-            << status << " failed: " << reason << std::endl;                                       \
-  throw std::exception();                                                                          \
-}
+  if (amd_comgr_status_s status = call) {                                                          \
+    const char* reason = "";                                                                       \
+    amd_comgr_status_string(status, &reason);                                                      \
+    std::cerr << __FILE__ << ':' << __LINE__ << " code: " << status << " failed: " << reason       \
+              << std::endl;                                                                        \
+    throw std::exception();                                                                        \
+  }
 
 #define RETURN_COMGR(call)                                                                         \
-if (amd_comgr_status_s status = call) {                                                            \
-  const char* reason = "";                                                                         \
-  amd_comgr_status_string(status, &reason);                                                        \
-  std::cerr << __FILE__ << ':' << __LINE__ << " code: "                                            \
-            << status << " failed: " << reason << std::endl;                                       \
-  return AMD_COMGR_STATUS_ERROR;                                                                   \
-}
+  if (amd_comgr_status_s status = call) {                                                          \
+    const char* reason = "";                                                                       \
+    amd_comgr_status_string(status, &reason);                                                      \
+    std::cerr << __FILE__ << ':' << __LINE__ << " code: " << status << " failed: " << reason       \
+              << std::endl;                                                                        \
+    return AMD_COMGR_STATUS_ERROR;                                                                 \
+  }
 
 std::unordered_map<uint64_t, std::string> DisassemblyInstance::agent_isa_name{};
 
@@ -94,8 +94,7 @@ CodeObjectBinary::CodeObjectBinary(const std::string& uri) : m_uri(uri) {
   /* %-decode the string.  */
   std::string decoded_path;
   decoded_path.reserve(path.length());
-  for (size_t i = 0; i < path.length(); ++i)
-  {
+  for (size_t i = 0; i < path.length(); ++i) {
     if (path[i] == '%' && std::isxdigit(path[i + 1]) && std::isxdigit(path[i + 2])) {
       decoded_path += std::stoi(path.substr(i + 1, 2), 0, 16);
       i += 2;
@@ -138,15 +137,14 @@ CodeObjectBinary::CodeObjectBinary(const std::string& uri) : m_uri(uri) {
   if (protocol != "file") throw protocol + " protocol not supported!";
 
   std::ifstream file(decoded_path, std::ios::in | std::ios::binary);
-  if (!file || !file.is_open()) throw "could not open " +  decoded_path;
+  if (!file || !file.is_open()) throw "could not open " + decoded_path;
 
   if (!size) {
     file.ignore(std::numeric_limits<std::streamsize>::max());
     size_t bytes = file.gcount();
     file.clear();
 
-    if (bytes < offset)
-      throw "invalid uri " + decoded_path + " (file size < offset)";
+    if (bytes < offset) throw "invalid uri " + decoded_path + " (file size < offset)";
 
     size = bytes - offset;
   }
@@ -156,19 +154,10 @@ CodeObjectBinary::CodeObjectBinary(const std::string& uri) : m_uri(uri) {
   file.read(&buffer[0], size);
 }
 
-DisassemblyInstance::DisassemblyInstance(
-  const char* codeobj_data,
-  uint64_t codeobj_size,
-  uint64_t gpu_id
-)
-{
-  if (
-      codeobj_size <= 4 ||
-      codeobj_data[0] != ELFMAG0 ||
-      codeobj_data[1] != ELFMAG1 ||
-      codeobj_data[2] != ELFMAG2 ||
-      codeobj_data[3] != ELFMAG3
-  )
+DisassemblyInstance::DisassemblyInstance(const char* codeobj_data, uint64_t codeobj_size,
+                                         uint64_t gpu_id) {
+  if (codeobj_size <= 4 || codeobj_data[0] != ELFMAG0 || codeobj_data[1] != ELFMAG1 ||
+      codeobj_data[2] != ELFMAG2 || codeobj_data[3] != ELFMAG3)
     throw std::invalid_argument("Invalid ELF file");
 
   buffer = std::vector<char>(codeobj_size, 0);
@@ -178,32 +167,24 @@ DisassemblyInstance::DisassemblyInstance(
   THROW_COMGR(amd_comgr_set_data(data, buffer.size(), buffer.data()));
 
   std::string input_isa{};
-  if (agent_isa_name.find(gpu_id) == agent_isa_name.end())
-  {
+  if (agent_isa_name.find(gpu_id) == agent_isa_name.end()) {
     size_t isa_size = 128;
     input_isa.resize(isa_size);
     THROW_COMGR(amd_comgr_get_data_isa_name(data, &isa_size, input_isa.data()));
     agent_isa_name[gpu_id] = input_isa;
-  }
-  else
-  {
+  } else {
     input_isa = agent_isa_name.at(gpu_id);
   }
 
   THROW_COMGR(amd_comgr_create_disassembly_info(
-      input_isa.data(),
-      &DisassemblyInstance::memory_callback, &DisassemblyInstance::inst_callback,
+      input_isa.data(), &DisassemblyInstance::memory_callback, &DisassemblyInstance::inst_callback,
       [](uint64_t address, void* user_data) {}, &info));
-
 }
 
-static bool IsKernelType(amd_comgr_symbol_type_t type)
-{
-  if (type == AMD_COMGR_SYMBOL_TYPE_FUNC)
-    return true;
-#ifdef AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL // To be deprecated
-  if (type == AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL)
-    return true;
+static bool IsKernelType(amd_comgr_symbol_type_t type) {
+  if (type == AMD_COMGR_SYMBOL_TYPE_FUNC) return true;
+#ifdef AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL  // To be deprecated
+  if (type == AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL) return true;
 #endif
   return false;
 }
@@ -213,8 +194,7 @@ amd_comgr_status_t DisassemblyInstance::symbol_callback(amd_comgr_symbol_t symbo
   amd_comgr_symbol_type_t type;
   RETURN_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_TYPE, &type));
 
-  if (!IsKernelType(type))
-    return AMD_COMGR_STATUS_SUCCESS;
+  if (!IsKernelType(type)) return AMD_COMGR_STATUS_SUCCESS;
 
   uint64_t vaddr;
   uint64_t mem_size;
@@ -231,15 +211,14 @@ amd_comgr_status_t DisassemblyInstance::symbol_callback(amd_comgr_symbol_t symbo
   DisassemblyInstance& instance = *static_cast<DisassemblyInstance*>(user_data);
   std::optional<uint64_t> faddr = instance.va2fo(vaddr);
 
-  if (faddr)
-    instance.symbol_map[vaddr] = {name, *faddr, mem_size};
+  if (faddr) instance.symbol_map[vaddr] = {name, *faddr, mem_size};
   return AMD_COMGR_STATUS_SUCCESS;
 }
 
 std::map<uint64_t, SymbolInfo>& DisassemblyInstance::GetKernelMap() {
   symbol_map = {};
   THROW_COMGR(amd_comgr_iterate_symbols(data, &DisassemblyInstance::symbol_callback, this));
-    
+
   return symbol_map;
 }
 
@@ -248,8 +227,8 @@ DisassemblyInstance::~DisassemblyInstance() {
   amd_comgr_destroy_disassembly_info(info);
 }
 
-uint64_t DisassemblyInstance::ReadInstruction(uint64_t faddr, uint64_t vaddr, const char* cpp_line)
-{
+uint64_t DisassemblyInstance::ReadInstruction(uint64_t faddr, uint64_t vaddr,
+                                              const char* cpp_line) {
   uint64_t size_read;
   uint64_t addr_in_buffer = reinterpret_cast<uint64_t>(buffer.data()) + faddr;
 
@@ -263,8 +242,8 @@ uint64_t DisassemblyInstance::ReadInstruction(uint64_t faddr, uint64_t vaddr, co
 uint64_t DisassemblyInstance::memory_callback(uint64_t from, char* to, uint64_t size,
                                               void* user_data) {
   DisassemblyInstance& instance = *static_cast<DisassemblyInstance*>(user_data);
-  int64_t copysize = reinterpret_cast<int64_t>(instance.buffer.data())
-                      + instance.buffer.size() - static_cast<int64_t>(from);
+  int64_t copysize = reinterpret_cast<int64_t>(instance.buffer.data()) + instance.buffer.size() -
+      static_cast<int64_t>(from);
   copysize = std::min<int64_t>(size, copysize);
   std::memcpy(to, (char*)from, copysize);
   return copysize;
@@ -275,38 +254,36 @@ void DisassemblyInstance::inst_callback(const char* instruction, void* user_data
   instance.last_instruction.instruction = strdup(instruction);
 }
 
-#define CHECK_VA2FO(x, msg) if (!(x)) {                                \
-  std::cerr << __FILE__ << ' ' << __LINE__ << ' ' << msg << std::endl; \
-  return std::nullopt;                                                 \
-}
+#define CHECK_VA2FO(x, msg)                                                                        \
+  if (!(x)) {                                                                                      \
+    std::cerr << __FILE__ << ' ' << __LINE__ << ' ' << msg << std::endl;                           \
+    return std::nullopt;                                                                           \
+  }
 
 // mem - input argument, start of the elf
 // va  - input argument, virtual address
 // return file offset, if found
-std::optional<uint64_t> DisassemblyInstance::va2fo(uint64_t va)
-{
+std::optional<uint64_t> DisassemblyInstance::va2fo(uint64_t va) {
   CHECK_VA2FO(buffer.size(), "buffer is not large enough");
 
-  uint8_t *e_ident = (uint8_t*)buffer.data();
+  uint8_t* e_ident = (uint8_t*)buffer.data();
   CHECK_VA2FO(e_ident, "e_ident is nullptr");
 
-  CHECK_VA2FO(
-    e_ident[EI_MAG0] == ELFMAG0 ||
-    e_ident[EI_MAG1] == ELFMAG1 ||
-    e_ident[EI_MAG2] == ELFMAG2 ||
-    e_ident[EI_MAG3] == ELFMAG3, "unexpected ei_mag");
+  CHECK_VA2FO(e_ident[EI_MAG0] == ELFMAG0 || e_ident[EI_MAG1] == ELFMAG1 ||
+                  e_ident[EI_MAG2] == ELFMAG2 || e_ident[EI_MAG3] == ELFMAG3,
+              "unexpected ei_mag");
 
   CHECK_VA2FO(e_ident[EI_CLASS] == ELFCLASS64, "unexpected ei_class");
   CHECK_VA2FO(e_ident[EI_DATA] == ELFDATA2LSB, "unexpected ei_data");
   CHECK_VA2FO(e_ident[EI_VERSION] == EV_CURRENT, "unexpected ei_version");
-  CHECK_VA2FO(e_ident[EI_OSABI] == 64, "unexpected ei_osabi"); // ELFOSABI_AMDGPU_HSA
+  CHECK_VA2FO(e_ident[EI_OSABI] == 64, "unexpected ei_osabi");  // ELFOSABI_AMDGPU_HSA
 
-  CHECK_VA2FO(
-    e_ident[EI_ABIVERSION] == 2 || // ELFABIVERSION_AMDGPU_HSA_V4
-    e_ident[EI_ABIVERSION] == 3 || // ELFABIVERSION_AMDGPU_HSA_V5
-    e_ident[EI_ABIVERSION] == 4, "unexpected ei_abiversion"); // ELFABIVERSION_AMDGPU_HSA_V6
+  CHECK_VA2FO(e_ident[EI_ABIVERSION] == 2 ||      // ELFABIVERSION_AMDGPU_HSA_V4
+                  e_ident[EI_ABIVERSION] == 3 ||  // ELFABIVERSION_AMDGPU_HSA_V5
+                  e_ident[EI_ABIVERSION] == 4,
+              "unexpected ei_abiversion");  // ELFABIVERSION_AMDGPU_HSA_V6
 
-  Elf64_Ehdr *ehdr = (Elf64_Ehdr*)buffer.data();
+  Elf64_Ehdr* ehdr = (Elf64_Ehdr*)buffer.data();
   CHECK_VA2FO(ehdr, "ehdr is nullptr");
   CHECK_VA2FO(ehdr->e_type == ET_DYN, "unexpected e_type");
   CHECK_VA2FO(ehdr->e_machine == ELF::EM_AMDGPU, "unexpected e_machine");
@@ -316,15 +293,12 @@ std::optional<uint64_t> DisassemblyInstance::va2fo(uint64_t va)
 
   CHECK_VA2FO(buffer.size() > ehdr->e_phoff + sizeof(Elf64_Phdr), "buffer is not large enough");
 
-  Elf64_Phdr *phdr = (Elf64_Phdr*)((uint8_t*)buffer.data() + ehdr->e_phoff);
+  Elf64_Phdr* phdr = (Elf64_Phdr*)((uint8_t*)buffer.data() + ehdr->e_phoff);
   CHECK_VA2FO(phdr, "phdr is nullptr");
 
-  for (uint16_t i = 0; i < ehdr->e_phnum; ++i)
-  {
-    if (phdr[i].p_type != PT_LOAD)
-      continue;
-    if (va < phdr[i].p_vaddr || va >= (phdr[i].p_vaddr + phdr[i].p_memsz))
-      continue;
+  for (uint16_t i = 0; i < ehdr->e_phnum; ++i) {
+    if (phdr[i].p_type != PT_LOAD) continue;
+    if (va < phdr[i].p_vaddr || va >= (phdr[i].p_vaddr + phdr[i].p_memsz)) continue;
 
     return va + phdr[i].p_offset - phdr[i].p_vaddr;
   }
@@ -332,35 +306,33 @@ std::optional<uint64_t> DisassemblyInstance::va2fo(uint64_t va)
 }
 
 #undef CHECK_VA2FO
-#define CHECK_VA2FO(x, msg) if (!(x)) {                                \
-  std::cerr << __FILE__ << ' ' << __LINE__ << ' ' << msg << std::endl; \
-  return {};                                                 \
-}
+#define CHECK_VA2FO(x, msg)                                                                        \
+  if (!(x)) {                                                                                      \
+    std::cerr << __FILE__ << ' ' << __LINE__ << ' ' << msg << std::endl;                           \
+    return {};                                                                                     \
+  }
 
-std::vector<std::pair<uint64_t, uint64_t>> DisassemblyInstance::getSegments()
-{
+std::vector<std::pair<uint64_t, uint64_t>> DisassemblyInstance::getSegments() {
   CHECK_VA2FO(buffer.size(), "buffer is not large enough");
 
-  uint8_t *e_ident = (uint8_t*)buffer.data();
+  uint8_t* e_ident = (uint8_t*)buffer.data();
   CHECK_VA2FO(e_ident, "e_ident is nullptr");
 
-  CHECK_VA2FO(
-    e_ident[EI_MAG0] == ELFMAG0 ||
-    e_ident[EI_MAG1] == ELFMAG1 ||
-    e_ident[EI_MAG2] == ELFMAG2 ||
-    e_ident[EI_MAG3] == ELFMAG3, "unexpected ei_mag");
+  CHECK_VA2FO(e_ident[EI_MAG0] == ELFMAG0 || e_ident[EI_MAG1] == ELFMAG1 ||
+                  e_ident[EI_MAG2] == ELFMAG2 || e_ident[EI_MAG3] == ELFMAG3,
+              "unexpected ei_mag");
 
   CHECK_VA2FO(e_ident[EI_CLASS] == ELFCLASS64, "unexpected ei_class");
   CHECK_VA2FO(e_ident[EI_DATA] == ELFDATA2LSB, "unexpected ei_data");
   CHECK_VA2FO(e_ident[EI_VERSION] == EV_CURRENT, "unexpected ei_version");
-  CHECK_VA2FO(e_ident[EI_OSABI] == 64, "unexpected ei_osabi"); // ELFOSABI_AMDGPU_HSA
+  CHECK_VA2FO(e_ident[EI_OSABI] == 64, "unexpected ei_osabi");  // ELFOSABI_AMDGPU_HSA
 
-  CHECK_VA2FO(
-    e_ident[EI_ABIVERSION] == 2 || // ELFABIVERSION_AMDGPU_HSA_V4
-    e_ident[EI_ABIVERSION] == 3 || // ELFABIVERSION_AMDGPU_HSA_V5
-    e_ident[EI_ABIVERSION] == 4, "unexpected ei_abiversion"); // ELFABIVERSION_AMDGPU_HSA_V6
+  CHECK_VA2FO(e_ident[EI_ABIVERSION] == 2 ||      // ELFABIVERSION_AMDGPU_HSA_V4
+                  e_ident[EI_ABIVERSION] == 3 ||  // ELFABIVERSION_AMDGPU_HSA_V5
+                  e_ident[EI_ABIVERSION] == 4,
+              "unexpected ei_abiversion");  // ELFABIVERSION_AMDGPU_HSA_V6
 
-  Elf64_Ehdr *ehdr = (Elf64_Ehdr*)buffer.data();
+  Elf64_Ehdr* ehdr = (Elf64_Ehdr*)buffer.data();
   CHECK_VA2FO(ehdr, "ehdr is nullptr");
   CHECK_VA2FO(ehdr->e_type == ET_DYN, "unexpected e_type");
   CHECK_VA2FO(ehdr->e_machine == ELF::EM_AMDGPU, "unexpected e_machine");
@@ -370,14 +342,12 @@ std::vector<std::pair<uint64_t, uint64_t>> DisassemblyInstance::getSegments()
 
   CHECK_VA2FO(buffer.size() > ehdr->e_phoff + sizeof(Elf64_Phdr), "buffer is not large enough");
 
-  Elf64_Phdr *phdr = (Elf64_Phdr*)((uint8_t*)buffer.data() + ehdr->e_phoff);
+  Elf64_Phdr* phdr = (Elf64_Phdr*)((uint8_t*)buffer.data() + ehdr->e_phoff);
   CHECK_VA2FO(phdr, "phdr is nullptr");
 
   std::vector<std::pair<uint64_t, uint64_t>> segments;
-  for (Elf64_Half i = 0; i < ehdr->e_phnum; ++i)
-  {
-    if (phdr[i].p_type != PT_LOAD)
-      continue;
+  for (Elf64_Half i = 0; i < ehdr->e_phnum; ++i) {
+    if (phdr[i].p_type != PT_LOAD) continue;
 
     segments.push_back({phdr[i].p_vaddr - phdr[i].p_offset, phdr[i].p_memsz});
   }

@@ -258,7 +258,7 @@ union SQ_IMG_RSRC_WORD5 {
 
 union SQ_IMG_RSRC_WORD6 {
   struct {
-#if	defined(LITTLEENDIAN_CPU)
+#if defined(LITTLEENDIAN_CPU)
     unsigned int min_lod_warn : 12;
     unsigned int counter_bank_id : 8;
     unsigned int lod_hdw_cnt_en : 1;
@@ -267,7 +267,7 @@ union SQ_IMG_RSRC_WORD6 {
     unsigned int color_transform : 1;
     unsigned int lost_alpha_bits : 4;
     unsigned int lost_color_bits : 4;
-#elif	defined(BIGENDIAN_CPU)
+#elif defined(BIGENDIAN_CPU)
     unsigned int lost_color_bits : 4;
     unsigned int lost_alpha_bits : 4;
     unsigned int color_transform : 1;
@@ -285,9 +285,9 @@ union SQ_IMG_RSRC_WORD6 {
 
 union SQ_IMG_RSRC_WORD7 {
   struct {
-#if		defined(LITTLEENDIAN_CPU)
+#if defined(LITTLEENDIAN_CPU)
     unsigned int meta_data_address : 32;
-#elif		defined(BIGENDIAN_CPU)
+#elif defined(BIGENDIAN_CPU)
     unsigned int meta_data_address : 32;
 #endif
   } bitfields, bits;
@@ -490,17 +490,17 @@ typedef enum SQ_TEX_BORDER_COLOR {
 } SQ_TEX_BORDER_COLOR;
 
 typedef struct metadata_amd_ci_vi_s {
-    uint32_t version; // Must be 1
-    uint32_t vendorID; // AMD | CZ
-    SQ_IMG_RSRC_WORD0 word0;
-    SQ_IMG_RSRC_WORD1 word1;
-    SQ_IMG_RSRC_WORD2 word2;
-    SQ_IMG_RSRC_WORD3 word3;
-    SQ_IMG_RSRC_WORD4 word4;
-    SQ_IMG_RSRC_WORD5 word5;
-    SQ_IMG_RSRC_WORD6 word6;
-    SQ_IMG_RSRC_WORD7 word7;
-    uint32_t mip_offsets[0]; //Mip level offset bits [39:8] for each level (if any)
+  uint32_t version;   // Must be 1
+  uint32_t vendorID;  // AMD | CZ
+  SQ_IMG_RSRC_WORD0 word0;
+  SQ_IMG_RSRC_WORD1 word1;
+  SQ_IMG_RSRC_WORD2 word2;
+  SQ_IMG_RSRC_WORD3 word3;
+  SQ_IMG_RSRC_WORD4 word4;
+  SQ_IMG_RSRC_WORD5 word5;
+  SQ_IMG_RSRC_WORD6 word6;
+  SQ_IMG_RSRC_WORD7 word7;
+  uint32_t mip_offsets[0];  // Mip level offset bits [39:8] for each level (if any)
 } metadata_amd_ci_vi_t;
 
 }  // namespace image

@@ -57,13 +57,11 @@ BusyWaitSignal::BusyWaitSignal(SharedSignal* abi_block, bool enableIPC)
 }
 
 hsa_signal_value_t BusyWaitSignal::LoadRelaxed() {
-  return hsa_signal_value_t(
-      atomic::Load(&signal_.value, std::memory_order_relaxed));
+  return hsa_signal_value_t(atomic::Load(&signal_.value, std::memory_order_relaxed));
 }
 
 hsa_signal_value_t BusyWaitSignal::LoadAcquire() {
-  return hsa_signal_value_t(
-      atomic::Load(&signal_.value, std::memory_order_acquire));
+  return hsa_signal_value_t(atomic::Load(&signal_.value, std::memory_order_acquire));
 }
 
 void BusyWaitSignal::StoreRelaxed(hsa_signal_value_t value) {
@@ -83,8 +81,8 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
   waiting_++;
   MAKE_SCOPE_GUARD([&]() { waiting_--; });
 
-  const uint32_t &signal_abort_timeout =
-    core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
+  const uint32_t& signal_abort_timeout =
+      core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
 
   const timer::fast_clock::time_point start_time = timer::fast_clock::now();
   const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
@@ -114,8 +112,7 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
 hsa_signal_value_t BusyWaitSignal::WaitAcquire(hsa_signal_condition_t condition,
                                                hsa_signal_value_t compare_value, uint64_t timeout,
                                                hsa_wait_state_t wait_hint) {
-  hsa_signal_value_t ret =
-      WaitRelaxed(condition, compare_value, timeout, wait_hint);
+  hsa_signal_value_t ret = WaitRelaxed(condition, compare_value, timeout, wait_hint);
   std::atomic_thread_fence(std::memory_order_acquire);
   return ret;
 }
@@ -201,51 +198,47 @@ void BusyWaitSignal::SubAcqRel(hsa_signal_value_t value) {
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchRelaxed(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_relaxed));
+  return hsa_signal_value_t(
+      atomic::Exchange(&signal_.value, int64_t(value), std::memory_order_relaxed));
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchAcquire(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_acquire));
+  return hsa_signal_value_t(
+      atomic::Exchange(&signal_.value, int64_t(value), std::memory_order_acquire));
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchRelease(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_release));
+  return hsa_signal_value_t(
+      atomic::Exchange(&signal_.value, int64_t(value), std::memory_order_release));
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchAcqRel(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_acq_rel));
+  return hsa_signal_value_t(
+      atomic::Exchange(&signal_.value, int64_t(value), std::memory_order_acq_rel));
 }
 
 hsa_signal_value_t BusyWaitSignal::CasRelaxed(hsa_signal_value_t expected,
                                               hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_relaxed));
+  return hsa_signal_value_t(
+      atomic::Cas(&signal_.value, int64_t(value), int64_t(expected), std::memory_order_relaxed));
 }
 
 hsa_signal_value_t BusyWaitSignal::CasAcquire(hsa_signal_value_t expected,
                                               hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_acquire));
+  return hsa_signal_value_t(
+      atomic::Cas(&signal_.value, int64_t(value), int64_t(expected), std::memory_order_acquire));
 }
 
 hsa_signal_value_t BusyWaitSignal::CasRelease(hsa_signal_value_t expected,
                                               hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_release));
+  return hsa_signal_value_t(
+      atomic::Cas(&signal_.value, int64_t(value), int64_t(expected), std::memory_order_release));
 }
 
 hsa_signal_value_t BusyWaitSignal::CasAcqRel(hsa_signal_value_t expected,
                                              hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_acq_rel));
+  return hsa_signal_value_t(
+      atomic::Cas(&signal_.value, int64_t(value), int64_t(expected), std::memory_order_acq_rel));
 }
 
 }  // namespace core

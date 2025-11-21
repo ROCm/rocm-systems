@@ -232,7 +232,8 @@ correlation_id_finalize()
                              << " from thread " << itr->thread_idx
                              << " :: remaining reference count: " << itr->get_ref_count();
                 while(itr && itr->get_ref_count() > 0 && itr->sub_ref_count() > 1)
-                {}
+                {
+                }
             }
         }
         ROCP_CI_LOG_IF(INFO, ndangling > 0) << "retired dangling correlation IDs: " << ndangling;

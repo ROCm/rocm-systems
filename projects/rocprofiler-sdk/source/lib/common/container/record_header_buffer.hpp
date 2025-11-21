@@ -57,7 +57,7 @@ struct record_header_buffer
     record_header_buffer(record_header_buffer&&) noexcept;
 
     record_header_buffer& operator=(const record_header_buffer&) = delete;
-    record_header_buffer& operator                               =(record_header_buffer&&) noexcept;
+    record_header_buffer& operator=(record_header_buffer&&) noexcept;
 
     // allocate the buffer if it is not already allocated. Will return false if buffer is already
     // allocated

@@ -63,18 +63,16 @@
 namespace {
 
 #if !defined(_WIN32) && !defined(_WIN64)
-uintptr_t PAGE_SIZE_MASK{
-    [] () {
-      uintptr_t page_size = sysconf(_SC_PAGE_SIZE);
-      if (page_size == -1) {
-        page_size = 1 << 12; // Default page size to 4KiB.
-      }
-      return ~(page_size - 1);
-    } ()
-  };
+uintptr_t PAGE_SIZE_MASK{[]() {
+  uintptr_t page_size = sysconf(_SC_PAGE_SIZE);
+  if (page_size == -1) {
+    page_size = 1 << 12;  // Default page size to 4KiB.
+  }
+  return ~(page_size - 1);
+}()};
 #endif
 
-std::string EncodePathname(const char *file_path) {
+std::string EncodePathname(const char* file_path) {
   std::ostringstream ss;
   unsigned char c;
 
@@ -82,8 +80,7 @@ std::string EncodePathname(const char *file_path) {
   ss << "file://";
 
   while ((c = *file_path++) != '\0') {
-    if (isalnum(c) || c == '/' || c == '-' ||
-        c == '_' || c == '.' || c == '~') {
+    if (isalnum(c) || c == '/' || c == '-' || c == '_' || c == '.' || c == '~') {
       ss << c;
     } else {
       ss << std::uppercase;
@@ -95,67 +92,67 @@ std::string EncodePathname(const char *file_path) {
   return ss.str();
 }
 
-std::string GetUriFromMemoryAddress(const void *memory, size_t size) {
+std::string GetUriFromMemoryAddress(const void* memory, size_t size) {
   int pid = getpid();
   std::ostringstream uri_stream;
-  uri_stream << "memory://" << pid
-             << "#offset=0x" << std::hex << (uintptr_t)memory << std::dec
+  uri_stream << "memory://" << pid << "#offset=0x" << std::hex << (uintptr_t)memory << std::dec
              << "&size=" << size;
   return uri_stream.str();
 }
 
-std::string GetUriFromMemoryInExecutableFile(const void *memory, size_t size) {
+std::string GetUriFromMemoryInExecutableFile(const void* memory, size_t size) {
 #if !defined(_WIN32) && !defined(_WIN64)
   uintptr_t address = reinterpret_cast<uintptr_t>(memory);
   struct callback_data_s {
     ElfW(Addr) address;
     size_t callback_num;
-    const char *file_path;
+    const char* file_path;
     size_t file_offset;
   } callback_data{address, 0, nullptr, 0};
 
   // Iterate the loaded shared objects program headers to see if the ELF binary
   // is allocated in a mapped file.
-  if (dl_iterate_phdr([](struct dl_phdr_info *info, size_t size, void *ptr) -> int {
-    struct callback_data_s *callback_data = (struct callback_data_s *) ptr;
-    const ElfW(Addr) elf_address = callback_data->address - info->dlpi_addr;
+  if (dl_iterate_phdr(
+          [](struct dl_phdr_info* info, size_t size, void* ptr) -> int {
+            struct callback_data_s* callback_data = (struct callback_data_s*)ptr;
+            const ElfW(Addr) elf_address = callback_data->address - info->dlpi_addr;
 
-    int n = info->dlpi_phnum;
-    while (--n >= 0) {
-      // Check if lib name is not empty and its not a "vdso.so" lib,
-      // The vDSO is a special shared object file that is built into
-      // the Linux kernel. It is not a regular shared library and thus
-      // does not have all the properties of regular shared libraries.
-      // The way the vDSO is loaded and organized in memory is different
-      // from regular shared libraries and it's not guaranteed that it
-      // will have a specific segment or section. Hence its skipped.
-      if (info->dlpi_name[0] != '\0'
-          && std::string(info->dlpi_name).find("vdso.so") != std::string::npos) {
-        continue;
-      }
+            int n = info->dlpi_phnum;
+            while (--n >= 0) {
+              // Check if lib name is not empty and its not a "vdso.so" lib,
+              // The vDSO is a special shared object file that is built into
+              // the Linux kernel. It is not a regular shared library and thus
+              // does not have all the properties of regular shared libraries.
+              // The way the vDSO is loaded and organized in memory is different
+              // from regular shared libraries and it's not guaranteed that it
+              // will have a specific segment or section. Hence its skipped.
+              if (info->dlpi_name[0] != '\0' &&
+                  std::string(info->dlpi_name).find("vdso.so") != std::string::npos) {
+                continue;
+              }
 
-      if (info->dlpi_phdr[n].p_type == PT_LOAD
-          && elf_address - info->dlpi_phdr[n].p_vaddr >= 0
-          && elf_address - info->dlpi_phdr[n].p_vaddr < info->dlpi_phdr[n].p_memsz) {
-        // The first callback is always the program executable.
-        if (!info->dlpi_name[0] && callback_data->callback_num == 0) {
-          static char argv0[PATH_MAX] = {0};
-          if (!argv0[0] && readlink("/proc/self/exe", argv0, sizeof(argv0)) == -1)
+              if (info->dlpi_phdr[n].p_type == PT_LOAD &&
+                  elf_address - info->dlpi_phdr[n].p_vaddr >= 0 &&
+                  elf_address - info->dlpi_phdr[n].p_vaddr < info->dlpi_phdr[n].p_memsz) {
+                // The first callback is always the program executable.
+                if (!info->dlpi_name[0] && callback_data->callback_num == 0) {
+                  static char argv0[PATH_MAX] = {0};
+                  if (!argv0[0] && readlink("/proc/self/exe", argv0, sizeof(argv0)) == -1) return 0;
+                  callback_data->file_path = argv0;
+                } else {
+                  callback_data->file_path = info->dlpi_name;
+                }
+
+                callback_data->file_offset =
+                    elf_address - info->dlpi_phdr[n].p_vaddr + info->dlpi_phdr[n].p_offset;
+                return 1;
+              }
+            }
+
+            ++callback_data->callback_num;
             return 0;
-          callback_data->file_path = argv0;
-        } else {
-          callback_data->file_path = info->dlpi_name;
-        }
-
-        callback_data->file_offset =
-            elf_address - info->dlpi_phdr[n].p_vaddr + info->dlpi_phdr[n].p_offset;
-        return 1;
-      }
-    }
-
-    ++callback_data->callback_num;
-    return 0;
-  }, &callback_data)) {
+          },
+          &callback_data)) {
     if (!callback_data.file_path || callback_data.file_path[0] == '\0') {
       return GetUriFromMemoryAddress(memory, size);
     }
@@ -170,7 +167,7 @@ std::string GetUriFromMemoryInExecutableFile(const void *memory, size_t size) {
   return GetUriFromMemoryAddress(memory, size);
 }
 
-std::string GetUriFromMemoryInMmapedFile(const void *memory, size_t size) {
+std::string GetUriFromMemoryInMmapedFile(const void* memory, size_t size) {
 #if !defined(_WIN32) && !defined(_WIN64)
   std::ifstream proc_maps;
   proc_maps.open("/proc/self/maps", std::ifstream::in);
@@ -184,9 +181,7 @@ std::string GetUriFromMemoryInMmapedFile(const void *memory, size_t size) {
 
     uintptr_t low_address, high_address;
     char dash;
-    tokens >> std::hex >> low_address >> std::dec
-           >> dash
-           >> std::hex >> high_address >> std::dec;
+    tokens >> std::hex >> low_address >> std::dec >> dash >> std::hex >> high_address >> std::dec;
     if (dash != '-') {
       continue;
     }
@@ -199,11 +194,7 @@ std::string GetUriFromMemoryInMmapedFile(const void *memory, size_t size) {
     std::string permissions, device, uri_file_path;
     size_t offset;
     uint64_t inode;
-    tokens >> permissions
-           >> std::hex >> offset >> std::dec
-           >> device
-           >> inode
-           >> uri_file_path;
+    tokens >> permissions >> std::hex >> offset >> std::dec >> device >> inode >> uri_file_path;
 
     if (inode == 0 || uri_file_path.empty()) {
       return GetUriFromMemoryAddress(memory, size);
@@ -232,8 +223,8 @@ std::string GetUriFromMemoryInMmapedFile(const void *memory, size_t size) {
   return GetUriFromMemoryAddress(memory, size);
 }
 
-std::string GetUriFromFile(int file_descriptor, size_t offset, size_t size,
-    bool is_complete_file, const void *memory) {
+std::string GetUriFromFile(int file_descriptor, size_t offset, size_t size, bool is_complete_file,
+                           const void* memory) {
 #if !defined(_WIN32) && !defined(_WIN64)
   std::ostringstream proc_fd_path;
   proc_fd_path << "/proc/self/fd/" << file_descriptor;
@@ -275,17 +266,15 @@ CodeObjectReaderImpl::~CodeObjectReaderImpl() {
     uintptr_t address = reinterpret_cast<uintptr_t>(code_object_memory);
     uintptr_t adjusted_address = address & PAGE_SIZE_MASK;
     size_t adjusted_size = code_object_size + (address - adjusted_address);
-    munmap(reinterpret_cast<void *>(adjusted_address), adjusted_size);
+    munmap(reinterpret_cast<void*>(adjusted_address), adjusted_size);
 #else
-    delete [] code_object_memory;
+    delete[] code_object_memory;
 #endif  // !defined(_WIN32) && !defined(_WIN64)
   }
 }
 
-hsa_status_t CodeObjectReaderImpl::SetFile(
-    hsa_file_t _code_object_file_descriptor,
-    size_t _code_object_offset,
-    size_t _code_object_size) {
+hsa_status_t CodeObjectReaderImpl::SetFile(hsa_file_t _code_object_file_descriptor,
+                                           size_t _code_object_offset, size_t _code_object_size) {
   assert(!code_object_memory && "Code object reader wrapper is already set");
 
   if (_code_object_file_descriptor == -1) {
@@ -307,28 +296,27 @@ hsa_status_t CodeObjectReaderImpl::SetFile(
 #if !defined(_WIN32) && !defined(_WIN64)
   off_t adjusted_offset = _code_object_offset & PAGE_SIZE_MASK;
   size_t adjusted_size = _code_object_size + (_code_object_offset - adjusted_offset);
-  void *memory = mmap(nullptr, adjusted_size, PROT_READ, MAP_PRIVATE,
-                      _code_object_file_descriptor, adjusted_offset);
-  if (memory == (void *) -1) {
+  void* memory = mmap(nullptr, adjusted_size, PROT_READ, MAP_PRIVATE, _code_object_file_descriptor,
+                      adjusted_offset);
+  if (memory == (void*)-1) {
     return HSA_STATUS_ERROR_INVALID_FILE;
   }
-  code_object_memory = reinterpret_cast<unsigned char*>(memory) +
-                        (_code_object_offset & ~PAGE_SIZE_MASK);
+  code_object_memory =
+      reinterpret_cast<unsigned char*>(memory) + (_code_object_offset & ~PAGE_SIZE_MASK);
   code_object_size = _code_object_size;
   is_mmap = true;
 #else
   //@todo May need an implementation in Windows
 #endif  // !defined(_WIN32) && !defined(_WIN64)
 
-  uri = GetUriFromFile(_code_object_file_descriptor, _code_object_offset,
-                        _code_object_size, is_complete_file, code_object_memory);
+  uri = GetUriFromFile(_code_object_file_descriptor, _code_object_offset, _code_object_size,
+                       is_complete_file, code_object_memory);
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t CodeObjectReaderImpl::SetMemory(
-    const void *_code_object_memory,
-    size_t _code_object_size) {
+hsa_status_t CodeObjectReaderImpl::SetMemory(const void* _code_object_memory,
+                                             size_t _code_object_size) {
   assert(!code_object_memory && "Code object reader wrapper is already set");
 
   if (!_code_object_memory || _code_object_size == 0) {

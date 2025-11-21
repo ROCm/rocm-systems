@@ -58,19 +58,20 @@
 
 static const uint32_t kShmemID = 1594685;
 
-#define RET_IF_HSA_ERR(err) { \
-  if ((err) != HSA_STATUS_SUCCESS) { \
-    const char* msg = 0; \
-    hsa_status_string(err, &msg); \
-    std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << \
-                          __FILE__ << ". Call returned " << err << std::endl; \
-    std::cout << msg << std::endl; \
-    return (err); \
-  } \
-}
+#define RET_IF_HSA_ERR(err)                                                                        \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
+                << ". Call returned " << err << std::endl;                                         \
+      std::cout << msg << std::endl;                                                               \
+      return (err);                                                                                \
+    }                                                                                              \
+  }
 
 bool isEmuModeEnabled() {
-  auto checkMode = []{ 
+  auto checkMode = [] {
     const char* path = "/sys/module/amdgpu/parameters/emu_mode";
     FILE* file = fopen(path, "r");
     if (!file) {
@@ -88,7 +89,7 @@ bool isEmuModeEnabled() {
     return emu_mode != 0;
   };
 
-  static bool emu_mode = checkMode(); 
+  static bool emu_mode = checkMode();
   return emu_mode;
 }
 
@@ -104,30 +105,27 @@ struct callback_args {
 // GLOBAL segment, 2) allows allocation and 3) is accessible by the provided
 // agent. If the provided pool meets these criteria, HSA_STATUS_INFO_BREAK is
 // returned
-static hsa_status_t
-FindPool(hsa_amd_memory_pool_t in_pool, hsa_agent_t agent) {
+static hsa_status_t FindPool(hsa_amd_memory_pool_t in_pool, hsa_agent_t agent) {
   hsa_amd_segment_t segment;
   hsa_status_t err;
 
-  err = hsa_amd_memory_pool_get_info(in_pool,
-                                  HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+  err = hsa_amd_memory_pool_get_info(in_pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
   RET_IF_HSA_ERR(err);
   if (segment != HSA_AMD_SEGMENT_GLOBAL) {
     return HSA_STATUS_SUCCESS;
   }
 
   bool canAlloc;
-  err = hsa_amd_memory_pool_get_info(in_pool,
-                   HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &canAlloc);
+  err = hsa_amd_memory_pool_get_info(in_pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED,
+                                     &canAlloc);
   RET_IF_HSA_ERR(err);
   if (!canAlloc) {
-     return HSA_STATUS_SUCCESS;
+    return HSA_STATUS_SUCCESS;
   }
 
-  hsa_amd_memory_pool_access_t access =
-                                     HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
-  err = hsa_amd_agent_memory_pool_get_info(agent, in_pool,
-                              HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access);
+  hsa_amd_memory_pool_access_t access = HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
+  err = hsa_amd_agent_memory_pool_get_info(agent, in_pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
+                                           &access);
   RET_IF_HSA_ERR(err);
 
   if (access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
@@ -150,7 +148,7 @@ static hsa_status_t FindDevicePool(hsa_amd_memory_pool_t pool, void* data) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  struct callback_args *args = (struct callback_args *)data;
+  struct callback_args* args = (struct callback_args*)data;
 
   err = FindPool(pool, args->device);
 
@@ -160,8 +158,8 @@ static hsa_status_t FindDevicePool(hsa_amd_memory_pool_t pool, void* data) {
     if (isEmuModeEnabled()) {
       args->gpu_mem_granule = 4;
     } else {
-      err = hsa_amd_memory_pool_get_info(args->gpu_pool,
-        HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE, &args->gpu_mem_granule);
+      err = hsa_amd_memory_pool_get_info(
+          args->gpu_pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE, &args->gpu_mem_granule);
       RET_IF_HSA_ERR(err);
     }
 
@@ -184,7 +182,7 @@ static hsa_status_t FindCPUPool(hsa_amd_memory_pool_t pool, void* data) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  struct callback_args *args = (struct callback_args *)data;
+  struct callback_args* args = (struct callback_args*)data;
 
   err = FindPool(pool, args->host);
 
@@ -203,21 +201,20 @@ static hsa_status_t FindCPUPool(hsa_amd_memory_pool_t pool, void* data) {
 //  HSA_STATUS_SUCCESS -- 2 GPU agents have not yet been found; iterator
 //    should keep iterating
 //  Other -- Some error occurred
-static hsa_status_t FindGpu(hsa_agent_t agent, void *data) {
+static hsa_status_t FindGpu(hsa_agent_t agent, void* data) {
   if (data == NULL) {
-     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
   hsa_device_type_t hsa_device_type;
-  hsa_status_t err = hsa_agent_get_info(agent,
-                                     HSA_AGENT_INFO_DEVICE, &hsa_device_type);
+  hsa_status_t err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &hsa_device_type);
   RET_IF_HSA_ERR(err);
 
   if (hsa_device_type != HSA_DEVICE_TYPE_GPU) {
     return HSA_STATUS_SUCCESS;
   }
 
-  struct callback_args *args = (struct callback_args *)data;
+  struct callback_args* args = (struct callback_args*)data;
 
   // Make sure GPU device has pool host can access
   args->device = agent;
@@ -247,18 +244,17 @@ static hsa_status_t FindGpu(hsa_agent_t agent, void *data) {
 //  HSA_STATUS_SUCCESS -- CPU agent has not yet been found; iterator
 //    should keep iterating
 //  Other -- Some error occurred
-static hsa_status_t FindCPUDevice(hsa_agent_t agent, void *data) {
+static hsa_status_t FindCPUDevice(hsa_agent_t agent, void* data) {
   if (data == NULL) {
-     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
   hsa_device_type_t hsa_device_type;
-  hsa_status_t err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE,
-                                                            &hsa_device_type);
+  hsa_status_t err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &hsa_device_type);
   RET_IF_HSA_ERR(err);
 
   if (hsa_device_type == HSA_DEVICE_TYPE_CPU) {
-    struct callback_args *args = (struct callback_args *)data;
+    struct callback_args* args = (struct callback_args*)data;
 
     args->host = agent;
 
@@ -283,9 +279,8 @@ static hsa_status_t FindCPUDevice(hsa_agent_t agent, void *data) {
 // the gpu-local data buffer to be tested to this system memory buffer.
 // We also write the system memory buffer with the new value, and then copy
 // it back the gpu-local buffer.
-static hsa_status_t
-CheckAndFillBuffer(struct callback_args *args, void *gpu_src_ptr,
-                                     uint32_t exp_cur_val, uint32_t new_val) {
+static hsa_status_t CheckAndFillBuffer(struct callback_args* args, void* gpu_src_ptr,
+                                       uint32_t exp_cur_val, uint32_t new_val) {
   hsa_signal_t copy_signal;
   size_t sz = args->gpu_mem_granule;
   hsa_agent_t cpu_ag = args->host;
@@ -295,32 +290,29 @@ CheckAndFillBuffer(struct callback_args *args, void *gpu_src_ptr,
   err = hsa_signal_create(1, 0, NULL, &copy_signal);
   RET_IF_HSA_ERR(err);
 
-  uint32_t *sysBuf;
+  uint32_t* sysBuf;
 
-  err = hsa_amd_memory_pool_allocate(args->cpu_pool, sz, 0,
-                                          reinterpret_cast<void **>(&sysBuf));
+  err = hsa_amd_memory_pool_allocate(args->cpu_pool, sz, 0, reinterpret_cast<void**>(&sysBuf));
   RET_IF_HSA_ERR(err);
 
   hsa_agent_t ag_list[2] = {args->device, args->host};
   err = hsa_amd_agents_allow_access(2, ag_list, NULL, sysBuf);
   RET_IF_HSA_ERR(err);
 
-  err = hsa_amd_memory_async_copy(sysBuf, cpu_ag, gpu_src_ptr, gpu_ag,
-                                                    sz, 0, NULL, copy_signal);
+  err = hsa_amd_memory_async_copy(sysBuf, cpu_ag, gpu_src_ptr, gpu_ag, sz, 0, NULL, copy_signal);
   RET_IF_HSA_ERR(err);
 
-  if (hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT,
-                                       1, -1, HSA_WAIT_STATE_BLOCKED) != 0) {
+  if (hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, -1,
+                              HSA_WAIT_STATE_BLOCKED) != 0) {
     printf("Async copy returned error value.\n");
     return HSA_STATUS_ERROR;
   }
 
-  uint32_t count = sz/sizeof(uint32_t);
+  uint32_t count = sz / sizeof(uint32_t);
 
   for (uint32_t i = 0; i < count; ++i) {
     if (sysBuf[i] != exp_cur_val) {
-      fprintf(stdout, "Expected %d but got %d in buffer.\n",
-                                                      exp_cur_val, sysBuf[i]);
+      fprintf(stdout, "Expected %d but got %d in buffer.\n", exp_cur_val, sysBuf[i]);
       err = HSA_STATUS_ERROR;
       break;
     }
@@ -329,12 +321,11 @@ CheckAndFillBuffer(struct callback_args *args, void *gpu_src_ptr,
 
   hsa_signal_store_relaxed(copy_signal, 1);
 
-  err = hsa_amd_memory_async_copy(gpu_src_ptr, gpu_ag, sysBuf, cpu_ag,
-                                                    sz, 0, NULL, copy_signal);
+  err = hsa_amd_memory_async_copy(gpu_src_ptr, gpu_ag, sysBuf, cpu_ag, sz, 0, NULL, copy_signal);
   RET_IF_HSA_ERR(err);
 
-  if (hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT,
-                                       1, -1, HSA_WAIT_STATE_BLOCKED) != 0) {
+  if (hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, -1,
+                              HSA_WAIT_STATE_BLOCKED) != 0) {
     printf("Async copy returned error value.\n");
     return HSA_STATUS_ERROR;
   }
@@ -350,7 +341,7 @@ CheckAndFillBuffer(struct callback_args *args, void *gpu_src_ptr,
 
 // See if the other process wrote an error value to the token; if not, write
 // the newVal to the token.
-static void CheckAndSetToken(volatile int *token, int newVal) {
+static void CheckAndSetToken(volatile int* token, int newVal) {
   if (*token == -1) {
     printf("Error in other process. Exiting.\n");
     exit(-1);
@@ -451,8 +442,7 @@ int main(int argc, char** argv) {
   err = hsa_iterate_agents(FindGpu, &args);
 
   if (err != HSA_STATUS_INFO_BREAK) {
-    printf(
-     "No GPU with accessible VRAM required for this program found. Exiting\n");
+    printf("No GPU with accessible VRAM required for this program found. Exiting\n");
     return -1;
   }
 
@@ -464,11 +454,9 @@ int main(int argc, char** argv) {
   err = hsa_agent_get_info(args.device, HSA_AGENT_INFO_NAME, name2);
   RET_IF_HSA_ERR(err);
   uint16_t loc1, loc2;
-  err = hsa_agent_get_info(args.host,
-                           (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &loc1);
+  err = hsa_agent_get_info(args.host, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &loc1);
   RET_IF_HSA_ERR(err);
-  err = hsa_agent_get_info(args.device,
-                           (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &loc2);
+  err = hsa_agent_get_info(args.device, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &loc2);
   RET_IF_HSA_ERR(err);
   fprintf(stdout, "Using: %s (%d) and %s (%d)\n", name1, loc1, name2, loc2);
 
@@ -478,9 +466,8 @@ int main(int argc, char** argv) {
   RET_IF_HSA_ERR(err);
 
 // Wrap printf to add first or second process indicator
-#define PROCESS_LOG(format, ...) \
-    fprintf(stdout, "line:%d P%u: " format, \
-                      __LINE__, static_cast<int>(!processOne), ##__VA_ARGS__);
+#define PROCESS_LOG(format, ...)                                                                   \
+  fprintf(stdout, "line:%d P%u: " format, __LINE__, static_cast<int>(!processOne), ##__VA_ARGS__);
 
   hsa_agent_t ag_list[2] = {args.device, args.host};
 
@@ -488,7 +475,7 @@ int main(int argc, char** argv) {
     // Allocate some VRAM and fill it with 1's
     uint32_t* gpuBuf = NULL;
     err = hsa_amd_memory_pool_allocate(args.gpu_pool, args.gpu_mem_granule, 0,
-                                            reinterpret_cast<void**>(&gpuBuf));
+                                       reinterpret_cast<void**>(&gpuBuf));
     RET_IF_HSA_ERR(err);
 
     PROCESS_LOG("Allocated local memory buffer at %p\n", gpuBuf);
@@ -497,14 +484,12 @@ int main(int argc, char** argv) {
     RET_IF_HSA_ERR(err);
 
     err = hsa_amd_ipc_memory_create(gpuBuf, args.gpu_mem_granule,
-                          const_cast<hsa_amd_ipc_memory_t*>(&shared->handle));
-    PROCESS_LOG(
-    "Created IPC handle associated with gpu-local buffer at P0 address %p\n",
-                                                                      gpuBuf);
+                                    const_cast<hsa_amd_ipc_memory_t*>(&shared->handle));
+    PROCESS_LOG("Created IPC handle associated with gpu-local buffer at P0 address %p\n", gpuBuf);
 
     RET_IF_HSA_ERR(err);
 
-    uint32_t count = args.gpu_mem_granule/sizeof(uint32_t);
+    uint32_t count = args.gpu_mem_granule / sizeof(uint32_t);
     shared->size = args.gpu_mem_granule;
     shared->count = count;
 
@@ -539,7 +524,7 @@ int main(int argc, char** argv) {
     PROCESS_LOG("PASSED on P0\n");
 
     hsa_signal_store_relaxed(ipc_signal, 0);
-    
+
     err = hsa_signal_destroy(ipc_signal);
     RET_IF_HSA_ERR(err);
 
@@ -560,14 +545,11 @@ int main(int argc, char** argv) {
 
     // Attach shared VRAM
     void* ptr;
-    err = hsa_amd_ipc_memory_attach(
-      const_cast<hsa_amd_ipc_memory_t*>(&shared->handle), shared->size, 1,
-                                                               ag_list, &ptr);
+    err = hsa_amd_ipc_memory_attach(const_cast<hsa_amd_ipc_memory_t*>(&shared->handle),
+                                    shared->size, 1, ag_list, &ptr);
     RET_IF_HSA_ERR(err);
 
-    PROCESS_LOG(
-     "Attached to IPC handle; P1 buffer address gpu-local memory is %p\n",
-                                                                         ptr);
+    PROCESS_LOG("Attached to IPC handle; P1 buffer address gpu-local memory is %p\n", ptr);
 
     // Attach shared signal
     hsa_signal_t ipc_signal;
@@ -577,11 +559,10 @@ int main(int argc, char** argv) {
 
     PROCESS_LOG("Attached to signal IPC handle\n");
 
-    err = CheckAndFillBuffer(&args, reinterpret_cast<uint32_t *>(ptr), 1, 2);
+    err = CheckAndFillBuffer(&args, reinterpret_cast<uint32_t*>(ptr), 1, 2);
     RET_IF_HSA_ERR(err);
 
-    PROCESS_LOG(
-      "Confirmed P0 filled buffer with 1; P1 re-filled buffer with 2\n");
+    PROCESS_LOG("Confirmed P0 filled buffer with 1; P1 re-filled buffer with 2\n");
     PROCESS_LOG("PASSED on P1\n");
 
     hsa_signal_store_release(ipc_signal, 2);

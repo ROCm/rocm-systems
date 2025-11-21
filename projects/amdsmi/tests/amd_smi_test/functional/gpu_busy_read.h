@@ -27,7 +27,7 @@
 
 class TestGPUBusyRead : public TestBase {
  public:
-    TestGPUBusyRead();
+  TestGPUBusyRead();
 
   // @Brief: Destructor for test case of TestGPUBusyRead
   virtual ~TestGPUBusyRead();

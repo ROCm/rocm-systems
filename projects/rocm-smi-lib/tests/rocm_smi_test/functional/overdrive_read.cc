@@ -43,25 +43,26 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/overdrive_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/overdrive_read.h"
 #include "rocm_smi_test/test_common.h"
 
 TestOverdriveRead::TestOverdriveRead() : TestBase() {
   set_title("RSMI Overdrive Read Test");
-  set_description("The Overdrive Read tests verifies that the "
-                             "current overdrive level can be read properly.");
+  set_description(
+      "The Overdrive Read tests verifies that the "
+      "current overdrive level can be read properly.");
 }
 
-TestOverdriveRead::~TestOverdriveRead(void) {
-}
+TestOverdriveRead::~TestOverdriveRead(void) {}
 
 void TestOverdriveRead::SetUp(void) {
   TestBase::SetUp();
@@ -69,9 +70,7 @@ void TestOverdriveRead::SetUp(void) {
   return;
 }
 
-void TestOverdriveRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestOverdriveRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestOverdriveRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -83,7 +82,6 @@ void TestOverdriveRead::Close() {
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestOverdriveRead::Run(void) {
   GTEST_SKIP_("Temporarily disabled due to kernel issue");
@@ -102,8 +100,7 @@ void TestOverdriveRead::Run(void) {
     err = rsmi_dev_overdrive_level_get(i, &val_ui32);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout <<
-          "\t**Overdrive Level get is not supported on this machine" << std::endl;
+        std::cout << "\t**Overdrive Level get is not supported on this machine" << std::endl;
       }
       // Verify api support checking functionality is working
       err = rsmi_dev_overdrive_level_get(i, nullptr);
@@ -112,10 +109,10 @@ void TestOverdriveRead::Run(void) {
     }
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) {
-    std::cout << "\t**OverDrive Level:" << val_ui32 << std::endl;
-    // Verify api support checking functionality is working
-    err = rsmi_dev_overdrive_level_get(i, nullptr);
-    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+      std::cout << "\t**OverDrive Level:" << val_ui32 << std::endl;
+      // Verify api support checking functionality is working
+      err = rsmi_dev_overdrive_level_get(i, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
   }
 }

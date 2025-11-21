@@ -52,10 +52,10 @@
 namespace rocr {
 namespace pcs {
 
-#define IS_BAD_PTR(ptr)                                          \
-do {                                                           \
-  if ((ptr) == NULL) return HSA_STATUS_ERROR_INVALID_ARGUMENT; \
-} while (false)
+#define IS_BAD_PTR(ptr)                                                                            \
+  do {                                                                                             \
+    if ((ptr) == NULL) return HSA_STATUS_ERROR_INVALID_ARGUMENT;                                   \
+  } while (false)
 
 
 PcsRuntime* PcsRuntime::instance() {
@@ -98,9 +98,7 @@ void PcsRuntime::DestroySingleton() {
 
 void ReleasePcSamplingRsrcs() { PcsRuntime::DestroySingleton(); }
 
-bool PcsRuntime::SessionsActive() const {
-  return pc_sampling_.size() > 0;
-}
+bool PcsRuntime::SessionsActive() const { return pc_sampling_.size() > 0; }
 
 PcsRuntime::PcSamplingSession::PcSamplingSession(
     core::Agent* _agent, hsa_ven_amd_pcs_method_kind_t method, hsa_ven_amd_pcs_units_t units,
@@ -211,8 +209,7 @@ hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size
         samples->timestamp = gpuAgent->TranslateTime(samples->timestamp);
         samples++;
       }
-    }
-    break;
+    } break;
     case HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1: {
       size_t buf_samples = buf1_sz / sizeof(perf_sample_snapshot_v1_t);
       perf_sample_snapshot_v1_t* samples = reinterpret_cast<perf_sample_snapshot_v1_t*>(buf1);
@@ -227,8 +224,7 @@ hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size
         samples->timestamp = gpuAgent->TranslateTime(samples->timestamp);
         samples++;
       }
-    }
-    break;
+    } break;
   }
 
   csd.data_ready_callback(csd.client_callback_data, buf1_sz + buf2_sz, lost_sample_count,
@@ -249,7 +245,6 @@ hsa_status_t PcsRuntime::PcSamplingCreate(core::Agent* agent, hsa_ven_amd_pcs_me
                                           size_t latency, size_t buffer_size,
                                           hsa_ven_amd_pcs_data_ready_callback_t data_ready_cb,
                                           void* client_cb_data, hsa_ven_amd_pcs_t* handle) {
-
   IS_BAD_PTR(handle);
   IS_BAD_PTR(data_ready_cb);
 
@@ -292,8 +287,8 @@ hsa_status_t PcsRuntime::PcSamplingCreateInternal(
                                              data_ready_cb, client_cb_data));
 
   if (!pc_sampling_[handle->handle].isValid()) {
-      pc_sampling_.erase(handle->handle);
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    pc_sampling_.erase(handle->handle);
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
   hsa_status_t ret = agent_pcs_create_fn(agent, pc_sampling_[handle->handle]);

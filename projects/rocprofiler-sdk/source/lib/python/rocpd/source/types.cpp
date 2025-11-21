@@ -71,8 +71,7 @@ region::get_extdata() const
 {
     auto _msg = decoded_extdata{};
     if(has_extdata())
-        common::read_json_string(
-            extdata, [](auto& ar, auto& msg) { cereal::load(ar, msg); }, _msg);
+        common::read_json_string(extdata, [](auto& ar, auto& msg) { cereal::load(ar, msg); }, _msg);
     return _msg;
 }
 
@@ -81,8 +80,7 @@ sample::get_extdata() const
 {
     auto _msg = decoded_extdata{};
     if(has_extdata())
-        common::read_json_string(
-            extdata, [](auto& ar, auto& msg) { cereal::load(ar, msg); }, _msg);
+        common::read_json_string(extdata, [](auto& ar, auto& msg) { cereal::load(ar, msg); }, _msg);
     return _msg;
 }
 }  // namespace types

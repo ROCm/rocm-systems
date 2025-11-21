@@ -105,9 +105,7 @@ typedef int hipLaunchParm;
 
 #ifdef __HIP_DEVICE_COMPILE__
 #define abort_()                                                                                   \
-  {                                                                                                \
-    asm("trap;");                                                                                  \
-  }
+  { asm("trap;"); }
 #undef assert
 #define assert(COND)                                                                               \
   {                                                                                                \

@@ -53,7 +53,7 @@
 
 class MemoryAlignmentTest : public TestBase {
  public:
-    MemoryAlignmentTest();
+  MemoryAlignmentTest();
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~MemoryAlignmentTest();
@@ -77,8 +77,7 @@ class MemoryAlignmentTest : public TestBase {
 
 
  private:
-  void MemoryPoolAlignment(hsa_agent_t agent,
-                             hsa_amd_memory_pool_t pool);
+  void MemoryPoolAlignment(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_MEMORY_ALIGNMENT_H_

@@ -34,17 +34,15 @@
  */
 class codeobj_capture_instance {
  public:
-  codeobj_capture_instance(
-    uint64_t _addr,
-    uint64_t _load_size,
-    const std::string& _uri,
-    uint64_t mem_addr,
-    uint64_t mem_size,
-    uint64_t start_time,
-    uint32_t id
-  )
-    : addr(_addr), load_size(_load_size), start_time(start_time),
-    load_id(id), URI(_uri), mem_addr(mem_addr), mem_size(mem_size) {};
+  codeobj_capture_instance(uint64_t _addr, uint64_t _load_size, const std::string& _uri,
+                           uint64_t mem_addr, uint64_t mem_size, uint64_t start_time, uint32_t id)
+      : addr(_addr),
+        load_size(_load_size),
+        start_time(start_time),
+        load_id(id),
+        URI(_uri),
+        mem_addr(mem_addr),
+        mem_size(mem_size) {};
 
   void setmode(rocprofiler_codeobj_capture_mode_t mode);
 
@@ -58,13 +56,8 @@ class codeobj_capture_instance {
   const uint64_t start_time;
   const uint32_t load_id;
 
-  static void Load(
-    uint64_t addr,
-    uint64_t load_size,
-    const std::string& URI,
-    uint64_t mem_addr,
-    uint64_t mem_size
-  );
+  static void Load(uint64_t addr, uint64_t load_size, const std::string& URI, uint64_t mem_addr,
+                   uint64_t mem_size);
   static void Unload(uint64_t addr);
   static uint32_t GetEventCount() { return eventcount.load(std::memory_order_relaxed); }
 

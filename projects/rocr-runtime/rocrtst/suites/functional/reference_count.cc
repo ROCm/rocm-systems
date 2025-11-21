@@ -72,17 +72,19 @@
 #include "hsa/hsa.h"
 
 static const int NumOfTimes = 1000;  // No of times the hsa runtime will be initialized
-static const double MaxRefCount = 2147483649;  // Setting to max value to test to INIT_MAX+2 as defined in hsa runtime
+static const double MaxRefCount =
+    2147483649;  // Setting to max value to test to INIT_MAX+2 as defined in hsa runtime
 
-#define RET_IF_HSA_ERR(err) { \
-  if ((err) != HSA_STATUS_SUCCESS) { \
-    const char* msg = 0; \
-    hsa_status_string(err, &msg); \
-    std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << \
-                          __FILE__ << ". Call returned " << err << std::endl; \
-    std::cout << msg << std::endl; \
-  } \
-}
+#define RET_IF_HSA_ERR(err)                                                                        \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
+                << ". Call returned " << err << std::endl;                                         \
+      std::cout << msg << std::endl;                                                               \
+    }                                                                                              \
+  }
 
 ReferenceCountTest::ReferenceCountTest(bool referenceCount_, bool maxReferenceCount_) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
@@ -99,8 +101,7 @@ ReferenceCountTest::ReferenceCountTest(bool referenceCount_, bool maxReferenceCo
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
-ReferenceCountTest::~ReferenceCountTest(void) {
-}
+ReferenceCountTest::~ReferenceCountTest(void) {}
 
 // Compare required profile for this test case with what we're actually
 // running on
@@ -121,9 +122,7 @@ void ReferenceCountTest::Run(void) {
 
 // Compare required profile for this test case with what we're actually
 // running on
-void ReferenceCountTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void ReferenceCountTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void ReferenceCountTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -138,7 +137,8 @@ void ReferenceCountTest::DisplayResults(void) const {
 void ReferenceCountTest::Close() {
   // This will close handles opened within rocrtst utility calls and call
   // hsa_shut_down(), so it should be done after other hsa cleanup
-  // all the reference count decremented in main function, ReferenceCountTest::TestReferenceCount(void)
+  // all the reference count decremented in main function,
+  // ReferenceCountTest::TestReferenceCount(void)
 }
 
 void ReferenceCountTest::TestReferenceCount(void) {
@@ -150,7 +150,7 @@ void ReferenceCountTest::TestReferenceCount(void) {
   }
 
   // Shutdown hsa runtime N - 1 times
-  for (int i = 0; i < NumOfTimes-1; ++i) {
+  for (int i = 0; i < NumOfTimes - 1; ++i) {
     status = hsa_shut_down();
     RET_IF_HSA_ERR(status);
   }
@@ -170,7 +170,7 @@ void ReferenceCountTest::TestMaxReferenceCount(void) {
       break;
     }
   }
-  for (int i = 0; i < MaxRefCount-2; ++i) {
+  for (int i = 0; i < MaxRefCount - 2; ++i) {
     status = hsa_shut_down();
     RET_IF_HSA_ERR(status);
   }

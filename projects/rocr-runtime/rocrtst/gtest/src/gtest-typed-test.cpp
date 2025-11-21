@@ -50,8 +50,8 @@ static const char* SkipSpaces(const char* str) {
 // Verifies that registered_tests match the test names in
 // defined_test_names_; returns registered_tests if successful, or
 // aborts the program otherwise.
-const char* TypedTestCasePState::VerifyRegisteredTestNames(
-  const char* file, int line, const char* registered_tests) {
+const char* TypedTestCasePState::VerifyRegisteredTestNames(const char* file, int line,
+                                                           const char* registered_tests) {
   typedef ::std::set<const char*>::const_iterator DefinedTestIter;
   registered_ = true;
 
@@ -62,8 +62,7 @@ const char* TypedTestCasePState::VerifyRegisteredTestNames(
   Message errors;
   ::std::set<std::string> tests;
 
-  for (const char* names = registered_tests; names != NULL;
-       names = SkipComma(names)) {
+  for (const char* names = registered_tests; names != NULL; names = SkipComma(names)) {
     const std::string name = GetPrefixUntilComma(names);
 
     if (tests.count(name) != 0) {
@@ -73,9 +72,7 @@ const char* TypedTestCasePState::VerifyRegisteredTestNames(
 
     bool found = false;
 
-    for (DefinedTestIter it = defined_test_names_.begin();
-         it != defined_test_names_.end();
-         ++it) {
+    for (DefinedTestIter it = defined_test_names_.begin(); it != defined_test_names_.end(); ++it) {
       if (name == *it) {
         found = true;
         break;
@@ -84,16 +81,12 @@ const char* TypedTestCasePState::VerifyRegisteredTestNames(
 
     if (found) {
       tests.insert(name);
-    }
-    else {
-      errors << "No test named " << name
-             << " can be found in this test case.\n";
+    } else {
+      errors << "No test named " << name << " can be found in this test case.\n";
     }
   }
 
-  for (DefinedTestIter it = defined_test_names_.begin();
-       it != defined_test_names_.end();
-       ++it) {
+  for (DefinedTestIter it = defined_test_names_.begin(); it != defined_test_names_.end(); ++it) {
     if (tests.count(*it) == 0) {
       errors << "You forgot to list test " << *it << ".\n";
     }
@@ -102,8 +95,7 @@ const char* TypedTestCasePState::VerifyRegisteredTestNames(
   const std::string& errors_str = errors.GetString();
 
   if (errors_str != "") {
-    fprintf(stderr, "%s %s", FormatFileLocation(file, line).c_str(),
-            errors_str.c_str());
+    fprintf(stderr, "%s %s", FormatFileLocation(file, line).c_str(), errors_str.c_str());
     fflush(stderr);
     posix::Abort();
   }

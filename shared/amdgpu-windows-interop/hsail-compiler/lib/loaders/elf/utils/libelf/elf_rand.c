@@ -33,27 +33,24 @@
 
 LIBELF_VCSID("$Id: elf_rand.c 189 2008-07-20 10:38:08Z jkoshy $");
 
-off_t
-elf_rand(Elf *ar, off_t offset)
-{
-	struct ar_hdr *arh;
+off_t elf_rand(Elf *ar, off_t offset) {
+  struct ar_hdr *arh;
 
-	if (ar == NULL || ar->e_kind != ELF_K_AR ||
-	    (offset & 1) || offset < SARMAG ||
-	    offset + sizeof(struct ar_hdr) >= ar->e_rawsize) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return 0;
-	}
+  if (ar == NULL || ar->e_kind != ELF_K_AR || (offset & 1) || offset < SARMAG ||
+      offset + sizeof(struct ar_hdr) >= ar->e_rawsize) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return 0;
+  }
 
-	arh = (struct ar_hdr *) (ar->e_rawfile + offset);
+  arh = (struct ar_hdr *)(ar->e_rawfile + offset);
 
-	/* a too simple sanity check */
-	if (arh->ar_fmag[0] != '`' || arh->ar_fmag[1] != '\n') {
-		LIBELF_SET_ERROR(ARCHIVE, 0);
-		return 0;
-	}
+  /* a too simple sanity check */
+  if (arh->ar_fmag[0] != '`' || arh->ar_fmag[1] != '\n') {
+    LIBELF_SET_ERROR(ARCHIVE, 0);
+    return 0;
+  }
 
-	ar->e_u.e_ar.e_next = offset;
+  ar->e_u.e_ar.e_next = offset;
 
-	return (offset);
+  return (offset);
 }

@@ -41,10 +41,12 @@
  *
  */
 
+#include "rocm_smi/rocm_smi_device.h"
+
 #include <pthread.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cassert>
@@ -60,12 +62,11 @@
 #include <type_traits>
 #include <vector>
 
-#include "rocm_smi/rocm_smi_main.h"
-#include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
-#include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include "shared_mutex.h"  // NOLINT
 
 namespace amd {
@@ -82,7 +83,7 @@ static const char *kDevPerfLevelFName = "power_dpm_force_performance_level";
 static const char *kDevDevProdNameFName = "product_name";
 static const char *kDevDevProdNumFName = "product_number";
 static const char *kDevDevIDFName = "device";
-static const char* kDevXGMIPhysicalIDFName = "xgmi_physical_id";
+static const char *kDevXGMIPhysicalIDFName = "xgmi_physical_id";
 static const char *kDevDevRevIDFName = "revision";
 static const char *kDevVendorIDFName = "vendor";
 static const char *kDevSubSysDevIDFName = "subsystem_device";
@@ -124,8 +125,7 @@ static const char *kDevXGMIErrorFName = "xgmi_error";
 static const char *kDevSerialNumberFName = "serial_number";
 static const char *kDevNumaNodeFName = "numa_node";
 static const char *kDevGpuMetricsFName = "gpu_metrics";
-static const char *kDevAvailableComputePartitionFName =
-                  "available_compute_partition";
+static const char *kDevAvailableComputePartitionFName = "available_compute_partition";
 static const char *kDevComputePartitionFName = "current_compute_partition";
 static const char *kDevMemoryPartitionFName = "current_memory_partition";
 static const char *kDevAvailableMemoryPartitionFName = "available_memory_partition";
@@ -168,25 +168,21 @@ static const char *kDevKFDNodePropArrCntSName = "array_count";
 static const char *kDevKFDNodePropSimdArrPerEngSName = "simd_arrays_per_engine";
 static const char *kDevKFDNodePropCuPerSimdArrSName = "cu_per_simd_array";
 static const char *kDevKFDNodePropSimdPerCUSName = "simd_per_cu";
-static const char *kDevKFDNodePropMaxSlotsScratchCuSName =
-                                                       "max_slots_scratch_cu";
+static const char *kDevKFDNodePropMaxSlotsScratchCuSName = "max_slots_scratch_cu";
 static const char *kDevKFDNodePropVendorIdSName = "vendor_id";
 static const char *kDevKFDNodePropDeviceIdSName = "device_id";
 static const char *kDevKFDNodePropLocationIdSName = "location_id";
 static const char *kDevKFDNodePropDrmRenderMinorSName = "drm_render_minor";
 static const char *kDevKFDNodePropHiveIdSName = "hive_id";
 static const char *kDevKFDNodePropNumSdmaEnginesSName = "num_sdma_engines";
-static const char *kDevKFDNodePropNumSdmaXgmiEngsSName =
-                                                      "num_sdma_xgmi_engines";
-static const char *kDevKFDNodePropMaxEngClkFCompSName =
-                                                    "max_engine_clk_fcompute";
+static const char *kDevKFDNodePropNumSdmaXgmiEngsSName = "num_sdma_xgmi_engines";
+static const char *kDevKFDNodePropMaxEngClkFCompSName = "max_engine_clk_fcompute";
 static const char *kDevKFDNodePropLocMemSzSName = "local_mem_size";
 static const char *kDevKFDNodePropFwVerSName = "fw_version";
 static const char *kDevKFDNodePropCapabilitySName = "capability";
 static const char *kDevKFDNodePropDbgPropSName = "debug_prop";
 static const char *kDevKFDNodePropSdmaFwVerSName = "sdma_fw_version";
-static const char *kDevKFDNodePropMaxEngClkCCompSName =
-                                                    "max_engine_clk_ccompute";
+static const char *kDevKFDNodePropMaxEngClkCCompSName = "max_engine_clk_ccompute";
 static const char *kDevKFDNodePropDomainSName = "domain";
 
 static const std::map<DevKFDNodePropTypes, const char *> kDevKFDPropNameMap = {
@@ -376,245 +372,219 @@ static const std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
     {kDevErrCntXGMIWAFL, RSMI_GPU_BLOCK_XGMI_WAFL},
 
     // rsmi_event_group_t
-    {kDevDFCountersAvailable, RSMI_EVNT_GRP_XGMI}
-};
+    {kDevDFCountersAvailable, RSMI_EVNT_GRP_XGMI}};
 
-const std::map<DevInfoTypes, const char*>
-Device::devInfoTypesStrings = {
-  {kDevPerfLevel, "kDevPerfLevel"},
-  {kDevOverDriveLevel, "kDevOverDriveLevel"},
-  {kDevMemOverDriveLevel, "kDevMemOverDriveLevel"},
-  {kDevDevID, "kDevDevID"},
-  {kDevXGMIPhysicalID, "kDevXGMIPhysicalID"},
-  {kDevDevRevID, "kDevDevRevID"},
-  {kDevDevProdName, "kDevDevProdName"},
-  {kDevDevProdNum, "kDevDevProdNum"},
-  {kDevVendorID, "kDevVendorID"},
-  {kDevSubSysDevID, "kDevSubSysDevID"},
-  {kDevSubSysVendorID, "kDevSubSysVendorID"},
-  {kDevGPUMClk, "kDevGPUMClk"},
-  {kDevGPUSClk, "kDevGPUSClk"},
-  {kDevDCEFClk, "kDevDCEFClk"},
-  {kDevFClk, "kDevFClk"},
-  {kDevSOCClk, "kDevSOCClk"},
-  {kDevPCIEClk, "kDevPCIEClk"},
-  {kDevPowerProfileMode, "kDevPowerProfileMode"},
-  {kDevUsage, "kDevUsage"},
-  {kDevPowerODVoltage, "kDevPowerODVoltage"},
-  {kDevVBiosVer, "kDevVBiosVer"},
-  {kDevPCIEThruPut, "kDevPCIEThruPut"},
-  {kDevErrCntSDMA, "kDevErrCntSDMA"},
-  {kDevErrCntUMC, "kDevErrCntUMC"},
-  {kDevErrCntGFX, "kDevErrCntGFX"},
-  {kDevErrCntMMHUB, "kDevErrCntMMHUB"},
-  {kDevErrCntPCIEBIF, "kDevErrCntPCIEBIF"},
-  {kDevErrCntHDP, "kDevErrCntHDP"},
-  {kDevErrCntXGMIWAFL, "kDevErrCntXGMIWAFL"},
-  {kDevErrCntFeatures, "kDevErrCntFeatures"},
-  {kDevMemTotGTT, "kDevMemTotGTT"},
-  {kDevMemTotVisVRAM, "kDevMemTotVisVRAM"},
-  {kDevMemTotVRAM, "kDevMemTotVRAM"},
-  {kDevMemUsedGTT, "kDevMemUsedGTT"},
-  {kDevMemUsedVisVRAM, "kDevMemUsedVisVRAM"},
-  {kDevMemUsedVRAM, "kDevMemUsedVRAM"},
-  {kDevVramVendor, "kDevVramVendor"},
-  {kDevPCIEReplayCount, "kDevPCIEReplayCount"},
-  {kDevUniqueId, "kDevUniqueId"},
-  {kDevDFCountersAvailable, "kDevDFCountersAvailable"},
-  {kDevMemBusyPercent, "kDevMemBusyPercent"},
-  {kDevXGMIError, "kDevXGMIError"},
-  {kDevFwVersionAsd, "kDevFwVersionAsd"},
-  {kDevFwVersionCe, "kDevFwVersionCe"},
-  {kDevFwVersionDmcu, "kDevFwVersionDmcu"},
-  {kDevFwVersionMc, "kDevFwVersionMc"},
-  {kDevFwVersionMe, "kDevFwVersionMe"},
-  {kDevFwVersionMec, "kDevFwVersionMec"},
-  {kDevFwVersionMec2, "kDevFwVersionMec2"},
-  {kDevFwVersionMes, "kDevFwVersionMes"},
-  {kDevFwVersionMesKiq, "kDevFwVersionMesKiq"},
-  {kDevFwVersionPfp, "kDevFwVersionPfp"},
-  {kDevFwVersionRlc, "kDevFwVersionRlc"},
-  {kDevFwVersionRlcSrlc, "kDevFwVersionRlcSrlc"},
-  {kDevFwVersionRlcSrlg, "kDevFwVersionRlcSrlg"},
-  {kDevFwVersionRlcSrls, "kDevFwVersionRlcSrls"},
-  {kDevFwVersionSdma, "kDevFwVersionSdma"},
-  {kDevFwVersionSdma2, "kDevFwVersionSdma2"},
-  {kDevFwVersionSmc, "kDevFwVersionSmc"},
-  {kDevFwVersionSos, "kDevFwVersionSos"},
-  {kDevFwVersionTaRas, "kDevFwVersionTaRas"},
-  {kDevFwVersionTaXgmi, "kDevFwVersionTaXgmi"},
-  {kDevFwVersionUvd, "kDevFwVersionUvd"},
-  {kDevFwVersionVce, "kDevFwVersionVce"},
-  {kDevFwVersionVcn, "kDevFwVersionVcn"},
-  {kDevSerialNumber, "kDevSerialNumber"},
-  {kDevMemPageBad, "kDevMemPageBad"},
-  {kDevNumaNode, "kDevNumaNode"},
-  {kDevGpuMetrics, "kDevGpuMetrics"},
-  {kDevGpuReset, "kDevGpuReset"},
-  {kDevAvailableComputePartition, "kDevAvailableComputePartition"},
-  {kDevComputePartition, "kDevComputePartition"},
-  {kDevMemoryPartition, "kDevMemoryPartition"},
-  {kDevAvailableMemoryPartition, "kDevAvailableMemoryPartition"},
+const std::map<DevInfoTypes, const char *> Device::devInfoTypesStrings = {
+    {kDevPerfLevel, "kDevPerfLevel"},
+    {kDevOverDriveLevel, "kDevOverDriveLevel"},
+    {kDevMemOverDriveLevel, "kDevMemOverDriveLevel"},
+    {kDevDevID, "kDevDevID"},
+    {kDevXGMIPhysicalID, "kDevXGMIPhysicalID"},
+    {kDevDevRevID, "kDevDevRevID"},
+    {kDevDevProdName, "kDevDevProdName"},
+    {kDevDevProdNum, "kDevDevProdNum"},
+    {kDevVendorID, "kDevVendorID"},
+    {kDevSubSysDevID, "kDevSubSysDevID"},
+    {kDevSubSysVendorID, "kDevSubSysVendorID"},
+    {kDevGPUMClk, "kDevGPUMClk"},
+    {kDevGPUSClk, "kDevGPUSClk"},
+    {kDevDCEFClk, "kDevDCEFClk"},
+    {kDevFClk, "kDevFClk"},
+    {kDevSOCClk, "kDevSOCClk"},
+    {kDevPCIEClk, "kDevPCIEClk"},
+    {kDevPowerProfileMode, "kDevPowerProfileMode"},
+    {kDevUsage, "kDevUsage"},
+    {kDevPowerODVoltage, "kDevPowerODVoltage"},
+    {kDevVBiosVer, "kDevVBiosVer"},
+    {kDevPCIEThruPut, "kDevPCIEThruPut"},
+    {kDevErrCntSDMA, "kDevErrCntSDMA"},
+    {kDevErrCntUMC, "kDevErrCntUMC"},
+    {kDevErrCntGFX, "kDevErrCntGFX"},
+    {kDevErrCntMMHUB, "kDevErrCntMMHUB"},
+    {kDevErrCntPCIEBIF, "kDevErrCntPCIEBIF"},
+    {kDevErrCntHDP, "kDevErrCntHDP"},
+    {kDevErrCntXGMIWAFL, "kDevErrCntXGMIWAFL"},
+    {kDevErrCntFeatures, "kDevErrCntFeatures"},
+    {kDevMemTotGTT, "kDevMemTotGTT"},
+    {kDevMemTotVisVRAM, "kDevMemTotVisVRAM"},
+    {kDevMemTotVRAM, "kDevMemTotVRAM"},
+    {kDevMemUsedGTT, "kDevMemUsedGTT"},
+    {kDevMemUsedVisVRAM, "kDevMemUsedVisVRAM"},
+    {kDevMemUsedVRAM, "kDevMemUsedVRAM"},
+    {kDevVramVendor, "kDevVramVendor"},
+    {kDevPCIEReplayCount, "kDevPCIEReplayCount"},
+    {kDevUniqueId, "kDevUniqueId"},
+    {kDevDFCountersAvailable, "kDevDFCountersAvailable"},
+    {kDevMemBusyPercent, "kDevMemBusyPercent"},
+    {kDevXGMIError, "kDevXGMIError"},
+    {kDevFwVersionAsd, "kDevFwVersionAsd"},
+    {kDevFwVersionCe, "kDevFwVersionCe"},
+    {kDevFwVersionDmcu, "kDevFwVersionDmcu"},
+    {kDevFwVersionMc, "kDevFwVersionMc"},
+    {kDevFwVersionMe, "kDevFwVersionMe"},
+    {kDevFwVersionMec, "kDevFwVersionMec"},
+    {kDevFwVersionMec2, "kDevFwVersionMec2"},
+    {kDevFwVersionMes, "kDevFwVersionMes"},
+    {kDevFwVersionMesKiq, "kDevFwVersionMesKiq"},
+    {kDevFwVersionPfp, "kDevFwVersionPfp"},
+    {kDevFwVersionRlc, "kDevFwVersionRlc"},
+    {kDevFwVersionRlcSrlc, "kDevFwVersionRlcSrlc"},
+    {kDevFwVersionRlcSrlg, "kDevFwVersionRlcSrlg"},
+    {kDevFwVersionRlcSrls, "kDevFwVersionRlcSrls"},
+    {kDevFwVersionSdma, "kDevFwVersionSdma"},
+    {kDevFwVersionSdma2, "kDevFwVersionSdma2"},
+    {kDevFwVersionSmc, "kDevFwVersionSmc"},
+    {kDevFwVersionSos, "kDevFwVersionSos"},
+    {kDevFwVersionTaRas, "kDevFwVersionTaRas"},
+    {kDevFwVersionTaXgmi, "kDevFwVersionTaXgmi"},
+    {kDevFwVersionUvd, "kDevFwVersionUvd"},
+    {kDevFwVersionVce, "kDevFwVersionVce"},
+    {kDevFwVersionVcn, "kDevFwVersionVcn"},
+    {kDevSerialNumber, "kDevSerialNumber"},
+    {kDevMemPageBad, "kDevMemPageBad"},
+    {kDevNumaNode, "kDevNumaNode"},
+    {kDevGpuMetrics, "kDevGpuMetrics"},
+    {kDevGpuReset, "kDevGpuReset"},
+    {kDevAvailableComputePartition, "kDevAvailableComputePartition"},
+    {kDevComputePartition, "kDevComputePartition"},
+    {kDevMemoryPartition, "kDevMemoryPartition"},
+    {kDevAvailableMemoryPartition, "kDevAvailableMemoryPartition"},
 };
 
 static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
     // Functions with only mandatory dependencies
-  {"rsmi_dev_vram_vendor_get",           {{kDevVramVendorFName}, {}}},
-  {"rsmi_dev_id_get",                    {{kDevDevIDFName}, {}}},
-  {"rsmi_dev_xgmi_physical_id_get",      {{kDevXGMIPhysicalIDFName}, {}}},
-  {"rsmi_dev_revision_get",              {{kDevDevRevIDFName}, {}}},
-  {"rsmi_dev_vendor_id_get",             {{kDevVendorIDFName}, {}}},
-  {"rsmi_dev_name_get",                  {{kDevVendorIDFName,
-                                           kDevDevIDFName}, {}}},
-  {"rsmi_dev_sku_get",                   {{kDevDevProdNumFName}, {}}},
-  {"rsmi_dev_brand_get",                 {{kDevVendorIDFName,
-                                           kDevVBiosVerFName}, {}}},
-  {"rsmi_dev_vendor_name_get",           {{kDevVendorIDFName}, {}}},
-  {"rsmi_dev_serial_number_get",         {{kDevSerialNumberFName}, {}}},
-  {"rsmi_dev_subsystem_id_get",          {{kDevSubSysDevIDFName}, {}}},
-  {"rsmi_dev_subsystem_name_get",        {{kDevSubSysVendorIDFName,
-                                           kDevVendorIDFName,
-                                           kDevDevIDFName}, {}}},
-  {"rsmi_dev_drm_render_minor_get",      {{}, {}}},
-  {"rsmi_dev_subsystem_vendor_id_get",   {{kDevSubSysVendorIDFName}, {}}},
-  {"rsmi_dev_unique_id_get",             {{kDevUniqueIdFName}, {}}},
-  {"rsmi_dev_pci_bandwidth_get",         {{kDevPCIEClkFName}, {}}},
-  {"rsmi_dev_pci_id_get",                {{}, {}}},
-  {"rsmi_dev_pci_throughput_get",        {{kDevPCIEThruPutFName}, {}}},
-  {"rsmi_dev_pci_replay_counter_get",    {{kDevPCIEReplayCountFName}, {}}},
-  {"rsmi_dev_pci_bandwidth_set",         {{kDevPerfLevelFName,
-                                           kDevPCIEClkFName}, {}}},
-  {"rsmi_dev_power_profile_set",         {{kDevPerfLevelFName,
-                                           kDevPowerProfileModeFName}, {}}},
-  {"rsmi_dev_memory_busy_percent_get",   {{kDevMemBusyPercentFName}, {}}},
-  {"rsmi_dev_busy_percent_get",          {{kDevUsageFName}, {}}},
-  {"rsmi_dev_memory_reserved_pages_get", {{kDevMemPageBadFName}, {}}},
-  {"rsmi_dev_overdrive_level_get",       {{kDevOverDriveLevelFName}, {}}},
-  {"rsmi_dev_mem_overdrive_level_get",   {{kDevMemOverDriveLevelFName}, {}}},
-  {"rsmi_dev_power_profile_presets_get", {{kDevPowerProfileModeFName}, {}}},
-  {"rsmi_dev_perf_level_set",            {{kDevPerfLevelFName}, {}}},
-  {"rsmi_dev_perf_level_set_v1",         {{kDevPerfLevelFName}, {}}},
-  {"rsmi_dev_perf_level_get",            {{kDevPerfLevelFName}, {}}},
-  {"rsmi_perf_determinism_mode_set",     {{kDevPerfLevelFName,
-                                           kDevPowerODVoltageFName}, {}}},
-  {"rsmi_dev_overdrive_level_set",       {{kDevOverDriveLevelFName}, {}}},
-  {"rsmi_dev_vbios_version_get",         {{kDevVBiosVerFName}, {}}},
-  {"rsmi_dev_od_volt_info_get",          {{kDevPowerODVoltageFName}, {}}},
-  {"rsmi_dev_od_volt_info_set",          {{kDevPowerODVoltageFName,
-                                           kDevPerfLevelFName},  {}}},
-  {"rsmi_dev_od_volt_curve_regions_get", {{kDevPowerODVoltageFName}, {}}},
-  {"rsmi_dev_ecc_enabled_get",           {{kDevErrCntFeaturesFName}, {}}},
-  {"rsmi_dev_ecc_status_get",            {{kDevErrCntFeaturesFName}, {}}},
-  {"rsmi_dev_counter_group_supported",   {{}, {}}},
-  {"rsmi_dev_counter_create",            {{}, {}}},
-  {"rsmi_dev_xgmi_error_status",         {{kDevXGMIErrorFName}, {}}},
-  {"rsmi_dev_xgmi_error_reset",          {{kDevXGMIErrorFName}, {}}},
-  {"rsmi_topo_numa_affinity_get",        {{kDevNumaNodeFName}, {}}},
-  {"rsmi_dev_gpu_metrics_info_get",      {{kDevGpuMetricsFName}, {}}},
-  {"rsmi_dev_gpu_reset",                 {{kDevGpuResetFName}, {}}},
-  {"rsmi_dev_energy_count_get",          {{kDevGpuMetricsFName}, {}}},
-  {"rsmi_dev_current_socket_power_get",  {{kDevGpuMetricsFName}, {}}},
+    {"rsmi_dev_vram_vendor_get", {{kDevVramVendorFName}, {}}},
+    {"rsmi_dev_id_get", {{kDevDevIDFName}, {}}},
+    {"rsmi_dev_xgmi_physical_id_get", {{kDevXGMIPhysicalIDFName}, {}}},
+    {"rsmi_dev_revision_get", {{kDevDevRevIDFName}, {}}},
+    {"rsmi_dev_vendor_id_get", {{kDevVendorIDFName}, {}}},
+    {"rsmi_dev_name_get", {{kDevVendorIDFName, kDevDevIDFName}, {}}},
+    {"rsmi_dev_sku_get", {{kDevDevProdNumFName}, {}}},
+    {"rsmi_dev_brand_get", {{kDevVendorIDFName, kDevVBiosVerFName}, {}}},
+    {"rsmi_dev_vendor_name_get", {{kDevVendorIDFName}, {}}},
+    {"rsmi_dev_serial_number_get", {{kDevSerialNumberFName}, {}}},
+    {"rsmi_dev_subsystem_id_get", {{kDevSubSysDevIDFName}, {}}},
+    {"rsmi_dev_subsystem_name_get",
+     {{kDevSubSysVendorIDFName, kDevVendorIDFName, kDevDevIDFName}, {}}},
+    {"rsmi_dev_drm_render_minor_get", {{}, {}}},
+    {"rsmi_dev_subsystem_vendor_id_get", {{kDevSubSysVendorIDFName}, {}}},
+    {"rsmi_dev_unique_id_get", {{kDevUniqueIdFName}, {}}},
+    {"rsmi_dev_pci_bandwidth_get", {{kDevPCIEClkFName}, {}}},
+    {"rsmi_dev_pci_id_get", {{}, {}}},
+    {"rsmi_dev_pci_throughput_get", {{kDevPCIEThruPutFName}, {}}},
+    {"rsmi_dev_pci_replay_counter_get", {{kDevPCIEReplayCountFName}, {}}},
+    {"rsmi_dev_pci_bandwidth_set", {{kDevPerfLevelFName, kDevPCIEClkFName}, {}}},
+    {"rsmi_dev_power_profile_set", {{kDevPerfLevelFName, kDevPowerProfileModeFName}, {}}},
+    {"rsmi_dev_memory_busy_percent_get", {{kDevMemBusyPercentFName}, {}}},
+    {"rsmi_dev_busy_percent_get", {{kDevUsageFName}, {}}},
+    {"rsmi_dev_memory_reserved_pages_get", {{kDevMemPageBadFName}, {}}},
+    {"rsmi_dev_overdrive_level_get", {{kDevOverDriveLevelFName}, {}}},
+    {"rsmi_dev_mem_overdrive_level_get", {{kDevMemOverDriveLevelFName}, {}}},
+    {"rsmi_dev_power_profile_presets_get", {{kDevPowerProfileModeFName}, {}}},
+    {"rsmi_dev_perf_level_set", {{kDevPerfLevelFName}, {}}},
+    {"rsmi_dev_perf_level_set_v1", {{kDevPerfLevelFName}, {}}},
+    {"rsmi_dev_perf_level_get", {{kDevPerfLevelFName}, {}}},
+    {"rsmi_perf_determinism_mode_set", {{kDevPerfLevelFName, kDevPowerODVoltageFName}, {}}},
+    {"rsmi_dev_overdrive_level_set", {{kDevOverDriveLevelFName}, {}}},
+    {"rsmi_dev_vbios_version_get", {{kDevVBiosVerFName}, {}}},
+    {"rsmi_dev_od_volt_info_get", {{kDevPowerODVoltageFName}, {}}},
+    {"rsmi_dev_od_volt_info_set", {{kDevPowerODVoltageFName, kDevPerfLevelFName}, {}}},
+    {"rsmi_dev_od_volt_curve_regions_get", {{kDevPowerODVoltageFName}, {}}},
+    {"rsmi_dev_ecc_enabled_get", {{kDevErrCntFeaturesFName}, {}}},
+    {"rsmi_dev_ecc_status_get", {{kDevErrCntFeaturesFName}, {}}},
+    {"rsmi_dev_counter_group_supported", {{}, {}}},
+    {"rsmi_dev_counter_create", {{}, {}}},
+    {"rsmi_dev_xgmi_error_status", {{kDevXGMIErrorFName}, {}}},
+    {"rsmi_dev_xgmi_error_reset", {{kDevXGMIErrorFName}, {}}},
+    {"rsmi_topo_numa_affinity_get", {{kDevNumaNodeFName}, {}}},
+    {"rsmi_dev_gpu_metrics_info_get", {{kDevGpuMetricsFName}, {}}},
+    {"rsmi_dev_gpu_reset", {{kDevGpuResetFName}, {}}},
+    {"rsmi_dev_energy_count_get", {{kDevGpuMetricsFName}, {}}},
+    {"rsmi_dev_current_socket_power_get", {{kDevGpuMetricsFName}, {}}},
 
-  {"rsmi_dev_compute_partition_get",     {{kDevComputePartitionFName}, {}}},
-  {"rsmi_dev_compute_partition_set",     {{kDevComputePartitionFName}, {}}},
-  {"rsmi_dev_memory_partition_get",      {{kDevMemoryPartitionFName}, {}}},
-  {"rsmi_dev_memory_partition_set",      {{kDevMemoryPartitionFName}, {}}},
+    {"rsmi_dev_compute_partition_get", {{kDevComputePartitionFName}, {}}},
+    {"rsmi_dev_compute_partition_set", {{kDevComputePartitionFName}, {}}},
+    {"rsmi_dev_memory_partition_get", {{kDevMemoryPartitionFName}, {}}},
+    {"rsmi_dev_memory_partition_set", {{kDevMemoryPartitionFName}, {}}},
 
-  // These functions with variants, but no sensors/units. (May or may not
-  // have mandatory dependencies.)
-  {"rsmi_dev_memory_total_get",     { .mandatory_depends = {},
-                                      .variants = {
-                                        kDevMemTotGTT, kDevMemTotVisVRAM,
-                                        kDevMemTotVRAM,
-                                       }
-                                    }
-  },
-  {"rsmi_dev_memory_usage_get",     { .mandatory_depends = {},
-                                      .variants = {
-                                        kDevMemUsedGTT,
-                                        kDevMemUsedVisVRAM,
-                                        kDevMemUsedVRAM,
-                                      }
-                                    }
-  },
-  {"rsmi_dev_gpu_clk_freq_get",     { .mandatory_depends = {},
-                                      .variants = {
-                                        kDevGPUSClk,
-                                        kDevGPUMClk,
-                                        kDevFClk,
-                                        kDevDCEFClk,
-                                        kDevSOCClk,
-                                       }
-                                    }
-  },
-  {"rsmi_dev_gpu_clk_freq_set",     { .mandatory_depends =
-                                        {kDevPerfLevelFName},
-                                      .variants = {
-                                        kDevGPUSClk,
-                                        kDevGPUMClk,
-                                        kDevFClk,
-                                        kDevDCEFClk,
-                                        kDevSOCClk,
-                                      }
-                                    }
-  },
-  {"rsmi_dev_firmware_version_get", { .mandatory_depends = {},
-                                      .variants = {
-                                        kDevFwVersionAsd,
-                                        kDevFwVersionCe,
-                                        kDevFwVersionDmcu,
-                                        kDevFwVersionMc,
-                                        kDevFwVersionMe,
-                                        kDevFwVersionMec,
-                                        kDevFwVersionMec2,
-                                        kDevFwVersionMes,
-                                        kDevFwVersionMesKiq,
-                                        kDevFwVersionPfp,
-                                        kDevFwVersionRlc,
-                                        kDevFwVersionRlcSrlc,
-                                        kDevFwVersionRlcSrlg,
-                                        kDevFwVersionRlcSrls,
-                                        kDevFwVersionSdma,
-                                        kDevFwVersionSdma2,
-                                        kDevFwVersionSmc,
-                                        kDevFwVersionSos,
-                                        kDevFwVersionTaRas,
-                                        kDevFwVersionTaXgmi,
-                                        kDevFwVersionUvd,
-                                        kDevFwVersionVce,
-                                        kDevFwVersionVcn,
-                                      }
-                                    }
-  },
-  {"rsmi_dev_ecc_count_get",        { .mandatory_depends = {},
-                                      .variants = {
-                                        kDevErrCntUMC,
-                                        kDevErrCntSDMA,
-                                        kDevErrCntGFX,
-                                        kDevErrCntMMHUB,
-                                        kDevErrCntPCIEBIF,
-                                        kDevErrCntHDP,
-                                        kDevErrCntXGMIWAFL,
-                                      }
-                                    }
-  },
-  {"rsmi_counter_available_counters_get", { .mandatory_depends = {},
-                                            .variants = {
-                                              kDevDFCountersAvailable,
-                                            }
-                                          }
-  },
+    // These functions with variants, but no sensors/units. (May or may not
+    // have mandatory dependencies.)
+    {"rsmi_dev_memory_total_get",
+     {.mandatory_depends = {},
+      .variants =
+          {
+              kDevMemTotGTT,
+              kDevMemTotVisVRAM,
+              kDevMemTotVRAM,
+          }}},
+    {"rsmi_dev_memory_usage_get",
+     {.mandatory_depends = {},
+      .variants =
+          {
+              kDevMemUsedGTT,
+              kDevMemUsedVisVRAM,
+              kDevMemUsedVRAM,
+          }}},
+    {"rsmi_dev_gpu_clk_freq_get",
+     {.mandatory_depends = {},
+      .variants =
+          {
+              kDevGPUSClk,
+              kDevGPUMClk,
+              kDevFClk,
+              kDevDCEFClk,
+              kDevSOCClk,
+          }}},
+    {"rsmi_dev_gpu_clk_freq_set",
+     {.mandatory_depends = {kDevPerfLevelFName},
+      .variants =
+          {
+              kDevGPUSClk,
+              kDevGPUMClk,
+              kDevFClk,
+              kDevDCEFClk,
+              kDevSOCClk,
+          }}},
+    {"rsmi_dev_firmware_version_get",
+     {.mandatory_depends = {},
+      .variants =
+          {
+              kDevFwVersionAsd,     kDevFwVersionCe,      kDevFwVersionDmcu,  kDevFwVersionMc,
+              kDevFwVersionMe,      kDevFwVersionMec,     kDevFwVersionMec2,  kDevFwVersionMes,
+              kDevFwVersionMesKiq,  kDevFwVersionPfp,     kDevFwVersionRlc,   kDevFwVersionRlcSrlc,
+              kDevFwVersionRlcSrlg, kDevFwVersionRlcSrls, kDevFwVersionSdma,  kDevFwVersionSdma2,
+              kDevFwVersionSmc,     kDevFwVersionSos,     kDevFwVersionTaRas, kDevFwVersionTaXgmi,
+              kDevFwVersionUvd,     kDevFwVersionVce,     kDevFwVersionVcn,
+          }}},
+    {"rsmi_dev_ecc_count_get",
+     {.mandatory_depends = {},
+      .variants =
+          {
+              kDevErrCntUMC,
+              kDevErrCntSDMA,
+              kDevErrCntGFX,
+              kDevErrCntMMHUB,
+              kDevErrCntPCIEBIF,
+              kDevErrCntHDP,
+              kDevErrCntXGMIWAFL,
+          }}},
+    {"rsmi_counter_available_counters_get",
+     {.mandatory_depends = {},
+      .variants =
+          {
+              kDevDFCountersAvailable,
+          }}},
 };
 
-#define RET_IF_NONZERO(X) { \
-  if (X) return X; \
-}
+#define RET_IF_NONZERO(X) \
+  {                       \
+    if (X) return X;      \
+  }
 
-Device::Device(std::string p, RocmSMI_env_vars const *e) :
-            monitor_(nullptr), path_(p), env_(e), evt_notif_anon_fd_(-1),
-                                                   m_gpu_metrics_header{0, 0, 0} {
+Device::Device(std::string p, RocmSMI_env_vars const *e)
+    : monitor_(nullptr), path_(p), env_(e), evt_notif_anon_fd_(-1), m_gpu_metrics_header{0, 0, 0} {
 #ifndef DEBUG
-    env_ = nullptr;
+  env_ = nullptr;
 #endif
 
   // Get the device name
@@ -628,13 +598,11 @@ Device::Device(std::string p, RocmSMI_env_vars const *e) :
 
   if (mutex_.ptr == nullptr) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-                                       "Failed to create shared mem. mutex.");
+                                   "Failed to create shared mem. mutex.");
   }
 }
 
-Device:: ~Device() {
-  shared_mutex_close(mutex_);
-}
+Device::~Device() { shared_mutex_close(mutex_); }
 
 template <typename T>
 int Device::openDebugFileStream(DevInfoTypes type, T *fs, const char *str) {
@@ -658,20 +626,20 @@ int Device::openDebugFileStream(DevInfoTypes type, T *fs, const char *str) {
 
   fs->open(debugfs_path);
   if (!fs->is_open()) {
-      return errno;
+    return errno;
   }
   return 0;
 }
 
 // The fallback sysfs to handle backward compatibilities
 static const std::map<DevInfoTypes, std::string> kDevFallbackFile = {
-  {kDevErrCntGFX, "ras/aca_gfx"},
-  {kDevErrCntSDMA, "ras/aca_sdma"},
-  {kDevErrCntUMC, "ras/aca_umc"},
-  {kDevErrCntMMHUB, "ras/aca_mmhub"},
-  {kDevErrCntPCIEBIF, "ras/aca_pcie_bif"},
-  {kDevErrCntHDP, "ras/aca_hdp"},
-  {kDevErrCntXGMIWAFL, "ras/aca_xgmi_wafl"},
+    {kDevErrCntGFX, "ras/aca_gfx"},
+    {kDevErrCntSDMA, "ras/aca_sdma"},
+    {kDevErrCntUMC, "ras/aca_umc"},
+    {kDevErrCntMMHUB, "ras/aca_mmhub"},
+    {kDevErrCntPCIEBIF, "ras/aca_pcie_bif"},
+    {kDevErrCntHDP, "ras/aca_hdp"},
+    {kDevErrCntXGMIWAFL, "ras/aca_xgmi_wafl"},
 };
 
 template <typename T>
@@ -680,8 +648,8 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   std::ostringstream ss;
 
 #ifdef DEBUG
-  if (env_->path_DRM_root_override
-      && (env_->enum_overrides.find(type) != env_->enum_overrides.end())) {
+  if (env_->path_DRM_root_override &&
+      (env_->enum_overrides.find(type) != env_->enum_overrides.end())) {
     sysfs_path = env_->path_DRM_root_override;
   }
 #endif
@@ -697,18 +665,15 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   if (ret != 0 || !reg_file) {
     // Handle specific types if the file does not exist
     if (kDevFallbackFile.find(type) != kDevFallbackFile.end()) {
-
       sysfs_path = path_ + "/device/" + kDevFallbackFile.at(type);
       DBG_FILE_ERROR(sysfs_path, str);
 
       // Recheck the adjusted path
       ret = isRegularFile(sysfs_path, &reg_file);
       if (ret != 0 || !reg_file) {
-        ss << __PRETTY_FUNCTION__
-           << " | Adjusted file path also does not exist - SYSFS file ("
-           << sysfs_path
-           << ") for DevInfoInfoType (" << get_type_string(type)
-           << "), returning " << std::to_string(ret);
+        ss << __PRETTY_FUNCTION__ << " | Adjusted file path also does not exist - SYSFS file ("
+           << sysfs_path << ") for DevInfoInfoType (" << get_type_string(type) << "), returning "
+           << std::to_string(ret);
         LOG_ERROR(ss);
         return ret;
       }
@@ -716,20 +681,17 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   }
 
   if (ret != 0) {
-    ss << __PRETTY_FUNCTION__ << " | Issue: File did not exist - SYSFS file ("
-       << sysfs_path
-       << ") for DevInfoInfoType (" << get_type_string(type)
-       << "), returning " << std::to_string(ret);
+    ss << __PRETTY_FUNCTION__ << " | Issue: File did not exist - SYSFS file (" << sysfs_path
+       << ") for DevInfoInfoType (" << get_type_string(type) << "), returning "
+       << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
   }
 
   if (!reg_file) {
-    ss << __PRETTY_FUNCTION__
-       << " | Issue: File is not a regular file - SYSFS file ("
-       << sysfs_path << ") for "
-       << "DevInfoInfoType (" << get_type_string(type) << "),"
-       << " returning ENOENT (" << std::strerror(ENOENT) << ")";
+    ss << __PRETTY_FUNCTION__ << " | Issue: File is not a regular file - SYSFS file (" << sysfs_path
+       << ") for " << "DevInfoInfoType (" << get_type_string(type) << ")," << " returning ENOENT ("
+       << std::strerror(ENOENT) << ")";
     LOG_ERROR(ss);
     return ENOENT;
   }
@@ -737,19 +699,15 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   fs->open(sysfs_path);
 
   if (!fs->is_open()) {
-    ss << __PRETTY_FUNCTION__
-       << " | Issue: Could not open - SYSFS file (" << sysfs_path << ") for "
-       << "DevInfoTypes (" << get_type_string(type) << "), "
-       << ", returning " << std::to_string(errno) << " ("
-       << std::strerror(errno) << ")";
+    ss << __PRETTY_FUNCTION__ << " | Issue: Could not open - SYSFS file (" << sysfs_path << ") for "
+       << "DevInfoTypes (" << get_type_string(type) << "), " << ", returning "
+       << std::to_string(errno) << " (" << std::strerror(errno) << ")";
     LOG_ERROR(ss);
     return errno;
   }
 
-  ss << __PRETTY_FUNCTION__ << " | Successfully opened SYSFS file ("
-     << sysfs_path
-     << ") for DevInfoTypes (" << get_type_string(type)
-     << ")";
+  ss << __PRETTY_FUNCTION__ << " | Successfully opened SYSFS file (" << sysfs_path
+     << ") for DevInfoTypes (" << get_type_string(type) << ")";
   LOG_INFO(ss);
   return 0;
 }
@@ -764,9 +722,8 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
 
   ret = openDebugFileStream(type, &fs);
   if (ret != 0) {
-    ss << "Could not read debugInfoStr for DevInfoType ("
-       << get_type_string(type) << "), returning "
-       << std::to_string(ret);
+    ss << "Could not read debugInfoStr for DevInfoType (" << get_type_string(type)
+       << "), returning " << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
   }
@@ -778,8 +735,8 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
 
   fs.close();
 
-  ss << "Successfully read debugInfoStr for DevInfoType ("
-     << get_type_string(type) << "), retString= " << *retStr;
+  ss << "Successfully read debugInfoStr for DevInfoType (" << get_type_string(type)
+     << "), retString= " << *retStr;
   LOG_INFO(ss);
 
   return 0;
@@ -794,34 +751,32 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
 
   ret = openSysfsFileStream(type, &fs);
   if (ret != 0) {
-    ss << "Could not read device info string for DevInfoType ("
-     << get_type_string(type) << "), returning "
-     << std::to_string(ret);
+    ss << "Could not read device info string for DevInfoType (" << get_type_string(type)
+       << "), returning " << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
   }
 
   fs >> *retStr;
   fs.close();
-  ss << __PRETTY_FUNCTION__
-     << "Successfully read device info string for DevInfoType ("
-     << get_type_string(type) << "): " + *retStr
+  ss << __PRETTY_FUNCTION__ << "Successfully read device info string for DevInfoType ("
+     << get_type_string(type) << "): " + *retStr << " | "
+     << (fs.is_open() ? " File stream is opened" : " File stream is closed") << " | "
+     << (fs.bad() ? "[ERROR] Bad read operation"
+                  : "[GOOD] No bad bit read, successful read operation")
      << " | "
-     << (fs.is_open() ? " File stream is opened" : " File stream is closed")
-     << " | " << (fs.bad() ? "[ERROR] Bad read operation" :
-     "[GOOD] No bad bit read, successful read operation")
-     << " | " << (fs.fail() ? "[ERROR] Failed read - format error" :
-     "[GOOD] No fail - Successful read operation")
-     << " | " << (fs.eof() ? "[ERROR] Failed read - EOF error" :
-     "[GOOD] No eof - Successful read operation")
-     << " | " << (fs.good() ? "[GOOD] read good - Successful read operation" :
-     "[ERROR] Failed read - good error");
+     << (fs.fail() ? "[ERROR] Failed read - format error"
+                   : "[GOOD] No fail - Successful read operation")
+     << " | "
+     << (fs.eof() ? "[ERROR] Failed read - EOF error" : "[GOOD] No eof - Successful read operation")
+     << " | "
+     << (fs.good() ? "[GOOD] read good - Successful read operation"
+                   : "[ERROR] Failed read - good error");
   LOG_INFO(ss);
   return 0;
 }
 
-int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
-                           bool returnWriteErr) {
+int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr, bool returnWriteErr) {
   // returnWriteErr = false, backwards compatability (old calls)
   // returnWriteErr = true, improvement - allows us to detect errors
   // when writing to file
@@ -839,9 +794,8 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
   if (ret != 0) {
     fs.close();
     ss << __PRETTY_FUNCTION__ << " | Issue: Could not open fileStream; "
-       << "Could not write device info string (" << valStr
-       << ") for DevInfoType (" << get_type_string(type)
-       << "), returning " << std::to_string(ret);
+       << "Could not write device info string (" << valStr << ") for DevInfoType ("
+       << get_type_string(type) << "), returning " << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
   }
@@ -850,9 +804,8 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
   if (fs << valStr) {
     fs.flush();
     fs.close();
-    ss << "Successfully wrote device info string (" << valStr
-       << ") for DevInfoType (" << get_type_string(type)
-       << "), returning RSMI_STATUS_SUCCESS";
+    ss << "Successfully wrote device info string (" << valStr << ") for DevInfoType ("
+       << get_type_string(type) << "), returning RSMI_STATUS_SUCCESS";
     LOG_INFO(ss);
     ret = RSMI_STATUS_SUCCESS;
   } else {
@@ -864,21 +817,21 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
     fs.flush();
     fs.close();
     ss << __PRETTY_FUNCTION__ << " | Issue: Could not write to file; "
-       << "Could not write device info string (" << valStr
-       << ") for DevInfoType (" << get_type_string(type)
-       << "), returning " << getRSMIStatusString(ErrnoToRsmiStatus(ret));
-    ss << " | "
-       << (fs.is_open() ? "[ERROR] File stream open" :
-          "[GOOD] File stream closed")
-       << " | " << (fs.bad() ? "[ERROR] Bad write operation" :
-                    "[GOOD] No bad bit write, successful write operation")
-       << " | " << (fs.fail() ? "[ERROR] Failed write - format error" :
-                    "[GOOD] No fail - Successful write operation")
-       << " | " << (fs.eof() ? "[ERROR] Failed write - EOF error" :
-                    "[GOOD] No eof - Successful write operation")
-       << " | " << (fs.good() ?
-                   "[GOOD] Write good - Successful write operation" :
-                   "[ERROR] Failed write - good error");
+       << "Could not write device info string (" << valStr << ") for DevInfoType ("
+       << get_type_string(type) << "), returning " << getRSMIStatusString(ErrnoToRsmiStatus(ret));
+    ss << " | " << (fs.is_open() ? "[ERROR] File stream open" : "[GOOD] File stream closed")
+       << " | "
+       << (fs.bad() ? "[ERROR] Bad write operation"
+                    : "[GOOD] No bad bit write, successful write operation")
+       << " | "
+       << (fs.fail() ? "[ERROR] Failed write - format error"
+                     : "[GOOD] No fail - Successful write operation")
+       << " | "
+       << (fs.eof() ? "[ERROR] Failed write - EOF error"
+                    : "[GOOD] No eof - Successful write operation")
+       << " | "
+       << (fs.good() ? "[GOOD] Write good - Successful write operation"
+                     : "[ERROR] Failed write - good error");
     LOG_ERROR(ss);
   }
 
@@ -888,7 +841,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
 rsmi_dev_perf_level Device::perfLvlStrToEnum(std::string s) {
   rsmi_dev_perf_level pl;
 
-  for (pl = RSMI_DEV_PERF_LEVEL_FIRST; pl <= RSMI_DEV_PERF_LEVEL_LAST; ) {
+  for (pl = RSMI_DEV_PERF_LEVEL_FIRST; pl <= RSMI_DEV_PERF_LEVEL_LAST;) {
     if (s == kDevPerfLvlMap.at(pl)) {
       return pl;
     }
@@ -907,8 +860,7 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
       break;
 
     case kDevPerfLevel:  // string: "auto", "low", "high", "manual", ...
-      return writeDevInfoStr(type,
-                                 kDevPerfLvlMap.at((rsmi_dev_perf_level)val));
+      return writeDevInfoStr(type, kDevPerfLvlMap.at((rsmi_dev_perf_level)val));
       break;
 
     default:
@@ -951,22 +903,20 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string *line) {
 
   ret = openSysfsFileStream(type, &fs);
   if (ret != 0) {
-    ss << "Could not read DevInfoLine for DevInfoType ("
-       << get_type_string(type) << ")";
+    ss << "Could not read DevInfoLine for DevInfoType (" << get_type_string(type) << ")";
     LOG_ERROR(ss);
     return ret;
   }
 
   std::getline(fs, *line);
-  ss << "Successfully read DevInfoLine for DevInfoType ("
-     << get_type_string(type) << "), returning *line = "
-     << *line;
+  ss << "Successfully read DevInfoLine for DevInfoType (" << get_type_string(type)
+     << "), returning *line = " << *line;
   LOG_INFO(ss);
   fs.close();
   return 0;
 }
 
-const char* Device::get_type_string(DevInfoTypes type) {
+const char *Device::get_type_string(DevInfoTypes type) {
   auto ite = devInfoTypesStrings.find(type);
   if (ite != devInfoTypesStrings.end()) {
     return ite->second;
@@ -975,8 +925,7 @@ const char* Device::get_type_string(DevInfoTypes type) {
   return "Unknown";
 }
 
-int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
-                                void *p_binary_data) {
+int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void *p_binary_data) {
   auto sysfs_path = path_;
   std::ostringstream ss;
 
@@ -986,10 +935,8 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
 
   ptr = fopen(sysfs_path.c_str(), "rb");
   if (!ptr) {
-    ss << "Could not read DevInfoBinary for DevInfoType ("
-       << get_type_string(type) << ")"
-       << " - SYSFS (" << sysfs_path << ")"
-       << ", returning " << std::to_string(errno) << " ("
+    ss << "Could not read DevInfoBinary for DevInfoType (" << get_type_string(type) << ")"
+       << " - SYSFS (" << sysfs_path << ")" << ", returning " << std::to_string(errno) << " ("
        << std::strerror(errno) << ")";
     LOG_ERROR(ss);
     return errno;
@@ -997,37 +944,27 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
 
   size_t num = fread(p_binary_data, b_size, 1, ptr);
   fclose(ptr);
-  if ((num*b_size) != b_size) {
-    ss << "Could not read DevInfoBinary for DevInfoType ("
-       << get_type_string(type) << ") - SYSFS ("
-       << sysfs_path << "), binary size error; "
-       << "[buff: "
-       << p_binary_data
-       << " size: "
-       << b_size
-       << " read: "
-       << num
-       << "]"
-       << ", returning ENOENT (" << std::strerror(ENOENT) << ")";
+  if ((num * b_size) != b_size) {
+    ss << "Could not read DevInfoBinary for DevInfoType (" << get_type_string(type) << ") - SYSFS ("
+       << sysfs_path << "), binary size error; " << "[buff: " << p_binary_data
+       << " size: " << b_size << " read: " << num << "]" << ", returning ENOENT ("
+       << std::strerror(ENOENT) << ")";
     LOG_ERROR(ss);
     return ENOENT;
   }
   if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
-    ss << "Successfully read DevInfoBinary for DevInfoType ("
-       << get_type_string(type) << ") - SYSFS ("
-       << sysfs_path << "), returning binaryData = " << p_binary_data
+    ss << "Successfully read DevInfoBinary for DevInfoType (" << get_type_string(type)
+       << ") - SYSFS (" << sysfs_path << "), returning binaryData = " << p_binary_data
        << "; byte_size = " << std::dec << static_cast<int>(b_size);
 
-    std::string metricDescription = "AMD SMI GPU METRICS (16-byte width), "
-                                  + sysfs_path;
+    std::string metricDescription = "AMD SMI GPU METRICS (16-byte width), " + sysfs_path;
     logHexDump(metricDescription.c_str(), p_binary_data, b_size, 16);
     LOG_INFO(ss);
   }
   return 0;
 }
 
-int Device::readDevInfoMultiLineStr(DevInfoTypes type,
-                                           std::vector<std::string> *retVec) {
+int Device::readDevInfoMultiLineStr(DevInfoTypes type, std::vector<std::string> *retVec) {
   std::string line;
   int ret;
   std::ifstream fs;
@@ -1047,31 +984,27 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
   fs.close();
 
   if (retVec->empty()) {
-    ss << "Read devInfoMultiLineStr for DevInfoType ("
-       << get_type_string(type) << ")"
+    ss << "Read devInfoMultiLineStr for DevInfoType (" << get_type_string(type) << ")"
        << ", but contained no string lines";
     LOG_ERROR(ss);
     return ENXIO;
   }
   // Remove any *trailing* empty (whitespace) lines
-  while (!retVec->empty() &&
-        retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
+  while (!retVec->empty() && retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
     retVec->pop_back();
   }
 
   // allow logging output of multiline strings
-  for (const auto& l: *retVec) {
+  for (const auto &l : *retVec) {
     allLines += "\n" + l;
   }
 
   if (!allLines.empty()) {
-    ss << "Successfully read devInfoMultiLineStr for DevInfoType ("
-       << get_type_string(type) << ") "
+    ss << "Successfully read devInfoMultiLineStr for DevInfoType (" << get_type_string(type) << ") "
        << ", returning lines read = " << allLines;
     LOG_INFO(ss);
   } else {
-    ss << "Read devInfoMultiLineStr for DevInfoType ("
-       << get_type_string(type) << ")"
+    ss << "Read devInfoMultiLineStr for DevInfoType (" << get_type_string(type) << ")"
        << ", but lines were empty";
     LOG_INFO(ss);
     return ENXIO;
@@ -1202,12 +1135,11 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
   return 0;
 }
 
-int Device::readDevInfo(DevInfoTypes type, std::size_t b_size,
-                                        void *p_binary_data) {
+int Device::readDevInfo(DevInfoTypes type, std::size_t b_size, void *p_binary_data) {
   assert(p_binary_data != nullptr);
 
   switch (type) {
-     case kDevGpuMetrics:
+    case kDevGpuMetrics:
       return readDevInfoBinary(type, b_size, p_binary_data);
       break;
 
@@ -1300,16 +1232,14 @@ void Device::fillSupportedFuncs(void) {
   if (!supported_funcs_.empty()) {
     return;
   }
-  std::map<const char *, dev_depends_t>::const_iterator it =
-                                                   kDevFuncDependsMap.begin();
+  std::map<const char *, dev_depends_t>::const_iterator it = kDevFuncDependsMap.begin();
   std::string dev_rt = path_ + "/device";
   bool mand_depends_met;
   std::shared_ptr<VariantMap> supported_variants;
 
   while (it != kDevFuncDependsMap.end()) {
     // First, see if all the mandatory dependencies are there
-    std::vector<const char *>::const_iterator dep =
-                                         it->second.mandatory_depends.begin();
+    std::vector<const char *>::const_iterator dep = it->second.mandatory_depends.begin();
 
     mand_depends_met = true;
     for (; dep != it->second.mandatory_depends.end(); dep++) {
@@ -1330,8 +1260,7 @@ void Device::fillSupportedFuncs(void) {
       continue;
     }
     // Then, see if the variants are supported.
-    std::vector<DevInfoTypes>::const_iterator var =
-                                                  it->second.variants.begin();
+    std::vector<DevInfoTypes>::const_iterator var = it->second.variants.begin();
 
     if (it->second.variants.empty()) {
       supported_funcs_[it->first] = nullptr;
@@ -1361,8 +1290,7 @@ void Device::fillSupportedFuncs(void) {
   // DumpSupportedFunctions();
 }
 
-static bool subvariant_match(const std::shared_ptr<SubVariant> *sv,
-                                                             uint64_t sub_v) {
+static bool subvariant_match(const std::shared_ptr<SubVariant> *sv, uint64_t sub_v) {
   assert(sv != nullptr);
 
   SubVariantIt it = (*sv)->begin();
@@ -1374,8 +1302,7 @@ static bool subvariant_match(const std::shared_ptr<SubVariant> *sv,
   return false;
 }
 
-bool Device::DeviceAPISupported(std::string name, uint64_t variant,
-                                                       uint64_t sub_variant) {
+bool Device::DeviceAPISupported(std::string name, uint64_t variant, uint64_t sub_variant) {
   SupportedFuncMapIt func_it;
   VariantMapIt var_it;
 
@@ -1435,8 +1362,8 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   // we do not care about the success of checking if gdm is active
   std::tie(success, out) = executeCommand("systemctl is-active gdm", true);
   (out == "active") ? (restartGDM = true) : (restartGDM = false);
-  ss << __PRETTY_FUNCTION__ << " | systemctl is-active gdm: out = "
-     << out << "; success = " << (success ? "True" : "False");
+  ss << __PRETTY_FUNCTION__ << " | systemctl is-active gdm: out = " << out
+     << "; success = " << (success ? "True" : "False");
   LOG_INFO(ss);
 
   // if gdm is active -> sudo systemctl stop gdm
@@ -1445,15 +1372,15 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   if (success && (out == "active") && (restartGDM)) {
     wasGdmServiceActive = true;
     std::tie(success, out) = executeCommand("systemctl stop gdm&", true);
-    ss << __PRETTY_FUNCTION__ << " | systemctl stop gdm&: out = "
-    << out << "; success = " << (success ? "True" : "False");
+    ss << __PRETTY_FUNCTION__ << " | systemctl stop gdm&: out = " << out
+       << "; success = " << (success ? "True" : "False");
     LOG_INFO(ss);
   } else {
     success = true;  // ignore failures to restart gdm
   }
 
-  ss << __PRETTY_FUNCTION__ << " | B4 modprobing anything!!! out = "
-     << out << "; success = " << (success ? "True" : "False")
+  ss << __PRETTY_FUNCTION__ << " | B4 modprobing anything!!! out = " << out
+     << "; success = " << (success ? "True" : "False")
      << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
      << "; captureRestartErr = " << captureRestartErr;
   LOG_INFO(ss);
@@ -1461,11 +1388,11 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   // sudo modprobe -r amdgpu
   // sudo modprobe amdgpu
   std::tie(success, out) = executeCommand(
-    "modprobe -r -v amdgpu >/dev/null 2>&1 && modprobe -v amdgpu >/dev/null 2>&1", true);
+      "modprobe -r -v amdgpu >/dev/null 2>&1 && modprobe -v amdgpu >/dev/null 2>&1", true);
   restartSuccessful &= success;
   captureRestartErr = out;
-  ss << __PRETTY_FUNCTION__ << " | modprobe -r -v amdgpu && modprobe -v amdgpu: out = "
-     << out << "; success = " << (success ? "True" : "False")
+  ss << __PRETTY_FUNCTION__ << " | modprobe -r -v amdgpu && modprobe -v amdgpu: out = " << out
+     << "; success = " << (success ? "True" : "False")
      << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
      << "; captureRestartErr = " << captureRestartErr;
   LOG_INFO(ss);
@@ -1474,22 +1401,22 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   // We don't care if successful or not, just try to restart as a courtesy
   if (wasGdmServiceActive && restartGDM) {
     std::tie(success, out) = executeCommand("systemctl start gdm&", true);
-    ss << __PRETTY_FUNCTION__ << " | systemctl start gdm&: out = "
-    << out << "; success = " << (success ? "True" : "False");
+    ss << __PRETTY_FUNCTION__ << " | systemctl start gdm&: out = " << out
+       << "; success = " << (success ? "True" : "False");
     LOG_INFO(ss);
   }
 
   // Return early if there was an issue restarting amdgpu
   if (!restartSuccessful) {
-    ss << __PRETTY_FUNCTION__ << " | [WARNING] Issue found during amdgpu restart: "
-    << captureRestartErr << "; retartSuccessful: " << (restartSuccessful ? "True" : "False");
+    ss << __PRETTY_FUNCTION__
+       << " | [WARNING] Issue found during amdgpu restart: " << captureRestartErr
+       << "; retartSuccessful: " << (restartSuccessful ? "True" : "False");
     LOG_INFO(ss);
     return RSMI_STATUS_AMDGPU_RESTART_ERR;
   }
 
   // wait for amdgpu module to come back up
-  rsmi_status_t status = Device::isRestartInProgress(&isRestartInProgress,
-                                                    &isAMDGPUModuleLive);
+  rsmi_status_t status = Device::isRestartInProgress(&isRestartInProgress, &isAMDGPUModuleLive);
   int maxLoops = 10;  // wait a max of 10 sec
   while (status != RSMI_STATUS_SUCCESS) {
     maxLoops -= 1;
@@ -1497,17 +1424,15 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
       break;
     }
     amd::smi::system_wait(kTimeToWaitForDriverMSec);
-    status = Device::isRestartInProgress(&isRestartInProgress,
-                                         &isAMDGPUModuleLive);
+    status = Device::isRestartInProgress(&isRestartInProgress, &isAMDGPUModuleLive);
   }
 
-  return ((restartSuccessful && (!isRestartInProgress && isAMDGPUModuleLive)) ?
-          RSMI_STATUS_SUCCESS :
-          RSMI_STATUS_AMDGPU_RESTART_ERR);
+  return ((restartSuccessful && (!isRestartInProgress && isAMDGPUModuleLive))
+              ? RSMI_STATUS_SUCCESS
+              : RSMI_STATUS_AMDGPU_RESTART_ERR);
 }
 
-rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
-                                          bool *isAMDGPUModuleLive) {
+rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress, bool *isAMDGPUModuleLive) {
   REQUIRE_ROOT_ACCESS
   std::ostringstream ss;
   bool success = false;
@@ -1518,8 +1443,7 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
 
   // wait for amdgpu module to come back up
   std::tie(success, out) = executeCommand("cat /sys/module/amdgpu/initstate", true);
-  ss << __PRETTY_FUNCTION__
-     << " | success = " << (success ? "True" : "False")
+  ss << __PRETTY_FUNCTION__ << " | success = " << (success ? "True" : "False")
      << " | out = " << out;
   LOG_DEBUG(ss);
   if ((success == true) && (!out.empty())) {
@@ -1531,16 +1455,17 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
   *isRestartInProgress = deviceRestartInProgress;
   *isAMDGPUModuleLive = isSystemAMDGPUModuleLive;
   ss << __PRETTY_FUNCTION__
-     << " | *isRestartInProgress = " << (*isRestartInProgress ? "True":"False")
-     << " | *isAMDGPUModuleLive = " << (*isAMDGPUModuleLive ? "True":"False")
+     << " | *isRestartInProgress = " << (*isRestartInProgress ? "True" : "False")
+     << " | *isAMDGPUModuleLive = " << (*isAMDGPUModuleLive ? "True" : "False")
      << " | out = " << out;
   LOG_DEBUG(ss);
 
-  return ((*isAMDGPUModuleLive && !*isRestartInProgress) ? RSMI_STATUS_SUCCESS :
-          RSMI_STATUS_AMDGPU_RESTART_ERR);
+  return ((*isAMDGPUModuleLive && !*isRestartInProgress) ? RSMI_STATUS_SUCCESS
+                                                         : RSMI_STATUS_AMDGPU_RESTART_ERR);
 }
 
-template <typename T> rsmi_status_t storeParameter(uint32_t dv_ind);
+template <typename T>
+rsmi_status_t storeParameter(uint32_t dv_ind);
 
 // Stores parameters depending on which rsmi type is provided.
 // Uses template specialization, to restrict types to identify
@@ -1553,8 +1478,7 @@ template <>
 rsmi_status_t storeParameter<rsmi_compute_partition_type_t>(uint32_t dv_ind) {
   rsmi_status_t returnStatus = RSMI_STATUS_SUCCESS;
   bool doesFileExist;
-  std::tie(doesFileExist, std::ignore) = readTmpFile(dv_ind, "boot",
-                                                     "compute_partition");
+  std::tie(doesFileExist, std::ignore) = readTmpFile(dv_ind, "boot", "compute_partition");
   // if temporary file exists -> we do not need to store anything new
   // if not, read & store the state value
   if (doesFileExist) {
@@ -1595,8 +1519,7 @@ rsmi_status_t storeParameter<rsmi_memory_partition_type_t>(uint32_t dv_ind) {
   uint32_t kDatalength = 128;
   char data[kDatalength];
   bool doesFileExist;
-  std::tie(doesFileExist, std::ignore) = readTmpFile(dv_ind, "boot",
-                                                     "memory_partition");
+  std::tie(doesFileExist, std::ignore) = readTmpFile(dv_ind, "boot", "memory_partition");
   // if temporary file exists -> we do not need to store anything new
   // if not, read & store the state value
   if (doesFileExist) {
@@ -1640,11 +1563,9 @@ rsmi_status_t Device::storeDevicePartitions(uint32_t dv_ind) {
 // or rsmi_compute_partition_type_t
 // dv_ind - device index
 template <>
-std::string Device::readBootPartitionState<rsmi_compute_partition_type_t>(
-    uint32_t dv_ind) {
+std::string Device::readBootPartitionState<rsmi_compute_partition_type_t>(uint32_t dv_ind) {
   std::string boot_state;
-  std::tie(std::ignore, boot_state) = readTmpFile(dv_ind, "boot",
-                                                  "compute_partition");
+  std::tie(std::ignore, boot_state) = readTmpFile(dv_ind, "boot", "compute_partition");
   return boot_state;
 }
 
@@ -1656,16 +1577,14 @@ std::string Device::readBootPartitionState<rsmi_compute_partition_type_t>(
 // or rsmi_compute_partition_type_t
 // dv_ind - device index
 template <>
-std::string Device::readBootPartitionState<rsmi_memory_partition_type_t>(
-    uint32_t dv_ind) {
+std::string Device::readBootPartitionState<rsmi_memory_partition_type_t>(uint32_t dv_ind) {
   std::string boot_state;
-  std::tie(std::ignore, boot_state) = readTmpFile(dv_ind, "boot",
-                                                  "memory_partition");
+  std::tie(std::ignore, boot_state) = readTmpFile(dv_ind, "boot", "memory_partition");
   return boot_state;
 }
 
 rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
-        rsmi_device_identifiers_t *device_identifiers) {
+                                                 rsmi_device_identifiers_t *device_identifiers) {
   bool found_device = false;
   std::ostringstream ss;
   rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
@@ -1673,7 +1592,7 @@ rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
   auto devices = smi.devices();
   ss << __PRETTY_FUNCTION__ << " | device_id = " << device_id
      << "; devices.size() = " << devices.size();
@@ -1690,16 +1609,15 @@ rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
     device_identifiers->bdfid = devices[i]->bdfid();
     device_identifiers->kfd_gpu_id = devices[i]->kfd_gpu_id();
     uint32_t temp_partition_id = 0;
-    rsmi_status_t ret = rsmi_dev_partition_id_get(
-        i, &temp_partition_id);
+    rsmi_status_t ret = rsmi_dev_partition_id_get(i, &temp_partition_id);
     if (ret != RSMI_STATUS_SUCCESS) {
       temp_partition_id = 0;
     }
     device_identifiers->partition_id = temp_partition_id;
     device_identifiers->smi_device_id = i;
     found_device = true;
-    ss << __PRETTY_FUNCTION__ << " | Found device: "
-       << "card_index = " << device_identifiers->card_index
+    ss << __PRETTY_FUNCTION__
+       << " | Found device: " << "card_index = " << device_identifiers->card_index
        << "; drm_render_minor = " << device_identifiers->drm_render_minor
        << "; bdfid = " << std::hex << "0x" << device_identifiers->bdfid
        << "; kfd_gpu_id = " << std::dec << device_identifiers->kfd_gpu_id
@@ -1715,8 +1633,6 @@ rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
   return ret;
 }
 
-
 #undef RET_IF_NONZERO
 }  // namespace smi
 }  // namespace amd
-

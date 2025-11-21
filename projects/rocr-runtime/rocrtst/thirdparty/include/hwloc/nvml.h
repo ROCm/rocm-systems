@@ -52,15 +52,13 @@ extern "C" {
  * This function is currently only implemented in a meaningful way for
  * Linux; other systems will simply get a full cpuset.
  */
-static __hwloc_inline int
-hwloc_nvml_get_device_cpuset(hwloc_topology_t topology __hwloc_attribute_unused,
-			     nvmlDevice_t device, hwloc_cpuset_t set)
-{
+static __hwloc_inline int hwloc_nvml_get_device_cpuset(
+    hwloc_topology_t topology __hwloc_attribute_unused, nvmlDevice_t device, hwloc_cpuset_t set) {
 #ifdef HWLOC_LINUX_SYS
   /* If we're on Linux, use the sysfs mechanism to get the local cpus */
 #define HWLOC_NVML_DEVICE_SYSFS_PATH_MAX 128
   char path[HWLOC_NVML_DEVICE_SYSFS_PATH_MAX];
-  FILE *sysfile = NULL;
+  FILE* sysfile = NULL;
   nvmlReturn_t nvres;
   nvmlPciInfo_t pci;
 
@@ -75,13 +73,12 @@ hwloc_nvml_get_device_cpuset(hwloc_topology_t topology __hwloc_attribute_unused,
     return -1;
   }
 
-  sprintf(path, "/sys/bus/pci/devices/%04x:%02x:%02x.0/local_cpus", pci.domain, pci.bus, pci.device);
+  sprintf(path, "/sys/bus/pci/devices/%04x:%02x:%02x.0/local_cpus", pci.domain, pci.bus,
+          pci.device);
   sysfile = fopen(path, "r");
-  if (!sysfile)
-    return -1;
+  if (!sysfile) return -1;
 
-  if (hwloc_linux_parse_cpumap_file(sysfile, set) < 0
-      || hwloc_bitmap_iszero(set))
+  if (hwloc_linux_parse_cpumap_file(sysfile, set) < 0 || hwloc_bitmap_iszero(set))
     hwloc_bitmap_copy(set, hwloc_topology_get_complete_cpuset(topology));
 
   fclose(sysfile);
@@ -105,18 +102,15 @@ hwloc_nvml_get_device_cpuset(hwloc_topology_t topology __hwloc_attribute_unused,
  * \note The corresponding PCI device object can be obtained by looking
  * at the OS device parent object.
  */
-static __hwloc_inline hwloc_obj_t
-hwloc_nvml_get_device_osdev_by_index(hwloc_topology_t topology, unsigned idx)
-{
-	hwloc_obj_t osdev = NULL;
-	while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
-                if (HWLOC_OBJ_OSDEV_GPU == osdev->attr->osdev.type
-                    && osdev->name
-		    && !strncmp("nvml", osdev->name, 4)
-		    && atoi(osdev->name + 4) == (int) idx)
-                        return osdev;
-        }
-        return NULL;
+static __hwloc_inline hwloc_obj_t hwloc_nvml_get_device_osdev_by_index(hwloc_topology_t topology,
+                                                                       unsigned idx) {
+  hwloc_obj_t osdev = NULL;
+  while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
+    if (HWLOC_OBJ_OSDEV_GPU == osdev->attr->osdev.type && osdev->name &&
+        !strncmp("nvml", osdev->name, 4) && atoi(osdev->name + 4) == (int)idx)
+      return osdev;
+  }
+  return NULL;
 }
 
 /** \brief Get the hwloc OS device object corresponding to NVML device \p device.
@@ -132,37 +126,31 @@ hwloc_nvml_get_device_osdev_by_index(hwloc_topology_t topology, unsigned idx)
  * \note The corresponding hwloc PCI device may be found by looking
  * at the result parent pointer.
  */
-static __hwloc_inline hwloc_obj_t
-hwloc_nvml_get_device_osdev(hwloc_topology_t topology, nvmlDevice_t device)
-{
-	hwloc_obj_t osdev;
-	nvmlReturn_t nvres;
-	nvmlPciInfo_t pci;
+static __hwloc_inline hwloc_obj_t hwloc_nvml_get_device_osdev(hwloc_topology_t topology,
+                                                              nvmlDevice_t device) {
+  hwloc_obj_t osdev;
+  nvmlReturn_t nvres;
+  nvmlPciInfo_t pci;
 
-	if (!hwloc_topology_is_thissystem(topology)) {
-		errno = EINVAL;
-		return NULL;
-	}
+  if (!hwloc_topology_is_thissystem(topology)) {
+    errno = EINVAL;
+    return NULL;
+  }
 
-	nvres = nvmlDeviceGetPciInfo(device, &pci);
-	if (NVML_SUCCESS != nvres)
-		return NULL;
+  nvres = nvmlDeviceGetPciInfo(device, &pci);
+  if (NVML_SUCCESS != nvres) return NULL;
 
-	osdev = NULL;
-	while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
-		hwloc_obj_t pcidev = osdev->parent;
-		if (strncmp(osdev->name, "nvml", 4))
-			continue;
-		if (pcidev
-		    && pcidev->type == HWLOC_OBJ_PCI_DEVICE
-		    && pcidev->attr->pcidev.domain == pci.domain
-		    && pcidev->attr->pcidev.bus == pci.bus
-		    && pcidev->attr->pcidev.dev == pci.device
-		    && pcidev->attr->pcidev.func == 0)
-			return osdev;
-	}
+  osdev = NULL;
+  while ((osdev = hwloc_get_next_osdev(topology, osdev)) != NULL) {
+    hwloc_obj_t pcidev = osdev->parent;
+    if (strncmp(osdev->name, "nvml", 4)) continue;
+    if (pcidev && pcidev->type == HWLOC_OBJ_PCI_DEVICE &&
+        pcidev->attr->pcidev.domain == pci.domain && pcidev->attr->pcidev.bus == pci.bus &&
+        pcidev->attr->pcidev.dev == pci.device && pcidev->attr->pcidev.func == 0)
+      return osdev;
+  }
 
-	return NULL;
+  return NULL;
 }
 
 /** @} */

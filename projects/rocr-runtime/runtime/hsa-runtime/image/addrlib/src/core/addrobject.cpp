@@ -18,8 +18,7 @@
 #include "addrobject.h"
 
 namespace rocr {
-namespace Addr
-{
+namespace Addr {
 
 /**
 ****************************************************************************************************
@@ -29,12 +28,11 @@ namespace Addr
 *       Constructor for the Object class.
 ****************************************************************************************************
 */
-Object::Object()
-{
-    m_client.handle = NULL;
-    m_client.callbacks.allocSysMem = NULL;
-    m_client.callbacks.freeSysMem = NULL;
-    m_client.callbacks.debugPrint = NULL;
+Object::Object() {
+  m_client.handle = NULL;
+  m_client.callbacks.allocSysMem = NULL;
+  m_client.callbacks.freeSysMem = NULL;
+  m_client.callbacks.debugPrint = NULL;
 }
 
 /**
@@ -45,10 +43,7 @@ Object::Object()
 *       Constructor for the Object class.
 ****************************************************************************************************
 */
-Object::Object(const Client* pClient)
-{
-    m_client = *pClient;
-}
+Object::Object(const Client* pClient) { m_client = *pClient; }
 
 /**
 ****************************************************************************************************
@@ -58,9 +53,7 @@ Object::Object(const Client* pClient)
 *       Destructor for the Object class.
 ****************************************************************************************************
 */
-Object::~Object()
-{
-}
+Object::~Object() {}
 
 /**
 ****************************************************************************************************
@@ -70,25 +63,23 @@ Object::~Object()
 *       Calls instanced allocSysMem inside Client
 ****************************************************************************************************
 */
-VOID* Object::ClientAlloc(
-    size_t         objSize,    ///< [in] Size to allocate
-    const Client*  pClient)    ///< [in] Client pointer
+VOID* Object::ClientAlloc(size_t objSize,         ///< [in] Size to allocate
+                          const Client* pClient)  ///< [in] Client pointer
 {
-    VOID* pObjMem = NULL;
+  VOID* pObjMem = NULL;
 
-    if (pClient->callbacks.allocSysMem != NULL)
-    {
-        ADDR_ALLOCSYSMEM_INPUT allocInput = {0};
+  if (pClient->callbacks.allocSysMem != NULL) {
+    ADDR_ALLOCSYSMEM_INPUT allocInput = {0};
 
-        allocInput.size        = sizeof(ADDR_ALLOCSYSMEM_INPUT);
-        allocInput.flags.value = 0;
-        allocInput.sizeInBytes = static_cast<UINT_32>(objSize);
-        allocInput.hClient     = pClient->handle;
+    allocInput.size = sizeof(ADDR_ALLOCSYSMEM_INPUT);
+    allocInput.flags.value = 0;
+    allocInput.sizeInBytes = static_cast<UINT_32>(objSize);
+    allocInput.hClient = pClient->handle;
 
-        pObjMem = pClient->callbacks.allocSysMem(&allocInput);
-    }
+    pObjMem = pClient->callbacks.allocSysMem(&allocInput);
+  }
 
-    return pObjMem;
+  return pObjMem;
 }
 
 /**
@@ -99,11 +90,10 @@ VOID* Object::ClientAlloc(
 *       A wrapper of ClientAlloc
 ****************************************************************************************************
 */
-VOID* Object::Alloc(
-    size_t objSize      ///< [in] Size to allocate
-    ) const
-{
-    return ClientAlloc(objSize, &m_client);;
+VOID* Object::Alloc(size_t objSize  ///< [in] Size to allocate
+) const {
+  return ClientAlloc(objSize, &m_client);
+  ;
 }
 
 /**
@@ -114,23 +104,20 @@ VOID* Object::Alloc(
 *       Calls freeSysMem inside Client
 ****************************************************************************************************
 */
-VOID Object::ClientFree(
-    VOID*          pObjMem,    ///< [in] User virtual address to free.
-    const Client*  pClient)    ///< [in] Client pointer
+VOID Object::ClientFree(VOID* pObjMem,          ///< [in] User virtual address to free.
+                        const Client* pClient)  ///< [in] Client pointer
 {
-    if (pClient->callbacks.freeSysMem != NULL)
-    {
-        if (pObjMem != NULL)
-        {
-            ADDR_FREESYSMEM_INPUT freeInput = {0};
+  if (pClient->callbacks.freeSysMem != NULL) {
+    if (pObjMem != NULL) {
+      ADDR_FREESYSMEM_INPUT freeInput = {0};
 
-            freeInput.size      = sizeof(ADDR_FREESYSMEM_INPUT);
-            freeInput.hClient   = pClient->handle;
-            freeInput.pVirtAddr = pObjMem;
+      freeInput.size = sizeof(ADDR_FREESYSMEM_INPUT);
+      freeInput.hClient = pClient->handle;
+      freeInput.pVirtAddr = pObjMem;
 
-            pClient->callbacks.freeSysMem(&freeInput);
-        }
+      pClient->callbacks.freeSysMem(&freeInput);
     }
+  }
 }
 
 /**
@@ -141,11 +128,9 @@ VOID Object::ClientFree(
 *       A wrapper of ClientFree
 ****************************************************************************************************
 */
-VOID Object::Free(
-    VOID* pObjMem       ///< [in] User virtual address to free.
-    ) const
-{
-    ClientFree(pObjMem, &m_client);
+VOID Object::Free(VOID* pObjMem  ///< [in] User virtual address to free.
+) const {
+  ClientFree(pObjMem, &m_client);
 }
 
 /**
@@ -159,12 +144,10 @@ VOID Object::Free(
 *       Returns pre-allocated memory pointer.
 ****************************************************************************************************
 */
-VOID* Object::operator new(
-    size_t objSize,     ///< [in] Size to allocate
-    VOID*  pMem        ///< [in] Pre-allocated pointer
-    ) noexcept
-{
-    return pMem;
+VOID* Object::operator new(size_t objSize,  ///< [in] Size to allocate
+                           VOID* pMem       ///< [in] Pre-allocated pointer
+                           ) noexcept {
+  return pMem;
 }
 
 /**
@@ -175,11 +158,10 @@ VOID* Object::operator new(
 *       Frees Object object memory.
 ****************************************************************************************************
 */
-VOID Object::operator delete(
-    VOID* pObjMem)      ///< [in] User virtual address to free.
+VOID Object::operator delete(VOID* pObjMem)  ///< [in] User virtual address to free.
 {
-    Object* pObj = static_cast<Object*>(pObjMem);
-    ClientFree(pObjMem, &pObj->m_client);
+  Object* pObj = static_cast<Object*>(pObjMem);
+  ClientFree(pObjMem, &pObj->m_client);
 }
 
 /**
@@ -193,32 +175,28 @@ VOID Object::operator delete(
 *       N/A
 ****************************************************************************************************
 */
-VOID Object::DebugPrint(
-    const CHAR* pDebugString,     ///< [in] Debug string
-    ...
-    ) const
-{
+VOID Object::DebugPrint(const CHAR* pDebugString,  ///< [in] Debug string
+                        ...) const {
 #if DEBUG
-    if (m_client.callbacks.debugPrint != NULL)
-    {
-        va_list ap;
+  if (m_client.callbacks.debugPrint != NULL) {
+    va_list ap;
 
-        va_start(ap, pDebugString);
+    va_start(ap, pDebugString);
 
-        ADDR_DEBUGPRINT_INPUT debugPrintInput = {0};
+    ADDR_DEBUGPRINT_INPUT debugPrintInput = {0};
 
-        debugPrintInput.size         = sizeof(ADDR_DEBUGPRINT_INPUT);
-        debugPrintInput.pDebugString = const_cast<CHAR*>(pDebugString);
-        debugPrintInput.hClient      = m_client.handle;
-        va_copy(debugPrintInput.ap, ap);
+    debugPrintInput.size = sizeof(ADDR_DEBUGPRINT_INPUT);
+    debugPrintInput.pDebugString = const_cast<CHAR*>(pDebugString);
+    debugPrintInput.hClient = m_client.handle;
+    va_copy(debugPrintInput.ap, ap);
 
-        m_client.callbacks.debugPrint(&debugPrintInput);
+    m_client.callbacks.debugPrint(&debugPrintInput);
 
-        va_end(ap);
-        va_end(debugPrintInput.ap);
-    }
+    va_end(ap);
+    va_end(debugPrintInput.ap);
+  }
 #endif
 }
 
-} // Addr
-} // namespace rocr
+}  // namespace Addr
+}  // namespace rocr

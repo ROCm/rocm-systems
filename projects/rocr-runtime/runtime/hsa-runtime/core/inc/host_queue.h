@@ -65,83 +65,67 @@ class HostQueue : public Queue {
   }
 
   uint64_t LoadReadIndexAcquire() override {
-    return atomic::Load(&amd_queue_.read_dispatch_id,
-                        std::memory_order_acquire);
+    return atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_acquire);
   }
 
   uint64_t LoadReadIndexRelaxed() override {
-    return atomic::Load(&amd_queue_.read_dispatch_id,
-                        std::memory_order_relaxed);
+    return atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_relaxed);
   }
 
   uint64_t LoadWriteIndexAcquire() override {
-    return atomic::Load(&amd_queue_.write_dispatch_id,
-                        std::memory_order_acquire);
+    return atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_acquire);
   }
 
   uint64_t LoadWriteIndexRelaxed() override {
-    return atomic::Load(&amd_queue_.write_dispatch_id,
-                        std::memory_order_relaxed);
+    return atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_relaxed);
   }
 
   void StoreReadIndexRelaxed(uint64_t value) override {
-    atomic::Store(&amd_queue_.read_dispatch_id, value,
-                  std::memory_order_relaxed);
+    atomic::Store(&amd_queue_.read_dispatch_id, value, std::memory_order_relaxed);
   }
 
   void StoreReadIndexRelease(uint64_t value) override {
-    atomic::Store(&amd_queue_.read_dispatch_id, value,
-                  std::memory_order_release);
+    atomic::Store(&amd_queue_.read_dispatch_id, value, std::memory_order_release);
   }
 
   void StoreWriteIndexRelaxed(uint64_t value) override {
-    atomic::Store(&amd_queue_.write_dispatch_id, value,
-                  std::memory_order_relaxed);
+    atomic::Store(&amd_queue_.write_dispatch_id, value, std::memory_order_relaxed);
   }
 
   void StoreWriteIndexRelease(uint64_t value) override {
-    atomic::Store(&amd_queue_.write_dispatch_id, value,
-                  std::memory_order_release);
+    atomic::Store(&amd_queue_.write_dispatch_id, value, std::memory_order_release);
   }
 
   uint64_t CasWriteIndexAcqRel(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                       std::memory_order_acq_rel);
+    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_acq_rel);
   }
 
   uint64_t CasWriteIndexAcquire(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                       std::memory_order_acquire);
+    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_acquire);
   }
 
   uint64_t CasWriteIndexRelaxed(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                       std::memory_order_relaxed);
+    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_relaxed);
   }
 
   uint64_t CasWriteIndexRelease(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                       std::memory_order_release);
+    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_release);
   }
 
   uint64_t AddWriteIndexAcqRel(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                       std::memory_order_acq_rel);
+    return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_acq_rel);
   }
 
   uint64_t AddWriteIndexAcquire(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                       std::memory_order_acquire);
+    return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_acquire);
   }
 
   uint64_t AddWriteIndexRelaxed(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                       std::memory_order_relaxed);
+    return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_relaxed);
   }
 
   uint64_t AddWriteIndexRelease(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                       std::memory_order_release);
+    return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_release);
   }
 
   hsa_status_t SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) override {

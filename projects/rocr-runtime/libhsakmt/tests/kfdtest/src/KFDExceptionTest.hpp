@@ -30,43 +30,41 @@
 
 class KFDExceptionTest : public KFDBaseComponentTest {
  public:
-    KFDExceptionTest() : m_ChildPid(-1) {
-        /* Because there could be early return before m_ChildPid is set
-         * by fork(), we should initialize m_ChildPid to a non-zero value
-         * to avoid possible exit of the main process.
-         */
-    }
+  KFDExceptionTest() : m_ChildPid(-1) {
+    /* Because there could be early return before m_ChildPid is set
+     * by fork(), we should initialize m_ChildPid to a non-zero value
+     * to avoid possible exit of the main process.
+     */
+  }
 
-    ~KFDExceptionTest() {
-        /* exit() is necessary for the child process. Otherwise when the
-         * child process finishes, gtest assumes the test has finished and
-         * starts the next test while the parent is still active.
-         */
-        if (m_ChildPid == 0) {
-            if (!m_ChildStatus && HasFatalFailure())
-                m_ChildStatus = HSAKMT_STATUS_ERROR;
-            exit(m_ChildStatus);
-        }
+  ~KFDExceptionTest() {
+    /* exit() is necessary for the child process. Otherwise when the
+     * child process finishes, gtest assumes the test has finished and
+     * starts the next test while the parent is still active.
+     */
+    if (m_ChildPid == 0) {
+      if (!m_ChildStatus && HasFatalFailure()) m_ChildStatus = HSAKMT_STATUS_ERROR;
+      exit(m_ChildStatus);
     }
+  }
 
-    friend void AddressFault(KFDTEST_PARAMETERS* pTestParamters);
-    friend void PermissionFault(KFDTEST_PARAMETERS* pTestParamters);
-    friend void PermissionFaultUserPointer(KFDTEST_PARAMETERS* pTestParamters);
-    friend void FaultStorm(KFDTEST_PARAMETERS* pTestParamters);
-    friend void SdmaQueueException(KFDTEST_PARAMETERS* pTestParamters);
+  friend void AddressFault(KFDTEST_PARAMETERS* pTestParamters);
+  friend void PermissionFault(KFDTEST_PARAMETERS* pTestParamters);
+  friend void PermissionFaultUserPointer(KFDTEST_PARAMETERS* pTestParamters);
+  friend void FaultStorm(KFDTEST_PARAMETERS* pTestParamters);
+  friend void SdmaQueueException(KFDTEST_PARAMETERS* pTestParamters);
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 
-    void TestMemoryException(int gpuNode, HSAuint64 pSrc, HSAuint64 pDst,
-                             unsigned int dimX = 1, unsigned int dimY = 1,
-                             unsigned int dimZ = 1);
-    void TestSdmaException(int gpuNode, void *pDst);
+  void TestMemoryException(int gpuNode, HSAuint64 pSrc, HSAuint64 pDst, unsigned int dimX = 1,
+                           unsigned int dimY = 1, unsigned int dimZ = 1);
+  void TestSdmaException(int gpuNode, void* pDst);
 
  protected:  // Members
-    pid_t m_ChildPid;
-    HSAKMT_STATUS m_ChildStatus;
+  pid_t m_ChildPid;
+  HSAKMT_STATUS m_ChildStatus;
 };
 
 #endif  // __KFD_EXCEPTION_TEST__H__

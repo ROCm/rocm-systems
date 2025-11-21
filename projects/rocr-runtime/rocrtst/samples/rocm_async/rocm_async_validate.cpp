@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 #include "rocm_async.hpp"
 
@@ -14,7 +14,6 @@
 #include <sstream>
 
 bool RocmAsync::PoolIsPresent(vector<uint32_t>& in_list) {
-  
   bool is_present;
   uint32_t idx1 = 0;
   uint32_t idx2 = 0;
@@ -37,13 +36,12 @@ bool RocmAsync::PoolIsPresent(vector<uint32_t>& in_list) {
 }
 
 bool RocmAsync::PoolIsDuplicated(vector<uint32_t>& in_list) {
-  
   uint32_t idx1 = 0;
   uint32_t idx2 = 0;
   uint32_t count = in_list.size();
   for (idx1 = 0; idx1 < count; idx1++) {
     for (idx2 = 0; idx2 < count; idx2++) {
-      if ((in_list[idx1] == in_list[idx2]) && (idx1 != idx2)){
+      if ((in_list[idx1] == in_list[idx2]) && (idx1 != idx2)) {
         return false;
       }
     }
@@ -52,7 +50,6 @@ bool RocmAsync::PoolIsDuplicated(vector<uint32_t>& in_list) {
 }
 
 bool RocmAsync::ValidateReadOrWriteReq(vector<uint32_t>& in_list) {
-
   // Determine read / write request is even
   // Request is specified as a list of memory
   // pool, agent tuples - first element identifies
@@ -62,57 +59,48 @@ bool RocmAsync::ValidateReadOrWriteReq(vector<uint32_t>& in_list) {
   if ((list_size % 2) != 0) {
     return false;
   }
-  
+
   // Validate the list of pool-agent tuples
-  for (uint32_t idx = 0; idx < list_size; idx+=2) {
+  for (uint32_t idx = 0; idx < list_size; idx += 2) {
     uint32_t pool_idx = in_list[idx];
     uint32_t exec_idx = in_list[idx + 1];
     // Determine the pool and agent exist in system
-    if ((pool_idx >= pool_index_) ||
-        (exec_idx >= agent_index_)) {
+    if ((pool_idx >= pool_index_) || (exec_idx >= agent_index_)) {
       return false;
     }
   }
   return true;
 }
 
-bool RocmAsync::ValidateReadReq() {
-  return ValidateReadOrWriteReq(read_list_);
-}
+bool RocmAsync::ValidateReadReq() { return ValidateReadOrWriteReq(read_list_); }
 
-bool RocmAsync::ValidateWriteReq() {
-  return ValidateReadOrWriteReq(write_list_);
-}
+bool RocmAsync::ValidateWriteReq() { return ValidateReadOrWriteReq(write_list_); }
 
 bool RocmAsync::ValidateCopyReq(vector<uint32_t>& in_list) {
-  
   // Determine pool list length is valid
   uint32_t count = in_list.size();
   uint32_t pool_count = pool_list_.size();
   if (count > pool_count) {
     return false;
   }
-  
+
   // Determine no pool is duplicated
   bool status = PoolIsDuplicated(in_list);
   if (status == false) {
     return false;
   }
-  
+
   // Determine every pool is present in system
   return PoolIsPresent(in_list);
 }
 
-bool RocmAsync::ValidateBidirCopyReq() {
-  return ValidateCopyReq(bidir_list_);
-}
+bool RocmAsync::ValidateBidirCopyReq() { return ValidateCopyReq(bidir_list_); }
 
 bool RocmAsync::ValidateUnidirCopyReq() {
   return ((ValidateCopyReq(src_list_)) && (ValidateCopyReq(dst_list_)));
 }
 
 bool RocmAsync::ValidateArguments() {
-  
   // Determine if user has requested a READ
   // operation and gave valid inputs
   bool status = false;
@@ -138,8 +126,7 @@ bool RocmAsync::ValidateArguments() {
   // valid inputs. Same validation is applied
   // for all-to-all unidirectional copy operation
   status = false;
-  if ((req_copy_bidir_ == REQ_COPY_BIDIR) ||
-      (req_copy_all_bidir_ == REQ_COPY_ALL_BIDIR)) {
+  if ((req_copy_bidir_ == REQ_COPY_BIDIR) || (req_copy_all_bidir_ == REQ_COPY_ALL_BIDIR)) {
     status = ValidateBidirCopyReq();
     if (status == false) {
       return status;
@@ -151,8 +138,7 @@ bool RocmAsync::ValidateArguments() {
   // valid inputs. Same validation is applied
   // for all-to-all bidirectional copy operation
   status = false;
-  if ((req_copy_unidir_ == REQ_COPY_UNIDIR) ||
-      (req_copy_all_unidir_ == REQ_COPY_ALL_UNIDIR)) {
+  if ((req_copy_unidir_ == REQ_COPY_UNIDIR) || (req_copy_all_unidir_ == REQ_COPY_ALL_UNIDIR)) {
     status = ValidateUnidirCopyReq();
     if (status == false) {
       return status;

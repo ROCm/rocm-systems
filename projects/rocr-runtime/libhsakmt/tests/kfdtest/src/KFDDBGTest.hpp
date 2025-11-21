@@ -30,12 +30,12 @@
 
 class KFDDBGTest : public KFDBaseComponentTest {
  public:
-    KFDDBGTest() {}
-    ~KFDDBGTest() {}
+  KFDDBGTest() {}
+  ~KFDDBGTest() {}
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 };
 
 #endif  // __KFD_DBG_TEST__H__

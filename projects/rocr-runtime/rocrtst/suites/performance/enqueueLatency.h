@@ -106,4 +106,3 @@ class EnqueueLatency : public TestBase {
 };
 
 #endif  // ROCRTST_SUITES_PERFORMANCE_ENQUEUELATENCY_H_
-

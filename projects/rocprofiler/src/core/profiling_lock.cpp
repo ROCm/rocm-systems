@@ -75,7 +75,7 @@ void terminate_current_profiler_instance() {
       << "allowed.\nCheck " << ROCPROFILER_PID_FILE
       << " and kill the process, delete this .pid file and try again.\nTerminating "
          "...\n";
-  throw std::runtime_error(oss.str()); 
+  throw std::runtime_error(oss.str());
 }
 
 
@@ -128,10 +128,10 @@ ProfilingLock::ProfilingLock() {
   lock = -1;
 }
 
-ProfilingLock::~ProfilingLock(){
+ProfilingLock::~ProfilingLock() {
   this->lock = acquire_lock(this->lock_file);
-  if (this->lock < 1) return; // lock couldn't be acquired
-  remove(this->pid_file); // remove the pid file
+  if (this->lock < 1) return;  // lock couldn't be acquired
+  remove(this->pid_file);      // remove the pid file
   release_lock(this->lock, this->lock_file);
   return;
 }

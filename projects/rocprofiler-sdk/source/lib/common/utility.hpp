@@ -293,7 +293,8 @@ private:
 }  // namespace common
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 void
 rocprofiler_debugger_block();
 void

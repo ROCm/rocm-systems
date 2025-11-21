@@ -36,7 +36,9 @@ namespace rocprofiler {
 class results_t {
  public:
   results_t(std::string in_name, event_t in_event, int xcc_count)
-      : name(in_name), val_double(0), event(in_event) { xcc_vals.reserve(xcc_count); }
+      : name(in_name), val_double(0), event(in_event) {
+    xcc_vals.reserve(xcc_count);
+  }
   std::string name;
   double val_double;
   std::vector<double> xcc_vals;

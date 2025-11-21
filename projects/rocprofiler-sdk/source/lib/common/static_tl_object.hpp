@@ -58,11 +58,11 @@ register_static_tl_dtor(static_dtor_func_t&&);
 template <typename Tp, typename ContextT = anonymous>
 struct static_tl_object
 {
-    static_tl_object()                            = delete;
-    ~static_tl_object()                           = delete;
-    static_tl_object(const static_tl_object&)     = delete;
-    static_tl_object(static_tl_object&&) noexcept = delete;
-    static_tl_object& operator=(const static_tl_object&) = delete;
+    static_tl_object()                                       = delete;
+    ~static_tl_object()                                      = delete;
+    static_tl_object(const static_tl_object&)                = delete;
+    static_tl_object(static_tl_object&&) noexcept            = delete;
+    static_tl_object& operator=(const static_tl_object&)     = delete;
     static_tl_object& operator=(static_tl_object&&) noexcept = delete;
 
     template <typename... Args>

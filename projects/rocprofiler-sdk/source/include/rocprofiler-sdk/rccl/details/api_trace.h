@@ -51,7 +51,9 @@
 
 #if !defined(RCCL_EXTERN_C_INIT)
 #    ifdef __cplusplus
-#        define RCCL_EXTERN_C_INIT extern "C" {
+#        define RCCL_EXTERN_C_INIT                                                                 \
+            extern "C"                                                                             \
+            {
 #    else
 #        define RCCL_EXTERN_C_INIT
 #    endif

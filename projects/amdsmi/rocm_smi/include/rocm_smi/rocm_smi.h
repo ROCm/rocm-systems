@@ -25,11 +25,11 @@
 
 #ifdef __cplusplus
 extern "C" {
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 #else
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #endif  // __cplusplus
 
 #include <stdbool.h>
@@ -42,12 +42,11 @@ extern "C" {
  *  in this file.
  *
  *  @brief The rocm_smi library api is new, and therefore subject to change
- *  either at the ABI or API level. Instead of marking every function prototype as "unstable", we are
- *  instead saying the API is unstable (i.e., changes are possible) while the
- *  major version remains 0. This means that if the API/ABI changes, we will
- *  not increment the major version to 1. Once the ABI stabilizes, we will
- *  increment the major version to 1, and thereafter increment it on all ABI
- *  breaks.
+ *  either at the ABI or API level. Instead of marking every function prototype as "unstable", we
+ * are instead saying the API is unstable (i.e., changes are possible) while the major version
+ * remains 0. This means that if the API/ABI changes, we will not increment the major version to 1.
+ * Once the ABI stabilizes, we will increment the major version to 1, and thereafter increment it on
+ * all ABI breaks.
  */
 
 //! Guaranteed maximum possible number of supported frequencies
@@ -61,60 +60,59 @@ extern "C" {
 //! The number of points that make up a voltage-frequency curve definition
 #define RSMI_NUM_VOLTAGE_CURVE_POINTS 3
 
-
 /**
  * @brief Error codes retured by rocm_smi_lib functions
  */
 typedef enum {
-  RSMI_STATUS_SUCCESS = 0x0,             //!< Operation was successful
-  RSMI_STATUS_INVALID_ARGS,              //!< Passed in arguments are not valid
-  RSMI_STATUS_NOT_SUPPORTED,             //!< The requested information or
-                                         //!< action is not available for the
-                                         //!< given input, on the given system
-  RSMI_STATUS_FILE_ERROR,                //!< Problem accessing a file. This
-                                         //!< may because the operation is not
-                                         //!< supported by the Linux kernel
-                                         //!< version running on the executing
-                                         //!< machine
-  RSMI_STATUS_PERMISSION,                //!< Permission denied/EACCESS file
-                                         //!< error. Many functions require
-                                         //!< root access to run.
-  RSMI_STATUS_OUT_OF_RESOURCES,          //!< Unable to acquire memory or other
-                                         //!< resource
-  RSMI_STATUS_INTERNAL_EXCEPTION,        //!< An internal exception was caught
-  RSMI_STATUS_INPUT_OUT_OF_BOUNDS,       //!< The provided input is out of
-                                         //!< allowable or safe range
-  RSMI_STATUS_INIT_ERROR,                //!< An error occurred when rsmi
-                                         //!< initializing internal data
-                                         //!< structures
+  RSMI_STATUS_SUCCESS = 0x0,        //!< Operation was successful
+  RSMI_STATUS_INVALID_ARGS,         //!< Passed in arguments are not valid
+  RSMI_STATUS_NOT_SUPPORTED,        //!< The requested information or
+                                    //!< action is not available for the
+                                    //!< given input, on the given system
+  RSMI_STATUS_FILE_ERROR,           //!< Problem accessing a file. This
+                                    //!< may because the operation is not
+                                    //!< supported by the Linux kernel
+                                    //!< version running on the executing
+                                    //!< machine
+  RSMI_STATUS_PERMISSION,           //!< Permission denied/EACCESS file
+                                    //!< error. Many functions require
+                                    //!< root access to run.
+  RSMI_STATUS_OUT_OF_RESOURCES,     //!< Unable to acquire memory or other
+                                    //!< resource
+  RSMI_STATUS_INTERNAL_EXCEPTION,   //!< An internal exception was caught
+  RSMI_STATUS_INPUT_OUT_OF_BOUNDS,  //!< The provided input is out of
+                                    //!< allowable or safe range
+  RSMI_STATUS_INIT_ERROR,           //!< An error occurred when rsmi
+                                    //!< initializing internal data
+                                    //!< structures
   RSMI_INITIALIZATION_ERROR = RSMI_STATUS_INIT_ERROR,
-  RSMI_STATUS_NOT_YET_IMPLEMENTED,       //!< The requested function has not
-                                         //!< yet been implemented in the
-                                         //!< current system for the current
-                                         //!< devices
-  RSMI_STATUS_NOT_FOUND,                 //!< An item was searched for but not
-                                         //!< found
-  RSMI_STATUS_INSUFFICIENT_SIZE,         //!< Not enough resources were
-                                         //!< available for the operation
-  RSMI_STATUS_INTERRUPT,                 //!< An interrupt occurred during
-                                         //!< execution of function
-  RSMI_STATUS_UNEXPECTED_SIZE,           //!< An unexpected amount of data
-                                         //!< was read
-  RSMI_STATUS_NO_DATA,                   //!< No data was found for a given
-                                         //!< input
-  RSMI_STATUS_UNEXPECTED_DATA,           //!< The data read or provided to
-                                         //!< function is not what was expected
-  RSMI_STATUS_BUSY,                      //!< A resource or mutex could not be
-                                         //!< acquired because it is already
-                                         //!< being used
-  RSMI_STATUS_REFCOUNT_OVERFLOW,         //!< An internal reference counter
-                                         //!< exceeded INT32_MAX
-  RSMI_STATUS_DIRECTORY_NOT_FOUND,       //!< Error when a directory is not 
-                                         //!< found, maps to ENOTDIR
-  RSMI_STATUS_SETTING_UNAVAILABLE,       //!< Requested setting is unavailable
-                                         //!< for the current device
-  RSMI_STATUS_AMDGPU_RESTART_ERR,        //!< Could not successfully restart
-                                         //!< the amdgpu driver
+  RSMI_STATUS_NOT_YET_IMPLEMENTED,  //!< The requested function has not
+                                    //!< yet been implemented in the
+                                    //!< current system for the current
+                                    //!< devices
+  RSMI_STATUS_NOT_FOUND,            //!< An item was searched for but not
+                                    //!< found
+  RSMI_STATUS_INSUFFICIENT_SIZE,    //!< Not enough resources were
+                                    //!< available for the operation
+  RSMI_STATUS_INTERRUPT,            //!< An interrupt occurred during
+                                    //!< execution of function
+  RSMI_STATUS_UNEXPECTED_SIZE,      //!< An unexpected amount of data
+                                    //!< was read
+  RSMI_STATUS_NO_DATA,              //!< No data was found for a given
+                                    //!< input
+  RSMI_STATUS_UNEXPECTED_DATA,      //!< The data read or provided to
+                                    //!< function is not what was expected
+  RSMI_STATUS_BUSY,                 //!< A resource or mutex could not be
+                                    //!< acquired because it is already
+                                    //!< being used
+  RSMI_STATUS_REFCOUNT_OVERFLOW,    //!< An internal reference counter
+                                    //!< exceeded INT32_MAX
+  RSMI_STATUS_DIRECTORY_NOT_FOUND,  //!< Error when a directory is not
+                                    //!< found, maps to ENOTDIR
+  RSMI_STATUS_SETTING_UNAVAILABLE,  //!< Requested setting is unavailable
+                                    //!< for the current device
+  RSMI_STATUS_AMDGPU_RESTART_ERR,   //!< Could not successfully restart
+                                    //!< the amdgpu driver
 
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
@@ -126,14 +124,14 @@ typedef enum {
  */
 
 typedef enum {
-  RSMI_INIT_FLAG_ALL_GPUS   = 0x1,       //!< Attempt to add all GPUs found
-                                         //!< (including non-AMD) to the list
-                                         //!< of devices from which SMI
-                                         //!< information can be retrieved. By
-                                         //!< default, only AMD devices are
-                                         //!<  enumerated by RSMI.
-  RSMI_INIT_FLAG_THRAD_ONLY_MUTEX = 0x400000000000000,   //!< The mutex limit to thread
-  RSMI_INIT_FLAG_RESRV_TEST1 = 0x800000000000000,  //!< Reserved for test
+  RSMI_INIT_FLAG_ALL_GPUS = 0x1,                        //!< Attempt to add all GPUs found
+                                                        //!< (including non-AMD) to the list
+                                                        //!< of devices from which SMI
+                                                        //!< information can be retrieved. By
+                                                        //!< default, only AMD devices are
+                                                        //!<  enumerated by RSMI.
+  RSMI_INIT_FLAG_THRAD_ONLY_MUTEX = 0x400000000000000,  //!< The mutex limit to thread
+  RSMI_INIT_FLAG_RESRV_TEST1 = 0x800000000000000,       //!< Reserved for test
 } rsmi_init_flags_t;
 
 /**
@@ -143,18 +141,18 @@ typedef enum {
  */
 
 typedef enum {
-  RSMI_DRIVER_NOT_FOUND   = 0,             //!< Cannot find the driver
-  RSMI_DRIVER_MODULE_STATE_LIVE,           //!< Driver loaded and live
-  RSMI_DRIVER_MODULE_STATE_LOADING,        //!< Driver is loading(coming)
-  RSMI_DRIVER_MODULE_STATE_UNLOADING,      //!< Driver is unloading(going)
-  RSMI_DRIVER_MODULE_STATE_UNKNOWN,        //!< Driver state unknown
+  RSMI_DRIVER_NOT_FOUND = 0,           //!< Cannot find the driver
+  RSMI_DRIVER_MODULE_STATE_LIVE,       //!< Driver loaded and live
+  RSMI_DRIVER_MODULE_STATE_LOADING,    //!< Driver is loading(coming)
+  RSMI_DRIVER_MODULE_STATE_UNLOADING,  //!< Driver is unloading(going)
+  RSMI_DRIVER_MODULE_STATE_UNKNOWN,    //!< Driver state unknown
 } rsmi_driver_state_t;
 
 /**
  * @brief PowerPlay performance levels
  */
 typedef enum {
-  RSMI_DEV_PERF_LEVEL_AUTO = 0,       //!< Performance level is "auto"
+  RSMI_DEV_PERF_LEVEL_AUTO = 0,  //!< Performance level is "auto"
   RSMI_DEV_PERF_LEVEL_FIRST = RSMI_DEV_PERF_LEVEL_AUTO,
 
   RSMI_DEV_PERF_LEVEL_LOW,              //!< Keep PowerPlay levels "low",
@@ -174,9 +172,8 @@ typedef enum {
 
   RSMI_DEV_PERF_LEVEL_LAST = RSMI_DEV_PERF_LEVEL_DETERMINISM,
 
-  RSMI_DEV_PERF_LEVEL_UNKNOWN = 0x100   //!< Unknown performance level
+  RSMI_DEV_PERF_LEVEL_UNKNOWN = 0x100  //!< Unknown performance level
 } rsmi_dev_perf_level_t;
-
 
 #define RSMI_MAX_NUM_PM_POLICIES 32
 #define RSMI_MAX_POLICY_NAME 32
@@ -192,21 +189,21 @@ typedef struct {
  * @brief This structure holds information about dpm policies.
  */
 typedef struct {
-    /**
-     * The number of supported policies
-     */
-    uint32_t num_supported;
+  /**
+   * The number of supported policies
+   */
+  uint32_t num_supported;
 
-    /**
-     * The current policy index
-     */
-    uint32_t current;
+  /**
+   * The current policy index
+   */
+  uint32_t current;
 
-    /**
-     * List of policies.
-     * Only the first num_supported policies are valid.
-     */
-    rsmi_dpm_policy_entry_t policies[RSMI_MAX_NUM_PM_POLICIES];
+  /**
+   * List of policies.
+   * Only the first num_supported policies are valid.
+   */
+  rsmi_dpm_policy_entry_t policies[RSMI_MAX_NUM_PM_POLICIES];
 } rsmi_dpm_policy_t;
 
 /// \cond Ignore in docs.
@@ -222,7 +219,7 @@ typedef rsmi_dev_perf_level_t rsmi_dev_perf_level;
 typedef enum {
   RSMI_SW_COMP_FIRST = 0x0,
 
-  RSMI_SW_COMP_DRIVER = RSMI_SW_COMP_FIRST,    //!< Driver
+  RSMI_SW_COMP_DRIVER = RSMI_SW_COMP_FIRST,  //!< Driver
 
   RSMI_SW_COMP_LAST = RSMI_SW_COMP_DRIVER
 } rsmi_sw_component_t;
@@ -243,7 +240,7 @@ typedef uintptr_t rsmi_event_handle_t;
  * base value for all the event enums in the group.
  */
 typedef enum {
-  RSMI_EVNT_GRP_XGMI = 0,         //!< Data Fabric (XGMI) related events
+  RSMI_EVNT_GRP_XGMI = 0,            //!< Data Fabric (XGMI) related events
   RSMI_EVNT_GRP_XGMI_DATA_OUT = 10,  //!< XGMI Outbound data
   RSMI_EVNT_GRP_INVALID = 0xFFFFFFFF
 } rsmi_event_group_t;
@@ -259,10 +256,10 @@ typedef enum {
 
   RSMI_EVNT_XGMI_FIRST = RSMI_EVNT_GRP_XGMI,
   RSMI_EVNT_XGMI_0_NOP_TX = RSMI_EVNT_XGMI_FIRST,  //!< NOPs sent to neighbor 0
-  RSMI_EVNT_XGMI_0_REQUEST_TX,                    //!< Outgoing requests to
-                                                  //!< neighbor 0
-  RSMI_EVNT_XGMI_0_RESPONSE_TX,                   //!< Outgoing responses to
-                                                  //!< neighbor 0
+  RSMI_EVNT_XGMI_0_REQUEST_TX,                     //!< Outgoing requests to
+                                                   //!< neighbor 0
+  RSMI_EVNT_XGMI_0_RESPONSE_TX,                    //!< Outgoing responses to
+                                                   //!< neighbor 0
   /**
    * @brief
    *
@@ -278,16 +275,16 @@ typedef enum {
    */
   // ie, Throughput = BEATS/time_running 10^9  bytes/sec
   RSMI_EVNT_XGMI_0_BEATS_TX,
-  RSMI_EVNT_XGMI_1_NOP_TX,                        //!< NOPs sent to neighbor 1
-  RSMI_EVNT_XGMI_1_REQUEST_TX,                        //!< Outgoing requests to
-                                                  //!< neighbor 1
-  RSMI_EVNT_XGMI_1_RESPONSE_TX,                   //!< Outgoing responses to
-                                                  //!< neighbor 1
-  RSMI_EVNT_XGMI_1_BEATS_TX,                      //!< Data beats sent to
-                                                  //!< neighbor 1; Each beat
-                                                  //!< represents 32 bytes
+  RSMI_EVNT_XGMI_1_NOP_TX,       //!< NOPs sent to neighbor 1
+  RSMI_EVNT_XGMI_1_REQUEST_TX,   //!< Outgoing requests to
+                                 //!< neighbor 1
+  RSMI_EVNT_XGMI_1_RESPONSE_TX,  //!< Outgoing responses to
+                                 //!< neighbor 1
+  RSMI_EVNT_XGMI_1_BEATS_TX,     //!< Data beats sent to
+                                 //!< neighbor 1; Each beat
+                                 //!< represents 32 bytes
 
-  RSMI_EVNT_XGMI_LAST = RSMI_EVNT_XGMI_1_BEATS_TX,   // 5
+  RSMI_EVNT_XGMI_LAST = RSMI_EVNT_XGMI_1_BEATS_TX,  // 5
 
   RSMI_EVNT_XGMI_DATA_OUT_FIRST = RSMI_EVNT_GRP_XGMI_DATA_OUT,  // 10
 
@@ -307,11 +304,11 @@ typedef enum {
    */
   // ie, Throughput = BEATS/time_running 10^9  bytes/sec
   RSMI_EVNT_XGMI_DATA_OUT_0 = RSMI_EVNT_XGMI_DATA_OUT_FIRST,
-  RSMI_EVNT_XGMI_DATA_OUT_1,   //!< Outbound beats to neighbor 1
-  RSMI_EVNT_XGMI_DATA_OUT_2,   //!< Outbound beats to neighbor 2
-  RSMI_EVNT_XGMI_DATA_OUT_3,   //!< Outbound beats to neighbor 3
-  RSMI_EVNT_XGMI_DATA_OUT_4,   //!< Outbound beats to neighbor 4
-  RSMI_EVNT_XGMI_DATA_OUT_5,   //!< Outbound beats to neighbor 5
+  RSMI_EVNT_XGMI_DATA_OUT_1,  //!< Outbound beats to neighbor 1
+  RSMI_EVNT_XGMI_DATA_OUT_2,  //!< Outbound beats to neighbor 2
+  RSMI_EVNT_XGMI_DATA_OUT_3,  //!< Outbound beats to neighbor 3
+  RSMI_EVNT_XGMI_DATA_OUT_4,  //!< Outbound beats to neighbor 4
+  RSMI_EVNT_XGMI_DATA_OUT_5,  //!< Outbound beats to neighbor 5
   RSMI_EVNT_XGMI_DATA_OUT_LAST = RSMI_EVNT_XGMI_DATA_OUT_5,
 
   RSMI_EVNT_LAST = RSMI_EVNT_XGMI_DATA_OUT_LAST,
@@ -330,24 +327,25 @@ typedef enum {
  * Counter value
  */
 typedef struct {
-  uint64_t value;            //!< Counter value
-  uint64_t time_enabled;     //!< Time that the counter was enabled
-                             //!< (in nanoseconds)
-  uint64_t time_running;     //!< Time that the counter was running
-                             //!< (in nanoseconds)
+  uint64_t value;         //!< Counter value
+  uint64_t time_enabled;  //!< Time that the counter was enabled
+                          //!< (in nanoseconds)
+  uint64_t time_running;  //!< Time that the counter was running
+                          //!< (in nanoseconds)
 } rsmi_counter_value_t;
 
 /**
  * Event notification event types
  */
 typedef enum {
-  RSMI_EVT_NOTIF_NONE = KFD_SMI_EVENT_NONE,                                //!< Unused
-  RSMI_EVT_NOTIF_VMFAULT = KFD_SMI_EVENT_VMFAULT,                          //!< VM page fault
+  RSMI_EVT_NOTIF_NONE = KFD_SMI_EVENT_NONE,        //!< Unused
+  RSMI_EVT_NOTIF_VMFAULT = KFD_SMI_EVENT_VMFAULT,  //!< VM page fault
   RSMI_EVT_NOTIF_FIRST = RSMI_EVT_NOTIF_VMFAULT,
-  RSMI_EVT_NOTIF_THERMAL_THROTTLE = KFD_SMI_EVENT_THERMAL_THROTTLE,        //!< thermal throttle
-  RSMI_EVT_NOTIF_GPU_PRE_RESET = KFD_SMI_EVENT_GPU_PRE_RESET,              //!< pre reset; event includes message indicating cause
-                                                                           //!< causes include job hang, RAS error,
-                                                                           //!< MES hang, HWS hang, user trigger, and unknown
+  RSMI_EVT_NOTIF_THERMAL_THROTTLE = KFD_SMI_EVENT_THERMAL_THROTTLE,  //!< thermal throttle
+  RSMI_EVT_NOTIF_GPU_PRE_RESET =
+      KFD_SMI_EVENT_GPU_PRE_RESET,  //!< pre reset; event includes message indicating cause
+                                    //!< causes include job hang, RAS error,
+                                    //!< MES hang, HWS hang, user trigger, and unknown
   RSMI_EVT_NOTIF_GPU_POST_RESET = KFD_SMI_EVENT_GPU_POST_RESET,            //!< post reset
   RSMI_EVT_NOTIF_EVENT_MIGRATE_START = KFD_SMI_EVENT_MIGRATE_START,        //!< migrate start
   RSMI_EVT_NOTIF_EVENT_MIGRATE_END = KFD_SMI_EVENT_MIGRATE_END,            //!< migrate end
@@ -375,23 +373,23 @@ typedef enum {
  * Event notification data returned from event notification API
  */
 typedef struct {
-    uint32_t dv_ind;        //!< Index of device that corresponds to the event
-    rsmi_evt_notification_type_t event;     //!< Event type
-    char message[MAX_EVENT_NOTIFICATION_MSG_SIZE];  //!< Event message
+  uint32_t dv_ind;                                //!< Index of device that corresponds to the event
+  rsmi_evt_notification_type_t event;             //!< Event type
+  char message[MAX_EVENT_NOTIFICATION_MSG_SIZE];  //!< Event message
 } rsmi_evt_notification_data_t;
 
 /**
  * Clock types
  */
 typedef enum {
-  RSMI_CLK_TYPE_SYS = 0x0,            //!< System clock
+  RSMI_CLK_TYPE_SYS = 0x0,  //!< System clock
   RSMI_CLK_TYPE_FIRST = RSMI_CLK_TYPE_SYS,
-  RSMI_CLK_TYPE_DF,                   //!< Data Fabric clock (for ASICs
-                                      //!< running on a separate clock)
-  RSMI_CLK_TYPE_DCEF,                 //!< Display Controller Engine clock
-  RSMI_CLK_TYPE_SOC,                  //!< SOC clock
-  RSMI_CLK_TYPE_MEM,                  //!< Memory clock
-  RSMI_CLK_TYPE_PCIE,                 //!< PCIE clock
+  RSMI_CLK_TYPE_DF,    //!< Data Fabric clock (for ASICs
+                       //!< running on a separate clock)
+  RSMI_CLK_TYPE_DCEF,  //!< Display Controller Engine clock
+  RSMI_CLK_TYPE_SOC,   //!< SOC clock
+  RSMI_CLK_TYPE_MEM,   //!< Memory clock
+  RSMI_CLK_TYPE_PCIE,  //!< PCIE clock
 
   // Add new clocks to the end (not in the middle) and update
   // RSMI_CLK_TYPE_LAST
@@ -408,16 +406,16 @@ typedef rsmi_clk_type_t rsmi_clk_type;
  */
 typedef enum {
   RSMI_COMPUTE_PARTITION_INVALID = 0,
-  RSMI_COMPUTE_PARTITION_SPX, //!< Single GPU mode (SPX)- All XCCs work
-                              //!< together with shared memory
-  RSMI_COMPUTE_PARTITION_DPX, //!< Dual GPU mode (DPX)- Half XCCs work
-                              //!< together with shared memory
-  RSMI_COMPUTE_PARTITION_TPX, //!< Triple GPU mode (TPX)- One-third XCCs
-                              //!< work together with shared memory
-  RSMI_COMPUTE_PARTITION_QPX, //!< Quad GPU mode (QPX)- Quarter XCCs
-                              //!< work together with shared memory
-  RSMI_COMPUTE_PARTITION_CPX  //!< Core mode (CPX)- Per-chip XCC with
-                              //!< shared memory
+  RSMI_COMPUTE_PARTITION_SPX,  //!< Single GPU mode (SPX)- All XCCs work
+                               //!< together with shared memory
+  RSMI_COMPUTE_PARTITION_DPX,  //!< Dual GPU mode (DPX)- Half XCCs work
+                               //!< together with shared memory
+  RSMI_COMPUTE_PARTITION_TPX,  //!< Triple GPU mode (TPX)- One-third XCCs
+                               //!< work together with shared memory
+  RSMI_COMPUTE_PARTITION_QPX,  //!< Quad GPU mode (QPX)- Quarter XCCs
+                               //!< work together with shared memory
+  RSMI_COMPUTE_PARTITION_CPX   //!< Core mode (CPX)- Per-chip XCC with
+                               //!< shared memory
 } rsmi_compute_partition_type_t;
 /// \cond Ignore in docs.
 typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
@@ -478,7 +476,7 @@ typedef struct {
  * Celcius.
  */
 typedef enum {
-  RSMI_TEMP_CURRENT = 0x0,   //!< Temperature current value.
+  RSMI_TEMP_CURRENT = 0x0,  //!< Temperature current value.
   RSMI_TEMP_FIRST = RSMI_TEMP_CURRENT,
 
   RSMI_TEMP_MAX,             //!< Temperature max value.
@@ -536,83 +534,84 @@ typedef enum {
   RSMI_TEMP_TYPE_PLX,                          //!< PLX temperature
   RSMI_TEMP_TYPE_GENERAL_LAST = RSMI_TEMP_TYPE_PLX,
 
-
   // GPU Board Node temperature
   RSMI_TEMP_TYPE_GPUBOARD_NODE_FIRST = 100,
-  RSMI_TEMP_TYPE_GPUBOARD_NODE_RETIMER_X = RSMI_TEMP_TYPE_GPUBOARD_NODE_FIRST,  //!< Retimer X temperature
-  RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_IBC,         //!< OAM X IBC temperature
-  RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_IBC_2,       //!< OAM X IBC 2 temperature
-  RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_VDD18_VR,    //!< OAM X VDD 1.8V voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_B_VR, //!< OAM X 0.4V HBM B voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR, //!< OAM X 0.4V HBM D voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_NODE_RETIMER_X =
+      RSMI_TEMP_TYPE_GPUBOARD_NODE_FIRST,          //!< Retimer X temperature
+  RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_IBC,          //!< OAM X IBC temperature
+  RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_IBC_2,        //!< OAM X IBC 2 temperature
+  RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_VDD18_VR,     //!< OAM X VDD 1.8V voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_B_VR,  //!< OAM X 0.4V HBM B voltage regulator
+                                                   //!< temperature
+  RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR,  //!< OAM X 0.4V HBM D voltage regulator
+                                                   //!< temperature
   RSMI_TEMP_TYPE_GPUBOARD_NODE_LAST = RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR,
 
   // GPU Board VR (Voltage Regulator) temperature
   RSMI_TEMP_TYPE_GPUBOARD_VR_FIRST = 150,
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD0 = RSMI_TEMP_TYPE_GPUBOARD_VR_FIRST,  //!< VDDCR VDD0 voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD1,        //!< VDDCR VDD1 voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD2,        //!< VDDCR VDD2 voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD3,        //!< VDDCR VDD3 voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOC_A,       //!< VDDCR SOC A voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOC_C,       //!< VDDCR SOC C voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOCIO_A,     //!< VDDCR SOCIO A voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOCIO_C,     //!< VDDCR SOCIO C voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDD_085_HBM,       //!< VDD 0.85V HBM voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_B,    //!< VDDCR 1.1V HBM B voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_D,    //!< VDDCR 1.1V HBM D voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDD_USR,           //!< VDD USR voltage regulator temperature
-  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_E32,      //!< VDDIO 1.1V E32 voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD0 =
+      RSMI_TEMP_TYPE_GPUBOARD_VR_FIRST,    //!< VDDCR VDD0 voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD1,      //!< VDDCR VDD1 voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD2,      //!< VDDCR VDD2 voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD3,      //!< VDDCR VDD3 voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOC_A,     //!< VDDCR SOC A voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOC_C,     //!< VDDCR SOC C voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOCIO_A,   //!< VDDCR SOCIO A voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOCIO_C,   //!< VDDCR SOCIO C voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDD_085_HBM,     //!< VDD 0.85V HBM voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_B,  //!< VDDCR 1.1V HBM B voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_D,  //!< VDDCR 1.1V HBM D voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDD_USR,         //!< VDD USR voltage regulator temperature
+  RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_E32,    //!< VDDIO 1.1V E32 voltage regulator temperature
   RSMI_TEMP_TYPE_GPUBOARD_LAST = RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_E32,
 
   // Baseboard System temperature
   RSMI_TEMP_TYPE_BASEBOARD_FIRST = 200,
   RSMI_TEMP_TYPE_BASEBOARD_UBB_FPGA = RSMI_TEMP_TYPE_BASEBOARD_FIRST,  //!< UBB FPGA temperature
-  RSMI_TEMP_TYPE_BASEBOARD_UBB_FRONT,         //!< UBB front temperature
-  RSMI_TEMP_TYPE_BASEBOARD_UBB_BACK,          //!< UBB back temperature
-  RSMI_TEMP_TYPE_BASEBOARD_UBB_OAM7,          //!< UBB OAM7 temperature
-  RSMI_TEMP_TYPE_BASEBOARD_UBB_IBC,           //!< UBB IBC temperature
-  RSMI_TEMP_TYPE_BASEBOARD_UBB_UFPGA,         //!< UBB UFPGA temperature
-  RSMI_TEMP_TYPE_BASEBOARD_UBB_OAM1,          //!< UBB OAM1 temperature
-  RSMI_TEMP_TYPE_BASEBOARD_OAM_0_1_HSC,       //!< OAM 0-1 HSC temperature
-  RSMI_TEMP_TYPE_BASEBOARD_OAM_2_3_HSC,       //!< OAM 2-3 HSC temperature
-  RSMI_TEMP_TYPE_BASEBOARD_OAM_4_5_HSC,       //!< OAM 4-5 HSC temperature
-  RSMI_TEMP_TYPE_BASEBOARD_OAM_6_7_HSC,       //!< OAM 6-7 HSC temperature
+  RSMI_TEMP_TYPE_BASEBOARD_UBB_FRONT,                                  //!< UBB front temperature
+  RSMI_TEMP_TYPE_BASEBOARD_UBB_BACK,                                   //!< UBB back temperature
+  RSMI_TEMP_TYPE_BASEBOARD_UBB_OAM7,                                   //!< UBB OAM7 temperature
+  RSMI_TEMP_TYPE_BASEBOARD_UBB_IBC,                                    //!< UBB IBC temperature
+  RSMI_TEMP_TYPE_BASEBOARD_UBB_UFPGA,                                  //!< UBB UFPGA temperature
+  RSMI_TEMP_TYPE_BASEBOARD_UBB_OAM1,                                   //!< UBB OAM1 temperature
+  RSMI_TEMP_TYPE_BASEBOARD_OAM_0_1_HSC,                                //!< OAM 0-1 HSC temperature
+  RSMI_TEMP_TYPE_BASEBOARD_OAM_2_3_HSC,                                //!< OAM 2-3 HSC temperature
+  RSMI_TEMP_TYPE_BASEBOARD_OAM_4_5_HSC,                                //!< OAM 4-5 HSC temperature
+  RSMI_TEMP_TYPE_BASEBOARD_OAM_6_7_HSC,                                //!< OAM 6-7 HSC temperature
   RSMI_TEMP_TYPE_BASEBOARD_UBB_FPGA_0V72_VR,  //!< UBB FPGA 0.72V voltage regulator temperature
   RSMI_TEMP_TYPE_BASEBOARD_UBB_FPGA_3V3_VR,   //!< UBB FPGA 3.3V voltage regulator temperature
-  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_0_1_2_3_1V2_VR,  //!< Retimer 0-1-2-3 1.2V voltage regulator temperature
-  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_4_5_6_7_1V2_VR,  //!< Retimer 4-5-6-7 1.2V voltage regulator temperature
-  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_0_1_0V9_VR, //!< Retimer 0-1 0.9V voltage regulator temperature
-  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_4_5_0V9_VR, //!< Retimer 4-5 0.9V voltage regulator temperature
-  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_2_3_0V9_VR, //!< Retimer 2-3 0.9V voltage regulator temperature
-  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_6_7_0V9_VR, //!< Retimer 6-7 0.9V voltage regulator temperature
-  RSMI_TEMP_TYPE_BASEBOARD_OAM_0_1_2_3_3V3_VR, //!< OAM 0-1-2-3 3.3V voltage regulator temperature
-  RSMI_TEMP_TYPE_BASEBOARD_OAM_4_5_6_7_3V3_VR, //!< OAM 4-5-6-7 3.3V voltage regulator temperature
-  RSMI_TEMP_TYPE_BASEBOARD_IBC_HSC,           //!< IBC HSC temperature
-  RSMI_TEMP_TYPE_BASEBOARD_IBC,               //!< IBC temperature
+  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_0_1_2_3_1V2_VR,  //!< Retimer 0-1-2-3 1.2V voltage regulator
+                                                    //!< temperature
+  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_4_5_6_7_1V2_VR,  //!< Retimer 4-5-6-7 1.2V voltage regulator
+                                                    //!< temperature
+  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_0_1_0V9_VR,  //!< Retimer 0-1 0.9V voltage regulator temperature
+  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_4_5_0V9_VR,  //!< Retimer 4-5 0.9V voltage regulator temperature
+  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_2_3_0V9_VR,  //!< Retimer 2-3 0.9V voltage regulator temperature
+  RSMI_TEMP_TYPE_BASEBOARD_RETIMER_6_7_0V9_VR,  //!< Retimer 6-7 0.9V voltage regulator temperature
+  RSMI_TEMP_TYPE_BASEBOARD_OAM_0_1_2_3_3V3_VR,  //!< OAM 0-1-2-3 3.3V voltage regulator temperature
+  RSMI_TEMP_TYPE_BASEBOARD_OAM_4_5_6_7_3V3_VR,  //!< OAM 4-5-6-7 3.3V voltage regulator temperature
+  RSMI_TEMP_TYPE_BASEBOARD_IBC_HSC,             //!< IBC HSC temperature
+  RSMI_TEMP_TYPE_BASEBOARD_IBC,                 //!< IBC temperature
   RSMI_TEMP_TYPE_BASEBOARD_LAST = RSMI_TEMP_TYPE_BASEBOARD_IBC,
 
-  RSMI_TEMP_TYPE_LAST = RSMI_TEMP_TYPE_BASEBOARD_LAST,    //!< Last of per GPU temperature types
+  RSMI_TEMP_TYPE_LAST = RSMI_TEMP_TYPE_BASEBOARD_LAST,  //!< Last of per GPU temperature types
 
-  RSMI_TEMP_TYPE_INVALID = 0xFFFFFFFF          //!< Invalid type
+  RSMI_TEMP_TYPE_INVALID = 0xFFFFFFFF  //!< Invalid type
 } rsmi_temperature_type_t;
 
 /**
  * @brief NPM status
  *
  */
-typedef enum  {
-  RSMI_NPM_STATUS_DISABLED,
-  RSMI_NPM_STATUS_ENABLED
-} rsmi_npm_status_t;
+typedef enum { RSMI_NPM_STATUS_DISABLED, RSMI_NPM_STATUS_ENABLED } rsmi_npm_status_t;
 
 /**
  * @brief NPM info including status, limit.
  *
  */
-typedef struct
-{
-  rsmi_npm_status_t status; //!< NPM status (enabled/disabled).
-  uint64_t limit;  //!< Node-level power limit in Watts.
+typedef struct {
+  rsmi_npm_status_t status;  //!< NPM status (enabled/disabled).
+  uint64_t limit;            //!< Node-level power limit in Watts.
   uint64_t reserved[6];
 } rsmi_npm_info_t;
 
@@ -624,10 +623,9 @@ typedef struct
 typedef enum {
   /* Utilization */
   RSMI_ACTIVITY_GFX = (0x1 << 0),
-  RSMI_ACTIVITY_UMC = (0x1 << 1),   //!< memory controller
-  RSMI_ACTIVITY_MM  = (0x1 << 2)    //!< UVD or VCN
+  RSMI_ACTIVITY_UMC = (0x1 << 1),  //!< memory controller
+  RSMI_ACTIVITY_MM = (0x1 << 2)    //!< UVD or VCN
 } rsmi_activity_metric_t;
-
 
 /**
  * @brief Voltage Metrics.  This enum is used to identify various
@@ -635,16 +633,16 @@ typedef enum {
  *
  */
 typedef enum {
-  RSMI_VOLT_CURRENT = 0x0,               //!< Voltage current value.
+  RSMI_VOLT_CURRENT = 0x0,  //!< Voltage current value.
 
   RSMI_VOLT_FIRST = RSMI_VOLT_CURRENT,
-  RSMI_VOLT_MAX,                         //!< Voltage max value.
-  RSMI_VOLT_MIN_CRIT,                    //!< Voltage critical min value.
-  RSMI_VOLT_MIN,                         //!< Voltage min value.
-  RSMI_VOLT_MAX_CRIT,                    //!< Voltage critical max value.
-  RSMI_VOLT_AVERAGE,                     //!< Average voltage.
-  RSMI_VOLT_LOWEST,                      //!< Historical minimum voltage.
-  RSMI_VOLT_HIGHEST,                     //!< Historical maximum voltage.
+  RSMI_VOLT_MAX,       //!< Voltage max value.
+  RSMI_VOLT_MIN_CRIT,  //!< Voltage critical min value.
+  RSMI_VOLT_MIN,       //!< Voltage min value.
+  RSMI_VOLT_MAX_CRIT,  //!< Voltage critical max value.
+  RSMI_VOLT_AVERAGE,   //!< Average voltage.
+  RSMI_VOLT_LOWEST,    //!< Historical minimum voltage.
+  RSMI_VOLT_HIGHEST,   //!< Historical maximum voltage.
 
   RSMI_VOLT_LAST = RSMI_VOLT_HIGHEST
 } rsmi_voltage_metric_t;
@@ -660,7 +658,7 @@ typedef enum {
   RSMI_VOLT_TYPE_VDDBOARD,                       //!< Voltage for VDDBOARD
 
   RSMI_VOLT_TYPE_LAST = RSMI_VOLT_TYPE_VDDBOARD,
-  RSMI_VOLT_TYPE_INVALID = 0xFFFFFFFF            //!< Invalid type
+  RSMI_VOLT_TYPE_INVALID = 0xFFFFFFFF  //!< Invalid type
 } rsmi_voltage_type_t;
 
 /**
@@ -678,7 +676,7 @@ typedef enum {
 
   //!< 3D Full Screen Power Profile
   RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK = 0x20,
-  RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT = 0x40,    //!< Default Boot Up Profile
+  RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT = 0x40,  //!< Default Boot Up Profile
   RSMI_PWR_PROF_PRST_LAST = RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT,
 
   //!< Invalid power profile
@@ -692,8 +690,8 @@ typedef rsmi_power_profile_preset_masks_t rsmi_power_profile_preset_masks;
  * @brief Power Cap Package Power Tracking (PPT) type
  */
 typedef enum {
-    RSMI_POWER_CAP_TYPE_PPT0,       //!< PPT0 power cap; lower limit, filtered input
-    RSMI_POWER_CAP_TYPE_PPT1,       //!< PPT1 power cap; higher limit, raw input
+  RSMI_POWER_CAP_TYPE_PPT0,  //!< PPT0 power cap; lower limit, filtered input
+  RSMI_POWER_CAP_TYPE_PPT1,  //!< PPT1 power cap; higher limit, raw input
 } rsmi_power_cap_type_t;
 /// \cond Ignore in docs.
 typedef rsmi_power_cap_type_t rsmi_power_cap_type;
@@ -703,33 +701,33 @@ typedef rsmi_power_cap_type_t rsmi_power_cap_type;
  * @brief This enum is used to identify different GPU blocks.
  */
 typedef enum {
-  RSMI_GPU_BLOCK_INVALID =   0x0000000000000000,  //!< Used to indicate an
-                                                  //!< invalid block
-  RSMI_GPU_BLOCK_FIRST =     0x0000000000000001,
+  RSMI_GPU_BLOCK_INVALID = 0x0000000000000000,  //!< Used to indicate an
+                                                //!< invalid block
+  RSMI_GPU_BLOCK_FIRST = 0x0000000000000001,
 
   RSMI_GPU_BLOCK_UMC = RSMI_GPU_BLOCK_FIRST,      //!< UMC block
-  RSMI_GPU_BLOCK_SDMA =      0x0000000000000002,  //!< SDMA block
-  RSMI_GPU_BLOCK_GFX =       0x0000000000000004,  //!< GFX block
-  RSMI_GPU_BLOCK_MMHUB =     0x0000000000000008,  //!< MMHUB block
-  RSMI_GPU_BLOCK_ATHUB =     0x0000000000000010,  //!< ATHUB block
-  RSMI_GPU_BLOCK_PCIE_BIF =  0x0000000000000020,  //!< PCIE_BIF block
-  RSMI_GPU_BLOCK_HDP =       0x0000000000000040,  //!< HDP block
+  RSMI_GPU_BLOCK_SDMA = 0x0000000000000002,       //!< SDMA block
+  RSMI_GPU_BLOCK_GFX = 0x0000000000000004,        //!< GFX block
+  RSMI_GPU_BLOCK_MMHUB = 0x0000000000000008,      //!< MMHUB block
+  RSMI_GPU_BLOCK_ATHUB = 0x0000000000000010,      //!< ATHUB block
+  RSMI_GPU_BLOCK_PCIE_BIF = 0x0000000000000020,   //!< PCIE_BIF block
+  RSMI_GPU_BLOCK_HDP = 0x0000000000000040,        //!< HDP block
   RSMI_GPU_BLOCK_XGMI_WAFL = 0x0000000000000080,  //!< XGMI block
-  RSMI_GPU_BLOCK_DF =        0x0000000000000100,  //!< DF block
-  RSMI_GPU_BLOCK_SMN =       0x0000000000000200,  //!< SMN block
-  RSMI_GPU_BLOCK_SEM =       0x0000000000000400,  //!< SEM block
-  RSMI_GPU_BLOCK_MP0 =       0x0000000000000800,  //!< MP0 block
-  RSMI_GPU_BLOCK_MP1 =       0x0000000000001000,  //!< MP1 block
-  RSMI_GPU_BLOCK_FUSE =      0x0000000000002000,  //!< Fuse block
-  RSMI_GPU_BLOCK_MCA =       0x0000000000004000,  //!< MCA block
-  RSMI_GPU_BLOCK_VCN =       0x0000000000008000,  //!< VCN block
-  RSMI_GPU_BLOCK_JPEG =      0x0000000000010000,  //!< JPEG block
-  RSMI_GPU_BLOCK_IH =        0x0000000000020000,  //!< IH block
-  RSMI_GPU_BLOCK_MPIO =      0x0000000000040000,  //!< MPIO block
+  RSMI_GPU_BLOCK_DF = 0x0000000000000100,         //!< DF block
+  RSMI_GPU_BLOCK_SMN = 0x0000000000000200,        //!< SMN block
+  RSMI_GPU_BLOCK_SEM = 0x0000000000000400,        //!< SEM block
+  RSMI_GPU_BLOCK_MP0 = 0x0000000000000800,        //!< MP0 block
+  RSMI_GPU_BLOCK_MP1 = 0x0000000000001000,        //!< MP1 block
+  RSMI_GPU_BLOCK_FUSE = 0x0000000000002000,       //!< Fuse block
+  RSMI_GPU_BLOCK_MCA = 0x0000000000004000,        //!< MCA block
+  RSMI_GPU_BLOCK_VCN = 0x0000000000008000,        //!< VCN block
+  RSMI_GPU_BLOCK_JPEG = 0x0000000000010000,       //!< JPEG block
+  RSMI_GPU_BLOCK_IH = 0x0000000000020000,         //!< IH block
+  RSMI_GPU_BLOCK_MPIO = 0x0000000000040000,       //!< MPIO block
 
-  RSMI_GPU_BLOCK_LAST = RSMI_GPU_BLOCK_MPIO,       //!< The highest bit position
-                                                  //!< for supported blocks
-  RSMI_GPU_BLOCK_RESERVED =  0x8000000000000000
+  RSMI_GPU_BLOCK_LAST = RSMI_GPU_BLOCK_MPIO,  //!< The highest bit position
+                                              //!< for supported blocks
+  RSMI_GPU_BLOCK_RESERVED = 0x8000000000000000
 } rsmi_gpu_block_t;
 /// \cond Ignore in docs.
 typedef rsmi_gpu_block_t rsmi_gpu_block;
@@ -739,14 +737,14 @@ typedef rsmi_gpu_block_t rsmi_gpu_block;
  * @brief The current ECC state
  */
 typedef enum {
-  RSMI_RAS_ERR_STATE_NONE = 0,   //!< No current errors
-  RSMI_RAS_ERR_STATE_DISABLED,   //!< ECC is disabled
-  RSMI_RAS_ERR_STATE_PARITY,     //!< ECC errors present, but type unknown
-  RSMI_RAS_ERR_STATE_SING_C,     //!< Single correctable error
-  RSMI_RAS_ERR_STATE_MULT_UC,    //!< Multiple uncorrectable errors
-  RSMI_RAS_ERR_STATE_POISON,     //!< Firmware detected error and isolated
-                                 //!< page. Treat as uncorrectable.
-  RSMI_RAS_ERR_STATE_ENABLED,    //!< ECC is enabled
+  RSMI_RAS_ERR_STATE_NONE = 0,  //!< No current errors
+  RSMI_RAS_ERR_STATE_DISABLED,  //!< ECC is disabled
+  RSMI_RAS_ERR_STATE_PARITY,    //!< ECC errors present, but type unknown
+  RSMI_RAS_ERR_STATE_SING_C,    //!< Single correctable error
+  RSMI_RAS_ERR_STATE_MULT_UC,   //!< Multiple uncorrectable errors
+  RSMI_RAS_ERR_STATE_POISON,    //!< Firmware detected error and isolated
+                                //!< page. Treat as uncorrectable.
+  RSMI_RAS_ERR_STATE_ENABLED,   //!< ECC is enabled
 
   RSMI_RAS_ERR_STATE_LAST = RSMI_RAS_ERR_STATE_ENABLED,
   RSMI_RAS_ERR_STATE_INVALID = 0xFFFFFFFF
@@ -769,8 +767,8 @@ typedef enum {
  * @brief The values of this enum are used as frequency identifiers.
  */
 typedef enum {
-  RSMI_FREQ_IND_MIN = 0,  //!< Index used for the minimum frequency value
-  RSMI_FREQ_IND_MAX = 1,  //!< Index used for the maximum frequency value
+  RSMI_FREQ_IND_MIN = 0,              //!< Index used for the minimum frequency value
+  RSMI_FREQ_IND_MAX = 1,              //!< Index used for the maximum frequency value
   RSMI_FREQ_IND_INVALID = 0xFFFFFFFF  //!< An invalid frequency index
 } rsmi_freq_ind_t;
 /// \cond Ignore in docs.
@@ -789,7 +787,6 @@ typedef enum {
 /// \cond Ignore in docs.
 typedef rsmi_pcie_slot_type_t rsmi_pcie_slot_type;
 /// \endcond
-
 
 /**
  * @brief The values of this enum are used to identify the various firmware
@@ -858,11 +855,11 @@ typedef enum {
  * @brief Types for IO Link
  */
 typedef enum _RSMI_IO_LINK_TYPE {
-  RSMI_IOLINK_TYPE_UNDEFINED      = 0,          //!< unknown type.
-  RSMI_IOLINK_TYPE_PCIEXPRESS,                  //!< PCI Express
-  RSMI_IOLINK_TYPE_XGMI,                        //!< XGMI
-  RSMI_IOLINK_TYPE_NUMIOLINKTYPES,              //!< Number of IO Link types
-  RSMI_IOLINK_TYPE_SIZE           = 0xFFFFFFFF  //!< Max of IO Link types
+  RSMI_IOLINK_TYPE_UNDEFINED = 0,     //!< unknown type.
+  RSMI_IOLINK_TYPE_PCIEXPRESS,        //!< PCI Express
+  RSMI_IOLINK_TYPE_XGMI,              //!< XGMI
+  RSMI_IOLINK_TYPE_NUMIOLINKTYPES,    //!< Number of IO Link types
+  RSMI_IOLINK_TYPE_SIZE = 0xFFFFFFFF  //!< Max of IO Link types
 } RSMI_IO_LINK_TYPE;
 
 //! The CPU node index which will be used in rsmi_topo_get_link_type
@@ -875,13 +872,13 @@ typedef enum _RSMI_IO_LINK_TYPE {
 typedef enum {
   RSMI_UTILIZATION_COUNTER_FIRST = 0,
   //!< Corse grain activity counters
-  RSMI_COARSE_GRAIN_GFX_ACTIVITY  = RSMI_UTILIZATION_COUNTER_FIRST,
-  RSMI_COARSE_GRAIN_MEM_ACTIVITY,    //!< Memory Activity
-  RSMI_COARSE_DECODER_ACTIVITY,      //!< Decoder Activity
+  RSMI_COARSE_GRAIN_GFX_ACTIVITY = RSMI_UTILIZATION_COUNTER_FIRST,
+  RSMI_COARSE_GRAIN_MEM_ACTIVITY,  //!< Memory Activity
+  RSMI_COARSE_DECODER_ACTIVITY,    //!< Decoder Activity
   //!< Fine grain activity counters
   RSMI_FINE_GRAIN_GFX_ACTIVITY = 100,
   RSMI_FINE_GRAIN_MEM_ACTIVITY = 101,
-  RSMI_FINE_DECODER_ACTIVITY   = 102,
+  RSMI_FINE_DECODER_ACTIVITY = 102,
   RSMI_UTILIZATION_COUNTER_LAST = RSMI_FINE_DECODER_ACTIVITY
 } RSMI_UTILIZATION_COUNTER_TYPE;
 
@@ -889,9 +886,9 @@ typedef enum {
  * @brief Power types
  */
 typedef enum {
-  RSMI_AVERAGE_POWER = 0,            //!< Average Power
-  RSMI_CURRENT_POWER,                //!< Current / Instant Power
-  RSMI_INVALID_POWER = 0xFFFFFFFF    //!< Invalid / Undetected Power
+  RSMI_AVERAGE_POWER = 0,          //!< Average Power
+  RSMI_CURRENT_POWER,              //!< Current / Instant Power
+  RSMI_INVALID_POWER = 0xFFFFFFFF  //!< Invalid / Undetected Power
 } RSMI_POWER_TYPE;
 
 /**
@@ -899,10 +896,11 @@ typedef enum {
  */
 //! The max number of values per counter type
 #define RSMI_MAX_UTILIZATION_VALUES 4
-typedef struct  {
-  RSMI_UTILIZATION_COUNTER_TYPE type;           //!< Utilization counter type
-  uint64_t value;                                    //!< Coarse grain activity counter value (average)
-  uint64_t fine_value[RSMI_MAX_UTILIZATION_VALUES];  //!< Utilization counter value (individual values)
+typedef struct {
+  RSMI_UTILIZATION_COUNTER_TYPE type;  //!< Utilization counter type
+  uint64_t value;                      //!< Coarse grain activity counter value (average)
+  uint64_t
+      fine_value[RSMI_MAX_UTILIZATION_VALUES];  //!< Utilization counter value (individual values)
   uint16_t fine_value_count;
 } rsmi_utilization_counter_t;
 
@@ -910,9 +908,9 @@ typedef struct  {
  * @brief Reserved Memory Page Record
  */
 typedef struct {
-  uint64_t page_address;                  //!< Start address of page
-  uint64_t page_size;                     //!< Page size
-  rsmi_memory_page_status_t status;       //!< Page "reserved" status
+  uint64_t page_address;             //!< Start address of page
+  uint64_t page_size;                //!< Page size
+  rsmi_memory_page_status_t status;  //!< Page "reserved" status
 } rsmi_retired_page_record_t;
 
 /**
@@ -926,20 +924,20 @@ typedef struct {
  * currently active.
  */
 typedef struct {
-    /**
-    * Which profiles are supported by this system
-    */
-    rsmi_bit_field_t available_profiles;
+  /**
+   * Which profiles are supported by this system
+   */
+  rsmi_bit_field_t available_profiles;
 
-    /**
-    * Which power profile is currently active
-    */
-    rsmi_power_profile_preset_masks_t current;
+  /**
+   * Which power profile is currently active
+   */
+  rsmi_power_profile_preset_masks_t current;
 
-    /**
-    * How many power profiles are available
-    */
-    uint32_t num_profiles;
+  /**
+   * How many power profiles are available
+   */
+  uint32_t num_profiles;
 } rsmi_power_profile_status_t;
 /// \cond Ignore in docs.
 typedef rsmi_power_profile_status_t rsmi_power_profile_status;
@@ -949,26 +947,26 @@ typedef rsmi_power_profile_status_t rsmi_power_profile_status;
  * @brief This structure holds information about clock frequencies.
  */
 typedef struct {
-    /**
-     * Deep Sleep frequency is only supported by some GPUs
-     */
-    bool has_deep_sleep;
+  /**
+   * Deep Sleep frequency is only supported by some GPUs
+   */
+  bool has_deep_sleep;
 
-    /**
-     * The number of supported frequencies
-     */
-    uint32_t num_supported;
+  /**
+   * The number of supported frequencies
+   */
+  uint32_t num_supported;
 
-    /**
-     * The current frequency index
-     */
-    uint32_t current;
+  /**
+   * The current frequency index
+   */
+  uint32_t current;
 
-    /**
-     * List of frequencies.
-     * Only the first num_supported frequencies are valid.
-     */
-    uint64_t frequency[RSMI_MAX_NUM_FREQUENCIES];
+  /**
+   * List of frequencies.
+   * Only the first num_supported frequencies are valid.
+   */
+  uint64_t frequency[RSMI_MAX_NUM_FREQUENCIES];
 } rsmi_frequencies_t;
 /// \cond Ignore in docs.
 typedef rsmi_frequencies_t rsmi_frequencies;
@@ -978,7 +976,7 @@ typedef rsmi_frequencies_t rsmi_frequencies;
  * @brief IO Link P2P Capability
  */
 typedef struct {
-  uint8_t is_iolink_coherent;    // 1 = true, 0 = false, UINT8_MAX = Not defined.
+  uint8_t is_iolink_coherent;  // 1 = true, 0 = false, UINT8_MAX = Not defined.
   uint8_t is_iolink_atomics_32bit;
   uint8_t is_iolink_atomics_64bit;
   uint8_t is_iolink_dma;
@@ -991,16 +989,16 @@ typedef struct {
  * associated numbers of lanes are stored here.
  */
 typedef struct {
-    /**
-     * Transfer rates (T/s) that are possible
-     */
-    rsmi_frequencies_t transfer_rate;
+  /**
+   * Transfer rates (T/s) that are possible
+   */
+  rsmi_frequencies_t transfer_rate;
 
-    /**
-     * List of lanes for corresponding transfer rate.
-     * Only the first num_supported bandwidths are valid.
-     */
-    uint32_t lanes[RSMI_MAX_NUM_FREQUENCIES];
+  /**
+   * List of lanes for corresponding transfer rate.
+   * Only the first num_supported bandwidths are valid.
+   */
+  uint32_t lanes[RSMI_MAX_NUM_FREQUENCIES];
 } rsmi_pcie_bandwidth_t;
 
 /// \cond Ignore in docs.
@@ -1022,10 +1020,10 @@ typedef struct {
  * @brief This structure holds version information.
  */
 typedef struct {
-    uint32_t major;     //!< Major version
-    uint32_t minor;     //!< Minor version
-    uint32_t patch;     //!< Patch, build  or stepping version
-    const char *build;  //!< Build string
+  uint32_t major;     //!< Major version
+  uint32_t minor;     //!< Minor version
+  uint32_t patch;     //!< Patch, build  or stepping version
+  const char *build;  //!< Build string
 } rsmi_version_t;
 /// \cond Ignore in docs.
 typedef rsmi_version_t rsmi_version;
@@ -1049,7 +1047,7 @@ typedef struct {
     */
     uint32_t flags;
     uint32_t max_num_cu_shared;  /* Indicates how many Compute Units share this cache instance */
-    uint32_t num_cache_instance;  /* total number of instance of this cache type */
+    uint32_t num_cache_instance; /* total number of instance of this cache type */
   } cache[RSMI_MAX_CACHE_TYPES];
 } rsmi_gpu_cache_info_t;
 /// \cond Ignore in docs.
@@ -1060,8 +1058,8 @@ typedef rsmi_gpu_cache_info_t rsmi_gpu_cache_info;
  * @brief This structure represents a range (e.g., frequencies or voltages).
  */
 typedef struct {
-    uint64_t lower_bound;      //!< Lower bound of range
-    uint64_t upper_bound;      //!< Upper bound of range
+  uint64_t lower_bound;  //!< Lower bound of range
+  uint64_t upper_bound;  //!< Upper bound of range
 } rsmi_range_t;
 /// \cond Ignore in docs.
 typedef rsmi_range_t rsmi_range;
@@ -1071,8 +1069,8 @@ typedef rsmi_range_t rsmi_range;
  * @brief This structure represents a point on the frequency-voltage plane.
  */
 typedef struct {
-    uint64_t frequency;      //!< Frequency coordinate (in Hz)
-    uint64_t voltage;        //!< Voltage coordinate (in mV)
+  uint64_t frequency;  //!< Frequency coordinate (in Hz)
+  uint64_t voltage;    //!< Voltage coordinate (in mV)
 } rsmi_od_vddc_point_t;
 /// \cond Ignore in docs.
 typedef rsmi_od_vddc_point_t rsmi_od_vddc_point;
@@ -1084,8 +1082,8 @@ typedef rsmi_od_vddc_point_t rsmi_od_vddc_point;
  * corresponding ::rsmi_od_vddc_point_t.
  */
 typedef struct {
-    rsmi_range_t freq_range;  //!< The frequency range for this VDDC Curve point
-    rsmi_range_t volt_range;  //!< The voltage range for this VDDC Curve point
+  rsmi_range_t freq_range;  //!< The frequency range for this VDDC Curve point
+  rsmi_range_t volt_range;  //!< The voltage range for this VDDC Curve point
 } rsmi_freq_volt_region_t;
 /// \cond Ignore in docs.
 typedef rsmi_freq_volt_region_t rsmi_freq_volt_region;
@@ -1095,11 +1093,11 @@ typedef rsmi_freq_volt_region_t rsmi_freq_volt_region;
  * ::RSMI_NUM_VOLTAGE_CURVE_POINTS number of ::rsmi_od_vddc_point_t's
  */
 typedef struct {
-    /**
-     * Array of ::RSMI_NUM_VOLTAGE_CURVE_POINTS ::rsmi_od_vddc_point_t's that
-     * make up the voltage frequency curve points.
-     */
-    rsmi_od_vddc_point_t vc_points[RSMI_NUM_VOLTAGE_CURVE_POINTS];
+  /**
+   * Array of ::RSMI_NUM_VOLTAGE_CURVE_POINTS ::rsmi_od_vddc_point_t's that
+   * make up the voltage frequency curve points.
+   */
+  rsmi_od_vddc_point_t vc_points[RSMI_NUM_VOLTAGE_CURVE_POINTS];
 } rsmi_od_volt_curve_t;
 /// \cond Ignore in docs.
 typedef rsmi_od_volt_curve_t rsmi_od_volt_curve;
@@ -1109,22 +1107,21 @@ typedef rsmi_od_volt_curve_t rsmi_od_volt_curve;
  * @brief This structure holds the frequency-voltage values for a device.
  */
 typedef struct {
-  rsmi_range_t curr_sclk_range;          //!< The current SCLK frequency range
-  rsmi_range_t curr_mclk_range;          //!< The current MCLK frequency range;
-                                         //!< (upper bound only)
-  rsmi_range_t sclk_freq_limits;         //!< The range possible of SCLK values
-  rsmi_range_t mclk_freq_limits;         //!< The range possible of MCLK values
+  rsmi_range_t curr_sclk_range;   //!< The current SCLK frequency range
+  rsmi_range_t curr_mclk_range;   //!< The current MCLK frequency range;
+                                  //!< (upper bound only)
+  rsmi_range_t sclk_freq_limits;  //!< The range possible of SCLK values
+  rsmi_range_t mclk_freq_limits;  //!< The range possible of MCLK values
 
   /**
    * @brief The current voltage curve
    */
   rsmi_od_volt_curve_t curve;
-  uint32_t num_regions;                //!< The number of voltage curve regions
+  uint32_t num_regions;  //!< The number of voltage curve regions
 } rsmi_od_volt_freq_data_t;
 /// \cond Ignore in docs.
 typedef rsmi_od_volt_freq_data_t rsmi_od_volt_freq_data;
 /// \endcond
-
 
 /**
  * @brief The following structures hold the gpu metrics values for a device.
@@ -1137,9 +1134,9 @@ struct metrics_table_header_t {
   // TODO(amd) Doxygen documents
   // Note: This should match: AMDGpuMetricsHeader_v1_t
   /// \cond Ignore in docs.
-  uint16_t      structure_size;
-  uint8_t       format_revision;
-  uint8_t       content_revision;
+  uint16_t structure_size;
+  uint8_t format_revision;
+  uint8_t content_revision;
   /// \endcond
 };
 /// \cond Ignore in docs.
@@ -1214,8 +1211,8 @@ typedef struct metrics_table_header_t metrics_table_header_t;
  */
 struct amdgpu_xcp_metrics_t {
   /*
-  * v1.6 additions
-  */
+   * v1.6 additions
+   */
   /* Utilization Instantaneous (%) */
   uint32_t gfx_busy_inst[RSMI_MAX_NUM_XCC];
   uint16_t jpeg_busy[RSMI_MAX_NUM_JPEG_ENG_V1];
@@ -1225,8 +1222,8 @@ struct amdgpu_xcp_metrics_t {
   uint64_t gfx_busy_acc[RSMI_MAX_NUM_XCC];
 
   /*
-  * v1.7 additions
-  */
+   * v1.7 additions
+   */
   /* Total App Clock Counter Accumulated */
   uint64_t gfx_below_host_limit_acc[RSMI_MAX_NUM_XCC];
 
@@ -1269,15 +1266,15 @@ typedef struct {
 
   // Utilization (%)
   uint16_t average_gfx_activity;
-  uint16_t average_umc_activity;    // memory controller
-  uint16_t average_mm_activity;     // UVD or VCN
+  uint16_t average_umc_activity;  // memory controller
+  uint16_t average_mm_activity;   // UVD or VCN
 
   // Power (W) /Energy (15.259uJ per 1ns)
   uint16_t average_socket_power;
-  uint64_t energy_accumulator;      // v1 mod. (32->64)
+  uint64_t energy_accumulator;  // v1 mod. (32->64)
 
   // Driver attached timestamp (in ns)
-  uint64_t system_clock_counter;    // v1 mod. (moved from top of struct)
+  uint64_t system_clock_counter;  // v1 mod. (moved from top of struct)
 
   // Average clocks (MHz)
   uint16_t average_gfxclk_frequency;
@@ -1304,24 +1301,21 @@ typedef struct {
   uint16_t current_fan_speed;
 
   // Link width (number of lanes) /speed (0.1 GT/s)
-  uint16_t pcie_link_width;         // v1 mod.(8->16)
-  uint16_t pcie_link_speed;         // in 0.1 GT/s; v1 mod. (8->16)
-
+  uint16_t pcie_link_width;  // v1 mod.(8->16)
+  uint16_t pcie_link_speed;  // in 0.1 GT/s; v1 mod. (8->16)
 
   /*
    * v1.1 additions
    */
-  uint32_t gfx_activity_acc;        // new in v1
-  uint32_t mem_activity_acc;        // new in v1
+  uint32_t gfx_activity_acc;                         // new in v1
+  uint32_t mem_activity_acc;                         // new in v1
   uint16_t temperature_hbm[RSMI_NUM_HBM_INSTANCES];  // new in v1
-
 
   /*
    * v1.2 additions
    */
   // PMFW attached timestamp (10ns resolution)
   uint64_t firmware_timestamp;
-
 
   /*
    * v1.3 additions
@@ -1333,7 +1327,6 @@ typedef struct {
 
   // Throttle status
   uint64_t indep_throttle_status;
-
 
   /*
    * v1.4 additions
@@ -1409,9 +1402,10 @@ typedef struct {
    * Where A and B are measurments recorded at prior points in time.
    * Typically A is the earlier measured value and B is the latest measured value.
    *
-   * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) - AccumulationCounter (A))
-   * TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
-  */
+   * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) -
+   * AccumulationCounter (A)) TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) *
+   * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
+   */
   uint64_t ppt_residency_acc;
   /**
    * Accumulated throttler residencies
@@ -1424,9 +1418,10 @@ typedef struct {
    * Where A and B are measurments recorded at prior points in time.
    * Typically A is the earlier measured value and B is the latest measured value.
    *
-   * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) - AccumulationCounter (A))
-   * TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
-  */
+   * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) -
+   * AccumulationCounter (A)) TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) *
+   * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
+   */
   uint64_t socket_thm_residency_acc;
   uint64_t vr_thm_residency_acc;
   uint64_t hbm_thm_residency_acc;
@@ -1441,8 +1436,8 @@ typedef struct {
   uint32_t pcie_lc_perf_other_end_recovery;
 
   /*
-  * v1.7 additions
-  */
+   * v1.7 additions
+   */
   /* VRAM max bandwidth at max memory clock */
   uint64_t vram_max_bandwidth;
 
@@ -1452,15 +1447,14 @@ typedef struct {
   /// \endcond
 } rsmi_gpu_metrics_t;
 
-
-#define  MAX_RSMI_NAME_LENGTH 64
+#define MAX_RSMI_NAME_LENGTH 64
 
 /**
  * @brief This structure holds the name value pairs
  */
 typedef struct {
-    char name[MAX_RSMI_NAME_LENGTH];     //!< Name
-    uint64_t value;   //!< Use uint64_t to make it universal
+  char name[MAX_RSMI_NAME_LENGTH];  //!< Name
+  uint64_t value;                   //!< Use uint64_t to make it universal
 } rsmi_name_value_t;
 
 /**
@@ -1478,9 +1472,9 @@ typedef enum {
  * @brief This structure holds error counts.
  */
 typedef struct {
-  uint64_t correctable_err;   //!< Accumulated correctable errors
+  uint64_t correctable_err;    //!< Accumulated correctable errors
   uint64_t uncorrectable_err;  //!< Accumulated uncorrectable errors
-  uint64_t deferred_err;  //!< Accumulated deferred errors
+  uint64_t deferred_err;       //!< Accumulated deferred errors
   uint64_t reserved[5];
 } rsmi_error_count_t;
 
@@ -1491,18 +1485,18 @@ typedef struct {
   uint32_t ras_eeprom_version;
   // PARITY error(bit 0), Single Bit correctable (bit1),
   // Double bit error detection (bit2), Poison (bit 3).
-  uint32_t ecc_correction_schema_flag;    //!< ecc_correction_schema mask
+  uint32_t ecc_correction_schema_flag;  //!< ecc_correction_schema mask
 } rsmi_ras_feature_info_t;
 
 /**
  * @brief This structure contains information specific to a process.
  */
 typedef struct {
-    uint32_t process_id;      //!< Process ID
-    uint64_t vram_usage;      //!< VRAM usage
-    uint64_t sdma_usage;      //!< SDMA usage in microseconds
-    uint32_t cu_occupancy;    //!< Compute Unit usage in percent
-    uint32_t evicted_time;    //!< Time that queues are evicted on a GPU in milliseconds
+  uint32_t process_id;    //!< Process ID
+  uint64_t vram_usage;    //!< VRAM usage
+  uint64_t sdma_usage;    //!< SDMA usage in microseconds
+  uint32_t cu_occupancy;  //!< Compute Unit usage in percent
+  uint32_t evicted_time;  //!< Time that queues are evicted on a GPU in milliseconds
 } rsmi_process_info_t;
 
 //! CU occupancy invalidation value for the GFX revisions not providing cu_occupancy debugfs method
@@ -1511,7 +1505,7 @@ typedef struct {
 /**
  * @brief Opaque handle to function-support object
  */
-typedef struct rsmi_func_id_iter_handle * rsmi_func_id_iter_handle_t;
+typedef struct rsmi_func_id_iter_handle *rsmi_func_id_iter_handle_t;
 
 //! Place-holder "variant" for functions that have don't have any variants,
 //! but do have monitors or sensors.
@@ -1523,24 +1517,24 @@ typedef struct rsmi_func_id_iter_handle * rsmi_func_id_iter_handle_t;
  * such as ::rsmi_memory_type_t, ::rsmi_temperature_metric_t, etc.
  */
 typedef union id {
-        uint64_t id;           //!< uint64_t representation of value
-        const char *name;      //!< name string (applicable to functions only)
-        union {
-            //!< Used for ::rsmi_memory_type_t variants
-            rsmi_memory_type_t memory_type;
-            //!< Used for ::rsmi_temperature_metric_t variants
-            rsmi_temperature_metric_t temp_metric;
-            //!< Used for ::rsmi_event_type_t variants
-            rsmi_event_type_t evnt_type;
-            //!< Used for ::rsmi_event_group_t variants
-            rsmi_event_group_t evnt_group;
-            //!< Used for ::rsmi_clk_type_t variants
-            rsmi_clk_type_t clk_type;
-            //!< Used for ::rsmi_fw_block_t variants
-            rsmi_fw_block_t fw_block;
-            //!< Used for ::rsmi_gpu_block_t variants
-            rsmi_gpu_block_t gpu_block_type;
-        };
+  uint64_t id;       //!< uint64_t representation of value
+  const char *name;  //!< name string (applicable to functions only)
+  union {
+    //!< Used for ::rsmi_memory_type_t variants
+    rsmi_memory_type_t memory_type;
+    //!< Used for ::rsmi_temperature_metric_t variants
+    rsmi_temperature_metric_t temp_metric;
+    //!< Used for ::rsmi_event_type_t variants
+    rsmi_event_type_t evnt_type;
+    //!< Used for ::rsmi_event_group_t variants
+    rsmi_event_group_t evnt_group;
+    //!< Used for ::rsmi_clk_type_t variants
+    rsmi_clk_type_t clk_type;
+    //!< Used for ::rsmi_fw_block_t variants
+    rsmi_fw_block_t fw_block;
+    //!< Used for ::rsmi_gpu_block_t variants
+    rsmi_gpu_block_t gpu_block_type;
+  };
 } rsmi_func_id_value_t;
 
 /**
@@ -1571,7 +1565,6 @@ typedef struct {
 
   uint32_t reserved[10];
 } rsmi_device_identifiers_t;
-
 
 /*****************************************************************************/
 /** @defgroup InitShutAdmin Initialization and Shutdown
@@ -1605,7 +1598,7 @@ rsmi_status_t rsmi_shut_down(void);
  *
  *  @details The status could be not found, live, loading, unloading.
  */
-rsmi_status_t rsmi_driver_status(rsmi_driver_state_t* state);
+rsmi_status_t rsmi_driver_status(rsmi_driver_state_t *state);
 
 /** @} */  // end of InitShut
 
@@ -1758,8 +1751,7 @@ rsmi_status_t rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id);
  *  be written.
  *
  */
-rsmi_status_t rsmi_dev_pcie_vendor_name_get(uint32_t dv_ind, char *name,
-                                                size_t len);
+rsmi_status_t rsmi_dev_pcie_vendor_name_get(uint32_t dv_ind, char *name, size_t len);
 
 /**
  *  @brief Get the name string of a gpu device.
@@ -1865,8 +1857,7 @@ rsmi_status_t rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len);
  *  be written.
  *
  */
-rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name,
-                                                                  size_t len);
+rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name, size_t len);
 
 /**
  *  @brief Get the vram vendor string of a gpu device.
@@ -1890,9 +1881,7 @@ rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name,
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t rsmi_dev_vram_vendor_get(uint32_t dv_ind, char *brand,
-                                                                uint32_t len);
-
+rsmi_status_t rsmi_dev_vram_vendor_get(uint32_t dv_ind, char *brand, uint32_t len);
 
 /**
  *  @brief Get the PCIe slot type of a gpu device.
@@ -1910,8 +1899,7 @@ rsmi_status_t rsmi_dev_vram_vendor_get(uint32_t dv_ind, char *brand,
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t rsmi_dev_pcie_slot_type_get(uint32_t dv_ind,
-        rsmi_pcie_slot_type_t* type);
+rsmi_status_t rsmi_dev_pcie_slot_type_get(uint32_t dv_ind, rsmi_pcie_slot_type_t *type);
 
 /**
  * @brief Get the serial number string for a device
@@ -1941,8 +1929,7 @@ rsmi_status_t rsmi_dev_pcie_slot_type_get(uint32_t dv_ind,
  *  be written.
  *
  */
-rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind,
-                                              char *serial_num, uint32_t len);
+rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind, char *serial_num, uint32_t len);
 /**
  *  @brief Get the subsystem device id associated with the device with
  *  provided device index.
@@ -2002,8 +1989,7 @@ rsmi_status_t rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id);
  *  be written.
  *
  */
-rsmi_status_t
-rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len);
+rsmi_status_t rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len);
 
 /**
  *  @brief Get the drm minor number associated with this device
@@ -2022,8 +2008,7 @@ rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_drm_render_minor_get(uint32_t dv_ind, uint32_t *minor);
+rsmi_status_t rsmi_dev_drm_render_minor_get(uint32_t dv_ind, uint32_t *minor);
 
 /**
  *  @brief Get the device subsystem vendor id associated with the device with
@@ -2106,7 +2091,8 @@ rsmi_status_t rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id);
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t rsmi_dev_xgmi_port_num_get(uint32_t dv_ind, uint32_t *count, uint16_t *link_to_dst_gpu);
+rsmi_status_t rsmi_dev_xgmi_port_num_get(uint32_t dv_ind, uint32_t *count,
+                                         uint16_t *link_to_dst_gpu);
 
 /**
  *  @brief Get the GUID, also known as the GPU device id,
@@ -2176,8 +2162,8 @@ rsmi_status_t rsmi_dev_node_id_get(uint32_t dv_ind, uint32_t *node_id);
  *                         - `smi_device_id`: The SMI device ID.
  *
  * @retval ::RSMI_STATUS_SUCCESS The call was successful, and the device identifiers were retrieved.
- * @retval ::RSMI_STATUS_NOT_SUPPORTED The installed software or hardware does not support this function
- *                                     with the given arguments.
+ * @retval ::RSMI_STATUS_NOT_SUPPORTED The installed software or hardware does not support this
+ * function with the given arguments.
  * @retval ::RSMI_STATUS_INVALID_ARGS The provided arguments are invalid.
  *
  * @note Ensure that the `identifiers` pointer is valid and points to a properly allocated structure
@@ -2185,7 +2171,6 @@ rsmi_status_t rsmi_dev_node_id_get(uint32_t dv_ind, uint32_t *node_id);
  */
 rsmi_status_t rsmi_dev_device_identifiers_get(uint32_t dv_ind,
                                               rsmi_device_identifiers_t *identifiers);
-
 
 /** @} */  // end of IDQuer
 
@@ -2213,8 +2198,7 @@ rsmi_status_t rsmi_dev_device_identifiers_get(uint32_t dv_ind,
  *  expected
  *
  */
-rsmi_status_t
-rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
+rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
 
 /**
  *  @brief Get the unique PCI device identifier associated for a device
@@ -2303,8 +2287,8 @@ rsmi_status_t rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t *numa_node);
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
  */
-rsmi_status_t rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
-                                    uint64_t *received, uint64_t *max_pkt_sz);
+rsmi_status_t rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent, uint64_t *received,
+                                          uint64_t *max_pkt_sz);
 
 /**
  *  @brief Get PCIe replay counter
@@ -2328,8 +2312,7 @@ rsmi_status_t rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind,
-                                                           uint64_t *counter);
+rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t *counter);
 
 /** @} */  // end of PCIeQuer
 /*****************************************************************************/
@@ -2406,8 +2389,7 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t
-rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
+rsmi_status_t rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
 
 /**
  *  @brief Get the current socket power (also known as instant
@@ -2430,8 +2412,7 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t
-rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power);
+rsmi_status_t rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power);
 
 /**
  *  @brief A generic get which attempts to retieve current socket power
@@ -2467,8 +2448,7 @@ rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power);
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_power_get(uint32_t dv_ind, uint64_t *power,
-                                 RSMI_POWER_TYPE *type);
+rsmi_status_t rsmi_dev_power_get(uint32_t dv_ind, uint64_t *power, RSMI_POWER_TYPE *type);
 
 /**
  *  @brief Get the energy accumulator counter of the device with provided
@@ -2500,9 +2480,8 @@ rsmi_status_t rsmi_dev_power_get(uint32_t dv_ind, uint64_t *power,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t
-rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t *power,
-                          float *counter_resolution, uint64_t *timestamp);
+rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t *power, float *counter_resolution,
+                                        uint64_t *timestamp);
 
 /**
  *  @brief Get the cap on power which, when reached, causes the system to take
@@ -2529,8 +2508,7 @@ rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t *power,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t
-rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap);
+rsmi_status_t rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap);
 
 /**
  *  @brief Get the default power cap for the device specified by @p dv_ind.
@@ -2556,8 +2534,8 @@ rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap);
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t
-rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *default_cap);
+rsmi_status_t rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint32_t sensor_ind,
+                                             uint64_t *default_cap);
 
 /**
  *  @brief Get the range of valid values for the power cap
@@ -2590,9 +2568,8 @@ rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *d
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind,
-                                                uint64_t *max, uint64_t *min);
+rsmi_status_t rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *max,
+                                           uint64_t *min);
 
 /** @} */  // end of PowerQuer
 
@@ -2621,8 +2598,7 @@ rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind,
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t
-rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
+rsmi_status_t rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
 
 /**
  *  @brief Set the power profile
@@ -2643,11 +2619,10 @@ rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t
-rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t reserved,
-                                   rsmi_power_profile_preset_masks_t profile);
+rsmi_status_t rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t reserved,
+                                         rsmi_power_profile_preset_masks_t profile);
 
- /**
+/**
  *  @brief Query the supported power cap sensors and their types for a device.
  *
  *  @ingroup tagPowerControl
@@ -2658,21 +2633,20 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t reserved,
  *  including their sensor indices and types (e.g., PPT0, PPT1).
  *
  *  @param[in]  dv_ind A device index.
- *  @param[out] sensor_count Pointer to a uint32_t that will be set to the number of supported sensors.
+ *  @param[out] sensor_count Pointer to a uint32_t that will be set to the number of supported
+ * sensors.
  *  @param[out] sensor_inds Pointer to an array of uint32_t to be filled with sensor indices.
  *                          The array must be allocated by the caller with enough space.
- *  @param[out] sensor_types Pointer to an array of rsmi_power_cap_type_t to be filled with sensor types.
- *                          The array must be allocated by the caller with enough space.
+ *  @param[out] sensor_types Pointer to an array of rsmi_power_cap_type_t to be filled with sensor
+ * types. The array must be allocated by the caller with enough space.
  *
  *  @return ::rsmi_status_t | ::RSMI_STATUS_SUCCESS on success, non-zero on fail.
  */
-rsmi_status_t 
-rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
-                                 uint32_t *sensor_inds, rsmi_power_cap_type_t *sensor_types);
+rsmi_status_t rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
+                                               uint32_t *sensor_inds,
+                                               rsmi_power_cap_type_t *sensor_types);
 /** @} */  // end of PowerCont
 /*****************************************************************************/
-
-
 
 /*****************************************************************************/
 /** @defgroup MemQuer Memory Queries
@@ -2705,9 +2679,8 @@ rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
-                                                             uint64_t *total);
+rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
+                                        uint64_t *total);
 
 /**
  *  @brief Get gpu cache info.
@@ -2722,8 +2695,7 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
  *
  *  @return ::rsmi_status_t | ::RSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-rsmi_status_t rsmi_dev_cache_info_get(
-      uint32_t dv_ind, rsmi_gpu_cache_info_t *info);
+rsmi_status_t rsmi_dev_cache_info_get(uint32_t dv_ind, rsmi_gpu_cache_info_t *info);
 
 /**
  *  @brief Get the current memory usage
@@ -2751,9 +2723,8 @@ rsmi_status_t rsmi_dev_cache_info_get(
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
-                                                              uint64_t *used);
+rsmi_status_t rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
+                                        uint64_t *used);
 
 /**
  *  @brief Get percentage of time any device memory is being used
@@ -2777,8 +2748,7 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
+rsmi_status_t rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
 
 /**
  *  @brief Get information about reserved ("retired") memory pages
@@ -2815,9 +2785,8 @@ rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
  *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if more records were available
  *  than allowed by the provided, allocated memory.
  */
-rsmi_status_t
-rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
-                                         rsmi_retired_page_record_t *records);
+rsmi_status_t rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
+                                                 rsmi_retired_page_record_t *records);
 /** @} */  // end of MemQuer
 
 /** @defgroup PhysQuer Physical State Queries
@@ -2851,8 +2820,7 @@ rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind,
-                                                              int64_t *speed);
+rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind, int64_t *speed);
 
 /**
  *  @brief Get the fan speed for the specified device as a value relative to
@@ -2881,8 +2849,7 @@ rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind,
-                                        uint32_t sensor_ind, int64_t *speed);
+rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64_t *speed);
 
 /**
  *  @brief Get the max. fan speed of the device with provided device index.
@@ -2909,11 +2876,10 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
-                                    uint32_t sensor_ind, uint64_t *max_speed);
+rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *max_speed);
 
-rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind,
-                              uintptr_t node_handle, rsmi_npm_info_t *npm_info);
+rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
+                                    rsmi_npm_info_t *npm_info);
 
 /**
  *  @brief Get the temperature metric value for the specified metric, from the
@@ -2946,7 +2912,7 @@ rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind,
  *
  */
 rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
-                      rsmi_temperature_metric_t metric, int64_t *temperature);
+                                       rsmi_temperature_metric_t metric, int64_t *temperature);
 
 /**
  *  @brief Get the voltage metric value for the specified metric, from the
@@ -2978,9 +2944,8 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind,
-                               rsmi_voltage_type_t sensor_type,
-                              rsmi_voltage_metric_t metric, int64_t *voltage);
+rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
+                                       rsmi_voltage_metric_t metric, int64_t *voltage);
 /** @} */  // end of PhysQuer
 
 /*****************************************************************************/
@@ -3027,8 +2992,7 @@ rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind);
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind,
-                                                              uint64_t speed);
+rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t speed);
 
 /** @} */  // end of PhysCont
 /*****************************************************************************/
@@ -3061,8 +3025,7 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
+rsmi_status_t rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
 
 /**
  *  @brief Get coarse grain utilization counter of the specified device
@@ -3093,11 +3056,9 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_utilization_count_get(uint32_t dv_ind,
-                rsmi_utilization_counter_t utilization_counters[],
-                uint32_t count,
-                uint64_t *timestamp);
+rsmi_status_t rsmi_utilization_count_get(uint32_t dv_ind,
+                                         rsmi_utilization_counter_t utilization_counters[],
+                                         uint32_t count, uint64_t *timestamp);
 
 /**
  *  @brief Get activity metric average utilization counter of the specified device
@@ -3109,8 +3070,9 @@ rsmi_utilization_count_get(uint32_t dv_ind,
  *
  *  @param[in] activity_metric_type a metric type
  *
- *  @param[inout] activity_metric_counter Multiple utilization counters can be retrieved with a single
- *  call. The caller must allocate enough space to the rsmi_activity_metric_counter_t structure.
+ *  @param[inout] activity_metric_counter Multiple utilization counters can be retrieved with a
+ * single call. The caller must allocate enough space to the rsmi_activity_metric_counter_t
+ * structure.
  *
  *  If the function returns RSMI_STATUS_SUCCESS, the requested type will be set in the corresponding
  *  field of the counter will be set in the value field of
@@ -3122,10 +3084,9 @@ rsmi_utilization_count_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_activity_metric_get(uint32_t dv_ind,
-                             rsmi_activity_metric_t activity_metric_type,
-                             rsmi_activity_metric_counter_t* activity_metric_counter);
+rsmi_status_t rsmi_dev_activity_metric_get(uint32_t dv_ind,
+                                           rsmi_activity_metric_t activity_metric_type,
+                                           rsmi_activity_metric_counter_t *activity_metric_counter);
 
 /**
  *  @brief Get activity metric bandwidth average utilization counter of the specified device
@@ -3147,8 +3108,7 @@ rsmi_dev_activity_metric_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_activity_avg_mm_get(uint32_t dv_ind, uint16_t* avg_activity);
+rsmi_status_t rsmi_dev_activity_avg_mm_get(uint32_t dv_ind, uint16_t *avg_activity);
 
 /**
  *  @brief Get the performance level of the device with provided
@@ -3173,8 +3133,7 @@ rsmi_dev_activity_avg_mm_get(uint32_t dv_ind, uint16_t* avg_activity);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_perf_level_get(uint32_t dv_ind,
-                                                 rsmi_dev_perf_level_t *perf);
+rsmi_status_t rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level_t *perf);
 
 /**
  *  @brief Enter performance determinism mode with provided device index.
@@ -3197,8 +3156,7 @@ rsmi_status_t rsmi_dev_perf_level_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_perf_determinism_mode_set(uint32_t dv_ind,
-                                             uint64_t clkvalue);
+rsmi_status_t rsmi_perf_determinism_mode_set(uint32_t dv_ind, uint64_t clkvalue);
 
 /**
  *  @brief Get the overdrive percent associated with the device with provided
@@ -3282,8 +3240,8 @@ rsmi_status_t rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t *od);
  *  expected
  *
  */
-rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
-                             rsmi_clk_type_t clk_type, rsmi_frequencies_t *f);
+rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_type,
+                                        rsmi_frequencies_t *f);
 
 /**
  *  @brief Reset the gpu associated with the device with provided device index
@@ -3322,8 +3280,7 @@ rsmi_status_t rsmi_dev_gpu_reset(uint32_t dv_ind);
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind,
-                                               rsmi_od_volt_freq_data_t *odv);
+rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data_t *odv);
 
 /**
  *  @brief This function retrieves the gpu partition metrics information
@@ -3368,8 +3325,7 @@ rsmi_status_t rsmi_dev_gpu_partition_metrics_info_get(uint32_t dv_ind,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind,
-                                            rsmi_gpu_metrics_t *pgpu_metrics);
+rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *pgpu_metrics);
 
 /**
  *  @brief Get the pm metrics table with provided device index.
@@ -3400,10 +3356,8 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_pm_metrics_info_get(uint32_t dv_ind,
-                      rsmi_name_value_t** pm_metrics,
-                      uint32_t *num_of_metrics);
-
+rsmi_status_t rsmi_dev_pm_metrics_info_get(uint32_t dv_ind, rsmi_name_value_t **pm_metrics,
+                                           uint32_t *num_of_metrics);
 
 /**
  *  @brief Get the register metrics table with provided device index and registertype.
@@ -3436,11 +3390,9 @@ rsmi_status_t rsmi_dev_pm_metrics_info_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_reg_table_info_get(uint32_t dv_ind,
-                      rsmi_reg_type_t reg_type,
-                      rsmi_name_value_t** reg_metrics,
-                      uint32_t *num_of_metrics);
-
+rsmi_status_t rsmi_dev_reg_table_info_get(uint32_t dv_ind, rsmi_reg_type_t reg_type,
+                                          rsmi_name_value_t **reg_metrics,
+                                          uint32_t *num_of_metrics);
 
 /**
  *  @brief This function sets the clock range information
@@ -3464,9 +3416,8 @@ rsmi_status_t rsmi_dev_reg_table_info_get(uint32_t dv_ind,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue,
-                                       uint64_t maxclkvalue,
-                                       rsmi_clk_type_t clkType);
+rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue, uint64_t maxclkvalue,
+                                     rsmi_clk_type_t clkType);
 
 /**
  *  @brief This function sets the clock min/max level
@@ -3489,9 +3440,8 @@ rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level,
-                                       uint64_t clkvalue,
-                                       rsmi_clk_type_t clkType);
+rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level, uint64_t clkvalue,
+                                        rsmi_clk_type_t clkType);
 
 /**
  *  @brief This function sets the clock frequency information
@@ -3515,8 +3465,7 @@ rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
-                                       uint64_t clkvalue,
+rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level, uint64_t clkvalue,
                                        rsmi_clk_type_t clkType);
 
 /**
@@ -3540,8 +3489,8 @@ rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
-                                        uint64_t clkvalue, uint64_t voltvalue);
+rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint, uint64_t clkvalue,
+                                        uint64_t voltvalue);
 
 /**
  *  @brief This function will retrieve the current valid regions in the
@@ -3581,8 +3530,8 @@ rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
-                      uint32_t *num_regions, rsmi_freq_volt_region_t *buffer);
+rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind, uint32_t *num_regions,
+                                                 rsmi_freq_volt_region_t *buffer);
 
 /**
  *  @brief Get the list of available preset power profiles and an indication of
@@ -3619,9 +3568,8 @@ rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
-                                         rsmi_power_profile_status_t *status);
+rsmi_status_t rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
+                                                 rsmi_power_profile_status_t *status);
 
 /** @} */  // end of PerfQuer
 /*****************************************************************************/
@@ -3652,8 +3600,7 @@ rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t
-rsmi_dev_perf_level_set(uint32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
+rsmi_status_t rsmi_dev_perf_level_set(uint32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
 
 /**
  *  @brief Set the PowerPlay performance level associated with the device with
@@ -3673,8 +3620,7 @@ rsmi_dev_perf_level_set(uint32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t
-rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
+rsmi_status_t rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
 
 /**
  *  @brief Set the overdrive percent associated with the device with provided
@@ -3796,8 +3742,8 @@ rsmi_status_t rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od);
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
-                             rsmi_clk_type_t clk_type, uint64_t freq_bitmask);
+rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_type,
+                                        uint64_t freq_bitmask);
 
 /**
  * @brief Get the dpm policy for a device
@@ -3814,8 +3760,7 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
  *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
  */
-rsmi_status_t rsmi_dev_soc_pstate_get(uint32_t dv_ind,
-                             rsmi_dpm_policy_t* policy);
+rsmi_status_t rsmi_dev_soc_pstate_get(uint32_t dv_ind, rsmi_dpm_policy_t *policy);
 
 /**
  * @brief Set the dpm policy for a device
@@ -3832,8 +3777,7 @@ rsmi_status_t rsmi_dev_soc_pstate_get(uint32_t dv_ind,
  *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
  */
-rsmi_status_t rsmi_dev_soc_pstate_set(uint32_t dv_ind,
-                             uint32_t policy_id);
+rsmi_status_t rsmi_dev_soc_pstate_set(uint32_t dv_ind, uint32_t policy_id);
 
 /**
  * @brief Get the xgmi per-link power down policy parameter for a device
@@ -3851,8 +3795,7 @@ rsmi_status_t rsmi_dev_soc_pstate_set(uint32_t dv_ind,
  *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
  */
-rsmi_status_t rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
-                             rsmi_dpm_policy_t* xgmi_plpd);
+rsmi_status_t rsmi_dev_xgmi_plpd_get(uint32_t dv_ind, rsmi_dpm_policy_t *xgmi_plpd);
 
 /**
  * @brief Set the xgmi per-link power down policy parameter for a device
@@ -3872,8 +3815,7 @@ rsmi_status_t rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
  *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
  */
-rsmi_status_t rsmi_dev_xgmi_plpd_set(uint32_t dv_ind,
-                             uint32_t plpd_id);
+rsmi_status_t rsmi_dev_xgmi_plpd_set(uint32_t dv_ind, uint32_t plpd_id);
 
 /**
  * @brief Get the status of the Process Isolation
@@ -3890,8 +3832,7 @@ rsmi_status_t rsmi_dev_xgmi_plpd_set(uint32_t dv_ind,
  *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
  */
-rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind,
-                             uint32_t* pisolate);
+rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind, uint32_t *pisolate);
 
 /**
  * @brief Enable/disable the system Process Isolation
@@ -3908,14 +3849,14 @@ rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind,
  *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
  */
-rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
-                             uint32_t pisolate);
+rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind, uint32_t pisolate);
 
 /**
  * @brief Run the cleaner shader to clean up data in LDS/GPRs
  *
  * @details Given a device index @p dv_ind, this function will clear the
- * GPU local data  of this device. This can be called between user logins to prevent information leak.
+ * GPU local data  of this device. This can be called between user logins to prevent information
+ * leak.
  *
  *  @note This function requires root access
  *
@@ -3946,8 +3887,7 @@ rsmi_status_t rsmi_dev_gpu_run_cleaner_shader(uint32_t dv_ind);
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
  *
  */
-rsmi_status_t
-rsmi_version_get(rsmi_version_t *version);
+rsmi_status_t rsmi_version_get(rsmi_version_t *version);
 
 /**
  *  @brief Get the driver version string for the current system.
@@ -3974,9 +3914,7 @@ rsmi_version_get(rsmi_version_t *version);
  *  large enough to hold the entire name. In this case, only @p len bytes will
  *  be written.
  */
-rsmi_status_t
-rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
-                                                                uint32_t len);
+rsmi_status_t rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str, uint32_t len);
 
 /**
  *  @brief Get the VBIOS identifer string
@@ -4004,8 +3942,7 @@ rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len);
+rsmi_status_t rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len);
 
 /**
  *  @brief Get the VBIOS Build string
@@ -4033,8 +3970,8 @@ rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_vbios_build_number_get(uint32_t dv_ind, char *vbios_build_number, uint32_t len);
+rsmi_status_t rsmi_dev_vbios_build_number_get(uint32_t dv_ind, char *vbios_build_number,
+                                              uint32_t len);
 
 /**
  *  @brief Get the firmware versions for a device
@@ -4060,9 +3997,8 @@ rsmi_dev_vbios_build_number_get(uint32_t dv_ind, char *vbios_build_number, uint3
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
-                                                        uint64_t *fw_version);
+rsmi_status_t rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
+                                            uint64_t *fw_version);
 
 /**
  *  @brief Get the target graphics version for a GPU device
@@ -4084,8 +4020,7 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind,
-                                                  uint64_t *gfx_version);
+rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind, uint64_t *gfx_version);
 
 /** @} */  // end of VersQuer
 
@@ -4121,8 +4056,8 @@ rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_ecc_count_get(uint32_t dv_ind,
-                              rsmi_gpu_block_t block, rsmi_error_count_t *ec);
+rsmi_status_t rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
+                                     rsmi_error_count_t *ec);
 
 /**
  *  @brief Retrieve the enabled ECC bit-mask
@@ -4151,8 +4086,7 @@ rsmi_status_t rsmi_dev_ecc_count_get(uint32_t dv_ind,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
-                                                    uint64_t *enabled_blocks);
+rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind, uint64_t *enabled_blocks);
 
 /**
  *  @brief Retrieve the ECC status for a GPU block
@@ -4180,8 +4114,7 @@ rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
  *
  */
 rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
-                                                  rsmi_ras_err_state_t *state);
-
+                                      rsmi_ras_err_state_t *state);
 
 /**
  *  @brief Returns RAS features info.
@@ -4204,9 +4137,7 @@ rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_ras_feature_info_get(
-  uint32_t dv_ind, rsmi_ras_feature_info_t *ras_feature);
-
+rsmi_status_t rsmi_ras_feature_info_get(uint32_t dv_ind, rsmi_ras_feature_info_t *ras_feature);
 
 /**
  *  @brief Get a description of a provided RSMI error status
@@ -4222,8 +4153,7 @@ rsmi_status_t rsmi_ras_feature_info_get(
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
  *
  */
-rsmi_status_t
-rsmi_status_string(rsmi_status_t status, const char **status_string);
+rsmi_status_t rsmi_status_string(rsmi_status_t status, const char **status_string);
 
 /** @} */  // end of ErrQuer
 
@@ -4348,8 +4278,7 @@ rsmi_status_string(rsmi_status_t status, const char **status_string);
  *  group
  *
  */
-rsmi_status_t
-rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group);
+rsmi_status_t rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group);
 
 /**
  *  @brief Create a performance counter object
@@ -4379,9 +4308,8 @@ rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group);
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t
-rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
-                                            rsmi_event_handle_t *evnt_handle);
+rsmi_status_t rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
+                                      rsmi_event_handle_t *evnt_handle);
 
 /**
  *  @brief Deallocate a performance counter object
@@ -4396,8 +4324,7 @@ rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t
-rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle);
+rsmi_status_t rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle);
 
 /**
  *  @brief Issue performance counter control commands
@@ -4416,9 +4343,8 @@ rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle);
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t
-rsmi_counter_control(rsmi_event_handle_t evt_handle,
-                                  rsmi_counter_command_t cmd, void *cmd_args);
+rsmi_status_t rsmi_counter_control(rsmi_event_handle_t evt_handle, rsmi_counter_command_t cmd,
+                                   void *cmd_args);
 
 /**
  *  @brief Read the current value of a performance counter
@@ -4437,9 +4363,7 @@ rsmi_counter_control(rsmi_event_handle_t evt_handle,
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t
-rsmi_counter_read(rsmi_event_handle_t evt_handle,
-                                                 rsmi_counter_value_t *value);
+rsmi_status_t rsmi_counter_read(rsmi_event_handle_t evt_handle, rsmi_counter_value_t *value);
 
 /**
  *  @brief Get the number of currently available counters
@@ -4460,9 +4384,8 @@ rsmi_counter_read(rsmi_event_handle_t evt_handle,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_counter_available_counters_get(uint32_t dv_ind,
-                                 rsmi_event_group_t grp, uint32_t *available);
+rsmi_status_t rsmi_counter_available_counters_get(uint32_t dv_ind, rsmi_event_group_t grp,
+                                                  uint32_t *available);
 /** @} */  // end of PerfCntr
 
 /*****************************************************************************/
@@ -4503,8 +4426,7 @@ rsmi_counter_available_counters_get(uint32_t dv_ind,
  *  processes for which information was available, but not enough space was
  *  provided as indicated by @p procs and @p num_items, on input.
  */
-rsmi_status_t
-rsmi_compute_process_info_get(rsmi_process_info_t *procs, uint32_t *num_items);
+rsmi_status_t rsmi_compute_process_info_get(rsmi_process_info_t *procs, uint32_t *num_items);
 
 /**
  *  @brief Get process information about a specific process
@@ -4527,8 +4449,7 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs, uint32_t *num_items);
  *  found for the provided @p pid
  *
  */
-rsmi_status_t
-rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_info_t *proc);
+rsmi_status_t rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_info_t *proc);
 
 /**
  *  @brief Get the device indices currently being used by a process
@@ -4564,8 +4485,7 @@ rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_info_t *proc);
  *  provided as indicated by @p dv_indices and @p num_devices, on input.
  *
  */
-rsmi_status_t
-rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
+rsmi_status_t rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
                                             uint32_t *num_devices);
 
 /**
@@ -4587,9 +4507,8 @@ rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_compute_process_info_by_device_get(uint32_t pid, uint32_t dv_ind,
-                                                rsmi_process_info_t *proc);
+rsmi_status_t rsmi_compute_process_info_by_device_get(uint32_t pid, uint32_t dv_ind,
+                                                      rsmi_process_info_t *proc);
 
 /** @} */  // end of SysInfo
 
@@ -4622,8 +4541,7 @@ rsmi_compute_process_info_by_device_get(uint32_t pid, uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status);
+rsmi_status_t rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status);
 
 /**
  * @brief Reset the XGMI error status for a device
@@ -4637,8 +4555,7 @@ rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status);
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t
-rsmi_dev_xgmi_error_reset(uint32_t dv_ind);
+rsmi_status_t rsmi_dev_xgmi_error_reset(uint32_t dv_ind);
 
 /**
  *  @brief Retrieve the XGMI hive id for a device
@@ -4658,8 +4575,7 @@ rsmi_dev_xgmi_error_reset(uint32_t dv_ind);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_dev_xgmi_hive_id_get(uint32_t dv_ind, uint64_t *hive_id);
+rsmi_status_t rsmi_dev_xgmi_hive_id_get(uint32_t dv_ind, uint64_t *hive_id);
 
 /** @} */  // end of SysInfo
 
@@ -4686,8 +4602,7 @@ rsmi_dev_xgmi_hive_id_get(uint32_t dv_ind, uint64_t *hive_id);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_topo_get_numa_node_number(uint32_t dv_ind, uint32_t *numa_node);
+rsmi_status_t rsmi_topo_get_numa_node_number(uint32_t dv_ind, uint32_t *numa_node);
 
 /**
  *  @brief Retrieve the weight for a connection between 2 GPUs
@@ -4709,9 +4624,7 @@ rsmi_topo_get_numa_node_number(uint32_t dv_ind, uint32_t *numa_node);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                          uint64_t *weight);
+rsmi_status_t rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst, uint64_t *weight);
 
 /**
  *  @brief Retreive minimal and maximal io link bandwidth between 2 GPUs
@@ -4735,9 +4648,8 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t
-rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                          uint64_t *min_bandwidth, uint64_t *max_bandwidth);
+rsmi_status_t rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                                        uint64_t *min_bandwidth, uint64_t *max_bandwidth);
 
 /**
  *  @brief Retrieve the hops and the connection type between GPU to GPU/CPU
@@ -4771,9 +4683,8 @@ rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                        uint64_t *hops, RSMI_IO_LINK_TYPE *type);
+rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, uint64_t *hops,
+                                      RSMI_IO_LINK_TYPE *type);
 
 /**
  *  @brief Return P2P availability status between 2 GPUs
@@ -4795,9 +4706,7 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t
-rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                       bool *accessible);
+rsmi_status_t rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst, bool *accessible);
 
 /**
  *  @brief Retrieve connection type and P2P capabilities between 2 GPUs
@@ -4805,9 +4714,9 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf}  @platform{guest_mvf}
  *
  *  @details Given a source processor handle @p processor_handle_src and
- *  a destination processor handle @p processor_handle_dst, a pointer to an amdsmi_link_type_t @p type,
- *  and a pointer to rsmi_p2p_capability_t @p cap. This function will write the connection type,
- *  and io link capabilities between the device
+ *  a destination processor handle @p processor_handle_dst, a pointer to an amdsmi_link_type_t @p
+ * type, and a pointer to rsmi_p2p_capability_t @p cap. This function will write the connection
+ * type, and io link capabilities between the device
  *  @p processor_handle_src and @p processor_handle_dst to the memory
  *  pointed to by @p cap and @p type.
  *
@@ -4826,9 +4735,8 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
  */
-rsmi_status_t
-rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                         RSMI_IO_LINK_TYPE *type, rsmi_p2p_capability_t *cap);
+rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                                       RSMI_IO_LINK_TYPE *type, rsmi_p2p_capability_t *cap);
 
 /** @} */  // end of HWTopo
 
@@ -4867,9 +4775,8 @@ rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  only @p len bytes will be written.
  *
  */
-rsmi_status_t
-rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
-                               uint32_t len);
+rsmi_status_t rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
+                                             uint32_t len);
 
 /**
  *  @brief Modifies a selected device's compute partition setting.
@@ -4895,9 +4802,8 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
  *  because it is already being used - device is busy
  *
  */
-rsmi_status_t
-rsmi_dev_compute_partition_set(uint32_t dv_ind,
-                               rsmi_compute_partition_type_t compute_partition);
+rsmi_status_t rsmi_dev_compute_partition_set(uint32_t dv_ind,
+                                             rsmi_compute_partition_type_t compute_partition);
 
 /**
  *  @brief Retrieves the partition_id for a desired device
@@ -4953,9 +4859,9 @@ rsmi_status_t rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id)
  *  only @p len bytes will be written.
  *
  */
-rsmi_status_t
-rsmi_dev_compute_partition_capabilities_get(uint32_t dv_ind, char *compute_partition_caps,
-                                            uint32_t len);
+rsmi_status_t rsmi_dev_compute_partition_capabilities_get(uint32_t dv_ind,
+                                                          char *compute_partition_caps,
+                                                          uint32_t len);
 
 /**
  *  @brief Retrieves the compute partition supported xcp configs
@@ -4987,9 +4893,9 @@ rsmi_dev_compute_partition_capabilities_get(uint32_t dv_ind, char *compute_parti
  *  only @p len bytes will be written.
  *
  */
-rsmi_status_t
-rsmi_dev_compute_partition_supported_xcp_configs_get(uint32_t dv_ind, char *supported_configs,
-                                                     uint32_t len);
+rsmi_status_t rsmi_dev_compute_partition_supported_xcp_configs_get(uint32_t dv_ind,
+                                                                   char *supported_configs,
+                                                                   uint32_t len);
 
 /**
  *  @brief Retrieves the compute partition supported NPS configs
@@ -5021,9 +4927,9 @@ rsmi_dev_compute_partition_supported_xcp_configs_get(uint32_t dv_ind, char *supp
  *  only @p len bytes will be written.
  *
  */
-rsmi_status_t
-rsmi_dev_compute_partition_supported_nps_configs_get(uint32_t dv_ind, char *supported_configs,
-                                                     uint32_t len);
+rsmi_status_t rsmi_dev_compute_partition_supported_nps_configs_get(uint32_t dv_ind,
+                                                                   char *supported_configs,
+                                                                   uint32_t len);
 
 /**
  *  @brief Retrieves the current compute partition xcp config
@@ -5082,32 +4988,34 @@ rsmi_status_t rsmi_dev_current_compute_xcp_config_get(uint32_t dv_ind, char *cur
  *  because it is already being used - device is busy
  *
  */
-rsmi_status_t
-rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
-                                          rsmi_compute_partition_type_t xcp_config);
+rsmi_status_t rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
+                                                        rsmi_compute_partition_type_t xcp_config);
 
 /**
  *  @brief Retrieves a selected device's compute partition resource profile.
  *
  *  @details Given a device index @p dv_ind, a pointer to a requested resorce of
- *  rsmi_accelerator_partition_resource_type_t @p type, and a rsmi_accelerator_partition_resource_profile_t
+ *  rsmi_accelerator_partition_resource_type_t @p type, and a
+ * rsmi_accelerator_partition_resource_profile_t
  *  @p profile this function will write the current XCP config's
  *  resource profile to its @p profile.
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[in] type a pointer to a requested resource using enum ::rsmi_accelerator_partition_resource_type_t
- * 
- *  @param[inout] profile a pointer to the requested rsmi_accelerator_partition_resource_profile_t details
+ *  @param[in] type a pointer to a requested resource using enum
+ * ::rsmi_accelerator_partition_resource_type_t
+ *
+ *  @param[inout] profile a pointer to the requested rsmi_accelerator_partition_resource_profile_t
+ * details
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_dev_compute_partition_resource_profile_get(uint32_t dv_ind,
-                                  rsmi_accelerator_partition_resource_type_t *type,
-                                  rsmi_accelerator_partition_resource_profile_t *profile);
+rsmi_status_t rsmi_dev_compute_partition_resource_profile_get(
+    uint32_t dv_ind, rsmi_accelerator_partition_resource_type_t *type,
+    rsmi_accelerator_partition_resource_profile_t *profile);
 
 /** @} */  // end of ComputePartition
 
@@ -5146,9 +5054,7 @@ rsmi_status_t rsmi_dev_compute_partition_resource_profile_get(uint32_t dv_ind,
  *  only @p len bytes will be written.
  *
  */
-rsmi_status_t
-rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
-                              uint32_t len);
+rsmi_status_t rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition, uint32_t len);
 
 /**
  *  @brief Retrieves the available memory partition capabilities
@@ -5180,8 +5086,8 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
  *  only @p len bytes will be written.
  *
  */
-rsmi_status_t rsmi_dev_memory_partition_capabilities_get(
-                uint32_t dv_ind, char *memory_partition_caps, uint32_t len);
+rsmi_status_t rsmi_dev_memory_partition_capabilities_get(uint32_t dv_ind,
+                                                         char *memory_partition_caps, uint32_t len);
 
 /**
  *  @brief Modifies a selected device's current memory partition setting.
@@ -5202,13 +5108,12 @@ rsmi_status_t rsmi_dev_memory_partition_capabilities_get(
  *  support this function
  *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
  *  the amdgpu driver
-  *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
+ *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
  *  because it is already being used - device is busy
  *
  */
-rsmi_status_t
-rsmi_dev_memory_partition_set(uint32_t dv_ind,
-                              rsmi_memory_partition_type_t memory_partition);
+rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
+                                            rsmi_memory_partition_type_t memory_partition);
 
 /** @} */  // end of memory_partition
 
@@ -5322,7 +5227,6 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
  *  @{
  */
 
-
 /**
  * @brief Get a function name iterator of supported RSMI functions for a device
  *
@@ -5345,9 +5249,8 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t
-rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
-                                          rsmi_func_id_iter_handle_t *handle);
+rsmi_status_t rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
+                                                    rsmi_func_id_iter_handle_t *handle);
 
 /**
  * @brief Get a variant iterator for a given handle
@@ -5373,9 +5276,8 @@ rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t
-rsmi_dev_supported_variant_iterator_open(rsmi_func_id_iter_handle_t obj_h,
-                                        rsmi_func_id_iter_handle_t *var_iter);
+rsmi_status_t rsmi_dev_supported_variant_iterator_open(rsmi_func_id_iter_handle_t obj_h,
+                                                       rsmi_func_id_iter_handle_t *var_iter);
 
 /**
  * @brief Advance a function identifer iterator
@@ -5395,8 +5297,7 @@ rsmi_dev_supported_variant_iterator_open(rsmi_func_id_iter_handle_t obj_h,
  * exhausted
  *
  */
-rsmi_status_t
-rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle);
+rsmi_status_t rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle);
 
 /**
  * @brief Close a variant iterator handle
@@ -5409,8 +5310,7 @@ rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle);
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t
-rsmi_dev_supported_func_iterator_close(rsmi_func_id_iter_handle_t *handle);
+rsmi_status_t rsmi_dev_supported_func_iterator_close(rsmi_func_id_iter_handle_t *handle);
 
 /**
  * @brief Get the value associated with a function/variant iterator
@@ -5430,9 +5330,8 @@ rsmi_dev_supported_func_iterator_close(rsmi_func_id_iter_handle_t *handle);
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t
-rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
-                                                 rsmi_func_id_value_t *value);
+rsmi_status_t rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
+                                       rsmi_func_id_value_t *value);
 
 /** @} */  // end of APISupport
 
@@ -5456,8 +5355,7 @@ rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
  *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
-rsmi_status_t
-rsmi_event_notification_init(uint32_t dv_ind);
+rsmi_status_t rsmi_event_notification_init(uint32_t dv_ind);
 
 /**
  * @brief Specify which events to collect for a device
@@ -5485,8 +5383,7 @@ rsmi_event_notification_init(uint32_t dv_ind);
  *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
  */
-rsmi_status_t
-rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask);
+rsmi_status_t rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask);
 
 /**
  * @brief Collect event notifications, waiting a specified amount of time
@@ -5528,9 +5425,8 @@ rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask);
  * @retval ::RSMI_STATUS_NO_DATA No events were found to collect.
  *
  */
-rsmi_status_t
-rsmi_event_notification_get(int timeout_ms,
-                     uint32_t *num_elem, rsmi_evt_notification_data_t *data);
+rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t *num_elem,
+                                          rsmi_evt_notification_data_t *data);
 
 /**
  * @brief Close any file handles and free any resources used by event
@@ -5553,7 +5449,6 @@ rsmi_event_notification_get(int timeout_ms,
 rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind);
 
 /** @} */  // end of EvntNotif
-
 
 /*****************************************************************************/
 /** @defgroup GPU Metric Functions
@@ -5578,8 +5473,8 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind);
  *            does not exist for the given device
  *
  */
-rsmi_status_t
-rsmi_dev_metrics_header_info_get(uint32_t dv_ind, metrics_table_header_t* header_value);
+rsmi_status_t rsmi_dev_metrics_header_info_get(uint32_t dv_ind,
+                                               metrics_table_header_t *header_value);
 
 /**
  *  @brief Get the 'xcd_counter' from the GPU metrics associated with the device
@@ -5597,8 +5492,7 @@ rsmi_dev_metrics_header_info_get(uint32_t dv_ind, metrics_table_header_t* header
  *            does not exist for the given device
  *
  */
-rsmi_status_t
-rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value);
+rsmi_status_t rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t *xcd_counter_value);
 
 /**
  *  @brief Get the log from the GPU metrics associated with the device
@@ -5611,8 +5505,7 @@ rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value);
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t
-rsmi_dev_metrics_log_get(uint32_t dv_ind);
+rsmi_status_t rsmi_dev_metrics_log_get(uint32_t dv_ind);
 
 /** @} */  // end of DevMetricsHeaderInfoGet
 
@@ -5631,23 +5524,23 @@ rsmi_dev_metrics_log_get(uint32_t dv_ind);
  *  https://docs.kernel.org/admin-guide/sysctl/kernel.html#modprobe
  *  with no extra parameters as specified in
  *  https://docs.kernel.org/gpu/amdgpu/module-parameters.html.
- * 
+ *
  *  Use this function with caution, as it will unload and reload the AMD GPU
- *  driver: `modprobe -r amdgpu && modprobe amdgpu`. 
- *  
+ *  driver: `modprobe -r amdgpu && modprobe amdgpu`.
+ *
  *  Any process or workload using the AMD GPU driver is REQUIRED to be
  *  stopped before calling this function. Otherwise, function will return
  *  ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
  *  the amdgpu driver.
- * 
+ *
  *  User is REQUIRED to have root/admin privileges to call this function.
  *  Otherwise, this function will return ::RSMI_STATUS_PERMISSION.
- * 
+ *
  *  This API will take time to complete, as we are checking the driver's
  *  loading status to confirm it reloaded properly. If
  *  ::RSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
  *  did not reload properly and the user should check dmesg logs.
- * 
+ *
  *  This function has been created in order to conviently reload the
  *  AMD GPU driver once `rsmi_dev_memory_partition_set()`
  *  successfully has been changed on Baremetal systems.

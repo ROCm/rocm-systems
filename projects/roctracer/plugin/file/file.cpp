@@ -255,8 +255,7 @@ class file_plugin_t {
         output_file = get_output_file(ACTIVITY_DOMAIN_ROCTX);
         ss << std::dec << record->begin_ns << " " << record->process_id << ":" << record->thread_id
            << " " << record->op << ":" << data->args.id << ":\""
-           << (data->args.message ? data->args.message : "") << "\""
-           << "\n";
+           << (data->args.message ? data->args.message : "") << "\"" << "\n";
         *output_file << ss.str();
         break;
       }

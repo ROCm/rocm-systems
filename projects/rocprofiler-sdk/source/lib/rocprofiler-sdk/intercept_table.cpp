@@ -249,7 +249,8 @@ template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
 }  // namespace intercept_table
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_query_intercept_table_name(rocprofiler_intercept_table_t kind,
                                        const char**                  name,

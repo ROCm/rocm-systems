@@ -134,10 +134,12 @@ void ApplicationParser::SetApplicationEnv(const char* app_name) {
 void ApplicationParser::GetKernelInfoForRunningApplication(
     std::vector<profiler_kernel_info_t>* kernel_info_output) {
   profiler_kernel_info_t kinfo;
-  for (const auto &line : output_lines) {
+  for (const auto& line : output_lines) {
     // Skip all the lines until  "Dispatch_ID" is found
-    if (line.empty() || line.find("Dispatch_ID") == std::string::npos || line.find("Kernel_Name(\"__amd_") != std::string::npos) {
-        continue;  // Skip to the next line if "Dispatch_ID" is not found or "Kernel_Name("__amd_" is found
+    if (line.empty() || line.find("Dispatch_ID") == std::string::npos ||
+        line.find("Kernel_Name(\"__amd_") != std::string::npos) {
+      continue;  // Skip to the next line if "Dispatch_ID" is not found or "Kernel_Name("__amd_" is
+                 // found
     }
 
     // Parse individual values and store them in the dispatch struct
@@ -519,8 +521,7 @@ TEST_F(LoadUnloadTest, WhenLoadingFirstTimeThenToolLoadsUnloadsSuccessfully) {
         std::string agentname;
         agentname.resize(64);
         hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agentname.data());
-        if ((agentname.find("gfx11") != std::string::npos))
-          bSkipCounterNoneZeroCheck = true;
+        if ((agentname.find("gfx11") != std::string::npos)) bSkipCounterNoneZeroCheck = true;
 
         hsa_device_type_t type;
         return hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
@@ -707,12 +708,12 @@ TEST_F(ProfilerAPITest, WhenRunningMultipleStreamsSerializationWorksFine) {
 
 class CodeobjTest : public ::testing::Test {
  public:
-  virtual void SetUp(const char* app_name){};
-  virtual void TearDown(){};
+  virtual void SetUp(const char* app_name) {};
+  virtual void TearDown() {};
   static void FlushCallback(const rocprofiler_record_header_t* record,
                             const rocprofiler_record_header_t* end_record,
                             rocprofiler_session_id_t session_id,
-                            rocprofiler_buffer_id_t buffer_id){};
+                            rocprofiler_buffer_id_t buffer_id) {};
 
   void SetupRocprofiler() {
     int result = ROCPROFILER_STATUS_ERROR;
@@ -768,8 +769,7 @@ TEST_F(CodeobjTest, WhenRunningProfilerWithCodeobjCapture) {
     if (!path) continue;
     std::string fpath(path);
     size_t pos = fpath.find("#offset=");
-    if (pos != std::string::npos && fpath.find("&size=", pos) != std::string::npos)
-      capture_count ++;
+    if (pos != std::string::npos && fpath.find("&size=", pos) != std::string::npos) capture_count++;
   }
   EXPECT_GE(capture_count, 2);
 
@@ -857,7 +857,7 @@ TEST_F(CodeobjTest, WhenRunningProfilerWithMultipleCaptureAndCopy) {
 class ATTCollection : public ::testing::Test {
  public:
   void SetUp() override { bCollected = false; };
-  void TearDown() override{};
+  void TearDown() override {};
   static bool bCollected;
 
   static void FlushCallback(const rocprofiler_record_header_t* record,
@@ -1102,8 +1102,7 @@ class MTBinaryTest : public ::testing::Test {
     int dispatch_counter = 0;
     for (size_t i = 0; i < counter_map.size(); i++) {
       std::string* dispatch_id = parser.ReadCounter(i, 1);
-      if (dispatch_id && dispatch_id->find("dispatch") != std::string::npos)
-        dispatch_counter++;
+      if (dispatch_id && dispatch_id->find("dispatch") != std::string::npos) dispatch_counter++;
     }
 
     // clear entries
@@ -1122,8 +1121,7 @@ class MTBinaryTest : public ::testing::Test {
     std::array<char, 2048> buffer{};
     std::string profiler_output;
     std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
-    if (!pipe)
-      throw std::runtime_error("popen() failed!");
+    if (!pipe) throw std::runtime_error("popen() failed!");
     while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr)
       profiler_output += buffer.data();
     return profiler_output;
@@ -1173,8 +1171,7 @@ class ProfilerMQTest : public ::testing::Test {
     uint32_t dispatch_counter = 0;
     for (size_t i = 0; i < counter_map.size(); i++) {
       std::string* dispatch_id = parser.ReadCounter(i, 1);
-      if (dispatch_id && dispatch_id->find("dispatch") != std::string::npos)
-        dispatch_counter++;
+      if (dispatch_id && dispatch_id->find("dispatch") != std::string::npos) dispatch_counter++;
     }
     // dispatch count test: Number of dispatches must be equal to
     // number of kernel launches in test_app
@@ -1371,15 +1368,13 @@ TEST_F(VectorAddCTFMPITest, WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(
  * ###################################################
  */
 TEST(ProfilerMPTest, DISABLED_WhenRunningMultiProcessTestItPasses) {
-  int num_threads = 3; // Create 3 threads
+  int num_threads = 3;  // Create 3 threads
 
   pid_t childpid = fork();
 
   if (childpid == 0) return;
 
   std::vector<std::thread> threads(num_threads);
-  for (auto& thread : threads)
-    thread = std::move(std::thread(KernelLaunch));
-  for (auto& thread : threads)
-    thread.join();
+  for (auto& thread : threads) thread = std::move(std::thread(KernelLaunch));
+  for (auto& thread : threads) thread.join();
 }

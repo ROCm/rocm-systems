@@ -192,7 +192,8 @@ main(int argc, char** argv)
         }
 
         if(is_roi_valid)
-        {}
+        {
+        }
         auto start_time = std::chrono::high_resolution_clock::now();
         CHECK_ROCJPEG(
             rocJpegDecode(rocjpeg_handle, rocjpeg_stream_handle, &decode_params, &output_image));

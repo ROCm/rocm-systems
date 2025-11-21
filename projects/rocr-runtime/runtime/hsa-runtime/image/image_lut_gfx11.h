@@ -51,10 +51,10 @@ namespace image {
 
 class ImageLutGfx11 : public ImageLutKv {
  public:
-  ImageLutGfx11() { }
+  ImageLutGfx11() {}
 
   ImageProperty MapFormat(const hsa_ext_image_format_t& format,
-                                  hsa_ext_image_geometry_t geometry) const;
+                          hsa_ext_image_geometry_t geometry) const;
 
  private:
   // Lookup table of channel format property. Based on HSA Programmer's

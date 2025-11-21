@@ -52,8 +52,7 @@
 
 class MemoryAllocationTest : public TestBase {
  public:
-    MemoryAllocationTest(bool launch_GroupMemory,
-                         bool launch_BasicAllocateFree);
+  MemoryAllocationTest(bool launch_GroupMemory, bool launch_BasicAllocateFree);
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~MemoryAllocationTest();
@@ -81,8 +80,7 @@ class MemoryAllocationTest : public TestBase {
 
  private:
   void GroupMemoryDynamicAllocation(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
-  void MemoryBasicAllocationAndFree(hsa_agent_t agent,
-                                               hsa_amd_memory_pool_t pool);
+  void MemoryBasicAllocationAndFree(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void MemoryAllocateContiguousTest(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
 
   void WriteAQLPktToQueue(hsa_queue_t* q);

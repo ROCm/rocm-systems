@@ -6,15 +6,15 @@
 *
 ***********************************************************************************************************************/
 
-#if !defined (__GFX12_GB_REG_H__)
+#if !defined(__GFX12_GB_REG_H__)
 #define __GFX12_GB_REG_H__
 
 /*
-*    gfx12_gb_reg.h
-*
-*    Register Spec Release:  1.0
-*
-*/
+ *    gfx12_gb_reg.h
+ *
+ *    Register Spec Release:  1.0
+ *
+ */
 
 //
 // Make sure the necessary endian defines are there.
@@ -26,32 +26,32 @@
 #endif
 
 union GB_ADDR_CONFIG_GFX12 {
-    struct {
+  struct {
 #if defined(LITTLEENDIAN_CPU)
-        unsigned int                       NUM_PIPES : 3;
-        unsigned int            PIPE_INTERLEAVE_SIZE : 3;
-        unsigned int            MAX_COMPRESSED_FRAGS : 2;
-        unsigned int                        NUM_PKRS : 3;
-        unsigned int                                 : 8;
-        unsigned int              NUM_SHADER_ENGINES : 4;
-        unsigned int                                 : 3;
-        unsigned int                   NUM_RB_PER_SE : 2;
-        unsigned int                                 : 4;
+    unsigned int NUM_PIPES : 3;
+    unsigned int PIPE_INTERLEAVE_SIZE : 3;
+    unsigned int MAX_COMPRESSED_FRAGS : 2;
+    unsigned int NUM_PKRS : 3;
+    unsigned int : 8;
+    unsigned int NUM_SHADER_ENGINES : 4;
+    unsigned int : 3;
+    unsigned int NUM_RB_PER_SE : 2;
+    unsigned int : 4;
 #elif defined(BIGENDIAN_CPU)
-        unsigned int                                 : 4;
-        unsigned int                   NUM_RB_PER_SE : 2;
-        unsigned int                                 : 3;
-        unsigned int              NUM_SHADER_ENGINES : 4;
-        unsigned int                                 : 8;
-        unsigned int                        NUM_PKRS : 3;
-        unsigned int            MAX_COMPRESSED_FRAGS : 2;
-        unsigned int            PIPE_INTERLEAVE_SIZE : 3;
-        unsigned int                       NUM_PIPES : 3;
+    unsigned int : 4;
+    unsigned int NUM_RB_PER_SE : 2;
+    unsigned int : 3;
+    unsigned int NUM_SHADER_ENGINES : 4;
+    unsigned int : 8;
+    unsigned int NUM_PKRS : 3;
+    unsigned int MAX_COMPRESSED_FRAGS : 2;
+    unsigned int PIPE_INTERLEAVE_SIZE : 3;
+    unsigned int NUM_PIPES : 3;
 #endif
-    } bitfields, bits;
-    unsigned int    u32All;
-    int             i32All;
-    float           f32All;
+  } bitfields, bits;
+  unsigned int u32All;
+  int i32All;
+  float f32All;
 };
 
 #endif

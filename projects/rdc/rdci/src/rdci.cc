@@ -122,8 +122,7 @@ int main(int argc, char** argv) {
     return e.error_code();
   } catch (...) {
     if (subsystem && subsystem->is_json_output()) {
-      std::cout << "\"status\": \"error\", \"description\": "
-                << "\"Unhandled exception.\"";
+      std::cout << "\"status\": \"error\", \"description\": " << "\"Unhandled exception.\"";
     } else {
       std::cout << "Unhandled exception." << std::endl;
     }

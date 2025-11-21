@@ -46,7 +46,8 @@
         }                                                                                          \
     } while(0)
 
-extern "C" {
+extern "C"
+{
 extern void
 __hipUnregisterFatBinary(void** modules);
 }
@@ -192,43 +193,43 @@ main(int argc, char** argv)
 
         // --- Device Properties ---
         std::cout << "\n[Device Properties]\n";
-        std::cout << std::left << std::setw(28) << "major.minor"
-                  << ": " << prop.major << "." << prop.minor << "\n";
+        std::cout << std::left << std::setw(28) << "major.minor" << ": " << prop.major << "."
+                  << prop.minor << "\n";
 
 // AMD-specific helpful fields if present in your HIP version:
 // prop.gcnArchName may exist; print defensively using std::string
 #if defined(__HIP_PLATFORM_AMD__)
         if(!std::string_view{prop.gcnArchName}.empty())
         {
-            std::cout << std::left << std::setw(28) << "gcnArchName"
-                      << ": " << prop.gcnArchName << "\n";
+            std::cout << std::left << std::setw(28) << "gcnArchName" << ": " << prop.gcnArchName
+                      << "\n";
         }
 #endif
 
         printBytes("totalGlobalMem", prop.totalGlobalMem);
         printBytes("sharedMemPerBlock", prop.sharedMemPerBlock);
         printBytes("sharedMemPerMultiprocessor", prop.sharedMemPerMultiprocessor);
-        std::cout << std::left << std::setw(28) << "regsPerBlock"
-                  << ": " << prop.regsPerBlock << "\n";
-        std::cout << std::left << std::setw(28) << "warpSize/wavefront"
-                  << ": " << prop.warpSize << "\n";
-        std::cout << std::left << std::setw(28) << "maxThreadsPerBlock"
-                  << ": " << prop.maxThreadsPerBlock << "\n";
+        std::cout << std::left << std::setw(28) << "regsPerBlock" << ": " << prop.regsPerBlock
+                  << "\n";
+        std::cout << std::left << std::setw(28) << "warpSize/wavefront" << ": " << prop.warpSize
+                  << "\n";
+        std::cout << std::left << std::setw(28) << "maxThreadsPerBlock" << ": "
+                  << prop.maxThreadsPerBlock << "\n";
         printArray3("maxThreadsDim", prop.maxThreadsDim);
         printArray3("maxGridSize", prop.maxGridSize);
-        std::cout << std::left << std::setw(28) << "clockRate (kHz)"
-                  << ": " << prop.clockRate << "\n";
-        std::cout << std::left << std::setw(28) << "memoryClockRate (kHz)"
-                  << ": " << prop.memoryClockRate << "\n";
-        std::cout << std::left << std::setw(28) << "memoryBusWidth (bits)"
-                  << ": " << prop.memoryBusWidth << "\n";
+        std::cout << std::left << std::setw(28) << "clockRate (kHz)" << ": " << prop.clockRate
+                  << "\n";
+        std::cout << std::left << std::setw(28) << "memoryClockRate (kHz)" << ": "
+                  << prop.memoryClockRate << "\n";
+        std::cout << std::left << std::setw(28) << "memoryBusWidth (bits)" << ": "
+                  << prop.memoryBusWidth << "\n";
         printBytes("totalConstMem", prop.totalConstMem);
-        std::cout << std::left << std::setw(28) << "multiProcessorCount"
-                  << ": " << prop.multiProcessorCount << "\n";
-        std::cout << std::left << std::setw(28) << "l2CacheSize (bytes)"
-                  << ": " << prop.l2CacheSize << "\n";
-        std::cout << std::left << std::setw(28) << "maxThreadsPerMultiProcessor"
-                  << ": " << prop.maxThreadsPerMultiProcessor << "\n";
+        std::cout << std::left << std::setw(28) << "multiProcessorCount" << ": "
+                  << prop.multiProcessorCount << "\n";
+        std::cout << std::left << std::setw(28) << "l2CacheSize (bytes)" << ": " << prop.l2CacheSize
+                  << "\n";
+        std::cout << std::left << std::setw(28) << "maxThreadsPerMultiProcessor" << ": "
+                  << prop.maxThreadsPerMultiProcessor << "\n";
         printBool("concurrentKernels", prop.concurrentKernels);
         printBool("cooperativeLaunch", prop.cooperativeLaunch);
         printBool("cooperativeMultiDeviceLaunch", prop.cooperativeMultiDeviceLaunch);
@@ -238,8 +239,8 @@ main(int argc, char** argv)
         printIfNonzero("pciDomainID", prop.pciDomainID);
         printIfNonzero("pciBusID", prop.pciBusID);
         printIfNonzero("pciDeviceID", prop.pciDeviceID);
-        std::cout << std::left << std::setw(28) << "isMultiGpuBoard"
-                  << ": " << (prop.isMultiGpuBoard != 0 ? "true" : "false") << "\n";
+        std::cout << std::left << std::setw(28) << "isMultiGpuBoard" << ": "
+                  << (prop.isMultiGpuBoard != 0 ? "true" : "false") << "\n";
 
         // --- Device Flags / Cache / SharedMem config are per current device context ---
         std::cout << "\n[Device Flags]\n";

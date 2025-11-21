@@ -1,14 +1,13 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 
 void error_check(hsa_status_t hsa_error_code, int line_num, const char* str) {
-  if (hsa_error_code != HSA_STATUS_SUCCESS &&
-      hsa_error_code != HSA_STATUS_INFO_BREAK) {
+  if (hsa_error_code != HSA_STATUS_SUCCESS && hsa_error_code != HSA_STATUS_INFO_BREAK) {
     printf("HSA Error Found!  In file: %s;   At line: %d\n", str, line_num);
     const char* string = nullptr;
     hsa_status_string(hsa_error_code, &string);
@@ -24,8 +23,7 @@ hsa_status_t FindGpuDevice(hsa_agent_t agent, void* data) {
   }
 
   hsa_device_type_t hsa_device_type;
-  hsa_status_t hsa_error_code =
-      hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &hsa_device_type);
+  hsa_status_t hsa_error_code = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &hsa_device_type);
   if (hsa_error_code != HSA_STATUS_SUCCESS) {
     return hsa_error_code;
   }
@@ -44,8 +42,7 @@ hsa_status_t FindCpuDevice(hsa_agent_t agent, void* data) {
   }
 
   hsa_device_type_t hsa_device_type;
-  hsa_status_t hsa_error_code =
-      hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &hsa_device_type);
+  hsa_status_t hsa_error_code = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &hsa_device_type);
   if (hsa_error_code != HSA_STATUS_SUCCESS) {
     return hsa_error_code;
   }
@@ -126,8 +123,7 @@ int CalcConcurrentQueues(vector<double> scores) {
   }
 
   for (size_t i = 1; i < scores.size(); ++i) {
-    if ((execpted_exec_time_array[i] - scores[i]) <
-        0.1 * execpted_exec_time_array[i])
+    if ((execpted_exec_time_array[i] - scores[i]) < 0.1 * execpted_exec_time_array[i])
       ++num_of_concurrent_queues;
   }
 

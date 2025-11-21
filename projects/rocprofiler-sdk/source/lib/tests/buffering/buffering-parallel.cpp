@@ -126,7 +126,8 @@ launch_threads(record_header_buffer_t& _buf,
 
 // computes the size of every raw_array size for a given type
 template <typename Tp, size_t... Idx>
-constexpr size_t get_data_size(std::index_sequence<Idx...>)
+constexpr size_t
+get_data_size(std::index_sequence<Idx...>)
 {
     size_t _v = 0;
     ((_v += sizeof(get_generated_array<Tp, Idx>())), ...);

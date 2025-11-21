@@ -30,46 +30,46 @@
 extern const std::vector<const char*> ShaderList;
 
 /* Common */
-extern const char *NoopIsa;
-extern const char *CopyDwordIsa;
-extern const char *InfiniteLoopIsa;
-extern const char *AtomicIncIsa;
+extern const char* NoopIsa;
+extern const char* CopyDwordIsa;
+extern const char* InfiniteLoopIsa;
+extern const char* AtomicIncIsa;
 
 /* KFDMemoryTest */
-extern const char *ScratchCopyDwordIsa;
-extern const char *PollMemoryIsa;
-extern const char *PollNCMemoryIsa;
-extern const char *CopyOnSignalIsa;
-extern const char *PollAndCopyIsa;
-extern const char *WriteFlagAndValueIsa;
-extern const char *WriteAndSignalIsa;
-extern const char *WriteReleaseVectorIsa;
-extern const char *WriteReleaseScalarIsa;
-extern const char *ReadAcquireVectorIsa;
-extern const char *ReadAcquireScalarIsa;
-extern const char *FlushBufferForAcquireReleaseIsa;
+extern const char* ScratchCopyDwordIsa;
+extern const char* PollMemoryIsa;
+extern const char* PollNCMemoryIsa;
+extern const char* CopyOnSignalIsa;
+extern const char* PollAndCopyIsa;
+extern const char* WriteFlagAndValueIsa;
+extern const char* WriteAndSignalIsa;
+extern const char* WriteReleaseVectorIsa;
+extern const char* WriteReleaseScalarIsa;
+extern const char* ReadAcquireVectorIsa;
+extern const char* ReadAcquireScalarIsa;
+extern const char* FlushBufferForAcquireReleaseIsa;
 
 /* KFDQMTest */
-extern const char *LoopIsa;
-extern const char *CheckCuMaskIsa;
+extern const char* LoopIsa;
+extern const char* CheckCuMaskIsa;
 
 /* KFDCWSRTest */
-extern const char *PersistentIterateIsa;
+extern const char* PersistentIterateIsa;
 
 /* KFDEvictTest */
-extern const char *ReadMemoryIsa;
+extern const char* ReadMemoryIsa;
 
 /* KFDGWSTest */
-extern const char *GwsInitIsa;
-extern const char *GwsAtomicIncreaseIsa;
+extern const char* GwsInitIsa;
+extern const char* GwsAtomicIncreaseIsa;
 
 /* HitTrapEvent */
-extern const char *JumpToTrapIsa;
-extern const char *TrapHandlerIsa;
+extern const char* JumpToTrapIsa;
+extern const char* TrapHandlerIsa;
 
 /* HitWatchPointEvent */
-extern const char *WatchReadIsa;
-extern const char *WatchWriteIsa;
-extern const char *WatchAtomicIsa;
+extern const char* WatchReadIsa;
+extern const char* WatchWriteIsa;
+extern const char* WatchAtomicIsa;
 
 #endif  // _SHADERSTORE_H_

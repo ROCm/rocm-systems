@@ -92,7 +92,7 @@ bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
   const char* hsaco_obj_files_path_str = getenv("HSACO_OBJ_FILES_PATH");
   fs::path hsaco_obj_files_path;
   Dl_info dl_info;
-  if(hsaco_obj_files_path_str) {
+  if (hsaco_obj_files_path_str) {
     hsaco_obj_files_path = fs::path(hsaco_obj_files_path_str);
   } else {
     hsaco_obj_files_path = fs::path(dl_info.dli_fname);
@@ -293,5 +293,5 @@ bool TestHsa::Cleanup() {
   if (my_queue_) hsa_queue_destroy(hsa_queue_);
   hsa_queue_ = NULL;
   agent_info_ = NULL;
-   return true;
+  return true;
 }

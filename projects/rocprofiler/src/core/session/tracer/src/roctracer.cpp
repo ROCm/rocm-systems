@@ -237,64 +237,57 @@ template <activity_domain_t domain> struct ApiTracer {
   };
 
   static void Exit(OperationId operation_id, TraceData* trace_data) {
-  rocprofiler::ROCProfiler_Singleton&  rocprofiler_singleton =
-  rocprofiler::ROCProfiler_Singleton::GetInstance();
+    rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton =
+        rocprofiler::ROCProfiler_Singleton::GetInstance();
     if (auto pool = activity_table.Get(operation_id)) {
-        if (rocprofiler_singleton.GetSession((*pool)->session_id) &&
-            rocprofiler_singleton
-                .GetSession((*pool)->session_id)
-                ->GetBuffer((*pool)->buffer_id)) {
-          if (rocprofiler_singleton
-                  .GetSession((*pool)->session_id)
-                  ->GetBuffer((*pool)->buffer_id)
-                  ->IsValid()) {
-            std::lock_guard<std::mutex> lock(rocprofiler_singleton
-                                                 .GetSession((*pool)->session_id)
-                                                 ->GetBuffer((*pool)->buffer_id)
-                                                 ->GetBufferLock());
-            assert(trace_data != nullptr);
-            rocprofiler_record_tracer_t record{};
-            record.header = rocprofiler_record_header_t{
+      if (rocprofiler_singleton.GetSession((*pool)->session_id) &&
+          rocprofiler_singleton.GetSession((*pool)->session_id)->GetBuffer((*pool)->buffer_id)) {
+        if (rocprofiler_singleton.GetSession((*pool)->session_id)
+                ->GetBuffer((*pool)->buffer_id)
+                ->IsValid()) {
+          std::lock_guard<std::mutex> lock(rocprofiler_singleton.GetSession((*pool)->session_id)
+                                               ->GetBuffer((*pool)->buffer_id)
+                                               ->GetBufferLock());
+          assert(trace_data != nullptr);
+          rocprofiler_record_tracer_t record{};
+          record.header = rocprofiler_record_header_t{
+              ROCPROFILER_TRACER_RECORD,
+              rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}};
+          record.domain = domain;
+          record.operation_id = rocprofiler_tracer_operation_id_t{operation_id};
+          record.correlation_id =
+              rocprofiler_tracer_activity_correlation_id_t{trace_data->api_data.correlation_id};
+          record.timestamps = rocprofiler_record_header_timestamp_t{
+              rocprofiler_timestamp_t{trace_data->phase_enter_timestamp},
+              rocprofiler_singleton.timestamp_ns()};
+          record.thread_id = rocprofiler_thread_id_t{GetTid()};
+          record.phase = ROCPROFILER_PHASE_NONE;
+
+          if (auto external_id = ExternalCorrelationId()) {
+            rocprofiler_record_tracer_t ext_record{};
+            ext_record.header = rocprofiler_record_header_t{
                 ROCPROFILER_TRACER_RECORD,
                 rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}};
-            record.domain = domain;
-            record.operation_id = rocprofiler_tracer_operation_id_t{operation_id};
-            record.correlation_id =
-                rocprofiler_tracer_activity_correlation_id_t{trace_data->api_data.correlation_id};
-            record.timestamps = rocprofiler_record_header_timestamp_t{
-                rocprofiler_timestamp_t{trace_data->phase_enter_timestamp},
-                rocprofiler_singleton.timestamp_ns()};
-            record.thread_id = rocprofiler_thread_id_t{GetTid()};
-            record.phase = ROCPROFILER_PHASE_NONE;
-
-            if (auto external_id = ExternalCorrelationId()) {
-              rocprofiler_record_tracer_t ext_record{};
-              ext_record.header = rocprofiler_record_header_t{
-                  ROCPROFILER_TRACER_RECORD,
-                  rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}};
-              ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
-              ext_record.operation_id =
-                  rocprofiler_tracer_operation_id_t{ACTIVITY_EXT_OP_EXTERN_ID};
-              ext_record.correlation_id =
-                  rocprofiler_tracer_activity_correlation_id_t{record.correlation_id};
-              ext_record.external_id = rocprofiler_tracer_external_id_t{*external_id};
-              ext_record.phase = ROCPROFILER_PHASE_NONE;
-              // Write the external correlation id record directly followed by the
-              // activity record.
-              rocprofiler_singleton
-                  .GetSession((*pool)->session_id)
-                  ->GetBuffer((*pool)->buffer_id)
-                  ->AddRecord(std::array<rocprofiler_record_tracer_t, 2>{ext_record, record});
-            } else {
-              // Write record to the buffer.
-              rocprofiler_singleton
-                  .GetSession((*pool)->session_id)
-                  ->GetBuffer((*pool)->buffer_id)
-                  ->AddRecord(record);
-            }
+            ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
+            ext_record.operation_id = rocprofiler_tracer_operation_id_t{ACTIVITY_EXT_OP_EXTERN_ID};
+            ext_record.correlation_id =
+                rocprofiler_tracer_activity_correlation_id_t{record.correlation_id};
+            ext_record.external_id = rocprofiler_tracer_external_id_t{*external_id};
+            ext_record.phase = ROCPROFILER_PHASE_NONE;
+            // Write the external correlation id record directly followed by the
+            // activity record.
+            rocprofiler_singleton.GetSession((*pool)->session_id)
+                ->GetBuffer((*pool)->buffer_id)
+                ->AddRecord(std::array<rocprofiler_record_tracer_t, 2>{ext_record, record});
+          } else {
+            // Write record to the buffer.
+            rocprofiler_singleton.GetSession((*pool)->session_id)
+                ->GetBuffer((*pool)->buffer_id)
+                ->AddRecord(record);
           }
         }
       }
+    }
     CorrelationIdPop();
   }
 
@@ -329,7 +322,8 @@ template <activity_domain_t domain> struct ApiTracer {
       trace_data->api_data.correlation_id = CorrelationIdPush();
 
       if (activity_enabled) {
-        trace_data->phase_enter_timestamp =  rocprofiler::ROCProfiler_Singleton::GetInstance().timestamp_ns().value;
+        trace_data->phase_enter_timestamp =
+            rocprofiler::ROCProfiler_Singleton::GetInstance().timestamp_ns().value;
         trace_data->phase_enter = nullptr;
         trace_data->phase_exit = Exit;
       }
@@ -362,7 +356,8 @@ ActivityRegistrationTable<ACTIVITY_DOMAIN_HSA_OPS, IsStopped> hsa_ops_activity_t
 CallbackRegistrationTable<ACTIVITY_DOMAIN_HSA_EVT, IsStopped> hsa_evt_callback_table;
 
 int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) {
-  rocprofiler::ROCProfiler_Singleton&  rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton =
+      rocprofiler::ROCProfiler_Singleton::GetInstance();
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_API:
       return HSA_ApiTracer::Enter(static_cast<HSA_ApiTracer::OperationId>(operation_id),
@@ -378,47 +373,45 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
           // If the record is for a kernel dispatch, write the kernel name in the pool's data,
           // and make the record point to it. Older HIP runtimes do not provide a kernel name,
           // so record.kernel_name might be null.
-            if (rocprofiler_singleton.GetSession((*pool)->session_id) &&
-                rocprofiler_singleton.GetSession((*pool)->session_id)
-                    ->GetBuffer((*pool)->buffer_id)) {
-              std::lock_guard<std::mutex> lock(
-                  rocprofiler_singleton.GetSession((*pool)->session_id)
-                      ->GetBuffer((*pool)->buffer_id)
-                      ->GetBufferLock());
+          if (rocprofiler_singleton.GetSession((*pool)->session_id) &&
+              rocprofiler_singleton.GetSession((*pool)->session_id)
+                  ->GetBuffer((*pool)->buffer_id)) {
+            std::lock_guard<std::mutex> lock(rocprofiler_singleton.GetSession((*pool)->session_id)
+                                                 ->GetBuffer((*pool)->buffer_id)
+                                                 ->GetBufferLock());
 
-              rocprofiler_record_tracer_t rocprofiler_record{};
-              rocprofiler_record.header = rocprofiler_record_header_t{
-                  ROCPROFILER_TRACER_RECORD,
-                  rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}};
-              rocprofiler_record.domain = domain;
-              rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{};
-              rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->kind};
-              rocprofiler_record.api_data = rocprofiler_tracer_api_data_t{};
-              rocprofiler_record.correlation_id =
-                  rocprofiler_tracer_activity_correlation_id_t{record->correlation_id};
-              rocprofiler_record.timestamps =
-                  rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{record->begin_ns},
-                                                        rocprofiler_timestamp_t{record->end_ns}};
-              rocprofiler_record.agent_id = rocprofiler_agent_id_t{(uint64_t)record->device_id};
-              rocprofiler_record.queue_id = rocprofiler_queue_id_t{record->queue_id};
-              rocprofiler_record.thread_id = rocprofiler_thread_id_t{GetTid()};
-              rocprofiler_record.phase = ROCPROFILER_PHASE_NONE;
-              if (operation_id == HIP_OP_ID_DISPATCH && record->kernel_name != nullptr) {
-                rocprofiler_record.name = record->kernel_name;
-                size_t kernel_name_size = (strlen(record->kernel_name) + 1);
+            rocprofiler_record_tracer_t rocprofiler_record{};
+            rocprofiler_record.header = rocprofiler_record_header_t{
+                ROCPROFILER_TRACER_RECORD,
+                rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}};
+            rocprofiler_record.domain = domain;
+            rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{};
+            rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->kind};
+            rocprofiler_record.api_data = rocprofiler_tracer_api_data_t{};
+            rocprofiler_record.correlation_id =
+                rocprofiler_tracer_activity_correlation_id_t{record->correlation_id};
+            rocprofiler_record.timestamps = rocprofiler_record_header_timestamp_t{
+                rocprofiler_timestamp_t{record->begin_ns}, rocprofiler_timestamp_t{record->end_ns}};
+            rocprofiler_record.agent_id = rocprofiler_agent_id_t{(uint64_t)record->device_id};
+            rocprofiler_record.queue_id = rocprofiler_queue_id_t{record->queue_id};
+            rocprofiler_record.thread_id = rocprofiler_thread_id_t{GetTid()};
+            rocprofiler_record.phase = ROCPROFILER_PHASE_NONE;
+            if (operation_id == HIP_OP_ID_DISPATCH && record->kernel_name != nullptr) {
+              rocprofiler_record.name = record->kernel_name;
+              size_t kernel_name_size = (strlen(record->kernel_name) + 1);
 
-                rocprofiler_singleton.GetSession((*pool)->session_id)
-                    ->GetBuffer((*pool)->buffer_id)
-                    ->AddRecord(rocprofiler_record, rocprofiler_record.name, kernel_name_size,
-                                [](auto& rocprofiler_record, const void* data) {
-                                  rocprofiler_record.name = static_cast<const char*>(data);
-                                });
-              } else {
-                rocprofiler_singleton.GetSession((*pool)->session_id)
-                    ->GetBuffer((*pool)->buffer_id)
-                    ->AddRecord(rocprofiler_record);
-              }
+              rocprofiler_singleton.GetSession((*pool)->session_id)
+                  ->GetBuffer((*pool)->buffer_id)
+                  ->AddRecord(rocprofiler_record, rocprofiler_record.name, kernel_name_size,
+                              [](auto& rocprofiler_record, const void* data) {
+                                rocprofiler_record.name = static_cast<const char*>(data);
+                              });
+            } else {
+              rocprofiler_singleton.GetSession((*pool)->session_id)
+                  ->GetBuffer((*pool)->buffer_id)
+                  ->AddRecord(rocprofiler_record);
             }
+          }
         }
         return 0;
       }
@@ -433,18 +426,17 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                                  user_callback->second);
           return 0;
         } else {
-
-          if (
-               rocprofiler_singleton.GetSession(
+          if (rocprofiler_singleton.GetSession(
                   reinterpret_cast<session_buffer_id_t*>(user_callback->second)->session_id) &&
-               rocprofiler_singleton.GetSession(
+              rocprofiler_singleton
+                  .GetSession(
                       reinterpret_cast<session_buffer_id_t*>(user_callback->second)->session_id)
                   ->GetBuffer(
                       reinterpret_cast<session_buffer_id_t*>(user_callback->second)->buffer_id)) {
             if (auto api_data = static_cast<DomainTraits<ACTIVITY_DOMAIN_ROCTX>::ApiData*>(data)) {
               std::lock_guard<std::mutex> lock(
-                      rocprofiler_singleton.
-                      GetSession(
+                  rocprofiler_singleton
+                      .GetSession(
                           reinterpret_cast<session_buffer_id_t*>(user_callback->second)->session_id)
                       ->GetBuffer(
                           reinterpret_cast<session_buffer_id_t*>(user_callback->second)->buffer_id)
@@ -453,8 +445,7 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
               rocprofiler_record_tracer_t rocprofiler_record{
                   rocprofiler_record_header_t{
                       ROCPROFILER_TRACER_RECORD,
-                      rocprofiler_record_id_t{
-                          rocprofiler_singleton.GetUniqueRecordId()}},
+                      rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}},
                   rocprofiler_tracer_external_id_t{api_data ? api_data->args.id : 0},
                   ACTIVITY_DOMAIN_ROCTX,
                   rocprofiler_tracer_operation_id_t{operation_id},
@@ -493,8 +484,7 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
           if (rocprofiler_singleton.GetSession((*pool)->session_id) &&
               rocprofiler_singleton.GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)) {
-            std::lock_guard<std::mutex> lock(rocprofiler_singleton
-                                                 .GetSession((*pool)->session_id)
+            std::lock_guard<std::mutex> lock(rocprofiler_singleton.GetSession((*pool)->session_id)
                                                  ->GetBuffer((*pool)->buffer_id)
                                                  ->GetBufferLock());
             rocprofiler_record_tracer_t rocprofiler_record{};
@@ -516,16 +506,14 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             if (record->kernel_name != nullptr && record->op == HSA_OP_ID_DISPATCH) {
               size_t kernel_name_size = strlen(record->kernel_name) + 1;
 
-              rocprofiler_singleton
-                  .GetSession((*pool)->session_id)
+              rocprofiler_singleton.GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->AddRecord(rocprofiler_record, record->kernel_name, kernel_name_size,
                               [](auto& rocprofiler_record, const void* data) {
                                 rocprofiler_record.name = static_cast<const char*>(data);
                               });
             } else {
-               rocprofiler_singleton
-                  .GetSession((*pool)->session_id)
+              rocprofiler_singleton.GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->AddRecord(rocprofiler_record);
             }
@@ -833,7 +821,9 @@ static std::string getKernelNameMultiKernelMultiDevice(hipLaunchParams* launchPa
   return name_str.str();
 }
 
-template <typename... Ts> struct Overloaded : Ts... { using Ts::operator()...; };
+template <typename... Ts> struct Overloaded : Ts... {
+  using Ts::operator()...;
+};
 template <class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
 
 std::optional<std::string> GetHipKernelName(uint32_t cid, hip_api_data_t* data) {

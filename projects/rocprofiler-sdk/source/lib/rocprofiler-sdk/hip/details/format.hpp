@@ -66,8 +66,7 @@
 #    define ROCP_SDK_HIP_FORMAT_DFLT_CASE(PREFIX)
 #else
 #    define ROCP_SDK_HIP_FORMAT_DFLT_CASE(PREFIX)                                                  \
-        default:                                                                                   \
-            return fmt::format_to(ctx.out(), "{}_UNKNOWN={}", #PREFIX, static_cast<int>(v))
+        default: return fmt::format_to(ctx.out(), "{}_UNKNOWN={}", #PREFIX, static_cast<int>(v))
 #endif
 
 namespace rocprofiler

@@ -52,17 +52,18 @@
 
 // Atomic Test type
 enum AtomicTest {
-  ADD,  // For add atomic operation
-  SUB,  // For sub atomic operation
-  AND,  // For and atomic operation
-  OR,   // For or atomic operation
-  XOR,  // For xor atomic operation
-  INC,  // For inc atomic operation
-  DEC,  // For dec atomic operation
-  MAX,  // For max atomic operation
-  MIN,  // For min atomic operation
+  ADD,   // For add atomic operation
+  SUB,   // For sub atomic operation
+  AND,   // For and atomic operation
+  OR,    // For or atomic operation
+  XOR,   // For xor atomic operation
+  INC,   // For inc atomic operation
+  DEC,   // For dec atomic operation
+  MAX,   // For max atomic operation
+  MIN,   // For min atomic operation
   XCHG,  // For xchg atomic operation
-  NO_TEST};
+  NO_TEST
+};
 
 class MemoryAtomic : public TestBase {
  public:

@@ -32,8 +32,4 @@
 
 LIBELF_VCSID("$Id: elf_fill.c 189 2008-07-20 10:38:08Z jkoshy $");
 
-void
-elf_fill(int fill)
-{
-	LIBELF_PRIVATE(fillchar) = fill;
-}
+void elf_fill(int fill) { LIBELF_PRIVATE(fillchar) = fill; }

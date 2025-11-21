@@ -47,8 +47,8 @@
 #define TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
 
 #include <memory>
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "rocm_smi/rocm_smi.h"
 
@@ -60,7 +60,7 @@ struct RSMITstGlobals {
   bool dont_fail;
 };
 
-uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);
+uint32_t ProcessCmdline(RSMITstGlobals *test, int arg_cnt, char **arg_list);
 
 void PrintTestHeader(uint32_t dv_ind);
 const char *GetPerfLevelStr(rsmi_dev_perf_level_t lvl);
@@ -73,30 +73,32 @@ const std::string GetVoltSensorNameStr(rsmi_voltage_type_t st);
 void DumpMonitorInfo(const TestBase *test);
 #endif
 
-#define DISPLAY_RSMI_ERR(RET) { \
-  if ((RET) != RSMI_STATUS_SUCCESS) { \
-    const char *err_str; \
-    std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl; \
-    rsmi_status_string((RET), &err_str); \
-    std::cout << "\t===> (" << err_str << ")" << std::endl; \
-    std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                  std::endl; \
-  } \
-}
+#define DISPLAY_RSMI_ERR(RET)                                                            \
+  {                                                                                      \
+    if ((RET) != RSMI_STATUS_SUCCESS) {                                                  \
+      const char *err_str;                                                               \
+      std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl;            \
+      rsmi_status_string((RET), &err_str);                                               \
+      std::cout << "\t===> (" << err_str << ")" << std::endl;                            \
+      std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << std::endl; \
+    }                                                                                    \
+  }
 
-#define CHK_ERR_RET(RET) { \
-  DISPLAY_RSMI_ERR(RET) \
-  if ((RET) != RSMI_STATUS_SUCCESS) { \
-    return (RET); \
-  } \
-}
-#define CHK_RSMI_PERM_ERR(RET) { \
-    if ((RET) == RSMI_STATUS_PERMISSION) { \
+#define CHK_ERR_RET(RET)                \
+  {                                     \
+    DISPLAY_RSMI_ERR(RET)               \
+    if ((RET) != RSMI_STATUS_SUCCESS) { \
+      return (RET);                     \
+    }                                   \
+  }
+#define CHK_RSMI_PERM_ERR(RET)                                        \
+  {                                                                   \
+    if ((RET) == RSMI_STATUS_PERMISSION) {                            \
       std::cout << "This command requires root access." << std::endl; \
-    } else { \
-      DISPLAY_RSMI_ERR(RET) \
-    } \
-}
+    } else {                                                          \
+      DISPLAY_RSMI_ERR(RET)                                           \
+    }                                                                 \
+  }
 
 void printRSMIError(rsmi_status_t err);
 

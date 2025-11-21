@@ -89,9 +89,7 @@ GTEST_API_ GTEST_DECLARE_STATIC_MUTEX_(g_linked_ptr_mutex);
 class linked_ptr_internal {
  public:
   // Create a new circle that includes only this instance.
-  void join_new() {
-    next_ = this;
-  }
+  void join_new() { next_ = this; }
 
   // Many linked_ptr operations may change p.link_ for some linked_ptr
   // variable p in the same circle as this object.  Therefore we need
@@ -105,8 +103,7 @@ class linked_ptr_internal {
   // framework.
 
   // Join an existing circle.
-  void join(linked_ptr_internal const* ptr)
-  GTEST_LOCK_EXCLUDED_(g_linked_ptr_mutex) {
+  void join(linked_ptr_internal const* ptr) GTEST_LOCK_EXCLUDED_(g_linked_ptr_mutex) {
     MutexLock lock(&g_linked_ptr_mutex);
 
     linked_ptr_internal const* p = ptr;
@@ -121,8 +118,7 @@ class linked_ptr_internal {
 
   // Leave whatever circle we're part of.  Returns true if we were the
   // last member of the circle.  Once this is done, you can join() another.
-  bool depart()
-  GTEST_LOCK_EXCLUDED_(g_linked_ptr_mutex) {
+  bool depart() GTEST_LOCK_EXCLUDED_(g_linked_ptr_mutex) {
     MutexLock lock(&g_linked_ptr_mutex);
 
     if (next_ == this) {
@@ -143,24 +139,17 @@ class linked_ptr_internal {
   mutable linked_ptr_internal const* next_;
 };
 
-template <typename T>
-class linked_ptr {
+template <typename T> class linked_ptr {
  public:
   typedef T element_type;
 
   // Take over ownership of a raw pointer.  This should happen as soon as
   // possible after the object is created.
-  explicit linked_ptr(T* ptr = NULL) {
-    capture(ptr);
-  }
-  ~linked_ptr() {
-    depart();
-  }
+  explicit linked_ptr(T* ptr = NULL) { capture(ptr); }
+  ~linked_ptr() { depart(); }
 
   // Copy an existing linked_ptr<>, adding ourselves to the list of references.
-  template <typename U> linked_ptr(linked_ptr<U> const& ptr) {
-    copy(&ptr);
-  }
+  template <typename U> linked_ptr(linked_ptr<U> const& ptr) { copy(&ptr); }
   linked_ptr(linked_ptr const& ptr) {  // NOLINT
     assert(&ptr != this);
     copy(&ptr);
@@ -187,34 +176,21 @@ class linked_ptr {
     depart();
     capture(ptr);
   }
-  T* get() const {
-    return value_;
-  }
-  T* operator->() const {
-    return value_;
-  }
-  T& operator*() const {
-    return *value_;
-  }
+  T* get() const { return value_; }
+  T* operator->() const { return value_; }
+  T& operator*() const { return *value_; }
 
-  bool operator==(T* p) const {
-    return value_ == p;
-  }
-  bool operator!=(T* p) const {
-    return value_ != p;
-  }
-  template <typename U>
-  bool operator==(linked_ptr<U> const& ptr) const {
+  bool operator==(T* p) const { return value_ == p; }
+  bool operator!=(T* p) const { return value_ != p; }
+  template <typename U> bool operator==(linked_ptr<U> const& ptr) const {
     return value_ == ptr.get();
   }
-  template <typename U>
-  bool operator!=(linked_ptr<U> const& ptr) const {
+  template <typename U> bool operator!=(linked_ptr<U> const& ptr) const {
     return value_ != ptr.get();
   }
 
  private:
-  template <typename U>
-  friend class linked_ptr;
+  template <typename U> friend class linked_ptr;
 
   T* value_;
   linked_ptr_internal link_;
@@ -235,30 +211,24 @@ class linked_ptr {
 
     if (value_) {
       link_.join(&ptr->link_);
-    }
-    else {
+    } else {
       link_.join_new();
     }
   }
 };
 
-template<typename T> inline
-bool operator==(T* ptr, const linked_ptr<T>& x) {
+template <typename T> inline bool operator==(T* ptr, const linked_ptr<T>& x) {
   return ptr == x.get();
 }
 
-template<typename T> inline
-bool operator!=(T* ptr, const linked_ptr<T>& x) {
+template <typename T> inline bool operator!=(T* ptr, const linked_ptr<T>& x) {
   return ptr != x.get();
 }
 
 // A function to convert T* into linked_ptr<T>
 // Doing e.g. make_linked_ptr(new FooBarBaz<type>(arg)) is a shorter notation
 // for linked_ptr<FooBarBaz<type> >(new FooBarBaz<type>(arg))
-template <typename T>
-linked_ptr<T> make_linked_ptr(T* ptr) {
-  return linked_ptr<T>(ptr);
-}
+template <typename T> linked_ptr<T> make_linked_ptr(T* ptr) { return linked_ptr<T>(ptr); }
 
 }  // namespace internal
 }  // namespace testing

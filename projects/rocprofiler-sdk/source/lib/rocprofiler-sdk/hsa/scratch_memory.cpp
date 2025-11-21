@@ -352,7 +352,8 @@ ASSERT_SAME_OFFSET(async_reclaim_end_t);
 #undef ASSERT_SAME_OFFSET
 
 template <typename T, typename... Ts>
-constexpr bool have_same_offset(T /*m*/)
+constexpr bool
+have_same_offset(T /*m*/)
 {
     return (offsetof(Ts, m) == ...);
 }
@@ -582,7 +583,8 @@ impl(Args... args)
 }
 
 template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args>
-auto get_hsa_amd_tool_api_impl(RetT (*)(Args...))
+auto
+get_hsa_amd_tool_api_impl(RetT (*)(Args...))
 {
     return &scratch_memory::impl<OpIdx, Args...>;
 }

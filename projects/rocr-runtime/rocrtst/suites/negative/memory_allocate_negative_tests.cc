@@ -61,37 +61,33 @@
 static const uint32_t kNumBufferElements = 256;
 
 
+#define RET_IF_HSA_ERR(err)                                                                        \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
+                << ". Call returned " << err << std::endl;                                         \
+      std::cout << msg << std::endl;                                                               \
+      return (err);                                                                                \
+    }                                                                                              \
+  }
 
 
-
-#define RET_IF_HSA_ERR(err) { \
-  if ((err) != HSA_STATUS_SUCCESS) { \
-    const char* msg = 0; \
-    hsa_status_string(err, &msg); \
-    std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << \
-                          __FILE__ << ". Call returned " << err << std::endl; \
-    std::cout << msg << std::endl; \
-    return (err); \
-  } \
-}
-
-
-
-MemoryAllocateNegativeTest::MemoryAllocateNegativeTest(void) :
-    TestBase() {
+MemoryAllocateNegativeTest::MemoryAllocateNegativeTest(void) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
 
   set_title("RocR Memory Allocate Negative Test");
-  set_description("This series of tests are Negative tests "
-    "that do check memory allocation on GPU and CPU, "
-    "i.e. requesting an allocation of more than max "
-    "pool size or 0 size.");
+  set_description(
+      "This series of tests are Negative tests "
+      "that do check memory allocation on GPU and CPU, "
+      "i.e. requesting an allocation of more than max "
+      "pool size or 0 size.");
 }
 
-MemoryAllocateNegativeTest::~MemoryAllocateNegativeTest(void) {
-}
+MemoryAllocateNegativeTest::~MemoryAllocateNegativeTest(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -118,9 +114,7 @@ void MemoryAllocateNegativeTest::Run(void) {
   TestBase::Run();
 }
 
-void MemoryAllocateNegativeTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void MemoryAllocateNegativeTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void MemoryAllocateNegativeTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -139,11 +133,9 @@ void MemoryAllocateNegativeTest::Close() {
 }
 
 
-
-
 static const char kSubTestSeparator[] = "  **************************";
 
-static void PrintMemorySubtestHeader(const char *header) {
+static void PrintMemorySubtestHeader(const char* header) {
   std::cout << "  *** Memory Subtest: " << header << " ***" << std::endl;
 }
 
@@ -173,7 +165,7 @@ static void PrintAgentNameAndType(hsa_agent_t agent) {
     case HSA_DEVICE_TYPE_AIE:
       std::cout << "AIE)";
       break;
-    }
+  }
   std::cout << std::endl;
   return;
 }
@@ -183,7 +175,7 @@ static const int kMemoryAllocSize = 1024;
 // This test verify that hsa_memory_allocate can't allocate
 // memory more than HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE
 void MemoryAllocateNegativeTest::MaxMemoryAllocateTest(hsa_agent_t agent,
-                                               hsa_amd_memory_pool_t pool) {
+                                                       hsa_amd_memory_pool_t pool) {
   hsa_status_t err;
 
   rocrtst::pool_info_t pool_i;
@@ -203,22 +195,20 @@ void MemoryAllocateNegativeTest::MaxMemoryAllocateTest(hsa_agent_t agent,
     return;
   }
 
-    char *memoryPtr;
+  char* memoryPtr;
   auto gran_sz = pool_i.alloc_granule;
   size_t max_size = pool_i.aggregate_alloc_max;
   err = hsa_amd_memory_pool_allocate(pool, (max_size + gran_sz), 0,
-                                       reinterpret_cast<void**>(&memoryPtr));
-    ASSERT_EQ(err, HSA_STATUS_ERROR_INVALID_ALLOCATION);
+                                     reinterpret_cast<void**>(&memoryPtr));
+  ASSERT_EQ(err, HSA_STATUS_ERROR_INVALID_ALLOCATION);
   return;
 }
-
-
 
 
 // This test verify that requesting an allocation
 // of 0 size is valid on memory pool or not
 void MemoryAllocateNegativeTest::ZeroMemoryAllocateTest(hsa_agent_t agent,
-                                                hsa_amd_memory_pool_t pool) {
+                                                        hsa_amd_memory_pool_t pool) {
   hsa_status_t err;
 
   rocrtst::pool_info_t pool_i;
@@ -231,13 +221,11 @@ void MemoryAllocateNegativeTest::ZeroMemoryAllocateTest(hsa_agent_t agent,
 
   // Determine if allocation is allowed in this pool
   bool alloc = false;
-  err = hsa_amd_memory_pool_get_info(pool,
-                   HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &alloc);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &alloc);
 
   if (alloc) {
-    char *memoryPtr;
-    err = hsa_amd_memory_pool_allocate(pool, 0, 0,
-                                       reinterpret_cast<void**>(&memoryPtr));
+    char* memoryPtr;
+    err = hsa_amd_memory_pool_allocate(pool, 0, 0, reinterpret_cast<void**>(&memoryPtr));
     ASSERT_EQ(err, HSA_STATUS_ERROR_INVALID_ARGUMENT);
   }
   return;
@@ -413,7 +401,7 @@ void MemoryAllocateNegativeTest::FreeQueueRingBufferTest(hsa_agent_t gpuAgent) {
   hsa_queue_t* queue[kMaxQueue];  // command queue
   uint32_t i;
   test_validation_data user_data = {};
-  ASSERT_SUCCESS( hsa_amd_register_system_event_handler(CallbackSystemErrorHandling, &user_data));
+  ASSERT_SUCCESS(hsa_amd_register_system_event_handler(CallbackSystemErrorHandling, &user_data));
   for (i = 0; i < kMaxQueue; ++i) {
     // create queue
     ASSERT_SUCCESS(hsa_queue_create(gpuAgent, kMaxQueueSizeForAgent, HSA_QUEUE_TYPE_SINGLE, NULL,

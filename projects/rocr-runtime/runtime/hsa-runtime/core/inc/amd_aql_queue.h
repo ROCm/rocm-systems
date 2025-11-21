@@ -56,9 +56,7 @@ namespace AMD {
 /// write pointers and a buffer.
 class AqlQueue : public core::Queue, private core::LocalSignal, public core::DoorbellSignal {
  public:
-  static __forceinline bool IsType(core::Signal* signal) {
-    return signal->IsType(&rtti_id());
-  }
+  static __forceinline bool IsType(core::Signal* signal) { return signal->IsType(&rtti_id()); }
 
   static __forceinline bool IsType(core::Queue* queue) { return queue->IsType(&rtti_id()); }
 
@@ -345,12 +343,12 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   }
 
   // Mutex for queue_event_ manipulation
-KernelMutex& queue_lock() {
-  // This allocation is meant to last until the last thread has exited.
-  // It is intentionally not freed.
-  static KernelMutex* queue_lock_ = new KernelMutex();
-  return *queue_lock_;
-}
+  KernelMutex& queue_lock() {
+    // This allocation is meant to last until the last thread has exited.
+    // It is intentionally not freed.
+    static KernelMutex* queue_lock_ = new KernelMutex();
+    return *queue_lock_;
+  }
 
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;
@@ -361,7 +359,7 @@ KernelMutex& queue_lock() {
   DISALLOW_COPY_AND_ASSIGN(AqlQueue);
 };
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr
 
 #endif  // header guard

@@ -65,7 +65,7 @@ namespace rocrtst {
  * run_flag, exit_flag, etc.
  */
 
-static void *worker(void *input) {
+static void* worker(void* input) {
   func_ptr fun_prt;
   thread_aux* thread = reinterpret_cast<thread_aux*>(input);
   fun_prt = reinterpret_cast<func_ptr>(thread->test->fun_prt);
@@ -119,8 +119,8 @@ static void *worker(void *input) {
  * @param group_size The size of test group, i.e., the size of test lists
  * @return Pointer to the new test_group
  */
-test_group *TestGroupCreate(size_t group_size) {
-  test_group *new_group = static_cast<test_group *>(malloc(sizeof(test_group)));
+test_group* TestGroupCreate(size_t group_size) {
+  test_group* new_group = static_cast<test_group*>(malloc(sizeof(test_group)));
   // initialize variables in the data structure
   new_group->group_size = group_size;
   new_group->n_threads = 0;
@@ -129,12 +129,12 @@ test_group *TestGroupCreate(size_t group_size) {
   new_group->exit_flag = 0;
   new_group->num_running_t = 0;
   // malloc test_list array with group_size
-  new_group->test_list = static_cast<test_aux *>(malloc(sizeof(test_aux) * group_size));
+  new_group->test_list = static_cast<test_aux*>(malloc(sizeof(test_aux) * group_size));
 
   return new_group;
 }
 
-void TestGroupWait(test_group *t_group) {
+void TestGroupWait(test_group* t_group) {
   pthread_mutex_lock(&t_group->test_mutex);
   while (t_group->num_running_t != 0) {
     pthread_cond_wait(&t_group->test_cond, &t_group->test_mutex);
@@ -144,14 +144,15 @@ void TestGroupWait(test_group *t_group) {
   return;
 }
 
-void TestGroupAdd(test_group *t_group, func_ptr fun_prt, void *data, size_t num_copy) {
+void TestGroupAdd(test_group* t_group, func_ptr fun_prt, void* data, size_t num_copy) {
   if (t_group->group_size < (num_copy + t_group->num_test)) {
-    fprintf(stderr, "Error beyound group size: %lu, please resize the test_group\n", t_group->group_size);
+    fprintf(stderr, "Error beyound group size: %lu, please resize the test_group\n",
+            t_group->group_size);
     return;
   }
 
   int num_test = t_group->num_test;
-  test_aux *test_list = t_group->test_list;
+  test_aux* test_list = t_group->test_list;
   unsigned int ii;
   for (ii = 0; ii < num_copy; ii++) {
     test_list[num_test + ii].fun_prt = reinterpret_cast<void*>(fun_prt);
@@ -163,13 +164,14 @@ void TestGroupAdd(test_group *t_group, func_ptr fun_prt, void *data, size_t num_
   return;
 }
 
-void TestGroupResize(test_group *t_group, size_t new_group_size) {
+void TestGroupResize(test_group* t_group, size_t new_group_size) {
   if (new_group_size < t_group->group_size) {
     fprintf(stderr, "Error new group_size is smaller than current group_size\n");
   }
 
-  test_aux *new_test_list;
-  new_test_list = static_cast<test_aux *>(realloc(t_group->test_list, new_group_size * sizeof(test_aux)));
+  test_aux* new_test_list;
+  new_test_list =
+      static_cast<test_aux*>(realloc(t_group->test_list, new_group_size * sizeof(test_aux)));
   t_group->group_size = new_group_size;
   t_group->test_list = new_test_list;
 
@@ -177,7 +179,7 @@ void TestGroupResize(test_group *t_group, size_t new_group_size) {
 }
 
 // Create threads for tests
-void TestGroupThreadCreate(test_group *t_group) {
+void TestGroupThreadCreate(test_group* t_group) {
   pthread_mutex_init(&(t_group->test_mutex), NULL);
   pthread_cond_init(&(t_group->test_cond), NULL);
   pthread_attr_init(&(t_group->attr));
@@ -187,8 +189,8 @@ void TestGroupThreadCreate(test_group *t_group) {
   int ii = 0;
 
   n_threads = t_group->n_threads = t_group->num_test;
-  thread_aux *thread_list = t_group->thread_list =
-              static_cast<thread_aux *>(malloc(sizeof(thread_aux) * n_threads));
+  thread_aux* thread_list = t_group->thread_list =
+      static_cast<thread_aux*>(malloc(sizeof(thread_aux) * n_threads));
   t_group->tid = static_cast<pthread_t*>(malloc(sizeof(pthread_t) * n_threads));
 
   for (ii = 0; ii < n_threads; ++ii) {
@@ -211,7 +213,7 @@ void TestGroupThreadCreate(test_group *t_group) {
     }
   }
 
-  // Update test group properties to 
+  // Update test group properties to
   // accommodate thread creation error
   t_group->num_test = ii;
   t_group->n_threads = ii;
@@ -219,26 +221,24 @@ void TestGroupThreadCreate(test_group *t_group) {
 }
 
 // Return number of test
-int TestGroupNumTests(test_group *t_group) {
-  return t_group->num_test;
-}
+int TestGroupNumTests(test_group* t_group) { return t_group->num_test; }
 
 // Set affinity of the specific test
-void TestGroupThreadAffinity(test_group *t_group, int test_id, int cpu_id) {
-/*  Setting CPU affinity isn't currently supported.
- *  CPU_SET(cpu_id, &t_group->thread_list[test_id].cpuset);
- *  int status;
- *  status = pthread_setaffinity_np(t_group->tid[test_id],
- *          sizeof(cpu_set_t), &t_group->thread_list[test_id].cpuset);
- *  if (status != 0) {
- *      perror("pthread_setaffinity_np error");
- *  }
- */
+void TestGroupThreadAffinity(test_group* t_group, int test_id, int cpu_id) {
+  /*  Setting CPU affinity isn't currently supported.
+   *  CPU_SET(cpu_id, &t_group->thread_list[test_id].cpuset);
+   *  int status;
+   *  status = pthread_setaffinity_np(t_group->tid[test_id],
+   *          sizeof(cpu_set_t), &t_group->thread_list[test_id].cpuset);
+   *  if (status != 0) {
+   *      perror("pthread_setaffinity_np error");
+   *  }
+   */
   return;
 }
 
 // Set run_flag to 1
-void TestGroupStart(test_group *t_group) {
+void TestGroupStart(test_group* t_group) {
   if (t_group->num_running_t != 0) {
     fprintf(stderr, "Error: %d tests are not finished\n", t_group->num_running_t);
     return;
@@ -254,7 +254,7 @@ void TestGroupStart(test_group *t_group) {
 }
 
 // Set exit_flag to 1, wait all threads finish and cleanup
-void TestGroupExit(test_group *t_group) {
+void TestGroupExit(test_group* t_group) {
   int ii = 0;
   int status;
 
@@ -281,7 +281,7 @@ void TestGroupExit(test_group *t_group) {
   return;
 }
 
-void TestGroupKill(test_group *t_group) {
+void TestGroupKill(test_group* t_group) {
   int ii = 0;
   int status;
   for (ii = 0; ii < t_group->n_threads; ++ii) {
@@ -302,16 +302,17 @@ void TestGroupKill(test_group *t_group) {
   return;
 }
 
-void TestGroupDestroy(test_group *t_group) {
+void TestGroupDestroy(test_group* t_group) {
   free(t_group->test_list);
   free(t_group);
 
   return;
 }
 
-int TestGroupTestStatus(test_group *t_group, int test_id) {
+int TestGroupTestStatus(test_group* t_group, int test_id) {
   if (test_id >= t_group->n_threads) {
-    fprintf(stderr, "test_id: %d is larger than the number of test: %d\n", test_id, t_group->num_test);
+    fprintf(stderr, "test_id: %d is larger than the number of test: %d\n", test_id,
+            t_group->num_test);
   }
 
   if (t_group->test_list[test_id].status == TEST_RUNNING) {

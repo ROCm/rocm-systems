@@ -53,9 +53,8 @@
 
 class MemoryConcurrentTest : public TestBase {
  public:
-    MemoryConcurrentTest(bool launch_Concurrent_Allocate_,
-                         bool launch_Concurrent_Free_ ,
-                         bool launch_Concurrent_PoolGetInfo_);
+  MemoryConcurrentTest(bool launch_Concurrent_Allocate_, bool launch_Concurrent_Free_,
+                       bool launch_Concurrent_PoolGetInfo_);
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~MemoryConcurrentTest();
@@ -89,12 +88,9 @@ class MemoryConcurrentTest : public TestBase {
   void MemoryConcurrentPoolGetInfo(void);
 
  private:
-  void MemoryConcurrentAllocate(hsa_agent_t agent,
-                             hsa_amd_memory_pool_t pool);
-  void MemoryConcurrentFree(hsa_agent_t agent,
-                             hsa_amd_memory_pool_t pool);
-  void MemoryConcurrentPoolGetInfo(hsa_agent_t agent,
-                             hsa_amd_memory_pool_t pool);
+  void MemoryConcurrentAllocate(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
+  void MemoryConcurrentFree(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
+  void MemoryConcurrentPoolGetInfo(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
 
   // @Brief: Indicate if launch concurrent allocate test
   bool launch_Concurrent_Allocate_;

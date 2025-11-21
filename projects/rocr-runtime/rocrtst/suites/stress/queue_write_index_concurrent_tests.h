@@ -53,9 +53,9 @@
 
 class QueueWriteIndexConcurrentTest : public TestBase {
  public:
-    QueueWriteIndexConcurrentTest(bool launch_Concurrent_AddWriteIndex,
-                         bool launch_Concurrent_CasWriteIndex ,
-                         bool launch_Concurrent_LoadStoreWriteIndex);
+  QueueWriteIndexConcurrentTest(bool launch_Concurrent_AddWriteIndex,
+                                bool launch_Concurrent_CasWriteIndex,
+                                bool launch_Concurrent_LoadStoreWriteIndex);
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~QueueWriteIndexConcurrentTest();

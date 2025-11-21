@@ -82,18 +82,15 @@ class CpuAgent : public core::Agent {
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // region returns ::HSA_STATUS_SUCCESS.
   hsa_status_t VisitRegion(bool include_peer,
-                           hsa_status_t (*callback)(hsa_region_t region,
-                                                    void* data),
+                           hsa_status_t (*callback)(hsa_region_t region, void* data),
                            void* data) const;
 
   // @brief Override from core::Agent.
-  hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region,
-                                                      void* data),
+  hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
                              void* data) const override;
 
-  hsa_status_t IterateSupportedIsas(
-                    hsa_status_t (*callback)(hsa_isa_t isa, void* data),
-                                                  void* data) const override;
+  hsa_status_t IterateSupportedIsas(hsa_status_t (*callback)(hsa_isa_t isa, void* data),
+                                    void* data) const override;
 
   // @brief Override from core::Agent.
   hsa_status_t IterateCache(hsa_status_t (*callback)(hsa_cache_t cache, void* data),
@@ -117,24 +114,19 @@ class CpuAgent : public core::Agent {
   __forceinline size_t num_cache() const { return cache_props_.size(); }
 
   // @brief Returns Hive ID
-  __forceinline uint64_t HiveId() const override { return  properties_.HiveID; }
+  __forceinline uint64_t HiveId() const override { return properties_.HiveID; }
 
   // @brief Returns data cache property.
   //
   // @param [in] idx Cache level.
-  __forceinline const HsaCacheProperties& cache_prop(int idx) const {
-    return cache_props_[idx];
-  }
+  __forceinline const HsaCacheProperties& cache_prop(int idx) const { return cache_props_[idx]; }
 
   // @brief Override from core::Agent.
-  const std::vector<const core::MemoryRegion*>& regions() const override {
-    return regions_;
-  }
+  const std::vector<const core::MemoryRegion*>& regions() const override { return regions_; }
 
   // @brief Override from core::Agent.
-  const std::vector<const core::Isa*>& supported_isas() const override {
-    return supported_isas_;
-  }
+  const std::vector<const core::Isa*>& supported_isas() const override { return supported_isas_; }
+
  private:
   // @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();
@@ -150,10 +142,9 @@ class CpuAgent : public core::Agent {
   //
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // region returns ::HSA_STATUS_SUCCESS.
-  hsa_status_t VisitRegion(
-      const std::vector<const core::MemoryRegion*>& regions,
-      hsa_status_t (*callback)(hsa_region_t region, void* data),
-      void* data) const;
+  hsa_status_t VisitRegion(const std::vector<const core::MemoryRegion*>& regions,
+                           hsa_status_t (*callback)(hsa_region_t region, void* data),
+                           void* data) const;
 
   // @brief Node property.
   const HsaNodeProperties properties_;
@@ -171,7 +162,7 @@ class CpuAgent : public core::Agent {
   DISALLOW_COPY_AND_ASSIGN(CpuAgent);
 };
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr
 
 #endif  // header guard

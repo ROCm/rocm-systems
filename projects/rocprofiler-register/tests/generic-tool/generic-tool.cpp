@@ -20,13 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #include <pthread.h>
 #include <cstdint>
 #include <stdexcept>
 #include <string_view>
 
-extern "C" {
+extern "C"
+{
 typedef struct rocprofiler_client_id_t
 {
     const char*    name;    ///< clients should set this value for debugging

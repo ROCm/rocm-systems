@@ -33,96 +33,89 @@
 
 LIBELF_VCSID("$Id: gelf_symshndx.c 189 2008-07-20 10:38:08Z jkoshy $");
 
-GElf_Sym *
-gelf_getsymshndx(Elf_Data *d, Elf_Data *id, int ndx, GElf_Sym *dst,
-    Elf32_Word *shindex)
-{
-	int ec;
-	Elf *e;
-	Elf_Scn *scn;
-	size_t msz;
-	uint32_t sh_type;
+GElf_Sym *gelf_getsymshndx(Elf_Data *d, Elf_Data *id, int ndx, GElf_Sym *dst,
+                           Elf32_Word *shindex) {
+  int ec;
+  Elf *e;
+  Elf_Scn *scn;
+  size_t msz;
+  uint32_t sh_type;
 
-	if (gelf_getsym(d, ndx, dst) == 0)
-		return (NULL);
+  if (gelf_getsym(d, ndx, dst) == 0)
+    return (NULL);
 
-	if (id == NULL || (scn = id->d_scn) == NULL ||
-	    (e = scn->s_elf) == NULL || (e != d->d_scn->s_elf) ||
-	    shindex == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (id == NULL || (scn = id->d_scn) == NULL || (e = scn->s_elf) == NULL ||
+      (e != d->d_scn->s_elf) || shindex == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	ec = e->e_class;
-	assert(ec == ELFCLASS32 || ec == ELFCLASS64);
+  ec = e->e_class;
+  assert(ec == ELFCLASS32 || ec == ELFCLASS64);
 
-	if (ec == ELFCLASS32)
-		sh_type = scn->s_shdr.s_shdr32.sh_type;
-	else
-		sh_type = scn->s_shdr.s_shdr64.sh_type;
+  if (ec == ELFCLASS32)
+    sh_type = scn->s_shdr.s_shdr32.sh_type;
+  else
+    sh_type = scn->s_shdr.s_shdr64.sh_type;
 
-	if (_libelf_xlate_shtype(sh_type) != ELF_T_WORD ||
-	   id->d_type != ELF_T_WORD) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (_libelf_xlate_shtype(sh_type) != ELF_T_WORD || id->d_type != ELF_T_WORD) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	msz = _libelf_msize(ELF_T_WORD, ec, e->e_version);
+  msz = _libelf_msize(ELF_T_WORD, ec, e->e_version);
 
-	assert(msz > 0);
+  assert(msz > 0);
 
-	if (msz * ndx >= id->d_size) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (msz * ndx >= id->d_size) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	*shindex = ((Elf32_Word *) id->d_buf)[ndx];
+  *shindex = ((Elf32_Word *)id->d_buf)[ndx];
 
-	return (dst);
+  return (dst);
 }
 
-int
-gelf_update_symshndx(Elf_Data *d, Elf_Data *id, int ndx, GElf_Sym *gs,
-    Elf32_Word xindex)
-{
-	int ec;
-	Elf *e;
-	Elf_Scn *scn;
-	size_t msz;
-	uint32_t sh_type;
+int gelf_update_symshndx(Elf_Data *d, Elf_Data *id, int ndx, GElf_Sym *gs,
+                         Elf32_Word xindex) {
+  int ec;
+  Elf *e;
+  Elf_Scn *scn;
+  size_t msz;
+  uint32_t sh_type;
 
-	if (gelf_update_sym(d, ndx, gs) == 0)
-		return (0);
+  if (gelf_update_sym(d, ndx, gs) == 0)
+    return (0);
 
-	if (id == NULL || (scn = id->d_scn) == NULL ||
-	    (e = scn->s_elf) == NULL || (e != d->d_scn->s_elf)) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (0);
-	}
+  if (id == NULL || (scn = id->d_scn) == NULL || (e = scn->s_elf) == NULL ||
+      (e != d->d_scn->s_elf)) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (0);
+  }
 
-	ec = e->e_class;
-	assert(ec == ELFCLASS32 || ec == ELFCLASS64);
+  ec = e->e_class;
+  assert(ec == ELFCLASS32 || ec == ELFCLASS64);
 
-	if (ec == ELFCLASS32)
-		sh_type = scn->s_shdr.s_shdr32.sh_type;
-	else
-		sh_type = scn->s_shdr.s_shdr64.sh_type;
+  if (ec == ELFCLASS32)
+    sh_type = scn->s_shdr.s_shdr32.sh_type;
+  else
+    sh_type = scn->s_shdr.s_shdr64.sh_type;
 
-	if (_libelf_xlate_shtype(sh_type) != ELF_T_WORD ||
-	    d->d_type != ELF_T_WORD) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (0);
-	}
+  if (_libelf_xlate_shtype(sh_type) != ELF_T_WORD || d->d_type != ELF_T_WORD) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (0);
+  }
 
-	msz = _libelf_msize(ELF_T_WORD, ec, e->e_version);
-	assert(msz > 0);
+  msz = _libelf_msize(ELF_T_WORD, ec, e->e_version);
+  assert(msz > 0);
 
-	if (msz * ndx >= id->d_size) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (0);
-	}
+  if (msz * ndx >= id->d_size) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (0);
+  }
 
-	*(((Elf32_Word *) id->d_buf) + ndx) = xindex;
+  *(((Elf32_Word *)id->d_buf) + ndx) = xindex;
 
-	return (1);
+  return (1);
 }

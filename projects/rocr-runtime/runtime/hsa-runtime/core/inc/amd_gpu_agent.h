@@ -77,151 +77,140 @@ class GpuAgentInt : public core::Agent {
   // @param [in] driver_type Driver type. Default is KFD.
   GpuAgentInt(uint32_t node_id, core::DriverType driver_type)
       : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(driver_type), node_id,
-      core::Agent::DeviceType::kAmdGpuDevice) {}
+                    core::Agent::DeviceType::kAmdGpuDevice) {}
 
-   // @brief Ensure blits are ready (performance hint).
-   virtual void PreloadBlits() {}
+  // @brief Ensure blits are ready (performance hint).
+  virtual void PreloadBlits() {}
 
-   // @brief Initialization hook invoked after tools library has loaded,
-   // to allow tools interception of interface functions.
-   //
-   // @retval HSA_STATUS_SUCCESS if initialization is successful.
-   virtual hsa_status_t PostToolsInit() = 0;
+  // @brief Initialization hook invoked after tools library has loaded,
+  // to allow tools interception of interface functions.
+  //
+  // @retval HSA_STATUS_SUCCESS if initialization is successful.
+  virtual hsa_status_t PostToolsInit() = 0;
 
-   virtual void ReleaseResources() = 0;
+  virtual void ReleaseResources() = 0;
 
-   // @brief Invoke the user provided callback for each region accessible by
-   // this agent.
-   //
-   // @param [in] include_peer If true, the callback will be also invoked on
-   // each peer memory region accessible by this agent. If false, only invoke
-   // the callback on memory region owned by this agent.
-   // @param [in] callback User provided callback function.
-   // @param [in] data User provided pointer as input for @p callback.
-   //
-   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
-   // region returns ::HSA_STATUS_SUCCESS.
-   virtual hsa_status_t
-   VisitRegion(bool include_peer,
-               hsa_status_t (*callback)(hsa_region_t region, void *data),
-               void *data) const = 0;
+  // @brief Invoke the user provided callback for each region accessible by
+  // this agent.
+  //
+  // @param [in] include_peer If true, the callback will be also invoked on
+  // each peer memory region accessible by this agent. If false, only invoke
+  // the callback on memory region owned by this agent.
+  // @param [in] callback User provided callback function.
+  // @param [in] data User provided pointer as input for @p callback.
+  //
+  // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
+  // region returns ::HSA_STATUS_SUCCESS.
+  virtual hsa_status_t VisitRegion(bool include_peer,
+                                   hsa_status_t (*callback)(hsa_region_t region, void* data),
+                                   void* data) const = 0;
 
-   // @brief Carve scratch memory for main from scratch pool.
-   //
-   // @param [in,out] scratch Structure to be populated with the carved memory
-   // information.
-   virtual void AcquireQueueMainScratch(ScratchInfo &scratch) = 0;
+  // @brief Carve scratch memory for main from scratch pool.
+  //
+  // @param [in,out] scratch Structure to be populated with the carved memory
+  // information.
+  virtual void AcquireQueueMainScratch(ScratchInfo& scratch) = 0;
 
-   // @brief Carve scratch memory for alt from scratch pool.
-   //
-   // @param [in,out] scratch Structure to be populated with the carved memory
-   // information.
-   virtual void AcquireQueueAltScratch(ScratchInfo &scratch) = 0;
+  // @brief Carve scratch memory for alt from scratch pool.
+  //
+  // @param [in,out] scratch Structure to be populated with the carved memory
+  // information.
+  virtual void AcquireQueueAltScratch(ScratchInfo& scratch) = 0;
 
-   // @brief Release scratch memory from main back to scratch pool.
-   //
-   // @param [in,out] scratch Scratch memory previously acquired with call to
-   // ::AcquireQueueMainScratch.
-   virtual void ReleaseQueueMainScratch(ScratchInfo &base) = 0;
+  // @brief Release scratch memory from main back to scratch pool.
+  //
+  // @param [in,out] scratch Scratch memory previously acquired with call to
+  // ::AcquireQueueMainScratch.
+  virtual void ReleaseQueueMainScratch(ScratchInfo& base) = 0;
 
-   // @brief Release scratch memory back from alternate to scratch pool.
-   //
-   // @param [in,out] scratch Scratch memory  previously acquired with call to
-   // ::AcquireQueueAltScratch.
-   virtual void ReleaseQueueAltScratch(ScratchInfo &base) = 0;
+  // @brief Release scratch memory back from alternate to scratch pool.
+  //
+  // @param [in,out] scratch Scratch memory  previously acquired with call to
+  // ::AcquireQueueAltScratch.
+  virtual void ReleaseQueueAltScratch(ScratchInfo& base) = 0;
 
-   // @brief Translate the kernel start and end dispatch timestamp from agent
-   // domain to host domain.
-   //
-   // @param [in] signal Pointer to signal that provides the dispatch timing.
-   // @param [out] time Structure to be populated with the host domain value.
-   virtual void TranslateTime(core::Signal *signal,
-                              hsa_amd_profiling_dispatch_time_t &time) = 0;
+  // @brief Translate the kernel start and end dispatch timestamp from agent
+  // domain to host domain.
+  //
+  // @param [in] signal Pointer to signal that provides the dispatch timing.
+  // @param [out] time Structure to be populated with the host domain value.
+  virtual void TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) = 0;
 
-   // @brief Translate the async copy start and end timestamp from agent
-   // domain to host domain.
-   //
-   // @param [in] signal Pointer to signal that provides the async copy timing.
-   // @param [out] time Structure to be populated with the host domain value.
-   virtual void TranslateTime(core::Signal *signal,
-                              hsa_amd_profiling_async_copy_time_t &time) = 0;
+  // @brief Translate the async copy start and end timestamp from agent
+  // domain to host domain.
+  //
+  // @param [in] signal Pointer to signal that provides the async copy timing.
+  // @param [out] time Structure to be populated with the host domain value.
+  virtual void TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_time_t& time) = 0;
 
-   // @brief Translate timestamp agent domain to host domain.
-   //
-   // @param [out] time Timestamp in agent domain.
-   virtual uint64_t TranslateTime(uint64_t tick) = 0;
+  // @brief Translate timestamp agent domain to host domain.
+  //
+  // @param [out] time Timestamp in agent domain.
+  virtual uint64_t TranslateTime(uint64_t tick) = 0;
 
-   // @brief Invalidate caches on the agent which may hold code object data.
-   virtual void InvalidateCodeCaches(void *ptr, size_t size) = 0;
+  // @brief Invalidate caches on the agent which may hold code object data.
+  virtual void InvalidateCodeCaches(void* ptr, size_t size) = 0;
 
-   // @brief Sets the coherency type of this agent.
-   //
-   // @param [in] type New coherency type.
-   //
-   // @retval true The new coherency type is set successfuly.
-   virtual bool current_coherency_type(hsa_amd_coherency_type_t type) = 0;
+  // @brief Sets the coherency type of this agent.
+  //
+  // @param [in] type New coherency type.
+  //
+  // @retval true The new coherency type is set successfuly.
+  virtual bool current_coherency_type(hsa_amd_coherency_type_t type) = 0;
 
-   // @brief Returns the current coherency type of this agent.
-   //
-   // @retval Coherency type.
-   virtual hsa_amd_coherency_type_t current_coherency_type() const = 0;
+  // @brief Returns the current coherency type of this agent.
+  //
+  // @retval Coherency type.
+  virtual hsa_amd_coherency_type_t current_coherency_type() const = 0;
 
-   virtual void RegisterGangPeer(core::Agent &gang_peer,
-                                 unsigned int bandwidth_factor) = 0;
+  virtual void RegisterGangPeer(core::Agent& gang_peer, unsigned int bandwidth_factor) = 0;
 
-   virtual void RegisterRecSdmaEngIdMaskPeer(core::Agent &gang_peer,
-                                             uint32_t rec_sdma_eng_id_mask) = 0;
+  virtual void RegisterRecSdmaEngIdMaskPeer(core::Agent& gang_peer,
+                                            uint32_t rec_sdma_eng_id_mask) = 0;
 
-   virtual void SetRecSdmaEngOverride(bool flag) = 0;
+  virtual void SetRecSdmaEngOverride(bool flag) = 0;
 
-   // @brief Query the agent HSA profile.
-   //
-   // @retval HSA profile.
-   virtual hsa_profile_t profile() const = 0;
+  // @brief Query the agent HSA profile.
+  //
+  // @retval HSA profile.
+  virtual hsa_profile_t profile() const = 0;
 
-   // @brief Query the agent memory bus width in bit.
-   //
-   // @retval Bus width in bit.
-   virtual uint32_t memory_bus_width() const = 0;
+  // @brief Query the agent memory bus width in bit.
+  //
+  // @retval Bus width in bit.
+  virtual uint32_t memory_bus_width() const = 0;
 
-   // @brief Query the agent memory maximum frequency in MHz.
-   //
-   // @retval Bus width in MHz.
-   virtual uint32_t memory_max_frequency() const = 0;
+  // @brief Query the agent memory maximum frequency in MHz.
+  //
+  // @retval Bus width in MHz.
+  virtual uint32_t memory_max_frequency() const = 0;
 
-   // @brief Whether agent supports asynchronous scratch reclaim. Depends on CP
-   // FW
-   virtual bool AsyncScratchReclaimEnabled() const = 0;
+  // @brief Whether agent supports asynchronous scratch reclaim. Depends on CP
+  // FW
+  virtual bool AsyncScratchReclaimEnabled() const = 0;
 
-   // @brief Update the agent's scratch use-once threshold.
-   // Only valid when async scratch reclaim is supported
-   // @retval HSA_STATUS_SUCCESS if successful
-   virtual hsa_status_t SetAsyncScratchThresholds(size_t use_once_limit) = 0;
+  // @brief Update the agent's scratch use-once threshold.
+  // Only valid when async scratch reclaim is supported
+  // @retval HSA_STATUS_SUCCESS if successful
+  virtual hsa_status_t SetAsyncScratchThresholds(size_t use_once_limit) = 0;
 
-   // @brief Iterate through supported PC Sampling configurations
-   // @retval HSA_STATUS_SUCCESS if successful
-   virtual hsa_status_t
-   PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configuration_callback_t cb,
-                           void *cb_data) = 0;
+  // @brief Iterate through supported PC Sampling configurations
+  // @retval HSA_STATUS_SUCCESS if successful
+  virtual hsa_status_t PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configuration_callback_t cb,
+                                               void* cb_data) = 0;
 
-   virtual hsa_status_t
-   PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession &session) = 0;
+  virtual hsa_status_t PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& session) = 0;
 
-   virtual hsa_status_t
-   PcSamplingCreateFromId(HsaPcSamplingTraceId pcsId,
-                          pcs::PcsRuntime::PcSamplingSession &session) = 0;
+  virtual hsa_status_t PcSamplingCreateFromId(HsaPcSamplingTraceId pcsId,
+                                              pcs::PcsRuntime::PcSamplingSession& session) = 0;
 
-   virtual hsa_status_t
-   PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession &session) = 0;
+  virtual hsa_status_t PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session) = 0;
 
-   virtual hsa_status_t
-   PcSamplingStart(pcs::PcsRuntime::PcSamplingSession &session) = 0;
+  virtual hsa_status_t PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) = 0;
 
-   virtual hsa_status_t
-   PcSamplingStop(pcs::PcsRuntime::PcSamplingSession &session) = 0;
+  virtual hsa_status_t PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session) = 0;
 
-   virtual hsa_status_t
-   PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession &session) = 0;
+  virtual hsa_status_t PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& session) = 0;
 };
 
 class GpuAgent : public GpuAgentInt {
@@ -273,18 +262,15 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Override from core::Agent.
   hsa_status_t VisitRegion(bool include_peer,
-                           hsa_status_t (*callback)(hsa_region_t region,
-                                                    void* data),
+                           hsa_status_t (*callback)(hsa_region_t region, void* data),
                            void* data) const override;
 
   // @brief Override from core::Agent.
-  hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region,
-                                                      void* data),
+  hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
                              void* data) const override;
 
-  hsa_status_t IterateSupportedIsas(
-                    hsa_status_t (*callback)(hsa_isa_t isa, void* data),
-                                                  void* data) const override;
+  hsa_status_t IterateSupportedIsas(hsa_status_t (*callback)(hsa_isa_t isa, void* data),
+                                    void* data) const override;
 
   // @brief Override from core::Agent.
   hsa_status_t IterateCache(hsa_status_t (*callback)(hsa_cache_t cache, void* data),
@@ -294,21 +280,19 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t DmaCopy(void* dst, const void* src, size_t size) override;
 
   // @brief Override from core::Agent.
-  hsa_status_t DmaCopy(void* dst, core::Agent& dst_agent, const void* src,
-                       core::Agent& src_agent, size_t size,
-                       std::vector<core::Signal*>& dep_signals,
+  hsa_status_t DmaCopy(void* dst, core::Agent& dst_agent, const void* src, core::Agent& src_agent,
+                       size_t size, std::vector<core::Signal*>& dep_signals,
                        core::Signal& out_signal) override;
 
   // @brief Override from core::Agent.
   hsa_status_t DmaCopyOnEngine(void* dst, core::Agent& dst_agent, const void* src,
-                       core::Agent& src_agent, size_t size,
-                       std::vector<core::Signal*>& dep_signals,
-                       core::Signal& out_signal, int engine_offset,
-                       bool force_copy_on_sdma) override;
+                               core::Agent& src_agent, size_t size,
+                               std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
+                               int engine_offset, bool force_copy_on_sdma) override;
 
   // @brief Override from core::Agent.
   hsa_status_t DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_agent,
-                             uint32_t *engine_ids_mask) override;
+                             uint32_t* engine_ids_mask) override;
 
   // @brief Override from core::Agent.
   hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
@@ -370,15 +354,13 @@ class GpuAgent : public GpuAgentInt {
   // Getter & setters.
 
   // @brief Returns Hive ID
-  __forceinline uint64_t HiveId() const override { return  properties_.HiveID; }
+  __forceinline uint64_t HiveId() const override { return properties_.HiveID; }
 
   // @brief Returns KFD's GPU id which is a hash used internally.
   __forceinline uint64_t KfdGpuID() const { return properties_.KFDGpuID; }
 
   // @brief Returns node property.
-  __forceinline const HsaNodeProperties& properties() const {
-    return properties_;
-  }
+  __forceinline const HsaNodeProperties& properties() const { return properties_; }
 
   // @brief set rec_sdma_eng_override_
   __forceinline void SetRecSdmaEngOverride(bool flag) override { rec_sdma_eng_override_ = flag; }
@@ -389,30 +371,21 @@ class GpuAgent : public GpuAgentInt {
   // @brief Returns data cache property.
   //
   // @param [in] idx Cache level.
-  __forceinline const HsaCacheProperties& cache_prop(int idx) const {
-    return cache_props_[idx];
-  }
+  __forceinline const HsaCacheProperties& cache_prop(int idx) const { return cache_props_[idx]; }
 
   // @brief Override from core::Agent.
-  const std::vector<const core::MemoryRegion*>& regions() const override {
-    return regions_;
-  }
+  const std::vector<const core::MemoryRegion*>& regions() const override { return regions_; }
 
-  const std::vector<const core::Isa *>& supported_isas() const override {
-                                                      return supported_isas_;}
+  const std::vector<const core::Isa*>& supported_isas() const override { return supported_isas_; }
 
   // @brief Override from AMD::GpuAgentInt.
   __forceinline hsa_profile_t profile() const override { return profile_; }
 
   // @brief Override from AMD::GpuAgentInt.
-  __forceinline uint32_t memory_bus_width() const override {
-    return memory_bus_width_;
-  }
+  __forceinline uint32_t memory_bus_width() const override { return memory_bus_width_; }
 
   // @brief Override from AMD::GpuAgentInt.
-  __forceinline uint32_t memory_max_frequency() const override {
-    return memory_max_frequency_;
-  }
+  __forceinline uint32_t memory_max_frequency() const override { return memory_max_frequency_; }
 
   // @brief Order the device is surfaced in hsa_iterate_agents counting only
   // GPU devices.
@@ -437,7 +410,7 @@ class GpuAgent : public GpuAgentInt {
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
-  __forceinline void PcieWcFlush(void *ptr, size_t size) const {
+  __forceinline void PcieWcFlush(void* ptr, size_t size) const {
     if (!xgmi_cpu_gpu_) {
       _mm_sfence();
       *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
@@ -461,11 +434,11 @@ class GpuAgent : public GpuAgentInt {
     const uint32_t GFX95X_MIN_CP_FW_VERSION_REQUIRED = 24;
 
     return (core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
-	    supported_isas()[0]->GetMajorVersion() == 9 &&
-	    ((supported_isas()[0]->GetMinorVersion() == 4 &&
-	      properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED) ||
-	     (supported_isas()[0]->GetMinorVersion() == 5 &&
-	      properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED)));
+            supported_isas()[0]->GetMajorVersion() == 9 &&
+            ((supported_isas()[0]->GetMinorVersion() == 4 &&
+              properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED) ||
+             (supported_isas()[0]->GetMinorVersion() == 5 &&
+              properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED)));
   };
 
   hsa_status_t SetAsyncScratchThresholds(size_t use_once_limit) override;
@@ -514,7 +487,8 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Create an internal queue, with a custom error handler, allowing tools to be
   // notified.
-  core::Queue* CreateInterceptibleQueue(void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
+  core::Queue* CreateInterceptibleQueue(void (*callback)(hsa_status_t status, hsa_queue_t* source,
+                                                         void* data),
                                         void* data, const uint32_t size);
 
   // @brief Create SDMA blit object.
@@ -535,10 +509,9 @@ class GpuAgent : public GpuAgentInt {
   //
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // region returns ::HSA_STATUS_SUCCESS.
-  hsa_status_t VisitRegion(
-      const std::vector<const core::MemoryRegion*>& regions,
-      hsa_status_t (*callback)(hsa_region_t region, void* data),
-      void* data) const;
+  hsa_status_t VisitRegion(const std::vector<const core::MemoryRegion*>& regions,
+                           hsa_status_t (*callback)(hsa_region_t region, void* data),
+                           void* data) const;
 
   // @brief Update ::t1_ tick count.
   void SyncClocks();
@@ -553,7 +526,7 @@ class GpuAgent : public GpuAgentInt {
                                        void* cb_data) override;
   hsa_status_t PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingCreateFromId(HsaPcSamplingTraceId pcsId,
-                            pcs::PcsRuntime::PcSamplingSession& session) override;
+                                      pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session) override;
@@ -823,7 +796,7 @@ class GpuAgent : public GpuAgentInt {
   // Check if SDMA engine by ID is free
   bool DmaEngineIsFree(uint32_t engine_id);
 
-  std::map<uint64_t,unsigned int> gang_peers_info_;
+  std::map<uint64_t, unsigned int> gang_peers_info_;
 
   std::map<uint64_t, uint32_t> rec_sdma_eng_id_peers_info_;
 
@@ -842,7 +815,7 @@ class GpuAgent : public GpuAgentInt {
   bool large_bar_enabled_;
 };
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr
 
 #endif  // header guard

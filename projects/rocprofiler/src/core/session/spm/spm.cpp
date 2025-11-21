@@ -188,7 +188,8 @@ std::mutex processQueueLock;
 //       }
 //       se++;
 //     }
-//     record.header.id = rocprofiler_record_id_t{rocprofiler::ROCProfiler_Singleton::GetInstance().GetUniqueRecordId()};
+//     record.header.id =
+//     rocprofiler_record_id_t{rocprofiler::ROCProfiler_Singleton::GetInstance().GetUniqueRecordId()};
 //     buffer->AddRecord(record);
 //     nSample++;
 //     index += 160;
@@ -239,11 +240,13 @@ uint64_t submitPacket(hsa_queue_t* queue, const void* packet) {
   const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
 
   // advance command queue
-  const uint64_t write_idx =
-      rocprofiler::HSASupport_Singleton::GetInstance().GetCoreApiTable().hsa_queue_add_write_index_scacq_screl_fn(queue, 1);
+  const uint64_t write_idx = rocprofiler::HSASupport_Singleton::GetInstance()
+                                 .GetCoreApiTable()
+                                 .hsa_queue_add_write_index_scacq_screl_fn(queue, 1);
   while ((write_idx -
-          rocprofiler::HSASupport_Singleton::GetInstance().GetCoreApiTable().hsa_queue_load_read_index_relaxed_fn(queue)) >=
-         queue->size) {
+          rocprofiler::HSASupport_Singleton::GetInstance()
+              .GetCoreApiTable()
+              .hsa_queue_load_read_index_relaxed_fn(queue)) >= queue->size) {
     sched_yield();  // TODO: remove
   }
 
@@ -261,8 +264,8 @@ uint64_t submitPacket(hsa_queue_t* queue, const void* packet) {
   header_atomic_ptr->store(slot_data[0], std::memory_order_release);
 
   // ringdoor bell
-  rocprofiler::HSASupport_Singleton::GetInstance().GetCoreApiTable().hsa_signal_store_relaxed_fn(queue->doorbell_signal,
-                                                                        write_idx);
+  rocprofiler::HSASupport_Singleton::GetInstance().GetCoreApiTable().hsa_signal_store_relaxed_fn(
+      queue->doorbell_signal, write_idx);
 
   return write_idx;
 }
@@ -288,8 +291,10 @@ hsa_signal_value_t signalWait(const hsa_signal_t& signal, const hsa_signal_value
     // Probably a maximum wait time should be set. We don't want application to hang because of
     // unlimited wait.
     // TODO2 : try 500000 assuming nanosecond granularity -- must be verified.
-    ret_value = rocprofiler::HSASupport_Singleton::GetInstance().GetCoreApiTable().hsa_signal_wait_scacquire_fn(
-        signal, HSA_SIGNAL_CONDITION_LT, signal_value, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+    ret_value = rocprofiler::HSASupport_Singleton::GetInstance()
+                    .GetCoreApiTable()
+                    .hsa_signal_wait_scacquire_fn(signal, HSA_SIGNAL_CONDITION_LT, signal_value,
+                                                  UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
     if (ret_value == exp_value) break;
     if (ret_value != signal_value)
@@ -318,10 +323,11 @@ spm::SpmCounters::SpmCounters(rocprofiler_buffer_id_t buffer_id, rocprofiler_fil
   delete device_list_;
 
   // create signals
-  hsa_status_t status =
-      HSASupport_Singleton::GetInstance().GetCoreApiTable().hsa_signal_create_fn(1, 0, NULL, &start_signal_);
+  hsa_status_t status = HSASupport_Singleton::GetInstance().GetCoreApiTable().hsa_signal_create_fn(
+      1, 0, NULL, &start_signal_);
   if (status != HSA_STATUS_SUCCESS) fatal("start signal creation failed");
-  status = HSASupport_Singleton::GetInstance().GetCoreApiTable().hsa_signal_create_fn(1, 0, NULL, &stop_signal_);
+  status = HSASupport_Singleton::GetInstance().GetCoreApiTable().hsa_signal_create_fn(
+      1, 0, NULL, &stop_signal_);
   if (status != HSA_STATUS_SUCCESS) fatal("start signal creation failed");
   is_started.store(false, std::memory_order_relaxed);
   buffer_read_flag.store(false, std::memory_order_relaxed);

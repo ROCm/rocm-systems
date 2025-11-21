@@ -199,7 +199,6 @@ class MetricsDict {
 
   MetricsDict(const rocprofiler::HSAAgentInfo* agent_info) : xml_(NULL), agent_info_(agent_info) {
     std::string xml_name = []() {
-
       if (const char* path = getenv("ROCPROFILER_METRICS_PATH"); path != nullptr) return path;
       return "";
     }();
@@ -211,12 +210,15 @@ class MetricsDict {
     }
     xml_ = xml::Xml::Create(xml_name);
     if (xml_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
-    xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->GetDeviceInfo().getMaxWaveSize());
+    xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE",
+                   agent_info->GetDeviceInfo().getMaxWaveSize());
     xml_->AddConst("top.const.metric", "CU_NUM", agent_info->GetDeviceInfo().getCUCount());
     xml_->AddConst("top.const.metric", "XCC_NUM", agent_info->GetDeviceInfo().getXccCount());
-    xml_->AddConst("top.const.metric", "SIMD_NUM",
-                   agent_info->GetDeviceInfo().getSimdCountPerCU() * agent_info->GetDeviceInfo().getCUCount());
-    xml_->AddConst("top.const.metric", "SE_NUM", agent_info->GetDeviceInfo().getShaderEngineCount());
+    xml_->AddConst(
+        "top.const.metric", "SIMD_NUM",
+        agent_info->GetDeviceInfo().getSimdCountPerCU() * agent_info->GetDeviceInfo().getCUCount());
+    xml_->AddConst("top.const.metric", "SE_NUM",
+                   agent_info->GetDeviceInfo().getShaderEngineCount());
     xml_->AddConst("top.const.metric", "LDS_BANKS", 32);
     ImportMetrics(agent_info, "const");
     agent_name_ = agent_info->GetDeviceInfo().getName();
@@ -225,8 +227,8 @@ class MetricsDict {
       agent_name_ = agent_name_.substr(0, agent_name_.find(':'));
 
     std::unordered_set<std::string> supported_agent_names = {
-        "gfx906",  "gfx908", "gfx90a",    // Vega
-        "gfx940",  "gfx941", "gfx942",    // Mi300
+        "gfx906",  "gfx908",  "gfx90a",   // Vega
+        "gfx940",  "gfx941",  "gfx942",   // Mi300
         "gfx1030", "gfx1031", "gfx1032",  // Navi2x
         "gfx1100", "gfx1101", "gfx1102",  // Navi3x
         "gfx1150", "gfx1151",

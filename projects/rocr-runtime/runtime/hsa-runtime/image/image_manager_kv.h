@@ -62,25 +62,24 @@ class ImageManagerKv : public ImageManager {
 
   /// @brief Retrieve device specific image property of a certain format
   /// and geometry.
-  virtual ImageProperty GetImageProperty(
-      hsa_agent_t component, const hsa_ext_image_format_t& format,
-      hsa_ext_image_geometry_t geometry) const;
+  virtual ImageProperty GetImageProperty(hsa_agent_t component,
+                                         const hsa_ext_image_format_t& format,
+                                         hsa_ext_image_geometry_t geometry) const;
 
   /// @brief Retrieve device specific supported max width, height, depth,
   /// and array size of an image geometry.
-  virtual void GetImageInfoMaxDimension(hsa_agent_t component,
-                                        hsa_ext_image_geometry_t geometry,
-                                        uint32_t& width, uint32_t& height,
-                                        uint32_t& depth,
+  virtual void GetImageInfoMaxDimension(hsa_agent_t component, hsa_ext_image_geometry_t geometry,
+                                        uint32_t& width, uint32_t& height, uint32_t& depth,
                                         uint32_t& array_size) const;
 
   /// @brief Calculate the size and alignment of the backing storage of an
   /// image.
-  virtual hsa_status_t CalculateImageSizeAndAlignment(
-      hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
-      hsa_ext_image_data_layout_t image_data_layout,
-      size_t image_data_row_pitch, size_t image_data_slice_pitch,
-      hsa_ext_image_data_info_t& image_info) const;
+  virtual hsa_status_t CalculateImageSizeAndAlignment(hsa_agent_t component,
+                                                      const hsa_ext_image_descriptor_t& desc,
+                                                      hsa_ext_image_data_layout_t image_data_layout,
+                                                      size_t image_data_row_pitch,
+                                                      size_t image_data_slice_pitch,
+                                                      hsa_ext_image_data_info_t& image_info) const;
 
   /// @brief Fill image structure with device specific image object.
   virtual hsa_status_t PopulateImageSrd(Image& image) const;
@@ -90,26 +89,24 @@ class ImageManagerKv : public ImageManager {
 
   /// @brief Modify device specific image object according to the specified
   /// new format.
-  virtual hsa_status_t ModifyImageSrd(Image& image,
-                                      hsa_ext_image_format_t& new_format) const;
+  virtual hsa_status_t ModifyImageSrd(Image& image, hsa_ext_image_format_t& new_format) const;
 
   /// @brief Fill sampler structure with device specific sampler object.
   virtual hsa_status_t PopulateSamplerSrd(Sampler& sampler) const;
 
   // @brief Copy the content of a linear memory to an image object.
-  virtual hsa_status_t CopyBufferToImage(
-      const void* src_memory, size_t src_row_pitch, size_t src_slice_pitch,
-      const Image& dst_image, const hsa_ext_image_region_t& image_region);
+  virtual hsa_status_t CopyBufferToImage(const void* src_memory, size_t src_row_pitch,
+                                         size_t src_slice_pitch, const Image& dst_image,
+                                         const hsa_ext_image_region_t& image_region);
 
   /// @brief Copy the content of an image object to a linear memory.
-  virtual hsa_status_t CopyImageToBuffer(
-      const Image& src_image, void* dst_memory, size_t dst_row_pitch,
-      size_t dst_slice_pitch, const hsa_ext_image_region_t& image_region);
+  virtual hsa_status_t CopyImageToBuffer(const Image& src_image, void* dst_memory,
+                                         size_t dst_row_pitch, size_t dst_slice_pitch,
+                                         const hsa_ext_image_region_t& image_region);
 
   /// @brief Transfer images backing storage using agent copy.
   virtual hsa_status_t CopyImage(const Image& dst_image, const Image& src_image,
-                                 const hsa_dim3_t& dst_origin,
-                                 const hsa_dim3_t& src_origin,
+                                 const hsa_dim3_t& dst_origin, const hsa_dim3_t& src_origin,
                                  const hsa_dim3_t size);
 
   /// @brief Fill image backing storage using agent copy.
@@ -123,18 +120,14 @@ class ImageManagerKv : public ImageManager {
 
   static VOID* ADDR_API AllocSysMem(const ADDR_ALLOCSYSMEM_INPUT* input);
 
-  static ADDR_E_RETURNCODE ADDR_API
-      FreeSysMem(const ADDR_FREESYSMEM_INPUT* input);
+  static ADDR_E_RETURNCODE ADDR_API FreeSysMem(const ADDR_FREESYSMEM_INPUT* input);
 
-  bool GetAddrlibSurfaceInfo(hsa_agent_t component,
-                             const hsa_ext_image_descriptor_t& desc,
-                             Image::TileMode tileMode,
-                             size_t image_data_row_pitch,
+  bool GetAddrlibSurfaceInfo(hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
+                             Image::TileMode tileMode, size_t image_data_row_pitch,
                              size_t image_data_slice_pitch,
                              ADDR_COMPUTE_SURFACE_INFO_OUTPUT& out) const;
 
-  size_t CalWorkingSizeBytes(hsa_ext_image_geometry_t geometry,
-                             hsa_dim3_t size_pixel,
+  size_t CalWorkingSizeBytes(hsa_ext_image_geometry_t geometry, hsa_dim3_t size_pixel,
                              uint32_t element_size) const;
 
   virtual bool IsLocalMemory(const void* address) const;

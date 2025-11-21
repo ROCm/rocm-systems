@@ -94,7 +94,8 @@ bool GenericBuffer::Flush() {
   {
     // Wait for the current operation to complete.
     std::unique_lock consumer_lock(consumer_mutex_);
-    consumer_cond_.wait(consumer_lock, [this]() { return !consumer_arg_.valid || !consumerRunning; });
+    consumer_cond_.wait(consumer_lock,
+                        [this]() { return !consumer_arg_.valid || !consumerRunning; });
   }
   return true;
 }

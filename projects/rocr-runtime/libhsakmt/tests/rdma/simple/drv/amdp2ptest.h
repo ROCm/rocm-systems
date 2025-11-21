@@ -31,41 +31,41 @@
 #define AMDP2PTEST_DEVICE_PATH "/dev/amdp2ptest"
 
 struct AMDRDMA_IOCTL_GET_PAGE_SIZE_PARAM {
-	/* Input parameters */
-	uint64_t addr;
-	uint64_t length;
+  /* Input parameters */
+  uint64_t addr;
+  uint64_t length;
 
-	/* Output parameters */
-	uint64_t page_size;
+  /* Output parameters */
+  uint64_t page_size;
 };
 
 struct AMDRDMA_IOCTL_GET_PAGES_PARAM {
-	/* Input parameters */
-	uint64_t addr;
-	uint64_t length;
-	uint64_t is_local;	/* 1 if this is the pointer to local
-				   allocation */
+  /* Input parameters */
+  uint64_t addr;
+  uint64_t length;
+  uint64_t is_local; /* 1 if this is the pointer to local
+                        allocation */
 
-	/* Output parameters */
-	uint64_t cpu_ptr;
+  /* Output parameters */
+  uint64_t cpu_ptr;
 };
 
 
 struct AMDRDMA_IOCTL_PUT_PAGES_PARAM {
-	/* Input parameters */
-	uint64_t addr;
-	uint64_t length;
+  /* Input parameters */
+  uint64_t addr;
+  uint64_t length;
 };
 
 
-#define AMD2P2PTEST_IOCTL_GET_PAGE_SIZE	\
-_IOWR(AMDP2PTEST_IOCTL_MAGIC, 1, struct AMDRDMA_IOCTL_GET_PAGE_SIZE_PARAM *)
+#define AMD2P2PTEST_IOCTL_GET_PAGE_SIZE                                                            \
+  _IOWR(AMDP2PTEST_IOCTL_MAGIC, 1, struct AMDRDMA_IOCTL_GET_PAGE_SIZE_PARAM*)
 
-#define AMD2P2PTEST_IOCTL_GET_PAGES \
-_IOWR(AMDP2PTEST_IOCTL_MAGIC, 2, struct AMDRDMA_IOCTL_GET_PAGES_PARAM *)
+#define AMD2P2PTEST_IOCTL_GET_PAGES                                                                \
+  _IOWR(AMDP2PTEST_IOCTL_MAGIC, 2, struct AMDRDMA_IOCTL_GET_PAGES_PARAM*)
 
-#define AMD2P2PTEST_IOCTL_PUT_PAGES	\
-_IOW(AMDP2PTEST_IOCTL_MAGIC, 3, struct AMDRDMA_IOCTL_PUT_PAGES_PARAM *)
+#define AMD2P2PTEST_IOCTL_PUT_PAGES                                                                \
+  _IOW(AMDP2PTEST_IOCTL_MAGIC, 3, struct AMDRDMA_IOCTL_PUT_PAGES_PARAM*)
 
 
-#endif  /* AMDP2PTEST_H */
+#endif /* AMDP2PTEST_H */

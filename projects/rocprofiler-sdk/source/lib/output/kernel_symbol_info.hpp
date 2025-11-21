@@ -63,10 +63,10 @@ struct kernel_symbol_info : rocprofiler_kernel_symbol_info_t
     {}
 
     kernel_symbol_info();
-    ~kernel_symbol_info()                             = default;
-    kernel_symbol_info(const kernel_symbol_info&)     = default;
-    kernel_symbol_info(kernel_symbol_info&&) noexcept = default;
-    kernel_symbol_info& operator=(const kernel_symbol_info&) = default;
+    ~kernel_symbol_info()                                        = default;
+    kernel_symbol_info(const kernel_symbol_info&)                = default;
+    kernel_symbol_info(kernel_symbol_info&&) noexcept            = default;
+    kernel_symbol_info& operator=(const kernel_symbol_info&)     = default;
     kernel_symbol_info& operator=(kernel_symbol_info&&) noexcept = default;
 
     std::string formatted_kernel_name = {};

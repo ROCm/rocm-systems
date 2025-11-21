@@ -99,7 +99,6 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       suspended_(false),
       priority_(HSA_QUEUE_PRIORITY_NORMAL),
       exception_signal_(nullptr) {
-
   // Queue size is a function of several restrictions.
   const uint32_t min_pkts = ComputeRingBufferMinPkts();
   const uint32_t max_pkts = ComputeRingBufferMaxPkts();
@@ -142,8 +141,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   amd_queue_.hsa_queue.doorbell_signal = Signal::Convert(this);
   amd_queue_.hsa_queue.size = queue_size_pkts;
   amd_queue_.hsa_queue.id = INVALID_QUEUEID;
-  amd_queue_.read_dispatch_id_field_base_byte_offset = uint32_t(
-      uintptr_t(&amd_queue_.read_dispatch_id) - uintptr_t(&amd_queue_));
+  amd_queue_.read_dispatch_id_field_base_byte_offset =
+      uint32_t(uintptr_t(&amd_queue_.read_dispatch_id) - uintptr_t(&amd_queue_));
   // Initialize the doorbell signal structure.
   memset(&signal_, 0, sizeof(signal_));
   signal_.kind = AMD_SIGNAL_KIND_DOORBELL;
@@ -155,11 +154,9 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   amd_queue_.max_wave_id = (props.MaxWavesPerSIMD * props.NumSIMDPerCU) - 1;
 
 #ifdef HSA_LARGE_MODEL
-  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64,
-                   1);
+  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64, 1);
 #else
-  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64,
-                   0);
+  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64, 0);
 #endif
 
   // Set group and private memory apertures in amd_queue_.
@@ -171,8 +168,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
     if (amdregion->IsLDS()) {
 #ifdef HSA_LARGE_MODEL
-      amd_queue_.group_segment_aperture_base_hi =
-          uint32_t(uintptr_t(base) >> 32);
+      amd_queue_.group_segment_aperture_base_hi = uint32_t(uintptr_t(base) >> 32);
 #else
       amd_queue_.group_segment_aperture_base_hi = uint32_t(base);
 #endif
@@ -180,8 +176,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
     if (amdregion->IsScratch()) {
 #ifdef HSA_LARGE_MODEL
-      amd_queue_.private_segment_aperture_base_hi =
-          uint32_t(uintptr_t(base) >> 32);
+      amd_queue_.private_segment_aperture_base_hi = uint32_t(uintptr_t(base) >> 32);
 #else
       amd_queue_.private_segment_aperture_base_hi = uint32_t(base);
 #endif
@@ -202,7 +197,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   queue_scratch_.use_once_limit = core::Runtime::runtime_singleton_->flag().scratch_single_limit();
   if (queue_scratch_.use_once_limit > agent_->MaxScratchDevice()) {
     fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%lu max:%lu)!\n",
-                    queue_scratch_.use_once_limit, agent_->MaxScratchDevice());
+            queue_scratch_.use_once_limit, agent_->MaxScratchDevice());
     queue_scratch_.use_once_limit = agent_->MaxScratchDevice();
   }
 
@@ -276,8 +271,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
                                          ring_buf_, ring_buf_alloc_bytes_, NULL, queue_rsrc);
   }
   if (status != HSA_STATUS_SUCCESS)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
-                             "Queue create failed\n");
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Queue create failed\n");
   // Complete populating the doorbell signal structure.
   signal_.hardware_doorbell_ptr = queue_rsrc.Queue_DoorBell_aql;
 
@@ -292,8 +286,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   amd_queue_.alt_scratch_max_use_index = UINT64_MAX;
 
   // Set flag to notify CP FW that SW supports the new amd_queue_v2
-  if (agent_->AsyncScratchReclaimEnabled())
-    amd_queue_.caps |= AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM;
+  if (agent_->AsyncScratchReclaimEnabled()) amd_queue_.caps |= AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM;
 
   // On the first queue creation, reserve some scratch memory on this agent.
   agent_->ReserveScratch();
@@ -367,18 +360,14 @@ AqlQueue::~AqlQueue() {
   Inactivate();
 
   if (queue_scratch_.main_queue_base) {
-    tool::notify_event_scratch_free_start(public_handle(),
-                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+    tool::notify_event_scratch_free_start(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
     agent_->ReleaseQueueMainScratch(queue_scratch_);
-    tool::notify_event_scratch_free_end(public_handle(),
-                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+    tool::notify_event_scratch_free_end(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
   }
   if (queue_scratch_.alt_queue_base) {
-    tool::notify_event_scratch_free_start(public_handle(),
-                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+    tool::notify_event_scratch_free_start(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
     agent_->ReleaseQueueAltScratch(queue_scratch_);
-    tool::notify_event_scratch_free_end(public_handle(),
-                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+    tool::notify_event_scratch_free_end(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
   }
 
   exception_signal_->WaitingDec();
@@ -422,55 +411,45 @@ uint64_t AqlQueue::LoadWriteIndexRelaxed() {
 }
 
 void AqlQueue::StoreWriteIndexRelaxed(uint64_t value) {
-  atomic::Store(&amd_queue_.write_dispatch_id, value,
-                std::memory_order_relaxed);
+  atomic::Store(&amd_queue_.write_dispatch_id, value, std::memory_order_relaxed);
 }
 
 void AqlQueue::StoreWriteIndexRelease(uint64_t value) {
-  atomic::Store(&amd_queue_.write_dispatch_id, value,
-                std::memory_order_release);
+  atomic::Store(&amd_queue_.write_dispatch_id, value, std::memory_order_release);
 }
 
 uint64_t AqlQueue::CasWriteIndexAcqRel(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_acq_rel);
+  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_acq_rel);
 }
 uint64_t AqlQueue::CasWriteIndexAcquire(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_acquire);
+  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_acquire);
 }
 uint64_t AqlQueue::CasWriteIndexRelaxed(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_relaxed);
+  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_relaxed);
 }
 uint64_t AqlQueue::CasWriteIndexRelease(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_release);
+  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_release);
 }
 
 uint64_t AqlQueue::AddWriteIndexAcqRel(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_acq_rel);
+  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_acq_rel);
 }
 
 uint64_t AqlQueue::AddWriteIndexAcquire(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_acquire);
+  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_acquire);
 }
 
 uint64_t AqlQueue::AddWriteIndexRelaxed(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_relaxed);
+  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_relaxed);
 }
 
 uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_release);
+  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_release);
 }
 
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
-        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+      core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_));
   } else {
     // Hardware doorbell supports AQL semantics.
@@ -527,16 +506,15 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
   if (IsDeviceMemRingBuf()) {
     if (!agent_->LargeBarEnabled()) {
       throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
-                                "Trying to allocate an AQL ring buffer in device memory without "
-                                "large BAR PCIe enabled.");
+                               "Trying to allocate an AQL ring buffer in device memory without "
+                               "large BAR PCIe enabled.");
     }
     ring_buf_ = agent_->coarsegrain_allocator()(
         ring_buf_alloc_bytes_,
         core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
   } else {
-    ring_buf_ = agent_->system_allocator()(
-        ring_buf_alloc_bytes_, 0x1000,
-        core::MemoryRegion::AllocateExecutable);
+    ring_buf_ = agent_->system_allocator()(ring_buf_alloc_bytes_, 0x1000,
+                                           core::MemoryRegion::AllocateExecutable);
   }
 
   assert(ring_buf_ != NULL && "AQL queue memory allocation failure");
@@ -651,11 +629,9 @@ void AqlQueue::CheckScratchLimits() {
       ? (scratch.use_once_limit / SCRATCH_ALT_RATIO)
       : 0;
 
-  if (scratch.main_size > scratch.use_once_limit)
-    AsyncReclaimMainScratch();
+  if (scratch.main_size > scratch.use_once_limit) AsyncReclaimMainScratch();
 
-  if (scratch.alt_size > scratch.use_alt_limit)
-    AsyncReclaimAltScratch();
+  if (scratch.alt_size > scratch.use_alt_limit) AsyncReclaimAltScratch();
 
   return;
 }
@@ -663,11 +639,9 @@ void AqlQueue::CheckScratchLimits() {
 void AqlQueue::FreeMainScratchSpace() {
   auto& scratch = queue_scratch_;
   if (queue_scratch_.main_queue_base) {
-    tool::notify_event_scratch_free_start(public_handle(),
-                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+    tool::notify_event_scratch_free_start(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
     agent_->ReleaseQueueMainScratch(scratch);
-    tool::notify_event_scratch_free_end(public_handle(),
-                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+    tool::notify_event_scratch_free_end(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
   }
   scratch.main_size = 0;
   scratch.main_size_per_thread = 0;
@@ -772,7 +746,7 @@ void AqlQueue::AsyncReclaimMainScratch() {
   }
 
   assert((amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM) &&
-          "This version of CP FW should support async scratch, but flag is not set");
+         "This version of CP FW should support async scratch, but flag is not set");
 
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
@@ -798,13 +772,13 @@ void AqlQueue::AsyncReclaimMainScratch() {
 
   // If current dispatch is using scratch, wait for it to finish
   while (amd_queue_.scratch_max_use_index >= LoadReadIndexRelaxed()) {
-    //TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
+    // TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
     os::YieldThread();
   }
 
   FreeMainScratchSpace();
   tool::notify_event_scratch_async_reclaim_end(public_handle(),
-                                                HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+                                               HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
 
   return;
 }
@@ -812,11 +786,9 @@ void AqlQueue::AsyncReclaimMainScratch() {
 void AqlQueue::FreeAltScratchSpace() {
   auto& scratch = queue_scratch_;
   if (queue_scratch_.alt_queue_base) {
-    tool::notify_event_scratch_free_start(public_handle(),
-                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+    tool::notify_event_scratch_free_start(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
     agent_->ReleaseQueueAltScratch(scratch);
-    tool::notify_event_scratch_free_end(public_handle(),
-                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+    tool::notify_event_scratch_free_end(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
   }
   scratch.alt_size = 0;
   scratch.alt_size_per_thread = 0;
@@ -844,7 +816,7 @@ void AqlQueue::AsyncReclaimAltScratch() {
   }
 
   assert((amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM) &&
-          "This version of CP FW should support async scratch, but flag is not set");
+         "This version of CP FW should support async scratch, but flag is not set");
 
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
@@ -860,13 +832,13 @@ void AqlQueue::AsyncReclaimAltScratch() {
 
   // If current dispatch is using alt scratch, wait for it to finish
   while (amd_queue_.alt_scratch_max_use_index >= LoadReadIndexRelaxed()) {
-    //TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
+    // TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
     os::YieldThread();
   }
 
   FreeAltScratchSpace();
   tool::notify_event_scratch_async_reclaim_end(public_handle(),
-                                                HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+                                               HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
   return;
 }
 
@@ -910,7 +882,7 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
    *
    *******************************************************************************************/
 
-  core::AqlPacket *pkt = NULL;
+  core::AqlPacket* pkt = NULL;
   uint64_t dispatch_id = UINT64_MAX;
 
   auto get_dispatch_pkt = [&]() {
@@ -919,17 +891,16 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
       // On GPUs where EOP is handled in asic, the read_dispatch_id is not
       // updated after each packet so look for the first dispatch that needs
       // scratch
-      const uint64_t pkt_slot_idx =
-          dispatch_id & (amd_queue_.hsa_queue.size - 1);
+      const uint64_t pkt_slot_idx = dispatch_id & (amd_queue_.hsa_queue.size - 1);
 
-      core::AqlPacket *dispatch_pkt =
-          &((core::AqlPacket *)amd_queue_.hsa_queue.base_address)[pkt_slot_idx];
+      core::AqlPacket* dispatch_pkt =
+          &((core::AqlPacket*)amd_queue_.hsa_queue.base_address)[pkt_slot_idx];
       if (dispatch_pkt->IsDispatchAndNeedsScratch()) return dispatch_pkt;
 
       dispatch_id++;
     } while (dispatch_id <= LoadWriteIndexRelaxed());
 
-    return (core::AqlPacket *)NULL;
+    return (core::AqlPacket*)NULL;
   };
 
   auto calc_dispatch_waves_per_group = [&](core::AqlPacket& pkt) {
@@ -948,10 +919,10 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
     uint64_t groups = ((uint64_t(pkt.dispatch.grid_size_x) + pkt.dispatch.workgroup_size_x - 1) /
                        pkt.dispatch.workgroup_size_x) *
-                      ((uint64_t(pkt.dispatch.grid_size_y) + pkt.dispatch.workgroup_size_y - 1) /
-                       pkt.dispatch.workgroup_size_y) *
-                      ((uint64_t(pkt.dispatch.grid_size_z) + pkt.dispatch.workgroup_size_z - 1) /
-                       pkt.dispatch.workgroup_size_z);
+        ((uint64_t(pkt.dispatch.grid_size_y) + pkt.dispatch.workgroup_size_y - 1) /
+         pkt.dispatch.workgroup_size_y) *
+        ((uint64_t(pkt.dispatch.grid_size_z) + pkt.dispatch.workgroup_size_z - 1) /
+         pkt.dispatch.workgroup_size_z);
     const uint32_t cu_count = amd_queue_.max_cu_id + 1;
 
     const uint32_t engines = agent_->properties().NumShaderBanks;
@@ -966,9 +937,8 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
     // For gfx10+ devices we must attempt to assign the smaller of 256 lanes or 16 groups to each
     // engine.
-    if (agent_->supported_isas()[0]->GetMajorVersion() >= 10 &&
-        maxGroupsPerEngine < 16 &&
-                              lanes_per_group * maxGroupsPerEngine < 256) {
+    if (agent_->supported_isas()[0]->GetMajorVersion() >= 10 && maxGroupsPerEngine < 16 &&
+        lanes_per_group * maxGroupsPerEngine < 256) {
       uint64_t groups_per_interleave = (256 + lanes_per_group - 1) / lanes_per_group;
       maxGroupsPerEngine = Min(groups_per_interleave, uint64_t(16ul));
     }
@@ -988,16 +958,16 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
   assert(core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
          (!scratch.async_reclaim || (amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM)) &&
-          "Asynchronous scratch reclaim capability not set, but this FW version should support it");
+         "Asynchronous scratch reclaim capability not set, but this FW version should support it");
 
   scratch.cooperative = (amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE);
 
-  pkt = get_dispatch_pkt(); // Sets dispatch_id
+  pkt = get_dispatch_pkt();  // Sets dispatch_id
   assert((pkt && dispatch_id != UINT64_MAX) &&
          "Could not find dispatch packet with private_segment_size > 0");
 
-  tool::notify_event_scratch_alloc_start(
-      public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE, dispatch_id);
+  tool::notify_event_scratch_alloc_start(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE,
+                                         dispatch_id);
 
   uint32_t device_slots = calc_device_slots();
   uint32_t groups = calc_dispatch_groups(*pkt);
@@ -1009,8 +979,7 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   const uint64_t lanes_per_wave = (error_code & 0x400) ? 32 : 64;
 
   const uint64_t size_per_thread =
-      AlignUp(pkt->dispatch.private_segment_size,
-              scratch.mem_alignment_size / lanes_per_wave);
+      AlignUp(pkt->dispatch.private_segment_size, scratch.mem_alignment_size / lanes_per_wave);
   const uint64_t device_size = size_per_thread * lanes_per_wave * device_slots;
   const uint64_t dispatch_size = size_per_thread * lanes_per_wave * dispatch_slots;
 
@@ -1020,11 +989,9 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   if (dispatch_size < scratch.use_alt_limit && dispatch_slots < device_slots) {
     // Try to use ALT scratch
     if (scratch.alt_queue_base) {
-      tool::notify_event_scratch_free_start(public_handle(),
-                                HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+      tool::notify_event_scratch_free_start(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
       agent_->ReleaseQueueAltScratch(scratch);
-      tool::notify_event_scratch_free_end(public_handle(),
-                                HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+      tool::notify_event_scratch_free_end(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
     }
 
     scratch.alt_size = dispatch_size;
@@ -1058,11 +1025,9 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
   // Use PRIMARY scratch
   if (scratch.main_queue_base) {
-    tool::notify_event_scratch_free_start(public_handle(),
-                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+    tool::notify_event_scratch_free_start(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
     agent_->ReleaseQueueMainScratch(scratch);
-    tool::notify_event_scratch_free_end(public_handle(),
-                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+    tool::notify_event_scratch_free_end(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
   }
 
   scratch.main_size = device_size;
@@ -1090,18 +1055,17 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   if (scratch.large) {
     amd_queue_.queue_properties |= AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE;
     // Set system release fence to flush scratch stores with older firmware versions.
-    if ((agent_->supported_isas()[0]->GetMajorVersion() == 8) && (agent_->GetMicrocodeVersion() < 729)) {
-      pkt->dispatch.header &=
-          ~(((1 << HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE) - 1)
-            << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-      pkt->dispatch.header |=
-          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    if ((agent_->supported_isas()[0]->GetMajorVersion() == 8) &&
+        (agent_->GetMicrocodeVersion() < 729)) {
+      pkt->dispatch.header &= ~(((1 << HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE) - 1)
+                                << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+      pkt->dispatch.header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     }
   } else if (scratch.alt_size && scratch.main_size > scratch.alt_size) {
     // Not using use-scratch-once, and dispatches that would fit in alt-scratch would also fit in
     // main scratch. No need for alt-scratch.
     tool::notify_event_scratch_async_reclaim_start(public_handle(),
-                                                 HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+                                                   HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
     FreeAltScratchSpace();
     tool::notify_event_scratch_async_reclaim_end(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
@@ -1255,43 +1219,43 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   };
   static const queue_error_t QueueErrors[] = {
       // EC_QUEUE_WAVE_ABORT
-      { 1, HSA_STATUS_ERROR_EXCEPTION },
+      {1, HSA_STATUS_ERROR_EXCEPTION},
       // EC_QUEUE_WAVE_TRAP
-      { 2, HSA_STATUS_ERROR_EXCEPTION },
+      {2, HSA_STATUS_ERROR_EXCEPTION},
       // EC_QUEUE_WAVE_MATH_ERROR
-      { 3, HSA_STATUS_ERROR_EXCEPTION },
+      {3, HSA_STATUS_ERROR_EXCEPTION},
       // EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION
-      { 4, (hsa_status_t)HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION },
+      {4, (hsa_status_t)HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION},
       // EC_QUEUE_WAVE_MEMORY_VIOLATION
-      { 5, (hsa_status_t)HSA_STATUS_ERROR_MEMORY_FAULT },
+      {5, (hsa_status_t)HSA_STATUS_ERROR_MEMORY_FAULT},
       // EC_QUEUE_WAVE_APERTURE_VIOLATION
-      { 6, (hsa_status_t)HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION },
+      {6, (hsa_status_t)HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION},
       // EC_QUEUE_PACKET_DISPATCH_DIM_INVALID
-      { 16, HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS },
+      {16, HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS},
       // EC_QUEUE_PACKET_DISPATCH_GROUP_SEGMENT_SIZE_INVALID
-      { 17, HSA_STATUS_ERROR_INVALID_ALLOCATION },
+      {17, HSA_STATUS_ERROR_INVALID_ALLOCATION},
       // EC_QUEUE_PACKET_DISPATCH_CODE_INVALID
-      { 18, HSA_STATUS_ERROR_INVALID_CODE_OBJECT },
+      {18, HSA_STATUS_ERROR_INVALID_CODE_OBJECT},
       // EC_QUEUE_PACKET_UNSUPPORTED
-      { 20, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT },
+      {20, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT},
       // EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID
-      { 21, HSA_STATUS_ERROR_INVALID_ARGUMENT },
+      {21, HSA_STATUS_ERROR_INVALID_ARGUMENT},
       // EC_QUEUE_PACKET_DISPATCH_REGISTER_SIZE_INVALID
-      { 22, HSA_STATUS_ERROR_INVALID_ISA },
+      {22, HSA_STATUS_ERROR_INVALID_ISA},
       // EC_QUEUE_PACKET_VENDOR_UNSUPPORTED
-      { 23, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT },
+      {23, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT},
       // EC_QUEUE_PREEMPTION_ERROR
-      { 31, HSA_STATUS_ERROR },
+      {31, HSA_STATUS_ERROR},
       // EC_DEVICE_MEMORY_VIOLATION
-      { 33, (hsa_status_t)HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION },
+      {33, (hsa_status_t)HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION},
       // EC_DEVICE_RAS_ERROR
-      { 34, HSA_STATUS_ERROR },
+      {34, HSA_STATUS_ERROR},
       // EC_DEVICE_FATAL_HALT
-      { 35, HSA_STATUS_ERROR },
+      {35, HSA_STATUS_ERROR},
       // EC_DEVICE_NEW
-      { 36, HSA_STATUS_ERROR },
+      {36, HSA_STATUS_ERROR},
       // EC_PROCESS_DEVICE_REMOVE
-      { 50, HSA_STATUS_ERROR }};
+      {50, HSA_STATUS_ERROR}};
 
   AqlQueue* queue = (AqlQueue*)arg;
   hsa_status_t errorCode = HSA_STATUS_ERROR;
@@ -1326,8 +1290,7 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   // Fallback if KFD does not support GPU core dump. In this case, the core
   // dump is generated by hsa-runtime.
   if (!core::Runtime::runtime_singleton_->KfdVersion().supports_core_dump &&
-                queue->agent_->supported_isas()[0]->GetMajorVersion() != 11) {
-
+      queue->agent_->supported_isas()[0]->GetMajorVersion() != 11) {
     if (pcs::PcsRuntime::instance()->SessionsActive())
       fprintf(stderr, "GPU core dump skipped because PC Sampling active\n");
     else if (amd::coredump::dump_gpu_core())
@@ -1335,7 +1298,7 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
     // supports_core_dump flag is overwritten to avoid generate core dump file again
     // caught by a different exception handler. Such as VMFaultHandler.
     core::Runtime::runtime_singleton_->KfdVersion(
-      core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging, true);
+        core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging, true);
   }
 
   queue->Suspend();
@@ -1394,7 +1357,6 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
   // Apply mask if non-default or not queue initialization.
   ScopedAcquire<KernelMutex> lock(&mask_lock_);
   if ((!cu_mask_.empty()) || (num_cu_mask_count != 0) || (!global_mask.empty())) {
-
     // Devices with WGPs must conform to even-indexed contiguous pairwise CU enablement.
     if (agent_->supported_isas()[0]->GetMajorVersion() >= 10) {
       for (int i = 0; i < mask.size() * 32; i += 2) {
@@ -1465,7 +1427,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
 
   uint32_t ib_jump_cmd[ib_jump_size_dw] = {
       PM4_HDR(PM4_HDR_IT_OPCODE_INDIRECT_BUFFER, ib_jump_size_dw,
-                              agent_->supported_isas()[0]->GetMajorVersion()),
+              agent_->supported_isas()[0]->GetMajorVersion()),
       PM4_INDIRECT_BUFFER_DW1_IB_BASE_LO(uint32_t(uintptr_t(pm4_ib_buf_) >> 2)),
       PM4_INDIRECT_BUFFER_DW2_IB_BASE_HI(uint32_t(uintptr_t(pm4_ib_buf_) >> 32)),
       (PM4_INDIRECT_BUFFER_DW3_IB_SIZE(uint32_t(cmd_size_b / sizeof(uint32_t))) |
@@ -1489,7 +1451,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
     slot_dw_idx += nop_pad_size_dw;
 
     nop_pad[0] = PM4_HDR(PM4_HDR_IT_OPCODE_NOP, nop_pad_size_dw,
-                              agent_->supported_isas()[0]->GetMajorVersion());
+                         agent_->supported_isas()[0]->GetMajorVersion());
 
     for (uint32_t i = 1; i < nop_pad_size_dw; ++i) {
       nop_pad[i] = 0;
@@ -1509,7 +1471,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
     uint32_t* rel_mem = &slot_data[slot_dw_idx];
 
     rel_mem[0] = PM4_HDR(PM4_HDR_IT_OPCODE_RELEASE_MEM, rel_mem_size_dw,
-                              agent_->supported_isas()[0]->GetMajorVersion());
+                         agent_->supported_isas()[0]->GetMajorVersion());
     rel_mem[1] = PM4_RELEASE_MEM_DW1_EVENT_INDEX(PM4_RELEASE_MEM_EVENT_INDEX_AQL);
     rel_mem[2] = 0;
     rel_mem[3] = 0;
@@ -1536,8 +1498,8 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
 
     amd_aql_pm4_ib aql_pm4_ib{};
     aql_pm4_ib.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE |
-                        (acquireFence << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-                        (releaseFence << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+        (acquireFence << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+        (releaseFence << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
 
     aql_pm4_ib.ven_hdr = AMD_AQL_FORMAT_PM4_IB;
     aql_pm4_ib.ib_jump_cmd[0] = ib_jump_cmd[0];
@@ -1568,8 +1530,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
 
   // Wait for the packet to be consumed.
   if (agent_->supported_isas()[0]->GetMajorVersion() <= 8) {
-    while (queue->LoadReadIndexRelaxed() <= write_idx)
-      os::YieldThread();
+    while (queue->LoadReadIndexRelaxed() <= write_idx) os::YieldThread();
 
     if (in_signal) hsa_signal_store_screlease(*in_signal, 0);
   } else if (!in_signal) {
@@ -1597,7 +1558,7 @@ void AqlQueue::FillBufRsrcWord1() {
 #ifdef HSA_LARGE_MODEL
   uintptr_t scratch_base = uintptr_t(queue_scratch_.main_queue_base);
   scratch_base_hi = uint32_t(scratch_base >> 32);
-  #endif
+#endif
 
   srd1.bits.BASE_ADDRESS_HI = scratch_base_hi;
   srd1.bits.STRIDE = 0;
@@ -1628,7 +1589,7 @@ void AqlQueue::FillBufRsrcWord2() {
   const auto& agent_props = agent_->properties();
   const uint32_t num_xcc = agent_props.NumXcc;
 
-   // report size per XCC
+  // report size per XCC
   srd2.bits.NUM_RECORDS = uint32_t(queue_scratch_.main_size / num_xcc);
 
   amd_queue_.scratch_resource_descriptor[2] = srd2.u32All;
@@ -1829,9 +1790,10 @@ void AqlQueue::FillComputeTmpRingSize_Gfx12() {
 
   // Scratch is allocated program COMPUTE_TMPRING_SIZE register
   // Scratch Size per Wave is specified in terms of kilobytes
-  uint32_t wave_scratch = (((queue_scratch_.main_lanes_per_wave * queue_scratch_.main_size_per_thread) +
-                            queue_scratch_.mem_alignment_size - 1) /
-                           queue_scratch_.mem_alignment_size);
+  uint32_t wave_scratch =
+      (((queue_scratch_.main_lanes_per_wave * queue_scratch_.main_size_per_thread) +
+        queue_scratch_.mem_alignment_size - 1) /
+       queue_scratch_.mem_alignment_size);
 
   tmpring_size.bits.WAVESIZE = wave_scratch;
   assert(wave_scratch == tmpring_size.bits.WAVESIZE && "WAVESIZE Overflow.");
@@ -1908,5 +1870,5 @@ hsa_status_t AqlQueue::EnableGWS(int gws_slot_count) {
   return HSA_STATUS_SUCCESS;
 }
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr

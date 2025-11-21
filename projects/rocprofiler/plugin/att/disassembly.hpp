@@ -39,8 +39,7 @@ class CodeObjectBinary {
   std::vector<char> buffer;
 };
 
-struct SymbolInfo
-{
+struct SymbolInfo {
   std::string name;
   uint64_t faddr;
   uint64_t mem_size;
@@ -48,11 +47,7 @@ struct SymbolInfo
 
 class DisassemblyInstance {
  public:
-  DisassemblyInstance(
-    const char* codeobj_data,
-    uint64_t codeobj_size,
-    uint64_t gpu_id
-  );
+  DisassemblyInstance(const char* codeobj_data, uint64_t codeobj_size, uint64_t gpu_id);
   ~DisassemblyInstance();
 
   uint64_t ReadInstruction(uint64_t faddr, uint64_t vaddr, const char* cpp_line);

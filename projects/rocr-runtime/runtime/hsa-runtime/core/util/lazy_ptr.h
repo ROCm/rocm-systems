@@ -147,7 +147,6 @@ template <typename T> class lazy_ptr {
       make_body(block);
     }
   }
-
 };
 
 }  // namespace rocr

@@ -52,7 +52,7 @@
 
 class MemoryAccessTest : public TestBase {
  public:
-    MemoryAccessTest();
+  MemoryAccessTest();
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~MemoryAccessTest();
@@ -84,9 +84,8 @@ class MemoryAccessTest : public TestBase {
 
 
  private:
-  void CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
-                                                   hsa_agent_t gpuAgent,
-                                                   hsa_amd_memory_pool_t pool);
+  void CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
+                                hsa_amd_memory_pool_t pool);
   void GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
 };
 

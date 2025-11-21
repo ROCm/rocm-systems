@@ -216,10 +216,11 @@ class CmdBuilder {
   /// @param dst  where gpu clock data is r/w. Must persist during packet dispatch
   /// @param reg  userdata register address
   /// @param header  SQTT packet header
-  virtual void BuildGPUClockPacket(CmdBuffer* cmdBuf, uint64_t* dst, const Register& reg, uint32_t header) {};
+  virtual void BuildGPUClockPacket(CmdBuffer* cmdBuf, uint64_t* dst, const Register& reg,
+                                   uint32_t header) {};
 
   /// @brief Release resources used by CmdBuilder
-  virtual ~CmdBuilder(){};
+  virtual ~CmdBuilder() {};
 
   bool bUsePerfCounterMode{true};
   // is this an MI300 command builder?

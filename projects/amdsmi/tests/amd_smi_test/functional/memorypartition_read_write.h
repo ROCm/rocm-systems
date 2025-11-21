@@ -27,7 +27,7 @@
 
 class TestMemoryPartitionReadWrite : public TestBase {
  public:
-    TestMemoryPartitionReadWrite();
+  TestMemoryPartitionReadWrite();
 
   // @Brief: Destructor for test case of TestMemoryPartitionReadWrite
   virtual ~TestMemoryPartitionReadWrite();

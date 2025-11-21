@@ -162,7 +162,8 @@ rocjpeg_init()
 }
 }  // namespace rocjpeg
 
-extern "C" {
+extern "C"
+{
 void
 rocjpeg_init(void)
 {

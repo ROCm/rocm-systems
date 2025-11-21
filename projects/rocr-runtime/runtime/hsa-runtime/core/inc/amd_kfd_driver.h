@@ -68,7 +68,7 @@ namespace AMD {
 /// by the KFD, allocate memory out of the KFD, manage DMA bufs, allocate queues,
 /// and more.
 class KfdDriver final : public core::Driver {
-public:
+ public:
   KfdDriver(std::string devnode_name);
 
   /// @brief Determine of the KFD is present on the system and attemp to open it if found.
@@ -91,11 +91,10 @@ public:
                                    std::vector<HsaMemoryProperties>& mem_props) const override;
   hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
                                   std::vector<HsaCacheProperties>& cache_props) const override;
-  hsa_status_t AllocateMemory(const core::MemoryRegion &mem_region,
-                              core::MemoryRegion::AllocateFlags alloc_flags,
-                              void **mem, size_t size,
-                              uint32_t node_id) override;
-  hsa_status_t FreeMemory(void *mem, size_t size) override;
+  hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
+                              core::MemoryRegion::AllocateFlags alloc_flags, void** mem,
+                              size_t size, uint32_t node_id) override;
+  hsa_status_t FreeMemory(void* mem, size_t size) override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, HsaEvent* event,
@@ -107,15 +106,13 @@ public:
                               uint32_t* queue_cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                              uint32_t* first_gws) const override;
-  hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
-                            size_t *offset) override;
-  hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                            core::ShareableHandle &handle) override;
-  hsa_status_t Map(core::ShareableHandle handle, void *mem, size_t offset,
-                   size_t size, hsa_access_permission_t perms) override;
-  hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
-                     size_t size) override;
-  hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
+  hsa_status_t ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, size_t* offset) override;
+  hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent& agent,
+                            core::ShareableHandle& handle) override;
+  hsa_status_t Map(core::ShareableHandle handle, void* mem, size_t offset, size_t size,
+                   hsa_access_permission_t perms) override;
+  hsa_status_t Unmap(core::ShareableHandle handle, void* mem, size_t offset, size_t size) override;
+  hsa_status_t ReleaseShareableHandle(core::ShareableHandle& handle) override;
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
@@ -143,20 +140,17 @@ public:
 
  private:
   /// @brief Allocate agent accessible memory (system / local memory).
-  static void *AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
-                                 size_t size);
+  static void* AllocateKfdMemory(const HsaMemFlags& flags, uint32_t node_id, size_t size);
 
   /// @brief Free agent accessible memory (system / local memory).
-  static bool FreeKfdMemory(void *mem, size_t size);
+  static bool FreeKfdMemory(void* mem, size_t size);
 
   /// @brief Pin memory.
-  static bool MakeKfdMemoryResident(size_t num_node, const uint32_t *nodes,
-                                    const void *mem, size_t size,
-                                    uint64_t *alternate_va,
-                                    HsaMemMapFlags map_flag);
+  static bool MakeKfdMemoryResident(size_t num_node, const uint32_t* nodes, const void* mem,
+                                    size_t size, uint64_t* alternate_va, HsaMemMapFlags map_flag);
 
   /// @brief Unpin memory.
-  static void MakeKfdMemoryUnresident(const void *mem);
+  static void MakeKfdMemoryUnresident(const void* mem);
 
   /// @brief Query for user preference and use that to determine Xnack mode
   /// of ROCm system. Return true if Xnack mode is ON or false if OFF. Xnack
@@ -170,7 +164,7 @@ public:
   static const uint32_t kfd_version_minor_min = 99;
 };
 
-} // namespace AMD
-} // namespace rocr
+}  // namespace AMD
+}  // namespace rocr
 
-#endif // header guard
+#endif  // header guard

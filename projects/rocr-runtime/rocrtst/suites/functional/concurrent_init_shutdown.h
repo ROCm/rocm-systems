@@ -52,27 +52,27 @@
 
 class ConcurrentInitShutdownTest : public TestBase {
  public:
-    ConcurrentInitShutdownTest();
+  ConcurrentInitShutdownTest();
 
-    // @Brief: Destructor for the ConcurrentInitShutdownTest class
-    virtual ~ConcurrentInitShutdownTest();
+  // @Brief: Destructor for the ConcurrentInitShutdownTest class
+  virtual ~ConcurrentInitShutdownTest();
 
-    // @Brief: Setup the environment for measurement
-    virtual void SetUp();
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-    // @Brief: Core measurement execution
-    virtual void Run();
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-    // @Brief: Clean up and retrive the resource
-    virtual void Close();
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
 
-    // @Brief: Display  results
-    virtual void DisplayResults() const;
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
 
-    // @Brief: Display information about what this test does
-    virtual void DisplayTestInfo(void);
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 
-    void TestConcurrentInitShutdown(void);
+  void TestConcurrentInitShutdown(void);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_CONCURRENT_INIT_SHUTDOWN_H_

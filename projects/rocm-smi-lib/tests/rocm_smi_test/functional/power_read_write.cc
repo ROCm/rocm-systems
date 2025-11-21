@@ -43,28 +43,28 @@
  *
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include "rocm_smi_test/functional/power_read_write.h"
 
-#include <iostream>
-#include <bitset>
-#include <string>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <algorithm>
+#include <bitset>
+#include <iostream>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/power_read_write.h"
 #include "rocm_smi_test/test_common.h"
-
 
 TestPowerReadWrite::TestPowerReadWrite() : TestBase() {
   set_title("RSMI Power Profiles Read/Write Test");
-  set_description("The Power Profiles tests verify that the power profile "
-                             "settings can be read and controlled properly.");
+  set_description(
+      "The Power Profiles tests verify that the power profile "
+      "settings can be read and controlled properly.");
 }
 
-TestPowerReadWrite::~TestPowerReadWrite(void) {
-}
+TestPowerReadWrite::~TestPowerReadWrite(void) {}
 
 void TestPowerReadWrite::SetUp(void) {
   TestBase::SetUp();
@@ -72,9 +72,7 @@ void TestPowerReadWrite::SetUp(void) {
   return;
 }
 
-void TestPowerReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPowerReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPowerReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -87,8 +85,7 @@ void TestPowerReadWrite::Close() {
   TestBase::Close();
 }
 
-static const char *
-power_profile_string(rsmi_power_profile_preset_masks_t profile) {
+static const char* power_profile_string(rsmi_power_profile_preset_masks_t profile) {
   switch (profile) {
     case RSMI_PWR_PROF_PRST_CUSTOM_MASK:
       return "CUSTOM";
@@ -124,9 +121,7 @@ void TestPowerReadWrite::Run(void) {
 
     ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout <<
-          "\t**Power profile presets are not supported for this device"
-                                                                 << std::endl;
+      std::cout << "\t**Power profile presets are not supported for this device" << std::endl;
       // Verify api support checking functionality is working
       ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, nullptr);
       ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
@@ -143,14 +138,13 @@ void TestPowerReadWrite::Run(void) {
       uint64_t tmp = 1;
       while (tmp <= RSMI_PWR_PROF_PRST_LAST) {
         if ((tmp & status.available_profiles) == tmp) {
-          std::cout << "\t" <<
-              power_profile_string((rsmi_power_profile_preset_masks_t)tmp) <<
-                                                                      std::endl;
+          std::cout << "\t" << power_profile_string((rsmi_power_profile_preset_masks_t)tmp)
+                    << std::endl;
         }
         tmp = tmp << 1;
       }
-      std::cout << "The current power profile is: " <<
-                              power_profile_string(status.current) << std::endl;
+      std::cout << "The current power profile is: " << power_profile_string(status.current)
+                << std::endl;
     }
 
     rsmi_power_profile_preset_masks_t orig_profile = status.current;
@@ -171,8 +165,7 @@ void TestPowerReadWrite::Run(void) {
     } else if (diff_profiles & RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK) {
       new_prof = RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK;
     } else {
-      std::cout <<
-        "No other non-custom power profiles to set to. Exiting." << std::endl;
+      std::cout << "No other non-custom power profiles to set to. Exiting." << std::endl;
       return;
     }
 

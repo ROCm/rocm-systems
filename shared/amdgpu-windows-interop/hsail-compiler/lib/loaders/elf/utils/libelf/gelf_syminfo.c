@@ -34,114 +34,108 @@
 LIBELF_VCSID("$Id: gelf_syminfo.c 1166 2010-09-04 00:54:36Z jkoshy $");
 
 #if LIBELF_CONFIG_SYMINFO
-GElf_Syminfo *
-gelf_getsyminfo(Elf_Data *d, int ndx, GElf_Syminfo *dst)
-{
-	int ec;
-	Elf *e;
-	Elf_Scn *scn;
-	Elf32_Syminfo *syminfo32;
-	Elf64_Syminfo *syminfo64;
-	size_t msz;
-	uint32_t sh_type;
+GElf_Syminfo *gelf_getsyminfo(Elf_Data *d, int ndx, GElf_Syminfo *dst) {
+  int ec;
+  Elf *e;
+  Elf_Scn *scn;
+  Elf32_Syminfo *syminfo32;
+  Elf64_Syminfo *syminfo64;
+  size_t msz;
+  uint32_t sh_type;
 
-	if (d == NULL || ndx < 0 || dst == NULL ||
-	    (scn = d->d_scn) == NULL ||
-	    (e = scn->s_elf) == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (d == NULL || ndx < 0 || dst == NULL || (scn = d->d_scn) == NULL ||
+      (e = scn->s_elf) == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	ec = e->e_class;
-	assert(ec == ELFCLASS32 || ec == ELFCLASS64);
+  ec = e->e_class;
+  assert(ec == ELFCLASS32 || ec == ELFCLASS64);
 
-	if (ec == ELFCLASS32)
-		sh_type = scn->s_shdr.s_shdr32.sh_type;
-	else
-		sh_type = scn->s_shdr.s_shdr64.sh_type;
+  if (ec == ELFCLASS32)
+    sh_type = scn->s_shdr.s_shdr32.sh_type;
+  else
+    sh_type = scn->s_shdr.s_shdr64.sh_type;
 
-	if (_libelf_xlate_shtype(sh_type) != ELF_T_SYMINFO) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (_libelf_xlate_shtype(sh_type) != ELF_T_SYMINFO) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	msz = _libelf_msize(ELF_T_SYMINFO, ec, e->e_version);
+  msz = _libelf_msize(ELF_T_SYMINFO, ec, e->e_version);
 
-	assert(msz > 0);
+  assert(msz > 0);
 
-	if (msz * ndx >= d->d_size) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  if (msz * ndx >= d->d_size) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	if (ec == ELFCLASS32) {
+  if (ec == ELFCLASS32) {
 
-		syminfo32 = (Elf32_Syminfo *) d->d_buf + ndx;
+    syminfo32 = (Elf32_Syminfo *)d->d_buf + ndx;
 
-		dst->si_boundto = syminfo32->si_boundto;
-		dst->si_flags   = syminfo32->si_flags;
+    dst->si_boundto = syminfo32->si_boundto;
+    dst->si_flags = syminfo32->si_flags;
 
-	} else {
+  } else {
 
-		syminfo64 = (Elf64_Syminfo *) d->d_buf + ndx;
+    syminfo64 = (Elf64_Syminfo *)d->d_buf + ndx;
 
-		*dst = *syminfo64;
-	}
+    *dst = *syminfo64;
+  }
 
-	return (dst);
+  return (dst);
 }
 
-int
-gelf_update_syminfo(Elf_Data *d, int ndx, GElf_Syminfo *gs)
-{
-	int ec;
-	Elf *e;
-	Elf_Scn *scn;
-	Elf32_Syminfo *syminfo32;
-	Elf64_Syminfo *syminfo64;
-	size_t msz;
-	uint32_t sh_type;
+int gelf_update_syminfo(Elf_Data *d, int ndx, GElf_Syminfo *gs) {
+  int ec;
+  Elf *e;
+  Elf_Scn *scn;
+  Elf32_Syminfo *syminfo32;
+  Elf64_Syminfo *syminfo64;
+  size_t msz;
+  uint32_t sh_type;
 
-	if (d == NULL || ndx < 0 || gs == NULL ||
-	    (scn = d->d_scn) == NULL ||
-	    (e = scn->s_elf) == NULL) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (0);
-	}
+  if (d == NULL || ndx < 0 || gs == NULL || (scn = d->d_scn) == NULL ||
+      (e = scn->s_elf) == NULL) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (0);
+  }
 
-	ec = e->e_class;
-	assert(ec == ELFCLASS32 || ec == ELFCLASS64);
+  ec = e->e_class;
+  assert(ec == ELFCLASS32 || ec == ELFCLASS64);
 
-	if (ec == ELFCLASS32)
-		sh_type = scn->s_shdr.s_shdr32.sh_type;
-	else
-		sh_type = scn->s_shdr.s_shdr64.sh_type;
+  if (ec == ELFCLASS32)
+    sh_type = scn->s_shdr.s_shdr32.sh_type;
+  else
+    sh_type = scn->s_shdr.s_shdr64.sh_type;
 
-	if (_libelf_xlate_shtype(sh_type) != ELF_T_SYMINFO) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (0);
-	}
+  if (_libelf_xlate_shtype(sh_type) != ELF_T_SYMINFO) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (0);
+  }
 
-	msz = _libelf_msize(ELF_T_SYMINFO, ec, e->e_version);
-	assert(msz > 0);
+  msz = _libelf_msize(ELF_T_SYMINFO, ec, e->e_version);
+  assert(msz > 0);
 
-	if (msz * ndx >= d->d_size) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (0);
-	}
+  if (msz * ndx >= d->d_size) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (0);
+  }
 
-	if (ec == ELFCLASS32) {
-		syminfo32 = (Elf32_Syminfo *) d->d_buf + ndx;
+  if (ec == ELFCLASS32) {
+    syminfo32 = (Elf32_Syminfo *)d->d_buf + ndx;
 
-		syminfo32->si_boundto  = gs->si_boundto;
-		syminfo32->si_flags  = gs->si_flags;
+    syminfo32->si_boundto = gs->si_boundto;
+    syminfo32->si_flags = gs->si_flags;
 
-	} else {
-		syminfo64 = (Elf64_Syminfo *) d->d_buf + ndx;
+  } else {
+    syminfo64 = (Elf64_Syminfo *)d->d_buf + ndx;
 
-		*syminfo64 = *gs;
-	}
+    *syminfo64 = *gs;
+  }
 
-	return (1);
+  return (1);
 }
 #endif /* LIBELF_CONFIG_SYMINFO */

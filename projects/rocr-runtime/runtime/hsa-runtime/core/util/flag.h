@@ -66,9 +66,9 @@ class Flag {
 
   // Lift limit for 2.10 release RCCL workaround. This limit is not used when asynchronous scratch
   // reclaim is supported
-  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT = (140 * (1UL<<20));  // small_limit >> 2;
-  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC = (3 * (1UL<<30));  // 3 GB
-  const size_t DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE = (256 * (1UL<<20)); //256 MB
+  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT = (140 * (1UL << 20));              // small_limit >> 2;
+  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC = (3 * (1UL << 30));  // 3 GB
+  const size_t DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE = (256 * (1UL << 20));        // 256 MB
 
   Flag() {}
 
@@ -94,17 +94,16 @@ class Flag {
     enable_peer_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
     var = os::GetEnvVar("HSA_ENABLE_SDMA_GANG");
-    enable_sdma_gang_ = (var == "0") ? SDMA_DISABLE :
-                       ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+    enable_sdma_gang_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
     if (enable_sdma_ == SDMA_DISABLE) enable_sdma_gang_ = SDMA_DISABLE;
 
     var = os::GetEnvVar("HSA_ENABLE_SDMA_COPY_SIZE_OVERRIDE");
-    enable_sdma_copy_size_override_ = (var == "0") ? SDMA_DISABLE :
-                                      ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+    enable_sdma_copy_size_override_ =
+        (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
     var = os::GetEnvVar("HSA_ENABLE_SDMA_RECOMMENDED_ENG");
-    enable_sdma_recommended_eng_ = (var == "0") ? SDMA_DISABLE :
-                                   ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+    enable_sdma_recommended_eng_ =
+        (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
     visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
     filter_visible_gpus_ = os::IsEnvVarSet("ROCR_VISIBLE_DEVICES");
@@ -164,9 +163,8 @@ class Flag {
 
     var = os::GetEnvVar("HSA_TOOLS_REPORT_LOAD_FAILURE");
 
-    ifdebug {
-      report_tool_load_failures_ = (var == "1") ? true : false;
-    } else {
+    ifdebug { report_tool_load_failures_ = (var == "1") ? true : false; }
+    else {
       report_tool_load_failures_ = (var == "0") ? false : true;
     }
 
@@ -297,7 +295,7 @@ class Flag {
     enable_dxg_detection_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
-    co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
+    co_dmacopy_size_ = var.empty() ? 1024 * 1024 : atoi(var.c_str());
 
     var = os::GetEnvVar("HSA_COREDUMP_SHOW_PROGRESS");
     enable_core_dump_progress_ = (var == "1");
@@ -439,15 +437,19 @@ class Flag {
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
 
   [[nodiscard]]
-  bool core_dump_disable() const { return core_dump_disable_; }
+  bool core_dump_disable() const {
+    return core_dump_disable_;
+  }
 
   [[nodiscard]]
   bool enable_core_dump_progress() const {
-                                       return enable_core_dump_progress_; }
+    return enable_core_dump_progress_;
+  }
 
   [[nodiscard]]
   const std::string& core_dump_pattern() const {
-                                         return core_dump_pattern_; }
+    return core_dump_pattern_;
+  }
 
   void set_sdma(bool peer_sdma, bool sdma_gang) {
     enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
@@ -456,7 +458,7 @@ class Flag {
 
   void disable_scratch() {
     scratch_single_limit_ = 0;
-    //scratch_single_limit_async_ = 0;
+    // scratch_single_limit_async_ = 0;
     enable_scratch_async_reclaim_ = false;
     enable_scratch_alt_ = false;
     enable_scratch_ = false;
@@ -473,7 +475,7 @@ class Flag {
 
   void disable_sdma_hdp_flush() { enable_sdma_hdp_flush_ = false; }
 
-  private:
+ private:
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
   bool enable_interrupt_;
@@ -504,7 +506,7 @@ class Flag {
   bool wait_any_;
   bool dev_mem_queue_buf_;
   uint32_t signal_abort_timeout_;
-  int  async_events_thread_priority_;
+  int async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;
   bool enable_dxg_detection_;

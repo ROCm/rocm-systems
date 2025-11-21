@@ -98,7 +98,8 @@ build_pack_from_array(parameter_pack&                             pack,
 }
 };  // namespace
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_dispatch_thread_trace_service(
     rocprofiler_context_id_t                        context_id,

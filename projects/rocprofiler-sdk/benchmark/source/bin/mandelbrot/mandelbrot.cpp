@@ -443,10 +443,8 @@ hipPerfMandelBrot::open(int deviceId)
     HIPCHECK(hipSetDevice(deviceId));
     hipDeviceProp_t props = {};
     HIPCHECK(hipGetDeviceProperties(&props, deviceId));
-    std::cout << "info: running on bus "
-              << "0x" << props.pciBusID << " " << props.name << " with "
-              << props.multiProcessorCount << " CUs"
-              << " and device id: " << deviceId << std::endl;
+    std::cout << "info: running on bus " << "0x" << props.pciBusID << " " << props.name << " with "
+              << props.multiProcessorCount << " CUs" << " and device id: " << deviceId << std::endl;
 
     numCUs = props.multiProcessorCount;
 }

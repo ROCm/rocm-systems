@@ -52,52 +52,35 @@ namespace amd {
 namespace hsa {
 namespace common {
 
-template<typename LockType>
-class ReaderLockGuard final {
-public:
-  explicit ReaderLockGuard(LockType &lock):
-    lock_(lock)
-  {
-    lock_.ReaderLock();
-  }
+template <typename LockType> class ReaderLockGuard final {
+ public:
+  explicit ReaderLockGuard(LockType& lock) : lock_(lock) { lock_.ReaderLock(); }
 
-  ~ReaderLockGuard()
-  {
-    lock_.ReaderUnlock();
-  }
+  ~ReaderLockGuard() { lock_.ReaderUnlock(); }
 
-private:
+ private:
   ReaderLockGuard(const ReaderLockGuard&);
   ReaderLockGuard& operator=(const ReaderLockGuard&);
 
-  LockType &lock_;
+  LockType& lock_;
 };
 
-template<typename LockType>
-class WriterLockGuard final {
-public:
-  explicit WriterLockGuard(LockType &lock):
-    lock_(lock)
-  {
-    lock_.WriterLock();
-  }
+template <typename LockType> class WriterLockGuard final {
+ public:
+  explicit WriterLockGuard(LockType& lock) : lock_(lock) { lock_.WriterLock(); }
 
-  ~WriterLockGuard()
-  {
-    lock_.WriterUnlock();
-  }
+  ~WriterLockGuard() { lock_.WriterUnlock(); }
 
-private:
+ private:
   WriterLockGuard(const WriterLockGuard&);
   WriterLockGuard& operator=(const WriterLockGuard&);
 
-  LockType &lock_;
+  LockType& lock_;
 };
 
 class ReaderWriterLock final {
-public:
-  ReaderWriterLock():
-    readers_count_(0), writers_count_(0), writers_waiting_(0) {}
+ public:
+  ReaderWriterLock() : readers_count_(0), writers_count_(0), writers_waiting_(0) {}
 
   ~ReaderWriterLock() {}
 
@@ -109,7 +92,7 @@ public:
 
   void WriterUnlock();
 
-private:
+ private:
   ReaderWriterLock(const ReaderWriterLock&);
   ReaderWriterLock& operator=(const ReaderWriterLock&);
 
@@ -121,9 +104,9 @@ private:
   std::condition_variable_any writers_condition_;
 };
 
-} // namespace common
-} // namespace hsa
-} // namespace amd
-} // namespace rocr
+}  // namespace common
+}  // namespace hsa
+}  // namespace amd
+}  // namespace rocr
 
-#endif // AMD_HSA_LOCKS_HPP
+#endif  // AMD_HSA_LOCKS_HPP

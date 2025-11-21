@@ -108,7 +108,7 @@ typedef unsigned int       flex_uint32_t;
 /* Promotes a possibly negative, possibly signed char to an
  *   integer in range [0..255] for use as an array index.
  */
-#define YY_SC_TO_UI(c) ((YY_CHAR)(c))
+#define YY_SC_TO_UI(c) ((YY_CHAR) (c))
 
 /* Enter a start condition.  This macro really ought to take a parameter,
  * but we do it the disgusting crufty way forced on us by the ()-less
@@ -119,7 +119,7 @@ typedef unsigned int       flex_uint32_t;
  * to BEGIN to return to the state.  The YYSTATE alias is for lex
  * compatibility.
  */
-#define YY_START (((yy_start) -1) / 2)
+#define YY_START (((yy_start) - 1) / 2)
 #define YYSTATE  YY_START
 /* Action number for EOF rule of a given start state. */
 #define YY_STATE_EOF(state) (YY_END_OF_BUFFER + state + 1)
@@ -597,7 +597,8 @@ input(void);
         do                                                                                         \
         {                                                                                          \
             if(fwrite(yytext, (size_t) yyleng, 1, yyout))                                          \
-            {}                                                                                     \
+            {                                                                                      \
+            }                                                                                      \
         } while(0)
 #endif
 
@@ -1041,8 +1042,8 @@ YY_DECL
 
                 default: YY_FATAL_ERROR("fatal flex scanner internal error--no action found");
             } /* end of action switch */
-        }     /* end of scanning one token */
-    }         /* end of user's declarations */
+        } /* end of scanning one token */
+    } /* end of user's declarations */
 } /* end of yylex */
 
 /* yy_get_next_buffer - try to read in a new buffer
@@ -1119,7 +1120,7 @@ yy_get_next_buffer(void)
 
                 b->yy_ch_buf = (char*)
                     /* Include room in for 2 EOB chars. */
-                    yyrealloc((void*) b->yy_ch_buf, (yy_size_t)(b->yy_buf_size + 2));
+                    yyrealloc((void*) b->yy_ch_buf, (yy_size_t) (b->yy_buf_size + 2));
             }
             else
                 /* Can't grow it, we don't own it. */
@@ -1395,7 +1396,7 @@ yy_create_buffer(FILE* file, int size)
     /* yy_ch_buf has to be 2 characters longer than the size given because
      * we need to put in 2 end-of-buffer characters.
      */
-    b->yy_ch_buf = (char*) yyalloc((yy_size_t)(b->yy_buf_size + 2));
+    b->yy_ch_buf = (char*) yyalloc((yy_size_t) (b->yy_buf_size + 2));
     if(!b->yy_ch_buf) YY_FATAL_ERROR("out of dynamic memory in yy_create_buffer()");
 
     b->yy_is_our_buffer = 1;
@@ -1634,7 +1635,7 @@ yy_scan_bytes(const char* yybytes, int _yybytes_len)
     int             i;
 
     /* Get memory for full buffer, including space for trailing EOB's. */
-    n   = (yy_size_t)(_yybytes_len + 2);
+    n   = (yy_size_t) (_yybytes_len + 2);
     buf = (char*) yyalloc(n);
     if(!buf) YY_FATAL_ERROR("out of dynamic memory in yy_scan_bytes()");
 

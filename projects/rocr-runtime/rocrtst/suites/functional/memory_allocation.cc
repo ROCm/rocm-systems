@@ -64,8 +64,8 @@ static const uint32_t kNumBufferElements = 256;
 static const int kValue = 5;
 
 
-MemoryAllocationTest::MemoryAllocationTest(bool launch_GroupMemory,
-                                           bool launch_BasicAllocateFree) : TestBase() {
+MemoryAllocationTest::MemoryAllocationTest(bool launch_GroupMemory, bool launch_BasicAllocateFree)
+    : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
@@ -78,8 +78,9 @@ MemoryAllocationTest::MemoryAllocationTest(bool launch_GroupMemory,
     desc += " This test Allocate group memory in kernel dynamically.";
   } else if (launch_BasicAllocateFree) {
     name += " For BasicAllocateFree";
-    desc += " This test Allocate And free Memory on all the availble pool "
-            " on which allocation is allowed on RocR Agents.";
+    desc +=
+        " This test Allocate And free Memory on all the availble pool "
+        " on which allocation is allowed on RocR Agents.";
   }
   set_title(name);
   set_description(desc);
@@ -87,8 +88,7 @@ MemoryAllocationTest::MemoryAllocationTest(bool launch_GroupMemory,
   memset(&aql(), 0, sizeof(hsa_kernel_dispatch_packet_t));
 }
 
-MemoryAllocationTest::~MemoryAllocationTest(void) {
-}
+MemoryAllocationTest::~MemoryAllocationTest(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -119,9 +119,7 @@ void MemoryAllocationTest::Run(void) {
   TestBase::Run();
 }
 
-void MemoryAllocationTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void MemoryAllocationTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void MemoryAllocationTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -144,89 +142,75 @@ void MemoryAllocationTest::WriteAQLPktToQueue(hsa_queue_t* q) {
   const uint32_t queue_mask = q->size - 1;
   uint64_t index = hsa_queue_add_write_index_relaxed(q, 1);
 
-      reinterpret_cast<hsa_kernel_dispatch_packet_t *>(
-                                     queue_base)[index & queue_mask] = aql();
+  reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue_base)[index & queue_mask] = aql();
 }
 
 
-
-
-
-typedef struct  __attribute__ ((aligned(16)))  args_t {
-     uint32_t *a;
-     uint32_t *b;
-     uint32_t grp_offset;
-     uint32_t count;
-  } args;
+typedef struct __attribute__((aligned(16))) args_t {
+  uint32_t* a;
+  uint32_t* b;
+  uint32_t grp_offset;
+  uint32_t count;
+} args;
 
 
 static const char kSubTestSeparator[] = "  **************************";
 
-static void PrintMemorySubtestHeader(const char *header) {
+static void PrintMemorySubtestHeader(const char* header) {
   std::cout << "  *** Memory Allocation  Test: " << header << " ***" << std::endl;
 }
 
 static const int kMemoryAllocSize = 1024;
 
 void MemoryAllocationTest::GroupMemoryDynamicAllocation(hsa_agent_t cpuAgent,
-                                                   hsa_agent_t gpuAgent) {
+                                                        hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // Get Global Memory Pool on the gpuAgent to allocate gpu buffers
   hsa_amd_memory_pool_t gpu_pool;
-  err = hsa_amd_agent_iterate_memory_pools(gpuAgent,
-                                            rocrtst::GetGlobalMemoryPool,
-                                            &gpu_pool);
+  err = hsa_amd_agent_iterate_memory_pools(gpuAgent, rocrtst::GetGlobalMemoryPool, &gpu_pool);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   hsa_amd_memory_pool_access_t access;
-  hsa_amd_agent_memory_pool_get_info(cpuAgent, gpu_pool,
-                                       HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
-                                       &access);
+  hsa_amd_agent_memory_pool_get_info(cpuAgent, gpu_pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
+                                     &access);
   if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
     // hsa objects
-    hsa_queue_t *queue = NULL;  // command queue
+    hsa_queue_t* queue = NULL;  // command queue
 
     // get queue size
     uint32_t queue_size = 0;
-    err = hsa_agent_get_info(gpuAgent,
-                                HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
+    err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     // create queue
-    err = hsa_queue_create(gpuAgent,
-                              queue_size, HSA_QUEUE_TYPE_MULTI,
-                              NULL, NULL, 0, 0, &queue);
+    err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, 0, 0, &queue);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     // Get System Memory Pool on the cpuAgent to allocate host side buffers
     hsa_amd_memory_pool_t global_pool;
-    err = hsa_amd_agent_iterate_memory_pools(cpuAgent,
-                                              rocrtst::GetGlobalMemoryPool,
-                                              &global_pool);
+    err = hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetGlobalMemoryPool, &global_pool);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     // Find a memory pool that supports kernel arguments.
     hsa_amd_memory_pool_t kernarg_pool;
-    err = hsa_amd_agent_iterate_memory_pools(cpuAgent,
-                                              rocrtst::GetKernArgMemoryPool,
-                                              &kernarg_pool);
+    err =
+        hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetKernArgMemoryPool, &kernarg_pool);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     // Allocate the host side buffers
     // (Indata,kernArg) on system memory
-    uint32_t *Indata = NULL;
-    args *kernArgs = NULL;
+    uint32_t* Indata = NULL;
+    args* kernArgs = NULL;
 
-    err = hsa_amd_memory_pool_allocate(global_pool,
-                                      kMemoryAllocSize*sizeof(uint32_t), 0,
-                                      reinterpret_cast<void **>(&Indata));
+    err = hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize * sizeof(uint32_t), 0,
+                                       reinterpret_cast<void**>(&Indata));
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
 
     // Allocate the kernel argument buffer from the kernarg_pool.
     err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
-                                        reinterpret_cast<void **>(&kernArgs));
+                                       reinterpret_cast<void**>(&kernArgs));
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     // initialize the host buffers
@@ -239,9 +223,9 @@ void MemoryAllocationTest::GroupMemoryDynamicAllocation(hsa_agent_t cpuAgent,
     // so allocate memory for it on the GPU's GLOBAL segment .
 
     // Get local memory of GPU to allocate device side buffers
-    uint32_t *OutData = NULL;
-    err = hsa_amd_memory_pool_allocate(gpu_pool, kMemoryAllocSize*sizeof(uint32_t), 0,
-                                        reinterpret_cast<void **>(&OutData));
+    uint32_t* OutData = NULL;
+    err = hsa_amd_memory_pool_allocate(gpu_pool, kMemoryAllocSize * sizeof(uint32_t), 0,
+                                       reinterpret_cast<void**>(&OutData));
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
 
@@ -305,23 +289,22 @@ void MemoryAllocationTest::GroupMemoryDynamicAllocation(hsa_agent_t cpuAgent,
     rocrtst::WriteAQLToQueueLoc(queue, index, &aql());
 
     aql().header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-                 HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
-    aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-                 HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+    aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+    aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
 
     void* q_base = queue->base_address;
     // Set the Aql packet header
-    rocrtst::AtomicSetPacketHeader(aql().header, aql().setup,
-                        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
-                            (q_base))[index & queue_mask]);
+    rocrtst::AtomicSetPacketHeader(
+        aql().header, aql().setup,
+        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[index & queue_mask]);
 
     // ringdoor bell
     hsa_signal_store_relaxed(queue->doorbell_signal, index);
 
     // wait for the signal and reset it for future use
     while (hsa_signal_wait_scacquire(aql().completion_signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                      (uint64_t)-1, HSA_WAIT_STATE_ACTIVE)) { }
+                                     (uint64_t)-1, HSA_WAIT_STATE_ACTIVE)) {
+    }
 
     hsa_signal_store_relaxed(aql().completion_signal, 1);
 
@@ -332,20 +315,28 @@ void MemoryAllocationTest::GroupMemoryDynamicAllocation(hsa_agent_t cpuAgent,
       }
       ASSERT_EQ(OutData[i], Indata[i]);
     }
-    if (Indata) { hsa_amd_memory_pool_free(Indata); }
-    if (OutData) { hsa_amd_memory_pool_free(OutData); }
-    if (kernArgs) { hsa_amd_memory_pool_free(kernArgs); }
-    if (queue) { hsa_queue_destroy(queue); }
+    if (Indata) {
+      hsa_amd_memory_pool_free(Indata);
+    }
+    if (OutData) {
+      hsa_amd_memory_pool_free(OutData);
+    }
+    if (kernArgs) {
+      hsa_amd_memory_pool_free(kernArgs);
+    }
+    if (queue) {
+      hsa_queue_destroy(queue);
+    }
   } else {
     if (verbosity() > 0) {
-      std::cout<< "Test not applicable as system is not large bar."
-                   "Skipping."<< std::endl;
+      std::cout << "Test not applicable as system is not large bar."
+                   "Skipping."
+                << std::endl;
       std::cout << kSubTestSeparator << std::endl;
     }
     return;
   }
 }
-
 
 
 void MemoryAllocationTest::GroupMemoryDynamicAllocation(void) {
@@ -363,7 +354,7 @@ void MemoryAllocationTest::GroupMemoryDynamicAllocation(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     GroupMemoryDynamicAllocation(cpus[0], gpus[i]);
   }
 
@@ -400,7 +391,7 @@ static void PrintAgentNameAndType(hsa_agent_t agent) {
     case HSA_DEVICE_TYPE_AIE:
       std::cout << "AIE)";
       break;
-    }
+  }
   std::cout << std::endl;
   return;
 }
@@ -422,13 +413,13 @@ static void PrintSegmentNameAndType(uint32_t segment) {
     default:
       std::cout << "  no segment";
       break;
-    }
+  }
   std::cout << std::endl;
   return;
 }
 
 void MemoryAllocationTest::MemoryBasicAllocationAndFree(hsa_agent_t agent,
-                                               hsa_amd_memory_pool_t pool) {
+                                                        hsa_amd_memory_pool_t pool) {
   hsa_status_t err;
 
   rocrtst::pool_info_t pool_i;
@@ -446,14 +437,12 @@ void MemoryAllocationTest::MemoryBasicAllocationAndFree(hsa_agent_t agent,
       PrintSegmentNameAndType(pool_i.segment);
     }
     size_t max_size;
-    err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                      &max_size);
+    err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE, &max_size);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     max_size = (max_size > kMemoryAllocSize) ? kMemoryAllocSize : max_size;
 
-    char *memoryPtr;
-    err = hsa_amd_memory_pool_allocate(pool, max_size , 0,
-                                       reinterpret_cast<void**>(&memoryPtr));
+    char* memoryPtr;
+    err = hsa_amd_memory_pool_allocate(pool, max_size, 0, reinterpret_cast<void**>(&memoryPtr));
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     if (memoryPtr) {
       err = hsa_amd_memory_pool_free(memoryPtr);
@@ -526,18 +515,18 @@ void MemoryAllocationTest::MemoryAllocateContiguousTest(hsa_agent_t agent,
   ASSERT_SUCCESS(hsa_amd_portable_export_dmabuf(memoryPtr, alloc_size, &dmabuf, &offset));
 
   std::vector<hsa_agent_t> accessible_gpus;
-  for (auto gpuIter: gpus) {
+  for (auto gpuIter : gpus) {
     hsa_amd_memory_pool_access_t access = HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
-    ASSERT_SUCCESS(hsa_amd_agent_memory_pool_get_info(gpuIter, pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access));
-    if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED)
-      accessible_gpus.push_back(gpuIter);
+    ASSERT_SUCCESS(hsa_amd_agent_memory_pool_get_info(
+        gpuIter, pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access));
+    if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) accessible_gpus.push_back(gpuIter);
   }
 
   void* importedPtr = nullptr;
   size_t importedSz;
 
-  ASSERT_SUCCESS(hsa_amd_interop_map_buffer(accessible_gpus.size(), accessible_gpus.data(), dmabuf, 0, &importedSz,
-                                                   &importedPtr, 0, NULL));
+  ASSERT_SUCCESS(hsa_amd_interop_map_buffer(accessible_gpus.size(), accessible_gpus.data(), dmabuf,
+                                            0, &importedSz, &importedPtr, 0, NULL));
 
   ASSERT_NE(importedPtr, nullptr);
   ASSERT_EQ(importedSz, alloc_size);

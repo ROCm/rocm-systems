@@ -97,9 +97,9 @@ union hwloc_topology_diff_obj_attr_u {
   struct hwloc_topology_diff_obj_attr_string_s {
     /* used for storing name and info pairs */
     hwloc_topology_diff_obj_attr_type_t type;
-    char *name; /* not used for NAME */
-    char *oldvalue;
-    char *newvalue;
+    char* name; /* not used for NAME */
+    char* oldvalue;
+    char* newvalue;
   } string;
 };
 
@@ -128,13 +128,13 @@ typedef union hwloc_topology_diff_u {
   struct hwloc_topology_diff_generic_s {
     /* each part of the union must start with these */
     hwloc_topology_diff_type_t type;
-    union hwloc_topology_diff_u * next; /* pointer to the next element of the list, or NULL */
+    union hwloc_topology_diff_u* next; /* pointer to the next element of the list, or NULL */
   } generic;
 
   /* A difference in an object attribute. */
   struct hwloc_topology_diff_obj_attr_s {
     hwloc_topology_diff_type_t type; /* must be ::HWLOC_TOPOLOGY_DIFF_OBJ_ATTR */
-    union hwloc_topology_diff_u * next;
+    union hwloc_topology_diff_u* next;
     /* List of attribute differences for a single object */
     unsigned obj_depth;
     unsigned obj_index;
@@ -144,12 +144,12 @@ typedef union hwloc_topology_diff_u {
   /* A difference that is too complex. */
   struct hwloc_topology_diff_too_complex_s {
     hwloc_topology_diff_type_t type; /* must be ::HWLOC_TOPOLOGY_DIFF_TOO_COMPLEX */
-    union hwloc_topology_diff_u * next;
+    union hwloc_topology_diff_u* next;
     /* Where we had to stop computing the diff in the first topology */
     unsigned obj_depth;
     unsigned obj_index;
   } too_complex;
-} * hwloc_topology_diff_t;
+}* hwloc_topology_diff_t;
 
 
 /** \brief Compute the difference between 2 topologies.
@@ -188,8 +188,10 @@ typedef union hwloc_topology_diff_u {
  * \note The output diff may be modified by removing some entries from
  * the list. The removed entries should be freed by passing them to
  * to hwloc_topology_diff_destroy() (possible as another list).
-*/
-HWLOC_DECLSPEC int hwloc_topology_diff_build(hwloc_topology_t topology, hwloc_topology_t newtopology, unsigned long flags, hwloc_topology_diff_t *diff);
+ */
+HWLOC_DECLSPEC int hwloc_topology_diff_build(hwloc_topology_t topology,
+                                             hwloc_topology_t newtopology, unsigned long flags,
+                                             hwloc_topology_diff_t* diff);
 
 /** \brief Flags to be given to hwloc_topology_diff_apply().
  */
@@ -197,7 +199,7 @@ enum hwloc_topology_diff_apply_flags_e {
   /** \brief Apply topology diff in reverse direction.
    * \hideinitializer
    */
-  HWLOC_TOPOLOGY_DIFF_APPLY_REVERSE = (1UL<<0)
+  HWLOC_TOPOLOGY_DIFF_APPLY_REVERSE = (1UL << 0)
 };
 
 /** \brief Apply a topology diff to an existing topology.
@@ -217,14 +219,16 @@ enum hwloc_topology_diff_apply_flags_e {
  * is returned if the very first difference element could not
  * be applied.
  */
-HWLOC_DECLSPEC int hwloc_topology_diff_apply(hwloc_topology_t topology, hwloc_topology_diff_t diff, unsigned long flags);
+HWLOC_DECLSPEC int hwloc_topology_diff_apply(hwloc_topology_t topology, hwloc_topology_diff_t diff,
+                                             unsigned long flags);
 
 /** \brief Destroy a list of topology differences.
  *
  * \note The \p topology parameter must be a valid topology
  * but it is not required that it is related to \p diff.
  */
-HWLOC_DECLSPEC int hwloc_topology_diff_destroy(hwloc_topology_t topology, hwloc_topology_diff_t diff);
+HWLOC_DECLSPEC int hwloc_topology_diff_destroy(hwloc_topology_t topology,
+                                               hwloc_topology_diff_t diff);
 
 /** \brief Load a list of topology differences from a XML file.
  *
@@ -240,7 +244,8 @@ HWLOC_DECLSPEC int hwloc_topology_diff_destroy(hwloc_topology_t topology, hwloc_
  * \note the pointer returned in refname should later be freed
  * by the caller.
  */
-HWLOC_DECLSPEC int hwloc_topology_diff_load_xml(hwloc_topology_t topology, const char *xmlpath, hwloc_topology_diff_t *diff, char **refname);
+HWLOC_DECLSPEC int hwloc_topology_diff_load_xml(hwloc_topology_t topology, const char* xmlpath,
+                                                hwloc_topology_diff_t* diff, char** refname);
 
 /** \brief Export a list of topology differences to a XML file.
  *
@@ -254,7 +259,9 @@ HWLOC_DECLSPEC int hwloc_topology_diff_load_xml(hwloc_topology_t topology, const
  * \note The \p topology parameter must be a valid topology
  * but it is not required that it is related to \p diff.
  */
-HWLOC_DECLSPEC int hwloc_topology_diff_export_xml(hwloc_topology_t topology, hwloc_topology_diff_t diff, const char *refname, const char *xmlpath);
+HWLOC_DECLSPEC int hwloc_topology_diff_export_xml(hwloc_topology_t topology,
+                                                  hwloc_topology_diff_t diff, const char* refname,
+                                                  const char* xmlpath);
 
 /** \brief Load a list of topology differences from a XML buffer.
  *
@@ -269,8 +276,10 @@ HWLOC_DECLSPEC int hwloc_topology_diff_export_xml(hwloc_topology_t topology, hwl
  *
  * \note the pointer returned in refname should later be freed
  * by the caller.
-  */
-HWLOC_DECLSPEC int hwloc_topology_diff_load_xmlbuffer(hwloc_topology_t topology, const char *xmlbuffer, int buflen, hwloc_topology_diff_t *diff, char **refname);
+ */
+HWLOC_DECLSPEC int hwloc_topology_diff_load_xmlbuffer(hwloc_topology_t topology,
+                                                      const char* xmlbuffer, int buflen,
+                                                      hwloc_topology_diff_t* diff, char** refname);
 
 /** \brief Export a list of topology differences to a XML buffer.
  *
@@ -286,7 +295,10 @@ HWLOC_DECLSPEC int hwloc_topology_diff_load_xmlbuffer(hwloc_topology_t topology,
  * \note The \p topology parameter must be a valid topology
  * but it is not required that it is related to \p diff.
  */
-HWLOC_DECLSPEC int hwloc_topology_diff_export_xmlbuffer(hwloc_topology_t topology, hwloc_topology_diff_t diff, const char *refname, char **xmlbuffer, int *buflen);
+HWLOC_DECLSPEC int hwloc_topology_diff_export_xmlbuffer(hwloc_topology_t topology,
+                                                        hwloc_topology_diff_t diff,
+                                                        const char* refname, char** xmlbuffer,
+                                                        int* buflen);
 
 /** @} */
 

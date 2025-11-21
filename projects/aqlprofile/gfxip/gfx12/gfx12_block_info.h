@@ -104,93 +104,93 @@ namespace gfx1200 {
 
 // Number of block instances
 // Reference: global_features.h (from gfxip header file package)
-static const uint32_t ChaCounterBlockNumInstances      = 1;
-static const uint32_t ChcCounterBlockNumInstances      = 2;
-static const uint32_t CpcCounterBlockNumInstances      = 1;
-static const uint32_t CpfCounterBlockNumInstances      = 1;
-static const uint32_t CpgCounterBlockNumInstances      = 1;
+static const uint32_t ChaCounterBlockNumInstances = 1;
+static const uint32_t ChcCounterBlockNumInstances = 2;
+static const uint32_t CpcCounterBlockNumInstances = 1;
+static const uint32_t CpfCounterBlockNumInstances = 1;
+static const uint32_t CpgCounterBlockNumInstances = 1;
 static const uint32_t GcmcVmL2CounterBlockNumInstances = 1;
-static const uint32_t GcrCounterBlockNumInstances      = 1;
-static const uint32_t Gcutcl2CounterBlockNumInstances  = 1;
-static const uint32_t Gcvml2CounterBlockNumInstances   = 1;
+static const uint32_t GcrCounterBlockNumInstances = 1;
+static const uint32_t Gcutcl2CounterBlockNumInstances = 1;
+static const uint32_t Gcvml2CounterBlockNumInstances = 1;
 static const uint32_t GcEaCpwdCounterBlockNumInstances = 18;
-static const uint32_t GcEaSeCounterBlockNumInstances   = 8;
-static const uint32_t Gl1aCounterBlockNumInstances     = 1;
-static const uint32_t Gl1cCounterBlockNumInstances     = 4;
-static const uint32_t Gl2aCounterBlockNumInstances     = 4;
-static const uint32_t Gl2cCounterBlockNumInstances     = 16;
-static const uint32_t GrbmCounterBlockNumInstances     = 1;
-static const uint32_t GrbmhCounterBlockNumInstances    = 1;
-static const uint32_t RlcCounterBlockNumInstances      = 1;
-static const uint32_t RpbCounterBlockNumInstances      = 1;
-static const uint32_t SdmaCounterBlockNumInstances     = 2;
-static const uint32_t SpiCounterBlockNumInstances      = 1;
-static const uint32_t SqcCounterBlockNumInstances      = 1;
-static const uint32_t SqgCounterBlockNumInstances      = 1;
-static const uint32_t TaCounterBlockNumInstances       = 2;
-static const uint32_t TcpCounterBlockNumInstances      = 2;
-static const uint32_t TdCounterBlockNumInstances       = 2;
-static const uint32_t Utcl1CounterBlockNumInstances    = 2;
+static const uint32_t GcEaSeCounterBlockNumInstances = 8;
+static const uint32_t Gl1aCounterBlockNumInstances = 1;
+static const uint32_t Gl1cCounterBlockNumInstances = 4;
+static const uint32_t Gl2aCounterBlockNumInstances = 4;
+static const uint32_t Gl2cCounterBlockNumInstances = 16;
+static const uint32_t GrbmCounterBlockNumInstances = 1;
+static const uint32_t GrbmhCounterBlockNumInstances = 1;
+static const uint32_t RlcCounterBlockNumInstances = 1;
+static const uint32_t RpbCounterBlockNumInstances = 1;
+static const uint32_t SdmaCounterBlockNumInstances = 2;
+static const uint32_t SpiCounterBlockNumInstances = 1;
+static const uint32_t SqcCounterBlockNumInstances = 1;
+static const uint32_t SqgCounterBlockNumInstances = 1;
+static const uint32_t TaCounterBlockNumInstances = 2;
+static const uint32_t TcpCounterBlockNumInstances = 2;
+static const uint32_t TdCounterBlockNumInstances = 2;
+static const uint32_t Utcl1CounterBlockNumInstances = 2;
 
-// Number of block counter registers - Auto-generated from chip_offset_byte.h, edit with extra caution
-// Reference: chip_offset_byte.h (from gfxip header file package)
-static const uint32_t ChaCounterBlockNumCounters      = 4;
-static const uint32_t ChcCounterBlockNumCounters      = 4;
-static const uint32_t CpcCounterBlockNumCounters      = 2;
-static const uint32_t CpfCounterBlockNumCounters      = 2;
-static const uint32_t CpgCounterBlockNumCounters      = 2;
+// Number of block counter registers - Auto-generated from chip_offset_byte.h, edit with extra
+// caution Reference: chip_offset_byte.h (from gfxip header file package)
+static const uint32_t ChaCounterBlockNumCounters = 4;
+static const uint32_t ChcCounterBlockNumCounters = 4;
+static const uint32_t CpcCounterBlockNumCounters = 2;
+static const uint32_t CpfCounterBlockNumCounters = 2;
+static const uint32_t CpgCounterBlockNumCounters = 2;
 static const uint32_t GcmcVmL2CounterBlockNumCounters = 8;
-static const uint32_t GcrCounterBlockNumCounters      = 2;
-static const uint32_t Gcutcl2CounterBlockNumCounters  = 4;
-static const uint32_t Gcvml2CounterBlockNumCounters   = 2;
+static const uint32_t GcrCounterBlockNumCounters = 2;
+static const uint32_t Gcutcl2CounterBlockNumCounters = 4;
+static const uint32_t Gcvml2CounterBlockNumCounters = 2;
 static const uint32_t GcEaCpwdCounterBlockNumCounters = 2;
-static const uint32_t GcEaSeCounterBlockNumCounters   = 2;
-static const uint32_t Gl1aCounterBlockNumCounters     = 4;
-static const uint32_t Gl1cCounterBlockNumCounters     = 4;
-static const uint32_t Gl2aCounterBlockNumCounters     = 4;
-static const uint32_t Gl2cCounterBlockNumCounters     = 4;
-static const uint32_t GrbmCounterBlockNumCounters     = 2;
-static const uint32_t GrbmhCounterBlockNumCounters    = 2;
-static const uint32_t RlcCounterBlockNumCounters      = 2;
-static const uint32_t RpbCounterBlockNumCounters      = 4;
-static const uint32_t SdmaCounterBlockNumCounters     = 2;
-static const uint32_t SpiCounterBlockNumCounters      = 6;
-static const uint32_t SqcCounterBlockNumCounters      = 16;
-static const uint32_t SqgCounterBlockNumCounters      = 8;
-static const uint32_t TaCounterBlockNumCounters       = 2;
-static const uint32_t TcpCounterBlockNumCounters      = 4;
-static const uint32_t TdCounterBlockNumCounters       = 2;
-static const uint32_t Utcl1CounterBlockNumCounters    = 4;
+static const uint32_t GcEaSeCounterBlockNumCounters = 2;
+static const uint32_t Gl1aCounterBlockNumCounters = 4;
+static const uint32_t Gl1cCounterBlockNumCounters = 4;
+static const uint32_t Gl2aCounterBlockNumCounters = 4;
+static const uint32_t Gl2cCounterBlockNumCounters = 4;
+static const uint32_t GrbmCounterBlockNumCounters = 2;
+static const uint32_t GrbmhCounterBlockNumCounters = 2;
+static const uint32_t RlcCounterBlockNumCounters = 2;
+static const uint32_t RpbCounterBlockNumCounters = 4;
+static const uint32_t SdmaCounterBlockNumCounters = 2;
+static const uint32_t SpiCounterBlockNumCounters = 6;
+static const uint32_t SqcCounterBlockNumCounters = 16;
+static const uint32_t SqgCounterBlockNumCounters = 8;
+static const uint32_t TaCounterBlockNumCounters = 2;
+static const uint32_t TcpCounterBlockNumCounters = 4;
+static const uint32_t TdCounterBlockNumCounters = 2;
+static const uint32_t Utcl1CounterBlockNumCounters = 4;
 
 // Block counters max event value - Auto-generated from chip_enum.h, edit with extra caution
 // Reference: chip_enum.h (from gfxip header file package)
-static const uint32_t ChaCounterBlockMaxEvent      = 25;
-static const uint32_t ChcCounterBlockMaxEvent      = 94;
-static const uint32_t CpcCounterBlockMaxEvent      = 55;
-static const uint32_t CpfCounterBlockMaxEvent      = 4;
-static const uint32_t CpgCounterBlockMaxEvent      = 30;
+static const uint32_t ChaCounterBlockMaxEvent = 25;
+static const uint32_t ChcCounterBlockMaxEvent = 94;
+static const uint32_t CpcCounterBlockMaxEvent = 55;
+static const uint32_t CpfCounterBlockMaxEvent = 4;
+static const uint32_t CpgCounterBlockMaxEvent = 30;
 static const uint32_t GcmcVmL2CounterBlockMaxEvent = 90;
-static const uint32_t GcrCounterBlockMaxEvent      = 151;
-static const uint32_t Gcutcl2CounterBlockMaxEvent  = 36;
-static const uint32_t Gcvml2CounterBlockMaxEvent   = 90;
+static const uint32_t GcrCounterBlockMaxEvent = 151;
+static const uint32_t Gcutcl2CounterBlockMaxEvent = 36;
+static const uint32_t Gcvml2CounterBlockMaxEvent = 90;
 static const uint32_t GcEaCpwdCounterBlockMaxEvent = 32;
-static const uint32_t GcEaSeCounterBlockMaxEvent   = 32;
-static const uint32_t Gl1aCounterBlockMaxEvent     = 21;
-static const uint32_t Gl1cCounterBlockMaxEvent     = 121;
-static const uint32_t Gl2aCounterBlockMaxEvent     = 114;
-static const uint32_t Gl2cCounterBlockMaxEvent     = 249;
-static const uint32_t GrbmCounterBlockMaxEvent     = 51;
-static const uint32_t GrbmhCounterBlockMaxEvent    = 25;
-static const uint32_t RlcCounterBlockMaxEvent      = 6;
-static const uint32_t RpbCounterBlockMaxEvent      = 29;
-static const uint32_t SdmaCounterBlockMaxEvent     = 125;
-static const uint32_t SpiCounterBlockMaxEvent      = 318;
-static const uint32_t SqcCounterBlockMaxEvent      = 511;
-static const uint32_t SqgCounterBlockMaxEvent      = 45;
-static const uint32_t TaCounterBlockMaxEvent       = 254;
-static const uint32_t TcpCounterBlockMaxEvent      = 99;
-static const uint32_t TdCounterBlockMaxEvent       = 271;
-static const uint32_t Utcl1CounterBlockMaxEvent    = 71;
+static const uint32_t GcEaSeCounterBlockMaxEvent = 32;
+static const uint32_t Gl1aCounterBlockMaxEvent = 21;
+static const uint32_t Gl1cCounterBlockMaxEvent = 121;
+static const uint32_t Gl2aCounterBlockMaxEvent = 114;
+static const uint32_t Gl2cCounterBlockMaxEvent = 249;
+static const uint32_t GrbmCounterBlockMaxEvent = 51;
+static const uint32_t GrbmhCounterBlockMaxEvent = 25;
+static const uint32_t RlcCounterBlockMaxEvent = 6;
+static const uint32_t RpbCounterBlockMaxEvent = 29;
+static const uint32_t SdmaCounterBlockMaxEvent = 125;
+static const uint32_t SpiCounterBlockMaxEvent = 318;
+static const uint32_t SqcCounterBlockMaxEvent = 511;
+static const uint32_t SqgCounterBlockMaxEvent = 45;
+static const uint32_t TaCounterBlockMaxEvent = 254;
+static const uint32_t TcpCounterBlockMaxEvent = 99;
+static const uint32_t TdCounterBlockMaxEvent = 271;
+static const uint32_t Utcl1CounterBlockMaxEvent = 71;
 }  // namespace gfx1200
 
 namespace gfx1201 {
@@ -199,14 +199,14 @@ namespace gfx1201 {
 // ip_block : sdma_7_0_1
 
 // Number of block instances
-static const uint32_t ChcCounterBlockNumInstances      = 4;
+static const uint32_t ChcCounterBlockNumInstances = 4;
 static const uint32_t GcEaCpwdCounterBlockNumInstances = 36;
-static const uint32_t GcEaSeCounterBlockNumInstances   = 4;
-static const uint32_t Gl2cCounterBlockNumInstances     = 32;
+static const uint32_t GcEaSeCounterBlockNumInstances = 4;
+static const uint32_t Gl2cCounterBlockNumInstances = 32;
 }  // namespace gfx1201
 
-static const uint32_t SdmaCounterBlockMaxInstances     = 8;
-static const uint32_t UmcCounterBlockMaxInstances      = 32;
+static const uint32_t SdmaCounterBlockMaxInstances = 8;
+static const uint32_t UmcCounterBlockMaxInstances = 32;
 
 }  // namespace gfx12
 }  // namespace gfxip

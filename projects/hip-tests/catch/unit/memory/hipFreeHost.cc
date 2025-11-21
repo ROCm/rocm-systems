@@ -53,7 +53,7 @@ TEST_CASE("Unit_hipFreeHost_InvalidMemory") {
 #if (HT_AMD == 1) && (HT_LINUX == 1)
   SECTION("Host registered memory AMD Linux") {
     char* ptr = new char;
-    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped, 
+    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped,
                          hipHostRegisterIoMemory);
     HIP_CHECK(hipHostRegister(ptr, sizeof(char), flag));
     HIP_CHECK_ERROR(hipFreeHost(ptr), hipErrorInvalidValue);

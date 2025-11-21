@@ -853,13 +853,13 @@ executable_freeze_internal(hsa_executable_t executable)
                         {
                             auto co_data = ditr->rocp_data;
                             auto record  = rocprofiler_callback_tracing_record_t{
-                                .context_id     = rocprofiler_context_id_t{citr->context_idx},
-                                .thread_id      = tidx,
-                                .correlation_id = rocprofiler_correlation_id_t{},
-                                .kind           = CODE_OBJECT_KIND,
-                                .operation      = CODE_OBJECT_LOAD,
-                                .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
-                                .payload        = static_cast<void*>(&co_data)};
+                                 .context_id     = rocprofiler_context_id_t{citr->context_idx},
+                                 .thread_id      = tidx,
+                                 .correlation_id = rocprofiler_correlation_id_t{},
+                                 .kind           = CODE_OBJECT_KIND,
+                                 .operation      = CODE_OBJECT_LOAD,
+                                 .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
+                                 .payload        = static_cast<void*>(&co_data)};
 
                             // invoke callback
                             auto& cb_data =
@@ -878,13 +878,13 @@ executable_freeze_internal(hsa_executable_t executable)
                             {
                                 auto sym_data = sitr->rocp_data;
                                 auto record   = rocprofiler_callback_tracing_record_t{
-                                    .context_id     = rocprofiler_context_id_t{citr->context_idx},
-                                    .thread_id      = tidx,
-                                    .correlation_id = rocprofiler_correlation_id_t{},
-                                    .kind           = CODE_OBJECT_KIND,
-                                    .operation      = CODE_OBJECT_KERNEL_SYMBOL,
-                                    .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
-                                    .payload        = static_cast<void*>(&sym_data)};
+                                      .context_id     = rocprofiler_context_id_t{citr->context_idx},
+                                      .thread_id      = tidx,
+                                      .correlation_id = rocprofiler_correlation_id_t{},
+                                      .kind           = CODE_OBJECT_KIND,
+                                      .operation      = CODE_OBJECT_KERNEL_SYMBOL,
+                                      .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
+                                      .payload        = static_cast<void*>(&sym_data)};
 
                                 // invoke callback
                                 auto& cb_data =
@@ -925,13 +925,13 @@ executable_freeze_internal(hsa_executable_t executable)
                                 host_data.kernel_id        = sym_data.kernel_id;
                                 host_data.host_function_id = ++get_host_function_id();
                                 auto hip_record            = rocprofiler_callback_tracing_record_t{
-                                    .context_id     = rocprofiler_context_id_t{citr->context_idx},
-                                    .thread_id      = tidx,
-                                    .correlation_id = rocprofiler_correlation_id_t{},
-                                    .kind           = CODE_OBJECT_KIND,
-                                    .operation      = CODE_OBJECT_HOST_SYMBOL,
-                                    .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
-                                    .payload        = static_cast<void*>(&host_data)};
+                                               .context_id     = rocprofiler_context_id_t{citr->context_idx},
+                                               .thread_id      = tidx,
+                                               .correlation_id = rocprofiler_correlation_id_t{},
+                                               .kind           = CODE_OBJECT_KIND,
+                                               .operation      = CODE_OBJECT_HOST_SYMBOL,
+                                               .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
+                                               .payload        = static_cast<void*>(&host_data)};
 
                                 // invoke callback
                                 cb_data.callback(hip_record, &user_data, cb_data.data);

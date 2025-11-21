@@ -30,14 +30,15 @@
 //  @class KFDOpenCloseKFDTest
 class KFDOpenCloseKFDTest : public testing::Test {
  public:
-    KFDOpenCloseKFDTest(void) {}
-    ~KFDOpenCloseKFDTest(void) {}
+  KFDOpenCloseKFDTest(void) {}
+  ~KFDOpenCloseKFDTest(void) {}
 
  protected:
-    // @brief Executed before every test that uses KFDOpenCloseKFDTest class, sets all common settings for the tests.
-    virtual void SetUp();
-    // @brief Executed after every test that uses KFDOpenCloseKFDTest class
-    virtual void TearDown();
+  // @brief Executed before every test that uses KFDOpenCloseKFDTest class, sets all common settings
+  // for the tests.
+  virtual void SetUp();
+  // @brief Executed after every test that uses KFDOpenCloseKFDTest class
+  virtual void TearDown();
 };
 
 #endif  //  __KFD_OPEN_CLOSE_KFD_TEST__H__

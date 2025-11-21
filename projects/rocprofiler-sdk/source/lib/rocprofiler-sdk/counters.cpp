@@ -115,7 +115,8 @@ get_agent_id_from_counter_id(rocprofiler_counter_id_t counter_id)
 namespace counters = ::rocprofiler::counters;
 namespace common   = ::rocprofiler::common;
 
-extern "C" {
+extern "C"
+{
 /**
  * @brief Query Counter info such as name or description.
  *

@@ -30,12 +30,12 @@
 
 class KFDLocalMemoryTest : public KFDBaseComponentTest {
  public:
-    KFDLocalMemoryTest() {}
-    ~KFDLocalMemoryTest() {}
+  KFDLocalMemoryTest() {}
+  ~KFDLocalMemoryTest() {}
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 };
 
 #endif  // __KFD_LOCALMEMORY_TEST__H__

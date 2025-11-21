@@ -62,9 +62,9 @@ namespace image {
 #if defined(__GNUC__)
 #define ALIGNED_(x) __attribute__((aligned(x)))
 #endif  // __GNUC__
-#endif // _MSC_VER
+#endif  // _MSC_VER
 
-#define MULTILINE(...) # __VA_ARGS__
+#define MULTILINE(...) #__VA_ARGS__
 
 #define ASSERT_SIZE_UINT32(desc)                                                                   \
   static_assert(sizeof(desc) == sizeof(uint32_t), #desc " size should be 32-bits");
@@ -188,8 +188,7 @@ struct DeleteObject {
 /// when passing 0.
 /// @param: val(Input), the data to be checked.
 /// @return: bool.
-template <typename T>
-static __forceinline bool IsPowerOfTwo(T val) {
+template <typename T> static __forceinline bool IsPowerOfTwo(T val) {
   return (val & (val - 1)) == 0;
 }
 
@@ -198,8 +197,7 @@ static __forceinline bool IsPowerOfTwo(T val) {
 /// @param: value(Input), value to be calculated.
 /// @param: alignment(Input), alignment value.
 /// @return: T.
-template <typename T>
-static __forceinline T AlignDown(T value, size_t alignment) {
+template <typename T> static __forceinline T AlignDown(T value, size_t alignment) {
   assert(IsPowerOfTwo(alignment));
   return (T)(value & ~(alignment - 1));
 }
@@ -209,8 +207,7 @@ static __forceinline T AlignDown(T value, size_t alignment) {
 /// @param: value(Input), pointer to type T.
 /// @param: alignment(Input), alignment value.
 /// @return: T*, pointer to type T.
-template <typename T>
-static __forceinline T* AlignDown(T* value, size_t alignment) {
+template <typename T> static __forceinline T* AlignDown(T* value, size_t alignment) {
   return (T*)AlignDown((intptr_t)value, alignment);
 }
 
@@ -220,8 +217,7 @@ static __forceinline T* AlignDown(T* value, size_t alignment) {
 /// @param: value(Input), value to be calculated.
 /// @param: alignment(Input), alignment value.
 /// @param: T.
-template <typename T>
-static __forceinline T AlignUp(T value, size_t alignment) {
+template <typename T> static __forceinline T AlignUp(T value, size_t alignment) {
   return AlignDown((T)(value + alignment - 1), alignment);
 }
 
@@ -230,8 +226,7 @@ static __forceinline T AlignUp(T value, size_t alignment) {
 /// @param: value(Input), pointer to type T.
 /// @param: alignment(Input), alignment value.
 /// @return: T*, pointer to type T.
-template <typename T>
-static __forceinline T* AlignUp(T* value, size_t alignment) {
+template <typename T> static __forceinline T* AlignUp(T* value, size_t alignment) {
   return (T*)AlignDown((intptr_t)((uint8_t*)value + alignment - 1), alignment);
 }
 
@@ -240,8 +235,7 @@ static __forceinline T* AlignUp(T* value, size_t alignment) {
 /// @param: value(Input), value to be checked.
 /// @param: alignment(Input), alignment value.
 /// @return: bool.
-template <typename T>
-static __forceinline bool IsMultipleOf(T value, size_t alignment) {
+template <typename T> static __forceinline bool IsMultipleOf(T value, size_t alignment) {
   return (AlignUp(value, alignment) == value);
 }
 
@@ -250,8 +244,7 @@ static __forceinline bool IsMultipleOf(T value, size_t alignment) {
 /// @param: value(Input), pointer to type T.
 /// @param: alignment(Input), alignment value.
 /// @return: bool.
-template <typename T>
-static __forceinline bool IsMultipleOf(T* value, size_t alignment) {
+template <typename T> static __forceinline bool IsMultipleOf(T* value, size_t alignment) {
   return (AlignUp(value, alignment) == value);
 }
 
@@ -280,14 +273,14 @@ static __forceinline uint64_t NextPow2(uint64_t value) {
 
 static __forceinline bool strIsEmpty(const char* str) noexcept { return str[0] == '\0'; }
 
-template<uint32_t lowBit, uint32_t highBit, typename T>
+template <uint32_t lowBit, uint32_t highBit, typename T>
 static __forceinline uint32_t BitSelect(T p) {
   static_assert(sizeof(T) <= sizeof(uintptr_t), "Type out of range.");
-  static_assert(highBit < sizeof(uintptr_t)*8, "Bit index out of range.");
+  static_assert(highBit < sizeof(uintptr_t) * 8, "Bit index out of range.");
 
   uintptr_t ptr = p;
-  if(highBit != (sizeof(uintptr_t)*8-1))
-    return (uint32_t)((ptr & ((1ull<<(highBit+1))-1)) >> lowBit);
+  if (highBit != (sizeof(uintptr_t) * 8 - 1))
+    return (uint32_t)((ptr & ((1ull << (highBit + 1)) - 1)) >> lowBit);
   else
     return (uint32_t)(ptr >> lowBit);
 }

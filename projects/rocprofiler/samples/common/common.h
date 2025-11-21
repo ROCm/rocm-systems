@@ -216,11 +216,10 @@ void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
 
 void FlushPCSamplingRecord(const rocprofiler_record_pc_sample_t* pc_sampling_record) {
   const auto& sample = pc_sampling_record->pc_sample;
-  output_file << "dispatch[" << sample.dispatch_id.value << "], "
-              << "timestamp(" << sample.timestamp.value << "), "
-              << "gpu_id(" << sample.gpu_id.handle << "), "
-              << "pc-sample(" << std::hex << std::showbase << sample.pc << "), "
-              << "se(" << sample.se << ')' << std::endl;
+  output_file << "dispatch[" << sample.dispatch_id.value << "], " << "timestamp("
+              << sample.timestamp.value << "), " << "gpu_id(" << sample.gpu_id.handle << "), "
+              << "pc-sample(" << std::hex << std::showbase << sample.pc << "), " << "se("
+              << sample.se << ')' << std::endl;
 }
 
 void FlushCountersSamplerRecord(

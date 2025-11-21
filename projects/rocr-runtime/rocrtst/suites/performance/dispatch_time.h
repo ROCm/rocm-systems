@@ -107,4 +107,3 @@ class DispatchTime : public TestBase {
 };
 
 #endif  // ROCRTST_SUITES_PERFORMANCE_DISPATCH_TIME_H_
-

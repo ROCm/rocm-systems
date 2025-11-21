@@ -49,8 +49,8 @@
 #include <ctype.h>
 #include <errno.h>
 #include <libelf.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #if !defined(WIN32)
 #include <unistd.h>
 #else
@@ -61,151 +61,146 @@
 
 LIBELF_VCSID("$Id: elf_begin.c 1923 2011-09-23 09:01:13Z jkoshy $");
 
-#define	_LIBELF_INITSIZE	(64*1024)
+#define _LIBELF_INITSIZE (64 * 1024)
 
 /*
  * Read from a device file, pipe or socket.
  */
-static void *
-_libelf_read_special_file(int fd, size_t *fsz)
-{
-	ssize_t readsz;
-	size_t bufsz, datasz;
-	unsigned char *buf, *t;
+static void *_libelf_read_special_file(int fd, size_t *fsz) {
+  ssize_t readsz;
+  size_t bufsz, datasz;
+  unsigned char *buf, *t;
 
-	datasz = 0;
-	readsz = 0;
-	bufsz = _LIBELF_INITSIZE;
-	if ((buf = malloc(bufsz)) == NULL)
-		goto resourceerror;
+  datasz = 0;
+  readsz = 0;
+  bufsz = _LIBELF_INITSIZE;
+  if ((buf = malloc(bufsz)) == NULL)
+    goto resourceerror;
 
-	/*
-	 * Read data from the file descriptor till we reach EOF, or
-	 * till an error is encountered.
-	 */
-	do {
-		/* Check if we need to expand the data buffer. */
-		if (datasz == bufsz) {
-			bufsz *= 2;
-			if ((t = realloc(buf, bufsz)) == NULL)
-				goto resourceerror;
-			buf = t;
-		}
+  /*
+   * Read data from the file descriptor till we reach EOF, or
+   * till an error is encountered.
+   */
+  do {
+    /* Check if we need to expand the data buffer. */
+    if (datasz == bufsz) {
+      bufsz *= 2;
+      if ((t = realloc(buf, bufsz)) == NULL)
+        goto resourceerror;
+      buf = t;
+    }
 
-		do {
-			readsz = bufsz - datasz;
-			t = buf + datasz;
-			if ((readsz = read(fd, t, readsz)) <= 0)
-				break;
-			datasz += readsz;
-		} while (datasz < bufsz);
+    do {
+      readsz = bufsz - datasz;
+      t = buf + datasz;
+      if ((readsz = read(fd, t, readsz)) <= 0)
+        break;
+      datasz += readsz;
+    } while (datasz < bufsz);
 
-	} while (readsz > 0);
+  } while (readsz > 0);
 
-	if (readsz < 0) {
-		LIBELF_SET_ERROR(IO, errno);
-		goto error;
-	}
+  if (readsz < 0) {
+    LIBELF_SET_ERROR(IO, errno);
+    goto error;
+  }
 
-	assert(readsz == 0);
+  assert(readsz == 0);
 
-	/*
-	 * Free up extra buffer space.
-	 */
-	if (bufsz > datasz) {
-		if (datasz > 0) {
-			if ((t = realloc(buf, datasz)) == NULL)
-				goto resourceerror;
-			buf = t;
-		} else {	/* Zero bytes read. */
-			LIBELF_SET_ERROR(ARGUMENT, 0);
-			free(buf);
-			buf = NULL;
-		}
-	}
+  /*
+   * Free up extra buffer space.
+   */
+  if (bufsz > datasz) {
+    if (datasz > 0) {
+      if ((t = realloc(buf, datasz)) == NULL)
+        goto resourceerror;
+      buf = t;
+    } else { /* Zero bytes read. */
+      LIBELF_SET_ERROR(ARGUMENT, 0);
+      free(buf);
+      buf = NULL;
+    }
+  }
 
-	*fsz = datasz;
-	return (buf);
+  *fsz = datasz;
+  return (buf);
 
 resourceerror:
-	LIBELF_SET_ERROR(RESOURCE, 0);
+  LIBELF_SET_ERROR(RESOURCE, 0);
 error:
-	if (buf != NULL)
-		free(buf);
-	return (NULL);
+  if (buf != NULL)
+    free(buf);
+  return (NULL);
 }
 
-static Elf *
-_libelf_open_object(int fd, Elf_Cmd c, Elf_Mem *mem)
-{
-	Elf *e;
-	void *m;
-	mode_t mode;
-	size_t fsize;
-	struct stat sb;
-	unsigned int flags;
+static Elf *_libelf_open_object(int fd, Elf_Cmd c, Elf_Mem *mem) {
+  Elf *e;
+  void *m;
+  mode_t mode;
+  size_t fsize;
+  struct stat sb;
+  unsigned int flags;
 
-	assert(c == ELF_C_READ || c == ELF_C_RDWR || c == ELF_C_WRITE);
+  assert(c == ELF_C_READ || c == ELF_C_RDWR || c == ELF_C_WRITE);
 
-	if (fstat(fd, &sb) < 0) {
-		LIBELF_SET_ERROR(IO, errno);
-		return (NULL);
-	}
+  if (fstat(fd, &sb) < 0) {
+    LIBELF_SET_ERROR(IO, errno);
+    return (NULL);
+  }
 
-	mode = sb.st_mode;
-	fsize = (size_t) sb.st_size;
+  mode = sb.st_mode;
+  fsize = (size_t)sb.st_size;
 
-	/*
-	 * Reject unsupported file types.
-	 */
-	if (!S_ISREG(mode) && !S_ISCHR(mode)
+  /*
+   * Reject unsupported file types.
+   */
+  if (!S_ISREG(mode) && !S_ISCHR(mode)
 #if !defined(WIN32)
-      && !S_ISFIFO(mode) &&
-	    !S_ISSOCK(mode)
+      && !S_ISFIFO(mode) && !S_ISSOCK(mode)
 #endif
-      ) {
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  ) {
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	/*
-	 * For ELF_C_WRITE mode, allocate and return a descriptor.
-     * For ELF_C_RDWR mode, if the file is empty, allocate and return.
-	 */
-	if (c == ELF_C_WRITE || (c == ELF_C_RDWR && !fsize)) {
-		if ((e = _libelf_allocate_elf(mem)) != NULL) {
-			_libelf_init_elf(e, ELF_K_ELF);
-			e->e_byteorder = LIBELF_PRIVATE(byteorder);
-			e->e_fd = fd;
-			e->e_cmd = c;
-			if (!S_ISREG(mode))
-				e->e_flags |= LIBELF_F_SPECIAL_FILE;
-		}
+  /*
+   * For ELF_C_WRITE mode, allocate and return a descriptor.
+   * For ELF_C_RDWR mode, if the file is empty, allocate and return.
+   */
+  if (c == ELF_C_WRITE || (c == ELF_C_RDWR && !fsize)) {
+    if ((e = _libelf_allocate_elf(mem)) != NULL) {
+      _libelf_init_elf(e, ELF_K_ELF);
+      e->e_byteorder = LIBELF_PRIVATE(byteorder);
+      e->e_fd = fd;
+      e->e_cmd = c;
+      if (!S_ISREG(mode))
+        e->e_flags |= LIBELF_F_SPECIAL_FILE;
+    }
 
-		return (e);
-	}
+    return (e);
+  }
 
-	/*
-	 * ELF_C_READ and ELF_C_RDWR mode.
-	 */
-	m = NULL;
-	flags = 0;
-	if (S_ISREG(mode)) {
-		/*
-		 * Always map regular files in with 'PROT_READ'
-		 * permissions.
-		 *
-		 * For objects opened in ELF_C_RDWR mode, when
-		 * elf_update(3) is called, we remove this mapping,
-		 * write file data out using write(2), and map the new
-		 * contents back.
-		 */
-		if ((m = mmap(NULL, fsize, PROT_READ, MAP_PRIVATE, fd,
-	    (off_t) 0)) == MAP_FAILED) {
-		LIBELF_SET_ERROR(IO, errno);
-		return (NULL);
-	    }
-		flags = LIBELF_F_RAWFILE_MMAP;
+  /*
+   * ELF_C_READ and ELF_C_RDWR mode.
+   */
+  m = NULL;
+  flags = 0;
+  if (S_ISREG(mode)) {
+    /*
+     * Always map regular files in with 'PROT_READ'
+     * permissions.
+     *
+     * For objects opened in ELF_C_RDWR mode, when
+     * elf_update(3) is called, we remove this mapping,
+     * write file data out using write(2), and map the new
+     * contents back.
+     */
+    if ((m = mmap(NULL, fsize, PROT_READ, MAP_PRIVATE, fd, (off_t)0)) ==
+        MAP_FAILED) {
+      LIBELF_SET_ERROR(IO, errno);
+      return (NULL);
+    }
+    flags = LIBELF_F_RAWFILE_MMAP;
 #if 0
         m = mem.alloc(fsize);
         if (!fread(m, 1, fsize, _fdopen(fd, "w+b"))) {
@@ -215,93 +210,90 @@ _libelf_open_object(int fd, Elf_Cmd c, Elf_Mem *mem)
         }
         flags = LIBELF_F_RAWFILE_MALLOC;
 #endif
-	} else if ((m = _libelf_read_special_file(fd, &fsize)) != NULL)
-		flags = LIBELF_F_RAWFILE_MALLOC | LIBELF_F_SPECIAL_FILE;
-	else
-		return (NULL);
+  } else if ((m = _libelf_read_special_file(fd, &fsize)) != NULL)
+    flags = LIBELF_F_RAWFILE_MALLOC | LIBELF_F_SPECIAL_FILE;
+  else
+    return (NULL);
 
-	if ((e = elf_memory(m, fsize, mem)) == NULL) {
-		assert((flags & LIBELF_F_RAWFILE_MALLOC) ||
-		    (flags & LIBELF_F_RAWFILE_MMAP));
-		if (flags & LIBELF_F_RAWFILE_MMAP)
-			(void) munmap(m, fsize);
-		else
-			e->e_mem.dealloc(m);
-		return (NULL);
-	}
+  if ((e = elf_memory(m, fsize, mem)) == NULL) {
+    assert((flags & LIBELF_F_RAWFILE_MALLOC) ||
+           (flags & LIBELF_F_RAWFILE_MMAP));
+    if (flags & LIBELF_F_RAWFILE_MMAP)
+      (void)munmap(m, fsize);
+    else
+      e->e_mem.dealloc(m);
+    return (NULL);
+  }
 
-	/* ar(1) archives aren't supported in RDWR mode. */
-	if (c == ELF_C_RDWR && e->e_kind == ELF_K_AR) {
-		(void) elf_end(e);
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
-	}
+  /* ar(1) archives aren't supported in RDWR mode. */
+  if (c == ELF_C_RDWR && e->e_kind == ELF_K_AR) {
+    (void)elf_end(e);
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	e->e_flags |= flags;
-	e->e_fd = fd;
-	e->e_cmd = c;
+  e->e_flags |= flags;
+  e->e_fd = fd;
+  e->e_cmd = c;
 
-	return (e);
+  return (e);
 }
 
-Elf *
-elf_begin(int fd, Elf_Cmd c, Elf *a, Elf_Mem *mem)
-{
-	Elf *e;
+Elf *elf_begin(int fd, Elf_Cmd c, Elf *a, Elf_Mem *mem) {
+  Elf *e;
 
-	e = NULL;
+  e = NULL;
 
-	if (LIBELF_PRIVATE(version) == EV_NONE) {
-		LIBELF_SET_ERROR(SEQUENCE, 0);
-		return (NULL);
-	}
+  if (LIBELF_PRIVATE(version) == EV_NONE) {
+    LIBELF_SET_ERROR(SEQUENCE, 0);
+    return (NULL);
+  }
 
-	switch (c) {
-	case ELF_C_NULL:
-		return (NULL);
+  switch (c) {
+  case ELF_C_NULL:
+    return (NULL);
 
-	case ELF_C_WRITE:
-		/*
-		 * The ELF_C_WRITE command is required to ignore the
-		 * descriptor passed in.
-		 */
-		a = NULL;
-		break;
+  case ELF_C_WRITE:
+    /*
+     * The ELF_C_WRITE command is required to ignore the
+     * descriptor passed in.
+     */
+    a = NULL;
+    break;
 
-	case ELF_C_RDWR:
-		if (a != NULL && a->e_kind == ELF_K_AR) { /* not allowed for ar(1) archives. */
-			LIBELF_SET_ERROR(ARGUMENT, 0);
-			return (NULL);
-		}
-		/*FALLTHROUGH*/
-	case ELF_C_READ:
-		/*
-		 * Descriptor `a' could be for a regular ELF file, or
-		 * for an ar(1) archive.  If descriptor `a' was opened
-		 * using a valid file descriptor, we need to check if
-		 * the passed in `fd' value matches the original one.
-		 */
-		if (a &&
-		    ((a->e_fd != -1 && a->e_fd != fd) || c != a->e_cmd)) {
-			LIBELF_SET_ERROR(ARGUMENT, 0);
-			return (NULL);
-		}
-		break;
+  case ELF_C_RDWR:
+    if (a != NULL &&
+        a->e_kind == ELF_K_AR) { /* not allowed for ar(1) archives. */
+      LIBELF_SET_ERROR(ARGUMENT, 0);
+      return (NULL);
+    }
+    /*FALLTHROUGH*/
+  case ELF_C_READ:
+    /*
+     * Descriptor `a' could be for a regular ELF file, or
+     * for an ar(1) archive.  If descriptor `a' was opened
+     * using a valid file descriptor, we need to check if
+     * the passed in `fd' value matches the original one.
+     */
+    if (a && ((a->e_fd != -1 && a->e_fd != fd) || c != a->e_cmd)) {
+      LIBELF_SET_ERROR(ARGUMENT, 0);
+      return (NULL);
+    }
+    break;
 
-	default:
-		LIBELF_SET_ERROR(ARGUMENT, 0);
-		return (NULL);
+  default:
+    LIBELF_SET_ERROR(ARGUMENT, 0);
+    return (NULL);
+  }
 
-	}
+  if (a == NULL)
+    e = _libelf_open_object(fd, c, mem);
+  else if (a->e_kind == ELF_K_AR)
+    e = _libelf_ar_open_member(a->e_fd, c, a, mem);
+  else
+    (e = a)->e_activations++;
 
-	if (a == NULL)
-		e = _libelf_open_object(fd, c, mem);
-	else if (a->e_kind == ELF_K_AR)
-		e = _libelf_ar_open_member(a->e_fd, c, a, mem);
-	else
-		(e = a)->e_activations++;
-
-	return (e);
+  return (e);
 }
 #if defined(WIN32)
 // This code taken from:
@@ -311,20 +303,19 @@ elf_begin(int fd, Elf_Cmd c, Elf *a, Elf_Mem *mem)
 // http://www.mingw.org/license
 // FIXME: This needs to be more robust to the protection and flag options.
 void *w32_mmap(void *start, size_t length, int prot, int flags, int fd,
-unsigned offset)
-{
-	HANDLE handle;
+               unsigned offset) {
+  HANDLE handle;
 
-	if (start != NULL || !(flags & MAP_PRIVATE))
-	 assert(!"Invalid usage of mingw_mmap");
+  if (start != NULL || !(flags & MAP_PRIVATE))
+    assert(!"Invalid usage of mingw_mmap");
 
-	handle = CreateFileMapping((HANDLE)_get_osfhandle(fd), NULL, PAGE_READONLY, 0, 0, NULL);
-	if (handle != NULL) {
-	 start = MapViewOfFile(handle, flags, 0, offset,
-length);
-	 CloseHandle(handle);
-    }
-	return start;
+  handle = CreateFileMapping((HANDLE)_get_osfhandle(fd), NULL, PAGE_READONLY, 0,
+                             0, NULL);
+  if (handle != NULL) {
+    start = MapViewOfFile(handle, flags, 0, offset, length);
+    CloseHandle(handle);
+  }
+  return start;
 }
 
 int w32_munmap(void *start, size_t length) {

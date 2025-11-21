@@ -43,34 +43,33 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/evt_notif_read_write.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/evt_notif_read_write.h"
 #include "rocm_smi_test/test_common.h"
 #include "rocm_smi_test/test_utils.h"
 
 TestEvtNotifReadWrite::TestEvtNotifReadWrite() : TestBase() {
   set_title("RSMI Event Notification Read/Write Test");
-  set_description("The Event Notification Read/Write tests verifies that "
-        "we can configure to collect various event types and then read them");
+  set_description(
+      "The Event Notification Read/Write tests verifies that "
+      "we can configure to collect various event types and then read them");
 }
 
-TestEvtNotifReadWrite::~TestEvtNotifReadWrite(void) {
-}
+TestEvtNotifReadWrite::~TestEvtNotifReadWrite(void) {}
 
 void TestEvtNotifReadWrite::SetUp(void) {
   TestBase::SetUp();
   return;
 }
 
-void TestEvtNotifReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestEvtNotifReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestEvtNotifReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -93,10 +92,7 @@ void TestEvtNotifReadWrite::Run(void) {
   }
 
   if (setup_failed_) {
-     IF_VERB(STANDARD) {
-        std::cout << "** SetUp Failed for this test. Skipping.**" <<
-                                                                    std::endl;
-     }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
@@ -104,17 +100,14 @@ void TestEvtNotifReadWrite::Run(void) {
   uint64_t mask = RSMI_EVENT_MASK_FROM_INDEX(evt_type);
   while (evt_type <= RSMI_EVT_NOTIF_LAST) {
     mask |= RSMI_EVENT_MASK_FROM_INDEX(evt_type);
-    evt_type = static_cast<rsmi_evt_notification_type_t>(
-                                           static_cast<uint32_t>(evt_type)+1);
+    evt_type = static_cast<rsmi_evt_notification_type_t>(static_cast<uint32_t>(evt_type) + 1);
   }
 
   for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     ret = rsmi_event_notification_init(dv_ind);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout <<
-          "Event notification is not supported for this driver version." <<
-                                                                    std::endl;
+        std::cout << "Event notification is not supported for this driver version." << std::endl;
       }
       return;
     }
@@ -129,13 +122,12 @@ void TestEvtNotifReadWrite::Run(void) {
 
   ret = rsmi_event_notification_get(10000, &num_elem, data);
   if (ret == RSMI_STATUS_SUCCESS || ret == RSMI_STATUS_INSUFFICIENT_SIZE) {
-    EXPECT_LE(num_elem, 10) <<
-            "Expected the number of elements found to be <= buffer size (10)";
+    EXPECT_LE(num_elem, 10) << "Expected the number of elements found to be <= buffer size (10)";
     IF_VERB(STANDARD) {
       for (uint32_t i = 0; i < num_elem; ++i) {
-        std::cout << "\tdv_ind=" << data[i].dv_ind <<
-                   "  Type: " << NameFromEvtNotifType(data[i].event) <<
-                   "  Mesg: " << data[i].message << std::endl;
+        std::cout << "\tdv_ind=" << data[i].dv_ind
+                  << "  Type: " << NameFromEvtNotifType(data[i].event)
+                  << "  Mesg: " << data[i].message << std::endl;
         if (data[i].event == RSMI_EVT_NOTIF_GPU_PRE_RESET) {
           read_again = true;
         }
@@ -143,19 +135,15 @@ void TestEvtNotifReadWrite::Run(void) {
     }
     IF_VERB(STANDARD) {
       if (ret == RSMI_STATUS_INSUFFICIENT_SIZE) {
-        std::cout <<
-        "\t\tBuffer size is 10, but more than 10 events are available." <<
-                                                                    std::endl;
+        std::cout << "\t\tBuffer size is 10, but more than 10 events are available." << std::endl;
       }
     }
   } else if (ret == RSMI_STATUS_NO_DATA) {
-    IF_VERB(STANDARD) {
-      std::cout << "\tNo events were collected." << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\tNo events were collected." << std::endl; }
   } else {
     // This should always fail. We want to print out the return code.
-    EXPECT_EQ(ret, RSMI_STATUS_SUCCESS) <<
-                  "Unexpected return code for rsmi_event_notification_get()";
+    EXPECT_EQ(ret, RSMI_STATUS_SUCCESS)
+        << "Unexpected return code for rsmi_event_notification_get()";
   }
 
   // In case GPU Pre reset event was collected in the previous read,
@@ -163,30 +151,25 @@ void TestEvtNotifReadWrite::Run(void) {
   if (read_again) {
     ret = rsmi_event_notification_get(10000, &num_elem, data);
     if (ret == RSMI_STATUS_SUCCESS || ret == RSMI_STATUS_INSUFFICIENT_SIZE) {
-      EXPECT_LE(num_elem, 10) <<
-              "Expected the number of elements found to be <= buffer size (10)";
+      EXPECT_LE(num_elem, 10) << "Expected the number of elements found to be <= buffer size (10)";
       IF_VERB(STANDARD) {
         for (uint32_t i = 0; i < num_elem; ++i) {
-          std::cout << "\tdv_ind=" << data[i].dv_ind <<
-                     "  Type: " << NameFromEvtNotifType(data[i].event) <<
-                     "  Mesg: " << data[i].message << std::endl;
+          std::cout << "\tdv_ind=" << data[i].dv_ind
+                    << "  Type: " << NameFromEvtNotifType(data[i].event)
+                    << "  Mesg: " << data[i].message << std::endl;
         }
       }
       IF_VERB(STANDARD) {
         if (ret == RSMI_STATUS_INSUFFICIENT_SIZE) {
-          std::cout <<
-          "\t\tBuffer size is 10, but more than 10 events are available." <<
-                                                                    std::endl;
+          std::cout << "\t\tBuffer size is 10, but more than 10 events are available." << std::endl;
         }
       }
     } else if (ret == RSMI_STATUS_NO_DATA) {
-      IF_VERB(STANDARD) {
-        std::cout << "\tNo further events were collected." << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\tNo further events were collected." << std::endl; }
     } else {
       // This should always fail. We want to print out the return code.
-      EXPECT_EQ(ret, RSMI_STATUS_SUCCESS) <<
-                  "Unexpected return code for rsmi_event_notification_get()";
+      EXPECT_EQ(ret, RSMI_STATUS_SUCCESS)
+          << "Unexpected return code for rsmi_event_notification_get()";
     }
   }
 

@@ -50,24 +50,22 @@ extern "C" {
  * This function may be used before calling sched_setaffinity or any other function
  * that takes a cpu_set_t as input parameter.
  *
- * \p schedsetsize should be sizeof(cpu_set_t) unless \p schedset was dynamically allocated with CPU_ALLOC
+ * \p schedsetsize should be sizeof(cpu_set_t) unless \p schedset was dynamically allocated with
+ * CPU_ALLOC
  */
-static __hwloc_inline int
-hwloc_cpuset_to_glibc_sched_affinity(hwloc_topology_t topology __hwloc_attribute_unused, hwloc_const_cpuset_t hwlocset,
-				    cpu_set_t *schedset, size_t schedsetsize)
-{
+static __hwloc_inline int hwloc_cpuset_to_glibc_sched_affinity(
+    hwloc_topology_t topology __hwloc_attribute_unused, hwloc_const_cpuset_t hwlocset,
+    cpu_set_t* schedset, size_t schedsetsize) {
 #ifdef CPU_ZERO_S
   unsigned cpu;
   CPU_ZERO_S(schedsetsize, schedset);
-  hwloc_bitmap_foreach_begin(cpu, hwlocset)
-    CPU_SET_S(cpu, schedsetsize, schedset);
+  hwloc_bitmap_foreach_begin(cpu, hwlocset) CPU_SET_S(cpu, schedsetsize, schedset);
   hwloc_bitmap_foreach_end();
-#else /* !CPU_ZERO_S */
+#else  /* !CPU_ZERO_S */
   unsigned cpu;
   CPU_ZERO(schedset);
   assert(schedsetsize == sizeof(cpu_set_t));
-  hwloc_bitmap_foreach_begin(cpu, hwlocset)
-    CPU_SET(cpu, schedset);
+  hwloc_bitmap_foreach_begin(cpu, hwlocset) CPU_SET(cpu, schedset);
   hwloc_bitmap_foreach_end();
 #endif /* !CPU_ZERO_S */
   return 0;
@@ -78,12 +76,12 @@ hwloc_cpuset_to_glibc_sched_affinity(hwloc_topology_t topology __hwloc_attribute
  * This function may be used before calling sched_setaffinity  or any other function
  * that takes a cpu_set_t  as input parameter.
  *
- * \p schedsetsize should be sizeof(cpu_set_t) unless \p schedset was dynamically allocated with CPU_ALLOC
+ * \p schedsetsize should be sizeof(cpu_set_t) unless \p schedset was dynamically allocated with
+ * CPU_ALLOC
  */
-static __hwloc_inline int
-hwloc_cpuset_from_glibc_sched_affinity(hwloc_topology_t topology __hwloc_attribute_unused, hwloc_cpuset_t hwlocset,
-                                       const cpu_set_t *schedset, size_t schedsetsize)
-{
+static __hwloc_inline int hwloc_cpuset_from_glibc_sched_affinity(
+    hwloc_topology_t topology __hwloc_attribute_unused, hwloc_cpuset_t hwlocset,
+    const cpu_set_t* schedset, size_t schedsetsize) {
   int cpu;
 #ifdef CPU_ZERO_S
   int count;
@@ -99,14 +97,13 @@ hwloc_cpuset_from_glibc_sched_affinity(hwloc_topology_t topology __hwloc_attribu
     }
     cpu++;
   }
-#else /* !CPU_ZERO_S */
+#else  /* !CPU_ZERO_S */
   /* sched.h does not support dynamic cpu_set_t (introduced in glibc 2.7),
    * assume we have a very old interface without CPU_COUNT (added in 2.6)
    */
   assert(schedsetsize == sizeof(cpu_set_t));
-  for(cpu=0; cpu<CPU_SETSIZE; cpu++)
-    if (CPU_ISSET(cpu, schedset))
-      hwloc_bitmap_set(hwlocset, cpu);
+  for (cpu = 0; cpu < CPU_SETSIZE; cpu++)
+    if (CPU_ISSET(cpu, schedset)) hwloc_bitmap_set(hwlocset, cpu);
 #endif /* !CPU_ZERO_S */
   return 0;
 }

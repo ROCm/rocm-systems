@@ -31,46 +31,45 @@
 
 // @class KFDEvictTest
 // Test eviction and restore procedure using two processes
-class KFDSVMEvictTest : public KFDLocalMemoryTest,
-                        public ::testing::WithParamInterface<int> {
+class KFDSVMEvictTest : public KFDLocalMemoryTest, public ::testing::WithParamInterface<int> {
  public:
-    KFDSVMEvictTest(void): m_ChildStatus(HSAKMT_STATUS_ERROR), m_IsParent(true) {}
+  KFDSVMEvictTest(void) : m_ChildStatus(HSAKMT_STATUS_ERROR), m_IsParent(true) {}
 
-    ~KFDSVMEvictTest(void) {
-        if (!m_IsParent) {
-            /* child process has to exit
-             * otherwise gtest will continue other tests
-             */
-            exit(m_ChildStatus);
-        }
-
-        try {
-            WaitChildProcesses();
-        } catch (...) {}
+  ~KFDSVMEvictTest(void) {
+    if (!m_IsParent) {
+      /* child process has to exit
+       * otherwise gtest will continue other tests
+       */
+      exit(m_ChildStatus);
     }
 
- protected:
-    virtual void SetUp();
-    virtual void TearDown();
+    try {
+      WaitChildProcesses();
+    } catch (...) {
+    }
+  }
 
  protected:
-    std::string CreateShader();
-    void AllocBuffers(HSAuint32 defaultGPUNode, HSAuint32 count, HSAuint64 vramBufSize,
-                    std::vector<void *> &pBuffers, HSAuint32 Granularity);
-    void FreeBuffers(std::vector<void *> &pBuffers, HSAuint64 vramBufSize);
-    void ForkChildProcesses(int nprocesses);
-    void WaitChildProcesses();
-    HSAint32 GetBufferCounter(HSAuint64 vramSize, HSAuint64 vramBufSize);
-    HSAint64 GetBufferSize(HSAuint64 vramSize, HSAuint32 count,
-                           HSAint32 xnack_enable);
+  virtual void SetUp();
+  virtual void TearDown();
+
+ protected:
+  std::string CreateShader();
+  void AllocBuffers(HSAuint32 defaultGPUNode, HSAuint32 count, HSAuint64 vramBufSize,
+                    std::vector<void*>& pBuffers, HSAuint32 Granularity);
+  void FreeBuffers(std::vector<void*>& pBuffers, HSAuint64 vramBufSize);
+  void ForkChildProcesses(int nprocesses);
+  void WaitChildProcesses();
+  HSAint32 GetBufferCounter(HSAuint64 vramSize, HSAuint64 vramBufSize);
+  HSAint64 GetBufferSize(HSAuint64 vramSize, HSAuint32 count, HSAint32 xnack_enable);
 
  protected:  // members
-    std::string     m_psName;
-    std::vector<pid_t> m_ChildPids;
-    HSA_SVM_FLAGS   m_Flags;
-    void*           m_pBuf;
-    HSAKMT_STATUS   m_ChildStatus;
-    bool            m_IsParent;
+  std::string m_psName;
+  std::vector<pid_t> m_ChildPids;
+  HSA_SVM_FLAGS m_Flags;
+  void* m_pBuf;
+  HSAKMT_STATUS m_ChildStatus;
+  bool m_IsParent;
 };
 
 #endif  // __KFD_SVM_EVICT_TEST__H__

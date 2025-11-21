@@ -1,6 +1,6 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -31,16 +31,16 @@
     }                                                                                              \
   }
 
-MemoryAsyncCopyOnEngine::MemoryAsyncCopyOnEngine(void) :
-    MemoryAsyncCopy() {
+MemoryAsyncCopyOnEngine::MemoryAsyncCopyOnEngine(void) : MemoryAsyncCopy() {
   set_title("Asynchronous Memory Copy On Engine Bandwidth");
-  set_description("This test measures bandwidth to/from Host from/to GPU "
+  set_description(
+      "This test measures bandwidth to/from Host from/to GPU "
       "and Peer to Peer using hsa_amd_memory_async_copy_on_engine() to copy "
       "buffers of various length from memory pool to another.");
 }
 
 
-void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
+void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction* t) {
   hsa_status_t err;
   void* ptr_src;
   void* ptr_dst;
@@ -53,7 +53,7 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
 
   size_t max_trans_size = t->max_size * 1024;
 
-  hsa_amd_memory_pool_t src_pool =  pool_info_[t->src]->pool_;
+  hsa_amd_memory_pool_t src_pool = pool_info_[t->src]->pool_;
   hsa_agent_t dst_agent = pool_info_[t->dst]->owner_agent_info()->agent();
   hsa_amd_memory_pool_t dst_pool = pool_info_[t->dst]->pool_;
   hsa_agent_t src_agent = pool_info_[t->src]->owner_agent_info()->agent();
@@ -61,7 +61,7 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
   PrintTransactionType(t);
 
   err = hsa_amd_memory_pool_get_info(src_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                      &src_alloc_size);
+                                     &src_alloc_size);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_agent_get_info(src_agent, HSA_AGENT_INFO_DEVICE, &ag_type);
@@ -69,12 +69,12 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
 
   if (src_alloc_size <= GPU_MEMORY_THRESHOLD && ag_type == HSA_DEVICE_TYPE_GPU) {
     err = hsa_agent_get_info(src_agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                              &src_alloc_size);
+                             &src_alloc_size);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
 
   err = hsa_amd_memory_pool_get_info(dst_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                      &dst_alloc_size);
+                                     &dst_alloc_size);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_agent_get_info(dst_agent, HSA_AGENT_INFO_DEVICE, &ag_type);
@@ -82,40 +82,36 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
 
   if (dst_alloc_size <= GPU_MEMORY_THRESHOLD && ag_type == HSA_DEVICE_TYPE_GPU) {
     err = hsa_agent_get_info(dst_agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                              &dst_alloc_size);
+                             &dst_alloc_size);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
 
-  max_alloc_size = (src_alloc_size < dst_alloc_size) ? src_alloc_size: dst_alloc_size;
+  max_alloc_size = (src_alloc_size < dst_alloc_size) ? src_alloc_size : dst_alloc_size;
 
   if (dst_alloc_size <= GPU_MEMORY_THRESHOLD && ag_type == HSA_DEVICE_TYPE_GPU)
-    size = (max_alloc_size/3 <= max_trans_size) ? max_alloc_size/3: max_trans_size;
+    size = (max_alloc_size / 3 <= max_trans_size) ? max_alloc_size / 3 : max_trans_size;
   else
-    size = (max_alloc_size/2 <= max_trans_size) ? max_alloc_size/2: max_trans_size;
+    size = (max_alloc_size / 2 <= max_trans_size) ? max_alloc_size / 2 : max_trans_size;
 
-  err = hsa_amd_memory_pool_allocate(src_pool, size, 0,
-                      &ptr_src);
+  err = hsa_amd_memory_pool_allocate(src_pool, size, 0, &ptr_src);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-  err = hsa_amd_memory_pool_allocate(dst_pool, size, 0,
-                      &ptr_dst);
+  err = hsa_amd_memory_pool_allocate(dst_pool, size, 0, &ptr_dst);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
 
   // rocrtst::CommonCleanUp data
   void* host_ptr_src = NULL;
   void* host_ptr_dst = NULL;
-  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0,
-                                     reinterpret_cast<void**>(&host_ptr_src));
+  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0, reinterpret_cast<void**>(&host_ptr_src));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
-  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0,
-                                     reinterpret_cast<void**>(&host_ptr_dst));
+  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0, reinterpret_cast<void**>(&host_ptr_dst));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-  err = hsa_amd_memory_fill(host_ptr_src, 1, size/sizeof(uint32_t));
+  err = hsa_amd_memory_fill(host_ptr_src, 1, size / sizeof(uint32_t));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-  err = hsa_amd_memory_fill(host_ptr_dst, 0, size/sizeof(uint32_t));
+  err = hsa_amd_memory_fill(host_ptr_dst, 0, size / sizeof(uint32_t));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
   hsa_signal_t s;
@@ -142,34 +138,32 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
   // **** First copy from the system buffer source to the test source pool
   // Acquire the appropriate access; prefer GPU agent over CPU where there
   // is a choice.
-  hsa_agent_t *cpy_ag = nullptr;
-  cpy_ag = AcquireAsyncCopyAccess(ptr_src, src_pool, &src_agent, host_ptr_src,
-                                                     sys_pool_, &cpu_agent_);
+  hsa_agent_t* cpy_ag = nullptr;
+  cpy_ag =
+      AcquireAsyncCopyAccess(ptr_src, src_pool, &src_agent, host_ptr_src, sys_pool_, &cpu_agent_);
   if (cpy_ag == nullptr) {
-    std::cout << "Agents " << t->src << " and " << t->dst <<
-                              "cannot access each other's pool." << std::endl;
+    std::cout << "Agents " << t->src << " and " << t->dst << "cannot access each other's pool."
+              << std::endl;
     std::cout << "Skipping..." << std::endl;
     return;
   }
 
-  err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag,
-                                                            size, 0, NULL, s);
+  err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag, size, 0, NULL, s);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
   while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
-                                   HSA_WAIT_STATE_ACTIVE))
-  {}
+                                   HSA_WAIT_STATE_ACTIVE)) {
+  }
 
   int iterations = RealIterationNum();
 
   // **** Next, copy from the test source pool to the test destination pool
   // Prefer a gpu agent to a cpu agent
 
-  cpy_ag = AcquireAsyncCopyAccess(ptr_dst, dst_pool, &dst_agent, ptr_src,
-                                                        src_pool, &src_agent);
+  cpy_ag = AcquireAsyncCopyAccess(ptr_dst, dst_pool, &dst_agent, ptr_src, src_pool, &src_agent);
   if (cpy_ag == nullptr) {
-    std::cout << "Owner agents for pools" << t->src << " and " <<
-                   t->dst << " cannot access each other's pool." << std::endl;
+    std::cout << "Owner agents for pools" << t->src << " and " << t->dst
+              << " cannot access each other's pool." << std::endl;
     std::cout << "Skipping..." << std::endl;
     return;
   }
@@ -208,38 +202,37 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
       engine_ids_mask = preferred_mask ? preferred_mask : engine_ids_mask;
 
       if (engine_ids_mask == 0) {
-          std::cout << "WARNING: No available copy engine detected. Exiting test." << std::endl;
-          return;
-      } 
-      hsa_amd_sdma_engine_id_t engine_id = 
+        std::cout << "WARNING: No available copy engine detected. Exiting test." << std::endl;
+        return;
+      }
+      hsa_amd_sdma_engine_id_t engine_id =
           static_cast<hsa_amd_sdma_engine_id_t>(1 << (ffs(engine_ids_mask) - 1));
-      
+
       err = hsa_amd_memory_async_copy_on_engine(ptr_dst, dst_agent, ptr_src, src_agent,
-                                              Granularities[i].Size, 0, NULL, t->signal,
-                                              engine_id, false);
-      
+                                                Granularities[i].Size, 0, NULL, t->signal,
+                                                engine_id, false);
+
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-      while (hsa_signal_wait_scacquire(t->signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                         uint64_t(-1), HSA_WAIT_STATE_ACTIVE))
-      {}
+      while (hsa_signal_wait_scacquire(t->signal, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
+                                       HSA_WAIT_STATE_ACTIVE)) {
+      }
 
       copy_timer.StopTimer(index);
 
       hsa_signal_store_relaxed(s, 1);
 
-      err = AcquireAccess(dst_agent, sys_pool_,
-                    host_ptr_dst);
+      err = AcquireAccess(dst_agent, sys_pool_, host_ptr_dst);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
 
-      err = hsa_amd_memory_async_copy(host_ptr_dst, cpu_agent_, ptr_dst,
-                                                 dst_agent, Granularities[i].Size, 0, NULL, s);
+      err = hsa_amd_memory_async_copy(host_ptr_dst, cpu_agent_, ptr_dst, dst_agent,
+                                      Granularities[i].Size, 0, NULL, s);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-      while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1,
-                                       uint64_t(-1), HSA_WAIT_STATE_ACTIVE))
-      {}
+      while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
+                                       HSA_WAIT_STATE_ACTIVE)) {
+      }
 
       err = AcquireAccess(cpu_agent_, sys_pool_, host_ptr_dst);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);

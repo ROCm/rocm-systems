@@ -76,7 +76,7 @@ TEST_CASE("Unit_Printf_PrintfAltFormsTsts") {
 -0X1.EDD2F1A9FBE77P+6
 0x00000042
       0x00000042
-0x00000042      
+0x00000042
 )here");
   CaptureStream captured(stdout);
   hipLaunchKernelGGL(test_kernel, dim3(1), dim3(1), 0, 0);

@@ -65,13 +65,12 @@ void Gfx9Factory::Print(const GpuBlockInfo* block_info) {
   for (int i = 0; i < counters; ++i) {
     auto reg_info = block_info->counter_reg_info[i];
     std::cout << "\t   " << i << ": select_addr = 0x" << std::hex << reg_info.select_addr.offset
-              << "(" << reg_info.select_addr.offset * 4 << ")"
-              << ", control_addr = 0x" << reg_info.control_addr.offset << "("
-              << reg_info.control_addr.offset * 4 << ")"
+              << "(" << reg_info.select_addr.offset * 4 << ")" << ", control_addr = 0x"
+              << reg_info.control_addr.offset << "(" << reg_info.control_addr.offset * 4 << ")"
               << ", counter_addr_lo = 0x" << reg_info.register_addr_lo.offset << "("
-              << reg_info.register_addr_lo.offset * 4 << ")"
-              << ", counter_addr_hi = 0x" << reg_info.register_addr_hi.offset << "("
-              << reg_info.register_addr_hi.offset * 4 << ")" << std::dec << std::endl;
+              << reg_info.register_addr_lo.offset * 4 << ")" << ", counter_addr_hi = 0x"
+              << reg_info.register_addr_hi.offset << "(" << reg_info.register_addr_hi.offset * 4
+              << ")" << std::dec << std::endl;
   }
 }
 

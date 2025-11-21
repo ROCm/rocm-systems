@@ -30,12 +30,12 @@
 
 class RDMATest : public KFDBaseComponentTest {
  public:
-    RDMATest() {}
-    ~RDMATest() {}
+  RDMATest() {}
+  ~RDMATest() {}
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 };
 
 #endif  // __RDMA_TEST__H__

@@ -27,10 +27,10 @@
 #define _HSAKMTMODEL_H_
 #include <stdbool.h>
 extern bool hsakmt_use_model;
-extern char *hsakmt_model_topology;
+extern char* hsakmt_model_topology;
 void model_init_env_vars(void);
 void model_init(void);
-void model_set_mmio_page(void *ptr);
-void model_set_event_page(void *ptr, unsigned event_limit);
-int model_kfd_ioctl(unsigned long request, void *arg);
+void model_set_mmio_page(void* ptr);
+void model_set_event_page(void* ptr, unsigned event_limit);
+int model_kfd_ioctl(unsigned long request, void* arg);
 #endif /* _HSAKMTMODEL_H_ */

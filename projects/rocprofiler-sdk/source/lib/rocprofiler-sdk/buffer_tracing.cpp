@@ -138,7 +138,8 @@ get_unsupported()
 }  // namespace buffer_tracing
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t               context_id,
                                              rocprofiler_buffer_tracing_kind_t      kind,

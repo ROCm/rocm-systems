@@ -65,24 +65,21 @@ static const uint32_t kNumThreads = 1024;
 static const uint32_t kMaxAllocSize = 1024 * 1024;
 
 
-
-
 typedef struct control_block {
-    hsa_amd_memory_pool_t* pool;
-    size_t alloc_size;
-    void* alloc_pointer;
+  hsa_amd_memory_pool_t* pool;
+  size_t alloc_size;
+  void* alloc_pointer;
 } cb_t;
 
 
 // Callback function which will call upon when need
 // to allocate memory from the pool in the thread.
-static void CallbackHSAMemoryAllocateFunc(void *data) {
+static void CallbackHSAMemoryAllocateFunc(void* data) {
   hsa_status_t err;
-  cb_t *cb = static_cast<cb_t*>(data);
+  cb_t* cb = static_cast<cb_t*>(data);
 
-  err = hsa_amd_memory_pool_allocate(*(cb->pool),
-                               cb->alloc_size, 0,
-                               reinterpret_cast<void**>(&(cb->alloc_pointer)));
+  err = hsa_amd_memory_pool_allocate(*(cb->pool), cb->alloc_size, 0,
+                                     reinterpret_cast<void**>(&(cb->alloc_pointer)));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   return;
@@ -90,9 +87,9 @@ static void CallbackHSAMemoryAllocateFunc(void *data) {
 
 // Callback function which will call upon when need
 // to Free memory from the pool in the thread.
-static void CallbackHSAMemoryFreeFunc(void *data) {
+static void CallbackHSAMemoryFreeFunc(void* data) {
   hsa_status_t err;
-  cb_t *cb = static_cast<cb_t*>(data);
+  cb_t* cb = static_cast<cb_t*>(data);
 
   err = hsa_memory_free(cb->alloc_pointer);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
@@ -101,12 +98,12 @@ static void CallbackHSAMemoryFreeFunc(void *data) {
 }
 
 typedef struct thread_data_get_pool_info_s {
-    // The current pool
-    hsa_amd_memory_pool_t pool;
-    // The pool info retrieved from main thread
-    rocrtst::pool_info_t* info;
-    // Consistency check result
-    int consistency;
+  // The current pool
+  hsa_amd_memory_pool_t pool;
+  // The pool info retrieved from main thread
+  rocrtst::pool_info_t* info;
+  // Consistency check result
+  int consistency;
 } thread_data_get_pool_info_t;
 
 // Callback function which will call upon when need
@@ -114,8 +111,7 @@ typedef struct thread_data_get_pool_info_s {
 static void CallbackGetPoolInfo(void* data) {
   hsa_status_t err;
 
-  thread_data_get_pool_info_t* thread_data =
-              static_cast<thread_data_get_pool_info_t*>(data);
+  thread_data_get_pool_info_t* thread_data = static_cast<thread_data_get_pool_info_t*>(data);
 
   rocrtst::pool_info_t info;
   memset(&info, 0, sizeof(rocrtst::pool_info_t));
@@ -131,8 +127,9 @@ static void CallbackGetPoolInfo(void* data) {
 }
 
 MemoryConcurrentTest::MemoryConcurrentTest(bool launch_Concurrent_Allocate_,
-                      bool launch_Concurrent_Free_ ,
-                      bool launch_Concurrent_PoolGetInfo_) :TestBase() {
+                                           bool launch_Concurrent_Free_,
+                                           bool launch_Concurrent_PoolGetInfo_)
+    : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
@@ -145,25 +142,27 @@ MemoryConcurrentTest::MemoryConcurrentTest(bool launch_Concurrent_Allocate_,
 
   if (launch_Concurrent_Allocate_) {
     name += " Allocate";
-    desc += " This test Verify that memory can be concurrently allocated from pool"
-            " and thread safety while allocating memory from different threads"
-            " on ROCR agents";
+    desc +=
+        " This test Verify that memory can be concurrently allocated from pool"
+        " and thread safety while allocating memory from different threads"
+        " on ROCR agents";
   } else if (launch_Concurrent_Free_) {
     name += " Free";
-    desc += " This test thet memory Verify can be concurrently freed from pool"
-            " and thread safety while memory free from different threads"
-            " on ROCR agents";
+    desc +=
+        " This test thet memory Verify can be concurrently freed from pool"
+        " and thread safety while memory free from different threads"
+        " on ROCR agents";
   } else if (launch_Concurrent_PoolGetInfo_) {
     name += " PoolGetInfo";
-    desc += " This test Verify that memory pool info can be concurrently "
-            " get from different threads on ROCR agents";
+    desc +=
+        " This test Verify that memory pool info can be concurrently "
+        " get from different threads on ROCR agents";
   }
   set_title(name);
   set_description(desc);
 }
 
-MemoryConcurrentTest::~MemoryConcurrentTest(void) {
-}
+MemoryConcurrentTest::~MemoryConcurrentTest(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -190,9 +189,7 @@ void MemoryConcurrentTest::Run(void) {
   TestBase::Run();
 }
 
-void MemoryConcurrentTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void MemoryConcurrentTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void MemoryConcurrentTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -211,11 +208,9 @@ void MemoryConcurrentTest::Close() {
 }
 
 
-
-
 static const char kSubTestSeparator[] = "  **************************";
 
-static void PrintMemorySubtestHeader(const char *header) {
+static void PrintMemorySubtestHeader(const char* header) {
   std::cout << "  *** Memory Stress Subtest: " << header << " ***" << std::endl;
 }
 
@@ -245,15 +240,14 @@ static void PrintAgentNameAndType(hsa_agent_t agent) {
     case HSA_DEVICE_TYPE_AIE:
       std::cout << "AIE)";
       break;
-    }
+  }
   std::cout << std::endl;
   return;
 }
 
 // This test verify check  memory can be
 // concurrently allocated from pool on ROCR agents
-void MemoryConcurrentTest::MemoryConcurrentAllocate(hsa_agent_t agent,
-                                               hsa_amd_memory_pool_t pool) {
+void MemoryConcurrentTest::MemoryConcurrentAllocate(hsa_agent_t agent, hsa_amd_memory_pool_t pool) {
   hsa_status_t err;
 
   rocrtst::pool_info_t pool_i;
@@ -266,8 +260,7 @@ void MemoryConcurrentTest::MemoryConcurrentAllocate(hsa_agent_t agent,
 
   // Determine if allocation is allowed in this memory pool
   bool alloc = false;
-  err = hsa_amd_memory_pool_get_info(pool,
-                   HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &alloc);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &alloc);
 
   if (alloc) {
     size_t alloc_size;
@@ -275,7 +268,7 @@ void MemoryConcurrentTest::MemoryConcurrentAllocate(hsa_agent_t agent,
     hsa_device_type_t ag_type;
 
     err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                      &total_vram_size);
+                                       &total_vram_size);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type);
@@ -286,12 +279,16 @@ void MemoryConcurrentTest::MemoryConcurrentAllocate(hsa_agent_t agent,
     if (total_vram_size <= 536870912 && ag_type == HSA_DEVICE_TYPE_GPU) {
       // Make sure do not allocate more than 1/4 of the available vram size
       err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                                &total_vram_size);
+                               &total_vram_size);
       ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-      alloc_size = (total_vram_size*1/4 <= kMaxAllocSize*kNumThreads) ? total_vram_size*1/(4*kNumThreads): kMaxAllocSize;
+      alloc_size = (total_vram_size * 1 / 4 <= kMaxAllocSize * kNumThreads)
+          ? total_vram_size * 1 / (4 * kNumThreads)
+          : kMaxAllocSize;
     } else {
       // Make sure do not allocate more than 3/4 of the vram size
-      alloc_size = (total_vram_size*3/4 <= kMaxAllocSize*kNumThreads) ? total_vram_size*3/(4*kNumThreads): kMaxAllocSize;
+      alloc_size = (total_vram_size * 3 / 4 <= kMaxAllocSize * kNumThreads)
+          ? total_vram_size * 3 / (4 * kNumThreads)
+          : kMaxAllocSize;
     }
 
     // Page align the alloc_size
@@ -327,16 +324,16 @@ void MemoryConcurrentTest::MemoryConcurrentAllocate(hsa_agent_t agent,
     // Check for overlapping addresses
     char *addr1, *addr2;
     for (kk = 0; kk < kNumThreads; ++kk) {
-      addr1 = reinterpret_cast<char *>(cb[kk].alloc_pointer);
-      addr2 = addr1+alloc_size;
-      ASSERT_NE(reinterpret_cast<void *>(addr1), nullptr);
+      addr1 = reinterpret_cast<char*>(cb[kk].alloc_pointer);
+      addr2 = addr1 + alloc_size;
+      ASSERT_NE(reinterpret_cast<void*>(addr1), nullptr);
       uint32_t ll;
-      for (ll = kk+1; ll < kNumThreads; ++ll) {
-        if (addr1 < reinterpret_cast<char *>(cb[ll].alloc_pointer)) {
-          ASSERT_LE(addr2, reinterpret_cast<char *>(cb[ll].alloc_pointer));
+      for (ll = kk + 1; ll < kNumThreads; ++ll) {
+        if (addr1 < reinterpret_cast<char*>(cb[ll].alloc_pointer)) {
+          ASSERT_LE(addr2, reinterpret_cast<char*>(cb[ll].alloc_pointer));
         }
-        if (addr2 > reinterpret_cast<char *>(cb[ll].alloc_pointer)+alloc_size) {
-          ASSERT_GE(addr1, reinterpret_cast<char *>(cb[ll].alloc_pointer)+alloc_size);
+        if (addr2 > reinterpret_cast<char*>(cb[ll].alloc_pointer) + alloc_size) {
+          ASSERT_GE(addr1, reinterpret_cast<char*>(cb[ll].alloc_pointer) + alloc_size);
         }
       }
     }
@@ -350,12 +347,9 @@ void MemoryConcurrentTest::MemoryConcurrentAllocate(hsa_agent_t agent,
 }
 
 
-
-
 // This test verify check  memory can be
 // concurrently allocated from pool on ROCR agents
-void MemoryConcurrentTest::MemoryConcurrentFree(hsa_agent_t agent,
-                                                hsa_amd_memory_pool_t pool) {
+void MemoryConcurrentTest::MemoryConcurrentFree(hsa_agent_t agent, hsa_amd_memory_pool_t pool) {
   hsa_status_t err;
 
   rocrtst::pool_info_t pool_i;
@@ -368,8 +362,7 @@ void MemoryConcurrentTest::MemoryConcurrentFree(hsa_agent_t agent,
 
   // Determine if allocation is allowed in this pool
   bool alloc = false;
-  err = hsa_amd_memory_pool_get_info(pool,
-                   HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &alloc);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &alloc);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   if (alloc) {
@@ -379,7 +372,7 @@ void MemoryConcurrentTest::MemoryConcurrentFree(hsa_agent_t agent,
     hsa_device_type_t ag_type;
 
     err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                      &total_vram_size);
+                                       &total_vram_size);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type);
@@ -390,12 +383,16 @@ void MemoryConcurrentTest::MemoryConcurrentFree(hsa_agent_t agent,
     if (total_vram_size <= 536870912 && ag_type == HSA_DEVICE_TYPE_GPU) {
       // Make sure do not allocate more than 1/4 of the available vram size
       err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                                &total_vram_size);
+                               &total_vram_size);
       ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-      alloc_size = (total_vram_size*1/4 <= kMaxAllocSize*kNumThreads) ? total_vram_size*1/(4*kNumThreads): kMaxAllocSize;
+      alloc_size = (total_vram_size * 1 / 4 <= kMaxAllocSize * kNumThreads)
+          ? total_vram_size * 1 / (4 * kNumThreads)
+          : kMaxAllocSize;
     } else {
       // Make sure do not allocate more than 3/4 of the vram size
-      alloc_size = (total_vram_size*3/4 <= kMaxAllocSize*kNumThreads) ? total_vram_size*3/(4*kNumThreads): kMaxAllocSize;
+      alloc_size = (total_vram_size * 3 / 4 <= kMaxAllocSize * kNumThreads)
+          ? total_vram_size * 3 / (4 * kNumThreads)
+          : kMaxAllocSize;
     }
 
     // Page align the alloc_size
@@ -410,7 +407,8 @@ void MemoryConcurrentTest::MemoryConcurrentFree(hsa_agent_t agent,
     for (kk = 0; kk < kNumThreads; kk++) {
       cb[kk].pool = &pool;
       cb[kk].alloc_size = alloc_size;
-      err = hsa_amd_memory_pool_allocate(*(cb[kk].pool), cb[kk].alloc_size, 0, &(cb[kk].alloc_pointer));
+      err = hsa_amd_memory_pool_allocate(*(cb[kk].pool), cb[kk].alloc_size, 0,
+                                         &(cb[kk].alloc_pointer));
       ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
       rocrtst::TestGroupAdd(tg_concurrent, &CallbackHSAMemoryFreeFunc, &cb[kk], 1);
@@ -438,7 +436,7 @@ void MemoryConcurrentTest::MemoryConcurrentFree(hsa_agent_t agent,
 // This test verify if each Agent pool's attribute information
 // is consistent across multiple thread.
 void MemoryConcurrentTest::MemoryConcurrentPoolGetInfo(hsa_agent_t agent,
-                                                hsa_amd_memory_pool_t pool) {
+                                                       hsa_amd_memory_pool_t pool) {
   hsa_status_t err;
 
   rocrtst::pool_info_t pool_i;
@@ -484,7 +482,6 @@ void MemoryConcurrentTest::MemoryConcurrentPoolGetInfo(hsa_agent_t agent,
   }
   return;
 }
-
 
 
 void MemoryConcurrentTest::MemoryConcurrentAllocate(void) {

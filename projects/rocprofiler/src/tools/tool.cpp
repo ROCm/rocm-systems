@@ -74,8 +74,10 @@ namespace fs = rocprofiler::common::filesystem;
 // Macro to check ROCProfiler calls status
 #define CHECK_ROCPROFILER(call)                                                                    \
   do {                                                                                             \
-    if ((call) != ROCPROFILER_STATUS_SUCCESS)                                                      \
-      {std::cerr << "ERROR IN " << __LINE__ << std::endl; abort(); } \
+    if ((call) != ROCPROFILER_STATUS_SUCCESS) {                                                    \
+      std::cerr << "ERROR IN " << __LINE__ << std::endl;                                           \
+      abort();                                                                                     \
+    }                                                                                              \
   } while (false)
 TRACE_BUFFER_INSTANTIATE();
 namespace {
@@ -121,12 +123,12 @@ class rocprofiler_plugin_t {
         dlsym(plugin_handle_, "rocprofiler_plugin_finalize"));
     if (!rocprofiler_plugin_finalize_fn) return;
 
-    initialize_fn = reinterpret_cast<decltype(initialize_fn)>(dlsym(plugin_handle_, "rocprofiler_plugin_initialize"));
+    initialize_fn = reinterpret_cast<decltype(initialize_fn)>(
+        dlsym(plugin_handle_, "rocprofiler_plugin_initialize"));
     initialize(data.userdata);
   }
 
-  void initialize(void* userdata)
-  {
+  void initialize(void* userdata) {
     if (initialize_fn)
       valid_ |= initialize_fn(ROCPROFILER_VERSION_MAJOR, ROCPROFILER_VERSION_MINOR, userdata) == 0;
   }
@@ -360,26 +362,22 @@ att_parsed_input_t GetATTParams() {
 
 std::mutex finish_lock{};
 
-void finish()
-{
+void finish() {
   std::lock_guard<std::mutex> lock(finish_lock);
 
   if (!rocprof_started.load()) return;
 
   trace_period_thread_control.store(false);
-  if (trace_period_thread.joinable())
-    trace_period_thread.join();
+  if (trace_period_thread.joinable()) trace_period_thread.join();
 
   flush_thread_control.store(false);
-  if (flush_thread.joinable())
-    flush_thread.join();
+  if (flush_thread.joinable()) flush_thread.join();
 
   for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids)
     CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
 
   roc_sys_handler.store(false);
-  if (wait_for_start_shm.joinable())
-    wait_for_start_shm.join();
+  if (wait_for_start_shm.joinable()) wait_for_start_shm.join();
 
   bool expect = true;
   if (session_created.compare_exchange_strong(expect, false)) {
@@ -455,8 +453,7 @@ void plugins_load(void* userdata) {
       delete plugin;
       plugin = nullptr;
     }
-    if (plugin)
-      plugin->setPluginName(plugin_name);
+    if (plugin) plugin->setPluginName(plugin_name);
   }
 }
 
@@ -478,8 +475,7 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
       tracer_record.timestamps = rocprofiler_record_header_timestamp_t{
           .begin = rocprofiler_timestamp_t{*tracer_record.api_data.hip->phase_data},
           .end = timestamp};
-      if (plugin)
-        plugin->write_callback_record(tracer_record);
+      if (plugin) plugin->write_callback_record(tracer_record);
     }
   }
   if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
@@ -493,8 +489,7 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
       tracer_record.timestamps = rocprofiler_record_header_timestamp_t{
           .begin = rocprofiler_timestamp_t{*tracer_record.api_data.hip->phase_data},
           .end = timestamp};
-      if (plugin)
-        plugin->write_callback_record(tracer_record);
+      if (plugin) plugin->write_callback_record(tracer_record);
     }
   }
   if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
@@ -503,38 +498,34 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
     tracer_record.timestamps =
         rocprofiler_record_header_timestamp_t{timestamp, rocprofiler_timestamp_t{0}};
     tracer_record.operation_id.id = tracer_record.api_data.roctx->args.id;
-    if (plugin)
-      plugin->write_callback_record(tracer_record);
+    if (plugin) plugin->write_callback_record(tracer_record);
   }
 }
 
-void wait_for_rocsys()
-{
+void wait_for_rocsys() {
   using namespace std::chrono_literals;
   int64_t run_increment_counter = -1;
 
-  while (roc_sys_handler.load())
-  {
+  while (roc_sys_handler.load()) {
     run_increment_counter++;
     int shm_fd_sn = shm_open(roc_sys_session_id, O_RDONLY, 0666);
     std::this_thread::sleep_for(10ms);
     if (shm_fd_sn < 0) {
       continue;
     }
-    shmd_t* shmd = reinterpret_cast<struct shmd_t*>(mmap(0, 1024, PROT_READ, MAP_SHARED, shm_fd_sn, 0));
+    shmd_t* shmd =
+        reinterpret_cast<struct shmd_t*>(mmap(0, 1024, PROT_READ, MAP_SHARED, shm_fd_sn, 0));
     msync(shmd, sizeof(shmd->command), MS_SYNC | MS_INVALIDATE);
     bool flag{false};
 
-    if (shmd && (sizeof(shmd->command) == sizeof(int)) && run_increment_counter > 0)
-    {
+    if (shmd && (sizeof(shmd->command) == sizeof(int)) && run_increment_counter > 0) {
       switch (shmd->command) {
         // Start
         case 4: {
           printf("ROCSYS:: Starting Tools Session...\n");
 
           bool expect = false;
-          if (session_created.compare_exchange_strong(expect, true))
-          {
+          if (session_created.compare_exchange_strong(expect, true)) {
             plugin->initialize(nullptr);
             CHECK_ROCPROFILER(rocprofiler_start_session(session_id));
           }
@@ -545,8 +536,7 @@ void wait_for_rocsys()
           printf("ROCSYS:: Stopping Tools Session...\n");
 
           bool expect = true;
-          if (session_created.compare_exchange_strong(expect, false))
-          {
+          if (session_created.compare_exchange_strong(expect, false)) {
             CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
             for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
               CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
@@ -560,8 +550,7 @@ void wait_for_rocsys()
           printf("ROCSYS:: Exiting Tools Session...\n");
 
           bool expect = true;
-          if (session_created.compare_exchange_strong(expect, false))
-          {
+          if (session_created.compare_exchange_strong(expect, false)) {
             CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
             for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
               CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
@@ -745,8 +734,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             [](const rocprofiler_record_header_t* record,
                const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
                rocprofiler_buffer_id_t buffer_id) {
-              if (plugin)
-                plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
             },
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);
@@ -767,8 +755,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             [](const rocprofiler_record_header_t* record,
                const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
                rocprofiler_buffer_id_t buffer_id) {
-              if (plugin)
-                plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
             },
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);
@@ -787,8 +774,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             [](const rocprofiler_record_header_t* record,
                const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
                rocprofiler_buffer_id_t buffer_id) {
-              if (plugin)
-                plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
             },
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);
@@ -812,8 +798,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             [](const rocprofiler_record_header_t* record,
                const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
                rocprofiler_buffer_id_t buffer_id) {
-              if (plugin)
-                plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
             },
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);
@@ -850,8 +835,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             [](const rocprofiler_record_header_t* record,
                const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
                rocprofiler_buffer_id_t buffer_id) {
-              if (plugin)
-                plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
             },
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);

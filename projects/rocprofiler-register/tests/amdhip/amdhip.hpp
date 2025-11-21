@@ -28,7 +28,8 @@
 
 #include <cstdint>
 
-extern "C" {
+extern "C"
+{
 // fake hip function
 void
 hip_init(void) __attribute__((visibility("default")));

@@ -199,8 +199,8 @@ finalize_ompt()
 }  // namespace ompt
 }  // namespace rocprofiler
 
-extern "C" {
-
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_ompt_is_initialized(int* status)
 {

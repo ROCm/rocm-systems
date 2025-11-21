@@ -789,6 +789,4 @@ ROCTRACER_EXPORT void OnUnload() { tool_unload(); }
 
 }  // extern "C"
 
-void initialize() {
-  tool_load();
-}
+void initialize() { tool_load(); }

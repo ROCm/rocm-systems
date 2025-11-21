@@ -176,7 +176,7 @@ class XdnaDriver final : public core::Driver {
     constexpr const BOHandle& operator[](size_t index) const { return entries[index]; }
   };
 
-public:
+ public:
   XdnaDriver(std::string devnode_name);
 
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
@@ -201,11 +201,10 @@ public:
                                    std::vector<HsaMemoryProperties>& mem_props) const override;
   hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
                                   std::vector<HsaCacheProperties>& cache_props) const override;
-  hsa_status_t AllocateMemory(const core::MemoryRegion &mem_region,
-                              core::MemoryRegion::AllocateFlags alloc_flags,
-                              void **mem, size_t size,
-                              uint32_t node_id) override;
-  hsa_status_t FreeMemory(void *mem, size_t size) override;
+  hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
+                              core::MemoryRegion::AllocateFlags alloc_flags, void** mem,
+                              size_t size, uint32_t node_id) override;
+  hsa_status_t FreeMemory(void* mem, size_t size) override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, HsaEvent* event,
@@ -217,15 +216,13 @@ public:
                               uint32_t* queue_cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                              uint32_t* first_gws) const override;
-  hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
-                            size_t *offset) override;
-  hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                            core::ShareableHandle &handle) override;
-  hsa_status_t Map(core::ShareableHandle handle, void *mem, size_t offset,
-                   size_t size, hsa_access_permission_t perms) override;
-  hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
-                     size_t size) override;
-  hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
+  hsa_status_t ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, size_t* offset) override;
+  hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent& agent,
+                            core::ShareableHandle& handle) override;
+  hsa_status_t Map(core::ShareableHandle handle, void* mem, size_t offset, size_t size,
+                   hsa_access_permission_t perms) override;
+  hsa_status_t Unmap(core::ShareableHandle handle, void* mem, size_t offset, size_t size) override;
+  hsa_status_t ReleaseShareableHandle(core::ShareableHandle& handle) override;
 
   /// @brief Submits @p num_pkts packets in a command chain.
   hsa_status_t SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uint32_t num_pkts,
@@ -301,7 +298,7 @@ public:
   /// object to track handle allocations. Using the VMEM API for mapping XDNA
   /// driver handles requires a bit more refactoring. So rely on the XDNA driver
   /// to manage some of this for now.
-  std::unordered_map<uint32_t, void *> vmem_handle_mappings;
+  std::unordered_map<uint32_t, void*> vmem_handle_mappings;
   std::map<void*, BOHandle> vmem_addr_mappings;
 
   /// @brief Hardware context to PDI cache mapping.
@@ -315,13 +312,13 @@ public:
   BOHandle dev_heap_handle;
 
   /// @brief The aligned device heap.
-  void *dev_heap_aligned = nullptr;
+  void* dev_heap_aligned = nullptr;
 
   static constexpr size_t dev_heap_size = 64 * 1024 * 1024;
   static constexpr size_t dev_heap_align = 64 * 1024 * 1024;
 };
 
-} // namespace AMD
-} // namespace rocr
+}  // namespace AMD
+}  // namespace rocr
 
-#endif // header guard
+#endif  // header guard

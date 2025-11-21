@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -14,6 +14,3 @@ double CalcMean(vector<double> scores);
 double CalcMedian(vector<double> scores);
 double CalcStdDeviation(vector<double> scores, int score_mean);
 int CalcConcurrentQueues(vector<double> scores);
-
-
-

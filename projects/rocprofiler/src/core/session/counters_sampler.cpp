@@ -33,8 +33,7 @@ CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
     : buffer_id_(buffer_id),
       filter_id_(filter_id),
       session_id_(session_id),
-      pci_system_initialized_(false)
-{
+      pci_system_initialized_(false) {
   pci_system_initialized_ = GetPciAccessLibApi()->pci_system_init() == 0;
   params_ = rocprofiler::ROCProfiler_Singleton::GetInstance()
                 .GetSession(session_id_)
@@ -63,8 +62,9 @@ CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
   }
 
   if (pcie_counter_names.size() > 0) {
-    auto agentInfo = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(agents[params_.gpu_agent_index].handle);
-    if (agentInfo.GetDeviceInfo().getName()== "gfx90a") {
+    auto agentInfo =
+        HSASupport_Singleton::GetInstance().GetHSAAgentInfo(agents[params_.gpu_agent_index].handle);
+    if (agentInfo.GetDeviceInfo().getName() == "gfx90a") {
       PciePerfMonMI200* perfmon = new PciePerfMonMI200(agentInfo);
       perfmon->SetCounterNames(pcie_counter_names);
       perfmon_instances_.push_back(perfmon);
@@ -78,7 +78,8 @@ CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
   }
 
   if (xgmi_counter_names.size() > 0) {
-    auto agentInfo = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(agents[params_.gpu_agent_index].handle);
+    auto agentInfo =
+        HSASupport_Singleton::GetInstance().GetHSAAgentInfo(agents[params_.gpu_agent_index].handle);
     if (agentInfo.GetDeviceInfo().getName() == "gfx90a") {
       DFPerfMonMI200* perfmon = new DFPerfMonMI200(agentInfo);
       perfmon->SetCounterNames(xgmi_counter_names);

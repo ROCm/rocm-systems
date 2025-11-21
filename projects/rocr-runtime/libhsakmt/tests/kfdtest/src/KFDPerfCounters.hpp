@@ -29,12 +29,12 @@
 
 class KFDPerfCountersTest : public KFDBaseComponentTest {
  public:
-    KFDPerfCountersTest() {}
-    ~KFDPerfCountersTest() {}
+  KFDPerfCountersTest() {}
+  ~KFDPerfCountersTest() {}
 
  protected:
-    virtual void SetUp();
-    virtual void TearDown();
+  virtual void SetUp();
+  virtual void TearDown();
 };
 
 #endif  // __KFDPERFCOUNTERS_HPP__

@@ -55,22 +55,22 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
-#define RET_IF_HSA_ERR(err) { \
-  if ((err) != HSA_STATUS_SUCCESS) { \
-    const char* msg = 0; \
-    hsa_status_string(err, &msg); \
-    std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << \
-                          __FILE__ << ". Call returned " << err << std::endl; \
-    std::cout << msg << std::endl; \
-    return (err); \
-  } \
-}
+#define RET_IF_HSA_ERR(err)                                                                        \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
+                << ". Call returned " << err << std::endl;                                         \
+      std::cout << msg << std::endl;                                                               \
+      return (err);                                                                                \
+    }                                                                                              \
+  }
 
-EnqueueLatency::
-EnqueueLatency(bool enqueueSinglePacket) : TestBase(),
-                                    enqueue_single_(enqueueSinglePacket) {
+EnqueueLatency::EnqueueLatency(bool enqueueSinglePacket)
+    : TestBase(), enqueue_single_(enqueueSinglePacket) {
   queue_size_ = 0;
-  
+
   if (rocrtst::isEmuModeEnabled()) {
     num_of_pkts_ = 2;
     set_num_iteration(1);
@@ -86,10 +86,10 @@ EnqueueLatency(bool enqueueSinglePacket) : TestBase(),
   std::string desc;
 
   name = "Average Enqueue Time";
-  desc = "This test measures the time when the packet enqueue to the"
+  desc =
+      "This test measures the time when the packet enqueue to the"
       " queue and before the door bell is ring to notify the command processor "
       "to execute the packet";
-
 
 
   if (enqueueSinglePacket) {
@@ -104,8 +104,7 @@ EnqueueLatency(bool enqueueSinglePacket) : TestBase(),
   set_description(desc);
 }
 
-EnqueueLatency::~EnqueueLatency() {
-}
+EnqueueLatency::~EnqueueLatency() {}
 
 void EnqueueLatency::SetUp() {
   hsa_status_t err;
@@ -128,7 +127,7 @@ void EnqueueLatency::Run() {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     hsa_agent_t* gpu_dev = &gpus[i];
     char agent_name[64];
     err = hsa_agent_get_info(*gpu_dev, HSA_AGENT_INFO_NAME, agent_name);
@@ -171,10 +170,7 @@ void EnqueueLatency::Run() {
 }
 
 
-
-size_t EnqueueLatency::RealIterationNum() {
-  return num_iteration() * 1.2 + 1;
-}
+size_t EnqueueLatency::RealIterationNum() { return num_iteration() * 1.2 + 1; }
 
 void EnqueueLatency::EnqueueSinglePacket() {
   std::vector<double> timer;
@@ -186,9 +182,8 @@ void EnqueueLatency::EnqueueSinglePacket() {
   ASSERT_EQ(hsa_queue_load_read_index_scacquire(main_queue()),
             hsa_queue_load_write_index_scacquire(main_queue()));
 
-  hsa_kernel_dispatch_packet_t *q_base_addr =
-                      reinterpret_cast<hsa_kernel_dispatch_packet_t *>(
-                                                  main_queue()->base_address);
+  hsa_kernel_dispatch_packet_t* q_base_addr =
+      reinterpret_cast<hsa_kernel_dispatch_packet_t*>(main_queue()->base_address);
   rocrtst::PerfTimer p_timer;
   for (int i = 0; i < it; i++) {
     // Get timing stamp and ring the doorbell to dispatch the kernel.
@@ -203,10 +198,8 @@ void EnqueueLatency::EnqueueSinglePacket() {
     rocrtst::WriteAQLToQueueLoc(main_queue(), index, &aql());
 
     rocrtst::AtomicSetPacketHeader(
-        HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE,
-        aql().setup,
-        reinterpret_cast<hsa_kernel_dispatch_packet_t *>
-                                     (&(q_base_addr)[index & queue_mask]));
+        HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE, aql().setup,
+        reinterpret_cast<hsa_kernel_dispatch_packet_t*>(&(q_base_addr)[index & queue_mask]));
 
     p_timer.StopTimer(id);
 
@@ -214,8 +207,8 @@ void EnqueueLatency::EnqueueSinglePacket() {
     hsa_signal_store_screlease(main_queue()->doorbell_signal, index);
 
     // Wait on the dispatch signal until the kernel is finished.
-    while (hsa_signal_wait_scacquire(aql().completion_signal,
-         HSA_SIGNAL_CONDITION_LT, 1, (uint64_t) - 1, HSA_WAIT_STATE_ACTIVE)) {
+    while (hsa_signal_wait_scacquire(aql().completion_signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                     (uint64_t)-1, HSA_WAIT_STATE_ACTIVE)) {
     }
 
     hsa_signal_store_screlease(aql().completion_signal, 1);
@@ -252,16 +245,14 @@ void EnqueueLatency::EnqueueMultiPackets() {
 
   rocrtst::PerfTimer p_timer;
 
-  hsa_kernel_dispatch_packet_t *q_base_addr =
-                      reinterpret_cast<hsa_kernel_dispatch_packet_t *>(
-                                                  main_queue()->base_address);
+  hsa_kernel_dispatch_packet_t* q_base_addr =
+      reinterpret_cast<hsa_kernel_dispatch_packet_t*>(main_queue()->base_address);
 
   for (int i = 0; i < it; i++) {
     // Get timing stamp and ring the doorbell to dispatch the kernel.
     int id = p_timer.CreateTimer();
     p_timer.StartTimer(id);
-    uint64_t* index =
-           reinterpret_cast<uint64_t*>(malloc(sizeof(uint64_t) * num_of_pkts_));
+    uint64_t* index = reinterpret_cast<uint64_t*>(malloc(sizeof(uint64_t) * num_of_pkts_));
 
     ASSERT_NE(index, nullptr);
 
@@ -276,22 +267,19 @@ void EnqueueLatency::EnqueueMultiPackets() {
     }
     // Write the aql packet at the calculated queue index address.
 
-    rocrtst::AtomicSetPacketHeader(
-        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-        (1 << HSA_PACKET_HEADER_BARRIER),
-        aql().setup,
-        reinterpret_cast<hsa_kernel_dispatch_packet_t *>
-                      (&(q_base_addr)[index[num_of_pkts_ - 1] & queue_mask]));
+    rocrtst::AtomicSetPacketHeader((HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+                                       (1 << HSA_PACKET_HEADER_BARRIER),
+                                   aql().setup,
+                                   reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+                                       &(q_base_addr)[index[num_of_pkts_ - 1] & queue_mask]));
 
 
     // Set packet header reversly; set all headers except the very first
     // one, for now.
     for (int32_t j = num_of_pkts_ - 1; j >= 0; j--) {
       rocrtst::AtomicSetPacketHeader(
-          HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE,
-          aql().setup,
-          reinterpret_cast<hsa_kernel_dispatch_packet_t *>
-                                     (&(q_base_addr)[index[j] & queue_mask]));
+          HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE, aql().setup,
+          reinterpret_cast<hsa_kernel_dispatch_packet_t*>(&(q_base_addr)[index[j] & queue_mask]));
     }
 
     p_timer.StopTimer(id);
@@ -303,8 +291,8 @@ void EnqueueLatency::EnqueueMultiPackets() {
     }
 
     // Wait on the dispatch signal until the kernel is finished.
-    while (hsa_signal_wait_scacquire(aql().completion_signal,
-        HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE) != 0) {
+    while (hsa_signal_wait_scacquire(aql().completion_signal, HSA_SIGNAL_CONDITION_EQ, 0,
+                                     UINT64_MAX, HSA_WAIT_STATE_ACTIVE) != 0) {
     }
 
 
@@ -332,10 +320,7 @@ void EnqueueLatency::EnqueueMultiPackets() {
 }
 
 
-
-void EnqueueLatency::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void EnqueueLatency::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void EnqueueLatency::DisplayResults(void) const {
   if (!rocrtst::CheckProfile(this)) {

@@ -26,7 +26,8 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 typedef uint32_t (*rocprofiler_register_import_func_t)(void);
@@ -218,7 +219,8 @@ rocprofiler_register_iterate_registration_info(
 ///
 #ifdef __cplusplus
 #    define ROCPROFILER_REGISTER_DEFINE_IMPORT(NAME, VERSION)                            \
-        extern "C" {                                                                     \
+        extern "C"                                                                       \
+        {                                                                                \
         uint32_t ROCPROFILER_REGISTER_IMPORT_FUNC(NAME)()                                \
             ROCPROFILER_REGISTER_ATTRIBUTE(visibility("default"));                       \
                                                                                          \

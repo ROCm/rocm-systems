@@ -55,9 +55,9 @@ struct sql_generator : public tool::generator<Tp>
     sql_generator()           = delete;
     ~sql_generator() override = default;
 
-    sql_generator(const sql_generator&)     = delete;
-    sql_generator(sql_generator&&) noexcept = delete;
-    sql_generator& operator=(const sql_generator&) = delete;
+    sql_generator(const sql_generator&)                = delete;
+    sql_generator(sql_generator&&) noexcept            = delete;
+    sql_generator& operator=(const sql_generator&)     = delete;
     sql_generator& operator=(sql_generator&&) noexcept = delete;
 
     std::vector<Tp> get(size_t itr) const override;

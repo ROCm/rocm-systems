@@ -13,8 +13,8 @@ const static uint32_t PCIE_PERF_CNTL_EVENT_CI_PORT_SEL = 0x11180250;
 // Step 2: EVENT SEL update
 const static uint32_t PCIE_PERF_CNTL_TXCLK1 = 0x11180204;
 const static uint32_t PCIE_PERF_CNTL_TXCLK2 = 0x11180210;
-const static uint32_t PCIE_PERF_CNTL_TXCLK3 = 0x1118021C;  //#
-const static uint32_t PCIE_PERF_CNTL_TXCLK4 = 0x11180228;  //#
+const static uint32_t PCIE_PERF_CNTL_TXCLK3 = 0x1118021C;  // #
+const static uint32_t PCIE_PERF_CNTL_TXCLK4 = 0x11180228;  // #
 const static uint32_t PCIE_PERF_CNTL_TXCLK5 = 0x11180258;
 const static uint32_t PCIE_PERF_CNTL_TXCLK6 = 0x11180264;
 const static uint32_t PCIE_PERF_CNTL_TXCLK7 = 0x11180888;
@@ -28,8 +28,8 @@ const static uint32_t PCIE_PERF_COUNT_CNTL = 0x11180200;
 // Step 5: Performance counters read:
 const static uint32_t PCIE_PERF_COUNT0_TXCLK1 = 0x11180208;
 const static uint32_t PCIE_PERF_COUNT0_TXCLK2 = 0x11180214;
-const static uint32_t PCIE_PERF_COUNT0_TXCLK3 = 0x11180220;  //#
-const static uint32_t PCIE_PERF_COUNT0_TXCLK4 = 0x1118022C;  //#
+const static uint32_t PCIE_PERF_COUNT0_TXCLK3 = 0x11180220;  // #
+const static uint32_t PCIE_PERF_COUNT0_TXCLK4 = 0x1118022C;  // #
 const static uint32_t PCIE_PERF_COUNT0_TXCLK5 = 0x1118025C;
 const static uint32_t PCIE_PERF_COUNT0_TXCLK6 = 0x11180268;
 const static uint32_t PCIE_PERF_COUNT0_TXCLK7 = 0x1118088C;
@@ -39,8 +39,8 @@ const static uint32_t PCIE_PERF_COUNT0_TXCLK10 = 0x111808B0;
 
 const static uint32_t PCIE_PERF_COUNT0_UPVAL_TXCLK1 = 0x111808E8;
 const static uint32_t PCIE_PERF_COUNT0_UPVAL_TXCLK2 = 0x111808F0;
-const static uint32_t PCIE_PERF_COUNT0_UPVAL_TXCLK3 = 0x111808F8;  //#
-const static uint32_t PCIE_PERF_COUNT0_UPVAL_TXCLK4 = 0x11180900;  //#
+const static uint32_t PCIE_PERF_COUNT0_UPVAL_TXCLK3 = 0x111808F8;  // #
+const static uint32_t PCIE_PERF_COUNT0_UPVAL_TXCLK4 = 0x11180900;  // #
 const static uint32_t PCIE_PERF_COUNT0_UPVAL_TXCLK5 = 0x11180908;
 const static uint32_t PCIE_PERF_COUNT0_UPVAL_TXCLK6 = 0x11180910;
 const static uint32_t PCIE_PERF_COUNT0_UPVAL_TXCLK7 = 0x11180918;
@@ -50,8 +50,8 @@ const static uint32_t PCIE_PERF_COUNT0_UPVAL_TXCLK10 = 0x11180930;
 
 const static uint32_t PCIE_PERF_COUNT1_TXCLK1 = 0x1118020C;
 const static uint32_t PCIE_PERF_COUNT1_TXCLK2 = 0x11180218;
-const static uint32_t PCIE_PERF_COUNT1_TXCLK3 = 0x11180224;  //#
-const static uint32_t PCIE_PERF_COUNT1_TXCLK4 = 0x11180230;  //#
+const static uint32_t PCIE_PERF_COUNT1_TXCLK3 = 0x11180224;  // #
+const static uint32_t PCIE_PERF_COUNT1_TXCLK4 = 0x11180230;  // #
 const static uint32_t PCIE_PERF_COUNT1_TXCLK5 = 0x11180260;
 const static uint32_t PCIE_PERF_COUNT1_TXCLK6 = 0x1118026C;
 const static uint32_t PCIE_PERF_COUNT1_TXCLK7 = 0x11180890;
@@ -61,8 +61,8 @@ const static uint32_t PCIE_PERF_COUNT1_TXCLK10 = 0x111808B4;
 
 const static uint32_t PCIE_PERF_COUNT1_UPVAL_TXCLK1 = 0x111808EC;
 const static uint32_t PCIE_PERF_COUNT1_UPVAL_TXCLK2 = 0x111808F4;
-const static uint32_t PCIE_PERF_COUNT1_UPVAL_TXCLK3 = 0x111808FC;  //#
-const static uint32_t PCIE_PERF_COUNT1_UPVAL_TXCLK4 = 0x11180904;  //#
+const static uint32_t PCIE_PERF_COUNT1_UPVAL_TXCLK3 = 0x111808FC;  // #
+const static uint32_t PCIE_PERF_COUNT1_UPVAL_TXCLK4 = 0x11180904;  // #
 const static uint32_t PCIE_PERF_COUNT1_UPVAL_TXCLK5 = 0x1118090C;
 const static uint32_t PCIE_PERF_COUNT1_UPVAL_TXCLK6 = 0x11180914;
 const static uint32_t PCIE_PERF_COUNT1_UPVAL_TXCLK7 = 0x1118091C;

@@ -29,7 +29,7 @@ namespace rocprofiler {
 
 class PerfMon {
  public:
-  virtual ~PerfMon(){};
+  virtual ~PerfMon() {};
   virtual void Start() = 0;
   virtual void Stop() = 0;
   virtual void Read(std::vector<rocprofiler_counters_sampler_counter_output_t>& values) = 0;

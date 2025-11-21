@@ -66,9 +66,7 @@
 // Table MAJOR_VERSION and STEP_VERSION defines have moved to hsa_api_trace_version.h
 
 // Min function used to copy Api Tables
-static inline uint32_t Min(const uint32_t a, const uint32_t b) {
-  return (a > b) ? b : a;
-}
+static inline uint32_t Min(const uint32_t a, const uint32_t b) { return (a > b) ? b : a; }
 
 // Declarations of APIs intended for use only by tools.
 
@@ -96,16 +94,16 @@ typedef void (*amd_intercept_marker_handler)(const struct amd_aql_intercept_mark
 // underlying hardware queue the following packet will be placed. user_data can
 // be used to hold any data useful to the tool.
 typedef struct amd_aql_intercept_marker_s {
-  uint16_t header; // Must have a packet type of HSA_PACKET_TYPE_VENDOR_SPECIFIC.
-  uint8_t format; // Must be AMD_AQL_FORMAT_INTERCEPT_MARKER.
-  uint8_t reserved[5]; // Must be 0.
+  uint16_t header;      // Must have a packet type of HSA_PACKET_TYPE_VENDOR_SPECIFIC.
+  uint8_t format;       // Must be AMD_AQL_FORMAT_INTERCEPT_MARKER.
+  uint8_t reserved[5];  // Must be 0.
 #ifdef HSA_LARGE_MODEL
   amd_intercept_marker_handler callback;
 #elif defined HSA_LITTLE_ENDIAN
   amd_intercept_marker_handler callback;
-  uint32_t reserved1; // Must be 0.
+  uint32_t reserved1;  // Must be 0.
 #else
-  uint32_t reserved1; // Must be 0.
+  uint32_t reserved1;  // Must be 0.
   amd_intercept_marker_handler callback;
 #endif
   uint64_t user_data[6];
@@ -152,32 +150,31 @@ struct ToolsApiTable {
 // Table to export HSA Finalizer Extension Apis
 struct FinalizerExtTable {
   ApiTableVersion version;
-	decltype(hsa_ext_program_create)* hsa_ext_program_create_fn;
-	decltype(hsa_ext_program_destroy)* hsa_ext_program_destroy_fn;
-	decltype(hsa_ext_program_add_module)* hsa_ext_program_add_module_fn;
-	decltype(hsa_ext_program_iterate_modules)* hsa_ext_program_iterate_modules_fn;
-	decltype(hsa_ext_program_get_info)* hsa_ext_program_get_info_fn;
-	decltype(hsa_ext_program_finalize)* hsa_ext_program_finalize_fn;
+  decltype(hsa_ext_program_create)* hsa_ext_program_create_fn;
+  decltype(hsa_ext_program_destroy)* hsa_ext_program_destroy_fn;
+  decltype(hsa_ext_program_add_module)* hsa_ext_program_add_module_fn;
+  decltype(hsa_ext_program_iterate_modules)* hsa_ext_program_iterate_modules_fn;
+  decltype(hsa_ext_program_get_info)* hsa_ext_program_get_info_fn;
+  decltype(hsa_ext_program_finalize)* hsa_ext_program_finalize_fn;
 };
 
 // Table to export HSA Image Extension Apis
 struct ImageExtTable {
   ApiTableVersion version;
-	decltype(hsa_ext_image_get_capability)* hsa_ext_image_get_capability_fn;
-	decltype(hsa_ext_image_data_get_info)* hsa_ext_image_data_get_info_fn;
-	decltype(hsa_ext_image_create)* hsa_ext_image_create_fn;
-	decltype(hsa_ext_image_import)* hsa_ext_image_import_fn;
-	decltype(hsa_ext_image_export)* hsa_ext_image_export_fn;
-	decltype(hsa_ext_image_copy)* hsa_ext_image_copy_fn;
-	decltype(hsa_ext_image_clear)* hsa_ext_image_clear_fn;
-	decltype(hsa_ext_image_destroy)* hsa_ext_image_destroy_fn;
-	decltype(hsa_ext_sampler_create)* hsa_ext_sampler_create_fn;
-	decltype(hsa_ext_sampler_destroy)* hsa_ext_sampler_destroy_fn;
+  decltype(hsa_ext_image_get_capability)* hsa_ext_image_get_capability_fn;
+  decltype(hsa_ext_image_data_get_info)* hsa_ext_image_data_get_info_fn;
+  decltype(hsa_ext_image_create)* hsa_ext_image_create_fn;
+  decltype(hsa_ext_image_import)* hsa_ext_image_import_fn;
+  decltype(hsa_ext_image_export)* hsa_ext_image_export_fn;
+  decltype(hsa_ext_image_copy)* hsa_ext_image_copy_fn;
+  decltype(hsa_ext_image_clear)* hsa_ext_image_clear_fn;
+  decltype(hsa_ext_image_destroy)* hsa_ext_image_destroy_fn;
+  decltype(hsa_ext_sampler_create)* hsa_ext_sampler_create_fn;
+  decltype(hsa_ext_sampler_destroy)* hsa_ext_sampler_destroy_fn;
   decltype(hsa_ext_image_get_capability_with_layout)* hsa_ext_image_get_capability_with_layout_fn;
   decltype(hsa_ext_image_data_get_info_with_layout)* hsa_ext_image_data_get_info_with_layout_fn;
   decltype(hsa_ext_image_create_with_layout)* hsa_ext_image_create_with_layout_fn;
   decltype(hsa_ext_sampler_create_v2)* hsa_ext_sampler_create_v2_fn;
-
 };
 
 // Table to export HSA PC Sampling Extension Apis
@@ -196,13 +193,14 @@ struct PcSamplingExtTable {
 // Table to export AMD Extension Apis
 struct AmdExtTable {
   ApiTableVersion version;
-	decltype(hsa_amd_coherency_get_type)* hsa_amd_coherency_get_type_fn;
-	decltype(hsa_amd_coherency_set_type)* hsa_amd_coherency_set_type_fn;
+  decltype(hsa_amd_coherency_get_type)* hsa_amd_coherency_get_type_fn;
+  decltype(hsa_amd_coherency_set_type)* hsa_amd_coherency_set_type_fn;
   decltype(hsa_amd_profiling_set_profiler_enabled)* hsa_amd_profiling_set_profiler_enabled_fn;
-  decltype(hsa_amd_profiling_async_copy_enable) *hsa_amd_profiling_async_copy_enable_fn;
+  decltype(hsa_amd_profiling_async_copy_enable)* hsa_amd_profiling_async_copy_enable_fn;
   decltype(hsa_amd_profiling_get_dispatch_time)* hsa_amd_profiling_get_dispatch_time_fn;
-  decltype(hsa_amd_profiling_get_async_copy_time) *hsa_amd_profiling_get_async_copy_time_fn;
-  decltype(hsa_amd_profiling_convert_tick_to_system_domain)* hsa_amd_profiling_convert_tick_to_system_domain_fn;
+  decltype(hsa_amd_profiling_get_async_copy_time)* hsa_amd_profiling_get_async_copy_time_fn;
+  decltype(hsa_amd_profiling_convert_tick_to_system_domain)*
+      hsa_amd_profiling_convert_tick_to_system_domain_fn;
   decltype(hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler_fn;
   decltype(hsa_amd_async_function)* hsa_amd_async_function_fn;
   decltype(hsa_amd_signal_wait_any)* hsa_amd_signal_wait_any_fn;
@@ -386,12 +384,10 @@ struct CoreApiTable {
   decltype(hsa_executable_load_code_object)* hsa_executable_load_code_object_fn;
   decltype(hsa_executable_freeze)* hsa_executable_freeze_fn;
   decltype(hsa_executable_get_info)* hsa_executable_get_info_fn;
-  decltype(hsa_executable_global_variable_define)*
-      hsa_executable_global_variable_define_fn;
+  decltype(hsa_executable_global_variable_define)* hsa_executable_global_variable_define_fn;
   decltype(hsa_executable_agent_global_variable_define)*
       hsa_executable_agent_global_variable_define_fn;
-  decltype(hsa_executable_readonly_variable_define)*
-      hsa_executable_readonly_variable_define_fn;
+  decltype(hsa_executable_readonly_variable_define)* hsa_executable_readonly_variable_define_fn;
   decltype(hsa_executable_validate)* hsa_executable_validate_fn;
   // Deprecated since v1.1.
   decltype(hsa_executable_get_symbol)* hsa_executable_get_symbol_fn;
@@ -429,48 +425,39 @@ struct CoreApiTable {
   //===--- Code Objects (deprecated) - HSA v1.1 additions -----------------===//
 
   // Deprecated since v1.1.
-  decltype(hsa_code_object_get_symbol_from_name)*
-      hsa_code_object_get_symbol_from_name_fn;
+  decltype(hsa_code_object_get_symbol_from_name)* hsa_code_object_get_symbol_from_name_fn;
 
   //===--- Executable - HSA v1.1 additions --------------------------------===//
 
-  decltype(hsa_code_object_reader_create_from_file)*
-      hsa_code_object_reader_create_from_file_fn;
-  decltype(hsa_code_object_reader_create_from_memory)*
-      hsa_code_object_reader_create_from_memory_fn;
+  decltype(hsa_code_object_reader_create_from_file)* hsa_code_object_reader_create_from_file_fn;
+  decltype(hsa_code_object_reader_create_from_memory)* hsa_code_object_reader_create_from_memory_fn;
   decltype(hsa_code_object_reader_destroy)* hsa_code_object_reader_destroy_fn;
   decltype(hsa_executable_create_alt)* hsa_executable_create_alt_fn;
-  decltype(hsa_executable_load_program_code_object)*
-      hsa_executable_load_program_code_object_fn;
-  decltype(hsa_executable_load_agent_code_object)*
-      hsa_executable_load_agent_code_object_fn;
+  decltype(hsa_executable_load_program_code_object)* hsa_executable_load_program_code_object_fn;
+  decltype(hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object_fn;
   decltype(hsa_executable_validate_alt)* hsa_executable_validate_alt_fn;
-  decltype(hsa_executable_get_symbol_by_name)*
-      hsa_executable_get_symbol_by_name_fn;
-  decltype(hsa_executable_iterate_agent_symbols)*
-      hsa_executable_iterate_agent_symbols_fn;
-  decltype(hsa_executable_iterate_program_symbols)*
-      hsa_executable_iterate_program_symbols_fn;
+  decltype(hsa_executable_get_symbol_by_name)* hsa_executable_get_symbol_by_name_fn;
+  decltype(hsa_executable_iterate_agent_symbols)* hsa_executable_iterate_agent_symbols_fn;
+  decltype(hsa_executable_iterate_program_symbols)* hsa_executable_iterate_program_symbols_fn;
 };
 
 // Table to export HSA Apis from Core Runtime, Amd Extensions
 // Finalizer and Images
 struct HsaApiTable {
-
   // Version of Hsa Api Table
   ApiTableVersion version;
 
   // Table of function pointers to HSA Core Runtime
-	CoreApiTable* core_;
+  CoreApiTable* core_;
 
   // Table of function pointers to AMD extensions
-	AmdExtTable* amd_ext_;
+  AmdExtTable* amd_ext_;
 
   // Table of function pointers to HSA Finalizer Extension
-	FinalizerExtTable* finalizer_ext_;
+  FinalizerExtTable* finalizer_ext_;
 
   // Table of function pointers to HSA Image Extension
-	ImageExtTable* image_ext_;
+  ImageExtTable* image_ext_;
 
   // Table of function pointers for tools to use
   ToolsApiTable* tools_;
@@ -482,11 +469,11 @@ struct HsaApiTable {
 // Structure containing instances of different api tables
 struct HsaApiTableContainer {
   HsaApiTable root;
-	CoreApiTable core;
-	AmdExtTable amd_ext;
-	FinalizerExtTable finalizer_ext;
-	ImageExtTable image_ext;
-	ToolsApiTable tools;
+  CoreApiTable core;
+  AmdExtTable amd_ext;
+  FinalizerExtTable finalizer_ext;
+  ImageExtTable image_ext;
+  ToolsApiTable tools;
   PcSamplingExtTable pc_sampling_ext;
 
   // Default initialization of a container instance
@@ -528,11 +515,9 @@ struct HsaApiTableContainer {
 };
 
 // Api to copy function pointers of a table
-static
-void inline copyApi(void* src, void* dest, size_t size) {
+static void inline copyApi(void* src, void* dest, size_t size) {
   assert(size >= sizeof(ApiTableVersion));
-  memcpy((char*)src + sizeof(ApiTableVersion),
-         (char*)dest + sizeof(ApiTableVersion),
+  memcpy((char*)src + sizeof(ApiTableVersion), (char*)dest + sizeof(ApiTableVersion),
          (size - sizeof(ApiTableVersion)));
 }
 

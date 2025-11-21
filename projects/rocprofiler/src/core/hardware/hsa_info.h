@@ -37,7 +37,7 @@ namespace Agent {
 static const uint32_t LDS_BLOCK_SIZE = 128 * 4;
 
 
-//DeviceInfo supports only GPU
+// DeviceInfo supports only GPU
 class DeviceInfo {
  public:
   DeviceInfo() = default;
@@ -62,7 +62,6 @@ class DeviceInfo {
   uint32_t getNumaNode() const;
 
  private:
-
   char name_[64];
   char gfxip_[64];
   uint32_t max_wave_size_;

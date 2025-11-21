@@ -115,8 +115,7 @@ generate_dimensions(rocprofiler_agent_id_t agent_id)
             dims.emplace(ast.out_id().handle, ast_copy.set_dimensions(agent_id));
         } catch(std::runtime_error& e)
         {
-            ROCP_FATAL << metric << " has improper dimensions"
-                       << " " << e.what();
+            ROCP_FATAL << metric << " has improper dimensions" << " " << e.what();
         }
     }
     return {.id_to_dim = dims};

@@ -58,14 +58,13 @@
 namespace rocr {
 namespace core {
 struct AqlPacket {
-
   union {
     struct {
       uint16_t header;
       struct {
         uint8_t user_data[62];
       } body;
-     } packet;
+    } packet;
     struct {
       uint16_t header;
       uint8_t format;
@@ -117,29 +116,28 @@ struct AqlPacket {
       return string.str();
     }
 
-    string << "type: " << type_names[t]
-           << "\nbarrier: " << ((dispatch.header >> HSA_PACKET_HEADER_BARRIER) &
-                                ((1 << HSA_PACKET_HEADER_WIDTH_BARRIER) - 1))
-           << "\nacquire: " << ((dispatch.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) &
-                                ((1 << HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE) - 1))
-           << "\nrelease: " << ((dispatch.header >> HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE) &
-                                ((1 << HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE) - 1));
+    string << "type: " << type_names[t] << "\nbarrier: "
+           << ((dispatch.header >> HSA_PACKET_HEADER_BARRIER) &
+               ((1 << HSA_PACKET_HEADER_WIDTH_BARRIER) - 1))
+           << "\nacquire: "
+           << ((dispatch.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) &
+               ((1 << HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE) - 1))
+           << "\nrelease: "
+           << ((dispatch.header >> HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE) &
+               ((1 << HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE) - 1));
 
     if (t == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      string << "\nDim: " << dispatch.setup
-             << "\nworkgroup_size: " << dispatch.workgroup_size_x << ", "
-             << dispatch.workgroup_size_y << ", " << dispatch.workgroup_size_z
-             << "\ngrid_size: " << dispatch.grid_size_x << ", "
-             << dispatch.grid_size_y << ", " << dispatch.grid_size_z
-             << "\nprivate_size: " << dispatch.private_segment_size
+      string << "\nDim: " << dispatch.setup << "\nworkgroup_size: " << dispatch.workgroup_size_x
+             << ", " << dispatch.workgroup_size_y << ", " << dispatch.workgroup_size_z
+             << "\ngrid_size: " << dispatch.grid_size_x << ", " << dispatch.grid_size_y << ", "
+             << dispatch.grid_size_z << "\nprivate_size: " << dispatch.private_segment_size
              << "\ngroup_size: " << dispatch.group_segment_size
              << "\nkernel_object: " << dispatch.kernel_object
              << "\nkern_arg: " << dispatch.kernarg_address
              << "\nsignal: " << dispatch.completion_signal.handle;
     }
 
-    if ((t == HSA_PACKET_TYPE_BARRIER_AND) ||
-        (t == HSA_PACKET_TYPE_BARRIER_OR)) {
+    if ((t == HSA_PACKET_TYPE_BARRIER_AND) || (t == HSA_PACKET_TYPE_BARRIER_OR)) {
       for (int i = 0; i < 5; i++)
         string << "\ndep[" << i << "]: " << barrier_and.dep_signal[i].handle;
       string << "\nsignal: " << barrier_and.completion_signal.handle;
@@ -202,7 +200,8 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   static __forceinline Queue* Convert(const hsa_queue_t* queue) {
     return (queue != nullptr)
         ? reinterpret_cast<SharedQueue*>(reinterpret_cast<uintptr_t>(queue) -
-                                         offsetof(SharedQueue, amd_queue.hsa_queue))->core_queue
+                                         offsetof(SharedQueue, amd_queue.hsa_queue))
+              ->core_queue
         : nullptr;
   }
 
@@ -393,9 +392,7 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   static void set_public_handle(Queue* ptr, hsa_queue_t* handle) {
     ptr->do_set_public_handle(handle);
   }
-  virtual void do_set_public_handle(hsa_queue_t* handle) {
-    public_handle_ = handle;
-  }
+  virtual void do_set_public_handle(hsa_queue_t* handle) { public_handle_ = handle; }
 
   virtual bool _IsA(rtti_t id) const = 0;
 
@@ -407,7 +404,6 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   uint64_t GetQueueId() { return hsa_queue_counter_++; }
 
  private:
-
   // HSA Queue ID - used to bind a unique ID
   static std::atomic<uint64_t> hsa_queue_counter_;
 
@@ -416,7 +412,7 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
 
   DISALLOW_COPY_AND_ASSIGN(Queue);
 };
-}   //  namespace core
-}   //  namespace rocr
+}  //  namespace core
+}  //  namespace rocr
 
 #endif  // header guard

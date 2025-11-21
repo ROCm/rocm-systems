@@ -28,7 +28,8 @@
 
 #include <cstdint>
 
-extern "C" {
+extern "C"
+{
 // fake hsa function
 void
 hsa_init(void) __attribute__((visibility("default")));

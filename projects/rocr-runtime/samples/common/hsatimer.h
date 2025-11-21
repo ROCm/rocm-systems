@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef __MYTIME__
 #define __MYTIME__
 
@@ -20,57 +20,55 @@
 using namespace std;
 
 #if defined(_MSC_VER)
-  #include <time.h>
-  #include <windows.h>
-  #include <intrin.h>
+#include <time.h>
+#include <windows.h>
+#include <intrin.h>
 #else
-  #if defined(__GNUC__)
-    #include <sys/time.h>
-    #include <x86intrin.h>
-  #endif // __GNUC__
-#endif //_MSC_VER
+#if defined(__GNUC__)
+#include <sys/time.h>
+#include <x86intrin.h>
+#endif  // __GNUC__
+#endif  //_MSC_VER
 
-#define HSA_FAILURE  1
+#define HSA_FAILURE 1
 #define HSA_SUCCESS 0
 
 class PerfTimer {
-	private:
-		struct Timer
-		{
-			string name;          /* < name name of time object*/
-			long long _freq;      /* < _freq frequency*/
-			double _clocks;       /* < _clocks number of ticks at end*/
-			double _start;        /* < _start start point ticks*/
-		};
+ private:
+  struct Timer {
+    string name;     /* < name name of time object*/
+    long long _freq; /* < _freq frequency*/
+    double _clocks;  /* < _clocks number of ticks at end*/
+    double _start;   /* < _start start point ticks*/
+  };
 
-		std::vector<Timer*> _timers;  /*< _timers vector to Timer objects */
-		double freq_in_100mhz;
+  std::vector<Timer*> _timers; /*< _timers vector to Timer objects */
+  double freq_in_100mhz;
 
-	public:
-		PerfTimer();
-		~PerfTimer();
+ public:
+  PerfTimer();
+  ~PerfTimer();
 
-	private:
-		//AMD timing method
-		uint64_t CoarseTimestampUs();
-		uint64_t MeasureTSCFreqHz();
+ private:
+  // AMD timing method
+  uint64_t CoarseTimestampUs();
+  uint64_t MeasureTSCFreqHz();
 
-		//General Linux timing method
+  // General Linux timing method
 
-	public:
-		int CreateTimer();
-		int StartTimer(int index);
-		int StopTimer(int index);
+ public:
+  int CreateTimer();
+  int StartTimer(int index);
+  int StopTimer(int index);
 
-	public:
-		// retrieve time
-		double ReadTimer(int index);
-		// write into a file
-		double WriteTimer(int index);
+ public:
+  // retrieve time
+  double ReadTimer(int index);
+  // write into a file
+  double WriteTimer(int index);
 
-	public:
-		void Error(string str);
+ public:
+  void Error(string str);
 };
 
 #endif
-

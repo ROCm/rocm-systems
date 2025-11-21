@@ -26,19 +26,20 @@
 #ifndef __KFD_EVENT_TEST__H__
 #define __KFD_EVENT_TEST__H__
 
-class KFDEventTest :  public KFDBaseComponentTest {
+class KFDEventTest : public KFDBaseComponentTest {
  public:
-    KFDEventTest(void) {}
-    ~KFDEventTest(void) {}
+  KFDEventTest(void) {}
+  ~KFDEventTest(void) {}
 
-    // @brief Executed before every test in KFDEventTest.
-    virtual void SetUp();
-    // @brief Executed after every test in KFDEventTest.
-    virtual void TearDown();
+  // @brief Executed before every test in KFDEventTest.
+  virtual void SetUp();
+  // @brief Executed after every test in KFDEventTest.
+  virtual void TearDown();
 
-    HsaEvent* m_pHsaEventGPU[MAX_GPU];
+  HsaEvent* m_pHsaEventGPU[MAX_GPU];
+
  protected:
-    static const unsigned int EVENT_TIMEOUT = 5000;  // 5 seconds
+  static const unsigned int EVENT_TIMEOUT = 5000;  // 5 seconds
 };
 
 #endif  // __KFD_EVENT_TEST__H__

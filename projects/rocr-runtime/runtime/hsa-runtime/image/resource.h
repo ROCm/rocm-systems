@@ -62,20 +62,19 @@
 #define ORDER_COUNT 20
 #define TYPE_COUNT 16
 #define RO HSA_EXT_IMAGE_CAPABILITY_READ_ONLY
-#define ROWO \
-  (HSA_EXT_IMAGE_CAPABILITY_READ_ONLY | HSA_EXT_IMAGE_CAPABILITY_WRITE_ONLY)
-#define RW                                                                    \
-  (HSA_EXT_IMAGE_CAPABILITY_READ_ONLY | HSA_EXT_IMAGE_CAPABILITY_WRITE_ONLY | \
-  HSA_EXT_IMAGE_CAPABILITY_READ_WRITE)
+#define ROWO (HSA_EXT_IMAGE_CAPABILITY_READ_ONLY | HSA_EXT_IMAGE_CAPABILITY_WRITE_ONLY)
+#define RW                                                                                         \
+  (HSA_EXT_IMAGE_CAPABILITY_READ_ONLY | HSA_EXT_IMAGE_CAPABILITY_WRITE_ONLY |                      \
+   HSA_EXT_IMAGE_CAPABILITY_READ_WRITE)
 
 namespace rocr {
 namespace image {
 
 typedef struct metadata_amd_s {
-    uint32_t version; // Must be 1
-    uint32_t vendorID; // AMD | CZ
-    uint32_t words[8];
-    uint32_t mip_offsets[0]; //Mip level offset bits [39:8] for each level (if any)
+  uint32_t version;   // Must be 1
+  uint32_t vendorID;  // AMD | CZ
+  uint32_t words[8];
+  uint32_t mip_offsets[0];  // Mip level offset bits [39:8] for each level (if any)
 } metadata_amd_t;
 
 /// @brief Structure to represent image access component.
@@ -97,7 +96,7 @@ typedef struct ImageProperty {
 
 /// @brief Structure to represent an HSA image object.
 typedef struct Image {
-private:
+ private:
   Image() {
     component.handle = 0;
     permission = HSA_ACCESS_PERMISSION_RO;
@@ -110,11 +109,8 @@ private:
 
   ~Image() {}
 
-public:
-  typedef enum TileMode {
-    LINEAR,
-    TILED
-  } TileMode;
+ public:
+  typedef enum TileMode { LINEAR, TILED } TileMode;
 
   /// @brief Create an Image.
   static Image* Create(hsa_agent_t agent);
@@ -131,8 +127,7 @@ public:
   }
 
   // Vendor specific image object.
-  __ALIGNED__(
-      HSA_IMAGE_OBJECT_ALIGNMENT) uint32_t srd[HSA_IMAGE_OBJECT_SIZE_DWORD];
+  __ALIGNED__(HSA_IMAGE_OBJECT_ALIGNMENT) uint32_t srd[HSA_IMAGE_OBJECT_SIZE_DWORD];
 
   void const printSRD() const {
     char hexStr[200];
@@ -167,7 +162,7 @@ public:
 
 /// @brief Structure to represent an HSA sampler object.
 typedef struct Sampler {
-private:
+ private:
   Sampler() {
     component.handle = 0;
     std::memset(srd, 0, sizeof(srd));
@@ -176,7 +171,7 @@ private:
 
   ~Sampler() {}
 
-public:
+ public:
   /// @brief Create a Sampler.
   static Sampler* Create(hsa_agent_t agent);
 

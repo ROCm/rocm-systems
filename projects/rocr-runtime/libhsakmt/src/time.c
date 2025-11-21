@@ -26,32 +26,29 @@
 #include "libhsakmt.h"
 #include "hsakmt/linux/kfd_ioctl.h"
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
-					       HsaClockCounters *Counters)
-{
-	HSAKMT_STATUS result;
-	uint32_t gpu_id;
-	struct kfd_ioctl_get_clock_counters_args args = {0};
-	int err;
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId, HsaClockCounters* Counters) {
+  HSAKMT_STATUS result;
+  uint32_t gpu_id;
+  struct kfd_ioctl_get_clock_counters_args args = {0};
+  int err;
 
-	CHECK_KFD_OPEN();
+  CHECK_KFD_OPEN();
 
-	result = hsakmt_validate_nodeid(NodeId, &gpu_id);
-	if (result != HSAKMT_STATUS_SUCCESS)
-		return result;
+  result = hsakmt_validate_nodeid(NodeId, &gpu_id);
+  if (result != HSAKMT_STATUS_SUCCESS) return result;
 
-	args.gpu_id = gpu_id;
+  args.gpu_id = gpu_id;
 
-	err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &args);
-	if (err < 0) {
-		result = HSAKMT_STATUS_ERROR;
-	} else {
-		/* At this point the result is already HSAKMT_STATUS_SUCCESS */
-		Counters->GPUClockCounter = args.gpu_clock_counter;
-		Counters->CPUClockCounter = args.cpu_clock_counter;
-		Counters->SystemClockCounter = args.system_clock_counter;
-		Counters->SystemClockFrequencyHz = args.system_clock_freq;
-	}
+  err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &args);
+  if (err < 0) {
+    result = HSAKMT_STATUS_ERROR;
+  } else {
+    /* At this point the result is already HSAKMT_STATUS_SUCCESS */
+    Counters->GPUClockCounter = args.gpu_clock_counter;
+    Counters->CPUClockCounter = args.cpu_clock_counter;
+    Counters->SystemClockCounter = args.system_clock_counter;
+    Counters->SystemClockFrequencyHz = args.system_clock_freq;
+  }
 
-	return result;
+  return result;
 }

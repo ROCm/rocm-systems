@@ -629,7 +629,7 @@ enum KFD_SVM_UNMAP_TRIGGERS
     KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU      /* Unmap to free the buffer */
 };
 
-#define KFD_SMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) -1))
+#define KFD_SMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) - 1))
 #define KFD_SMI_EVENT_MSG_SIZE           96
 
 struct kfd_ioctl_smi_events_args

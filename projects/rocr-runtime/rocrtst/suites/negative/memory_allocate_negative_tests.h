@@ -52,7 +52,7 @@
 
 class MemoryAllocateNegativeTest : public TestBase {
  public:
-    MemoryAllocateNegativeTest();
+  MemoryAllocateNegativeTest();
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~MemoryAllocateNegativeTest();
@@ -86,10 +86,8 @@ class MemoryAllocateNegativeTest : public TestBase {
   void FreeQueueRingBufferTest(void);
 
  private:
-  void MaxMemoryAllocateTest(hsa_agent_t agent,
-                             hsa_amd_memory_pool_t pool);
-  void ZeroMemoryAllocateTest(hsa_agent_t agent,
-                             hsa_amd_memory_pool_t pool);
+  void MaxMemoryAllocateTest(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
+  void ZeroMemoryAllocateTest(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
 
   void FreeQueueRingBufferTest(hsa_agent_t agent);
 };

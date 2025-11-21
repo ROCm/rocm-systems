@@ -636,8 +636,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
           uint32_t block_samples_count = 1;
           if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockSeAttr)
             block_samples_count *= se_number;
-          if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockSaAttr)
-            block_samples_count *= 2;
+          if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockSaAttr) block_samples_count *= 2;
           if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockWgpAttr)
             block_samples_count *= pm4_factory->GetNumWGPs();
           if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockSqAttr && pm4_factory->IsGFX11())

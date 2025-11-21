@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -62,18 +62,12 @@
 namespace rocr {
 namespace os {
 
-static_assert(sizeof(LibHandle) == sizeof(HMODULE),
-              "OS abstraction size mismatch");
-static_assert(sizeof(LibHandle) == sizeof(::HANDLE),
-              "OS abstraction size mismatch");
-static_assert(sizeof(Semaphore) == sizeof(::HANDLE),
-              "OS abstraction size mismatch");
-static_assert(sizeof(Mutex) == sizeof(::HANDLE),
-              "OS abstraction size mismatch");
-static_assert(sizeof(Thread) == sizeof(::HANDLE),
-              "OS abstraction size mismatch");
-static_assert(sizeof(EventHandle) == sizeof(::HANDLE),
-              "OS abstraction size mismatch");
+static_assert(sizeof(LibHandle) == sizeof(HMODULE), "OS abstraction size mismatch");
+static_assert(sizeof(LibHandle) == sizeof(::HANDLE), "OS abstraction size mismatch");
+static_assert(sizeof(Semaphore) == sizeof(::HANDLE), "OS abstraction size mismatch");
+static_assert(sizeof(Mutex) == sizeof(::HANDLE), "OS abstraction size mismatch");
+static_assert(sizeof(Thread) == sizeof(::HANDLE), "OS abstraction size mismatch");
+static_assert(sizeof(EventHandle) == sizeof(::HANDLE), "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
   HMODULE ret = LoadLibrary(filename.c_str());
@@ -103,13 +97,9 @@ Semaphore CreateSemaphore() {
   return *(Semaphore*)&sem;
 }
 
-bool WaitSemaphore(Semaphore sem) {
-  return WaitForSingleObject(sem, INFINITE) == WAIT_OBJECT_0;
-}
+bool WaitSemaphore(Semaphore sem) { return WaitForSingleObject(sem, INFINITE) == WAIT_OBJECT_0; }
 
-void PostSemaphore(Semaphore sem) {
-  ReleaseSemaphore(sem, 1, nullptr);
-}
+void PostSemaphore(Semaphore sem) { ReleaseSemaphore(sem, 1, nullptr); }
 
 void DestroySemaphore(Semaphore sem) {
   if (!CloseHandle(sem)) {
@@ -152,13 +142,12 @@ unsigned __stdcall ThreadTrampoline(void* arg) {
   return 0;
 }
 
-Thread CreateThread(ThreadEntry entry_function, void* entry_argument,
-                    uint stack_size, int priority_unused) {
+Thread CreateThread(ThreadEntry entry_function, void* entry_argument, uint stack_size,
+                    int priority_unused) {
   ThreadArgs* thread_args = new ThreadArgs();
   thread_args->entry_args = entry_argument;
   thread_args->entry_function = entry_function;
-  uintptr_t ret =
-      _beginthreadex(NULL, stack_size, ThreadTrampoline, thread_args, 0, NULL);
+  uintptr_t ret = _beginthreadex(NULL, stack_size, ThreadTrampoline, thread_args, 0, NULL);
   return *(Thread*)&ret;
 }
 
@@ -169,8 +158,7 @@ bool WaitForThread(Thread thread) {
 }
 
 bool WaitForAllThreads(Thread* threads, uint thread_count) {
-  return WaitForMultipleObjects(thread_count, threads, TRUE, INFINITE) ==
-         WAIT_OBJECT_0;
+  return WaitForMultipleObjects(thread_count, threads, TRUE, INFINITE) == WAIT_OBJECT_0;
 }
 
 void SetEnvVar(std::string env_var_name, std::string env_var_value) {
@@ -209,8 +197,8 @@ uintptr_t GetUserModeVirtualMemoryBase() { return (uintptr_t)0; }
 
 // Os event wrappers
 EventHandle CreateOsEvent(bool auto_reset, bool init_state) {
-  EventHandle evt = reinterpret_cast<EventHandle>(
-      CreateEvent(NULL, (BOOL)(!auto_reset), (BOOL)init_state, NULL));
+  EventHandle evt =
+      reinterpret_cast<EventHandle>(CreateEvent(NULL, (BOOL)(!auto_reset), (BOOL)init_state, NULL));
   return evt;
 }
 
@@ -226,8 +214,7 @@ int WaitForOsEvent(EventHandle event, unsigned int milli_seconds) {
     return -1;
   }
 
-  int ret_code =
-      WaitForSingleObject(reinterpret_cast<::HANDLE>(event), milli_seconds);
+  int ret_code = WaitForSingleObject(reinterpret_cast<::HANDLE>(event), milli_seconds);
   if (ret_code == WAIT_TIMEOUT) {
     ret_code = 0x14003;  // 0x14003 indicates timeout
   }
@@ -260,9 +247,7 @@ uint64_t AccurateClockFrequency() {
   return ret;
 }
 
-SharedMutex CreateSharedMutex() {
-  return reinterpret_cast<SharedMutex>(new std::shared_mutex());
-}
+SharedMutex CreateSharedMutex() { return reinterpret_cast<SharedMutex>(new std::shared_mutex()); }
 
 bool TryAcquireSharedMutex(SharedMutex lock) {
   return reinterpret_cast<std::shared_mutex*>(lock)->try_lock();
@@ -273,9 +258,7 @@ bool AcquireSharedMutex(SharedMutex lock) {
   return true;
 }
 
-void ReleaseSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->unlock();
-}
+void ReleaseSharedMutex(SharedMutex lock) { reinterpret_cast<std::shared_mutex*>(lock)->unlock(); }
 
 bool TrySharedAcquireSharedMutex(SharedMutex lock) {
   return reinterpret_cast<std::shared_mutex*>(lock)->try_lock_shared();
@@ -290,9 +273,7 @@ void SharedReleaseSharedMutex(SharedMutex lock) {
   reinterpret_cast<std::shared_mutex*>(lock)->unlock_shared();
 }
 
-void DestroySharedMutex(SharedMutex lock) {
-  delete reinterpret_cast<std::shared_mutex*>(lock);
-}
+void DestroySharedMutex(SharedMutex lock) { delete reinterpret_cast<std::shared_mutex*>(lock); }
 
 uint64_t ReadSystemClock() {
   assert(false && "Not implemented.");
@@ -383,8 +364,8 @@ static inline int memProtToOsProt(MemProt prot) {
   return -1;
 }
 
-static size_t g_page_size_ = 0;   //!< The default os page size
-static int processorCount_;       //!< The number of active processors
+static size_t g_page_size_ = 0;  //!< The default os page size
+static int processorCount_;      //!< The number of active processors
 static size_t allocationGranularity_;
 
 //! Return the default os page size.
@@ -411,7 +392,8 @@ void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   size_t requested = size + alignment - allocationGranularity_;
   address mem, aligned;
   do {
-    mem = reinterpret_cast<address>(VirtualAlloc(start, requested, MEM_RESERVE, memProtToOsProt(prot)));
+    mem = reinterpret_cast<address>(
+        VirtualAlloc(start, requested, MEM_RESERVE, memProtToOsProt(prot)));
 
     // check for out of memory.
     if (mem == NULL) return NULL;
@@ -478,7 +460,7 @@ int Ctz(uint64_t i) {
 }
 
 char* DlError() { return nullptr; }
-}   //  namespace os
-}   //  namespace rocr
+}  //  namespace os
+}  //  namespace rocr
 
 #endif

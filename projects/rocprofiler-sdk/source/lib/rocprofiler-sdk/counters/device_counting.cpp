@@ -65,10 +65,10 @@ submitPacket(hsa_queue_t* queue, const void* packet)
         sched_yield();
     }
 
-    const uint32_t slot_idx = (uint32_t)(write_idx % queue->size);
+    const uint32_t slot_idx = (uint32_t) (write_idx % queue->size);
     // NOLINTBEGIN(performance-no-int-to-ptr)
     uint32_t* queue_slot =
-        reinterpret_cast<uint32_t*>((uintptr_t)(queue->base_address) + (slot_idx * pkt_size));
+        reinterpret_cast<uint32_t*>((uintptr_t) (queue->base_address) + (slot_idx * pkt_size));
     // NOLINTEND(performance-no-int-to-ptr)
 
     const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packet);

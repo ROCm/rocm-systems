@@ -35,7 +35,8 @@ using namespace std::string_literals;
 TEST(WhenTestingDeviceInfo, TestFailFatal) {
   fs::directory_entry dirp("/sys/class/kfd/kfd/topology/nodes");
   fs::path sysfs_nodes_path = "/sys/class/kfd/kfd/topology/nodes";
-  if (!fs::exists(sysfs_nodes_path)) rocprofiler::fatal("Could not opendir `%s'", sysfs_nodes_path.c_str());
+  if (!fs::exists(sysfs_nodes_path))
+    rocprofiler::fatal("Could not opendir `%s'", sysfs_nodes_path.c_str());
   for (auto const& dirp_entry : fs::directory_iterator{dirp}) {
     fs::path node_path = dirp_entry.path();
     long long node_id = std::stoll(std::string(dirp_entry.path().stem().string()));
@@ -59,7 +60,8 @@ TEST(WhenTestingDeviceInfo, TestFailFatal) {
 TEST(WhenTestingDeviceInfo, DeviceInfoReadSuccessfully) {
   fs::directory_entry dirp("/sys/class/kfd/kfd/topology/nodes");
   fs::path sysfs_nodes_path = "/sys/class/kfd/kfd/topology/nodes";
-  if (!fs::exists(sysfs_nodes_path)) rocprofiler::fatal("Could not opendir `%s'", sysfs_nodes_path.c_str());
+  if (!fs::exists(sysfs_nodes_path))
+    rocprofiler::fatal("Could not opendir `%s'", sysfs_nodes_path.c_str());
   uint64_t gpu_id = 0;
   uint32_t wave_front_size = 0;
   uint32_t location_id = 0;
@@ -162,7 +164,8 @@ TEST(WhenTestingDeviceInfo, DeviceInfoReadSuccessfully) {
 TEST(WhenTestingDeviceInfo, GetDeviceInfoFail) {
   fs::directory_entry dirp("/sys/class/kfd/kfd/topology/nodes");
   fs::path sysfs_nodes_path = "/sys/class/kfd/kfd/topology/nodes";
-  if (!fs::exists(sysfs_nodes_path)) rocprofiler::fatal("Could not opendir `%s'", sysfs_nodes_path.c_str());
+  if (!fs::exists(sysfs_nodes_path))
+    rocprofiler::fatal("Could not opendir `%s'", sysfs_nodes_path.c_str());
   uint64_t node_id = 0;
   for ([[maybe_unused]] auto const& dirp_entry : fs::directory_iterator{dirp}) {
     node_id++;
@@ -186,23 +189,22 @@ class TestRocprofilerSingleton {
   }
 };
 
-void instantiateRocprofiler(uint64_t *target) {
+void instantiateRocprofiler(uint64_t* target) {
   TestRocprofilerSingleton test;
   *target = test.ref_address;
-
 }
 
 
-//Add more threads here
+// Add more threads here
 TEST(WhenInvokingRocprofilerSingleton, RocprofilerSingletonInstanciation) {
   std::vector<std::thread> threads;
-  uint64_t *refaddress = (uint64_t*)malloc(sizeof(uint64_t)*(MAX_THREADS));
-  for(int i = 0; i < MAX_THREADS; i++) {
+  uint64_t* refaddress = (uint64_t*)malloc(sizeof(uint64_t) * (MAX_THREADS));
+  for (int i = 0; i < MAX_THREADS; i++) {
     threads.emplace_back(instantiateRocprofiler, &refaddress[i]);
   }
   for (auto&& thread : threads) thread.join();
   uint64_t ref_addr = refaddress[0];
-  for(int i = 1; i < MAX_THREADS; i++)
-   EXPECT_EQ(ref_addr, refaddress[i]) << "RocprofilerSingleton Instanciation failed";
+  for (int i = 1; i < MAX_THREADS; i++)
+    EXPECT_EQ(ref_addr, refaddress[i]) << "RocprofilerSingleton Instanciation failed";
   free(refaddress);
 }

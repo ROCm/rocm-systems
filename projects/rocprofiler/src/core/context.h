@@ -247,7 +247,7 @@ class Context {
     size_t index;
     char* ptr;
     size_t single_xcc_buff_size;
-    size_t cb_invocation_count; 
+    size_t cb_invocation_count;
   };
 
   void RestoreSignals(const profile_tuple_t& tuple) {
@@ -265,14 +265,15 @@ class Context {
       hsa_rsrc_->SignalWaitRestore(tuple.completion_signal, 1);
       // Restore other signals
       RestoreSignals(tuple);
-      for (rocprofiler_feature_t* rinfo : *(tuple.info_vector)){
+      for (rocprofiler_feature_t* rinfo : *(tuple.info_vector)) {
         rinfo->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
         rinfo->data.result_int64 = 0;
       }
       size_t xcc_count = agent_info_->xcc_num;
-      size_t single_xcc_buff_size = tuple.profile->output_buffer.size / (sizeof(uint64_t) * xcc_count);
-      callback_data_t callback_data{tuple.profile, tuple.info_vector, tuple.info_vector->size(),
-                                    NULL, single_xcc_buff_size, 0};
+      size_t single_xcc_buff_size =
+          tuple.profile->output_buffer.size / (sizeof(uint64_t) * xcc_count);
+      callback_data_t callback_data{tuple.profile, tuple.info_vector,    tuple.info_vector->size(),
+                                    NULL,          single_xcc_buff_size, 0};
       const hsa_status_t status =
           api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, DataCallback, &callback_data);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "context iterate data failed");
@@ -527,8 +528,7 @@ class Context {
     } else {
       if (sample_id == 0) index += 1;
     }
-    if(callback_data->cb_invocation_count++ % callback_data->single_xcc_buff_size == 0)
-      index = 0;
+    if (callback_data->cb_invocation_count++ % callback_data->single_xcc_buff_size == 0) index = 0;
     callback_data->index = index;
 
     if (index < info_vector.size()) {

@@ -64,10 +64,10 @@ struct file_buffer
     , file{get_tmp_file_name_callback()(_domain)}
     {}
 
-    ~file_buffer()                      = default;
-    file_buffer(const file_buffer&)     = delete;
-    file_buffer(file_buffer&&) noexcept = default;
-    file_buffer& operator=(const file_buffer&) = delete;
+    ~file_buffer()                                 = default;
+    file_buffer(const file_buffer&)                = delete;
+    file_buffer(file_buffer&&) noexcept            = default;
+    file_buffer& operator=(const file_buffer&)     = delete;
     file_buffer& operator=(file_buffer&&) noexcept = default;
 
     void reset();

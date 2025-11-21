@@ -193,10 +193,8 @@ void print_usage(fs::path current_path) {
 
   // no serialization
   fmt::print(fg(fmt::color::cyan), " -ns  | --no-serialization\n\t\t\t");
-  fmt::print(
-      "For disabling serilization when running in counter-collection mode\n\t\t\t");
-  fmt::print(fg(fmt::color::gray),
-             "usage e.g:  rocprofv2 -i pmc.txt -ns\n");
+  fmt::print("For disabling serilization when running in counter-collection mode\n\t\t\t");
+  fmt::print(fg(fmt::color::gray), "usage e.g:  rocprofv2 -i pmc.txt -ns\n");
 }
 
 // runs memory check on hip_vectoradd
@@ -223,66 +221,57 @@ static std::atomic<uint32_t> pass_num{1};
 // function to run the app for the amount of passes needed
 void run_application(const char* app_path, char* const envp[], char* const args[]) {
   std::vector<char*> envp_vector;
-    std::vector<char*> counter_passes;
+  std::vector<char*> counter_passes;
 
-    // each line of counter input file needs a single pass
-    for(int i = 0; envp[i] != nullptr; ++i)
-    {
-        std::string envpString = envp[i];
-        if(envpString.find("ROCPROFILER_COUNTERS") != std::string::npos)
-        {
-            counter_passes.push_back(const_cast<char*>(envp[i]));
-        }
-        else
-        {
-            envp_vector.push_back(const_cast<char*>(envp[i]));
-        }
+  // each line of counter input file needs a single pass
+  for (int i = 0; envp[i] != nullptr; ++i) {
+    std::string envpString = envp[i];
+    if (envpString.find("ROCPROFILER_COUNTERS") != std::string::npos) {
+      counter_passes.push_back(const_cast<char*>(envp[i]));
+    } else {
+      envp_vector.push_back(const_cast<char*>(envp[i]));
     }
+  }
 
-    // no counter collection. hence need only 1 pass
-    if(counter_passes.empty())
-    {
-        envp_vector[envp_vector.size()] = nullptr;
+  // no counter collection. hence need only 1 pass
+  if (counter_passes.empty()) {
+    envp_vector[envp_vector.size()] = nullptr;
 
-        int status = 0;
-        if(fork() > 0)
-        {
-            status = execve(app_path, args, envp_vector.data());
-            std::cout << "error: can't launch(" << app_path << "):" << std::endl;
-            perror("errno");
-            exit(EXIT_FAILURE);
-        }
-        envp_vector.pop_back();
-        if(status == 0)
-            std::cout << "pass(" << pass_num.fetch_add(1, std::memory_order_release)
-                      << ") of the application: " << fs::path(app_path).filename()
-                      << " is executed successfully!" << std::endl;
+    int status = 0;
+    if (fork() > 0) {
+      status = execve(app_path, args, envp_vector.data());
+      std::cout << "error: can't launch(" << app_path << "):" << std::endl;
+      perror("errno");
+      exit(EXIT_FAILURE);
     }
-    // counter collection. might need multipass, depends on input file pmc lines
-    else
-    {
-        for(const auto& pass : counter_passes)
-        {
-            int status = 0;
+    envp_vector.pop_back();
+    if (status == 0)
+      std::cout << "pass(" << pass_num.fetch_add(1, std::memory_order_release)
+                << ") of the application: " << fs::path(app_path).filename()
+                << " is executed successfully!" << std::endl;
+  }
+  // counter collection. might need multipass, depends on input file pmc lines
+  else {
+    for (const auto& pass : counter_passes) {
+      int status = 0;
 
-            envp_vector.push_back(pass);
-            envp_vector[envp_vector.size()] = nullptr;
+      envp_vector.push_back(pass);
+      envp_vector[envp_vector.size()] = nullptr;
 
-            if(fork() > 0)
-            {
-                status = execve(app_path, args, envp_vector.data());
-                std::cout << "error: can't launch(" << app_path << "):" << std::endl;
-                perror("errno");
-                exit(EXIT_FAILURE);
-            }
-            envp_vector.pop_back();
-            if(status == 0)
-                std::cout << "pass(" << pass_num.fetch_add(1, std::memory_order_release)
-                          << ") of the application: " << fs::path(app_path).filename()
-                          << " is executed successfully!" << std::endl;
-        }
+      if (fork() > 0) {
+        status = execve(app_path, args, envp_vector.data());
+        std::cout << "error: can't launch(" << app_path << "):" << std::endl;
+        perror("errno");
+        exit(EXIT_FAILURE);
+      }
+      envp_vector.pop_back();
+      if (status == 0)
+        std::cout << "pass(" << pass_num.fetch_add(1, std::memory_order_release)
+                  << ") of the application: " << fs::path(app_path).filename()
+                  << " is executed successfully!" << std::endl;
     }
-    envp_vector.clear();
+  }
+  envp_vector.clear();
 }
 
 }  // namespace tools

@@ -65,4 +65,3 @@ class Kernel : public device::Kernel {
 };
 
 }  // namespace amd::roc
-

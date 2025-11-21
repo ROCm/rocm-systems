@@ -57,10 +57,10 @@ struct tool_counter_info : rocprofiler_counter_info_v1_t
     , dimensions{std::move(_dim_info)}
     {}
 
-    ~tool_counter_info()                            = default;
-    tool_counter_info(const tool_counter_info&)     = default;
-    tool_counter_info(tool_counter_info&&) noexcept = default;
-    tool_counter_info& operator=(const tool_counter_info&) = default;
+    ~tool_counter_info()                                       = default;
+    tool_counter_info(const tool_counter_info&)                = default;
+    tool_counter_info(tool_counter_info&&) noexcept            = default;
+    tool_counter_info& operator=(const tool_counter_info&)     = default;
     tool_counter_info& operator=(tool_counter_info&&) noexcept = default;
 
     rocprofiler_agent_id_t       agent_id      = {};

@@ -59,8 +59,6 @@ void SetEnv(const char* env_var_name, const char* env_var_value) {
   return;
 }
 
-char* GetEnv(const char* env_var_name) {
-  return getenv(env_var_name);
-}
+char* GetEnv(const char* env_var_name) { return getenv(env_var_name); }
 
 }  // namespace rocrtst

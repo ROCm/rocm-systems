@@ -59,20 +59,22 @@
 #include "common/helper_funcs.h"
 #include "gtest/gtest.h"
 
-#define RET_IF_HSA_ERR(err) { \
-  if ((err) != HSA_STATUS_SUCCESS) { \
-    const char* msg = 0; \
-    hsa_status_string(err, &msg); \
-    std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << \
-                          __FILE__ << ". Call returned " << err << std::endl; \
-    std::cout << msg << std::endl; \
-    return (err); \
-  } \
-}
+#define RET_IF_HSA_ERR(err)                                                                        \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
+                << ". Call returned " << err << std::endl;                                         \
+      std::cout << msg << std::endl;                                                               \
+      return (err);                                                                                \
+    }                                                                                              \
+  }
 
 MemoryAsyncCopyNUMA::MemoryAsyncCopyNUMA(void) : MemoryAsyncCopy() {
   set_title("Asynchronous Memory Copy Bandwidth Using NUMA aware allocation");
-  set_description("This test measures bandwidth to/from Host from/to GPU "
+  set_description(
+      "This test measures bandwidth to/from Host from/to GPU "
       "using hsa_amd_memory_async_copy() to copy buffers of various length "
       "from memory pool to another. Host memory is allocated using NUMA "
       "aware allocators. Bandwidth performance using NUMA should, at worst, "
@@ -81,15 +83,14 @@ MemoryAsyncCopyNUMA::MemoryAsyncCopyNUMA(void) : MemoryAsyncCopy() {
   do_p2p_ = false;
 }
 
-MemoryAsyncCopyNUMA::~MemoryAsyncCopyNUMA(void) {
-}
+MemoryAsyncCopyNUMA::~MemoryAsyncCopyNUMA(void) {}
 
 void MemoryAsyncCopyNUMA::Run(void) {
   int ret;
   TestBase::Run();
 
   hwloc_bitmap_t cpu_bind_set = nullptr;
-  char *a;
+  char* a;
 
   // Bind CPU
   cpu_bind_set = hwloc_bitmap_alloc();
@@ -99,17 +100,15 @@ void MemoryAsyncCopyNUMA::Run(void) {
   ASSERT_FALSE((bool)hwloc_bitmap_iszero(cpu_bind_set));
 
   if (hwloc_bitmap_isfull(cpu_bind_set)) {
-    std::cout <<
-     "All cpus associated with NUMA node. No hwloc cpu binding will be done."
-                                                                 << std::endl;
+    std::cout << "All cpus associated with NUMA node. No hwloc cpu binding will be done."
+              << std::endl;
   } else {
     hwloc_bitmap_t cpu_bind_set_chk = nullptr;
     cpu_bind_set_chk = hwloc_bitmap_alloc();
 
     hwloc_bitmap_singlify(cpu_bind_set);
     ret = hwloc_set_cpubind(topology_, cpu_bind_set, HWLOC_CPUBIND_PROCESS);
-    ASSERT_TRUE(ret == 0 &&
-          "hwloc: cpubind not supported or cannot be enforced. Check errno.");
+    ASSERT_TRUE(ret == 0 && "hwloc: cpubind not supported or cannot be enforced. Check errno.");
 
     hwloc_get_cpubind(topology_, cpu_bind_set_chk, 0);
 
@@ -120,14 +119,12 @@ void MemoryAsyncCopyNUMA::Run(void) {
       printf("read hwloc cpubind mask: %s\n", a);
     }
     ASSERT_TRUE(hwloc_bitmap_isequal(cpu_bind_set, cpu_bind_set_chk) &&
-                                              "Unexpected hwloc cpubind set");
+                "Unexpected hwloc cpubind set");
     hwloc_bitmap_free(cpu_bind_set_chk);
 
     // Bind Memory
-    ret = hwloc_set_membind_nodeset(topology_, cpu_hwl_numa_nodeset_,
-                                     HWLOC_MEMBIND_BIND, 0);
-    ASSERT_TRUE(ret == 0 &&
-          "hwloc: membind not supported or cannot be enforced. Check errno.");
+    ret = hwloc_set_membind_nodeset(topology_, cpu_hwl_numa_nodeset_, HWLOC_MEMBIND_BIND, 0);
+    ASSERT_TRUE(ret == 0 && "hwloc: membind not supported or cannot be enforced. Check errno.");
   }
   for (Transaction t : tran_) {
     RunBenchmarkWithVerification(&t);
@@ -136,14 +133,14 @@ void MemoryAsyncCopyNUMA::Run(void) {
   hwloc_bitmap_free(cpu_bind_set);
 }
 
-void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
+void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction* t) {
   hsa_status_t err;
   void* ptr_src;
   void* ptr_dst;
 
   size_t size = t->max_size * 1024;
 
-  hsa_amd_memory_pool_t src_pool =  pool_info_[t->src]->pool_;
+  hsa_amd_memory_pool_t src_pool = pool_info_[t->src]->pool_;
   hsa_agent_t dst_agent = pool_info_[t->dst]->owner_agent_info()->agent();
   hsa_amd_memory_pool_t dst_pool = pool_info_[t->dst]->pool_;
 
@@ -152,14 +149,13 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
   PrintTransactionType(t);
 
   // Allocate resources...
-  void *locked_mem;
+  void* locked_mem;
 
   // We are relying a previous call to hwloc_set_membind_nodeset() to set
   // policy
-  void *local_alloc = hwloc_alloc(topology_, size);
+  void* local_alloc = hwloc_alloc(topology_, size);
   ASSERT_TRUE(local_alloc != nullptr && "hwloc_alloc_membind() failed");
-  hsa_agent_t gpu_agent = ((t->type == H2D || t->type == H2DRemote) ?
-                                                       dst_agent : src_agent);
+  hsa_agent_t gpu_agent = ((t->type == H2D || t->type == H2DRemote) ? dst_agent : src_agent);
 
   // 1. We should specify the gpu agent here as the cpu already has
   // access to the system memory.
@@ -189,11 +185,9 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
 
   void* host_ptr_src = NULL;
   void* host_ptr_dst = NULL;
-  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0,
-                                     reinterpret_cast<void**>(&host_ptr_src));
+  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0, reinterpret_cast<void**>(&host_ptr_src));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
-  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0,
-                                     reinterpret_cast<void**>(&host_ptr_dst));
+  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0, reinterpret_cast<void**>(&host_ptr_dst));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
   hsa_signal_t s;
@@ -226,56 +220,54 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
     ASSERT_EQ(HSA_STATUS_SUCCESS, err);
   });
 
-  hsa_agent_t *cpy_ag = nullptr;
+  hsa_agent_t* cpy_ag = nullptr;
   // **** First copy from the system buffer source to the test source pool
   // Acquire the appropriate access; prefer GPU agent over CPU where there
   // is a choice. We don't need to do this is the test source happens to
   // be the host pool
 
-  err = hsa_amd_memory_fill(host_ptr_src, 1, size/sizeof(uint32_t));
+  err = hsa_amd_memory_fill(host_ptr_src, 1, size / sizeof(uint32_t));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-  err = hsa_amd_memory_fill(host_ptr_dst, 0, size/sizeof(uint32_t));
+  err = hsa_amd_memory_fill(host_ptr_dst, 0, size / sizeof(uint32_t));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
   if (t->type == D2H) {
-    cpy_ag = AcquireAsyncCopyAccess(ptr_src, src_pool, &src_agent,
-                                        host_ptr_src, sys_pool_, &cpu_agent_);
+    cpy_ag =
+        AcquireAsyncCopyAccess(ptr_src, src_pool, &src_agent, host_ptr_src, sys_pool_, &cpu_agent_);
     if (cpy_ag == nullptr) {
-      std::cout << "Agents " << t->src << " and " << t->dst <<
-                              "cannot access each other's pool." << std::endl;
+      std::cout << "Agents " << t->src << " and " << t->dst << "cannot access each other's pool."
+                << std::endl;
       std::cout << "Skipping..." << std::endl;
       return;
     }
     ASSERT_NE(cpy_ag, nullptr);
 
-    err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag,
-                                                            size, 0, NULL, s);
+    err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag, size, 0, NULL, s);
     ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-    while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1,
-                                         uint64_t(-1), HSA_WAIT_STATE_ACTIVE))
-    {}
+    while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
+                                     HSA_WAIT_STATE_ACTIVE)) {
+    }
 
     memset(local_alloc, 0, size);
   } else {  // H2D
-    cpy_ag = AcquireAsyncCopyAccess(ptr_dst, dst_pool, &dst_agent,
-                                        host_ptr_dst, sys_pool_, &cpu_agent_);
+    cpy_ag =
+        AcquireAsyncCopyAccess(ptr_dst, dst_pool, &dst_agent, host_ptr_dst, sys_pool_, &cpu_agent_);
     if (cpy_ag == nullptr) {
-      std::cout << "Agents " << t->src << " and " << t->dst <<
-                              "cannot access each other's pool." << std::endl;
+      std::cout << "Agents " << t->src << " and " << t->dst << "cannot access each other's pool."
+                << std::endl;
       std::cout << "Skipping..." << std::endl;
       return;
     }
     ASSERT_NE(cpy_ag, nullptr);
 
-    err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag,
-                                                            size, 0, NULL, s);
+    err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag, size, 0, NULL, s);
     ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-    while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1,
-                                         uint64_t(-1), HSA_WAIT_STATE_ACTIVE))
-    {}
+    while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
+                                     HSA_WAIT_STATE_ACTIVE)) {
+    }
 
     memset(local_alloc, 1, size);
   }
@@ -287,11 +279,10 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
 
   ASSERT_NE(cpy_ag, nullptr);
 
-  cpy_ag = AcquireAsyncCopyAccess(ptr_dst, dst_pool, &dst_agent,
-              ptr_src, src_pool, &src_agent);
+  cpy_ag = AcquireAsyncCopyAccess(ptr_dst, dst_pool, &dst_agent, ptr_src, src_pool, &src_agent);
   if (cpy_ag == nullptr) {
-    std::cout << "Agents " << t->src << " and " << t->dst <<
-                            "cannot access each other's pool." << std::endl;
+    std::cout << "Agents " << t->src << " and " << t->dst << "cannot access each other's pool."
+              << std::endl;
     std::cout << "Skipping..." << std::endl;
     return;
   }
@@ -316,13 +307,13 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
       int index = copy_timer.CreateTimer();
 
       copy_timer.StartTimer(index);
-      err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag,
-                                                 Granularities[i].Size, 0, NULL, t->signal);
+      err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag, Granularities[i].Size, 0,
+                                      NULL, t->signal);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-      while (hsa_signal_wait_scacquire(t->signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                         uint64_t(-1), HSA_WAIT_STATE_ACTIVE))
-      {}
+      while (hsa_signal_wait_scacquire(t->signal, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
+                                       HSA_WAIT_STATE_ACTIVE)) {
+      }
 
       copy_timer.StopTimer(index);
 
@@ -334,13 +325,13 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
       if (t->type == D2H) {
         memcpy(host_ptr_dst, local_alloc, size);
       } else {
-        err = hsa_amd_memory_async_copy(host_ptr_dst, dst_agent, ptr_dst,
-                                                 dst_agent, size, 0, NULL, s);
+        err = hsa_amd_memory_async_copy(host_ptr_dst, dst_agent, ptr_dst, dst_agent, size, 0, NULL,
+                                        s);
         ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-        while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1,
-                                       uint64_t(-1), HSA_WAIT_STATE_ACTIVE))
-          {}
+        while (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
+                                         HSA_WAIT_STATE_ACTIVE)) {
+        }
       }
 
       if (memcmp(host_ptr_src, host_ptr_dst, Granularities[i].Size)) {

@@ -163,7 +163,8 @@ external_correlation::push(rocprofiler_thread_id_t tid, rocprofiler_user_data_t 
             return true;
         },
         tid))
-    {}
+    {
+    }
 
     // since we know from above that there will be a key for the tid, we start with a read
     // lock and then once we have have the mapped data for the key, we leverage the enabling
@@ -267,7 +268,8 @@ external_correlation::invoke_callback(rocprofiler_thread_id_t thr_id,
 }  // namespace external_correlation
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_external_correlation_id_request_service(
     rocprofiler_context_id_t                                  context_id,

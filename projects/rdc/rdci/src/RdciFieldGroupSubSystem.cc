@@ -112,33 +112,26 @@ void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char** argv) {
 
 void RdciFieldGroupSubSystem::show_help() const {
   if (is_json_output()) return;
-  std::cout << " fieldgroup -- Used to  create and maintain groups "
-            << "of field Ids.\n\n";
+  std::cout << " fieldgroup -- Used to  create and maintain groups " << "of field Ids.\n\n";
   std::cout << "Usage\n";
-  std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port]"
-            << " [--json] [-u] -l\n";
+  std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port]" << " [--json] [-u] -l\n";
   std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json]"
             << " [-u] -c <groupName> -f <filedIds>\n";
-  std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json] [-u] "
-            << "-g <groupId> -i\n";
-  std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json] [-u] "
-            << "-d <groupId>\n";
+  std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json] [-u] " << "-g <groupId> -i\n";
+  std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json] [-u] " << "-d <groupId>\n";
   std::cout << "\nFlags:\n";
   show_common_usage();
-  std::cout << "  --json                         "
-            << "Output using json.\n";
+  std::cout << "  --json                         " << "Output using json.\n";
   std::cout << "  -l  --list                     "
             << "List the field groups that currently exist for a host.\n";
   std::cout << "  -g  --group groupId            "
             << "The field group to query on the specified host.\n";
-  std::cout << "  -c  --create groupName         "
-            << "Create a field group on the remote host.\n";
+  std::cout << "  -c  --create groupName         " << "Create a field group on the remote host.\n";
   std::cout << "  -f  --fieldids fieldIds        Comma-separated "
             << "list of the field ids to add to a field group\n";
   std::cout << "  -i  --info                     "
             << "Display the information for the specified group Id\n";
-  std::cout << "  -d  --delete groupId           "
-            << "Delete a field group on the remote host.\n";
+  std::cout << "  -d  --delete groupId           " << "Delete a field group on the remote host.\n";
 }
 
 void RdciFieldGroupSubSystem::process() {
@@ -181,8 +174,8 @@ void RdciFieldGroupSubSystem::process() {
         if (is_json_output()) {
           std::cout << "\"field_group_id\": \"" << group_id << "\", \"status\": \"ok\"";
         } else {
-          std::cout << "Successfully created a field group"
-                    << " with a group ID " << group_id << std::endl;
+          std::cout << "Successfully created a field group" << " with a group ID " << group_id
+                    << std::endl;
           return;
         }
       }
@@ -210,9 +203,7 @@ void RdciFieldGroupSubSystem::process() {
 
       if (!is_json_output()) {
         std::cout << count << " field group found.\n";
-        std::cout << "GroupID\t"
-                  << "GroupName\t"
-                  << "FieldIds\n";
+        std::cout << "GroupID\t" << "GroupName\t" << "FieldIds\n";
       }
 
       for (uint32_t i = 0; i < count; i++) {

@@ -116,9 +116,9 @@ std::mutex& Tracer::GetTracerLock() { return tracer_lock_; }
 void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_data, void* args) {
   api_callback_data_t* args_data = reinterpret_cast<api_callback_data_t*>(args);
   rocprofiler_tracer_api_data_t api_data{};
-  rocprofiler::ROCProfiler_Singleton&  rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
-  if (args_data  &&
-      rocprofiler_singleton.GetSession(args_data->session_id) &&
+  rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton =
+      rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (args_data && rocprofiler_singleton.GetSession(args_data->session_id) &&
       rocprofiler_singleton.GetSession(args_data->session_id)->GetTracer()) {
     switch (domain) {
       case ACTIVITY_DOMAIN_ROCTX: {

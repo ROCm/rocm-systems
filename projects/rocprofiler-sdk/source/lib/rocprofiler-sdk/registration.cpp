@@ -87,7 +87,8 @@
 #include <unordered_set>
 #include <vector>
 
-extern "C" {
+extern "C"
+{
 #pragma weak rocprofiler_configure
 
 extern rocprofiler_tool_configure_result_t*
@@ -236,7 +237,7 @@ struct client_library
     client_library(const client_library&)     = delete;
     client_library(client_library&&) noexcept = default;
 
-    client_library& operator=(const client_library&) = delete;
+    client_library& operator=(const client_library&)     = delete;
     client_library& operator=(client_library&&) noexcept = delete;
 
     std::string                                 name                    = {};
@@ -929,7 +930,8 @@ detach()
 }  // namespace registration
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_is_initialized(int* status)
 {

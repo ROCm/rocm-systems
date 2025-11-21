@@ -19,7 +19,6 @@ struct hwloc_backend;
 #endif
 
 
-
 /** \defgroup hwlocality_disc_components Components and Plugins: Discovery components
  * @{
  */
@@ -28,18 +27,18 @@ struct hwloc_backend;
 typedef enum hwloc_disc_component_type_e {
   /** \brief CPU-only discovery through the OS, or generic no-OS support.
    * \hideinitializer */
-  HWLOC_DISC_COMPONENT_TYPE_CPU = (1<<0),
+  HWLOC_DISC_COMPONENT_TYPE_CPU = (1 << 0),
 
   /** \brief xml, synthetic or custom,
    * platform-specific components such as bgq.
    * Anything the discovers CPU and everything else.
    * No misc backend is expected to complement a global component.
    * \hideinitializer */
-  HWLOC_DISC_COMPONENT_TYPE_GLOBAL = (1<<1),
+  HWLOC_DISC_COMPONENT_TYPE_GLOBAL = (1 << 1),
 
   /** \brief OpenCL, Cuda, etc.
    * \hideinitializer */
-  HWLOC_DISC_COMPONENT_TYPE_MISC = (1<<2)
+  HWLOC_DISC_COMPONENT_TYPE_MISC = (1 << 2)
 } hwloc_disc_component_type_t;
 
 /** \brief Discovery component structure
@@ -54,7 +53,7 @@ struct hwloc_disc_component {
   /** \brief Name.
    * If this component is built as a plugin, this name does not have to match the plugin filename.
    */
-  const char *name;
+  const char* name;
 
   /** \brief Component types to exclude, as an OR'ed set of ::hwloc_disc_component_type_e.
    *
@@ -69,7 +68,8 @@ struct hwloc_disc_component {
   /** \brief Instantiate callback to create a backend from the component.
    * Parameters data1, data2, data3 are NULL except for components
    * that have special enabling routines such as hwloc_topology_set_xml(). */
-  struct hwloc_backend * (*instantiate)(struct hwloc_disc_component *component, const void *data1, const void *data2, const void *data3);
+  struct hwloc_backend* (*instantiate)(struct hwloc_disc_component* component, const void* data1,
+                                       const void* data2, const void* data3);
 
   /** \brief Component priority.
    * Used to sort topology->components, higher priority first.
@@ -89,12 +89,10 @@ struct hwloc_disc_component {
    * (the component structure is usually read-only,
    *  the core copies it before using this field for queueing)
    */
-  struct hwloc_disc_component * next;
+  struct hwloc_disc_component* next;
 };
 
 /** @} */
-
-
 
 
 /** \defgroup hwlocality_disc_backends Components and Plugins: Discovery backends
@@ -113,13 +111,13 @@ struct hwloc_disc_component {
  */
 struct hwloc_backend {
   /** \private Reserved for the core, set by hwloc_backend_alloc() */
-  struct hwloc_disc_component * component;
+  struct hwloc_disc_component* component;
   /** \private Reserved for the core, set by hwloc_backend_enable() */
-  struct hwloc_topology * topology;
+  struct hwloc_topology* topology;
   /** \private Reserved for the core. Set to 1 if forced through envvar, 0 otherwise. */
   int envvar_forced;
   /** \private Reserved for the core. Used internally to list backends topology->backends. */
-  struct hwloc_backend * next;
+  struct hwloc_backend* next;
 
   /** \brief Backend flags, as an OR'ed set of ::hwloc_backend_flag_e */
   unsigned long flags;
@@ -135,48 +133,52 @@ struct hwloc_backend {
   int is_thissystem;
 
   /** \brief Backend private data, or NULL if none. */
-  void * private_data;
+  void* private_data;
   /** \brief Callback for freeing the private_data.
    * May be NULL.
    */
-  void (*disable)(struct hwloc_backend *backend);
+  void (*disable)(struct hwloc_backend* backend);
 
   /** \brief Main discovery callback.
    * returns > 0 if it modified the topology tree, -1 on error, 0 otherwise.
    * May be NULL if type is ::HWLOC_DISC_COMPONENT_TYPE_MISC. */
-  int (*discover)(struct hwloc_backend *backend);
+  int (*discover)(struct hwloc_backend* backend);
 
-  /** \brief Callback used by the PCI backend to retrieve the locality of a PCI object from the OS/cpu backend.
-   * May be NULL. */
-  int (*get_obj_cpuset)(struct hwloc_backend *backend, struct hwloc_backend *caller, struct hwloc_obj *obj, hwloc_bitmap_t cpuset);
+  /** \brief Callback used by the PCI backend to retrieve the locality of a PCI object from the
+   * OS/cpu backend. May be NULL. */
+  int (*get_obj_cpuset)(struct hwloc_backend* backend, struct hwloc_backend* caller,
+                        struct hwloc_obj* obj, hwloc_bitmap_t cpuset);
 
   /** \brief Callback called by backends to notify this backend that a new object was added.
    * returns > 0 if it modified the topology tree, 0 otherwise.
    * May be NULL. */
-  int (*notify_new_object)(struct hwloc_backend *backend, struct hwloc_backend *caller, struct hwloc_obj *obj);
+  int (*notify_new_object)(struct hwloc_backend* backend, struct hwloc_backend* caller,
+                           struct hwloc_obj* obj);
 };
 
 /** \brief Backend flags */
 enum hwloc_backend_flag_e {
   /** \brief Levels should be reconnected before this backend discover() is used.
    * \hideinitializer */
-  HWLOC_BACKEND_FLAG_NEED_LEVELS = (1UL<<0)
+  HWLOC_BACKEND_FLAG_NEED_LEVELS = (1UL << 0)
 };
 
-/** \brief Allocate a backend structure, set good default values, initialize backend->component and topology, etc.
- * The caller will then modify whatever needed, and call hwloc_backend_enable().
+/** \brief Allocate a backend structure, set good default values, initialize backend->component and
+ * topology, etc. The caller will then modify whatever needed, and call hwloc_backend_enable().
  */
-HWLOC_DECLSPEC struct hwloc_backend * hwloc_backend_alloc(struct hwloc_disc_component *component);
+HWLOC_DECLSPEC struct hwloc_backend* hwloc_backend_alloc(struct hwloc_disc_component* component);
 
 /** \brief Enable a previously allocated and setup backend. */
-HWLOC_DECLSPEC int hwloc_backend_enable(struct hwloc_topology *topology, struct hwloc_backend *backend);
+HWLOC_DECLSPEC int hwloc_backend_enable(struct hwloc_topology* topology,
+                                        struct hwloc_backend* backend);
 
 /** \brief Used by backends discovery callbacks to request locality information from others.
  *
  * Traverse the list of enabled backends until one has a
  * get_obj_cpuset() method, and call it.
  */
-HWLOC_DECLSPEC int hwloc_backends_get_obj_cpuset(struct hwloc_backend *caller, struct hwloc_obj *obj, hwloc_bitmap_t cpuset);
+HWLOC_DECLSPEC int hwloc_backends_get_obj_cpuset(struct hwloc_backend* caller,
+                                                 struct hwloc_obj* obj, hwloc_bitmap_t cpuset);
 
 /** \brief Used by backends discovery callbacks to notify other
  * backends of new objects.
@@ -187,11 +189,10 @@ HWLOC_DECLSPEC int hwloc_backends_get_obj_cpuset(struct hwloc_backend *caller, s
  *
  * Currently only used for notifying of new PCI device objects.
  */
-HWLOC_DECLSPEC int hwloc_backends_notify_new_object(struct hwloc_backend *caller, struct hwloc_obj *obj);
+HWLOC_DECLSPEC int hwloc_backends_notify_new_object(struct hwloc_backend* caller,
+                                                    struct hwloc_obj* obj);
 
 /** @} */
-
-
 
 
 /** \defgroup hwlocality_generic_components Components and Plugins: Generic components
@@ -254,16 +255,16 @@ struct hwloc_component {
   /** \brief Component flags, unused for now */
   unsigned long flags;
 
-  /** \brief Component data, pointing to a struct hwloc_disc_component or struct hwloc_xml_component. */
-  void * data;
+  /** \brief Component data, pointing to a struct hwloc_disc_component or struct
+   * hwloc_xml_component. */
+  void* data;
 };
 
 /** @} */
 
 
-
-
-/** \defgroup hwlocality_components_core_funcs Components and Plugins: Core functions to be used by components
+/** \defgroup hwlocality_components_core_funcs Components and Plugins: Core functions to be used by
+ * components
  * @{
  */
 
@@ -287,20 +288,24 @@ struct hwloc_component {
  * Returns NULL and frees obj on error.
  * Returns another object and frees obj if it was merged with an identical pre-existing object.
  */
-HWLOC_DECLSPEC struct hwloc_obj *hwloc_insert_object_by_cpuset(struct hwloc_topology *topology, hwloc_obj_t obj);
+HWLOC_DECLSPEC struct hwloc_obj* hwloc_insert_object_by_cpuset(struct hwloc_topology* topology,
+                                                               hwloc_obj_t obj);
 
 /** \brief Type of error callbacks during object insertion */
-typedef void (*hwloc_report_error_t)(const char * msg, int line);
+typedef void (*hwloc_report_error_t)(const char* msg, int line);
 /** \brief Report an insertion error from a backend */
-HWLOC_DECLSPEC void hwloc_report_os_error(const char * msg, int line);
+HWLOC_DECLSPEC void hwloc_report_os_error(const char* msg, int line);
 /** \brief Check whether insertion errors are hidden */
 HWLOC_DECLSPEC int hwloc_hide_errors(void);
 
 /** \brief Add an object to the topology and specify which error callback to use.
  *
- * Aside from the error callback selection, this function is identical to hwloc_insert_object_by_cpuset()
+ * Aside from the error callback selection, this function is identical to
+ * hwloc_insert_object_by_cpuset()
  */
-HWLOC_DECLSPEC struct hwloc_obj *hwloc__insert_object_by_cpuset(struct hwloc_topology *topology, hwloc_obj_t obj, hwloc_report_error_t report_error);
+HWLOC_DECLSPEC struct hwloc_obj* hwloc__insert_object_by_cpuset(struct hwloc_topology* topology,
+                                                                hwloc_obj_t obj,
+                                                                hwloc_report_error_t report_error);
 
 /** \brief Insert an object somewhere in the topology.
  *
@@ -316,13 +321,13 @@ HWLOC_DECLSPEC struct hwloc_obj *hwloc__insert_object_by_cpuset(struct hwloc_top
  *
  * Remember to call topology_connect() afterwards to fix handy pointers.
  */
-HWLOC_DECLSPEC void hwloc_insert_object_by_parent(struct hwloc_topology *topology, hwloc_obj_t parent, hwloc_obj_t obj);
+HWLOC_DECLSPEC void hwloc_insert_object_by_parent(struct hwloc_topology* topology,
+                                                  hwloc_obj_t parent, hwloc_obj_t obj);
 
 /** \brief Allocate and initialize an object of the given type and physical index */
-static __hwloc_inline struct hwloc_obj *
-hwloc_alloc_setup_object(hwloc_obj_type_t type, signed os_index)
-{
-  struct hwloc_obj *obj = malloc(sizeof(*obj));
+static __hwloc_inline struct hwloc_obj* hwloc_alloc_setup_object(hwloc_obj_type_t type,
+                                                                 signed os_index) {
+  struct hwloc_obj* obj = malloc(sizeof(*obj));
   memset(obj, 0, sizeof(*obj));
   obj->type = type;
   obj->os_index = os_index;
@@ -362,15 +367,13 @@ HWLOC_DECLSPEC int hwloc_fill_object_sets(hwloc_obj_t obj);
  * \note This function should remain inline so plugins can call it even
  * when they cannot find libhwloc symbols.
  */
-static __hwloc_inline int
-hwloc_plugin_check_namespace(const char *pluginname __hwloc_attribute_unused, const char *symbol __hwloc_attribute_unused)
-{
+static __hwloc_inline int hwloc_plugin_check_namespace(
+    const char* pluginname __hwloc_attribute_unused, const char* symbol __hwloc_attribute_unused) {
 #ifdef HWLOC_INSIDE_PLUGIN
   lt_dlhandle handle;
-  void *sym;
+  void* sym;
   handle = lt_dlopen(NULL);
-  if (!handle)
-    /* cannot check, assume things will work */
+  if (!handle) /* cannot check, assume things will work */
     return 0;
   sym = lt_dlsym(handle, symbol);
   lt_dlclose(handle);
@@ -378,13 +381,13 @@ hwloc_plugin_check_namespace(const char *pluginname __hwloc_attribute_unused, co
     static int verboseenv_checked = 0;
     static int verboseenv_value = 0;
     if (!verboseenv_checked) {
-      const char *verboseenv = getenv("HWLOC_PLUGINS_VERBOSE");
+      const char* verboseenv = getenv("HWLOC_PLUGINS_VERBOSE");
       verboseenv_value = verboseenv ? atoi(verboseenv) : 0;
       verboseenv_checked = 1;
     }
     if (verboseenv_value)
       fprintf(stderr, "Plugin `%s' disabling itself because it cannot find the `%s' core symbol.\n",
-	      pluginname, symbol);
+              pluginname, symbol);
     return -1;
   }
 #endif /* HWLOC_INSIDE_PLUGIN */
@@ -394,9 +397,8 @@ hwloc_plugin_check_namespace(const char *pluginname __hwloc_attribute_unused, co
 /** @} */
 
 
-
-
-/** \defgroup hwlocality_components_pci_funcs Components and Plugins: PCI functions to be used by components
+/** \defgroup hwlocality_components_pci_funcs Components and Plugins: PCI functions to be used by
+ * components
  * @{
  */
 
@@ -408,32 +410,34 @@ hwloc_plugin_check_namespace(const char *pluginname __hwloc_attribute_unused, co
  * are then inserted in the topology by calling the get_obj_cpuset() callback to
  * find their locality.
  */
-HWLOC_DECLSPEC int hwloc_insert_pci_device_list(struct hwloc_backend *backend, struct hwloc_obj *first_obj);
+HWLOC_DECLSPEC int hwloc_insert_pci_device_list(struct hwloc_backend* backend,
+                                                struct hwloc_obj* first_obj);
 
 /** \brief Return the offset of the given capability in the PCI config space buffer
  *
  * This function requires a 256-bytes config space. Unknown/unavailable bytes should be set to 0xff.
  */
-HWLOC_DECLSPEC unsigned hwloc_pci_find_cap(const unsigned char *config, unsigned cap);
+HWLOC_DECLSPEC unsigned hwloc_pci_find_cap(const unsigned char* config, unsigned cap);
 
-/** \brief Fill linkspeed by reading the PCI config space where PCI_CAP_ID_EXP is at position offset.
+/** \brief Fill linkspeed by reading the PCI config space where PCI_CAP_ID_EXP is at position
+ * offset.
  *
  * Needs 20 bytes of EXP capability block starting at offset in the config space
  * for registers up to link status.
  */
-HWLOC_DECLSPEC int hwloc_pci_find_linkspeed(const unsigned char *config, unsigned offset, float *linkspeed);
+HWLOC_DECLSPEC int hwloc_pci_find_linkspeed(const unsigned char* config, unsigned offset,
+                                            float* linkspeed);
 
-/** \brief Modify the PCI device object into a bridge and fill its attribute if a bridge is found in the PCI config space.
+/** \brief Modify the PCI device object into a bridge and fill its attribute if a bridge is found in
+ * the PCI config space.
  *
  * This function requires 64 bytes of common configuration header at the beginning of config.
  *
  * Returns -1 and destroys /p obj if bridge fields are invalid.
  */
-HWLOC_DECLSPEC int hwloc_pci_prepare_bridge(hwloc_obj_t obj, const unsigned char *config);
+HWLOC_DECLSPEC int hwloc_pci_prepare_bridge(hwloc_obj_t obj, const unsigned char* config);
 
 /** @} */
-
-
 
 
 #endif /* HWLOC_PLUGINS_H */

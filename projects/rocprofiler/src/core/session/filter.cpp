@@ -195,7 +195,8 @@ void Filter::SetProperty(rocprofiler_filter_property_t property) {
     case ROCPROFILER_FILTER_DISPATCH_IDS:
       dispatch_id_filter_.clear();
       for (uint32_t j = 0; j < property.data_count; j++)
-        dispatch_id_filter_.push_back({property.dispatch_ids[j].start, property.dispatch_ids[j].end});
+        dispatch_id_filter_.push_back(
+            {property.dispatch_ids[j].start, property.dispatch_ids[j].end});
       break;
     default:
       break;

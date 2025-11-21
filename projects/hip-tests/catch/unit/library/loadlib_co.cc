@@ -46,7 +46,7 @@ TEST_CASE("Unit_hip_library_load_co") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   std::string lib_co = "library_code_load.code";
-  
+
   auto host_verify = [](const std::vector<float>& x, const std::vector<float>&y, const std::vector<float>& expected, int op) {
     for (size_t i = 0; i < size; i++) {
       float tmp;
@@ -102,7 +102,7 @@ TEST_CASE("Unit_hip_library_load_co") {
     HIP_CHECK(
         hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     HIP_CHECK(hipLibraryGetKernel(&function, library, "sub_kernel"));
-    
+
     hipLibrary_t new_library;
     HIP_CHECK(hipKernelGetLibrary(&new_library, function));
     REQUIRE(new_library == library);
@@ -137,7 +137,7 @@ TEST_CASE("Unit_hip_library_load_co") {
     HIP_CHECK(
         hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     HIP_CHECK(hipLibraryGetKernel(&function, library, "mul_kernel"));
-    
+
     hipLibrary_t new_library;
     HIP_CHECK(hipKernelGetLibrary(&new_library, function));
     REQUIRE(new_library == library);
@@ -171,7 +171,7 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     HIP_CHECK(
       hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-    
+
     HIP_CHECK(hipLibraryEnumerateKernels(functions, num_kernels, library));
 
     void* args[] = {&d_out, &d_in1, &d_in2};
@@ -188,7 +188,7 @@ TEST_CASE("Unit_hip_library_load_co") {
       return -1;
     };
 
-    
+
     std::vector<float> out(size, 0);
     size_t offset, paramsize;
     for (int k = 0; k < num_kernels; k++) {

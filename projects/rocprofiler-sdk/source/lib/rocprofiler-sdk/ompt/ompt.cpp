@@ -827,8 +827,8 @@ ompt_impl<OpIdx>::end(ompt_data_t* data, Args... args)
     auto  ancestor_corr_id = corr_id->ancestor;
 
     ROCP_FATAL_IF(common::get_tid() != state->thr_id)
-        << "MIsmatch of OMPT begin/end thread id: "
-        << " current=" << common::get_tid() << ", expected= " << state->thr_id;
+        << "MIsmatch of OMPT begin/end thread id: " << " current=" << common::get_tid()
+        << ", expected= " << state->thr_id;
 
     if(!callback_contexts.empty())
     {

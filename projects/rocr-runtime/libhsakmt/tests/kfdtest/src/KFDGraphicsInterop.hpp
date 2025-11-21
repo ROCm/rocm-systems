@@ -28,10 +28,10 @@
 
 // @class KFDGraphicsInteropTest
 // Adds access to graphics device for interoperability testing
-class KFDGraphicsInterop :  public KFDMemoryTest {
+class KFDGraphicsInterop : public KFDMemoryTest {
  public:
-    KFDGraphicsInterop(void) {}
-    ~KFDGraphicsInterop(void) {}
+  KFDGraphicsInterop(void) {}
+  ~KFDGraphicsInterop(void) {}
 };
 
 #endif

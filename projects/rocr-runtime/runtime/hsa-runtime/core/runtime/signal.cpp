@@ -79,11 +79,13 @@ SharedSignal* SharedSignalPool_t::alloc() {
   ScopedAcquire<HybridMutex> lock(&lock_);
   if (free_list_.empty()) {
     SharedSignal* block = reinterpret_cast<SharedSignal*>(
-        allocate_()(block_size_ * sizeof(SharedSignal), __alignof(SharedSignal), core::MemoryRegion::AllocateNonPaged, 0));
+        allocate_()(block_size_ * sizeof(SharedSignal), __alignof(SharedSignal),
+                    core::MemoryRegion::AllocateNonPaged, 0));
     if (block == nullptr) {
       block_size_ = minblock_;
-      block = reinterpret_cast<SharedSignal*>(
-          allocate_()(block_size_ * sizeof(SharedSignal), __alignof(SharedSignal), core::MemoryRegion::AllocateNonPaged, 0));
+      block = reinterpret_cast<SharedSignal*>(allocate_()(block_size_ * sizeof(SharedSignal),
+                                                          __alignof(SharedSignal),
+                                                          core::MemoryRegion::AllocateNonPaged, 0));
       if (block == nullptr) throw std::bad_alloc();
     }
 
@@ -127,8 +129,7 @@ void SharedSignalPool_t::free(SharedSignal* ptr) {
 }
 
 LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable)
-    : local_signal_(exportable ? nullptr
-                               : core::Runtime::runtime_singleton_->GetSharedSignalPool(),
+    : local_signal_(exportable ? nullptr : core::Runtime::runtime_singleton_->GetSharedSignalPool(),
                     exportable ? core::MemoryRegion::AllocateIPC : 0) {
   local_signal_.shared_object()->amd_signal.value = initial_value;
 }
@@ -205,9 +206,9 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
   });
 
   if (!core::Runtime::runtime_singleton_->KfdVersion().supports_event_age)
-      // Allow only the first waiter to sleep. Without event age tracking,
-      // race condition can cause some threads to sleep without wakeup since missing interrupt.
-      if (prior != 0) wait_hint = HSA_WAIT_STATE_ACTIVE;
+    // Allow only the first waiter to sleep. Without event age tracking,
+    // race condition can cause some threads to sleep without wakeup since missing interrupt.
+    if (prior != 0) wait_hint = HSA_WAIT_STATE_ACTIVE;
 
   // Ensure that all signals in the list can be slept on.
   if (wait_hint != HSA_WAIT_STATE_ACTIVE) {
@@ -225,11 +226,10 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
   uint32_t unique_evts = 0;
   if (wait_hint != HSA_WAIT_STATE_ACTIVE) {
     if (signal_count > small_size)
-      evts = new HsaEvent* [signal_count];
+      evts = new HsaEvent*[signal_count];
     else
       evts = short_evts;
-    for (uint32_t i = 0; i < signal_count; i++)
-      evts[i] = signals[i]->EopEvent();
+    for (uint32_t i = 0; i < signal_count; i++) evts[i] = signals[i]->EopEvent();
     std::sort(evts, evts + signal_count);
     HsaEvent** end = std::unique(evts, evts + signal_count);
     unique_evts = uint32_t(end - evts);
@@ -244,8 +244,7 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
 #endif
   memset(event_age, 0, unique_evts * sizeof(uint64_t));
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_event_age)
-    for (uint32_t i = 0; i < unique_evts; i++)
-      event_age[i] = 1;
+    for (uint32_t i = 0; i < unique_evts; i++) event_age[i] = 1;
 
   int64_t value;
 
@@ -258,8 +257,7 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
   uint64_t hsa_freq = 0;
   HSA::hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &hsa_freq);
   const timer::fast_clock::duration fast_timeout =
-      timer::duration_from_seconds<timer::fast_clock::duration>(
-          double(timeout) / double(hsa_freq));
+      timer::duration_from_seconds<timer::fast_clock::duration>(double(timeout) / double(hsa_freq));
 
   std::vector<uint32_t> unmet_condition_ids(signal_count);
   std::iota(unmet_condition_ids.begin(), unmet_condition_ids.end(), 0);
@@ -269,11 +267,9 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
     for (auto it = unmet_condition_ids.begin(); it != unmet_condition_ids.end();) {
       auto i = *it;
       bool condition_met = false;
-      if (!signals[i]->IsValid())
-        return uint32_t(-1);
+      if (!signals[i]->IsValid()) return uint32_t(-1);
 
-      value =
-          atomic::Load(&signals[i]->signal_.value, std::memory_order_relaxed);
+      value = atomic::Load(&signals[i]->signal_.value, std::memory_order_relaxed);
 
       switch (conds[i]) {
         case HSA_SIGNAL_CONDITION_EQ: {
@@ -317,15 +313,14 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
     }
 
     if (time - start_time < kMaxElapsed) {
-    //  os::uSleep(20);
+      //  os::uSleep(20);
       continue;
     }
 
     uint32_t wait_ms;
     auto time_remaining = fast_timeout - (time - start_time);
-    uint64_t ct=timer::duration_cast<std::chrono::milliseconds>(
-      time_remaining).count();
-    wait_ms = (ct>0xFFFFFFFEu) ? 0xFFFFFFFEu : ct;
+    uint64_t ct = timer::duration_cast<std::chrono::milliseconds>(time_remaining).count();
+    wait_ms = (ct > 0xFFFFFFFEu) ? 0xFFFFFFFEu : ct;
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, wait_on_all, wait_ms, event_age));
   }
 }
@@ -334,9 +329,9 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
  * Special handler to wait listen for exceptions from underlying driver.
  */
 uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hsa_signals,
-                         const hsa_signal_condition_t* conds, const hsa_signal_value_t* values,
-                         hsa_signal_value_t* satisfying_value) {
-
+                                   const hsa_signal_condition_t* conds,
+                                   const hsa_signal_value_t* values,
+                                   hsa_signal_value_t* satisfying_value) {
   uint32_t wait_ms = uint32_t(-1);
   hsa_signal_handle* signals =
       reinterpret_cast<hsa_signal_handle*>(const_cast<hsa_signal_t*>(hsa_signals));
@@ -356,11 +351,11 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
   });
 
   if (!core::Runtime::runtime_singleton_->KfdVersion().supports_event_age)
-      // Allow only the first waiter to sleep. Without event age tracking,
-      // race condition can cause some threads to sleep without wakeup since missing interrupt.
-      if (prior != 0) wait_ms = 0;
+    // Allow only the first waiter to sleep. Without event age tracking,
+    // race condition can cause some threads to sleep without wakeup since missing interrupt.
+    if (prior != 0) wait_ms = 0;
 
-  HsaEvent** evts = new HsaEvent* [signal_count];
+  HsaEvent** evts = new HsaEvent*[signal_count];
   MAKE_SCOPE_GUARD([&]() { delete[] evts; });
 
   uint32_t unique_evts = 0;
@@ -380,8 +375,7 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
 #endif
   memset(event_age, 0, unique_evts * sizeof(uint64_t));
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_event_age)
-    for (uint32_t i = 0; i < unique_evts; i++)
-      event_age[i] = 1;
+    for (uint32_t i = 0; i < unique_evts; i++) event_age[i] = 1;
 
   int64_t value;
 
@@ -390,8 +384,7 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
     // Cannot mwaitx - polling multiple signals
 
     for (uint32_t i = 0; i < signal_count; i++) {
-      if (!signals[i]->IsValid())
-        return uint32_t(-1);
+      if (!signals[i]->IsValid()) return uint32_t(-1);
 
       const HSA_EVENTTYPE event_type = signals[i]->EopEvent()->EventData.EventType;
       if (event_type == HSA_EVENTTYPE_MEMORY) {
@@ -399,8 +392,7 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
             signals[i]->EopEvent()->EventData.EventData.MemoryAccessFault;
         if (fault.Flags == HSA_EVENTID_MEMORY_FATAL_PROCESS) return i;
       } else if (event_type == HSA_EVENTTYPE_HW_EXCEPTION) {
-        const HsaHwException& exception =
-            signals[i]->EopEvent()->EventData.EventData.HwException;
+        const HsaHwException& exception = signals[i]->EopEvent()->EventData.EventData.HwException;
         if (exception.MemoryLost) return i;
       }
 
@@ -435,7 +427,7 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
     }
 
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, false, wait_ms, event_age));
-  } //while
+  }  // while
 }
 
 SignalGroup::SignalGroup(uint32_t num_signals, const hsa_signal_t* hsa_signals)

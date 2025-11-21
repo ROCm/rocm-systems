@@ -60,16 +60,16 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_
 
 // GPU enumeration
 enum gpu_id_t {
-  INVAL_GPU_ID,   // invalid GPU id
-  GFX9_GPU_ID,    // generic Gfx9 id
-  MI100_GPU_ID,   // Mi100 GPU id
-  MI200_GPU_ID,   // Mi200 GPU id
-  MI300_GPU_ID,   // Mi300 GPU id
-  MI350_GPU_ID,   // Mi350 GPU id
-  GFX10_GPU_ID,   // generic Gfx10 id
-  GFX11_GPU_ID,   // generic Gfx11 id
+  INVAL_GPU_ID,    // invalid GPU id
+  GFX9_GPU_ID,     // generic Gfx9 id
+  MI100_GPU_ID,    // Mi100 GPU id
+  MI200_GPU_ID,    // Mi200 GPU id
+  MI300_GPU_ID,    // Mi300 GPU id
+  MI350_GPU_ID,    // Mi350 GPU id
+  GFX10_GPU_ID,    // generic Gfx10 id
+  GFX11_GPU_ID,    // generic Gfx11 id
   GFX115X_GPU_ID,  // Gfx11.5x id
-  GFX12_GPU_ID,   // generic Gfx12 id
+  GFX12_GPU_ID,    // generic Gfx12 id
 };
 
 // Block info map class
@@ -194,13 +194,10 @@ class Pm4Factory {
     size_t block_samples_count = 1;
     auto* block_info = GetBlockInfo(block_name);
 
-    if (block_info->attr & CounterBlockSeAttr)
-      block_samples_count *= se_number;
-    if (block_info->attr & CounterBlockSaAttr)
-      block_samples_count *= 2;
-    if (block_info->attr & CounterBlockWgpAttr)
-      block_samples_count *= GetNumWGPs();
-    if ((block_info->attr & CounterBlockSqAttr) && IsGFX11()) // TODO: Move to CounterBlockWgpAttr
+    if (block_info->attr & CounterBlockSeAttr) block_samples_count *= se_number;
+    if (block_info->attr & CounterBlockSaAttr) block_samples_count *= 2;
+    if (block_info->attr & CounterBlockWgpAttr) block_samples_count *= GetNumWGPs();
+    if ((block_info->attr & CounterBlockSqAttr) && IsGFX11())  // TODO: Move to CounterBlockWgpAttr
       block_samples_count *= GetNumWGPs();
     return block_samples_count;
   }
@@ -258,9 +255,9 @@ class Pm4Factory {
   // PM4 factory instance map type
   struct instances_fncomp_t {
     bool operator()(const AgentInfo& a, const AgentInfo& b) const {
-      // using name instead of gfxip due to backward compatability with rocprofv2, 
+      // using name instead of gfxip due to backward compatability with rocprofv2,
       // as in newer api which rocprofv3 uses both name and gfxip strings are same for a agent.
-      int cmp = strcmp(a.name, b.name); 
+      int cmp = strcmp(a.name, b.name);
       if (cmp < 0) return true;
       if (cmp > 0) return false;
       // If gfxip strings are equal, compare cu_num
@@ -413,9 +410,9 @@ inline bool Pm4Factory::CheckConcurrent(const profile_t* profile) {
 // Return GPU id for a given agent
 inline gpu_id_t Pm4Factory::GetGpuId(std::string_view gfx_ip) {
   std::vector<std::pair<std::string, gpu_id_t>> gfxip_map = {
-      {"gfx908", MI100_GPU_ID}, {"gfx90a", MI200_GPU_ID}, {"gfx900", GFX9_GPU_ID},
-      {"gfx902", GFX9_GPU_ID},  {"gfx906", GFX9_GPU_ID},  {"gfx94", MI300_GPU_ID},
-      {"gfx95", MI350_GPU_ID},  {"gfx10", GFX10_GPU_ID},  {"gfx11", GFX11_GPU_ID},
+      {"gfx908", MI100_GPU_ID},   {"gfx90a", MI200_GPU_ID}, {"gfx900", GFX9_GPU_ID},
+      {"gfx902", GFX9_GPU_ID},    {"gfx906", GFX9_GPU_ID},  {"gfx94", MI300_GPU_ID},
+      {"gfx95", MI350_GPU_ID},    {"gfx10", GFX10_GPU_ID},  {"gfx11", GFX11_GPU_ID},
       {"gfx115", GFX115X_GPU_ID}, {"gfx12", GFX12_GPU_ID},
   };
 

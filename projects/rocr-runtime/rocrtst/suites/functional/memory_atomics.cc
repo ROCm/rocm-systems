@@ -62,8 +62,7 @@
 static const uint32_t kNumBufferElements = 256;
 static const int kValue = 5;
 
-MemoryAtomic::MemoryAtomic(AtomicTest testtype) :
-    TestBase() {
+MemoryAtomic::MemoryAtomic(AtomicTest testtype) : TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
@@ -76,44 +75,54 @@ MemoryAtomic::MemoryAtomic(AtomicTest testtype) :
 
   if (testtype_ == ADD) {
     name += " For ADD";
-    desc += " This test will do Add kernel atomic"
-            " operation on GPU and system memory.";
+    desc +=
+        " This test will do Add kernel atomic"
+        " operation on GPU and system memory.";
   } else if (testtype_ == SUB) {
     name += " For Sub";
-    desc += " This test will do Sub kernel atomic"
-            " operation on GPU and system memory.";
+    desc +=
+        " This test will do Sub kernel atomic"
+        " operation on GPU and system memory.";
   } else if (testtype_ == AND) {
     name += " For And";
-    desc += " This test will do AND kernel atomic"
-            " operation on GPU and system memory.";
+    desc +=
+        " This test will do AND kernel atomic"
+        " operation on GPU and system memory.";
   } else if (testtype_ == OR) {
     name += " For Or";
-    desc += " This test will do OR kernel atomic"
-            " operation on GPU and system memory.";
+    desc +=
+        " This test will do OR kernel atomic"
+        " operation on GPU and system memory.";
   } else if (testtype_ == XOR) {
     name += " For Xor";
-    desc += " This test will do XOR kernel atomic"
-            " operation on GPU and system memory.";
+    desc +=
+        " This test will do XOR kernel atomic"
+        " operation on GPU and system memory.";
   } else if (testtype_ == MIN) {
     name += " For Minimum";
-    desc += " This test will do Minimum kernel atomic"
-            " operation on GPU and system memory.";
+    desc +=
+        " This test will do Minimum kernel atomic"
+        " operation on GPU and system memory.";
   } else if (testtype_ == MAX) {
     name += " For Maximum";
-    desc += " This test will do Maximum kernel atomic"
-            " operation on GPU and system memory.";
+    desc +=
+        " This test will do Maximum kernel atomic"
+        " operation on GPU and system memory.";
   } else if (testtype_ == XCHG) {
     name += " For Exchange";
-    desc += " This test will do Xchg kernel atomic"
-            " operation on GPU and system memory.";
+    desc +=
+        " This test will do Xchg kernel atomic"
+        " operation on GPU and system memory.";
   } else if (testtype_ == INC) {
     name += " For Increment";
-    desc += " This test will do Increment kernel atomic"
-            " operation on GPU and system memory.";
+    desc +=
+        " This test will do Increment kernel atomic"
+        " operation on GPU and system memory.";
   } else if (testtype_ == DEC) {
     name += " For Decremnet";
-    desc += " This test will do decrement kernel atomic"
-            " operation on GPU and system memory.";
+    desc +=
+        " This test will do decrement kernel atomic"
+        " operation on GPU and system memory.";
   }
 
   set_title(name);
@@ -121,8 +130,7 @@ MemoryAtomic::MemoryAtomic(AtomicTest testtype) :
   memset(&aql(), 0, sizeof(hsa_kernel_dispatch_packet_t));
 }
 
-MemoryAtomic::~MemoryAtomic(void) {
-}
+MemoryAtomic::~MemoryAtomic(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -153,9 +161,7 @@ void MemoryAtomic::Run(void) {
   TestBase::Run();
 }
 
-void MemoryAtomic::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void MemoryAtomic::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void MemoryAtomic::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -173,101 +179,87 @@ void MemoryAtomic::Close() {
   TestBase::Close();
 }
 
-typedef struct  __attribute__ ((aligned(16)))  args_t {
-  int *a;
-  int *b;
-  int *c;
+typedef struct __attribute__((aligned(16))) args_t {
+  int* a;
+  int* b;
+  int* c;
   int d;
   int n;
-  } args;
+} args;
 
 static const char kSubTestSeparator[] = "  **************************";
 
 
 static const int kMemoryAllocSize = 4096;
 
-void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
-                                                   hsa_agent_t gpuAgent) {
+void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // Get Global Memory Pool on the gpuAgent to allocate gpu buffers
   hsa_amd_memory_pool_t gpu_pool;
-  err = hsa_amd_agent_iterate_memory_pools(gpuAgent,
-                                            rocrtst::GetGlobalMemoryPool,
-                                            &gpu_pool);
+  err = hsa_amd_agent_iterate_memory_pools(gpuAgent, rocrtst::GetGlobalMemoryPool, &gpu_pool);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   hsa_amd_memory_pool_access_t access;
-  hsa_amd_agent_memory_pool_get_info(cpuAgent, gpu_pool,
-                                       HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
-                                       &access);
+  hsa_amd_agent_memory_pool_get_info(cpuAgent, gpu_pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
+                                     &access);
   // hsa objects
-  hsa_queue_t *queue = NULL;  // command queue
+  hsa_queue_t* queue = NULL;  // command queue
   // get queue size
   uint32_t queue_size = 0;
-  err = hsa_agent_get_info(gpuAgent,
-                           HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
+  err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // create queue
-  err = hsa_queue_create(gpuAgent,
-                         queue_size, HSA_QUEUE_TYPE_MULTI,
-                         NULL, NULL, 0, 0, &queue);
+  err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, 0, 0, &queue);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Find a memory pool that supports kernel arguments.
   hsa_amd_memory_pool_t kernarg_pool;
-  err = hsa_amd_agent_iterate_memory_pools(cpuAgent,
-                                            rocrtst::GetKernArgMemoryPool,
-                                            &kernarg_pool);
+  err = hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetKernArgMemoryPool, &kernarg_pool);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // Allocate the host side buffers
   // (refSysdata,oldValues,oldrefdata,kernArg) on system memory
 
   // this is ref sys data on which atomics operation need to done
-  int *refSysdata = NULL;
-  // This is oldrefdata which will be required  to compare the returned old values after atomics operation
-  int *oldrefdata = NULL;
+  int* refSysdata = NULL;
+  // This is oldrefdata which will be required  to compare the returned old values after atomics
+  // operation
+  int* oldrefdata = NULL;
   // This is returned old values
-  int *oldValues = NULL;
+  int* oldValues = NULL;
   // This is expected data set
-  int *expecteddata = NULL;
+  int* expecteddata = NULL;
   // Array size for the data
-  int arraySize = kMemoryAllocSize/sizeof(int);
+  int arraySize = kMemoryAllocSize / sizeof(int);
 
   // Get System Memory Pool on the cpuAgent to allocate host side buffers
   hsa_amd_memory_pool_t global_pool;
-  err = hsa_amd_agent_iterate_memory_pools(cpuAgent,
-                                            rocrtst::GetGlobalMemoryPool,
-                                            &global_pool);
+  err = hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetGlobalMemoryPool, &global_pool);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  err = hsa_amd_memory_pool_allocate(global_pool,
-                                    kMemoryAllocSize, 0,
-                                    reinterpret_cast<void **>(&oldValues));
+  err = hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize, 0,
+                                     reinterpret_cast<void**>(&oldValues));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  err = hsa_amd_memory_pool_allocate(global_pool,
-                                    kMemoryAllocSize, 0,
-                                    reinterpret_cast<void **>(&refSysdata));
+  err = hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize, 0,
+                                     reinterpret_cast<void**>(&refSysdata));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  err = hsa_amd_memory_pool_allocate(global_pool,
-                                    kMemoryAllocSize, 0,
-                                    reinterpret_cast<void **>(&oldrefdata));
+  err = hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize, 0,
+                                     reinterpret_cast<void**>(&oldrefdata));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  err = hsa_amd_memory_pool_allocate(global_pool,
-                                    kMemoryAllocSize, 0,
-                                    reinterpret_cast<void **>(&expecteddata));
+  err = hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize, 0,
+                                     reinterpret_cast<void**>(&expecteddata));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
 
   // Allocate the kernel argument buffer from the kernarg_pool.
-  args *kernArguments = NULL;
+  args* kernArguments = NULL;
   err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
-                                     reinterpret_cast<void **>(&kernArguments));
+                                     reinterpret_cast<void**>(&kernArguments));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
 
@@ -281,18 +273,18 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
   // so allocate memory for it on the GPU's GLOBAL segment .
 
   // Get local memory of GPU to allocate device side buffers on which atomics operation need to done
-  int *gpuRefData = NULL;
+  int* gpuRefData = NULL;
 
   // On non-Large bar system acess to GPU pool not allowed to directly so pinned memory
   // g_gpuRefData is pointer to GPU Memory allocated on non-large bar where
   // gpuRefData would be pointer to  host allocated memory on non-large bar
-  int *g_gpuRefData = NULL;
+  int* g_gpuRefData = NULL;
   //  Pointer to the location where to store the new address
-  int *device_ptr = NULL;
+  int* device_ptr = NULL;
 
   if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
     err = hsa_amd_memory_pool_allocate(gpu_pool, kMemoryAllocSize, 0,
-                                       reinterpret_cast<void **>(&gpuRefData));
+                                       reinterpret_cast<void**>(&gpuRefData));
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     // Allow cpuAgent access to all allocated GPU memory.
@@ -304,19 +296,18 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     // Alocate the System Memory and get pointer gpuRefData
     err = hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize, 0,
-                                        reinterpret_cast<void **>(&gpuRefData));
+                                       reinterpret_cast<void**>(&gpuRefData));
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     memset(gpuRefData, 0, kMemoryAllocSize);
     // Alocate the GPU Memory and get pointer g_gpuRefData
     err = hsa_amd_memory_pool_allocate(gpu_pool, kMemoryAllocSize, 0,
-                                        reinterpret_cast<void **>(&g_gpuRefData));
+                                       reinterpret_cast<void**>(&g_gpuRefData));
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     // Map the Host memory and get the pointer to new adress which is accesible to GPU agent
     err = hsa_amd_agents_allow_access(1, &gpuAgent, NULL, gpuRefData);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     device_ptr = gpuRefData;
   }
-
 
 
   // initialize the host buffers & gpuRefData buffer
@@ -330,10 +321,12 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
   // Sync the data from system memory to GPU memory on non-largebar
   if (access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
     hsa_signal_store_relaxed(copy_signal, 1);
-    err = hsa_amd_memory_async_copy(g_gpuRefData, gpuAgent, device_ptr,
-                                    gpuAgent, kMemoryAllocSize, 0, NULL, copy_signal);
+    err = hsa_amd_memory_async_copy(g_gpuRefData, gpuAgent, device_ptr, gpuAgent, kMemoryAllocSize,
+                                    0, NULL, copy_signal);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-    while (hsa_signal_wait_acquire(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)(-1), HSA_WAIT_STATE_ACTIVE)) {}
+    while (hsa_signal_wait_acquire(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)(-1),
+                                   HSA_WAIT_STATE_ACTIVE)) {
+    }
   }
 
 
@@ -424,7 +417,7 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
     }
   } else {
     if (verbosity() > 0) {
-      std::cout<< "No test specified" <<std::endl;
+      std::cout << "No test specified" << std::endl;
     }
   }
 
@@ -451,16 +444,14 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
   rocrtst::WriteAQLToQueueLoc(queue, index, &aql());
 
   aql().header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-  aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-               HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
-  aql().header |= HSA_FENCE_SCOPE_SYSTEM <<
-               HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+  aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+  aql().header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
 
   void* q_base = queue->base_address;
   // Set the Aql packet header
-  rocrtst::AtomicSetPacketHeader(aql().header, aql().setup,
-                      &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>
-                          (q_base))[index & queue_mask]);
+  rocrtst::AtomicSetPacketHeader(
+      aql().header, aql().setup,
+      &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[index & queue_mask]);
 
 
   // ringdoor bell
@@ -468,17 +459,20 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
 
   // wait for the signal and reset it for future use
   while (hsa_signal_wait_scacquire(aql().completion_signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                      (uint64_t)-1, HSA_WAIT_STATE_ACTIVE)) { }
+                                   (uint64_t)-1, HSA_WAIT_STATE_ACTIVE)) {
+  }
 
   hsa_signal_store_relaxed(aql().completion_signal, 1);
 
   // Sync the data from GPU memory to system memory on non-largebar
   if (access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
     hsa_signal_store_relaxed(copy_signal, 1);
-    err = hsa_amd_memory_async_copy(device_ptr, gpuAgent, g_gpuRefData,
-                                    gpuAgent, kMemoryAllocSize, 0, NULL, copy_signal);
+    err = hsa_amd_memory_async_copy(device_ptr, gpuAgent, g_gpuRefData, gpuAgent, kMemoryAllocSize,
+                                    0, NULL, copy_signal);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-    while (hsa_signal_wait_acquire(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)(-1), HSA_WAIT_STATE_ACTIVE)) { }
+    while (hsa_signal_wait_acquire(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)(-1),
+                                   HSA_WAIT_STATE_ACTIVE)) {
+    }
   }
 
   // compare results with expected results
@@ -537,8 +531,7 @@ void MemoryAtomic::MemoryAtomicTest(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     MemoryAtomicTest(cpus[0], gpus[i]);
   }
 }
-
