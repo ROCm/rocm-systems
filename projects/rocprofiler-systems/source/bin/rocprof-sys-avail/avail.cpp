@@ -1188,7 +1188,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     {
         for(const auto& itr : fitr.second)
         {
-            width_type _w = { { (int64_t) itr.symbol().length(), (int64_t) 8, (int64_t) 6,
+            width_type _w = { { (int64_t) itr.symbol().length(), (int64_t) 4, (int64_t) 6,
                                 (int64_t) itr.short_description().length(),
                                 (int64_t) itr.long_description().length() } };
             for(auto& witr : _w)
