@@ -94,7 +94,7 @@ jobs:
             EXCLUDED_TESTS=""
           else
             MODE=Continuous
-            EXCLUDED_TESTS=""
+            EXCLUDED_TESTS="test_profile_live_attach_detach|test_profile_roofline"
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
           echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
@@ -141,6 +141,7 @@ jobs:
       
       - name: Configure, Build, and Test
         id: test
+        timeout-minutes: 90
         working-directory: projects/rocprofiler-compute
         run: |
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
