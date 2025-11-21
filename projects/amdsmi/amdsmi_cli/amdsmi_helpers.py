@@ -1798,16 +1798,7 @@ class AMDSMIHelpers():
 
         gpu_id = self.get_gpu_id_from_device_handle(device_handle)
         if args.follow and not getattr(self, "_cper_follow_prompted", False):
-            msg = "Press CTRL + C to stop."
-            if log_to_file and log_path is not None:
-                try:
-                    log_path.parent.mkdir(parents=True, exist_ok=True)
-                except Exception:
-                    pass
-                with log_path.open('a', encoding='utf-8') as f:
-                    f.write(msg + '\n')
-            else:
-                print(msg)
+            print("Press CTRL + C to stop.")
             self._cper_follow_prompted = True
 
         primary_partition = self.is_primary_partition(device_handle, gpu_id)
