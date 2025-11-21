@@ -777,7 +777,8 @@ hipError_t hipSetDevice(int device) {
 
   hip::tls.isSetDeviceCalled = true;
   // Check if the device is already set
-  if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device) {
+  if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device
+      && hip::tls.device_->GetActiveStatus() == true) {
     HIP_RETURN(hipSuccess);
   }
 
