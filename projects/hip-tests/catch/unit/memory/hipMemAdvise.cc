@@ -181,7 +181,7 @@ TEST_CASE("Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemAdvise_Read_Write_After_Advise") {
+TEST_CASE("Unit_hipMemAdvise_Read_Write_After_Advise", "[multigpu]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");

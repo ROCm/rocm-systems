@@ -36,13 +36,11 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
+rocprofiler_add_unit_test(
     TARGET kfd-events-parser
-    SOURCES ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES}
-    TEST_LIST kfd-events-parsers_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${kfd-events-parsers_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests;kfd-events" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    SOURCES ${ROCPROFILER_LIB_KFD_EVENTS_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-events"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

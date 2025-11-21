@@ -43,24 +43,26 @@ extern "C"
 
     /// @fn int rocprofsys_user_start_trace(void)
     /// @return rocprofsys_user_error_t value
-    /// @brief Enable tracing on this thread and all subsequently created threads
+    /// @brief Enable user defined tracing on this thread and on all subsequently created
+    /// threads.
     extern int rocprofsys_user_start_trace(void) ROCPROFSYS_PUBLIC_API;
 
     /// @fn int rocprofsys_user_stop_trace(void)
     /// @return rocprofsys_user_error_t value
-    /// @brief Disable tracing on this thread and all subsequently created threads
+    /// @brief Disable user defined tracing on this thread and on all subsequently created
+    /// threads.
     extern int rocprofsys_user_stop_trace(void) ROCPROFSYS_PUBLIC_API;
 
     /// @fn int rocprofsys_user_start_thread_trace(void)
     /// @return rocprofsys_user_error_t value
-    /// @brief Enable tracing on this specific thread. Does not apply to subsequently
-    /// created threads
+    /// @brief Enable user defined tracing on this specific thread. Does not apply to
+    /// subsequently created threads.
     extern int rocprofsys_user_start_thread_trace(void) ROCPROFSYS_PUBLIC_API;
 
     /// @fn int rocprofsys_user_stop_thread_trace(void)
     /// @return rocprofsys_user_error_t value
-    /// @brief Disable tracing on this specific thread. Does not apply to subsequently
-    /// created threads
+    /// @brief Disable user defined tracing on this specific thread. Does not apply to
+    /// subsequently created threads.
     extern int rocprofsys_user_stop_thread_trace(void) ROCPROFSYS_PUBLIC_API;
 
     /// @fn int rocprofsys_user_push_region(const char* id)

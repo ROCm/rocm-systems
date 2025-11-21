@@ -24,7 +24,6 @@
 
 #include <timemory/log/macros.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <iostream>

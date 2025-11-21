@@ -1075,18 +1075,32 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     using width_bool       = array_t<bool, N>;
     using hwcounter_info_t = std::vector<tim::hardware_counters::info>;
 
-    auto _papi_events = tim::papi::available_events_info();
+    auto _papi_events = tim::papi::available_events_info({ "perf_event_uncore" });
     auto _rocm_events =
         (gpu_count > 0) ? rocprofsys::rocm::rocm_events() : hwcounter_info_t{};
 
-    if(alphabetical)
+    // Tag overflow events by modifying both short and long descriptions upfront
     {
-        auto _sorter = [](const auto& lhs, const auto& rhs) {
-            return (lhs.symbol() < rhs.symbol());
-        };
-        std::sort(_papi_events.begin(), _papi_events.end(), _sorter);
-        std::sort(_rocm_events.begin(), _rocm_events.end(), _sorter);
+        namespace regex_const = ::std::regex_constants;
+        auto _regex =
+            std::regex{ "^(perf::|)PERF_COUNT_(HW|SW|HW_CACHE)_([A-Z_]+)(|:[A-Z]+)$",
+                        regex_const::optimize };
+        for(auto& itr : _papi_events)
+        {
+            if(std::regex_match(itr.symbol(), _regex))
+            {
+                itr.short_description() += " (overflow event)";
+                itr.long_description() += " (overflow event)";
+            }
+        }
     }
+
+    // sort the events alphabetically
+    auto _sorter = [](const auto& lhs, const auto& rhs) {
+        return (lhs.symbol() < rhs.symbol());
+    };
+    std::sort(_papi_events.begin(), _papi_events.end(), _sorter);
+    std::sort(_rocm_events.begin(), _rocm_events.end(), _sorter);
 
     auto _process_counters = [](auto& _events_v, int32_t _offset_v) {
         for(auto& iitr : _events_v)

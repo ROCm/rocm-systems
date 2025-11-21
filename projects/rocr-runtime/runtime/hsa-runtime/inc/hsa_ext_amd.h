@@ -705,7 +705,11 @@ typedef enum hsa_amd_agent_info_s {
    * Queries the driver for clock counters of the agent.
    * The type of this attribute is hsa_amd_clock_counters_t.
    */
-  HSA_AMD_AGENT_INFO_CLOCK_COUNTERS = 0xA118
+  HSA_AMD_AGENT_INFO_CLOCK_COUNTERS = 0xA118,
+  /**
+   * The agent uses PM4 emulation mode.
+   */
+  HSA_AMD_AGENT_INFO_PM4_EMULATION = 0xA119
 } hsa_amd_agent_info_t;
 
 /**
@@ -2321,7 +2325,7 @@ hsa_status_t HSA_API
  */
 hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents,
                                         hsa_agent_t* agents,
-                                        int interop_handle,
+                                        hsa_handle_t interop_handle,
                                         uint32_t flags,
                                         size_t* size,
                                         void** ptr,

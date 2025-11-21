@@ -242,7 +242,7 @@ class Flag {
     enable_mwaitx_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
-    enable_ipc_mode_legacy_ = (var == "1") ? true : false;
+    enable_ipc_mode_legacy_ = (var == "0") ? false : true;
 
     if (os::IsEnvVarSet("HSA_PCS_MAX_DEVICE_BUFFER_SIZE")) {
       var = os::GetEnvVar("HSA_PCS_MAX_DEVICE_BUFFER_SIZE");
@@ -298,6 +298,14 @@ class Flag {
 
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
+
+    var = os::GetEnvVar("HSA_COREDUMP_SHOW_PROGRESS");
+    enable_core_dump_progress_ = (var == "1");
+
+    var = os::GetEnvVar("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
+    core_dump_disable_ = (var == "1");
+
+    core_dump_pattern_ = os::GetEnvVar("HSA_COREDUMP_PATTERN");
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -430,6 +438,17 @@ class Flag {
 
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
 
+  [[nodiscard]]
+  bool core_dump_disable() const { return core_dump_disable_; }
+
+  [[nodiscard]]
+  bool enable_core_dump_progress() const {
+                                       return enable_core_dump_progress_; }
+
+  [[nodiscard]]
+  const std::string& core_dump_pattern() const {
+                                         return core_dump_pattern_; }
+
   void set_sdma(bool peer_sdma, bool sdma_gang) {
     enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
     enable_sdma_gang_ = sdma_gang ? SDMA_ENABLE : SDMA_DISABLE;
@@ -521,6 +540,10 @@ class Flag {
   size_t pc_sampling_max_device_buffer_size_;
 
   size_t co_dmacopy_size_;
+
+  bool core_dump_disable_ = false;
+  bool enable_core_dump_progress_ = false;
+  std::string core_dump_pattern_;
 
   // Map GPU index post RVD to its default cu mask.
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;
