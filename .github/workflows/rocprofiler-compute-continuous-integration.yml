@@ -125,13 +125,14 @@ jobs:
 
       # TODO: Remove this and replace with TheRock tarball when runtime error is fixed
       - name: Install ROCm
+        if: false
         run: |
           apt install -y rocm-dev
           echo "✅ ROCm Installation Complete!"
 
       # TODO: Enable this step and remove the above step once runtime error is fixed
       - name: Install Latest Nightly ROCm
-        if: false
+        if: true
         run: |
           set -e
           TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]\.[0-9]\.[0-9])*')
