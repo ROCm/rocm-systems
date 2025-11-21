@@ -1,11 +1,13 @@
+import os
 import sys
 import math
+import re
 import statistics
 #from matplotlib import pyplot as plt
 import xlsxwriter
 from datetime import datetime
-
-f1 = sys.argv[1]
+from dataclasses import dataclass
+from typing import List
 
 ## EDIT THESE VALUES
 bkc_version = "BKC 00.25.11.02 (38.4 GT/s XGMI)"
@@ -15,29 +17,30 @@ os_kernel = "CentOS Kernel 6.9.0-0_fbk10_brcmrdma13_141_g9b20106afb70"
 nic_driver = "Broadcom driver=6.9.0-0_fbk10_brcmrdma13_141_g9 firmware=232.0.213.0/pkg 232.1.190.0"
 ###
 
-rccl_version = ""
+rocshmem_version = ""
 rocm_version = ""
 hip_version = ""
+minmsgsize = 16
 
-search_term = "(elements)"
+if len(sys.argv) == 0:
+    print("No input directory providing. Aborting")
+    sys.exit()
 
-file_prefixes = [f1, f1, f1, f1, f1, f1]
-file_names = [
-    "get_n2_w1_z16_4194304B.log",
-    "wgget_n2_w16_z64_4194304B.log",
-    "waveget_n2_w16_z128_4194304B.log",
-    "put_n2_w1_z16_4194304B.log",
-    "wgput_n2_w16_z64_4194304B.log",
-    "waveput_n2_w16_z128_4194304B.log",
-]
-files = len(file_prefixes)
+files_in_dir = {}
+files = 0
+
+for dir in sys.argv:
+    file_names = []
+    if not os.path.isdir (dir):
+        continue
+    for entry in os.listdir(dir):
+        full_path = os.path.join(dir, entry)
+        if os.path.isfile(full_path):
+            file_names.append(entry)
+    files_in_dir[dir] = file_names
+    files = files + len(file_names)
 
 unique="rocSHMEM_MI300_Thor2_Heatmap"
-dt="11-20-2025_v1"
-
-## no. of nodes
-nnodes = [2]
-nodes = len(nnodes)
 
 ## cols => no. of consecutive runs
 ## rows => no. of msg sizes in the sweep -- 35 = 1B-16GB
@@ -49,143 +52,115 @@ x = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131
 x_str = [16, 32, 64, 128, 256, 512, '1KB', '2KB', '4KB', '8KB', '16KB', '32KB', '64KB', '128KB', '256KB', '512KB', '1MB', '2MB', '4MB']
 
 
-size1 = [[["" for _ in range(rows)] for _ in range(nodes)] for _ in range(files)]
-msgcount1 = [[["" for _ in range(rows)] for _ in range(nodes)] for _ in range(files)]
+@dataclass
+class Measurement:
+    msgsize: int
+    msgcount: int
+    avg_time: float
+    avg_bw: float
+    msg_rate: float
 
-avg_time1 = [[[[0 for _ in range(cols)] for _ in range(rows)] for _ in range(nodes)] for _ in range(files)]
-avg_bw1 = [[[[0 for _ in range(cols)] for _ in range(rows)] for _ in range(nodes)] for _ in range(files)]
-avg_msg_rate1 = [[[[0 for _ in range(cols)] for _ in range(rows)] for _ in range(nodes)] for _ in range(files)]
+@dataclass
+class Series:
+    op: str
+    ngpus: int
+    data: List[Measurement]
 
-
-#colls = ['get', 'wgget', 'waveget', 'put', 'wgput', 'waveput', 'alltoall']
-colls = ['get', 'wgget', 'waveget', 'put', 'wgput', 'waveput']
-
-#uniq = f"{unique}_{dt}" maybe use date and include ipc vs. gda
 uniq = f"rocshmem_test"
 workbook = xlsxwriter.Workbook(f"{uniq}.xlsx")
 workbook.set_properties({'company':  'AMD'})
 
-merge_format1 = workbook.add_format({'bold':     True,
-                                    'border':    5,
-                                    'align':     'center',
-                                    'valign':    'vcenter',
-                                    'text_wrap': True,
-                                    'fg_color':  '#FFFF00'})
-
-merge_format2 = workbook.add_format({'bold':      True,
-                                    'border':     5,
-                                    'align':      'center',
-                                    'valign':     'vcenter',
-                                    'text_wrap':  True,
-                                    'fg_color':   '#FFFF00',
-                                    'font_color': '#FF0000'})
-
-merge_format3 = workbook.add_format({'bold':     True,
-                                    'border':    5,
-                                    'align':     'center',
-                                    'valign':    'vcenter',
-                                    'text_wrap': True})
-
-merge_format4 = workbook.add_format({'bold':     True,
-                                    'align':     'center',
-                                    'valign':    'vcenter',
-                                    'text_wrap': True,
-                                    'top':       5,
-                                    'bottom':    5})
-
-merge_format5 = workbook.add_format({'bold':     True,
-                                    'align':     'center',
-                                    'valign':    'vcenter',
-                                    'text_wrap': True,
-                                    'top':       5,
-                                    'bottom':    5,
-                                    'left':      5})
-
-merge_format6 = workbook.add_format({'bold':     True,
-                                    'align':     'center',
-                                    'valign':    'vcenter',
-                                    'text_wrap': True,
-                                    'top':       5,
-                                    'bottom':    5,
-                                    'right':     5})
-
-cell_format1 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'top': 5, 'left': 5})
-cell_format2 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'top': 5})
-cell_format3 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'top': 5, 'right': 5})
-cell_format4 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'left': 5})
-cell_format5 = workbook.add_format({'align': 'center', 'valign': 'vcenter'})
-cell_format6 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'right': 5})
-cell_format7 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'bottom': 5, 'left': 5})
-cell_format8 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'bottom': 5})
-cell_format9 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'bottom': 5, 'right': 5})
-
-cell_format_high4 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'left': 5, 'bold': True, 'fg_color': '#FFFF00'})
-cell_format_high5 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'bold': True, 'fg_color': '#FFFF00'})
-cell_format_high6 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'bold': True, 'right': 5, 'fg_color': '#FFFF00'})
-
-num_format1 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'top': 5, 'left': 5, 'num_format': '0.00'})
-num_format2 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'top': 5, 'num_format': '0.00'})
-num_format3 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'top': 5, 'right': 5, 'num_format': '0.00'})
-num_format4 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'left': 5, 'num_format': '0.00'})
-num_format5 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'num_format': '0.00'})
-num_format6 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'right': 5, 'num_format': '0.00'})
-num_format7 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'bottom': 5, 'left': 5, 'num_format': '0.00'})
-num_format8 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'bottom': 5, 'num_format': '0.00'})
-num_format9 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'bottom': 5, 'right': 5, 'num_format': '0.00'})
-
-num_format_high4 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'left': 5, 'num_format': '0.00', 'bold': True, 'fg_color': '#FFFF00'})
-num_format_high5 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'num_format': '0.00', 'bold': True, 'fg_color': '#FFFF00'})
-num_format_high6 = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'right': 5, 'num_format': '0.00', 'bold': True, 'fg_color': '#FFFF00'})
+cell_format = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'bold': True})
+num_format = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'num_format': '0.00'})
 
 now = datetime.now()
 date_str = now.strftime("%Y-%m-%d");
-worksheet = workbook.add_worksheet(f"{date_str}")
-worksheet.set_zoom(70)
 
-for fprefix in range(0, files, 1):
-    coll = colls[fprefix]
-       
-    filename_prefix = file_prefixes[fprefix]
+for dir, file_names in files_in_dir.items():
+    worksheet = workbook.add_worksheet(f"{dir}-{date_str}")
+    worksheet.set_zoom(70)
+    all_data = []
 
-    for n in range(1, nodes+1):
+    for file in file_names:
         mpirun_cmd = ""
 
-        filename=f"{filename_prefix}/{file_names[fprefix]}"
-        print(filename)
+        filename=f"{dir}/{file}"
+        #print(filename)
+
+        elems = file.split('_')
+        op = elems[0]
+        procs = elems[1]
+        ngpu = int(re.findall("[0-9]+",procs)[0])
+
+        this_series = Series(op, ngpu, [])
 
         with open(f"{filename}", 'r') as file1:
             for lno1, line1 in enumerate(file1, start=0):
                 if "mpirun " in line1.rstrip():
                     mpirun_cmd = line1.rstrip()
-                    print(mpirun_cmd)
+                    #print(mpirun_cmd)
                     continue
 
                 if "#" in line1.rstrip():
                     continue
 
+                if "[" in line1.rstrip():
+                    continue
+
                 values = line1.rstrip().split()
-                print(values)
+                #print(values)
 
-                size1[fprefix][n-1][lno1-3] = int(values[0])
-                msgcount1[fprefix][n-1][lno1-3] = int(values[1])
-                avg_time1[fprefix][n-1][lno1-3][0] = float(values[2])
-                avg_bw1[fprefix][n-1][lno1-3][0] = float(values[3])
-                avg_msg_rate1[fprefix][n-1][lno1-3][0] = float(values[4])
+                size1 = int(values[0])
+                msgcount1 = int(values[1])
+                avg_time1 = float(values[2])
+                avg_bw1 = float(values[3])
+                msg_rate1 = float(values[4])
 
-            print(f"{coll} nodes: {nnodes[n-1]} {fprefix}")
+                if size1 < minmsgsize:
+                    continue
 
-    for fprefix in range(0, files, 1): 
-        pad_top = 1 + 10*(fprefix)
-        pad_left = 2
+                datapoint = Measurement(size1, msgcount1, avg_time1, avg_bw1, msg_rate1)
+                this_series.data.append(datapoint)
+        all_data.append(this_series)
 
-        worksheet.write(pad_top, pad_left+1, f"{file_names[fprefix]}", cell_format5)
-        worksheet.write(pad_top+1, pad_left, "size (H)", cell_format5)
-        for i in range(0, rows, 1):
-            worksheet.write(pad_top+1, i+pad_left+1, x_str[i], cell_format5)
+    # sort all_data such that data of the same operation appear together
+    # and num_gpus for the same operation are increasing
+    all_data.sort(key = lambda item: (item.op, item.ngpus))
 
-        for n in range(1, nodes+1, 1):
-            top_start = pad_top+1 + n
-            worksheet.write(top_start, pad_left, f"{nnodes[n-1]}-GPUs", cell_format5)
+    #for data_series in all_data:
+    #    print(data_series.op, data_series.ngpus)
+    #    for dt in data_series.data:
+    #        print("   ", dt.msgsize, dt.avg_time)
+
+    prev_op = ""
+    op_count = 1
+    worksheet.write(1, 3, f"Data directory: {dir}", cell_format)
+    dataset_count = 0
+    for data_series in all_data:
+        if prev_op != data_series.op:
+            prev_op = data_series.op
+            pad_top = 1 + 10*(op_count)
+            pad_left = 2
+            dataset_count = 0
+            op_count = op_count + 1
+
+            worksheet.write(pad_top, pad_left+1, f"{data_series.op}", cell_format)
+            worksheet.write(pad_top+1, pad_left, f"num-gpus", cell_format)
             for i in range(0, rows, 1):
-                worksheet.write(top_start, i+pad_left+1, float(avg_time1[fprefix][n-1][i][0]), num_format5)
+                worksheet.write(pad_top+1, i+pad_left+1, x_str[i], cell_format)
+
+        top_start = pad_top+2 + dataset_count
+        worksheet.write(top_start, pad_left, f"{data_series.ngpus}", cell_format)
+
+        for i in range(0, rows, 1):
+            msg_size = x[i]
+            data_val = -1.0
+            for pt in data_series.data:
+                if pt.msgsize == msg_size:
+                    data_val = pt.avg_time
+                    break
+            worksheet.write(top_start, i+pad_left+1, data_val, num_format)
+
+        dataset_count = dataset_count + 1
+
 workbook.close()
