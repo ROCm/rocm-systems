@@ -309,12 +309,12 @@ bool initGLInteropPrivateExt(void* GLdeviceContext) {
     // functions require some current GL context when loaded.
     HGLRC fakeRC = nullptr;
     if (!pfnWglGetCurrentContext()) {
-      fakeRC = pfnWglCreateContext((HDC)GLdeviceContext);
+      fakeRC = pfnWglCreateContext(static_cast<HDC>(GLdeviceContext));
       if (fakeRC == nullptr) {
         LogError("Couldn't create temporary WGL context");
         return;
       }
-      pfnWglMakeCurrent((HDC)GLdeviceContext, fakeRC);
+      pfnWglMakeCurrent(static_cast<HDC>(GLdeviceContext), fakeRC);
     }
 
     wglBeginCLInteropAMD =
