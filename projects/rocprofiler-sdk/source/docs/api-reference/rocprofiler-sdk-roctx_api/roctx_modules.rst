@@ -14,4 +14,3 @@ The ROCprofiler-SDK-ROCTx API is organized into the following modules based on f
 * :ref:`ranges_information_reference`
 * :ref:`profiler-control_information_reference`
 * :ref:`naming-utilities_information_reference`
-

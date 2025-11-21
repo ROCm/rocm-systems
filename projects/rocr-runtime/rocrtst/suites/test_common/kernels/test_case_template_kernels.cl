@@ -48,7 +48,6 @@ square(__global int *dstArray,  __global const int *srcArray, const int sz) {
   unsigned int id = get_global_id(0);
   if (id < sz) {
      dstArray[id] = srcArray[id] * srcArray[id];
-  } 
+  }
   return;
 }
- 

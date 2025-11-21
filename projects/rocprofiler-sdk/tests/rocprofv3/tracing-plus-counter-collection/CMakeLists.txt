@@ -6,12 +6,18 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-tracing-plus-counter-collection
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 # pmc
 rocprofiler_add_integration_execute_test(
@@ -25,7 +31,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;application-replay"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection)
+    FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection
+)
 
 foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
     rocprofiler_add_integration_validate_test(
@@ -45,12 +52,17 @@ foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
              ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_counter_collection.csv
         TIMEOUT 45
         LABELS "integration-tests;application-replay"
-        FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection)
+        FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection
+    )
 endforeach()
 
 set(cmdl_single "GRBM_COUNT")
-set(cmdl_multiple "SQ_WAVES" "GRBM_GUI_ACTIVE" "SQ_CYCLES:device=16384"
-                  "SQ_BUSY_CYCLES:device=65536")
+set(cmdl_multiple
+    "SQ_WAVES"
+    "GRBM_GUI_ACTIVE"
+    "SQ_CYCLES:device=16384"
+    "SQ_BUSY_CYCLES:device=65536"
+)
 
 foreach(_GROUP "single" "multiple")
     rocprofiler_add_integration_execute_test(
@@ -63,10 +75,12 @@ foreach(_GROUP "single" "multiple")
         DEPENDS transpose
         TIMEOUT 45
         PRELOAD "${PRELOAD_ENV}"
-        FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
+        FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP}
+    )
 
     set(_TEST_OUTPUT_PREFIX
-        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/cmdl/${_GROUP})
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/cmdl/${_GROUP}
+    )
 
     rocprofiler_add_integration_validate_test(
         rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP}
@@ -85,5 +99,6 @@ foreach(_GROUP "single" "multiple")
              ${_TEST_OUTPUT_PREFIX}_counter_collection.csv
         TIMEOUT 45
         LABELS "integration-tests"
-        FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
+        FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP}
+    )
 endforeach()

@@ -25,10 +25,14 @@ add_library(rocprofiler::build-flags ALIAS rocprofiler-build-flags)
 
 target_compile_options(
     rocprofiler-build-flags
-    INTERFACE $<$<COMPILE_LANGUAGE:C,CXX>:-W -Wall -Wextra -Wno-unused-parameter>
-              $<$<COMPILE_LANGUAGE:CXX>:-fms-extensions>
-              $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:Clang>:-ferror-limit=1000000>>
-    )
+    INTERFACE
+        $<$<COMPILE_LANGUAGE:C,CXX>:-W
+        -Wall
+        -Wextra
+        -Wno-unused-parameter>
+        $<$<COMPILE_LANGUAGE:CXX>:-fms-extensions>
+        $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:Clang>:-ferror-limit=1000000>>
+)
 target_compile_definitions(rocprofiler-build-flags INTERFACE NEW_TRACE_API=1)
 
 # Enable debug trace
@@ -38,19 +42,29 @@ endif()
 
 # Enable direct loading of AQL-profile HSA extension
 if(ROCPROFILER_LD_AQLPROFILE)
-    target_compile_definitions(rocprofiler-build-flags INTERFACE ROCP_LD_AQLPROFILE=1)
+    target_compile_definitions(
+        rocprofiler-build-flags
+        INTERFACE ROCP_LD_AQLPROFILE=1
+    )
 endif()
 
 if(NOT DEFINED ROCM_PATH)
-    set(ROCM_PATH "/opt/rocm"  CACHE STRING "Default ROCM installation directory")
+    set(ROCM_PATH
+        "/opt/rocm"
+        CACHE STRING
+        "Default ROCM installation directory"
+    )
 endif()
 
 # Find hsa-runtime
 find_package(
-    hsa-runtime64 CONFIG REQUIRED
+    hsa-runtime64
+    CONFIG
+    REQUIRED
     HINTS ${CMAKE_PREFIX_PATH}
     PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib/cmake/hsa-runtime64)
+    PATH_SUFFIXES lib/cmake/hsa-runtime64
+)
 
 # Include path: /opt/rocm-ver/include. Go up one level to get ROCm  path
 get_filename_component(ROCM_ROOT_DIR ${ROCM_PATH}/include DIRECTORY)
@@ -73,4 +87,6 @@ find_library(
     NAMES hsa-amd-aqlprofile64
     HINTS ${CMAKE_PREFIX_PATH}
     PATHS ${ROCM_ROOT_DIR}
-    PATH_SUFFIXES lib REQUIRED)
+    PATH_SUFFIXES lib
+    REQUIRED
+)

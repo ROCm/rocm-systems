@@ -23,7 +23,6 @@
 ## the first, second and third number values in
 ## the major, minor and patch variables.
 function(parse_version VERSION_STRING)
-
     string(FIND ${VERSION_STRING} "-" STRING_INDEX)
 
     if(${STRING_INDEX} GREATER -1)
@@ -61,7 +60,12 @@ function(get_version_from_file REL_FILE_PATH ITEM)
 
     if(EXISTS "${FILE_PATH}")
         file(READ ${FILE_PATH} file_contents)
-        string(REGEX MATCHALL "AMDSMI_LIB_VERSION_${ITEM} *[0-9]+" OUTPUT_STR "${file_contents}")
+        string(
+            REGEX MATCHALL
+            "AMDSMI_LIB_VERSION_${ITEM} *[0-9]+"
+            OUTPUT_STR
+            "${file_contents}"
+        )
         list(LENGTH OUTPUT_STR OUTPUT_STR_LENGTH)
         if(${OUTPUT_STR_LENGTH} GREATER 0)
             string(REGEX MATCH "[0-9]+" OUTPUT_ITEM "${OUTPUT_STR}")
@@ -74,7 +78,14 @@ endfunction()
 # Parses file for a pattern and replaces the value
 # associated with that pattern with a specified value
 # Replaces VERSION(MAJOR.MINOR.RELEASE) with updated values
-function(update_version_in_file REL_FILE_PATH DEFAULT_VERSION PAT1 PAT2 PAT3)
+function(
+    update_version_in_file
+    REL_FILE_PATH
+    DEFAULT_VERSION
+    PAT1
+    PAT2
+    PAT3
+)
     get_version_from_file(${REL_FILE_PATH} "MAJOR")
     get_version_from_file(${REL_FILE_PATH} "MINOR")
     get_version_from_file(${REL_FILE_PATH} "RELEASE")
@@ -86,12 +97,27 @@ function(update_version_in_file REL_FILE_PATH DEFAULT_VERSION PAT1 PAT2 PAT3)
             parse_version(${DEFAULT_VERSION})
             file(READ ${FILE_PATH} file_contents_new)
 
-            string(REGEX REPLACE "${PAT1}MAJOR${PAT2} *[0-9]*" "${PAT1}MAJOR${PAT3}${VERSION_MAJOR}" file_contents
-                                 "${file_contents_new}")
-            string(REGEX REPLACE "${PAT1}MINOR${PAT2} *[0-9]*" "${PAT1}MINOR${PAT3}${VERSION_MINOR}" file_contents_new
-                                 "${file_contents}")
-            string(REGEX REPLACE "${PAT1}RELEASE${PAT2} *[0-9]*" "${PAT1}RELEASE${PAT3}${VERSION_PATCH}" file_contents
-                                 "${file_contents_new}")
+            string(
+                REGEX REPLACE
+                "${PAT1}MAJOR${PAT2} *[0-9]*"
+                "${PAT1}MAJOR${PAT3}${VERSION_MAJOR}"
+                file_contents
+                "${file_contents_new}"
+            )
+            string(
+                REGEX REPLACE
+                "${PAT1}MINOR${PAT2} *[0-9]*"
+                "${PAT1}MINOR${PAT3}${VERSION_MINOR}"
+                file_contents_new
+                "${file_contents}"
+            )
+            string(
+                REGEX REPLACE
+                "${PAT1}RELEASE${PAT2} *[0-9]*"
+                "${PAT1}RELEASE${PAT3}${VERSION_PATCH}"
+                file_contents
+                "${file_contents_new}"
+            )
 
             file(WRITE ${FILE_PATH} "${file_contents}")
         endif()
@@ -117,7 +143,9 @@ function(get_version_from_tag DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
             COMMAND head -n 1
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             OUTPUT_VARIABLE GIT_TAG_STRING
-            OUTPUT_STRIP_TRAILING_WHITESPACE RESULTS_VARIABLE RESULTS)
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULTS_VARIABLE RESULTS
+        )
         if(GIT_TAG_STRING)
             parse_version(${GIT_TAG_STRING})
         endif()
@@ -137,21 +165,28 @@ function(get_version_from_tag DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
 endfunction()
 
 function(num_change_since_prev_pkg VERSION_PREFIX)
-    find_program(get_commits NAMES version_util.sh PATHS ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
+    find_program(
+        get_commits
+        NAMES version_util.sh
+        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules
+    )
     if(get_commits)
         execute_process(
             COMMAND ${get_commits} -c ${VERSION_PREFIX}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             OUTPUT_VARIABLE NUM_COMMITS
             OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE RESULT)
+            RESULT_VARIABLE RESULT
+        )
 
         set(NUM_COMMITS "${NUM_COMMITS}" PARENT_SCOPE)
 
         if(${RESULT} EQUAL 0)
             message("${NUM_COMMITS} were found since previous release")
         else()
-            message("Unable to determine number of commits since previous release")
+            message(
+                "Unable to determine number of commits since previous release"
+            )
         endif()
     else()
         message("WARNING: Didn't find version_util.sh")
@@ -177,11 +212,15 @@ function(get_package_version_number DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             OUTPUT_VARIABLE VERSION_HASH
             OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE RESULT)
+            RESULT_VARIABLE RESULT
+        )
         if(${RESULT} EQUAL 0)
             # Check for dirty workspace.
-            execute_process(COMMAND git diff --quiet WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                            RESULT_VARIABLE RESULT)
+            execute_process(
+                COMMAND git diff --quiet
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                RESULT_VARIABLE RESULT
+            )
             if(${RESULT} EQUAL 1)
                 set(VERSION_HASH "${VERSION_HASH}-dirty")
             endif()

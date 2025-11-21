@@ -1,4 +1,5 @@
-add_executable (icd_loader_test
+add_executable(
+    icd_loader_test
     test_kernel.c
     main.c
     test_platforms.c
@@ -10,6 +11,7 @@ add_executable (icd_loader_test
     callbacks.c
     test_create_calls.c
     test_clgl.c
-    test_image_objects.c )
+    test_image_objects.c
+)
 
-target_link_libraries (icd_loader_test OpenCL IcdLog)
+target_link_libraries(icd_loader_test OpenCL IcdLog)

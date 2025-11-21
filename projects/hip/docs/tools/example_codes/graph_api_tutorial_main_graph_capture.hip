@@ -92,7 +92,7 @@ auto main() -> int
         auto projGeom = phantom::make_projectionGeometry();
         auto volGeom = phantom::make_volumeGeometry();
         auto phantomProjections = phantom::make_projections(projGeom, volGeom, streams);
-        
+
         std::cout << "Initializing... " << std::flush;
 
         auto stream = streams.at(0);
@@ -112,7 +112,7 @@ auto main() -> int
         filter_absolute_kernel<<<absoluteBlocks, 1024, 0, stream>>>(R, projGeom.dimTrans.x, projGeom.pixelDim.x);
 
         hip_check(hipStreamSynchronize(stream));
-        
+
         hipfft_check(hipfftDestroy(filterPlan));
         hip_check(hipFree(r));
 
@@ -133,7 +133,7 @@ auto main() -> int
         auto memRequired = static_cast<std::size_t>(memTotal);
         if(memRequired > devMemFree)
         {
-            std::cerr << "Not enough device memory. Required: " << memRequired 
+            std::cerr << "Not enough device memory. Required: " << memRequired
                       << ", available: " << devMemFree << std::endl;
             return EXIT_FAILURE;
         }
@@ -167,7 +167,7 @@ auto main() -> int
             ));
             expandedProjections.push_back(expanded);
             expandedPitches.push_back(expandedPitch);
-            
+
             auto transformed = static_cast<hipfftComplex*>(nullptr);
             auto transformedPitch = std::size_t{};
             hip_check(hipMallocPitch(
@@ -245,7 +245,7 @@ auto main() -> int
         ));
         auto hostVol = make_hipPitchedPtr(
             hostVolPtr, volGeom.dim.x * sizeof(float), volGeom.dim.x, volGeom.dim.y
-        );    
+        );
         auto vol = hipPitchedPtr{};
         auto volExt = make_hipExtent(volGeom.dim.x * sizeof(float), volGeom.dim.y, volGeom.dim.z);
         hip_check(hipMalloc3D(&vol, volExt));
@@ -264,7 +264,7 @@ auto main() -> int
         // [sphinx-graph-vars-end]
 
         auto start = std::chrono::steady_clock::now();
-            
+
         auto projIdx = 0u;
         while(projIdx < projGeom.numProj)
         {
@@ -350,7 +350,7 @@ auto main() -> int
                 ));
                 auto& forward = forwardPlans.at(streamIdx);
                 hipfft_check(hipfftExecR2C(forward, expanded, transformed));
-                
+
                 // Apply filter
                 auto filterBlocksPerGrid = dim3{
                     (projGeom.dimTrans.x / threadsPerBlock.x) + 1,
@@ -360,7 +360,7 @@ auto main() -> int
                 filter_application_kernel<<<filterBlocksPerGrid, threadsPerBlock, 0, stream>>>(
                     transformed, transformedPitch, R, projGeom.dimTrans
                 );
-                
+
                 auto& backward = backwardPlans.at(streamIdx);
                 hipfft_check(hipfftExecC2R(backward, transformed, expanded));
 
@@ -375,7 +375,7 @@ auto main() -> int
                     hipMemcpyDeviceToDevice,
                     stream
                 ));
-                
+
                 filter_normalization_kernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
                     proj, projPitch, projGeom.dimFFT.x, projGeom.dim
                 );
@@ -455,7 +455,7 @@ auto main() -> int
                 if(!graphCreated)
                 {
                     hip_check(hipGraphDebugDotPrint(graph, "graph_capture.dot", hipGraphDebugDotFlagsVerbose));
-                    
+
                     hip_check(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
                     hip_check(hipGraphDestroy(graph));
                     hip_check(hipGraphLaunch(graphExec, graphStream));
@@ -516,11 +516,11 @@ auto main() -> int
                 hip_check(hipGraphDestroy(graph));
                 hip_check(hipGraphLaunch(graphExecFinal, graphStream));
                 // [sphinx-graph-final-end]
-                
+
                 graphFinalCreated = true;
             }
         }
-        
+
         // Obtain reconstruction time before copying back the result
         auto stop = std::chrono::steady_clock::time_point{};
         hip_check(hipLaunchHostFunc(graphStream, [](void* data)
@@ -539,7 +539,7 @@ auto main() -> int
         memcpyParams.extent = volExt;
         memcpyParams.kind = hipMemcpyDeviceToHost;
         hip_check(hipMemcpy3DAsync(&memcpyParams, graphStream));
-            
+
         auto saveVolArgs = new save_volume_args
         {
             "volume.tif",
@@ -552,7 +552,7 @@ auto main() -> int
         std::cout << "All work items enqueued, waiting for completion... " << std::flush;
         hip_check(hipStreamSynchronize(graphStream));
         std::cout << "Done!" << std::endl;
-        
+
         auto const elapsed = std::chrono::duration<double>{stop - start};
         std::cout << "Reconstruction time: " << elapsed.count() << 's' << std::endl;
 

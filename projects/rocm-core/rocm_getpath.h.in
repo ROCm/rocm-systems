@@ -53,4 +53,3 @@ LIB_API_PUBLIC PathErrors_t getROCmInstallPath(char **InstallPath, unsigned int 
 #endif
 
 #endif  //_ROCM_GETPATH_H_  header guard
-

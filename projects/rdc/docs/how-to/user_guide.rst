@@ -67,5 +67,3 @@ Terminology
 
     * - Job
       - A workload that is submitted to one or more compute nodes
-
-

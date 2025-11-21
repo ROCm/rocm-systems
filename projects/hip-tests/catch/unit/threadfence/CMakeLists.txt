@@ -18,12 +18,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-set(TEST_SRC
-    __threadfence_block.cc
-    __threadfence.cc
-    __threadfence_system.cc
-)
+set(TEST_SRC __threadfence_block.cc __threadfence.cc __threadfence_system.cc)
 
 hip_add_exe_to_target(NAME ThreadfenceTest
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests)
+                      TEST_TARGET_NAME build_tests
+)

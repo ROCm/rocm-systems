@@ -6,12 +6,18 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-memory-allocation-tracing
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-memory-allocation-tracing
@@ -23,7 +29,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-memory-allocation-tracing)
+    FIXTURES_SETUP rocprofv3-test-memory-allocation-tracing
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-memory-allocation-tracing
@@ -38,4 +45,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/hsa-memory-allocation-trace/out_memory_allocation_trace.csv
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-memory-allocation-tracing)
+    FIXTURES_REQUIRED rocprofv3-test-memory-allocation-tracing
+)

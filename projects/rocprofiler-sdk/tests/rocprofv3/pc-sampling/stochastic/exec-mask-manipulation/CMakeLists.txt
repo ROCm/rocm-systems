@@ -25,18 +25,20 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-tests-pc-sampling
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-tests-pc-sampling LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 
 # Checking whether stochastic PC sampling is disabled. If so, skip the tests.
 rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABLED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-cmd
@@ -51,7 +53,8 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-cmd
-    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-cmd
@@ -71,7 +74,8 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-cmd
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-json
@@ -86,7 +90,8 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-json
-    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-json
@@ -106,7 +111,8 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-json
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-yaml
@@ -120,7 +126,8 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-yaml
-    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-yaml
@@ -140,4 +147,5 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-yaml
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}"
+)

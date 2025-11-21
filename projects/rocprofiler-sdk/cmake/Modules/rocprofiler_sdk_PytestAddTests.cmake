@@ -2,7 +2,6 @@
 cmake_minimum_required(VERSION 3.20...4.1)
 
 if(CMAKE_SCRIPT_MODE_FILE)
-
     # Initialize content for the CMake test file.
     set(_content "")
 
@@ -15,8 +14,10 @@ if(CMAKE_SCRIPT_MODE_FILE)
     string(REPLACE [[;]] [[\\;]] PYTHON_PATH "${PYTHON_PATH}")
 
     # Set up the encoded environment with required paths.
-    set(ENCODED_ENVIRONMENT "${LIBRARY_ENV_NAME}=${LIBRARY_PATH}"
-                            "PYTHONPATH=${PYTHON_PATH}")
+    set(ENCODED_ENVIRONMENT
+        "${LIBRARY_ENV_NAME}=${LIBRARY_PATH}"
+        "PYTHONPATH=${PYTHON_PATH}"
+    )
 
     # Serialize additional environment variables if any are provided.
     foreach(env ${ENVIRONMENT})
@@ -37,7 +38,11 @@ if(CMAKE_SCRIPT_MODE_FILE)
 
     # Macro to create individual tests with optional test properties.
     macro(create_test NAME IDENTIFIERS)
-        string(APPEND _content "add_test([==[${NAME}]==] \"${PYTEST_EXECUTABLE}\"")
+        string(
+            APPEND
+            _content
+            "add_test([==[${NAME}]==] \"${PYTEST_EXECUTABLE}\""
+        )
 
         foreach(identifier ${IDENTIFIERS})
             string(APPEND _content " [==[${identifier}]==]")
@@ -61,21 +66,29 @@ if(CMAKE_SCRIPT_MODE_FILE)
         endforeach()
 
         # Append the test properties to the content.
-        string(APPEND _content "set_tests_properties([==[${NAME}]==] ${args})\n")
+        string(
+            APPEND
+            _content
+            "set_tests_properties([==[${NAME}]==] ${args})\n"
+        )
     endmacro()
 
     # If tests are bundled together, create a single test group.
     if(BUNDLE_TESTS)
         create_test("\${TEST_GROUP_NAME}" "\${TEST_PATHS}")
-
     else()
         # Set environment variables for collecting tests.
         set(ENV{${LIBRARY_ENV_NAME}} "${LIBRARY_PATH}")
         set(ENV{PYTHONPATH} "${PYTHON_PATH}")
         set(ENV{PYTHONWARNINGS} "ignore")
 
-        set(_command "${PYTEST_EXECUTABLE}" --collect-only -q
-                     "--rootdir=${WORKING_DIRECTORY}" ${DISCOVERY_EXTRA_ARGS})
+        set(_command
+            "${PYTEST_EXECUTABLE}"
+            --collect-only
+            -q
+            "--rootdir=${WORKING_DIRECTORY}"
+            ${DISCOVERY_EXTRA_ARGS}
+        )
 
         foreach(test_path IN LISTS TEST_PATHS)
             list(APPEND _command "${test_path}")
@@ -87,7 +100,8 @@ if(CMAKE_SCRIPT_MODE_FILE)
             OUTPUT_VARIABLE _output_lines
             ERROR_VARIABLE _output_lines
             OUTPUT_STRIP_TRAILING_WHITESPACE
-            WORKING_DIRECTORY ${WORKING_DIRECTORY})
+            WORKING_DIRECTORY ${WORKING_DIRECTORY}
+        )
 
         # Check for errors during test collection.
         string(REGEX MATCH "(=+ ERRORS =+|ERROR:).*" _error "${_output_lines}")
@@ -95,7 +109,9 @@ if(CMAKE_SCRIPT_MODE_FILE)
         if(_error)
             message(${_error})
             message(
-                FATAL_ERROR "An error occurred during the collection of Python tests.")
+                FATAL_ERROR
+                "An error occurred during the collection of Python tests."
+            )
         endif()
 
         # Convert the collected output into a list of lines.
@@ -134,7 +150,13 @@ if(CMAKE_SCRIPT_MODE_FILE)
 
             # Optionally strip parameter brackets from the test name.
             if(STRIP_PARAM_BRACKETS)
-                string(REGEX REPLACE "\\[(.+)\\]$" ".\\1" test_name "${test_name}")
+                string(
+                    REGEX REPLACE
+                    "\\[(.+)\\]$"
+                    ".\\1"
+                    test_name
+                    "${test_name}"
+                )
             endif()
 
             # Optionally include the file path in the test name.
@@ -146,7 +168,13 @@ if(CMAKE_SCRIPT_MODE_FILE)
 
             # Optionally trim parts of the full test name.
             if(TRIM_FROM_FULL_NAME)
-                string(REGEX REPLACE "${TRIM_FROM_FULL_NAME}" "" test_name "${test_name}")
+                string(
+                    REGEX REPLACE
+                    "${TRIM_FROM_FULL_NAME}"
+                    ""
+                    test_name
+                    "${test_name}"
+                )
             endif()
 
             # Prefix the test name with the test group name.
@@ -165,5 +193,4 @@ if(CMAKE_SCRIPT_MODE_FILE)
 
     # Write the generated test content to the specified CTest file.
     file(WRITE ${CTEST_FILE} ${_content})
-
 endif()

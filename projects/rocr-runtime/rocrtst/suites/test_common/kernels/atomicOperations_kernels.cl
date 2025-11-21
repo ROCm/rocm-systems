@@ -136,5 +136,3 @@ __kernel void test_atomic_min(volatile __global int *sysMemory,
     oldValues[tid] = atomic_min(&sysMemory[tid], value);
     atomic_min(&gpuMemory[tid], value);
 }
-
-

@@ -3,15 +3,17 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-sdk-tests-aborted-app
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-aborted-app LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 # disable this test for thread sanitizers because of "signal-unsafe call inside signal"
 # issues on mi200 and mi300 (works fine on vega20 and navi32)
@@ -38,7 +40,8 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROF_TESTING_RAISE_SIGNAL=1"
                 "ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT=1"
-    FIXTURES_SETUP rocprofv3-test-app-abort)
+    FIXTURES_SETUP rocprofv3-test-app-abort
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-app-abort
@@ -49,4 +52,5 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-app-abort
-    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/out-aborted-app/out_results.json)
+    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/out-aborted-app/out_results.json
+)

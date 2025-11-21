@@ -28,7 +28,8 @@ find_path(
     rocJPEG_ROOT_DIR
     NAMES include/rocjpeg
     HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH})
+    PATHS ${ROCM_PATH}
+)
 
 mark_as_advanced(rocJPEG_ROOT_DIR)
 
@@ -37,33 +38,50 @@ find_path(
     NAMES rocjpeg/rocjpeg.h
     HINTS ${rocJPEG_ROOT_DIR}
     PATHS ${rocJPEG_ROOT_DIR}
-    PATH_SUFFIXES include)
+    PATH_SUFFIXES include
+)
 
 find_library(
     rocJPEG_LIBRARY
     NAMES rocjpeg
     HINTS ${rocJPEG_ROOT_DIR}
     PATHS ${rocJPEG_ROOT_DIR}
-    PATH_SUFFIXES lib)
+    PATH_SUFFIXES lib
+)
 
 function(_rocjpeg_read_version_header _VERSION_VAR)
-    if(rocJPEG_INCLUDE_DIR AND EXISTS "${rocJPEG_INCLUDE_DIR}/rocjpeg/rocjpeg_version.h")
-        file(READ "${rocJPEG_INCLUDE_DIR}/rocjpeg/rocjpeg_version.h" _rocjpeg_version)
+    if(
+        rocJPEG_INCLUDE_DIR
+        AND EXISTS "${rocJPEG_INCLUDE_DIR}/rocjpeg/rocjpeg_version.h"
+    )
+        file(
+            READ
+            "${rocJPEG_INCLUDE_DIR}/rocjpeg/rocjpeg_version.h"
+            _rocjpeg_version
+        )
         macro(_rocjpeg_get_version_num _VAR _NAME)
-            string(REGEX MATCH "define([ \t]+)${_NAME}([ \t]+)([0-9]+)" _tmp
-                         "${_rocjpeg_version}")
+            string(
+                REGEX MATCH
+                "define([ \t]+)${_NAME}([ \t]+)([0-9]+)"
+                _tmp
+                "${_rocjpeg_version}"
+            )
             set(${_VAR} 0)
             if(_tmp MATCHES "([0-9]+)")
-                string(REGEX REPLACE "(.*${_NAME}[ ]+)([0-9]+)" "\\2" ${_VAR} "${_tmp}")
+                string(
+                    REGEX REPLACE
+                    "(.*${_NAME}[ ]+)([0-9]+)"
+                    "\\2"
+                    ${_VAR}
+                    "${_tmp}"
+                )
             endif()
         endmacro()
 
         _rocjpeg_get_version_num(_major "ROCJPEG_MAJOR_VERSION")
         _rocjpeg_get_version_num(_minor "ROCJPEG_MINOR_VERSION")
         _rocjpeg_get_version_num(_patch "ROCJPEG_MICRO_VERSION")
-        set(${_VERSION_VAR}
-            ${_major}.${_minor}.${_patch}
-            PARENT_SCOPE)
+        set(${_VERSION_VAR} ${_major}.${_minor}.${_patch} PARENT_SCOPE)
     endif()
 endfunction()
 
@@ -74,13 +92,17 @@ find_package_handle_standard_args(
     rocJPEG
     FOUND_VAR rocJPEG_FOUND
     VERSION_VAR rocJPEG_VERSION
-    REQUIRED_VARS rocJPEG_INCLUDE_DIR rocJPEG_LIBRARY)
+    REQUIRED_VARS rocJPEG_INCLUDE_DIR rocJPEG_LIBRARY
+)
 
 if(rocJPEG_FOUND)
     if(NOT TARGET rocJPEG::rocJPEG)
         add_library(rocJPEG::rocJPEG INTERFACE IMPORTED)
         target_link_libraries(rocJPEG::rocJPEG INTERFACE ${rocJPEG_LIBRARY})
-        target_include_directories(rocJPEG::rocJPEG INTERFACE ${rocJPEG_INCLUDE_DIR})
+        target_include_directories(
+            rocJPEG::rocJPEG
+            INTERFACE ${rocJPEG_INCLUDE_DIR}
+        )
     endif()
 endif()
 

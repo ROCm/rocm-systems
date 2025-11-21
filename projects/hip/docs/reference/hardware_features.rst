@@ -240,7 +240,7 @@ page.
         - 106
         - 104
 
-.. [1] The RDNA architectures feature an experimental compiler option called 
+.. [1] The RDNA architectures feature an experimental compiler option called
    ``mwavefrontsize64``, which determines the wavefront size for kernel code
    generation. When this option is disabled, the native wavefront size of 32 is
    used, when enabled wavefront size 64 is used. This option is not supported by

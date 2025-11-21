@@ -214,4 +214,3 @@ case $TARGET in
     (generatepch) generate_pch ;;
     (*) die "Invalid target $TARGET" ;;
 esac
-

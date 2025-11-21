@@ -18,33 +18,26 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(TEST_SRC
-    hipMemGetAllocationGranularity.cc
-    hipMemRetainAllocationHandle.cc)
+set(TEST_SRC hipMemGetAllocationGranularity.cc hipMemRetainAllocationHandle.cc)
 
 if(HIP_PLATFORM MATCHES "nvidia")
-set(TEST_SRC
-    ${TEST_SRC}
-    hipMemMapArrayAsync.cc)
+    set(TEST_SRC ${TEST_SRC} hipMemMapArrayAsync.cc)
 endif()
 
 if(UNIX)
-if(HIP_PLATFORM MATCHES "amd")
-  set(TEST_SRC
-      ${TEST_SRC}
-      hipMemImportFromShareableHandle.cc
-      hipMemGetHandleForAddressRange.cc)
+    if(HIP_PLATFORM MATCHES "amd")
+        set(TEST_SRC
+            ${TEST_SRC}
+            hipMemImportFromShareableHandle.cc
+            hipMemGetHandleForAddressRange.cc
+        )
+    endif()
+
+    set(TEST_SRC ${TEST_SRC} hipMemExportToShareableHandle.cc)
 endif()
 
-set(TEST_SRC
-    ${TEST_SRC}
-    hipMemExportToShareableHandle.cc)
-endif()
-
 if(HIP_PLATFORM MATCHES "amd")
-  set(TEST_SRC
-      ${TEST_SRC}
-      hipGetProcAddressVmmApis.cc)
+    set(TEST_SRC ${TEST_SRC} hipGetProcAddressVmmApis.cc)
 endif()
 
 set(TEST_SRC
@@ -57,8 +50,10 @@ set(TEST_SRC
     hipMemMap.cc
     hipMemRelease.cc
     hipMemUnmap.cc
-    hipMemVmm_old.cc)
+    hipMemVmm_old.cc
+)
 
 hip_add_exe_to_target(NAME VirtualMemoryManagementTest
   TEST_SRC ${TEST_SRC}
-  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
+  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC}
+)

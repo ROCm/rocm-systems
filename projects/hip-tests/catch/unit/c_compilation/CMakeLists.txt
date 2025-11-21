@@ -18,32 +18,33 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-set(TEST_SRC
-    hipGetDeviceProp.cc
-)
+set(TEST_SRC hipGetDeviceProp.cc)
 
-set (PLATFORM_DEFINE __HIP_PLATFORM_AMD__)
+set(PLATFORM_DEFINE __HIP_PLATFORM_AMD__)
 if(HIP_PLATFORM MATCHES "nvidia")
-    set (PLATFORM_DEFINE __HIP_PLATFORM_NVIDIA__)
+    set(PLATFORM_DEFINE __HIP_PLATFORM_NVIDIA__)
 endif()
 
 # Creating Custom object file
-add_custom_target(devprop_c_custom
-    COMMAND ${HIP_PATH}/bin/hipcc
-            -c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
-            -I${HIP_PATH}/include
-            -D${PLATFORM_DEFINE}
-            --hip-path=${HIP_PATH}
-            -o hipGetDeviceProp.o
+add_custom_target(
+    devprop_c_custom
+    COMMAND
+        ${HIP_PATH}/bin/hipcc -c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
+        -I${HIP_PATH}/include -D${PLATFORM_DEFINE} --hip-path=${HIP_PATH} -o
+        hipGetDeviceProp.o
     BYPRODUCTS hipGetDeviceProp.o
 )
 
 add_library(devprop_c OBJECT IMPORTED)
-set_property(TARGET devprop_c PROPERTY IMPORTED_OBJECTS "${CMAKE_CURRENT_BINARY_DIR}/hipGetDeviceProp.o")
+set_property(
+    TARGET devprop_c
+    PROPERTY IMPORTED_OBJECTS "${CMAKE_CURRENT_BINARY_DIR}/hipGetDeviceProp.o"
+)
 
 hip_add_exe_to_target(NAME CTests
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
-                      LINKER_LIBS devprop_c)
+                      LINKER_LIBS devprop_c
+)
 
 add_dependencies(CTests devprop_c_custom)

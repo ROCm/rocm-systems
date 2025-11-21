@@ -6,7 +6,8 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-kernel-rename
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
@@ -16,11 +17,19 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/input-kernel-rename.yml.in
-               ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml @ONLY)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/input-kernel-rename.yml.in
+    ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml
+    @ONLY
+)
 
 ##########################################################################################
 #
@@ -42,7 +51,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-kernel-rename-cmd-line)
+    FIXTURES_SETUP rocprofv3-test-kernel-rename-cmd-line
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-kernel-rename-cmd-line
@@ -57,7 +67,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.otf2
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-kernel-rename-cmd-line)
+    FIXTURES_REQUIRED rocprofv3-test-kernel-rename-cmd-line
+)
 
 ##########################################################################################
 #
@@ -74,7 +85,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-kernel-rename-inp-yaml)
+    FIXTURES_SETUP rocprofv3-test-kernel-rename-inp-yaml
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-kernel-rename-inp-yaml
@@ -89,4 +101,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.otf2
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-kernel-rename-inp-yaml)
+    FIXTURES_REQUIRED rocprofv3-test-kernel-rename-inp-yaml
+)

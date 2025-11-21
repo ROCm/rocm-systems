@@ -20,47 +20,51 @@
 
 # Common Tests - Test independent of all platforms
 
-set(TEST_SRC
-    memcpy.cc
-    memset.cc
-)
+set(TEST_SRC memcpy.cc memset.cc)
 
 if(HIP_PLATFORM MATCHES "nvidia")
-  set(LINKER_LIBS nvrtc)
+    set(LINKER_LIBS nvrtc)
 elseif(HIP_PLATFORM MATCHES "amd")
-  set(LINKER_LIBS hiprtc)
+    set(LINKER_LIBS hiprtc)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
-  hip_add_exe_to_target(NAME DeviceMemoryTest
-                    TEST_SRC ${TEST_SRC}
-                    TEST_TARGET_NAME build_tests
-                    LINKER_LIBS ${LINKER_LIBS}
-                    PROPERTY CXX_STANDARD 17)
-elseif (HIP_PLATFORM MATCHES "nvidia")
-  hip_add_exe_to_target(NAME DeviceMemoryTest
-                    TEST_SRC ${TEST_SRC}
-                    TEST_TARGET_NAME build_tests
-                    LINKER_LIBS ${LINKER_LIBS}
-                    COMPILE_OPTIONS -std=c++17)
+    hip_add_exe_to_target(NAME DeviceMemoryTest
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME build_tests
+                      LINKER_LIBS ${LINKER_LIBS}
+                      PROPERTY CXX_STANDARD 17
+    )
+elseif(HIP_PLATFORM MATCHES "nvidia")
+    hip_add_exe_to_target(NAME DeviceMemoryTest
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME build_tests
+                      LINKER_LIBS ${LINKER_LIBS}
+                      COMPILE_OPTIONS -std=c++17
+    )
 endif()
 
 if(UNIX)
-file(GLOB NEGATIVE_TEST_SRC
-     "memcpy_negative_kernels.cc"
-     "memset_negative_kernels.cc"
+    file(
+        GLOB NEGATIVE_TEST_SRC
+        "memcpy_negative_kernels.cc"
+        "memset_negative_kernels.cc"
     )
 
-file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
+    file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+    set_property(
+        GLOBAL
+        APPEND
+        PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC}
+    )
 
-#add_test(NAME Unit_Device_memcpy_Negative
-#         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
-#         ./src ${HIP_PLATFORM} ${HIP_PATH}
-#         memcpy_negative_kernels.cc 4)
-#
-#add_test(NAME Unit_Device_memset_Negative
-#         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
-#         ./src ${HIP_PLATFORM} ${HIP_PATH}
-#         memset_negative_kernels.cc 4)
+    #add_test(NAME Unit_Device_memcpy_Negative
+    #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
+    #         ./src ${HIP_PLATFORM} ${HIP_PATH}
+    #         memcpy_negative_kernels.cc 4)
+    #
+    #add_test(NAME Unit_Device_memset_Negative
+    #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
+    #         ./src ${HIP_PLATFORM} ${HIP_PATH}
+    #         memset_negative_kernels.cc 4)
 endif()

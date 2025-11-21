@@ -27,9 +27,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -45,10 +50,7 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
-find_path(
-    ROCJPEG_SHARE_DIR
-    NAMES images
-    PATHS ${ROCM_PATH}/share/rocjpeg/)
+find_path(ROCJPEG_SHARE_DIR NAMES images PATHS ${ROCM_PATH}/share/rocjpeg/)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -65,5 +67,10 @@ find_package(Threads REQUIRED)
 find_package(rocJPEG REQUIRED)
 target_link_libraries(
     rocjpeg-demo
-    PRIVATE Threads::Threads hsa-runtime64 rocprofiler-sdk::tests-common-library
-            rocprofiler-sdk::tests-build-flags rocJPEG::rocJPEG)
+    PRIVATE
+        Threads::Threads
+        hsa-runtime64
+        rocprofiler-sdk::tests-common-library
+        rocprofiler-sdk::tests-build-flags
+        rocJPEG::rocJPEG
+)

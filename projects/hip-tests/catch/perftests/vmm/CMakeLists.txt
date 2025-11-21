@@ -18,10 +18,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-set(TEST_SRC
-  hipPerfVMMAlloc.cc
-)
+set(TEST_SRC hipPerfVMMAlloc.cc)
 
 hip_add_exe_to_target(NAME perfVMMTest
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME perf_test)
+                      TEST_TARGET_NAME perf_test
+)

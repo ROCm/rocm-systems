@@ -12,12 +12,14 @@ set(ROCPROFILER_CXX_HEADER_FILES
     perfetto.hpp
     utility.hpp
     serialization.hpp
-    version.hpp)
+    version.hpp
+)
 
 install(
     FILES ${ROCPROFILER_CXX_HEADER_FILES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk/cxx
-    COMPONENT development)
+    COMPONENT development
+)
 
 add_subdirectory(codeobj)
 add_subdirectory(details)

@@ -28,75 +28,95 @@ function(_rocprofiler_check_clang_format_version _OUT _EXE)
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
         OUTPUT_VARIABLE _CLANG_FMT_OUT
         RESULT_VARIABLE _CLANG_FMT_RET
-        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    if(_CLANG_FMT_RET EQUAL 0 AND "${_CLANG_FMT_OUT}" MATCHES
-                                  "version 11\\.([0-9]+)\\.([0-9]+)")
-        set(${_OUT}
-            ON
-            PARENT_SCOPE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(
+        _CLANG_FMT_RET EQUAL 0
+        AND "${_CLANG_FMT_OUT}" MATCHES "version 11\\.([0-9]+)\\.([0-9]+)"
+    )
+        set(${_OUT} ON PARENT_SCOPE)
     else()
-        set(${_OUT}
-            OFF
-            PARENT_SCOPE)
+        set(${_OUT} OFF PARENT_SCOPE)
     endif()
 endfunction()
 
 _rocprofiler_get_python_user_bin(_PYTHON_USER_BIN)
-if(NOT ROCPROFILER_CLANG_FORMAT_EXE
-   AND _PYTHON_USER_BIN
-   AND EXISTS "${_PYTHON_USER_BIN}/clang-format")
+if(
+    NOT ROCPROFILER_CLANG_FORMAT_EXE
+    AND _PYTHON_USER_BIN
+    AND EXISTS "${_PYTHON_USER_BIN}/clang-format"
+)
     _rocprofiler_check_clang_format_version(_IS_VALID_CLANG_FMT
-                                            "${_PYTHON_USER_BIN}/clang-format")
+                                            "${_PYTHON_USER_BIN}/clang-format"
+    )
     if(_IS_VALID_CLANG_FMT)
         set(ROCPROFILER_CLANG_FORMAT_EXE
             "${_PYTHON_USER_BIN}/clang-format"
-            CACHE FILEPATH "clang-format exe")
+            CACHE FILEPATH
+            "clang-format exe"
+        )
     endif()
 endif()
 
-if(NOT ROCPROFILER_CMAKE_FORMAT_EXE
-   AND _PYTHON_USER_BIN
-   AND EXISTS "${_PYTHON_USER_BIN}/cmake-format")
+if(
+    NOT ROCPROFILER_CMAKE_FORMAT_EXE
+    AND _PYTHON_USER_BIN
+    AND EXISTS "${_PYTHON_USER_BIN}/cmake-format"
+)
     set(ROCPROFILER_CMAKE_FORMAT_EXE
         "${_PYTHON_USER_BIN}/cmake-format"
-        CACHE FILEPATH "cmake-format exe")
+        CACHE FILEPATH
+        "cmake-format exe"
+    )
 endif()
 
-if(NOT ROCPROFILER_BLACK_FORMAT_EXE
-   AND _PYTHON_USER_BIN
-   AND EXISTS "${_PYTHON_USER_BIN}/black")
+if(
+    NOT ROCPROFILER_BLACK_FORMAT_EXE
+    AND _PYTHON_USER_BIN
+    AND EXISTS "${_PYTHON_USER_BIN}/black"
+)
     set(ROCPROFILER_BLACK_FORMAT_EXE
         "${_PYTHON_USER_BIN}/black"
-        CACHE FILEPATH "black exe")
+        CACHE FILEPATH
+        "black exe"
+    )
 endif()
 
 find_program(
-    ROCPROFILER_CLANG_FORMAT_EXE ${_FMT_REQUIRED}
+    ROCPROFILER_CLANG_FORMAT_EXE
+    ${_FMT_REQUIRED}
     NAMES clang-format-11 clang-format-mp-11 clang-format
     PATHS ${_PYTHON_USER_BIN}
     HINTS ${_PYTHON_USER_BIN}
-    PATH_SUFFIXES bin)
+    PATH_SUFFIXES bin
+)
 find_program(
-    ROCPROFILER_CMAKE_FORMAT_EXE ${_FMT_REQUIRED}
+    ROCPROFILER_CMAKE_FORMAT_EXE
+    ${_FMT_REQUIRED}
     NAMES cmake-format
     PATHS ${_PYTHON_USER_BIN}
     HINTS ${_PYTHON_USER_BIN}
-    PATH_SUFFIXES bin)
+    PATH_SUFFIXES bin
+)
 find_program(
-    ROCPROFILER_BLACK_FORMAT_EXE ${_FMT_REQUIRED}
+    ROCPROFILER_BLACK_FORMAT_EXE
+    ${_FMT_REQUIRED}
     NAMES black
     PATHS ${_PYTHON_USER_BIN}
     HINTS ${_PYTHON_USER_BIN}
-    PATH_SUFFIXES bin)
+    PATH_SUFFIXES bin
+)
 
 _rocprofiler_check_clang_format_version(_IS_VALID_CLANG_FMT
-                                        "${ROCPROFILER_CLANG_FORMAT_EXE}")
+                                        "${ROCPROFILER_CLANG_FORMAT_EXE}"
+)
 if(NOT _IS_VALID_CLANG_FMT)
     if(ROCPROFILER_BUILD_DEVELOPER)
         message(
             AUTHOR_WARNING
-                "[rocprofiler] clang-format version 11 not found. Please see rocprofiler-sdk CONTRIBUTING.md for instructions on installing clang-format version 11."
-            )
+            "[rocprofiler] clang-format version 11 not found. Please see rocprofiler-sdk CONTRIBUTING.md for instructions on installing clang-format version 11."
+        )
     endif()
     unset(ROCPROFILER_CLANG_FORMAT_EXE CACHE)
 endif()
@@ -111,29 +131,52 @@ foreach(_TYPE source python cmake)
     endif()
 endforeach()
 
-if(ROCPROFILER_CLANG_FORMAT_EXE
-   OR ROCPROFILER_BLACK_FORMAT_EXE
-   OR ROCPROFILER_CMAKE_FORMAT_EXE)
-
+if(
+    ROCPROFILER_CLANG_FORMAT_EXE
+    OR ROCPROFILER_BLACK_FORMAT_EXE
+    OR ROCPROFILER_CMAKE_FORMAT_EXE
+)
     set(rocp_source_files)
     set(rocp_header_files)
     set(rocp_python_files)
-    set(rocp_cmake_files ${PROJECT_SOURCE_DIR}/CMakeLists.txt
-                         ${PROJECT_SOURCE_DIR}/external/CMakeLists.txt)
+    set(rocp_cmake_files
+        ${PROJECT_SOURCE_DIR}/CMakeLists.txt
+        ${PROJECT_SOURCE_DIR}/external/CMakeLists.txt
+    )
 
-    foreach(_DIR cmake samples source tests benchmark)
+    foreach(
+        _DIR
+        cmake
+        samples
+        source
+        tests
+        benchmark
+    )
         foreach(_TYPE header_files source_files cmake_files python_files)
             set(${_TYPE})
         endforeach()
-        file(GLOB_RECURSE header_files ${PROJECT_SOURCE_DIR}/${_DIR}/*.h
-             ${PROJECT_SOURCE_DIR}/${_DIR}/*.hpp ${PROJECT_SOURCE_DIR}/${_DIR}/*.h.in
-             ${PROJECT_SOURCE_DIR}/${_DIR}/*.hpp.in)
-        file(GLOB_RECURSE source_files ${PROJECT_SOURCE_DIR}/${_DIR}/*.c
-             ${PROJECT_SOURCE_DIR}/${_DIR}/*.cpp)
-        file(GLOB_RECURSE cmake_files ${PROJECT_SOURCE_DIR}/${_DIR}/*CMakeLists.txt
-             ${PROJECT_SOURCE_DIR}/${_DIR}/*.cmake)
-        file(GLOB_RECURSE python_files ${PROJECT_SOURCE_DIR}/${_DIR}/*.py
-             ${PROJECT_SOURCE_DIR}/${_DIR}/*.py.in)
+        file(
+            GLOB_RECURSE header_files
+            ${PROJECT_SOURCE_DIR}/${_DIR}/*.h
+            ${PROJECT_SOURCE_DIR}/${_DIR}/*.hpp
+            ${PROJECT_SOURCE_DIR}/${_DIR}/*.h.in
+            ${PROJECT_SOURCE_DIR}/${_DIR}/*.hpp.in
+        )
+        file(
+            GLOB_RECURSE source_files
+            ${PROJECT_SOURCE_DIR}/${_DIR}/*.c
+            ${PROJECT_SOURCE_DIR}/${_DIR}/*.cpp
+        )
+        file(
+            GLOB_RECURSE cmake_files
+            ${PROJECT_SOURCE_DIR}/${_DIR}/*CMakeLists.txt
+            ${PROJECT_SOURCE_DIR}/${_DIR}/*.cmake
+        )
+        file(
+            GLOB_RECURSE python_files
+            ${PROJECT_SOURCE_DIR}/${_DIR}/*.py
+            ${PROJECT_SOURCE_DIR}/${_DIR}/*.py.in
+        )
         foreach(_TYPE header_files source_files cmake_files python_files)
             list(APPEND rocp_${_TYPE} ${${_TYPE}})
         endforeach()
@@ -149,10 +192,11 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
     if(ROCPROFILER_CLANG_FORMAT_EXE)
         add_custom_target(
             format-rocprofiler-source
-            ${ROCPROFILER_CLANG_FORMAT_EXE} -i ${rocp_header_files} ${rocp_source_files}
+            ${ROCPROFILER_CLANG_FORMAT_EXE} -i ${rocp_header_files}
+            ${rocp_source_files}
             COMMENT
                 "[rocprofiler] Running source formatter ${ROCPROFILER_CLANG_FORMAT_EXE}..."
-            )
+        )
     endif()
 
     if(ROCPROFILER_BLACK_FORMAT_EXE AND rocp_python_files)
@@ -161,7 +205,7 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
             ${ROCPROFILER_BLACK_FORMAT_EXE} -q ${rocp_python_files}
             COMMENT
                 "[rocprofiler] Running python formatter ${ROCPROFILER_BLACK_FORMAT_EXE}..."
-            )
+        )
     endif()
 
     if(ROCPROFILER_CMAKE_FORMAT_EXE)
@@ -170,7 +214,7 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
             ${ROCPROFILER_CMAKE_FORMAT_EXE} -i ${rocp_cmake_files}
             COMMENT
                 "[rocprofiler] Running cmake formatter ${ROCPROFILER_CMAKE_FORMAT_EXE}..."
-            )
+        )
     endif()
 
     foreach(_TYPE source python cmake)

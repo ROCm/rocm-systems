@@ -16,4 +16,3 @@ Finally, do the following to build the application and respective kernels:
 
 make
 make sample_kernels
-

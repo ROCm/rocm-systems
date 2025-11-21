@@ -25,15 +25,17 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-sdk-tests-rocprofv3-agent-index
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-rocprofv3-agent-index LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
     set(LOG_LEVEL "warning") # info produces memory leak
@@ -52,7 +54,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-agent-index-json-absolute)
+    FIXTURES_SETUP rocprofv3-test-agent-index-json-absolute
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-agent-index-json-type-relative
@@ -65,7 +68,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-agent-index-json-type-relative)
+    FIXTURES_SETUP rocprofv3-test-agent-index-json-type-relative
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-agent-index-json-relative
@@ -78,7 +82,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-agent-index-json-relative)
+    FIXTURES_SETUP rocprofv3-test-agent-index-json-relative
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-agent-index-json-absolute
@@ -99,7 +104,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_memory_copy_trace.csv
          --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_results.json
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    FAIL_REGULAR_EXPRESSION "AssertionError"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-agent-index-json-relative
@@ -121,7 +127,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-relative/out_memory_copy_trace.csv
          --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_results.json
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    FAIL_REGULAR_EXPRESSION "AssertionError"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-agent-index-json-type-relative
@@ -143,4 +150,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_memory_copy_trace.csv
          --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_results.json
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    FAIL_REGULAR_EXPRESSION "AssertionError"
+)

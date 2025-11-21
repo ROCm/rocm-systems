@@ -20,20 +20,26 @@
 
 cmake_minimum_required(VERSION 3.21.3)
 
-project(cmake_cxx_amdclang++_test
-        DESCRIPTION "Verifies CXX Language Support with amdclang++"
-        LANGUAGES CXX)
+project(
+    cmake_cxx_amdclang++_test
+    DESCRIPTION "Verifies CXX Language Support with amdclang++"
+    LANGUAGES CXX
+)
 
 if(UNIX)
-  if(NOT DEFINED ROCM_PATH)
-    if(DEFINED ENV{ROCM_PATH})
-      set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
-    else()
-      set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory.")
+    if(NOT DEFINED ROCM_PATH)
+        if(DEFINED ENV{ROCM_PATH})
+            set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
+        else()
+            set(ROCM_PATH
+                "/opt/rocm"
+                CACHE STRING
+                "Default ROCM installation directory."
+            )
+        endif()
     endif()
-  endif()
-  # Search for rocm in common locations
-  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+    # Search for rocm in common locations
+    list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
 set(CMAKE_CXX_COMPILER "${ROCM_PATH}/llvm/bin/clang++")
@@ -43,9 +49,9 @@ find_package(hip REQUIRED)
 
 # Create the excutable
 if(TARGET build_cookbook)
-set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
+    set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
 else()
-set(EXCLUDE_OPTION )
+    set(EXCLUDE_OPTION)
 endif()
 add_executable(square1 ${EXCLUDE_OPTION} square.cpp)
 
@@ -55,5 +61,5 @@ target_include_directories(square1 PRIVATE ../../common)
 target_link_libraries(square1 hip::device)
 
 if(TARGET build_cookbook)
-add_dependencies(build_cookbook square1)
+    add_dependencies(build_cookbook square1)
 endif()

@@ -1,6 +1,6 @@
 # Contributing to AMD SMI #
 
-We welcome contributions to AMD SMI.  
+We welcome contributions to AMD SMI.
 Please follow these details to help ensure your contributions will be successfully accepted.
 
 ## Issue Discussion ##

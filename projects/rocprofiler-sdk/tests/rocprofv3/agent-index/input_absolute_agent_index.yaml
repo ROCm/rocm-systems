@@ -3,5 +3,3 @@ jobs:
     output_format: [csv, json]
     sys_trace: True
     agent_index: absolute
-
-    

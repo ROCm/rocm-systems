@@ -28,15 +28,13 @@ if(PkgConfig_FOUND)
     set(ENV{PKG_CONFIG_SYSTEM_INCLUDE_PATH} "")
     pkg_check_modules(ELF libelf)
 
-    if(ELF_FOUND
-       AND ELF_INCLUDE_DIRS
-       AND ELF_LIBRARIES)
+    if(ELF_FOUND AND ELF_INCLUDE_DIRS AND ELF_LIBRARIES)
         set(libelf_INCLUDE_DIR
             "${ELF_INCLUDE_DIRS}"
-            CACHE FILEPATH "libelf include directory")
-        set(libelf_LIBRARY
-            "${ELF_LIBRARIES}"
-            CACHE FILEPATH "libelf libraries")
+            CACHE FILEPATH
+            "libelf include directory"
+        )
+        set(libelf_LIBRARY "${ELF_LIBRARIES}" CACHE FILEPATH "libelf libraries")
     endif()
 endif()
 
@@ -45,7 +43,8 @@ if(NOT libelf_INCLUDE_DIR OR NOT libelf_LIBRARY)
         libelf_ROOT_DIR
         NAMES include/elf.h
         HINTS ${libelf_ROOT}
-        PATHS ${libelf_ROOT})
+        PATHS ${libelf_ROOT}
+    )
 
     mark_as_advanced(libelf_ROOT_DIR)
 
@@ -54,18 +53,25 @@ if(NOT libelf_INCLUDE_DIR OR NOT libelf_LIBRARY)
         NAMES elf.h
         HINTS ${libelf_ROOT}
         PATHS ${libelf_ROOT}
-        PATH_SUFFIXES include)
+        PATH_SUFFIXES include
+    )
 
     find_library(
         libelf_LIBRARY
         NAMES elf
         HINTS ${libelf_ROOT}
         PATHS ${libelf_ROOT}
-        PATH_SUFFIXES lib lib64)
+        PATH_SUFFIXES lib lib64
+    )
 endif()
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(libelf DEFAULT_MSG libelf_LIBRARY libelf_INCLUDE_DIR)
+find_package_handle_standard_args(
+    libelf
+    DEFAULT_MSG
+    libelf_LIBRARY
+    libelf_INCLUDE_DIR
+)
 
 if(libelf_FOUND)
     if(NOT TARGET libelf::libelf)
@@ -76,7 +82,11 @@ if(libelf_FOUND)
         target_link_libraries(libelf::libelf INTERFACE PkgConfig::ELF)
     else()
         target_link_libraries(libelf::libelf INTERFACE ${libelf_LIBRARY})
-        target_include_directories(libelf::libelf SYSTEM INTERFACE ${libelf_INCLUDE_DIR})
+        target_include_directories(
+            libelf::libelf
+            SYSTEM
+            INTERFACE ${libelf_INCLUDE_DIR}
+        )
     endif()
 endif()
 

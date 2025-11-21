@@ -7,9 +7,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -36,7 +41,10 @@ set_source_files_properties(hip-streams-per-thread.cpp PROPERTIES LANGUAGE HIP)
 
 add_executable(hip-streams-per-thread)
 target_sources(hip-streams-per-thread PRIVATE hip-streams-per-thread.cpp)
-target_link_libraries(hip-streams-per-thread PRIVATE rocprofiler-sdk::tests-build-flags)
+target_link_libraries(
+    hip-streams-per-thread
+    PRIVATE rocprofiler-sdk::tests-build-flags
+)
 
 find_package(Threads REQUIRED)
 target_link_libraries(hip-streams-per-thread PRIVATE Threads::Threads)

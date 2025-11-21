@@ -28,13 +28,19 @@ set(ROCPROFILER_LIB_KFD_EVENTS_TEST_SOURCES parser.cpp)
 
 add_executable(kfd-events-parser)
 
-target_sources(kfd-events-parser PRIVATE ${ROCPROFILER_LIB_KFD_EVENTS_TEST_SOURCES})
+target_sources(
+    kfd-events-parser
+    PRIVATE ${ROCPROFILER_LIB_KFD_EVENTS_TEST_SOURCES}
+)
 
 target_link_libraries(
     kfd-events-parser
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
-            GTest::gtest_main)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk-common-library
+        rocprofiler-sdk::rocprofiler-sdk-static-library
+        GTest::gtest
+        GTest::gtest_main
+)
 
 rocprofiler_add_unit_test(
     TARGET kfd-events-parser
@@ -43,4 +49,5 @@ rocprofiler_add_unit_test(
     LABELS "unittests;kfd-events"
     ENVIRONMENT
         "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+)

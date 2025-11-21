@@ -8,13 +8,22 @@
 find_path(
     FIND_LIBELF_INCLUDES
     NAMES libelf.h
-    PATHS /usr/include /usr/include/libelf /usr/local/include /usr/local/include/libelf)
+    PATHS
+        /usr/include
+        /usr/include/libelf
+        /usr/local/include
+        /usr/local/include/libelf
+)
 
 find_library(FIND_LIBELF_LIBRARIES NAMES elf PATH /usr/lib /usr/local/lib)
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(LibElf DEFAULT_MSG FIND_LIBELF_INCLUDES
-                                  FIND_LIBELF_LIBRARIES)
+find_package_handle_standard_args(
+    LibElf
+    DEFAULT_MSG
+    FIND_LIBELF_INCLUDES
+    FIND_LIBELF_LIBRARIES
+)
 mark_as_advanced(FIND_LIBELF_INCLUDES FIND_LIBELF_LIBRARIES)
 
 set(LIBELF_INCLUDES ${FIND_LIBELF_INCLUDES})

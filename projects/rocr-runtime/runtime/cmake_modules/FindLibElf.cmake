@@ -13,57 +13,63 @@
 #  For details see the accompanying COPYING-CMAKE-SCRIPTS file.
 #
 
-if (LIBELF_FOUND)
-  return()
-endif (LIBELF_FOUND)
+if(LIBELF_FOUND)
+    return()
+endif(LIBELF_FOUND)
 
-find_path (LIBELF_INCLUDE_DIRS
-  NAMES
-    libelf.h
-  PATHS
-    /usr/include
-    /usr/include/libelf
-    /usr/local/include
-    /usr/local/include/libelf
-    /opt/local/include
-    /opt/local/include/libelf
-    /sw/include
-    /sw/include/libelf
-    ENV CPATH)
+find_path(
+    LIBELF_INCLUDE_DIRS
+    NAMES libelf.h
+    PATHS
+        /usr/include
+        /usr/include/libelf
+        /usr/local/include
+        /usr/local/include/libelf
+        /opt/local/include
+        /opt/local/include/libelf
+        /sw/include
+        /sw/include/libelf
+    ENV CPATH
+)
 
-find_library (LIBELF_LIBRARIES
-  NAMES
-    elf
-  PATHS
-    /usr/lib
-    /usr/local/lib
-    /opt/local/lib
-    /sw/lib
+find_library(
+    LIBELF_LIBRARIES
+    NAMES elf
+    PATHS /usr/lib /usr/local/lib /opt/local/lib /sw/lib
     ENV LIBRARY_PATH
-    ENV LD_LIBRARY_PATH)
+    ENV LD_LIBRARY_PATH
+)
 
-include (FindPackageHandleStandardArgs)
-
+include(FindPackageHandleStandardArgs)
 
 # handle the QUIETLY and REQUIRED arguments and set LIBELF_FOUND to TRUE if all listed variables are TRUE
-FIND_PACKAGE_HANDLE_STANDARD_ARGS(LibElf DEFAULT_MSG
-  LIBELF_LIBRARIES
-  LIBELF_INCLUDE_DIRS)
+find_package_handle_standard_args(
+    LibElf
+    DEFAULT_MSG
+    LIBELF_LIBRARIES
+    LIBELF_INCLUDE_DIRS
+)
 
-SET(CMAKE_REQUIRED_LIBRARIES elf)
-INCLUDE(CheckCXXSourceCompiles)
-CHECK_CXX_SOURCE_COMPILES("#include <libelf.h>
+set(CMAKE_REQUIRED_LIBRARIES elf)
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles(
+    "#include <libelf.h>
 int main() {
   Elf *e = (Elf*)0;
   size_t sz;
   elf_getshdrstrndx(e, &sz);
   return 0;
-}" ELF_GETSHDRSTRNDX)
+}"
+    ELF_GETSHDRSTRNDX
+)
 
 mark_as_advanced(LIBELF_INCLUDE_DIRS LIBELF_LIBRARIES ELF_GETSHDRSTRNDX)
 
 if(LIBELF_FOUND)
-  add_library(elf UNKNOWN IMPORTED)
-  set_property(TARGET elf PROPERTY IMPORTED_LOCATION ${LIBELF_LIBRARIES})
-  set_property(TARGET elf PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${LIBELF_INCLUDE_DIRS})
+    add_library(elf UNKNOWN IMPORTED)
+    set_property(TARGET elf PROPERTY IMPORTED_LOCATION ${LIBELF_LIBRARIES})
+    set_property(
+        TARGET elf
+        PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${LIBELF_INCLUDE_DIRS}
+    )
 endif()

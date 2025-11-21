@@ -9,8 +9,10 @@ find_package(rocprofiler-sdk-roctx REQUIRED)
 
 add_executable(openmp-target)
 target_sources(openmp-target PRIVATE openmp-target.cpp)
-target_link_libraries(openmp-target PRIVATE Threads::Threads
-                                            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+target_link_libraries(
+    openmp-target
+    PRIVATE Threads::Threads rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+)
 target_compile_options(openmp-target PRIVATE -fopenmp)
 target_link_options(openmp-target PRIVATE -fopenmp)
 

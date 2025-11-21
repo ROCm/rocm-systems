@@ -30,7 +30,8 @@ set(TOOL_OUTPUT_HEADERS
     stream_info.hpp
     timestamps.hpp
     tmp_file_buffer.hpp
-    tmp_file.hpp)
+    tmp_file.hpp
+)
 
 set(TOOL_OUTPUT_SOURCES
     csv_output_file.cpp
@@ -50,29 +51,38 @@ set(TOOL_OUTPUT_SOURCES
     output_stream.cpp
     statistics.cpp
     tmp_file_buffer.cpp
-    tmp_file.cpp)
+    tmp_file.cpp
+)
 
 add_library(rocprofiler-sdk-output-library STATIC)
-add_library(rocprofiler-sdk::rocprofiler-sdk-output-library ALIAS
-            rocprofiler-sdk-output-library)
-target_sources(rocprofiler-sdk-output-library PRIVATE ${TOOL_OUTPUT_SOURCES}
-                                                      ${TOOL_OUTPUT_HEADERS})
+add_library(
+    rocprofiler-sdk::rocprofiler-sdk-output-library
+    ALIAS rocprofiler-sdk-output-library
+)
+target_sources(
+    rocprofiler-sdk-output-library
+    PRIVATE ${TOOL_OUTPUT_SOURCES} ${TOOL_OUTPUT_HEADERS}
+)
 target_link_libraries(
     rocprofiler-sdk-output-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-rocpd-library
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
-            rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-memcheck
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-cereal
-            rocprofiler-sdk::rocprofiler-sdk-perfetto
-            rocprofiler-sdk::rocprofiler-sdk-otf2
-            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
-            rocprofiler-sdk::rocprofiler-sdk-dw
-            rocprofiler-sdk::rocprofiler-sdk-elf
-            rocprofiler-sdk::rocprofiler-sdk-sqlite3)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk-headers
+        rocprofiler-sdk::rocprofiler-sdk-build-flags
+        rocprofiler-sdk::rocprofiler-sdk-memcheck
+        rocprofiler-sdk::rocprofiler-sdk-common-library
+        rocprofiler-sdk::rocprofiler-sdk-cereal
+        rocprofiler-sdk::rocprofiler-sdk-perfetto
+        rocprofiler-sdk::rocprofiler-sdk-otf2
+        rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+        rocprofiler-sdk::rocprofiler-sdk-dw
+        rocprofiler-sdk::rocprofiler-sdk-elf
+        rocprofiler-sdk::rocprofiler-sdk-sqlite3
+)
 
-target_compile_definitions(rocprofiler-sdk-output-library
-                           PRIVATE PROJECT_BINARY_DIR="${PROJECT_BINARY_DIR}")
+target_compile_definitions(
+    rocprofiler-sdk-output-library
+    PRIVATE PROJECT_BINARY_DIR="${PROJECT_BINARY_DIR}"
+)
 
 add_subdirectory(sql)

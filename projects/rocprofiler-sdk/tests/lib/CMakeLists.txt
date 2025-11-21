@@ -12,7 +12,7 @@ add_subdirectory(vector-operations)
 
 set(CMAKE_BUILD_RPATH
     "\$ORIGIN:\$ORIGIN/../lib:$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>"
-    )
+)
 
 # libraries used by integration test apps which DO link to rocprofiler-sdk-roctx
 add_subdirectory(transpose)

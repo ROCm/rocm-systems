@@ -65,5 +65,3 @@ Test
 
     # In another console run the RDC command-line
     $ LD_LIBRARY_PATH=$PWD/rdc_libs/  ./rdci/rdci discovery -l -u
-
-

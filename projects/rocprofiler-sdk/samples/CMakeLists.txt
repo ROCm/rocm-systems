@@ -7,9 +7,7 @@ project(rocprofiler-sdk-samples LANGUAGES C CXX)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "samples")
 if(CMAKE_BUILD_TYPE STREQUAL "")
-    set(CMAKE_BUILD_TYPE
-        "RelWithDebInfo"
-        CACHE STRING "Build type" FORCE)
+    set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Build type" FORCE)
 endif()
 
 if(NOT PROJECT_IS_TOP_LEVEL)

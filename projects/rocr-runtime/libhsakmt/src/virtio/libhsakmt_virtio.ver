@@ -42,4 +42,3 @@ vhsaKmtGetRuntimeCapabilities;
 vamdgpu_query_gpu_info;
 local: *;
 };
-

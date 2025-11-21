@@ -41,7 +41,7 @@ HIP projects can target either AMD or NVIDIA platforms. HIP is a marshalling lan
 that provides a thin-layer mapping to functions in the AMD ROCm language, or to CUDA
 functions. To compile the HIP code, you can use ``amdclang++``, also called HIP-Clang,
 or you can use ``hipcc`` to enable compilation by ``nvcc`` to produce CUDA executables,
-as described in :ref:`compilation_platform`. 
+as described in :ref:`compilation_platform`.
 
 Because HIP is a marshalling language that can be compiled by ``nvcc``, mixing HIP code
 with CUDA code results in valid application code. This enables users to incrementally port
@@ -117,7 +117,7 @@ HIP-Clang creates a primary context when the HIP API is called. In CUDA
 driver API code, HIP-Clang creates a primary context while HIP/NVCC has an empty
 context stack. HIP-Clang pushes the primary context to the context stack when it
 is empty. This can lead to subtle differences in applications which mix the
-runtime and driver APIs. 
+runtime and driver APIs.
 
 Scanning CUDA source to scope the translation
 ---------------------------------------------
@@ -143,7 +143,7 @@ from `cuda-samples <https://github.com/NVIDIA/cuda-samples>`_:
   [HIPIFY] info: CONVERTED refs by names:
     cooperative_groups.h => hip/hip_cooperative_groups.h: 1
     cudaMemcpyToSymbol => hipMemcpyToSymbol: 1
-  
+
   [HIPIFY] info: file './main.cpp' statistics:
     CONVERTED refs count: 13
     TOTAL lines of code: 174
@@ -156,7 +156,7 @@ from `cuda-samples <https://github.com/NVIDIA/cuda-samples>`_:
     cudaMemcpyDeviceToHost => hipMemcpyDeviceToHost: 1
     cudaMemcpyHostToDevice => hipMemcpyHostToDevice: 1
     cuda_runtime.h => hip/hip_runtime.h: 1
-  
+
   [HIPIFY] info: file 'GLOBAL' statistics:
     CONVERTED refs count: 15
     TOTAL lines of code: 512
@@ -207,12 +207,12 @@ performance.
 In the case where a library provides both ``roc`` and ``hip`` versions, such as
 ``hipSparse`` and ``rocSparse``, the ``hip`` version is a marshalling library,
 which is just a thin layer that redirects function calls to either the
-``roc`` library or the corresponding CUDA library, depending on the target platform.  
+``roc`` library or the corresponding CUDA library, depending on the target platform.
 
 .. note::
 
   If the application is only required to run on AMD GPUs, it is recommended to use
-  the ``roc``-libraries. In hipify tools, this can be accomplished using the ``--roc`` option. 
+  the ``roc``-libraries. In hipify tools, this can be accomplished using the ``--roc`` option.
 
 cuModule and hipModule
 ----------------------
@@ -230,11 +230,11 @@ directly, such as a new accelerator language front end. NVCC is not used here.
 Instead, the environment might have a different kernel language or compilation
 flow. Other environments have many kernels and don't want all of them to be
 loaded automatically. The Module functions load the generated code objects and
-launch kernels. 
+launch kernels.
 
 Like the ``cuModule`` API, the ``hipModule`` API provides additional control
 over code object management, including options to load code from files or from
-in-memory pointers. 
+in-memory pointers.
 
 NVCC and HIP-Clang target different architectures and use different code object
 formats. NVCC supports ``cubin`` or ``ptx`` files, while the HIP-Clang path uses
@@ -282,7 +282,7 @@ stream) are passed as arguments to the launch function.
 
 The HIP runtime API additionally supports the triple chevron (``<<< >>>``) syntax for launching
 kernels, which resembles a special function call and is easier to use than the
-explicit launch API, especially when handling kernel arguments. 
+explicit launch API, especially when handling kernel arguments.
 
 .. _context_driver_api:
 
@@ -306,7 +306,7 @@ alternate syntax for changing the active device. The ``hipCtx`` API can be used 
 current context or to query properties of the device associated with the context. The current
 context is implicitly used by other APIs, such as ``hipStreamCreate``.
 
-.. note:: 
+.. note::
   The ``hipCtx`` API is **deprecated** and its use is discouraged. Most new applications use
   ``hipSetDevice`` or the ``hipStream`` APIs. For more details on deprecated APIs, see :doc:`../reference/deprecated_api_list`.
 
@@ -335,7 +335,7 @@ compiler and runtime. It can also help set options appropriately. As an example,
 
 .. note::
   You can use ``amdclang++`` to target NVIDIA systems, but you must manually specify
-  the required compiler options. 
+  the required compiler options.
 
 HIP Headers
 -----------
@@ -502,7 +502,7 @@ Identifying host or device compilation pass
 ``amdclang++`` makes multiple passes over the code: one pass for the host code, and
 for the device code one pass for each GPU architecture to be compiled for.
 ``nvcc`` only makes two passes over the code: one for the host code and one for the
-device code. 
+device code.
 
 The ``__HIP_DEVICE_COMPILE__`` macro is defined when the compiler is compiling
 for the device. This macro is a portable check that can replace the
@@ -751,7 +751,7 @@ Identifying device architecture and features
 GPUs of different generations and architectures do not provide the same
 level of :doc:`hardware feature support <../reference/hardware_features>`. To
 guard device code that uses architecture-dependent features, the
-``__HIP_ARCH_<FEATURE>__`` C++-macros can be used, as described below. 
+``__HIP_ARCH_<FEATURE>__`` C++-macros can be used, as described below.
 
 Device code feature identification
 ----------------------------------
@@ -949,7 +949,7 @@ maxregcount
 The ``nvcc`` compiler will predict the number of registers per thread based on the launch bounds calculation.
 ``--maxregcount X`` can be used to override the compiler's decision by enforcing a hard number of registers
 (``X``) that the compiler must not exceed. If the compiler is unable to meet this requirement, it will place
-additional "registers" into memory instead of using hardware registers. 
+additional "registers" into memory instead of using hardware registers.
 
 Unlike ``nvcc``, ``amdclang++`` does not support the ``--maxregcount`` option. You are encouraged to use
 the ``__launch_bounds__`` directive since the parameters are more intuitive and portable than micro-architecture
@@ -1090,7 +1090,7 @@ older toolkit.
 .. note::
   :cpp:func:``hipGetProcAddress`` and its CUDA counterpart ``cuGetProcAddress`` are limited
   to HIP/CUDA driver API function calls. For HIP/CUDA runtime API calls,the corresponding
-  function is :cpp:func:``hipGetDriverEntryPoint`` / ``cudaGetDriverEntryPoint``. 
+  function is :cpp:func:``hipGetDriverEntryPoint`` / ``cudaGetDriverEntryPoint``.
 
 An example is provided for a hypothetical ``foo()`` function.
 

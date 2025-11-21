@@ -28,4 +28,3 @@ ROCm SMI Python API tutorial
         def getMemInfo(self, device):
             (memUsed, memTotal) = rocm_smi.getMemInfo(device, "vram")
             return round(float(memUsed)/float(memTotal) * 100, 2)
-

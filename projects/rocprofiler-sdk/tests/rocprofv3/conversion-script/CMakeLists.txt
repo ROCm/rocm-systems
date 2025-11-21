@@ -26,16 +26,23 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-conversion-script
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py input.txt conftest.py
-                                   CONFIG pytest.ini)
+                                   CONFIG pytest.ini
+)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-conversion-script
@@ -48,16 +55,23 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     PRELOAD "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-    FIXTURES_SETUP rocprofv3-test-conversion-script)
+    FIXTURES_SETUP rocprofv3-test-conversion-script
+)
 
-set(convert_tests rocprofv3-test-conversion-script-convert-no-agent-prefix
-                  rocprofv3-test-conversion-script-convert-agent-prefix)
+set(convert_tests
+    rocprofv3-test-conversion-script-convert-no-agent-prefix
+    rocprofv3-test-conversion-script-convert-agent-prefix
+)
 
-set(validate_tests rocprofv3-test-conversion-script-validate-no-agent-prefix
-                   rocprofv3-test-conversion-script-validate-agent-prefix)
+set(validate_tests
+    rocprofv3-test-conversion-script-validate-no-agent-prefix
+    rocprofv3-test-conversion-script-validate-agent-prefix
+)
 
-set(output_dir ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script_no_agent_prefix
-               ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script_agent_prefix)
+set(output_dir
+    ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script_no_agent_prefix
+    ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script_agent_prefix
+)
 
 set(agent_index_flag false true)
 
@@ -79,13 +93,18 @@ foreach(i RANGE 0 ${convert_test_length})
             ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script
             --output
             ${output}
-            --retain-agent-prefix)
+            --retain-agent-prefix
+        )
         set(validate_args --retain-agent-prefix true)
     else()
         set(conversion_cmd
             ${Python3_EXECUTABLE}
-            $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format> --input
-            ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script --output ${output})
+            $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format>
+            --input
+            ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script
+            --output
+            ${output}
+        )
         set(validate_args --retain-agent-prefix false)
     endif()
 
@@ -97,7 +116,8 @@ foreach(i RANGE 0 ${convert_test_length})
         LABELS "integration-tests"
         PRELOAD "${PRELOAD_ENV}"
         FIXTURES_REQUIRED rocprofv3-test-conversion-script
-        FIXTURES_SETUP ${test_name})
+        FIXTURES_SETUP ${test_name}
+    )
 
     rocprofiler_add_integration_validate_test(
         ${validate_test_name}
@@ -108,5 +128,6 @@ foreach(i RANGE 0 ${convert_test_length})
         TIMEOUT 45
         LABELS "integration-tests"
         FIXTURES_REQUIRED ${test_name}
-        UNSTABLE)
+        UNSTABLE
+    )
 endforeach()

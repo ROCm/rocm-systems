@@ -8,14 +8,14 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ### Added
 
-- **Added support for GPU metrics 1.8**.  
-  - Added new fields for `rsmi_gpu_metrics_t` including:  
+- **Added support for GPU metrics 1.8**.
+  - Added new fields for `rsmi_gpu_metrics_t` including:
     - Adding the following metrics to allow new calculations for violation status:
     - Per XCP metrics `gfx_below_host_limit_ppt_acc[XCP][MAX_XCC]` - GFX Clock Host limit Package Power Tracking violation counts
     - Per XCP metrics `gfx_below_host_limit_thm_acc[XCP][MAX_XCC]` - GFX Clock Host limit Thermal (TVIOL) violation counts
     - Per XCP metrics `gfx_low_utilization_acc[XCP][MAX_XCC]` - violation counts for how did low utilization caused the GPU to be below application clocks.
     - Per XCP metrics `gfx_below_host_limit_total_acc[XCP][MAX_XCC]`- violation counts for how long GPU was held below application clocks any limiter (see above new violation metrics).
-  - Increasing available JPEG engines to 40.  
+  - Increasing available JPEG engines to 40.
   Current ASICs may not support all 40. These will be indicated as UINT16_MAX or N/A in CLI.
 
 ### Changed
@@ -24,7 +24,7 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ### Removed
 
-- **Removed backwards compatibility `rsmi_dev_gpu_metrics_info_get()`'s `jpeg_activity` or `vcn_activity` fields: use `xcp_stats.jpeg_busy` or `xcp_stats.vcn_busy`**  
+- **Removed backwards compatibility `rsmi_dev_gpu_metrics_info_get()`'s `jpeg_activity` or `vcn_activity` fields: use `xcp_stats.jpeg_busy` or `xcp_stats.vcn_busy`**
   - Backwards compability is removed for `jpeg_activity` and `vcn_activity` fields, if the `jpeg_busy` or `vcn_busy` field is available.
     - <i>Reasons for this change</i>:
       - Providing both `vcn_activity`/`jpeg_activity` and XCP (partition) stats `vcn_busy`/`jpeg_busy` caused confusion for users about which field to use. By removing backward compatibility, it is easier to identify the relevant field.
@@ -120,7 +120,7 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
     These changes impact what information is readable/writable for the partition nodes.
 
-    <b><i>Example: Previous Outputs in CPX</b></i>  
+    <b><i>Example: Previous Outputs in CPX</b></i>
     ```shell
     $ rocm-smi
 
@@ -141,7 +141,7 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
     ...
     ==========================================================================================================================
     ================================================== End of ROCm SMI Log ===================================================
-    ```  
+    ```
     <b><i>Example: Corrected outputs in CPX</i></b>
     ```shell
     $ rocm-smi
@@ -177,13 +177,13 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ### Added
 
-- **Added support for GPU metrics 1.7 to `rsmi_dev_gpu_metrics_info_get()`**  
-Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to include new fields for XGMI Link Status, graphics clocks below host limit (per XCP), and VRAM max bandwidth:  
+- **Added support for GPU metrics 1.7 to `rsmi_dev_gpu_metrics_info_get()`**
+Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to include new fields for XGMI Link Status, graphics clocks below host limit (per XCP), and VRAM max bandwidth:
   - `uint64_t vram_max_bandwidth` - VRAM max bandwidth at max memory clock (GB/s)
   - `uint16_t xgmi_link_status[MAX_NUM_XGMI_LINKS]` - XGMI link statis, 1=Up 0=Down
   - `uint64_t gfx_below_host_limit_acc[MAX_NUM_XCC]` - graphics clocks below host limit (per XCP) accumulators. Used for graphic clk below host limit violation status.
 
-- **Added new GPU metrics 1.7 to `rocm-smi --showmetrics`**  
+- **Added new GPU metrics 1.7 to `rocm-smi --showmetrics`**
 New metrics added to `rocm-smi --showmetrics`
 ```shell
 $ rocm-smi --showmetrics
@@ -217,25 +217,25 @@ $ rocm-smi --showmetrics
 
 ### Resolved issues
 
-- **Fixed `rsmi_dev_target_graphics_version_get`, `rocm-smi --showhw`, and `rocm-smi --showprod` not displaying graphics version properly for MI2x, MI1x or Navi 3x ASICs.**  
+- **Fixed `rsmi_dev_target_graphics_version_get`, `rocm-smi --showhw`, and `rocm-smi --showprod` not displaying graphics version properly for MI2x, MI1x or Navi 3x ASICs.**
 
 ### Upcoming changes
 
 ## rocm_smi_lib for ROCm 6.3
 
-- **Added `rsmi_dev_memory_partition_capabilities_get` which returns driver memory partition capablities.**  
+- **Added `rsmi_dev_memory_partition_capabilities_get` which returns driver memory partition capablities.**
 Driver now has the ability to report what the user can set memory partition modes to. User can now see available
 memory partition modes upon an invalid argument return from memory partition mode set (`rsmi_dev_memory_partition_set`).
 
 
-- **Added support for GPU metrics 1.6 to `rsmi_dev_gpu_metrics_info_get()`**  
-Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to include new fields for PVIOL / TVIOL,  XCP (Graphics Compute Partitions) stats, and pcie_lc_perf_other_end_recovery:  
+- **Added support for GPU metrics 1.6 to `rsmi_dev_gpu_metrics_info_get()`**
+Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to include new fields for PVIOL / TVIOL,  XCP (Graphics Compute Partitions) stats, and pcie_lc_perf_other_end_recovery:
   - `uint64_t accumulation_counter` - used for all throttled calculations
   - `uint64_t prochot_residency_acc` - Processor hot accumulator
   - `uint64_t ppt_residency_acc` - Package Power Tracking (PPT) accumulator (used in PVIOL calculations)
   - `uint64_t socket_thm_residency_acc` - Socket thermal accumulator - (used in TVIOL calculations)
   - `uint64_t vr_thm_residency_acc` - Voltage Rail (VR) thermal accumulator
-  - `uint64_t hbm_thm_residency_acc` - High Bandwidth Memory (HBM) thermal accumulator 
+  - `uint64_t hbm_thm_residency_acc` - High Bandwidth Memory (HBM) thermal accumulator
   - `uint16_t num_partition` - corresponds to the current total number of partitions
   - `struct amdgpu_xcp_metrics_t xcp_stats[MAX_NUM_XCP]` - for each partition associated with current GPU, provides gfx busy & accumulators, jpeg, and decoder (VCN) engine utilizations
     - `uint32_t gfx_busy_inst[MAX_NUM_XCC]` - graphic engine utilization (%)
@@ -244,18 +244,18 @@ Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to 
     - `uint64_t gfx_busy_acc[MAX_NUM_XCC]` - graphic engine utilization accumulated (%)
   - `uint32_t pcie_lc_perf_other_end_recovery` - corresponds to the pcie other end recovery counter
 
-- **Added ability to view raw GPU metrics`rocm-smi --showmetrics`**  
-Users can now view GPU metrics from our new `rocm-smi --showmetrics`. Unlike AMD SMI (or other ROCM-SMI interfaces), these values are ***not*** converted into applicable units as users may see in `amd-smi metric`. Units listed display as indicated by the driver, they are not converted (eg. in other AMD SMI/ROCm SMI interfaces which use the data provided). It is important to note, that fields displaying `N/A` data mean this ASIC does not support or backward compatibility was not provided in a newer ASIC's GPU metric structure.   
+- **Added ability to view raw GPU metrics`rocm-smi --showmetrics`**
+Users can now view GPU metrics from our new `rocm-smi --showmetrics`. Unlike AMD SMI (or other ROCM-SMI interfaces), these values are ***not*** converted into applicable units as users may see in `amd-smi metric`. Units listed display as indicated by the driver, they are not converted (eg. in other AMD SMI/ROCm SMI interfaces which use the data provided). It is important to note, that fields displaying `N/A` data mean this ASIC does not support or backward compatibility was not provided in a newer ASIC's GPU metric structure.
 
 ### Changed
 
-- **Added back in C++ tests for `memorypartition_read_write`**.  
+- **Added back in C++ tests for `memorypartition_read_write`**.
 Due to driver adding in all needed features for memory partition write. We have re-enabled memorypartition_read_write.
 
-- **Updated `rsmi_dev_memory_partition_set` to not return until a successful restart of AMD GPU Driver.**  
+- **Updated `rsmi_dev_memory_partition_set` to not return until a successful restart of AMD GPU Driver.**
 This change keeps checking for ~ up to 40 seconds for a successful restart of the AMD GPU driver. Additionally, the API call continues to check if memory partition (NPS) SYSFS files are successfully updated to reflect the user's requested memory partition (NPS) mode change. Otherwise, reports an error back to the user. Due to these changes, we have updated ROCm SMI's CLI to reflect the maximum wait of 40 seconds, while memory partition change is in progress.
 
-- **All APIs now have the ability to catch driver reporting invalid arguments.**  
+- **All APIs now have the ability to catch driver reporting invalid arguments.**
 Now ROCm SMI APIs can show RSMI_STATUS_INVALID_ARGS when driver returns EINVAL.
 
 ### Removed
@@ -266,11 +266,11 @@ Now ROCm SMI APIs can show RSMI_STATUS_INVALID_ARGS when driver returns EINVAL.
 
 ### Resolved issues
 
-- **Fixed `rsmi_dev_target_graphics_version_get`, `rocm-smi --showhw`, and `rocm-smi --showprod` not displaying properly for MI2x or Navi 3x ASICs.**  
+- **Fixed `rsmi_dev_target_graphics_version_get`, `rocm-smi --showhw`, and `rocm-smi --showprod` not displaying properly for MI2x or Navi 3x ASICs.**
 
 ### Upcoming changes
 
-- **Re-enable C++ tests for `memorypartition_read_write`**.  
+- **Re-enable C++ tests for `memorypartition_read_write`**.
   - This change is part of the partition feature redesign.
   - SMI's workflow needs to be adjusted in order to accomidate incoming driver changes to enable
   Dynamic memory partition feature. We plan on re-enabling testing for this feature during ROCm
@@ -280,20 +280,20 @@ Now ROCm SMI APIs can show RSMI_STATUS_INVALID_ARGS when driver returns EINVAL.
 
 ### Optimized
 
-- **Improved handling of UnicodeEncodeErrors with non UTF-8 locales**  
+- **Improved handling of UnicodeEncodeErrors with non UTF-8 locales**
 Non UTF-8 locales were causing crashing on UTF-8 special characters
 
 ### Resolved issues
 
-- **Fixed rsmitstReadWrite.TestComputePartitionReadWrite segfault**  
+- **Fixed rsmitstReadWrite.TestComputePartitionReadWrite segfault**
 Segfault was caused due to unhandled start conditions:
 
 1) When setting CPX as a partition mode, there is a DRM node limitation of 64.
-This is a known limitation of the driver, if other drivers are using other DRM nodes (ex. using PCIe space, such as ast).  
-The number of DRM nodes can be checked via `ls /sys/class/drm`  
-Recommended steps for removing unnecessary drivers:  
-a. unloading amdgpu - `sudo rmmod amdgpu`  
-b. removing unnecessary driver(s) - ex. `sudo rmmod ast`  
+This is a known limitation of the driver, if other drivers are using other DRM nodes (ex. using PCIe space, such as ast).
+The number of DRM nodes can be checked via `ls /sys/class/drm`
+Recommended steps for removing unnecessary drivers:
+a. unloading amdgpu - `sudo rmmod amdgpu`
+b. removing unnecessary driver(s) - ex. `sudo rmmod ast`
 c. reload amgpu - `sudo modprobe amdgpu`
 
 2) Since user could start amdgpu in different partition modes (ex. `sudo modprobe amdgpu user_partt_mode=1`).
@@ -304,19 +304,19 @@ The test segfault could be seen on all MI3x ASICs, if brought up in a non-SPX co
 
 ### Changed
 
-- **Added Partition ID API (`rsmi_dev_partition_id_get(..)`)**  
+- **Added Partition ID API (`rsmi_dev_partition_id_get(..)`)**
 Previously `rsmi_dev_partition_id_get` could only be retrived by querying through `rsmi_dev_pci_id_get()`
 and parsing optional bits in our python CLI/API. We are now making this available directly through API.
-As well as added testing, in our compute partitioning tests verifing partition IDs update accordingly. 
+As well as added testing, in our compute partitioning tests verifing partition IDs update accordingly.
 
 ### Resolved issues
 
-- **Partition ID CLI output**  
+- **Partition ID CLI output**
 Due to driver changes in KFD, some devices may report bits [31:28] or [2:0]. With the newly added `rsmi_dev_partition_id_get(..)`, we provided this fallback to properly retreive partition ID. We
 plan to eventually remove partition ID from the function portion of the BDF (Bus Device Function). See below for PCI ID description.
 
   - bits [63:32] = domain
-  - bits [31:28] or bits [2:0] = partition id 
+  - bits [31:28] or bits [2:0] = partition id
   - bits [27:16] = reserved
   - bits [15:8]  = Bus
   - bits [7:3] = Device
@@ -326,12 +326,12 @@ plan to eventually remove partition ID from the function portion of the BDF (Bus
 
 ### Added
 
-- **Added Ring Hang event**  
+- **Added Ring Hang event**
 Added `RSMI_EVT_NOTIF_RING_HANG` to the possible events in the `rsmi_evt_notification_type_t` enum.
 
 ### Resolved issues
 
-- **Fixed parsing of `pp_od_clk_voltage` within `get_od_clk_volt_info`**  
+- **Fixed parsing of `pp_od_clk_voltage` within `get_od_clk_volt_info`**
 The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropping of voltage curve support on MI series cards.
 
 ## rocm_smi_lib for ROCm 6.1.1

@@ -86,73 +86,96 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
 
 set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx942 gfx950)
 function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
-  set(ARCH_CHECK -1 PARENT_SCOPE)
-  string(REGEX MATCHALL "--offload-arch=gfx[0-9a-z]+" OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR_LOCAL})
-  foreach(OFFLOAD_ARCH IN LISTS OFFLOAD_ARCH_LIST)
-    string(REGEX MATCHALL "--offload-arch=(gfx[0-9a-z]+)" matches ${OFFLOAD_ARCH})
-    if (CMAKE_MATCH_COUNT EQUAL 1)
-      if (CMAKE_MATCH_1 IN_LIST gfx90a_AND_ABOVE_TARGETS)
-        set(ARCH_CHECK 1 PARENT_SCOPE)
-      endif()         # CMAKE_MATCH_1
-    endif()        # CMAKE_MATCH_COUNT
-  endforeach()   # OFFLOAD_ARCH_LIST
-endfunction()  # CheckAcceptedArchs
+    set(ARCH_CHECK -1 PARENT_SCOPE)
+    string(
+        REGEX MATCHALL
+        "--offload-arch=gfx[0-9a-z]+"
+        OFFLOAD_ARCH_LIST
+        ${OFFLOAD_ARCH_STR_LOCAL}
+    )
+    foreach(OFFLOAD_ARCH IN LISTS OFFLOAD_ARCH_LIST)
+        string(
+            REGEX MATCHALL
+            "--offload-arch=(gfx[0-9a-z]+)"
+            matches
+            ${OFFLOAD_ARCH}
+        )
+        if(CMAKE_MATCH_COUNT EQUAL 1)
+            if(CMAKE_MATCH_1 IN_LIST gfx90a_AND_ABOVE_TARGETS)
+                set(ARCH_CHECK 1 PARENT_SCOPE)
+            endif() # CMAKE_MATCH_1
+        endif() # CMAKE_MATCH_COUNT
+    endforeach() # OFFLOAD_ARCH_LIST
+endfunction() # CheckAcceptedArchs
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
-                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} --std=c++17 ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
-                   -o tex_ref_get_module.code
-                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
-                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
-add_custom_target(tex_ref_get_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
+    COMMAND
+        ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} --std=c++17
+        ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc -o
+        tex_ref_get_module.code -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
+)
+add_custom_target(
+    tex_ref_get_module
+    ALL
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
+)
+set_property(
+    GLOBAL
+    APPEND
+    PROPERTY
+        G_INSTALL_CUSTOM_TARGETS
+            ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
+)
 
 if(HIP_PLATFORM MATCHES "amd")
-  if (DEFINED OFFLOAD_ARCH_STR)
-    CheckRejectedArchs(${OFFLOAD_ARCH_STR})
-  elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
-    CheckRejectedArchs($ENV{HCC_AMDGPU_TARGET})
-  else()
-    set(ARCH_CHECK -1)
-  endif()
-  if(${ARCH_CHECK} EQUAL -1)
-    message(STATUS "Adding test: ${NOT_FOR_gfx90a_AND_ABOVE_TEST}")
-    set(TEST_SRC ${TEST_SRC} ${NOT_FOR_gfx90a_AND_ABOVE_TEST})
-  else()
-    message(STATUS "Removing test: ${NOT_FOR_gfx90a_AND_ABOVE_TEST}")
-  endif()
+    if(DEFINED OFFLOAD_ARCH_STR)
+        checkrejectedarchs(${OFFLOAD_ARCH_STR})
+    elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
+        checkrejectedarchs($ENV{HCC_AMDGPU_TARGET})
+    else()
+        set(ARCH_CHECK -1)
+    endif()
+    if(${ARCH_CHECK} EQUAL -1)
+        message(STATUS "Adding test: ${NOT_FOR_gfx90a_AND_ABOVE_TEST}")
+        set(TEST_SRC ${TEST_SRC} ${NOT_FOR_gfx90a_AND_ABOVE_TEST})
+    else()
+        message(STATUS "Removing test: ${NOT_FOR_gfx90a_AND_ABOVE_TEST}")
+    endif()
 else()
-  set(TEST_SRC ${TEST_SRC} ${NOT_FOR_gfx90a_AND_ABOVE_TEST})
+    set(TEST_SRC ${TEST_SRC} ${NOT_FOR_gfx90a_AND_ABOVE_TEST})
 endif()
 
 # Mipmap APIs are not supported on Linux
 if(0)
-set(TEST_SRC
-    ${TEST_SRC}
-    hipBindTextureToMipmappedArray.cc
-    hipMallocMipmappedArray.cc
-    hipFreeMipmappedArray.cc
-    hipGetMipmappedArrayLevel.cc
-    hipMipmappedArrayCreate.cc
-    hipMipmappedArrayDestroy.cc
-    hipMipmappedArrayGetLevel.cc
-    hipTextureMipmapObj1D.cc
-    hipTextureMipmapObj2D.cc
-    hipTextureMipmapObj3D.cc
-    tex1DLod.cc
-    tex1DLayeredLod.cc
-    tex2DLod.cc
-    tex2DLayeredLod.cc
-    tex3DLod.cc
-    hipTexRefSetGetMipmapFilterMode.cc
-    hipTexRefSetGetMipmapLevelBias.cc
-    hipTexRefSetGetMipmapLevelClamp.cc
-    hipTexRefSetGetMipmappedArray.cc
-)
+    set(TEST_SRC
+        ${TEST_SRC}
+        hipBindTextureToMipmappedArray.cc
+        hipMallocMipmappedArray.cc
+        hipFreeMipmappedArray.cc
+        hipGetMipmappedArrayLevel.cc
+        hipMipmappedArrayCreate.cc
+        hipMipmappedArrayDestroy.cc
+        hipMipmappedArrayGetLevel.cc
+        hipTextureMipmapObj1D.cc
+        hipTextureMipmapObj2D.cc
+        hipTextureMipmapObj3D.cc
+        tex1DLod.cc
+        tex1DLayeredLod.cc
+        tex2DLod.cc
+        tex2DLayeredLod.cc
+        tex3DLod.cc
+        hipTexRefSetGetMipmapFilterMode.cc
+        hipTexRefSetGetMipmapLevelBias.cc
+        hipTexRefSetGetMipmapLevelClamp.cc
+        hipTexRefSetGetMipmappedArray.cc
+    )
 endif()
-
 
 hip_add_exe_to_target(NAME TextureTest
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests)
+                      TEST_TARGET_NAME build_tests
+)
 
 add_dependencies(TextureTest tex_ref_get_module)

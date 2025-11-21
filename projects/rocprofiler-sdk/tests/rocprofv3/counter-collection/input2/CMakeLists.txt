@@ -6,12 +6,18 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-counter-collection-input2
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 # pmc2
 rocprofiler_add_integration_execute_test(
@@ -24,7 +30,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-counter-collection-txt-pmc2)
+    FIXTURES_SETUP rocprofv3-test-counter-collection-txt-pmc2
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-txt-pmc2
@@ -41,4 +48,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_counter_collection.csv
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-counter-collection-txt-pmc2)
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-txt-pmc2
+)

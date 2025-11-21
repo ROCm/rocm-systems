@@ -138,7 +138,7 @@ header .scrolldown a {
 }
 header .scrolldown a:hover { color: #11ABB0; }
 
-/* nav atempt... 
+/* nav atempt...
 --------------------------------------------------------------------- */
 /* primary navigation
 --------------------------------------------------------------------- */
@@ -202,9 +202,9 @@ ul#nav li {
 #nav .filter a {
    display: inline-block;
    text-transform: uppercase;
-   padding: 8px; 
+   padding: 8px;
    /* line-height: 32px; */
-   
+
    vertical-align: top;
    text-decoration: none;
    text-align: left;
@@ -229,7 +229,7 @@ ul#nav li {
    vertical-align: middle;
    letter-spacing: normal;
    /* font-size: 14px; */
-   text-align: left; 
+   text-align: left;
    overflow: hidden;
 }
 
@@ -246,7 +246,7 @@ ul#nav li {
    vertical-align: middle;
    letter-spacing: normal;
    /* font-size: 14px; */
-   text-align: left; 
+   text-align: left;
    overflow: hidden;
 }
 
@@ -262,7 +262,7 @@ ul#nav li {
    vertical-align: middle; */
    letter-spacing: normal;
    /* font-size: 14px; */
-   text-align: left; 
+   text-align: left;
    overflow: visible;
    z-index: 10;
 }
@@ -302,7 +302,7 @@ div input[type="text"]{
    border-style: dashed;
    border-radius: 5px;
    text-align: center;
-       
+
 }
 
 
@@ -327,7 +327,7 @@ div#upload-drag a {
    text-align: center;
    float: right;
 } */
- 
+
 /* div.daq-slider--light {
    position: relative;
    list-style: none;
@@ -365,7 +365,7 @@ div.nav-right {
 ul#nav li a:active { background-color: transparent !important; }
 ul#nav li.current a { color: #F06000; }
 
-/* Causal Graphs 
+/* Causal Graphs
 .dash-graph{
    width:90%;
    margin: auto;

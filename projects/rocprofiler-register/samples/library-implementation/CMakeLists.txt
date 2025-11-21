@@ -15,5 +15,7 @@ find_package(rocprofiler-register REQUIRED)
 
 add_library(rocp-reg-hip-demo SHARED)
 target_sources(rocp-reg-hip-demo PRIVATE demo.cpp demo.hpp)
-target_link_libraries(rocp-reg-hip-demo
-                      PRIVATE rocprofiler-register::rocprofiler-register)
+target_link_libraries(
+    rocp-reg-hip-demo
+    PRIVATE rocprofiler-register::rocprofiler-register
+)

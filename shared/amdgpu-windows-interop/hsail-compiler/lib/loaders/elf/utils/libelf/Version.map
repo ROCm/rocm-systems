@@ -1,6 +1,6 @@
 /*
  * $Id: Version.map 2033 2011-10-23 09:21:13Z jkoshy $
- * 
+ *
  * $FreeBSD: src/lib/libelf/Version.map,v 1.3 2007/04/29 14:05:22 deischen Exp $
  */
 FBSD_1.0 {

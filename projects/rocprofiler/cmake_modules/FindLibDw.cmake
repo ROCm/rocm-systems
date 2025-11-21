@@ -8,13 +8,18 @@
 find_path(
     FIND_LIBDW_INCLUDES
     NAMES elfutils/libdw.h
-    PATHS /usr/include /usr/local/include)
+    PATHS /usr/include /usr/local/include
+)
 
 find_library(FIND_LIBDW_LIBRARIES NAMES dw PATH /usr/lib /usr/local/lib)
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(LibDw DEFAULT_MSG FIND_LIBDW_INCLUDES
-                                  FIND_LIBDW_LIBRARIES)
+find_package_handle_standard_args(
+    LibDw
+    DEFAULT_MSG
+    FIND_LIBDW_INCLUDES
+    FIND_LIBDW_LIBRARIES
+)
 mark_as_advanced(FIND_LIBDW_INCLUDES FIND_LIBDW_LIBRARIES)
 
 set(LIBDW_INCLUDES ${FIND_LIBDW_INCLUDES})

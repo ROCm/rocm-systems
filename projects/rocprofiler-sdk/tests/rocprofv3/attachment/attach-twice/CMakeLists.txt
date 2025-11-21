@@ -6,14 +6,21 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-attachment-attach-twice
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer"
-                               "ThreadSanitizer")
+set(ROCPROFILER_MEMCHECK_TYPES
+    "AddressSanitizer"
+    "UndefinedBehaviorSanitizer"
+    "ThreadSanitizer"
+)
 
-if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
+if(
+    ROCPROFILER_MEMCHECK
+    AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES
+)
     set(IS_DISABLED ON)
 else()
     set(IS_DISABLED OFF)
@@ -25,8 +32,13 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 # Test that launches the app and reattaches to it twice (CSV format)
 rocprofiler_add_integration_execute_test(
@@ -42,7 +54,8 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION "This test is skipped."
     FIXTURES_SETUP rocprofv3-test-attachment-attach-twice
-    DISABLED "${IS_DISABLED}")
+    DISABLED "${IS_DISABLED}"
+)
 
 # Validate the output from the reattached profiling (CSV)
 rocprofiler_add_integration_validate_test(
@@ -64,7 +77,8 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;attachment"
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-twice
-    DISABLED "${IS_DISABLED}")
+    DISABLED "${IS_DISABLED}"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-attachment-attach-twice-json
@@ -85,4 +99,5 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;attachment"
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-twice
-    DISABLED "${IS_DISABLED}")
+    DISABLED "${IS_DISABLED}"
+)

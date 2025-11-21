@@ -31,7 +31,8 @@ macro(ROCPROFILER_REGISTER_SAVE_VARIABLES _PREFIX)
         "" # options
         "CONDITION" # single value args
         "VARIABLES" # multiple value args
-        ${ARGN})
+        ${ARGN}
+    )
     if(DEFINED SAVE_CONDITION AND NOT "${SAVE_CONDITION}" STREQUAL "")
         if(${SAVE_CONDITION})
             foreach(_VAR ${SAVE_VARIABLES})
@@ -65,7 +66,8 @@ macro(ROCPROFILER_REGISTER_RESTORE_VARIABLES _PREFIX)
         "" # options
         "CONDITION" # single value args
         "VARIABLES" # multiple value args
-        ${ARGN})
+        ${ARGN}
+    )
     if(DEFINED RESTORE_CONDITION AND NOT "${RESTORE_CONDITION}" STREQUAL "")
         if(${RESTORE_CONDITION})
             foreach(_VAR ${RESTORE_VARIABLES})
@@ -102,9 +104,7 @@ function(ROCPROFILER_REGISTER_CAPITALIZE str var)
     string(TOUPPER "${_first}" _first)
     string(SUBSTRING "${str}" 1 -1 _remainder)
     string(CONCAT str "${_first}" "${_remainder}")
-    set(${var}
-        "${str}"
-        PARENT_SCOPE)
+    set(${var} "${str}" PARENT_SCOPE)
 endfunction()
 
 # ------------------------------------------------------------------------------#
@@ -122,13 +122,15 @@ function(ROCPROFILER_REGISTER_STRIP_TARGET)
     else()
         rocprofiler_register_message(
             FATAL_ERROR
-            "rocprofiler_register_strip_target cannot deduce target from \"${ARGN}\"")
+            "rocprofiler_register_strip_target cannot deduce target from \"${ARGN}\""
+        )
     endif()
 
     if(NOT TARGET "${_TARGET}")
         rocprofiler_register_message(
             FATAL_ERROR
-            "rocprofiler_register_strip_target not provided valid target: \"${_TARGET}\"")
+            "rocprofiler_register_strip_target not provided valid target: \"${_TARGET}\""
+        )
     endif()
 
     if(CMAKE_STRIP AND (STRIP_FORCE OR ROCPROFILER_REGISTER_STRIP_LIBRARIES))
@@ -138,7 +140,8 @@ function(ROCPROFILER_REGISTER_STRIP_TARGET)
                 POST_BUILD
                 COMMAND ${CMAKE_STRIP} ${STRIP_ARGS} $<TARGET_FILE:${_TARGET}>
                 WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-                COMMENT "Stripping ${_TARGET}...")
+                COMMENT "Stripping ${_TARGET}..."
+            )
         else()
             add_custom_command(
                 TARGET ${_TARGET}
@@ -161,7 +164,8 @@ function(ROCPROFILER_REGISTER_STRIP_TARGET)
                     --keep-symbol="__libc_start_main" ${STRIP_ARGS}
                     $<TARGET_FILE:${_TARGET}>
                 WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-                COMMENT "Stripping ${_TARGET}...")
+                COMMENT "Stripping ${_TARGET}..."
+            )
         endif()
     endif()
 endfunction()
@@ -177,7 +181,8 @@ function(ADD_ROCPROFILER_REGISTER_TEST_TARGET)
             rocprofiler-register-test
             COMMAND ${CMAKE_COMMAND} --build ${PROJECT_BINARY_DIR} --target test
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-            COMMENT "Running tests...")
+            COMMENT "Running tests..."
+        )
     endif()
 endfunction()
 
@@ -194,9 +199,12 @@ endfunction()
 function(ROCPROFILER_REGISTER_CHECKOUT_GIT_SUBMODULE)
     # parse args
     cmake_parse_arguments(
-        CHECKOUT "RECURSIVE"
+        CHECKOUT
+        "RECURSIVE"
         "RELATIVE_PATH;WORKING_DIRECTORY;TEST_FILE;REPO_URL;REPO_BRANCH"
-        "ADDITIONAL_CMDS" ${ARGN})
+        "ADDITIONAL_CMDS"
+        ${ARGN}
+    )
 
     if(NOT CHECKOUT_WORKING_DIRECTORY)
         set(CHECKOUT_WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
@@ -251,17 +259,23 @@ function(ROCPROFILER_REGISTER_CHECKOUT_GIT_SUBMODULE)
     if(NOT _TEST_FILE_EXISTS AND _SUBMODULE_EXISTS)
         # perform the checkout
         execute_process(
-            COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
-                    ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
+            COMMAND
+                ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
-            RESULT_VARIABLE RET)
+            RESULT_VARIABLE RET
+        )
 
         # check the return code
         if(RET GREATER 0)
-            set(_CMD "${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
-                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}")
+            set(_CMD
+                "${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}"
+            )
             message(
-                STATUS "function(rocprofiler_register_checkout_git_submodule) failed.")
+                STATUS
+                "function(rocprofiler_register_checkout_git_submodule) failed."
+            )
             message(FATAL_ERROR "Command: \"${_CMD}\"")
         else()
             set(_TEST_FILE_EXISTS ON)
@@ -270,29 +284,34 @@ function(ROCPROFILER_REGISTER_CHECKOUT_GIT_SUBMODULE)
 
     if(NOT _TEST_FILE_EXISTS AND _HAS_REPO_URL)
         message(
-            STATUS "Checking out '${CHECKOUT_REPO_URL}' @ '${CHECKOUT_REPO_BRANCH}'...")
+            STATUS
+            "Checking out '${CHECKOUT_REPO_URL}' @ '${CHECKOUT_REPO_BRANCH}'..."
+        )
 
         # remove the existing directory
         if(EXISTS "${_DIR}")
-            execute_process(COMMAND ${CMAKE_COMMAND} -E remove_directory ${_DIR})
+            execute_process(
+                COMMAND ${CMAKE_COMMAND} -E remove_directory ${_DIR}
+            )
         endif()
 
         # perform the checkout
         execute_process(
             COMMAND
                 ${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
-                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}
+                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL}
+                ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
-            RESULT_VARIABLE RET)
+            RESULT_VARIABLE RET
+        )
 
         # perform the submodule update
-        if(CHECKOUT_RECURSIVE
-           AND EXISTS "${_DIR}"
-           AND IS_DIRECTORY "${_DIR}")
+        if(CHECKOUT_RECURSIVE AND EXISTS "${_DIR}" AND IS_DIRECTORY "${_DIR}")
             execute_process(
                 COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
                 WORKING_DIRECTORY ${_DIR}
-                RESULT_VARIABLE RET)
+                RESULT_VARIABLE RET
+            )
         endif()
 
         # check the return code
@@ -300,9 +319,11 @@ function(ROCPROFILER_REGISTER_CHECKOUT_GIT_SUBMODULE)
             set(_CMD
                 "${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}"
-                )
+            )
             message(
-                STATUS "function(rocprofiler_register_checkout_git_submodule) failed.")
+                STATUS
+                "function(rocprofiler_register_checkout_git_submodule) failed."
+            )
             message(FATAL_ERROR "Command: \"${_CMD}\"")
         else()
             set(_TEST_FILE_EXISTS ON)
@@ -312,9 +333,9 @@ function(ROCPROFILER_REGISTER_CHECKOUT_GIT_SUBMODULE)
     if(NOT EXISTS "${_TEST_FILE}" OR NOT _TEST_FILE_EXISTS)
         message(
             FATAL_ERROR
-                "Error checking out submodule: '${CHECKOUT_RELATIVE_PATH}' to '${_DIR}'")
+            "Error checking out submodule: '${CHECKOUT_RELATIVE_PATH}' to '${_DIR}'"
+        )
     endif()
-
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
@@ -324,13 +345,9 @@ function(ROCPROFILER_REGISTER_TEST_FIND_PACKAGE PACKAGE_NAME OUTPUT_VAR)
     cmake_parse_arguments(PACKAGE "" "" "UNSET" ${ARGN})
     find_package(${PACKAGE_NAME} QUIET ${PACKAGE_UNPARSED_ARGUMENTS})
     if(NOT ${PACKAGE_NAME}_FOUND)
-        set(${OUTPUT_VAR}
-            OFF
-            PARENT_SCOPE)
+        set(${OUTPUT_VAR} OFF PARENT_SCOPE)
     else()
-        set(${OUTPUT_VAR}
-            ON
-            PARENT_SCOPE)
+        set(${OUTPUT_VAR} ON PARENT_SCOPE)
     endif()
     foreach(_ARG ${PACKAGE_UNSET} FIND_PACKAGE_MESSAGE_DETAILS_${PACKAGE_NAME})
         unset(${_ARG} CACHE)
@@ -352,7 +369,8 @@ function(ROCPROFILER_REGISTER_ADD_INTERFACE_LIBRARY _TARGET _DESCRIPT)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT core
             EXPORT ${PROJECT_NAME}-library-targets
-            OPTIONAL)
+            OPTIONAL
+        )
     endif()
 endfunction()
 
@@ -364,28 +382,45 @@ endfunction()
 function(ROCPROFILER_REGISTER_ADD_FEATURE _var _description)
     set(EXTRA_DESC "")
     foreach(currentArg ${ARGN})
-        if(NOT "${currentArg}" STREQUAL "${_var}"
-           AND NOT "${currentArg}" STREQUAL "${_description}"
-           AND NOT "${currentArg}" STREQUAL "CMAKE_DEFINE"
-           AND NOT "${currentArg}" STREQUAL "DOC")
+        if(
+            NOT "${currentArg}" STREQUAL "${_var}"
+            AND NOT "${currentArg}" STREQUAL "${_description}"
+            AND NOT "${currentArg}" STREQUAL "CMAKE_DEFINE"
+            AND NOT "${currentArg}" STREQUAL "DOC"
+        )
             set(EXTRA_DESC "${EXTA_DESC}${currentArg}")
         endif()
     endforeach()
 
     set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_FEATURES ${_var})
-    set_property(GLOBAL PROPERTY ${_var}_DESCRIPTION "${_description}${EXTRA_DESC}")
+    set_property(
+        GLOBAL
+        PROPERTY ${_var}_DESCRIPTION "${_description}${EXTRA_DESC}"
+    )
 
     if("CMAKE_DEFINE" IN_LIST ARGN)
-        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES
-                                            "${_var} @${_var}@")
+        set_property(
+            GLOBAL
+            APPEND
+            PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES "${_var} @${_var}@"
+        )
         if(ROCPROFILER_REGISTER_BUILD_DOCS)
             set_property(
-                GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
-                                       "${_var}` | ${_description}${EXTRA_DESC} |")
+                GLOBAL
+                APPEND
+                PROPERTY
+                    ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
+                        "${_var}` | ${_description}${EXTRA_DESC} |"
+            )
         endif()
     elseif("DOC" IN_LIST ARGN AND ROCPROFILER_REGISTER_BUILD_DOCS)
-        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
-                                            "${_var}` | ${_description}${EXTRA_DESC} |")
+        set_property(
+            GLOBAL
+            APPEND
+            PROPERTY
+                ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
+                    "${_var}` | ${_description}${EXTRA_DESC} |"
+        )
     endif()
 endfunction()
 
@@ -400,15 +435,24 @@ function(ROCPROFILER_REGISTER_ADD_OPTION _NAME _MESSAGE _DEFAULT)
     else()
         rocprofiler_register_add_feature(${_NAME} "${_MESSAGE}")
         if(ROCPROFILER_REGISTER_BUILD_DOCS)
-            set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
-                                                "${_NAME}` | ${_MESSAGE} |")
+            set_property(
+                GLOBAL
+                APPEND
+                PROPERTY
+                    ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
+                        "${_NAME}` | ${_MESSAGE} |"
+            )
         endif()
     endif()
     if("ADVANCED" IN_LIST ARGN)
         mark_as_advanced(${_NAME})
     endif()
     if("CMAKE_DEFINE" IN_LIST ARGN)
-        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES ${_NAME})
+        set_property(
+            GLOBAL
+            APPEND
+            PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES ${_NAME}
+        )
     endif()
 endfunction()
 
@@ -422,9 +466,7 @@ function(ROCPROFILER_REGISTER_ADD_CACHE_OPTION _NAME _DEFAULT _TYPE _MESSAGE)
         set(_FORCE FORCE)
     endif()
 
-    set(${_NAME}
-        "${_DEFAULT}"
-        CACHE ${_TYPE} "${_MESSAGE}" ${_FORCE})
+    set(${_NAME} "${_DEFAULT}" CACHE ${_TYPE} "${_MESSAGE}" ${_FORCE})
 
     if("NO_FEATURE" IN_LIST ARGN)
         mark_as_advanced(${_NAME})
@@ -432,8 +474,13 @@ function(ROCPROFILER_REGISTER_ADD_CACHE_OPTION _NAME _DEFAULT _TYPE _MESSAGE)
         rocprofiler_register_add_feature(${_NAME} "${_MESSAGE}")
 
         if(ROCPROFILER_REGISTER_BUILD_DOCS)
-            set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
-                                                "${_NAME}` | ${_MESSAGE} |")
+            set_property(
+                GLOBAL
+                APPEND
+                PROPERTY
+                    ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
+                        "${_NAME}` | ${_MESSAGE} |"
+            )
         endif()
     endif()
 
@@ -442,7 +489,11 @@ function(ROCPROFILER_REGISTER_ADD_CACHE_OPTION _NAME _DEFAULT _TYPE _MESSAGE)
     endif()
 
     if("CMAKE_DEFINE" IN_LIST ARGN)
-        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES ${_NAME})
+        set_property(
+            GLOBAL
+            APPEND
+            PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES ${_NAME}
+        )
     endif()
 endfunction()
 
@@ -483,16 +534,30 @@ function(ROCPROFILER_REGISTER_PRINT_ENABLED_FEATURES)
             get_property(_desc GLOBAL PROPERTY ${_feature}_DESCRIPTION)
             # print description, if not standard ON/OFF, print what is set to
             if(_desc)
-                if(NOT "${${_feature}}" STREQUAL "ON" AND NOT "${${_feature}}" STREQUAL
-                                                          "TRUE")
+                if(
+                    NOT "${${_feature}}" STREQUAL "ON"
+                    AND NOT "${${_feature}}" STREQUAL "TRUE"
+                )
                     set(_currentFeatureText
-                        "${_currentFeatureText}: ${_desc} -- [\"${${_feature}}\"]")
+                        "${_currentFeatureText}: ${_desc} -- [\"${${_feature}}\"]"
+                    )
                 else()
-                    string(REGEX REPLACE "^${PROJECT_NAME}_USE_" "" _feature_tmp
-                                         "${_feature}")
+                    string(
+                        REGEX REPLACE
+                        "^${PROJECT_NAME}_USE_"
+                        ""
+                        _feature_tmp
+                        "${_feature}"
+                    )
                     string(TOLOWER "${_feature_tmp}" _feature_tmp_l)
                     rocprofiler_register_capitalize("${_feature_tmp}" _feature_tmp_c)
-                    foreach(_var _feature _feature_tmp _feature_tmp_l _feature_tmp_c)
+                    foreach(
+                        _var
+                        _feature
+                        _feature_tmp
+                        _feature_tmp_l
+                        _feature_tmp_c
+                    )
                         set(_ver "${${${_var}}_VERSION}")
                         if(NOT "${_ver}" STREQUAL "")
                             set(_desc "${_desc} -- [found version ${_ver}]")
@@ -563,15 +628,15 @@ function(ROCPROFILER_REGISTER_WATCH_FOR_CHANGE _var)
 
     macro(update_var _VAL)
         if(_VAR)
-            set(${_VAR}
-                ${_VAL}
-                PARENT_SCOPE)
+            set(${_VAR} ${_VAL} PARENT_SCOPE)
         endif()
     endmacro()
 
     update_var(OFF)
 
-    set(_rocprofiler_register_watch_var_name ROCPROFILER_REGISTER_WATCH_VALUE_${_var})
+    set(_rocprofiler_register_watch_var_name
+        ROCPROFILER_REGISTER_WATCH_VALUE_${_var}
+    )
     if(DEFINED ${_rocprofiler_register_watch_var_name})
         if("${${_var}}" STREQUAL "${${_rocprofiler_register_watch_var_name}}")
             return()
@@ -579,7 +644,7 @@ function(ROCPROFILER_REGISTER_WATCH_FOR_CHANGE _var)
             rocprofiler_register_message(
                 STATUS
                 "${_var} changed :: ${${_rocprofiler_register_watch_var_name}} --> ${${_var}}"
-                )
+            )
             update_var(ON)
         endif()
     else()
@@ -592,7 +657,10 @@ function(ROCPROFILER_REGISTER_WATCH_FOR_CHANGE _var)
     # store the value for the next run
     set(${_rocprofiler_register_watch_var_name}
         "${${_var}}"
-        CACHE INTERNAL "Last value of ${_var}" FORCE)
+        CACHE INTERNAL
+        "Last value of ${_var}"
+        FORCE
+    )
 endfunction()
 
 function(ROCPROFILER_REGISTER_FIND_STATIC_LIBRARY)

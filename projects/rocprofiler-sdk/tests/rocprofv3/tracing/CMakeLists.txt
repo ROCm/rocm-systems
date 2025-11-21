@@ -3,10 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-sdk-tests-rocprofv3-tracing
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-rocprofv3-tracing LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 
@@ -16,8 +13,13 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-trace
@@ -33,7 +35,7 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-trace
     FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
-    )
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-trace
@@ -58,7 +60,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.db
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-trace)
+    FIXTURES_REQUIRED rocprofv3-test-trace
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-trace-input-json
@@ -74,7 +77,7 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-trace-input-json
     FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
-    )
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-trace-input-json
@@ -99,7 +102,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.db
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-trace-input-json)
+    FIXTURES_REQUIRED rocprofv3-test-trace-input-json
+)
 
 # sys-trace test: tests --sys-trace command with mangled kernel names and validates
 # generated files
@@ -117,7 +121,7 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-systrace
     FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
-    )
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-systrace
@@ -143,7 +147,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.db
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-systrace)
+    FIXTURES_REQUIRED rocprofv3-test-systrace
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-systrace-input-json
@@ -158,7 +163,7 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-systrace-input-json
     FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
-    )
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-systrace-input-json
@@ -184,4 +189,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.db
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-systrace-input-json)
+    FIXTURES_REQUIRED rocprofv3-test-systrace-input-json
+)

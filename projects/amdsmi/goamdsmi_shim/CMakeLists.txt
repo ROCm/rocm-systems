@@ -81,11 +81,22 @@ set(go_amd_smi_includes)
 
 add_subdirectory(smiwrapper)
 list(APPEND go_amd_smi_headers smiwrapper/goamdsmi.h ${go_amd_smi_headers})
-list(APPEND go_amd_smi_headers smiwrapper/amdsmi_go_shim.h ${go_amd_smi_headers})
+list(
+    APPEND
+    go_amd_smi_headers
+    smiwrapper/amdsmi_go_shim.h
+    ${go_amd_smi_headers}
+)
 list(APPEND go_amd_smi_sources smiwrapper/amdsmi_go_shim.c)
 list(APPEND go_amd_smi_includes ${CMAKE_CURRENT_SOURCE_DIR}/smiwrapper)
 
-add_library(${GOAMDSMI_SHIM_TARGET} SHARED ${go_amd_smi_sources} ${go_amd_smi_headers} ${go_amd_smi_includes})
+add_library(
+    ${GOAMDSMI_SHIM_TARGET}
+    SHARED
+    ${go_amd_smi_sources}
+    ${go_amd_smi_headers}
+    ${go_amd_smi_includes}
+)
 
 target_link_libraries(${GOAMDSMI_SHIM_TARGET} pthread rt m)
 
@@ -94,22 +105,36 @@ target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib)
 target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib64)
 
 ## Set the VERSION and SOVERSION values
-set_property(TARGET ${GOAMDSMI_SHIM_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}")
-set_property(TARGET ${GOAMDSMI_SHIM_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}")
+set_property(
+    TARGET ${GOAMDSMI_SHIM_TARGET}
+    PROPERTY SOVERSION "${VERSION_MAJOR}"
+)
+set_property(
+    TARGET ${GOAMDSMI_SHIM_TARGET}
+    PROPERTY VERSION "${SO_VERSION_STRING}"
+)
 
 ## If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    add_custom_command(TARGET ${GOAMDSMI_SHIM_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} lib${GOAMDSMI_SHIM_TARGET}.so)
+    add_custom_command(
+        TARGET ${GOAMDSMI_SHIM_TARGET}
+        POST_BUILD
+        COMMAND ${CMAKE_STRIP} lib${GOAMDSMI_SHIM_TARGET}.so
+    )
 endif()
 
-set(go_amd_smi_install_headers smiwrapper/goamdsmi.h smiwrapper/amdsmi_go_shim.h)
+set(go_amd_smi_install_headers
+    smiwrapper/goamdsmi.h
+    smiwrapper/amdsmi_go_shim.h
+)
 
 ## Add the install directives for the runtime library.
 install(
     TARGETS ${GOAMDSMI_SHIM_TARGET}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT ${GOAMDSMI_SHIM_COMPONENT})
-install(
-    FILES ${go_amd_smi_install_headers}
-    DESTINATION include)
+    LIBRARY
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT ${GOAMDSMI_SHIM_COMPONENT}
+)
+install(FILES ${go_amd_smi_install_headers} DESTINATION include)
 
 include_directories(${go_amd_smi_includes})

@@ -7,7 +7,7 @@ project(rocprofiler-sdk-tests-bin LANGUAGES C CXX)
 
 set(CMAKE_BUILD_RPATH
     "\$ORIGIN:\$ORIGIN/../lib:$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>"
-    )
+)
 
 # Find rocDecode and rocJPEG packages for testing
 find_package(rocDecode)

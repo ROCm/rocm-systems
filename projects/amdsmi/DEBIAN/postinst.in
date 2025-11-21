@@ -151,7 +151,7 @@ do_install_amdsmi_python_lib() {
       "AMD-SMI python library will not be installed."
     return
   fi
- 
+
   # install python library at @CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/amdsmi
   local python_lib_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
   local amdsmi_python_lib_path="$python_lib_path"

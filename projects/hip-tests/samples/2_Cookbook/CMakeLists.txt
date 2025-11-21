@@ -36,8 +36,8 @@ add_subdirectory(15_static_library/device_functions)
 add_subdirectory(15_static_library/host_functions)
 # Disable samples that call hipcc directly for static builds.
 if(BUILD_SHARED_LIBS)
-  add_subdirectory(16_assembly_to_executable)
-  add_subdirectory(17_llvm_ir_to_executable)
+    add_subdirectory(16_assembly_to_executable)
+    add_subdirectory(17_llvm_ir_to_executable)
 endif()
 add_subdirectory(18_cmake_hip_device)
 add_subdirectory(19_cmake_lang)
@@ -45,6 +45,6 @@ add_subdirectory(21_cmake_hip_cxx_clang)
 # Disable hip-lang test for static builds.
 # Once the issues are fixed, will enable the test
 if(BUILD_SHARED_LIBS)
-  add_subdirectory(22_cmake_hip_lang)
+    add_subdirectory(22_cmake_hip_lang)
 endif()
 add_subdirectory(23_cmake_hiprtc)

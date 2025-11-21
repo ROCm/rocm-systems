@@ -22,21 +22,22 @@ find_program(CHMOD_CMD NAMES chmod)
 if(NOT EXISTS ${PROJECT_BINARY_DIR}/external/miniconda.sh)
     message(
         STATUS
-            "Downloading https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
-        )
+        "Downloading https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
+    )
     file(
         DOWNLOAD
-        https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
-        ${PROJECT_BINARY_DIR}/external/miniconda.sh
+            https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+            ${PROJECT_BINARY_DIR}/external/miniconda.sh
         STATUS MINICONDA_DOWNLOAD_RET
         INACTIVITY_TIMEOUT 60
-        SHOW_PROGRESS)
+        SHOW_PROGRESS
+    )
 
     if(NOT MINICONDA_DOWNLOAD_RET EQUAL 0)
         message(
             FATAL_ERROR
-                "Download to ${PROJECT_BINARY_DIR}/external/miniconda.sh from https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh failed"
-            )
+            "Download to ${PROJECT_BINARY_DIR}/external/miniconda.sh from https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh failed"
+        )
     endif()
 endif()
 
@@ -49,7 +50,8 @@ function(DOCS_EXECUTE_PROCESS)
         RESULT_VARIABLE _RET
         OUTPUT_VARIABLE _OUT
         ERROR_VARIABLE _ERR
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/external)
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/external
+    )
 
     if(NOT _RET EQUAL 0)
         message(STATUS "docs command failed: ${_RET}")
@@ -61,14 +63,15 @@ function(DOCS_EXECUTE_PROCESS)
 endfunction()
 
 include(ProcessorCount)
-processorcount(ROCP_NUM_PROCS)
+ProcessorCount(ROCP_NUM_PROCS)
 if(NOT ROCP_NUM_PROCS EQUAL 0)
     set(DOCS_BUILD_JOBS -j${ROCP_NUM_PROCS})
     message(STATUS "Using ${ROCP_NUM_PROCS} jobs for docs build")
 endif()
 
 file(
-    WRITE "${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh"
+    WRITE
+    "${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh"
     "#!${SHELL_CMD}
 
 set -e
@@ -127,20 +130,30 @@ doxysphinx build \${WORK_DIR} \${WORK_DIR}/_build/html \${WORK_DIR}/_doxygen/roc
 make html SPHINXOPTS=\"--keep-going -n -q -T ${DOCS_BUILD_JOBS}\"
 
 rm -rf ${PROJECT_SOURCE_DIR}/build-docs
-")
+"
+)
 
 if(CHMOD_CMD)
     docs_execute_process(${CHMOD_CMD} +x ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
-    add_custom_target(docs ${CMAKE_COMMAND} -E env HOME=${DOCS_WD}
-                           ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
+    add_custom_target(
+        docs
+        ${CMAKE_COMMAND} -E env HOME=${DOCS_WD}
+        ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh
+    )
 else()
-    add_custom_target(docs ${CMAKE_COMMAND} -E env HOME=${DOCS_WD} ${SHELL_CMD}
-                           ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
+    add_custom_target(
+        docs
+        ${CMAKE_COMMAND} -E env HOME=${DOCS_WD} ${SHELL_CMD}
+        ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh
+    )
 endif()
 
 install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/_build/html/
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/html/${PACKAGE_NAME}
     COMPONENT docs
-    OPTIONAL USE_SOURCE_PERMISSIONS FILES_MATCHING
-    PATTERN "*")
+    OPTIONAL
+    USE_SOURCE_PERMISSIONS
+    FILES_MATCHING
+    PATTERN "*"
+)

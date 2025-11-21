@@ -1,5 +1,5 @@
 + LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose
-ROCTracer (pid=1963): 
+ROCTracer (pid=1963):
     KFD-trace()
 3802694735152956
 Device name Device 687f

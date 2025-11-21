@@ -27,15 +27,17 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 include(FindPackageHandleStandardArgs)
 
-project(
-    rocprofiler-sdk-tests-rocprofv3-att
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-rocprofv3-att LANGUAGES CXX VERSION 0.0.0)
 
 set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
@@ -46,14 +48,17 @@ find_library(
     NAMES rocprof-trace-decoder
     HINTS ${ROCM_PATH}
     PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
+    PATH_SUFFIXES lib
+)
 
 if(attdecoder_LIBRARY)
     cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
 endif()
 
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
+find_package_handle_standard_args(
+    attdecoder
+    REQUIRED_VARS attdecoder_LIB_DIR attdecoder_LIBRARY
+)
 
 set(IS_DISABLED ON)
 if(attdecoder_FOUND)
@@ -77,7 +82,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-att-consecutive-kernels)
+    FIXTURES_SETUP rocprofv3-test-att-consecutive-kernels
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-att-consecutive-kernels
@@ -89,4 +95,5 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED rocprofv3-test-att-consecutive-kernels
     DISABLED ${IS_DISABLED}
     ARGS --csv-directory-input ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    FAIL_REGULAR_EXPRESSION "AssertionError"
+)

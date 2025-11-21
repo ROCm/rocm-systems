@@ -23,15 +23,19 @@ project(module_api_global)
 cmake_minimum_required(VERSION 3.10)
 
 if(UNIX)
-  if(NOT DEFINED ROCM_PATH)
-    if(DEFINED ENV{ROCM_PATH})
-      set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
-    else()
-      set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory.")
+    if(NOT DEFINED ROCM_PATH)
+        if(DEFINED ENV{ROCM_PATH})
+            set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
+        else()
+            set(ROCM_PATH
+                "/opt/rocm"
+                CACHE STRING
+                "Default ROCM installation directory."
+            )
+        endif()
     endif()
-  endif()
-  # Search for rocm in common locations
-  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+    # Search for rocm in common locations
+    list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
 # Find hip
@@ -40,21 +44,23 @@ find_package(hip)
 # Set compiler and linker
 set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
 
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+set(CMAKE_CXX_LINKER ${HIP_HIPCC_EXECUTABLE})
 
 # Create the excutable
 if(TARGET build_intro)
-set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
+    set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
 else()
-set(EXCLUDE_OPTION )
+    set(EXCLUDE_OPTION)
 endif()
 
 add_executable(runKernel1.hip.out ${EXCLUDE_OPTION} runKernel.cpp)
 # Generate code object
 add_custom_target(
-  codeobj1
-  COMMAND  ${HIP_HIPCC_EXECUTABLE} --genco  ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o vcpy_kernel.code
-  COMMENT "codeobj1 generated"
+    codeobj1
+    COMMAND
+        ${HIP_HIPCC_EXECUTABLE} --genco
+        ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o vcpy_kernel.code
+    COMMENT "codeobj1 generated"
 )
 
 add_dependencies(runKernel1.hip.out codeobj1)
@@ -65,5 +71,5 @@ target_include_directories(runKernel1.hip.out PRIVATE ../../common)
 target_link_libraries(runKernel1.hip.out hip::host)
 
 if(TARGET build_intro)
-add_dependencies(build_intro runKernel1.hip.out)
+    add_dependencies(build_intro runKernel1.hip.out)
 endif()

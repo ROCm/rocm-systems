@@ -190,7 +190,7 @@ Check out the repository:
 
 Then navigate to ``rocm-examples/HIP-Doc/Tutorials/graph_api/``. The code can be found in the ``src`` subdirectory.
 
-Create a separate ``build`` directory inside ``rocm-examples/HIP-Doc/Tutorials/graph_api/``. Then 
+Create a separate ``build`` directory inside ``rocm-examples/HIP-Doc/Tutorials/graph_api/``. Then
 configure the project (adjust ``CMAKE_HIP_ARCHITECTURES`` to match your GPU):
 
 .. code-block:: bash
@@ -598,7 +598,7 @@ Now you have manually implemented the processing pipeline with the graph API. Yo
 another trace:
 
 .. code-block:: bash
-  
+
   rocprofv3 -o graph_creation -d outDir -f pftrace --hip-trace --kernel-trace --memory-copy-trace --memory-allocation-trace -- ./HIP-Doc/Tutorials/graph_api/src/hip_graph_api_tutorial_graph_creation
 
 Analyzing the trace

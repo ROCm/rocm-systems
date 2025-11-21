@@ -1,27 +1,43 @@
 #
 #
 #
-set(ROCPROFILER_REGISTER_MEMCHECK_TYPES "ThreadSanitizer" "AddressSanitizer"
-                                        "LeakSanitizer" "UndefinedBehaviorSanitizer")
+set(ROCPROFILER_REGISTER_MEMCHECK_TYPES
+    "ThreadSanitizer"
+    "AddressSanitizer"
+    "LeakSanitizer"
+    "UndefinedBehaviorSanitizer"
+)
 
-if(ROCPROFILER_REGISTER_MEMCHECK AND NOT ROCPROFILER_REGISTER_MEMCHECK IN_LIST
-                                     ROCPROFILER_REGISTER_MEMCHECK_TYPES)
+if(
+    ROCPROFILER_REGISTER_MEMCHECK
+    AND NOT ROCPROFILER_REGISTER_MEMCHECK IN_LIST ROCPROFILER_REGISTER_MEMCHECK_TYPES
+)
     message(
         FATAL_ERROR
-            "Unsupported memcheck type '${ROCPROFILER_REGISTER_MEMCHECK}'. Options: ${ROCPROFILER_REGISTER_MEMCHECK_TYPES}"
-        )
+        "Unsupported memcheck type '${ROCPROFILER_REGISTER_MEMCHECK}'. Options: ${ROCPROFILER_REGISTER_MEMCHECK_TYPES}"
+    )
 endif()
 
-set_property(CACHE ROCPROFILER_REGISTER_MEMCHECK
-             PROPERTY STRINGS "${ROCPROFILER_REGISTER_MEMCHECK_TYPES}")
+set_property(
+    CACHE ROCPROFILER_REGISTER_MEMCHECK
+    PROPERTY STRINGS "${ROCPROFILER_REGISTER_MEMCHECK_TYPES}"
+)
 
 function(rocprofiler_register_add_memcheck_flags _TYPE _LIB)
     target_compile_options(
         rocprofiler-register-memcheck
-        INTERFACE $<BUILD_INTERFACE:-g3 -Og -fno-omit-frame-pointer
-                  -fno-optimize-sibling-calls -fno-inline-functions -fsanitize=${_TYPE}>)
-    target_link_options(rocprofiler-register-memcheck INTERFACE
-                        $<BUILD_INTERFACE:-fsanitize=${_TYPE}>)
+        INTERFACE
+            $<BUILD_INTERFACE:-g3
+            -Og
+            -fno-omit-frame-pointer
+            -fno-optimize-sibling-calls
+            -fno-inline-functions
+            -fsanitize=${_TYPE}>
+    )
+    target_link_options(
+        rocprofiler-register-memcheck
+        INTERFACE $<BUILD_INTERFACE:-fsanitize=${_TYPE}>
+    )
 endfunction()
 
 function(rocprofiler_register_set_memcheck_env _TYPE _LIB_BASE)
@@ -37,11 +53,13 @@ function(rocprofiler_register_set_memcheck_env _TYPE _LIB_BASE)
         3
         2
         1
-        0)
+        0
+    )
         list(
-            APPEND _LIBS
+            APPEND
+            _LIBS
             ${CMAKE_SHARED_LIBRARY_PREFIX}${_LIB_BASE}${CMAKE_SHARED_LIBRARY_SUFFIX}.${_N}
-            )
+        )
     endforeach()
 
     foreach(_LIB ${_LIBS})
@@ -55,10 +73,16 @@ function(rocprofiler_register_set_memcheck_env _TYPE _LIB_BASE)
     if(${_TYPE}_LIBRARY)
         set(ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY
             "${${_TYPE}_LIBRARY}"
-            CACHE INTERNAL "LD_PRELOAD library for tests " FORCE)
+            CACHE INTERNAL
+            "LD_PRELOAD library for tests "
+            FORCE
+        )
         set(ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV
             "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}"
-            CACHE INTERNAL "LD_PRELOAD env variable for tests " FORCE)
+            CACHE INTERNAL
+            "LD_PRELOAD env variable for tests "
+            FORCE
+        )
     endif()
 endfunction()
 

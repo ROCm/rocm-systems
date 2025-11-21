@@ -6,15 +6,22 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-counter-collection-input3
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
-                                                          input.json input.yml)
+                                                          input.json input.yml
+)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 # pmc1
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-json-pmc1
@@ -26,7 +33,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-counter-collection-json-pmc1)
+    FIXTURES_SETUP rocprofv3-test-counter-collection-json-pmc1
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-json-pmc1
@@ -43,7 +51,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_json_counter_collection.csv
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-counter-collection-json-pmc1)
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-json-pmc1
+)
 
 # YAML input test
 rocprofiler_add_integration_execute_test(
@@ -56,7 +65,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-counter-collection-yaml-pmc1)
+    FIXTURES_SETUP rocprofv3-test-counter-collection-yaml-pmc1
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-yaml-pmc1
@@ -73,4 +83,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_yaml_counter_collection.csv
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-counter-collection-yaml-pmc1)
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-yaml-pmc1
+)

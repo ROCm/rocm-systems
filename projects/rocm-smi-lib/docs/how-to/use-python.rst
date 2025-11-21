@@ -30,7 +30,7 @@ The SMI will report two "versions": the ``ROCM-SMI`` version and the ``ROCM-SMI-
 - ``ROCM-SMI`` version is the CLI/tool version number with commit ID appended after + sign.
 
 - ``ROCM-SMI-LIB`` version is the library package version number.
-  
+
 .. code-block:: shell-session
 
    ROCM-SMI version: 2.0.0+8e78352
@@ -219,7 +219,7 @@ Detailed option descriptions
 ============================
 
 --setextremum <[min or max] [sclk or mclk] [value in MHz to set to]>
-    Provided ASIC support, users can now set a maximum or minimum sclk or mclk value through our Python CLI tool (`rocm-smi --setextremum max sclk 1500`). See example below.  
+    Provided ASIC support, users can now set a maximum or minimum sclk or mclk value through our Python CLI tool (`rocm-smi --setextremum max sclk 1500`). See example below.
 
     .. code-block:: shell-session
 
@@ -287,7 +287,7 @@ Detailed option descriptions
 
 --setoverdrive, --setmemoverdrive <#>
     .. warning::
-      
+
        DEPRECATED IN NEWER KERNEL VERSIONS. Use ``--setslevel`` or ``--setmlevel`` instead.
 
     This sets the percentage above maximum for the max Performance Level.

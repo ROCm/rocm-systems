@@ -93,4 +93,3 @@ To verify the build and capability of ROCm SMI on your system and to see an exam
     make -j $(nproc)
 
 To run the test, execute the program `rsmitst` that is built from the preceding steps.
-

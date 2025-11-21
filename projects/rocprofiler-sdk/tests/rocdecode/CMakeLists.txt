@@ -3,19 +3,20 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-sdk-tests-rocdecode-tracing
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-rocdecode-tracing LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocDecode)
 
-file(GLOB_RECURSE ROCDECODE_VIDEO_FILE
-     "${rocDecode_ROOT_DIR}/share/rocdecode/video/*AMD_driving_virtual_20-H265.265")
+file(
+    GLOB_RECURSE ROCDECODE_VIDEO_FILE
+    "${rocDecode_ROOT_DIR}/share/rocdecode/video/*AMD_driving_virtual_20-H265.265"
+)
 if(TARGET rocdecode-demo AND NOT EXISTS "${ROCDECODE_VIDEO_FILE}")
     message(
-        WARNING "Unable to find video file for rocdecode tests: ${ROCDECODE_VIDEO_FILE}")
+        WARNING
+        "Unable to find video file for rocdecode tests: ${ROCDECODE_VIDEO_FILE}"
+    )
     set(IS_DISABLED ON)
 endif()
 
@@ -34,7 +35,8 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=rocdecode-tracing-test.json"
-    FIXTURES_SETUP rocdecode-tracing)
+    FIXTURES_SETUP rocdecode-tracing
+)
 
 rocprofiler_add_integration_validate_test(
     rocdecode-tracing
@@ -45,4 +47,5 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocdecode-tracing
-    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-tracing-test.json)
+    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-tracing-test.json
+)

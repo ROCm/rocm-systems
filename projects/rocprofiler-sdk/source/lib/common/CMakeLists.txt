@@ -16,7 +16,8 @@ set(common_sources
     static_tl_object.cpp
     string_entry.cpp
     utility.cpp
-    uuid_v7.cpp)
+    uuid_v7.cpp
+)
 set(common_headers
     abi.hpp
     defines.hpp
@@ -39,36 +40,48 @@ set(common_headers
     synchronized.hpp
     units.hpp
     utility.hpp
-    uuid_v7.hpp)
+    uuid_v7.hpp
+)
 
 add_library(rocprofiler-sdk-common-library STATIC)
-add_library(rocprofiler-sdk::rocprofiler-sdk-common-library ALIAS
-            rocprofiler-sdk-common-library)
+add_library(
+    rocprofiler-sdk::rocprofiler-sdk-common-library
+    ALIAS rocprofiler-sdk-common-library
+)
 
 add_subdirectory(container)
 add_subdirectory(memory)
 
-target_sources(rocprofiler-sdk-common-library PRIVATE ${common_sources} ${common_headers})
-target_include_directories(rocprofiler-sdk-common-library
-                           PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source>)
+target_sources(
+    rocprofiler-sdk-common-library
+    PRIVATE ${common_sources} ${common_headers}
+)
+target_include_directories(
+    rocprofiler-sdk-common-library
+    PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source>
+)
 
 target_link_libraries(
     rocprofiler-sdk-common-library
-    PUBLIC $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-memcheck>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-glog>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-fmt>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-yaml-cpp>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dl>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-ptl>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-atomic>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsakmt-nolink>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-elfio>)
+    PUBLIC
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-memcheck>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-glog>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-fmt>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-yaml-cpp>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dl>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-ptl>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-atomic>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsakmt-nolink>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-elfio>
+)
 
-set_target_properties(rocprofiler-sdk-common-library PROPERTIES OUTPUT_NAME
-                                                                rocprofiler-sdk-common)
+set_target_properties(
+    rocprofiler-sdk-common-library
+    PROPERTIES OUTPUT_NAME rocprofiler-sdk-common
+)
 
 add_subdirectory(details)

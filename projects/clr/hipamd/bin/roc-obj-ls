@@ -154,7 +154,7 @@ foreach my $executable_file(@ARGV) {
       print("triple: $triple\n") if $debug;
 
       # because the bundle entry's offset is relative to the beginning of the bundled code object section.
-      $abs_offset = int($current_bundle_offset + $entry_offset); 
+      $abs_offset = int($current_bundle_offset + $entry_offset);
 
       # and we need to keep track of where we are in the current bundle.
       $end_of_current_bundle = int($abs_offset + $entry_size);

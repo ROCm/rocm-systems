@@ -26,7 +26,7 @@ div#flexbox > div {
 }
 
 div#minimap {
-	position: absolute; 
+	position: absolute;
 	width: 350px;
 	top: 340px;
 	display: flex;

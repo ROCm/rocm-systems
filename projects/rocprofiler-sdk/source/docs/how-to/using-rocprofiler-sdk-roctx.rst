@@ -246,7 +246,7 @@ The following sample code from the MatrixTranspose application shows the usage o
 
 Before using the ``roctx`` module for python application, ensure that the ``roctx`` module is built, installed and available in your python environment.
 
-An example to build and install ``roctx`` module is as follows:    
+An example to build and install ``roctx`` module is as follows:
 
 .. code-block:: shell
 
@@ -260,26 +260,26 @@ Multiple python versions can be specified in the ``ROCPROFILER_PYTHON_VERSIONS``
     ``cmake -B build-sdk -DCMAKE_INSTALL_PREFIX=/opt/rocm -DROCPROFILER_PYTHON_VERSIONS="3.8;3.9;3.10;3.11;3.12" -DCMAKE_PREFIX_PATH=/opt/rocm``
 
 Based on the python major.minor version and the roctx module install path ("/opt/rocm" in above example), set the ``PYTHONPATH`` environment variable to include the path to the ``roctx`` module.
-    
+
 .. code-block:: shell
 
    export PYTHONPATH="<install-path>/lib/pythonX.Y/site-packages:$PYTHONPATH"
-    
+
 Above example will install the roctx module in ``/opt/rocm/lib/python3.10/site-packages``, set the ``PYTHONPATH`` as follows:
 
 .. code-block:: shell
 
     export PYTHONPATH=/opt/rocm/lib/python3.10/site-packages:$PYTHONPATH
 
-    
+
 Once the ``PYTHONPATH`` is set, user should be able to import the `roctx` package:
 
 .. code-block:: shell
 
    python3 -c "import roctx"
-    
+
 User can profile the python application which is annotated with ROCTx markers using ``rocprofv3`` as follows:
-    
+
 .. code-block:: shell
 
    rocprofv3 --marker-trace --output-format csv -- $(which python) <python_application_path>
@@ -290,4 +290,3 @@ The preceding command generates a ``marker_api_trace.csv`` file prefixed with th
    :file: /data/python_bindings.csv
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
-

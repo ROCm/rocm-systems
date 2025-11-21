@@ -7,9 +7,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -35,12 +40,16 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(simple-transpose.cpp PROPERTIES LANGUAGE HIP)
 add_executable(simple-transpose)
 target_sources(simple-transpose PRIVATE simple-transpose.cpp)
-target_compile_options(simple-transpose PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                                -Werror)
+target_compile_options(
+    simple-transpose
+    PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
+)
 
 find_package(Threads REQUIRED)
 target_link_libraries(simple-transpose PRIVATE Threads::Threads)
 
 find_package(rocprofiler-sdk-roctx REQUIRED)
-target_link_libraries(simple-transpose
-                      PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+target_link_libraries(
+    simple-transpose
+    PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+)

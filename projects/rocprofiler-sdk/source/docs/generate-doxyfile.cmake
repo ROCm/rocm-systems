@@ -12,11 +12,22 @@ endif()
 
 file(READ "${SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 1)
 string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
-string(REGEX REPLACE "([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)" "\\1.\\2.\\3"
-                     ROCPROFILER_VERSION "${FULL_VERSION_STRING}")
+string(
+    REGEX REPLACE
+    "([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)"
+    "\\1.\\2.\\3"
+    ROCPROFILER_VERSION
+    "${FULL_VERSION_STRING}"
+)
 
-configure_file(${SOURCE_DIR}/source/docs/rocprofiler-sdk.dox.in
-               ${SOURCE_DIR}/source/docs/rocprofiler-sdk.dox @ONLY)
+configure_file(
+    ${SOURCE_DIR}/source/docs/rocprofiler-sdk.dox.in
+    ${SOURCE_DIR}/source/docs/rocprofiler-sdk.dox
+    @ONLY
+)
 
-configure_file(${SOURCE_DIR}/source/docs/rocprofiler-sdk-roctx.dox.in
-               ${SOURCE_DIR}/source/docs/rocprofiler-sdk-roctx.dox @ONLY)
+configure_file(
+    ${SOURCE_DIR}/source/docs/rocprofiler-sdk-roctx.dox.in
+    ${SOURCE_DIR}/source/docs/rocprofiler-sdk-roctx.dox
+    @ONLY
+)

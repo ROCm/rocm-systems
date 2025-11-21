@@ -7,9 +7,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -17,10 +22,7 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(
-    rocprofiler-sdk-tests-thread-trace
-    LANGUAGES CXX HIP
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-thread-trace LANGUAGES CXX HIP VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 
@@ -38,19 +40,30 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
 endforeach()
 
 set_source_files_properties(
-    kernel_branch.cpp kernel_lds.cpp
-    PROPERTIES LANGUAGE HIP COMPILE_FLAGS "${CMAKE_HIP_FLAGS_RELWITHDEBINFO}")
+    kernel_branch.cpp
+    kernel_lds.cpp
+    PROPERTIES LANGUAGE HIP COMPILE_FLAGS "${CMAKE_HIP_FLAGS_RELWITHDEBINFO}"
+)
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 
 # Single dispatch test
 add_executable(thread-trace-api-single-test)
 target_sources(
-    thread-trace-api-single-test PRIVATE main.cpp trace_callbacks.cpp single_dispatch.cpp
-                                         kernel_branch.cpp kernel_lds.cpp)
+    thread-trace-api-single-test
+    PRIVATE
+        main.cpp
+        trace_callbacks.cpp
+        single_dispatch.cpp
+        kernel_branch.cpp
+        kernel_lds.cpp
+)
 target_link_libraries(
     thread-trace-api-single-test
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk
+        rocprofiler-sdk::tests-build-flags
+        rocprofiler-sdk::tests-common-library
+)
 
 rocprofiler_add_integration_execute_test(
     thread-trace-api-single-test
@@ -58,16 +71,26 @@ rocprofiler_add_integration_execute_test(
     DEPENDS thread-trace-api-single-test
     TIMEOUT 10
     LABELS "integration-tests"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+)
 # Multi dispatch test
 add_executable(thread-trace-api-multi-test)
 target_sources(
-    thread-trace-api-multi-test PRIVATE main.cpp trace_callbacks.cpp multi_dispatch.cpp
-                                        kernel_branch.cpp kernel_lds.cpp)
+    thread-trace-api-multi-test
+    PRIVATE
+        main.cpp
+        trace_callbacks.cpp
+        multi_dispatch.cpp
+        kernel_branch.cpp
+        kernel_lds.cpp
+)
 target_link_libraries(
     thread-trace-api-multi-test
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk
+        rocprofiler-sdk::tests-build-flags
+        rocprofiler-sdk::tests-common-library
+)
 
 rocprofiler_add_integration_execute_test(
     thread-trace-api-multi-test
@@ -75,16 +98,27 @@ rocprofiler_add_integration_execute_test(
     DEPENDS thread-trace-api-multi-test
     TIMEOUT 10
     LABELS "integration-tests"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+)
 
 # Agent profiling test
 add_executable(thread-trace-api-agent-test)
-target_sources(thread-trace-api-agent-test PRIVATE main.cpp trace_callbacks.cpp agent.cpp
-                                                   kernel_branch.cpp kernel_lds.cpp)
+target_sources(
+    thread-trace-api-agent-test
+    PRIVATE
+        main.cpp
+        trace_callbacks.cpp
+        agent.cpp
+        kernel_branch.cpp
+        kernel_lds.cpp
+)
 target_link_libraries(
     thread-trace-api-agent-test
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk
+        rocprofiler-sdk::tests-build-flags
+        rocprofiler-sdk::tests-common-library
+)
 
 rocprofiler_add_integration_execute_test(
     thread-trace-api-agent-test
@@ -92,7 +126,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS thread-trace-api-agent-test
     TIMEOUT 10
     LABELS "integration-tests"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+)
 
 # Test large buffer sizes. 5120 == 5GB
 rocprofiler_add_integration_execute_test(
@@ -103,7 +138,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ATT_BUFFER_SIZE_MB=5120"
-    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
+)
 
 # Test occupancy mode
 rocprofiler_add_integration_execute_test(
@@ -113,4 +149,5 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 10
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ATT_NODETAIL=1"
-    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
+)

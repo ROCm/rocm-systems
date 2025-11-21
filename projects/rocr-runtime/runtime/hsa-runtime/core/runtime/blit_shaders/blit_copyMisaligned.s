@@ -180,5 +180,3 @@ CopyMisaligned:
 
   L_COPY_MISALIGNED_PHASE_2_DONE:
     s_endpgm
-
-

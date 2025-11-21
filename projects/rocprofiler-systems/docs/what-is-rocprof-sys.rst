@@ -30,4 +30,3 @@ To use ROCm Systems Profiler for instrumentation, follow these two configuration
 
 #. Indicate the functions and modules to :doc:`instrument <./how-to/instrumenting-rewriting-binary-application>` in the target binaries, including the executable and any libraries
 #. Specify the :doc:`instrumentation parameters <./how-to/configuring-runtime-options>` to use when the instrumented binaries are launched
-

@@ -4,8 +4,15 @@
 rocprofiler_activate_clang_tidy()
 
 set(ROCPROFILER_LIB_HEADERS
-    agent.hpp buffer.hpp external_correlation.hpp intercept_table.hpp
-    internal_threading.hpp ompt.hpp registration.hpp runtime_initialization.hpp)
+    agent.hpp
+    buffer.hpp
+    external_correlation.hpp
+    intercept_table.hpp
+    internal_threading.hpp
+    ompt.hpp
+    registration.hpp
+    runtime_initialization.hpp
+)
 set(ROCPROFILER_LIB_SOURCES
     agent.cpp
     attach.cpp
@@ -24,7 +31,8 @@ set(ROCPROFILER_LIB_SOURCES
     pc_sampling.cpp
     registration.cpp
     rocprofiler.cpp
-    runtime_initialization.cpp)
+    runtime_initialization.cpp
+)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -34,11 +42,15 @@ set(ROCPROFILER_LIB_SOURCES
 # ----------------------------------------------------------------------------------------#
 
 add_library(rocprofiler-sdk-object-library OBJECT)
-add_library(rocprofiler-sdk::rocprofiler-sdk-object-library ALIAS
-            rocprofiler-sdk-object-library)
+add_library(
+    rocprofiler-sdk::rocprofiler-sdk-object-library
+    ALIAS rocprofiler-sdk-object-library
+)
 
-target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
-                                                      ${ROCPROFILER_LIB_HEADERS})
+target_sources(
+    rocprofiler-sdk-object-library
+    PRIVATE ${ROCPROFILER_LIB_SOURCES} ${ROCPROFILER_LIB_HEADERS}
+)
 add_subdirectory(hsa)
 add_subdirectory(hip)
 add_subdirectory(code_object)
@@ -60,18 +72,25 @@ add_subdirectory(ompt)
 target_link_libraries(
     rocprofiler-sdk-object-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-memcheck
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
-            rocprofiler-sdk::rocprofiler-sdk-hsa-aql
-            rocprofiler-sdk::rocprofiler-sdk-drm
-            rocprofiler-sdk::rocprofiler-sdk-dw)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk-build-flags
+        rocprofiler-sdk::rocprofiler-sdk-memcheck
+        rocprofiler-sdk::rocprofiler-sdk-common-library
+        rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+        rocprofiler-sdk::rocprofiler-sdk-hsa-aql
+        rocprofiler-sdk::rocprofiler-sdk-drm
+        rocprofiler-sdk::rocprofiler-sdk-dw
+)
 
-target_compile_definitions(rocprofiler-sdk-object-library PRIVATE rocprofiler_EXPORTS=1)
+target_compile_definitions(
+    rocprofiler-sdk-object-library
+    PRIVATE rocprofiler_EXPORTS=1
+)
 
-set_target_properties(rocprofiler-sdk-object-library PROPERTIES POSITION_INDEPENDENT_CODE
-                                                                ON)
+set_target_properties(
+    rocprofiler-sdk-object-library
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -80,40 +99,52 @@ set_target_properties(rocprofiler-sdk-object-library PROPERTIES POSITION_INDEPEN
 # ----------------------------------------------------------------------------------------#
 
 add_library(rocprofiler-sdk-shared-library SHARED)
-add_library(rocprofiler-sdk::rocprofiler-sdk-shared-library ALIAS
-            rocprofiler-sdk-shared-library)
+add_library(
+    rocprofiler-sdk::rocprofiler-sdk-shared-library
+    ALIAS rocprofiler-sdk-shared-library
+)
 
 target_sources(
     rocprofiler-sdk-shared-library
-    PRIVATE $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>
-            shared_library.cpp)
+    PRIVATE
+        $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>
+        shared_library.cpp
+)
 target_link_libraries(
     rocprofiler-sdk-shared-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-memcheck
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem
-            rocprofiler-sdk::rocprofiler-sdk-dl
-            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
-            rocprofiler-sdk::rocprofiler-sdk-object-library)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk-build-flags
+        rocprofiler-sdk::rocprofiler-sdk-memcheck
+        rocprofiler-sdk::rocprofiler-sdk-common-library
+        rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem
+        rocprofiler-sdk::rocprofiler-sdk-dl
+        rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+        rocprofiler-sdk::rocprofiler-sdk-object-library
+)
 
 set_target_properties(
     rocprofiler-sdk-shared-library
-    PROPERTIES OUTPUT_NAME rocprofiler-sdk
-               SOVERSION ${PROJECT_VERSION_MAJOR}
-               VERSION ${PROJECT_VERSION}
-               BUILD_RPATH "\$ORIGIN"
-               INSTALL_RPATH "\$ORIGIN"
-               DEFINE_SYMBOL rocprofiler_EXPORTS)
+    PROPERTIES
+        OUTPUT_NAME rocprofiler-sdk
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+        VERSION ${PROJECT_VERSION}
+        BUILD_RPATH "\$ORIGIN"
+        INSTALL_RPATH "\$ORIGIN"
+        DEFINE_SYMBOL rocprofiler_EXPORTS
+)
 
-add_library(rocprofiler-sdk::rocprofiler-library ALIAS rocprofiler-sdk-shared-library)
+add_library(
+    rocprofiler-sdk::rocprofiler-library
+    ALIAS rocprofiler-sdk-shared-library
+)
 
 install(
     TARGETS rocprofiler-sdk-shared-library
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
     COMPONENT core
-    EXPORT rocprofiler-sdk-targets)
+    EXPORT rocprofiler-sdk-targets
+)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -122,21 +153,29 @@ install(
 # ----------------------------------------------------------------------------------------#
 
 add_library(rocprofiler-sdk-static-library EXCLUDE_FROM_ALL STATIC)
-add_library(rocprofiler-sdk::rocprofiler-sdk-static-library ALIAS
-            rocprofiler-sdk-static-library)
+add_library(
+    rocprofiler-sdk::rocprofiler-sdk-static-library
+    ALIAS rocprofiler-sdk-static-library
+)
 
-target_sources(rocprofiler-sdk-static-library
-               PRIVATE $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>)
+target_sources(
+    rocprofiler-sdk-static-library
+    PRIVATE $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>
+)
 target_link_libraries(
     rocprofiler-sdk-static-library
-    PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dw>
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-object-library)
+    PUBLIC
+        rocprofiler-sdk::rocprofiler-sdk-headers
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dw>
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk-common-library
+        rocprofiler-sdk::rocprofiler-sdk-object-library
+)
 
 set_target_properties(
-    rocprofiler-sdk-static-library PROPERTIES OUTPUT_NAME rocprofiler-sdk
-                                              DEFINE_SYMBOL rocprofiler_EXPORTS)
+    rocprofiler-sdk-static-library
+    PROPERTIES OUTPUT_NAME rocprofiler-sdk DEFINE_SYMBOL rocprofiler_EXPORTS
+)
 
 # ----------------------------------------------------------------------------------------#
 #

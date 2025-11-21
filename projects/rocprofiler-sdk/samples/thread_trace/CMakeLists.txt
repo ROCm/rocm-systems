@@ -7,9 +7,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -25,12 +30,9 @@ find_package(
     amd_comgr
     REQUIRED
     CONFIG
-    HINTS
-    ${rocm_version_DIR}
-    ${ROCM_PATH}
-    PATHS
-    ${rocm_version_DIR}
-    ${ROCM_PATH})
+    HINTS ${rocm_version_DIR} ${ROCM_PATH}
+    PATHS ${rocm_version_DIR} ${ROCM_PATH}
+)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -46,7 +48,9 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
 endforeach()
 
 set_source_files_properties(
-    main.cpp PROPERTIES LANGUAGE HIP COMPILE_FLAGS "${CMAKE_HIP_FLAGS_RELWITHDEBINFO}")
+    main.cpp
+    PROPERTIES LANGUAGE HIP COMPILE_FLAGS "${CMAKE_HIP_FLAGS_RELWITHDEBINFO}"
+)
 
 add_executable(thread-trace-sample)
 target_sources(thread-trace-sample PRIVATE main.cpp agent.cpp)
@@ -54,8 +58,12 @@ target_sources(thread-trace-sample PRIVATE main.cpp agent.cpp)
 target_link_libraries(
     thread-trace-sample
     PUBLIC rocprofiler-sdk::samples-build-flags
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library
-            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx amd_comgr)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk
+        rocprofiler-sdk::samples-common-library
+        rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+        amd_comgr
+)
 
 add_test(NAME thread-trace-sample COMMAND $<TARGET_FILE:thread-trace-sample>)
 
@@ -64,14 +72,17 @@ find_library(
     NAMES rocprof-trace-decoder
     HINTS ${ROCM_PATH}
     PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
+    PATH_SUFFIXES lib
+)
 
 if(attdecoder_LIBRARY)
     cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
 endif()
 
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
+find_package_handle_standard_args(
+    attdecoder
+    REQUIRED_VARS attdecoder_LIB_DIR attdecoder_LIBRARY
+)
 
 set(IS_DISABLED ON)
 if(attdecoder_FOUND)
@@ -82,8 +93,17 @@ if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
 endif()
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV)
-list(APPEND PRELOAD_ENV "ROCPROFILER_TRACE_DECODER_LIB_PATH=${attdecoder_LIB_DIR}")
+list(
+    APPEND
+    PRELOAD_ENV
+    "ROCPROFILER_TRACE_DECODER_LIB_PATH=${attdecoder_LIB_DIR}"
+)
 
 set_tests_properties(
-    thread-trace-sample PROPERTIES TIMEOUT 60 ENVIRONMENT "${PRELOAD_ENV}" LABELS
-                                   "samples;thread-trace" DISABLED ${IS_DISABLED})
+    thread-trace-sample
+    PROPERTIES
+        TIMEOUT 60
+        ENVIRONMENT "${PRELOAD_ENV}"
+        LABELS "samples;thread-trace"
+        DISABLED ${IS_DISABLED}
+)

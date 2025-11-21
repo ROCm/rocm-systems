@@ -28,30 +28,35 @@ target_sources(rocprofv3-list-avail PRIVATE rocprofv3_avail.cpp)
 
 target_link_libraries(
     rocprofv3-list-avail
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
-            rocprofiler-sdk::rocprofiler-sdk-headers
-            rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-memcheck
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-cereal
-            rocprofiler-sdk::rocprofiler-sdk-perfetto
-            rocprofiler-sdk::rocprofiler-sdk-output-library
-            rocprofiler-sdk::rocprofiler-sdk-drm
-            rocprofiler-sdk::rocprofiler-sdk-dl
-            rocprofiler-sdk::rocprofiler-sdk-dw
-            rocprofiler-sdk::rocprofiler-sdk-amd-comgr)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk-shared-library
+        rocprofiler-sdk::rocprofiler-sdk-headers
+        rocprofiler-sdk::rocprofiler-sdk-build-flags
+        rocprofiler-sdk::rocprofiler-sdk-memcheck
+        rocprofiler-sdk::rocprofiler-sdk-common-library
+        rocprofiler-sdk::rocprofiler-sdk-cereal
+        rocprofiler-sdk::rocprofiler-sdk-perfetto
+        rocprofiler-sdk::rocprofiler-sdk-output-library
+        rocprofiler-sdk::rocprofiler-sdk-drm
+        rocprofiler-sdk::rocprofiler-sdk-dl
+        rocprofiler-sdk::rocprofiler-sdk-dw
+        rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+)
 
 set_target_properties(
     rocprofv3-list-avail
-    PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
-               SOVERSION ${PROJECT_VERSION_MAJOR}
-               VERSION ${PROJECT_VERSION}
-               BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
-               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+    PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY
+            ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+        VERSION ${PROJECT_VERSION}
+        BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
+        INSTALL_RPATH "\$ORIGIN:\$ORIGIN/.."
+)
 
 install(
     TARGETS rocprofv3-list-avail
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
     COMPONENT tools
-    EXPORT rocprofiler-sdk-tool-targets)
+    EXPORT rocprofiler-sdk-tool-targets
+)

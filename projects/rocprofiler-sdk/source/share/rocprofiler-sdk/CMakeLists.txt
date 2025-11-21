@@ -27,25 +27,38 @@ set(share_files basic_counters.xml counter_defs.yaml derived_counters.xml)
 set(share_progs convert-counters-collection-format.py)
 
 foreach(_FILE ${share_files})
-    configure_file(${_FILE} ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/${_FILE} COPYONLY)
+    configure_file(
+        ${_FILE}
+        ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/${_FILE}
+        COPYONLY
+    )
     install(
         FILES ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/${_FILE}
         DESTINATION share/rocprofiler-sdk
-        COMPONENT core)
+        COMPONENT core
+    )
 endforeach()
 
 foreach(_FILE ${share_progs})
-    configure_file(${_FILE} ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/${_FILE}
-                   USE_SOURCE_PERMISSIONS COPYONLY)
+    configure_file(
+        ${_FILE}
+        ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/${_FILE}
+        USE_SOURCE_PERMISSIONS
+        COPYONLY
+    )
     install(
         PROGRAMS ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/${_FILE}
         DESTINATION share/rocprofiler-sdk
-        COMPONENT core)
+        COMPONENT core
+    )
 endforeach()
 
 set(CONVERT_CC_FORMAT_PATH
-    ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/convert-counters-collection-format.py)
+    ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/convert-counters-collection-format.py
+)
 
 add_executable(rocprofiler-sdk::convert-counters-collection-format IMPORTED)
-set_property(TARGET rocprofiler-sdk::convert-counters-collection-format
-             PROPERTY IMPORTED_LOCATION ${CONVERT_CC_FORMAT_PATH})
+set_property(
+    TARGET rocprofiler-sdk::convert-counters-collection-format
+    PROPERTY IMPORTED_LOCATION ${CONVERT_CC_FORMAT_PATH}
+)

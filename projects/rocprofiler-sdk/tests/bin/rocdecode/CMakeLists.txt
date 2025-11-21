@@ -7,9 +7,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -40,5 +45,10 @@ find_package(Threads REQUIRED)
 find_package(rocDecode REQUIRED)
 target_link_libraries(
     rocdecode-demo
-    PRIVATE rocprofiler-sdk::tests-build-flags Threads::Threads hsa-runtime64
-            rocprofiler-sdk::tests-common-library rocDecode::rocDecode)
+    PRIVATE
+        rocprofiler-sdk::tests-build-flags
+        Threads::Threads
+        hsa-runtime64
+        rocprofiler-sdk::tests-common-library
+        rocDecode::rocDecode
+)

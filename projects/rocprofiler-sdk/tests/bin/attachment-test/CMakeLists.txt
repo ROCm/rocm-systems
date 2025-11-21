@@ -8,9 +8,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -18,10 +23,7 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(
-    rocprofiler-tests-attachment-test
-    LANGUAGES CXX HIP
-    VERSION 0.0.0)
+project(rocprofiler-tests-attachment-test LANGUAGES CXX HIP VERSION 0.0.0)
 
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
@@ -42,8 +44,12 @@ find_package(rocprofiler-sdk-roctx REQUIRED)
 set_source_files_properties(attachment_test.cpp PROPERTIES LANGUAGE HIP)
 add_executable(attachment-test)
 target_sources(attachment-test PRIVATE attachment_test.cpp)
-target_compile_options(attachment-test PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                               -Werror)
+target_compile_options(
+    attachment-test
+    PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
+)
 
 target_link_libraries(
-    attachment-test PRIVATE Threads::Threads rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+    attachment-test
+    PRIVATE Threads::Threads rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+)

@@ -25,33 +25,41 @@ project(square)
 cmake_minimum_required(VERSION 3.10)
 
 if(UNIX)
-  if(NOT DEFINED ROCM_PATH)
-    if(DEFINED ENV{ROCM_PATH})
-      set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
-    else()
-      set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory.")
+    if(NOT DEFINED ROCM_PATH)
+        if(DEFINED ENV{ROCM_PATH})
+            set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
+        else()
+            set(ROCM_PATH
+                "/opt/rocm"
+                CACHE STRING
+                "Default ROCM installation directory."
+            )
+        endif()
     endif()
-  endif()
-  # Search for rocm in common locations
-  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+    # Search for rocm in common locations
+    list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
 # create square.cpp
-execute_process(COMMAND sh -c "${ROCM_PATH}/bin/hipify-perl \
-         ${CMAKE_CURRENT_SOURCE_DIR}/square.cu > ${CMAKE_CURRENT_BINARY_DIR}/square.cpp")
+execute_process(
+    COMMAND
+        sh -c
+        "${ROCM_PATH}/bin/hipify-perl \
+         ${CMAKE_CURRENT_SOURCE_DIR}/square.cu > ${CMAKE_CURRENT_BINARY_DIR}/square.cpp"
+)
 
 # Find hip
 find_package(hip)
 
 # Set compiler and linker
 set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+set(CMAKE_CXX_LINKER ${HIP_HIPCC_EXECUTABLE})
 
 # Create the excutable
 if(TARGET build_intro)
-set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
+    set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
 else()
-set(EXCLUDE_OPTION )
+    set(EXCLUDE_OPTION)
 endif()
 add_executable(square ${EXCLUDE_OPTION} ${CMAKE_CURRENT_BINARY_DIR}/square.cpp)
 
@@ -59,5 +67,5 @@ add_executable(square ${EXCLUDE_OPTION} ${CMAKE_CURRENT_BINARY_DIR}/square.cpp)
 target_link_libraries(square hip::host)
 
 if(TARGET build_intro)
-add_dependencies(build_intro square)
+    add_dependencies(build_intro square)
 endif()

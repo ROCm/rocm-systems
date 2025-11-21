@@ -17,7 +17,7 @@ Build Procedure:
 ################
 
 The following simply lists the steps to build RocmAsync
-  
+
 --- Define following environment variable to specify location of header
     and library files
 
@@ -59,8 +59,7 @@ The following simply lists the steps to build RocmAsync
 --- Invoke the install command to copy build artifacts to pre-defined folders
     of RocmAsync suite. Upon completion artifacts will be copied to the bin and
     lib directories of build directory
-    
-        e.g. make install
-    
-    @note: All executables will be found in <build_directory>/bin folder
 
+        e.g. make install
+
+    @note: All executables will be found in <build_directory>/bin folder

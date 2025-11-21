@@ -87,4 +87,3 @@
 /projects/rocr-runtime/**/*.md                                        @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 /projects/rocr-runtime/**/*.rst                                       @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 /projects/rocr-runtime/**/.readthedocs.yaml                           @kentrussell @dayatsin-amd @ROCm/rocm-documentation
-

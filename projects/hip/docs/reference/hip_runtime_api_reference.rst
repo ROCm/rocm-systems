@@ -8,7 +8,7 @@
 HIP runtime API
 ********************************************************************************
 
-The HIP Runtime API reference includes descriptions of HIP functions, as well as global datatypes, enums, and structs. 
+The HIP Runtime API reference includes descriptions of HIP functions, as well as global datatypes, enums, and structs.
 
 Modules
 =======

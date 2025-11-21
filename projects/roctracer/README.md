@@ -61,11 +61,11 @@ To use the rocTX API you need the API header and to link your application with `
     `rocTracer` library public API header.
 
   - `roctx.h`
-  
+
     `rocTX` library public API header.
 
 - `src`
-  
+
   Library sources.
 
   - `core`

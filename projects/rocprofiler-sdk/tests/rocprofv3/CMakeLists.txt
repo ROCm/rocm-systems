@@ -8,9 +8,7 @@ project(rocprofiler-rocprofv3-tests LANGUAGES C CXX)
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tests")
 
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE
-        "Release"
-        CACHE STRING "" FORCE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)

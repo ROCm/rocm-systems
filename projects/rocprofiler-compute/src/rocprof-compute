@@ -35,7 +35,7 @@ try:
     from rocprof_compute_base import RocProfCompute
     from utils.logger import console_error
 except ImportError as e:
-    print (f"{e}")
+    print(f"{e}")
     # In wheel package, softlink is not supported.
     # rocprof-compute will get installed in bin and libexec/rocprofiler-compute.
     # When invoked from bin folder, the extra paths are required to import the

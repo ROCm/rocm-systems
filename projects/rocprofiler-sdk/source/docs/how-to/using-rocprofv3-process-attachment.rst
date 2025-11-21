@@ -117,7 +117,7 @@ There are some restrictions on what options can change when reattaching.  Typica
 
 .. class:: details
 
-Full list of options that must not change 
+Full list of options that must not change
   - ALL options ending with ``trace``
   - ALL options starting with ``pc_sampling``
   - ALL options starting with ``att``

@@ -151,4 +151,3 @@ ROCPROFV3 SUMMARY:
 | hsa_amd_agent_memory_pool_get_info                                        | HSA_API           |              13 |            1140 |       8.769e+01 |      0.000117 |              30 |             640 |       1.664e+02 |
 | hsa_agent_iterate_isas                                                    | HSA_API           |               1 |             700 |       7.000e+02 |      0.000072 |             700 |             700 |       0.000e+00 |
 | hsa_system_get_major_extension_table                                      | HSA_API           |               1 |             190 |       1.900e+02 |      0.000019 |             190 |             190 |       0.000e+00 |
-

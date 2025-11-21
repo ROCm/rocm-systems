@@ -33,7 +33,7 @@ THE SOFTWARE.
 }
 
 
-/* 
+/*
  * Square each element in the array A and write to array C.
  */
 template <typename T>
@@ -66,9 +66,9 @@ int main(int argc, char *argv[])
     C_h = (float*)malloc(Nbytes);
     CHECK(C_h == 0 ? cudaErrorMemoryAllocation : cudaSuccess );
     // Fill with Phi + i
-    for (size_t i=0; i<N; i++) 
+    for (size_t i=0; i<N; i++)
     {
-        A_h[i] = 1.618f + i; 
+        A_h[i] = 1.618f + i;
     }
 
     printf ("info: allocate device mem (%6.2f MB)\n", 2*Nbytes/1024.0/1024.0);

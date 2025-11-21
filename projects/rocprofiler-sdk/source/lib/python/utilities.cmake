@@ -22,7 +22,8 @@ macro(rocprofiler_reset_python3_cache)
         Python3_STDARCH
         Python3_SITELIB
         Python3_SOABI
-        ${ARGN})
+        ${ARGN}
+    )
         unset(${_VAR} CACHE)
         unset(${_VAR})
     endforeach()
@@ -31,7 +32,9 @@ endmacro()
 # use Development.Module for manylinux compatibility
 set(ROCPROFILER_BUILD_Find_Python3_COMPONENTS
     "Interpreter;Development.Module"
-    CACHE STRING "Components to find for Python3")
+    CACHE STRING
+    "Components to find for Python3"
+)
 
 if(ROCPROFILER_MEMCHECK)
     # override with local variable for sanitizers. Sanitizers need Development (full) to
@@ -43,23 +46,38 @@ macro(rocprofiler_find_python3 _VERSION)
     rocprofiler_reset_python3_cache()
 
     if("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
-        find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
-                     COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
+        find_package(
+            Python3
+            ${_VERSION}
+            EXACT
+            ${ARGN}
+            REQUIRED
+            MODULE
+            COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS}
+        )
     elseif("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)$")
-        find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${ARGN} REQUIRED MODULE
-                     COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
+        find_package(
+            Python3
+            ${_VERSION}.0...${_VERSION}.999
+            ${ARGN}
+            REQUIRED
+            MODULE
+            COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS}
+        )
     else()
         message(
             FATAL_ERROR
-                "Invalid Python3 version (${_VERSION}). Specify <MAJOR>.<MINOR> or <MAJOR>.<MINOR>.<PATCH>"
-            )
+            "Invalid Python3 version (${_VERSION}). Specify <MAJOR>.<MINOR> or <MAJOR>.<MINOR>.<PATCH>"
+        )
     endif()
 endmacro()
 
 # make sure we have all python version candidates
 set(ROCPROFILER_PYTHON_VERSION_CANDIDATES
     "3.20;3.19;3.18;3.17;3.16;3.15;3.14;3.13;3.12;3.11;3.10;3.9;3.8;3.7;3.6"
-    CACHE STRING "Python versions to search for, newest first")
+    CACHE STRING
+    "Python versions to search for, newest first"
+)
 
 function(get_default_python_versions _VAR)
     rocprofiler_reset_python3_cache()
@@ -67,28 +85,41 @@ function(get_default_python_versions _VAR)
     set(_PYTHON_FOUND_VERSIONS)
 
     foreach(_VER IN LISTS ROCPROFILER_PYTHON_VERSION_CANDIDATES)
-        find_package(Python3 ${_VER} EXACT QUIET
-                     COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
+        find_package(
+            Python3
+            ${_VER}
+            EXACT
+            QUIET
+            COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS}
+        )
         if(Python3_FOUND)
-            list(APPEND _PYTHON_FOUND_VERSIONS
-                 "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
+            list(
+                APPEND
+                _PYTHON_FOUND_VERSIONS
+                "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}"
+            )
         endif()
     endforeach()
 
     # If none found, do one last check for 3.6 (no EXACT)
     if(NOT _PYTHON_FOUND_VERSIONS)
-        find_package(Python3 3.6 COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
+        find_package(
+            Python3
+            3.6
+            COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS}
+        )
         if(Python3_FOUND)
-            list(APPEND _PYTHON_FOUND_VERSIONS
-                 "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
+            list(
+                APPEND
+                _PYTHON_FOUND_VERSIONS
+                "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}"
+            )
         endif()
     endif()
 
     # Set the output variable to the first found version, if any
     if(_PYTHON_FOUND_VERSIONS)
-        set(${_VAR}
-            "${_PYTHON_FOUND_VERSIONS}"
-            PARENT_SCOPE)
+        set(${_VAR} "${_PYTHON_FOUND_VERSIONS}" PARENT_SCOPE)
     endif()
 
     rocprofiler_reset_python3_cache()
@@ -96,59 +127,78 @@ endfunction()
 
 function(rocprofiler_roctx_python_bindings _VERSION)
     message(
-        STATUS "Building rocprofiler-sdk roctx python bindings for python ${_VERSION}")
+        STATUS
+        "Building rocprofiler-sdk roctx python bindings for python ${_VERSION}"
+    )
 
     rocprofiler_find_python3(${_VERSION} QUIET)
 
     set(roctx_PYTHON_INSTALL_DIRECTORY
         ${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages/roctx
-        )
+    )
     set(roctx_PYTHON_OUTPUT_DIRECTORY
-        ${PROJECT_BINARY_DIR}/${roctx_PYTHON_INSTALL_DIRECTORY})
+        ${PROJECT_BINARY_DIR}/${roctx_PYTHON_INSTALL_DIRECTORY}
+    )
     set(roctx_PYTHON_SOURCES __init__.py context_decorators.py)
 
     foreach(_SOURCE ${roctx_PYTHON_SOURCES})
-        configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
-                       ${roctx_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} @ONLY)
+        configure_file(
+            ${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
+            ${roctx_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
+            @ONLY
+        )
         install(
             FILES ${roctx_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
             DESTINATION ${roctx_PYTHON_INSTALL_DIRECTORY}
-            COMPONENT roctx)
+            COMPONENT roctx
+        )
     endforeach()
 
     add_library(rocprofiler-sdk-roctx-python-bindings-${_VERSION} MODULE)
-    target_sources(rocprofiler-sdk-roctx-python-bindings-${_VERSION}
-                   PRIVATE libpyroctx.cpp)
-    target_include_directories(rocprofiler-sdk-roctx-python-bindings-${_VERSION} SYSTEM
-                               PRIVATE ${Python3_INCLUDE_DIRS})
+    target_sources(
+        rocprofiler-sdk-roctx-python-bindings-${_VERSION}
+        PRIVATE libpyroctx.cpp
+    )
+    target_include_directories(
+        rocprofiler-sdk-roctx-python-bindings-${_VERSION}
+        SYSTEM
+        PRIVATE ${Python3_INCLUDE_DIRS}
+    )
     target_link_libraries(
         rocprofiler-sdk-roctx-python-bindings-${_VERSION}
-        PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
-                rocprofiler-sdk::rocprofiler-sdk-pybind11)
+        PRIVATE
+            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
+            rocprofiler-sdk::rocprofiler-sdk-pybind11
+    )
 
     # if "Development" is specified instead of "Development.Module", we need to link to
     # python libraries
     if("Development" IN_LIST ROCPROFILER_BUILD_Find_Python3_COMPONENTS)
-        target_link_libraries(rocprofiler-sdk-roctx-python-bindings-${_VERSION}
-                              PRIVATE ${Python3_LIBRARIES})
+        target_link_libraries(
+            rocprofiler-sdk-roctx-python-bindings-${_VERSION}
+            PRIVATE ${Python3_LIBRARIES}
+        )
     endif()
 
     set_target_properties(
         rocprofiler-sdk-roctx-python-bindings-${_VERSION}
-        PROPERTIES OUTPUT_NAME libpyroctx
-                   RUNTIME_OUTPUT_DIRECTORY ${roctx_PYTHON_OUTPUT_DIRECTORY}
-                   LIBRARY_OUTPUT_DIRECTORY ${roctx_PYTHON_OUTPUT_DIRECTORY}
-                   ARCHIVE_OUTPUT_DIRECTORY ${roctx_PYTHON_OUTPUT_DIRECTORY}
-                   PDB_OUTPUT_DIRECTORY ${roctx_PYTHON_OUTPUT_DIRECTORY}
-                   PREFIX ""
-                   SUFFIX ".${Python3_SOABI}${CMAKE_SHARED_LIBRARY_SUFFIX}"
-                   BUILD_RPATH "${DEFAULT_PYTHON_RPATH}"
-                   INSTALL_RPATH "${DEFAULT_PYTHON_RPATH}")
+        PROPERTIES
+            OUTPUT_NAME libpyroctx
+            RUNTIME_OUTPUT_DIRECTORY ${roctx_PYTHON_OUTPUT_DIRECTORY}
+            LIBRARY_OUTPUT_DIRECTORY ${roctx_PYTHON_OUTPUT_DIRECTORY}
+            ARCHIVE_OUTPUT_DIRECTORY ${roctx_PYTHON_OUTPUT_DIRECTORY}
+            PDB_OUTPUT_DIRECTORY ${roctx_PYTHON_OUTPUT_DIRECTORY}
+            PREFIX ""
+            SUFFIX ".${Python3_SOABI}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+            BUILD_RPATH "${DEFAULT_PYTHON_RPATH}"
+            INSTALL_RPATH "${DEFAULT_PYTHON_RPATH}"
+    )
 
     install(
         TARGETS rocprofiler-sdk-roctx-python-bindings-${_VERSION}
         DESTINATION ${roctx_PYTHON_INSTALL_DIRECTORY}
-        COMPONENT roctx)
+        COMPONENT roctx
+    )
 endfunction()
 
 function(rocprofiler_rocpd_python_bindings_target_sources _VERSION)
@@ -157,14 +207,17 @@ endfunction()
 
 function(rocprofiler_rocpd_python_bindings _VERSION)
     message(
-        STATUS "Building rocprofiler-sdk rocpd python bindings for python ${_VERSION}")
+        STATUS
+        "Building rocprofiler-sdk rocpd python bindings for python ${_VERSION}"
+    )
     rocprofiler_find_python3(${_VERSION} QUIET)
 
     set(rocpd_PYTHON_INSTALL_DIRECTORY
         ${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages/rocpd
-        )
+    )
     set(rocpd_PYTHON_OUTPUT_DIRECTORY
-        ${PROJECT_BINARY_DIR}/${rocpd_PYTHON_INSTALL_DIRECTORY})
+        ${PROJECT_BINARY_DIR}/${rocpd_PYTHON_INSTALL_DIRECTORY}
+    )
     set(rocpd_PYTHON_SOURCES
         csv.py
         importer.py
@@ -178,82 +231,108 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         query.py
         schema.py
         summary.py
-        time_window.py)
+        time_window.py
+    )
 
     foreach(_SOURCE ${rocpd_PYTHON_SOURCES})
-        configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
-                       ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} @ONLY)
+        configure_file(
+            ${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
+            ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
+            @ONLY
+        )
         install(
             FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
             DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}
-            COMPONENT rocpd)
+            COMPONENT rocpd
+        )
     endforeach()
 
     add_library(rocprofiler-sdk-rocpd-python-bindings-${_VERSION} MODULE)
     target_sources(
         rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
-        PRIVATE libpyrocpd.cpp libpyrocpd.hpp
-                $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>)
-    target_include_directories(rocprofiler-sdk-rocpd-python-bindings-${_VERSION} SYSTEM
-                               PRIVATE ${Python3_INCLUDE_DIRS})
+        PRIVATE
+            libpyrocpd.cpp
+            libpyrocpd.hpp
+            $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>
+    )
+    target_include_directories(
+        rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
+        SYSTEM
+        PRIVATE ${Python3_INCLUDE_DIRS}
+    )
     target_link_libraries(
         rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
-        PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
-                rocprofiler-sdk::rocprofiler-sdk-build-flags
-                rocprofiler-sdk::rocprofiler-sdk-memcheck
-                rocprofiler-sdk::rocprofiler-sdk-common-library
-                rocprofiler-sdk::rocprofiler-sdk-output-library
-                rocprofiler-sdk::rocprofiler-sdk-cereal
-                rocprofiler-sdk::rocprofiler-sdk-perfetto
-                rocprofiler-sdk::rocprofiler-sdk-otf2
-                rocprofiler-sdk::rocprofiler-sdk-sqlite3
-                rocprofiler-sdk::rocprofiler-sdk-pybind11
-                rocprofiler-sdk::rocprofiler-sdk-gotcha
-                rocprofiler-sdk::rocprofiler-sdk-dw
-                rocprofiler-sdk::rocprofiler-sdk-static-library
-                rocprofiler-sdk::rocprofiler-sdk-rocpd-library)
+        PRIVATE
+            rocprofiler-sdk::rocprofiler-sdk-headers
+            rocprofiler-sdk::rocprofiler-sdk-build-flags
+            rocprofiler-sdk::rocprofiler-sdk-memcheck
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-output-library
+            rocprofiler-sdk::rocprofiler-sdk-cereal
+            rocprofiler-sdk::rocprofiler-sdk-perfetto
+            rocprofiler-sdk::rocprofiler-sdk-otf2
+            rocprofiler-sdk::rocprofiler-sdk-sqlite3
+            rocprofiler-sdk::rocprofiler-sdk-pybind11
+            rocprofiler-sdk::rocprofiler-sdk-gotcha
+            rocprofiler-sdk::rocprofiler-sdk-dw
+            rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-rocpd-library
+    )
 
     # if "Development" is specified instead of "Development.Module", we need to link to
     # python libraries
     if("Development" IN_LIST ROCPROFILER_BUILD_Find_Python3_COMPONENTS)
-        target_link_libraries(rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
-                              PRIVATE ${Python3_LIBRARIES})
+        target_link_libraries(
+            rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
+            PRIVATE ${Python3_LIBRARIES}
+        )
     endif()
 
     set_target_properties(
         rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
-        PROPERTIES OUTPUT_NAME libpyrocpd
-                   RUNTIME_OUTPUT_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}
-                   LIBRARY_OUTPUT_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}
-                   ARCHIVE_OUTPUT_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}
-                   PDB_OUTPUT_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}
-                   PREFIX ""
-                   SUFFIX ".${Python3_SOABI}${CMAKE_SHARED_LIBRARY_SUFFIX}"
-                   BUILD_RPATH "${DEFAULT_PYTHON_RPATH}"
-                   INSTALL_RPATH "${DEFAULT_PYTHON_RPATH}")
+        PROPERTIES
+            OUTPUT_NAME libpyrocpd
+            RUNTIME_OUTPUT_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}
+            LIBRARY_OUTPUT_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}
+            ARCHIVE_OUTPUT_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}
+            PDB_OUTPUT_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}
+            PREFIX ""
+            SUFFIX ".${Python3_SOABI}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+            BUILD_RPATH "${DEFAULT_PYTHON_RPATH}"
+            INSTALL_RPATH "${DEFAULT_PYTHON_RPATH}"
+    )
 
     install(
         TARGETS rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
         DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}
-        COMPONENT rocpd)
+        COMPONENT rocpd
+    )
 endfunction()
 
 function(rocprofiler_rocprofv3_python)
     set(rocprofv3_PYTHON_INSTALL_DIRECTORY
-        ${CMAKE_INSTALL_LIBDIR}/python3/site-packages/rocprofv3)
+        ${CMAKE_INSTALL_LIBDIR}/python3/site-packages/rocprofv3
+    )
     set(rocprofv3_PYTHON_OUTPUT_DIRECTORY
-        ${PROJECT_BINARY_DIR}/${rocprofv3_PYTHON_INSTALL_DIRECTORY})
+        ${PROJECT_BINARY_DIR}/${rocprofv3_PYTHON_INSTALL_DIRECTORY}
+    )
     set(rocprofv3_PYTHON_SOURCES ${ARGN})
     if(NOT rocprofv3_PYTHON_SOURCES)
         message(
-            FATAL_ERROR "rocprofiler_rocprofv3_python requires specifying source files")
+            FATAL_ERROR
+            "rocprofiler_rocprofv3_python requires specifying source files"
+        )
     endif()
     foreach(_SOURCE ${rocprofv3_PYTHON_SOURCES})
-        configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
-                       ${rocprofv3_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} COPYONLY)
+        configure_file(
+            ${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
+            ${rocprofv3_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
+            COPYONLY
+        )
         install(
             FILES ${rocprofv3_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
             DESTINATION ${rocprofv3_PYTHON_INSTALL_DIRECTORY}
-            COMPONENT tools)
+            COMPONENT tools
+        )
     endforeach()
 endfunction()

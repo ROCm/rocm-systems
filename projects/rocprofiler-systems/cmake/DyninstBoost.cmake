@@ -309,7 +309,8 @@ else()
         foreach(c ${_boost_components})
             list(APPEND Boost_LIBRARIES "optimized libboost_${c} debug libboost_${c}-gd ")
             list(
-                APPEND _boost_build_byproducts
+                APPEND
+                _boost_build_byproducts
                 "{Boost_ROOT_DIR}/lib/libboost_${c}${_LIB_SUFFIX}"
             )
             set(Boost_${c}_LIBRARY
@@ -346,7 +347,8 @@ else()
                 $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}/libboost_${c}${_LIB_SUFFIX}>
             )
             list(
-                APPEND _boost_build_byproducts
+                APPEND
+                _boost_build_byproducts
                 "${Boost_ROOT_DIR}/lib/libboost_${c}${_LIB_SUFFIX}"
             )
             list(APPEND Boost_LIBRARIES "${Boost_${c}_LIBRARY}")

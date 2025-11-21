@@ -282,4 +282,3 @@ memory than is available to the architecture, the compilation fails.
 A more in-depth example on statically allocated shared memory can be found in
 the  `ROCm shared memory example
 <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/shared_memory>`_.
-

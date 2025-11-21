@@ -99,4 +99,3 @@ if [ "$?" -ne 0 ] ; then
   echo "Profiling data corrupted: '$OUTPUT_LIST'"
   exit 1
 fi
-

@@ -44,4 +44,3 @@ END {
     printf("#define	ELFTC_ARCH	%s\n", elfarch);
     printf("#define	ELFTC_BYTEORDER	ELFDATA2%s\n", elfdata);
 }'
-

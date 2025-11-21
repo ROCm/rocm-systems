@@ -14,5 +14,7 @@ find_package(Threads REQUIRED)
 
 add_executable(hip-host)
 target_sources(hip-host PRIVATE hip_host.cpp)
-target_link_libraries(hip-host PRIVATE rocprofiler-sdk::tests-build-flags hip::host
-                                       Threads::Threads)
+target_link_libraries(
+    hip-host
+    PRIVATE rocprofiler-sdk::tests-build-flags hip::host Threads::Threads
+)

@@ -3,10 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-tests-python-bindings
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-tests-python-bindings LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 
@@ -14,8 +11,13 @@ if(NOT Python3_EXECUTABLE)
     find_package(Python3 3.6 REQUIRED COMPONENTS Interpreter)
 endif()
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 rocprofiler_add_integration_execute_test(
     roctx-python-bindings
@@ -30,7 +32,8 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT
         "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    FIXTURES_SETUP roctx-python-bindings)
+    FIXTURES_SETUP roctx-python-bindings
+)
 
 rocprofiler_add_integration_validate_test(
     roctx-python-bindings
@@ -48,4 +51,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_results.json
          --pftrace-input
          ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_results.pftrace
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    FAIL_REGULAR_EXPRESSION "AssertionError"
+)

@@ -88,34 +88,34 @@ Step-by-step execution
 
 **Step 1**: Start at the root node ``R``
 
-* Mark ``R`` as visited  
-* Enqueue ``R``  
+* Mark ``R`` as visited
+* Enqueue ``R``
 * Queue: [R]
 
 **Step 2**: Process ``R``
 
-* Dequeue ``R``  
-* Discover neighbors: ``A`` and ``B``  
-* Enqueue both, mark as visited  
+* Dequeue ``R``
+* Discover neighbors: ``A`` and ``B``
+* Enqueue both, mark as visited
 * Queue: [A, B]
 
 **Step 3**: Process ``A``
 
-* Dequeue ``A``  
-* Neighbors: ``R`` (visited) and ``C`` (new)  
-* Enqueue ``C``  
+* Dequeue ``A``
+* Neighbors: ``R`` (visited) and ``C`` (new)
+* Enqueue ``C``
 * Queue: [B, C]
 
 **Step 4**: Process ``B``
 
-* Dequeue ``B``  
-* Neighbors: ``R`` (visited) and ``C`` (visited)  
+* Dequeue ``B``
+* Neighbors: ``R`` (visited) and ``C`` (visited)
 * Queue: [C]
 
 **Step 5**: Process ``C``
 
-* Dequeue ``C``  
-* All neighbors visited  
+* Dequeue ``C``
+* All neighbors visited
 * Queue becomes empty — traversal complete
 
 Parallel BFS on GPU
@@ -479,6 +479,6 @@ Key takeaways:
 3. **Host controls iteration**: CPU manages the overall loop while GPU does heavy lifting.
 4. **Flags enable dynamic control**: Device-side flags allow work-dependent termination.
 
-Understanding multi-kernel patterns enables developers to implement 
-sophisticated algorithms like graph processing, dynamic programming, and 
+Understanding multi-kernel patterns enables developers to implement
+sophisticated algorithms like graph processing, dynamic programming, and
 iterative refinement methods efficiently on GPUs.

@@ -1,5 +1,5 @@
 .file "RTspace.s"
-        
+
 .globl DYNINSTstaticHeap_8K_lowmemHeap_1
 .type DYNINSTstaticHeap_8K_lowmemHeap_1, @object
 .size DYNINSTstaticHeap_8K_lowmemHeap_1, 8192

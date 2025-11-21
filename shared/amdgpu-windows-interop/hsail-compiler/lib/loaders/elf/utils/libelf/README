@@ -8,5 +8,5 @@ Documentation:
    manual pages document individual APIs in the library.
  * A tutorial "libelf by Example" is available at:
    http://people.freebsd.org/~jkoshy/download/libelf/article.html
-	
+
 For ongoing development please see http://elftoolchain.sourceforge.net/

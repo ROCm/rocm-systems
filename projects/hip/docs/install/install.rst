@@ -54,8 +54,8 @@ Installation
      By default, HIP is installed into ``/opt/rocm``.
 
      .. note::
-     
-        There is no autodetection for the HIP installation. If you choose to 
+
+        There is no autodetection for the HIP installation. If you choose to
         install it somewhere other than the default location, you must set the
         ``HIP_PATH`` environment variable as explained in
         `Build HIP from source <./build.html>`_.

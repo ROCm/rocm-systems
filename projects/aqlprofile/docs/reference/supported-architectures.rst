@@ -6,7 +6,7 @@ Supported architectures and counter blocks in AQLprofile
 ========================================================
 
 The AQLprofile library supports profiling and tracing GPU workloads
-across multiple architectures. 
+across multiple architectures.
 
 .. note::
 
@@ -76,4 +76,3 @@ Here's a summary of the counter blocks supported for each architecture:
 +-------------+------+--------+--------+--------+------+------+-----+
 | TD          | ✅   | ✅     | ✅     | ✅     | ❌   | ❌   | ✅  |
 +-------------+------+--------+--------+--------+------+------+-----+
-

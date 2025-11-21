@@ -23,21 +23,25 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-sdk-tests-rocjpeg-tracing
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-rocjpeg-tracing LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocJPEG)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 set(rocJPEG_IMAGE_DIR "${rocJPEG_ROOT_DIR}/share/rocjpeg/images")
 if(TARGET rocjpeg-demo AND NOT EXISTS "${rocJPEG_IMAGE_DIR}")
     message(
-        WARNING "Unable to find image directory for rocjpeg tests: ${rocJPEG_IMAGE_DIR}")
+        WARNING
+        "Unable to find image directory for rocjpeg tests: ${rocJPEG_IMAGE_DIR}"
+    )
     set(IS_DISABLED ON)
 endif()
 
@@ -56,7 +60,8 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=rocjpeg-tracing-test.json"
-    FIXTURES_SETUP rocjpeg-tracing)
+    FIXTURES_SETUP rocjpeg-tracing
+)
 
 rocprofiler_add_integration_validate_test(
     rocjpeg-tracing
@@ -67,4 +72,5 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocjpeg-tracing
-    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-tracing-test.json)
+    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-tracing-test.json
+)

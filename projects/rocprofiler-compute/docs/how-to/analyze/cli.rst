@@ -351,7 +351,7 @@ Show System Speed-of-Light and CS_Busy blocks only
    GPU Busy Cycles metric.
 
 .. note::
-   
+
    Dispatch filtering via ``-d`` or ``--dispatch`` is not supported for profiling
    data collected with ``--iteration-multiplexing`` option.
 

@@ -211,5 +211,3 @@ static constexpr auto kHilo2Double{R"(
   __global__ void hiloint2double_kernel_v4(double* result, int x, Dummy y) { *result = __hiloint2double(x, y); }
   __global__ void hiloint2double_kernel_v5(Dummy* result, int x, int y) { *result = __hiloint2double(x, y); }
 )"};
-
-

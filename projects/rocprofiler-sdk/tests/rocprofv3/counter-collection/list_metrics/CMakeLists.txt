@@ -6,17 +6,24 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-counter-collection-list-metrics
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 rocprofiler_configure_pytest_files(
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     CONFIG pytest.ini
-    COPY input.json)
+    COPY input.json
+)
 
 # basic-metrics
 rocprofiler_add_integration_execute_test(
@@ -27,7 +34,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 60
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    ENVIRONMENT "ROCPD_LOG_LEVEL=info")
+    ENVIRONMENT "ROCPD_LOG_LEVEL=info"
+)
 
 # list-metrics-stdout
 rocprofiler_add_integration_execute_test(
@@ -41,7 +49,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "ROCPD_LOG_LEVEL=info"
     PASS_REGULAR_EXPRESSION
         "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;counter_name:\\t[a-zA-Z_]*\\n;description:\\t(.*)\\n*;expression:\\t(.)*\\n*;block:\\t[a-zA-Z]*\\n*;dimension_name:\\t([A-Z_]*)\\n*; dimension_instances:\\t([[0-9]*:[0-9]*\\])*\\n*;method:(.*)\\n*;unit:(.*)\\n*;min_interval:[0-9]*\\n*;max_interval:[0-9]*\\n*;flags:(.*)\\n*"
-    )
+)
 
 # list-metrics with tracing
 rocprofiler_add_integration_execute_test(
@@ -54,4 +62,5 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 60
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    ENVIRONMENT "ROCPD_LOG_LEVEL=info")
+    ENVIRONMENT "ROCPD_LOG_LEVEL=info"
+)

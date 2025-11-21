@@ -1,8 +1,18 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-foreach(BINARY_OUTPUT ${BINARY_DIR}/parser.h ${BINARY_DIR}/parser.cpp
-                      ${BINARY_DIR}/scanner.cpp)
-    string(REPLACE "${BINARY_DIR}" "${SOURCE_DIR}" SOURCE_OUTPUT "${BINARY_OUTPUT}")
+foreach(
+    BINARY_OUTPUT
+    ${BINARY_DIR}/parser.h
+    ${BINARY_DIR}/parser.cpp
+    ${BINARY_DIR}/scanner.cpp
+)
+    string(
+        REPLACE
+        "${BINARY_DIR}"
+        "${SOURCE_DIR}"
+        SOURCE_OUTPUT
+        "${BINARY_OUTPUT}"
+    )
     foreach(VAR PROJECT_SRC_DIR PROJECT_BLD_DIR)
         string(REPLACE "/" "_" ${VAR} "${${VAR}}")
         string(REPLACE "-" "_" ${VAR} "${${VAR}}")
@@ -15,8 +25,20 @@ foreach(BINARY_OUTPUT ${BINARY_DIR}/parser.h ${BINARY_DIR}/parser.cpp
         file(READ ${BINARY_OUTPUT} OUTPUT_DATA)
         string(REPLACE "${SOURCE_DIR}/" "" OUTPUT_DATA "${OUTPUT_DATA}")
         string(REPLACE "${BINARY_DIR}/" "" OUTPUT_DATA "${OUTPUT_DATA}")
-        string(REPLACE "${PROJECT_BLD_DIR}" "_ROCPROFILER" OUTPUT_DATA "${OUTPUT_DATA}")
-        string(REPLACE "${PROJECT_SRC_DIR}" "_ROCPROFILER" OUTPUT_DATA "${OUTPUT_DATA}")
+        string(
+            REPLACE
+            "${PROJECT_BLD_DIR}"
+            "_ROCPROFILER"
+            OUTPUT_DATA
+            "${OUTPUT_DATA}"
+        )
+        string(
+            REPLACE
+            "${PROJECT_SRC_DIR}"
+            "_ROCPROFILER"
+            OUTPUT_DATA
+            "${OUTPUT_DATA}"
+        )
         file(WRITE ${BINARY_OUTPUT} "${OUTPUT_DATA}")
 
         if(FORMAT_EXE)

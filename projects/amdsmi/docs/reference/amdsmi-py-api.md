@@ -473,7 +473,7 @@ except AmdSmiException as e:
 
 ### amdsmi_get_supported_power_cap
 
-Description: Returns dictionary of Package Power Tracking (PPT) types as currently 
+Description: Returns dictionary of Package Power Tracking (PPT) types as currently
 configured on the given GPU. It is not supported on virtual machine guest
 
 Input parameters:
@@ -1301,10 +1301,10 @@ Description: Dump CPER entries for a given GPU in a file using from CPER header 
 Input parameters:
 
 * `processor_handle` device which to query
-* `severity_mask`    the severity mask of the entries to be retrieved: 
+* `severity_mask`    the severity mask of the entries to be retrieved:
                         1:'nonfatal-uncorrected',
-                        2: 'fatal', 
-                        4: 'nonfatal-corrected', 'corrected', 
+                        2: 'fatal',
+                        4: 'nonfatal-corrected', 'corrected',
                         7: 'all'
 * `buffer_size`      number of bytes that will be used to create a buffer for copying cper entries into; default is 1048576 bytes
 * `cursor`           the zero based index at which to start retrieving cper entries; default value is 0; for example, if there are 10 cper entries available, then with a cursor value of 8, it will retrieve the last two cper entries only
@@ -1337,7 +1337,7 @@ Output3: A list of dictionaries, each dictionary containing the CPER record and 
 
 Output4: status_code
     AMDSMI_STATUS_SUCCESS: If all entries were retrieved successfully
-    AMDSMI_STATUS_MORE_DATA: If some of the entries were retrieved and: 
+    AMDSMI_STATUS_MORE_DATA: If some of the entries were retrieved and:
         * A subsequent call to the API with the updated cursor will result in the fetching the next batch of entries, or
         * Increasing the input buffer_size will allow more entries to be fetched with the same cursor
 

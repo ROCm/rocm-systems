@@ -2,7 +2,11 @@ cmake_minimum_required(VERSION 3.20)
 
 option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
 option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" ON)
-option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
+option(
+    CMAKE_EXPORT_COMPILE_COMMANDS
+    "Export compile commands for linters and autocompleters"
+    ON
+)
 
 # Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2")

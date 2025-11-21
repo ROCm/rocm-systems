@@ -6,8 +6,8 @@
 SQ Thread Trace (SQTT) workflow with AQLprofile
 ***********************************************
 
-The SQ Thread Trace workflow focuses on collecting detailed instruction-level traces. 
-This workflow relies on creating a profile object, generating command packets, and iterating over output buffers: 
+The SQ Thread Trace workflow focuses on collecting detailed instruction-level traces.
+This workflow relies on creating a profile object, generating command packets, and iterating over output buffers:
 
 1. **Intercept the kernel dispatch**: The SDK intercepts the kernel dispatch.
 2. **Create a SQTT profile object**: A profile object is created for SQTT, specifying trace parameters and output buffers.
@@ -21,8 +21,8 @@ The SDK abstracts queue interception and packet management so tool developers ca
 Key API code snippets
 =====================
 
-These API snippets use the legacy interfaces from ``hsa_ven_amd_aqlprofile.h``. These are provided for understanding purposes only.  
-For new development, refer to the updated APIs in ``aql_profile_v2.h``.  
+These API snippets use the legacy interfaces from ``hsa_ven_amd_aqlprofile.h``. These are provided for understanding purposes only.
+For new development, refer to the updated APIs in ``aql_profile_v2.h``.
 
 In the `ROCprofiler-SDK <https://github.com/ROCm/rocprofiler-sdk>`__ codebase, these APIs are wrapped and orchestrated in the ``aql``, ``hsa``, and ``thread_trace`` folders for queue interception, packet construction, and result iteration.
 
@@ -89,5 +89,3 @@ Iterate and decode trace data
         },
         nullptr
     );
-
-

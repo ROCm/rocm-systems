@@ -18,8 +18,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-add_custom_target(perf_test COMMAND "${CMAKE_CTEST_COMMAND}" -R "Perf_"
-                            COMMENT "Build complete, now executing the performnce test ...")
+add_custom_target(
+    perf_test
+    COMMAND "${CMAKE_CTEST_COMMAND}" -R "Perf_"
+    COMMENT "Build complete, now executing the performnce test ..."
+)
 
 add_subdirectory(memory)
 add_subdirectory(stream)

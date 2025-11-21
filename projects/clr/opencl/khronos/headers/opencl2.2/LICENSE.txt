@@ -32,4 +32,3 @@ OUT OF OR IN CONNECTION WITH THE MATERIALS OR THE USE OR OTHER DEALINGS IN
 THE MATERIALS.
 
 OpenCL is a trademark of Apple Inc. used under license by Khronos.
-

@@ -19,11 +19,12 @@
 # THE SOFTWARE.
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
-  hipDrvGetPCIBusId.cc
-  hipDrvMemcpy.cc
-  hipMemsetD8.cc
-  hipCtxNotSupported.cc
+    hipDrvGetPCIBusId.cc
+    hipDrvMemcpy.cc
+    hipMemsetD8.cc
+    hipCtxNotSupported.cc
 )
 hip_add_exe_to_target(NAME Context
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests)
+                      TEST_TARGET_NAME build_tests
+)

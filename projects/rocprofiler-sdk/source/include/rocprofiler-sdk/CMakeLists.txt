@@ -3,11 +3,17 @@
 #   Installation of public headers
 #
 #
-configure_file(${CMAKE_CURRENT_LIST_DIR}/version.h.in
-               ${CMAKE_CURRENT_BINARY_DIR}/version.h @ONLY)
+configure_file(
+    ${CMAKE_CURRENT_LIST_DIR}/version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/version.h
+    @ONLY
+)
 
-configure_file(${CMAKE_CURRENT_LIST_DIR}/ext_version.h.in
-               ${CMAKE_CURRENT_BINARY_DIR}/ext_version.h @ONLY)
+configure_file(
+    ${CMAKE_CURRENT_LIST_DIR}/ext_version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/ext_version.h
+    @ONLY
+)
 
 set(ROCPROFILER_HEADER_FILES
     # core headers
@@ -38,12 +44,14 @@ set(ROCPROFILER_HEADER_FILES
     rocjpeg.h
     spm.h
     ${CMAKE_CURRENT_BINARY_DIR}/version.h
-    ${CMAKE_CURRENT_BINARY_DIR}/ext_version.h)
+    ${CMAKE_CURRENT_BINARY_DIR}/ext_version.h
+)
 
 install(
     FILES ${ROCPROFILER_HEADER_FILES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk
-    COMPONENT development)
+    COMPONENT development
+)
 
 add_subdirectory(hip)
 add_subdirectory(hsa)

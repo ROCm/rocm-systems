@@ -129,7 +129,7 @@ int main()
             break;
         }
     }
-    
+
     if(passed)
     {
         std::cout << "Asynchronous execution with events completed successfully." << std::endl;

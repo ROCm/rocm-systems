@@ -593,4 +593,3 @@ Please report in the Github Issues.
 - gfx94x (AMD Instinct™ MI300)
 - gfx10xx ([Navi2x] AMD Radeon(TM) Graphics)
 - gfx11xx ([Navi3x] AMD Radeon(TM) Graphics)
-

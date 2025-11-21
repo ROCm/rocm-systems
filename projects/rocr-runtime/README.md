@@ -62,7 +62,7 @@ Ensure you have the following installed:
     ```sh
     cmake -DCMAKE_INSTALL_PREFIX=<rocm install dir> ..
     ```
-    e.g: 
+    e.g:
     ```
     cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
     ```

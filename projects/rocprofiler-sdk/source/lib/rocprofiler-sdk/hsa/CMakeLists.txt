@@ -11,7 +11,8 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     profile_serializer.cpp
     queue_controller.cpp
     queue.cpp
-    scratch_memory.cpp)
+    scratch_memory.cpp
+)
 
 set(ROCPROFILER_LIB_HSA_HEADERS
     agent_cache.hpp
@@ -28,9 +29,12 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     queue_info_session.hpp
     rocprofiler_packet.hpp
     scratch_memory.hpp
-    utils.hpp)
+    utils.hpp
+)
 
-target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_HSA_SOURCES}
-                                                      ${ROCPROFILER_LIB_HSA_HEADERS})
+target_sources(
+    rocprofiler-sdk-object-library
+    PRIVATE ${ROCPROFILER_LIB_HSA_SOURCES} ${ROCPROFILER_LIB_HSA_HEADERS}
+)
 
 add_subdirectory(details)

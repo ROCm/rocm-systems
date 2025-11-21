@@ -6,12 +6,18 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-counter-collection-kernel-filtering
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 # pmc1
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-kernel-filtering-input-json
@@ -23,7 +29,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-json)
+    FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-json
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-kernel-filtering-input-json
@@ -49,7 +56,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_4/out_results.json
     TIMEOUT 120
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-json)
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-json
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-kernel-filtering-input-cmd
@@ -62,7 +70,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-cmd)
+    FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-cmd
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-kernel-filtering-input-cmd
@@ -74,7 +83,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/cmd_input/pmc_1/out_counter_collection.csv
     TIMEOUT 120
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-cmd)
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-cmd
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-kernel-filtering-input-yaml
@@ -86,7 +96,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-yaml)
+    FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-yaml
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-kernel-filtering-input-yaml
@@ -112,4 +123,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_4/out_results.json
     TIMEOUT 120
     LABELS "integration-tests" FIXTURES
-           rocprofv3-test-counter-collection-kernel-filtering-input-yaml)
+           rocprofv3-test-counter-collection-kernel-filtering-input-yaml
+)

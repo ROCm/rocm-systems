@@ -77,7 +77,7 @@ std::vector<float> matrix_transpose_reference(const std::vector<float>& input,
     return output;
 }
 
-// argv: Array of command-line arguments. Run with "--enable-sleep" to enable 
+// argv: Array of command-line arguments. Run with "--enable-sleep" to enable
 // the mode with delay implemented by thread sleep
 int main(int argc, char* argv[])
 {
@@ -111,7 +111,7 @@ int main(int argc, char* argv[])
 
     constexpr float eps = 1.0E-6f;
 
-    while (true) 
+    while (true)
     {
         if(enable_sleep)
             std::this_thread::sleep_for(std::chrono::seconds(5));

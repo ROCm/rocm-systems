@@ -5,37 +5,74 @@
 rocprofiler_activate_clang_tidy()
 
 # Adding main rocprofv3
-configure_file(rocprofv3.py ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3 @ONLY)
+configure_file(
+    rocprofv3.py
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3
+    @ONLY
+)
 
 install(
     FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3
     DESTINATION ${CMAKE_INSTALL_BINDIR}
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
-                WORLD_EXECUTE
-    COMPONENT tools)
+    PERMISSIONS
+        OWNER_READ
+        OWNER_WRITE
+        OWNER_EXECUTE
+        GROUP_READ
+        GROUP_EXECUTE
+        WORLD_READ
+        WORLD_EXECUTE
+    COMPONENT tools
+)
 
-configure_file(rocprofv3-avail.py
-               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3-avail COPYONLY)
+configure_file(
+    rocprofv3-avail.py
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3-avail
+    COPYONLY
+)
 
 install(
     FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3-avail
     DESTINATION ${CMAKE_INSTALL_BINDIR}
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
-                WORLD_EXECUTE
-    COMPONENT tools)
+    PERMISSIONS
+        OWNER_READ
+        OWNER_WRITE
+        OWNER_EXECUTE
+        GROUP_READ
+        GROUP_EXECUTE
+        WORLD_READ
+        WORLD_EXECUTE
+    COMPONENT tools
+)
 
-configure_file(rocprof-attach.py
-               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-attach COPYONLY)
+configure_file(
+    rocprof-attach.py
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-attach
+    COPYONLY
+)
 
 install(
     FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-attach
     DESTINATION ${CMAKE_INSTALL_BINDIR}
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
-                WORLD_EXECUTE
-    COMPONENT tools)
+    PERMISSIONS
+        OWNER_READ
+        OWNER_WRITE
+        OWNER_EXECUTE
+        GROUP_READ
+        GROUP_EXECUTE
+        WORLD_READ
+        WORLD_EXECUTE
+    COMPONENT tools
+)
 
 # for each entry here there must be a ROCPD_BIN_<entry> list
-set(ROCPD_EXECUTABLES "all" "csv" "otf2" "pftrace" "summary")
+set(ROCPD_EXECUTABLES
+    "all"
+    "csv"
+    "otf2"
+    "pftrace"
+    "summary"
+)
 
 # format is list: [<exe-name>, <python-module>, <extra-args-to-python-module>]
 set(ROCPD_BIN_all "rocpd" "rocpd" "")
@@ -49,15 +86,20 @@ foreach(_EXE IN LISTS ROCPD_EXECUTABLES)
     list(GET ROCPD_BIN_${_EXE} 1 ROCPD_EXE_MODULE)
     list(GET ROCPD_BIN_${_EXE} 2 ROCPD_EXE_MODULE_ARGS)
 
-    if(NOT ROCPD_EXE_NAME
-       OR NOT ROCPD_EXE_MODULE
-       OR (NOT ROCPD_EXE_MODULE_ARGS AND NOT ROCPD_EXE_MODULE_ARGS STREQUAL ""))
+    if(
+        NOT ROCPD_EXE_NAME
+        OR NOT ROCPD_EXE_MODULE
+        OR (NOT ROCPD_EXE_MODULE_ARGS AND NOT ROCPD_EXE_MODULE_ARGS STREQUAL "")
+    )
         message(
-            FATAL_ERROR "ROCPD_BIN_${_EXE} not properly defined: ${ROCPD_BIN_${_EXE}}")
+            FATAL_ERROR
+            "ROCPD_BIN_${_EXE} not properly defined: ${ROCPD_BIN_${_EXE}}"
+        )
     endif()
 
     set(ROCPD_EXE_OUTPUT_FILE
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/${ROCPD_EXE_NAME})
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/${ROCPD_EXE_NAME}
+    )
 
     # Adding main rocpd
     configure_file(rocpd.py ${ROCPD_EXE_OUTPUT_FILE} @ONLY)
@@ -65,7 +107,14 @@ foreach(_EXE IN LISTS ROCPD_EXECUTABLES)
     install(
         FILES ${ROCPD_EXE_OUTPUT_FILE}
         DESTINATION ${CMAKE_INSTALL_BINDIR}
-        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
-                    WORLD_READ WORLD_EXECUTE
-        COMPONENT rocpd)
+        PERMISSIONS
+            OWNER_READ
+            OWNER_WRITE
+            OWNER_EXECUTE
+            GROUP_READ
+            GROUP_EXECUTE
+            WORLD_READ
+            WORLD_EXECUTE
+        COMPONENT rocpd
+    )
 endforeach()

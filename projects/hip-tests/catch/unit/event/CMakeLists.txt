@@ -14,17 +14,14 @@ set(TEST_SRC
 
 # The test used wait mechanism and doesnt play well with all arch of nvidia
 if(HIP_PLATFORM MATCHES "amd")
-  set(AMD_SRC
-      Unit_hipEventQuery.cc
-  )
-  if(UNIX)
-    set(AMD_SRC
-      ${AMD_SRC}
-      Unit_hipEventIpc_shm_cleanup.cc)
-  endif()
-  set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
+    set(AMD_SRC Unit_hipEventQuery.cc)
+    if(UNIX)
+        set(AMD_SRC ${AMD_SRC} Unit_hipEventIpc_shm_cleanup.cc)
+    endif()
+    set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
 
 hip_add_exe_to_target(NAME EventTest
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests)
+                      TEST_TARGET_NAME build_tests
+)

@@ -183,6 +183,3 @@ mFillPhase1 0, kFillUnroll - 1
 
   L_FILL_PHASE_2_DONE:
     s_endpgm
-
-
-

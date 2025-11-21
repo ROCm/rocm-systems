@@ -75,4 +75,3 @@ cat <<EOF
 EOF
 
 } > "$amd_gpu_shaders"
-

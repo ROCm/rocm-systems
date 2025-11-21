@@ -313,7 +313,7 @@ done
 
 if [ "$CONCURRENTNODES" == "all" ]; then
     validNodes=$(getHsaNodes)
-    CONCURRENTNODES=$(echo $validNodes | tr ' ' ',') 
+    CONCURRENTNODES=$(echo $validNodes | tr ' ' ',')
 else
     validNodes=$(getHsaNodes)
     validNodesArray=($validNodes)

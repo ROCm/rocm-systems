@@ -3,10 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-tests-rocprofv3-python-binding
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-tests-rocprofv3-python-binding LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 
@@ -20,8 +17,13 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-trace-roctx-python-bindings
@@ -36,7 +38,8 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT
         "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    FIXTURES_SETUP rocprofv3-trace-roctx-python-bindings)
+    FIXTURES_SETUP rocprofv3-trace-roctx-python-bindings
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-trace-roctx-python-bindings
@@ -54,4 +57,5 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-trace-roctx-python-bindings
-    DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}")
+    DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"
+)

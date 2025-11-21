@@ -12,21 +12,21 @@ Follow our install/build guides to ensure the Python API is installed correctly 
 
 ## How to Run
 ### Basic How To
-The 2 tests are in this PATH:  
-```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py```  
+The 2 tests are in this PATH:
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py```
 
-The recommended method to run the tests:  
-<u>Unittest only (not verbose)</u>  
-```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v```  
+The recommended method to run the tests:
+<u>Unittest only (not verbose)</u>
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b -v```
 
-<u>Unittest verbose</u>  
-```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v```  
+<u>Unittest verbose</u>
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v```
 
-<u>Unittest filter and verbose</u>  
-```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "testname" -v```  
+<u>Unittest filter and verbose</u>
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "testname" -v```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "testname" -v```
 
 ## Unittest Run Options
@@ -43,7 +43,7 @@ options:
 Runs all tests. Silence print statements to stdout. Lists tests results.
 This is also the best way to list all tests available.
 
-```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v```  
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b -v```
 
 ex.
@@ -67,7 +67,7 @@ OK
 ### Unittest: verbose (with print statements)
 Helpful to see print outs of Python.
 
-```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v```  
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v```
 
 
@@ -621,9 +621,9 @@ OK
 
 
 ### Unittest: filter and verbose
-Allow filtering based on common or specific test names. 
+Allow filtering based on common or specific test names.
 
-```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_walkthrough" -v```  
+```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_walkthrough" -v```
 
 ex.
 <details open>

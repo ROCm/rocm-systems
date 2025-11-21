@@ -12,4 +12,3 @@ This library provides following services:
 
 Services other than kernel dispatches are AMD private i.e. are
 not defined by any specification.
-

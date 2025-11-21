@@ -6,10 +6,16 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-hsa-queue-tracing
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
-string(REPLACE "LD_PRELOAD=" "--preload;" PRELOAD_ARGS
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "--preload;"
+    PRELOAD_ARGS
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
@@ -24,7 +30,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_SETUP rocprofv3-test-hsa-multiqueue
-    FAIL_REGULAR_EXPRESSION "HSA_API|HIP_API")
+    FAIL_REGULAR_EXPRESSION "HSA_API|HIP_API"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-hsa-multiqueue
@@ -41,4 +48,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.pftrace
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-hsa-multiqueue)
+    FIXTURES_REQUIRED rocprofv3-test-hsa-multiqueue
+)

@@ -25,7 +25,7 @@ Prerequisites
 - Install ``libdrm`` package.
 
 .. code-block:: shell
-    
+
     sudo apt install libdrm-dev
 
 The ROCR prebuilt binaries include:
@@ -67,7 +67,7 @@ Prerequisites
 .. code-block:: shell
 
     sudo apt install xxd
-    
+
 Building the runtime
 ----------------------
 

@@ -6,12 +6,18 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-counter-collection-range-filtering
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 # Range filtering test
 rocprofiler_add_integration_execute_test(
@@ -24,7 +30,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-range-filter)
+    FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-range-filter
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-kernel-filtering-range-filter
@@ -41,4 +48,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_3/out_results.json
     TIMEOUT 120
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-range-filter)
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-range-filter
+)

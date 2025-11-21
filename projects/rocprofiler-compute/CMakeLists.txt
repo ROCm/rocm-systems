@@ -53,11 +53,15 @@ set(EXECUTABLE_NAME "rocprof-compute")
 
 include(ExternalProject)
 include(GNUInstallDirs)
-include( utils.cmake )
+include(utils.cmake)
 
-set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
-set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
-set( COMP_TYPE "main" )
+set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides")
+set(BUILD_DEBIAN_PKGING_FLAG
+    ON
+    CACHE BOOL
+    "Internal Status Flag to indicate Debian Packaging Build"
+)
+set(COMP_TYPE "main")
 
 # version control info
 execute_process(
@@ -173,7 +177,7 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
     file(
         APPEND
-            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+        ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
         ${mod_additions}
     )
     list(POP_BACK CMAKE_MESSAGE_INDENT)
@@ -529,7 +533,8 @@ install(
         src/config.py
         src/rocprof_compute_base.py
         src/roofline.py
-        VERSION VERSION.sha
+        VERSION
+        VERSION.sha
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
 )
@@ -701,8 +706,8 @@ message(STATUS "Install tests: ${INSTALL_TESTS}")
 # Packaging
 # ----------
 
-set(PKG_MAINTAINER_NM  "rocprofiler compute support")
-set(PKG_MAINTAINER_EMAIL  "dl.omnitools@amd.com")
+set(PKG_MAINTAINER_NM "rocprofiler compute support")
+set(PKG_MAINTAINER_EMAIL "dl.omnitools@amd.com")
 message(STATUS "Packaging config...")
 set(CPACK_GENERATOR "DEB" "RPM" CACHE STRING "")
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
@@ -807,6 +812,6 @@ set(CPACK_SOURCE_IGNORE_FILES
     /build
 )
 
-configure_pkg( ${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+configure_pkg( ${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 
 include(CPack)

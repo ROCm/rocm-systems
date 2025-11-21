@@ -37,20 +37,20 @@ set(TEST_SRC
     hipLaunchKernelEx.cc
 )
 if(UNIX)
-  set(TEST_SRC ${TEST_SRC}
-      hipPrintfKernel.cc)
+    set(TEST_SRC ${TEST_SRC} hipPrintfKernel.cc)
 endif()
 
 # only for AMD
 if(HIP_PLATFORM MATCHES "amd")
-  set(AMD_SRC
-      hipExtLaunchKernelGGL.cc
-      hipSetupArgument.cc
-      hipConfigureCall.cc
-  )
-  set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
+    set(AMD_SRC
+        hipExtLaunchKernelGGL.cc
+        hipSetupArgument.cc
+        hipConfigureCall.cc
+    )
+    set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
 
 hip_add_exe_to_target(NAME KernelTest
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests)
+                      TEST_TARGET_NAME build_tests
+)

@@ -19,4 +19,3 @@
 *.h filter=trimspacecpp
 *.hpp filter=trimspace
 *.md filter=trimspace
-

@@ -257,4 +257,3 @@ mCopyAlignedPhase2Store 0, (kCopyAlignedUnroll - 1)
 
   L_COPY_ALIGNED_PHASE_4_DONE:
     s_endpgm
-

@@ -16,9 +16,18 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
     find_program(
         rocminfo_EXECUTABLE
         NAMES rocminfo
-        HINTS ${rocprofiler-sdk_ROOT_DIR} ${rocm_version_DIR} ${ROCM_PATH} /opt/rocm
-        PATHS ${rocprofiler-sdk_ROOT_DIR} ${rocm_version_DIR} ${ROCM_PATH} /opt/rocm
-        PATH_SUFFIXES bin)
+        HINTS
+            ${rocprofiler-sdk_ROOT_DIR}
+            ${rocm_version_DIR}
+            ${ROCM_PATH}
+            /opt/rocm
+        PATHS
+            ${rocprofiler-sdk_ROOT_DIR}
+            ${rocm_version_DIR}
+            ${ROCM_PATH}
+            /opt/rocm
+        PATH_SUFFIXES bin
+    )
 
     if(rocminfo_EXECUTABLE)
         execute_process(
@@ -26,24 +35,38 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
             RESULT_VARIABLE rocminfo_RET
             OUTPUT_VARIABLE rocminfo_OUT
             ERROR_VARIABLE rocminfo_ERR
-            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
 
         if(rocminfo_RET EQUAL 0)
-            string(REGEX MATCHALL "gfx([0-9A-Fa-f]+)" rocminfo_GFXINFO "${rocminfo_OUT}")
+            string(
+                REGEX MATCHALL
+                "gfx([0-9A-Fa-f]+)"
+                rocminfo_GFXINFO
+                "${rocminfo_OUT}"
+            )
             list(REMOVE_DUPLICATES rocminfo_GFXINFO)
-            set(${_VAR}
-                "${rocminfo_GFXINFO}"
-                PARENT_SCOPE)
+            set(${_VAR} "${rocminfo_GFXINFO}" PARENT_SCOPE)
 
             if(ARG_ECHO)
-                string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${rocminfo_GFXINFO}")
-                message(STATUS "${ARG_PREFIX}System architectures: ${_GFXINFO_ECHO}")
+                string(
+                    REPLACE
+                    ";"
+                    "${ARG_DELIM}"
+                    _GFXINFO_ECHO
+                    "${rocminfo_GFXINFO}"
+                )
+                message(
+                    STATUS
+                    "${ARG_PREFIX}System architectures: ${_GFXINFO_ECHO}"
+                )
             endif()
         else()
             message(
                 AUTHOR_WARNING
-                    "${rocminfo_EXECUTABLE} returned ${rocminfo_RET}\nstderr:\n${rocminfo_ERR}\nstdout:\n${rocminfo_OUT}"
-                )
+                "${rocminfo_EXECUTABLE} returned ${rocminfo_RET}\nstderr:\n${rocminfo_ERR}\nstdout:\n${rocminfo_OUT}"
+            )
         endif()
     endif()
 endfunction()
@@ -58,24 +81,28 @@ function(rocprofiler_sdk_pc_sampling_disabled _VAR)
     rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
     list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
 
-    if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx90a$"
-       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$"
-       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx95[0-9]$"
-       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx12[0-9][0-9]$")
+    if(
+        "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx90a$"
+        OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$"
+        OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx95[0-9]$"
+        OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx12[0-9][0-9]$"
+    )
         # PC sampling is enabled on this architecture.
-        set(${_VAR}
-            FALSE
-            PARENT_SCOPE)
+        set(${_VAR} FALSE PARENT_SCOPE)
         if(ARG_ECHO)
-            message(STATUS "PC Sampling is enabled for ${pc-sampling-gpu-0-gfx-info}")
+            message(
+                STATUS
+                "PC Sampling is enabled for ${pc-sampling-gpu-0-gfx-info}"
+            )
         endif()
     else()
         # PC sampling is disabled on this architecture.
-        set(${_VAR}
-            TRUE
-            PARENT_SCOPE)
+        set(${_VAR} TRUE PARENT_SCOPE)
         if(ARG_ECHO)
-            message(STATUS "PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}")
+            message(
+                STATUS
+                "PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}"
+            )
         endif()
     endif()
 endfunction()
@@ -90,22 +117,26 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
     rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
     list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
 
-    if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$"
-       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx95[0-9]$")
+    if(
+        "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$"
+        OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx95[0-9]$"
+    )
         # PC sampling is enabled on this architecture.
-        set(${_VAR}
-            FALSE
-            PARENT_SCOPE)
+        set(${_VAR} FALSE PARENT_SCOPE)
         if(ARG_ECHO)
-            message(STATUS "PC Sampling is enabled for ${pc-sampling-gpu-0-gfx-info}")
+            message(
+                STATUS
+                "PC Sampling is enabled for ${pc-sampling-gpu-0-gfx-info}"
+            )
         endif()
     else()
         # PC sampling is disabled on this architecture.
-        set(${_VAR}
-            TRUE
-            PARENT_SCOPE)
+        set(${_VAR} TRUE PARENT_SCOPE)
         if(ARG_ECHO)
-            message(STATUS "PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}")
+            message(
+                STATUS
+                "PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}"
+            )
         endif()
     endif()
 endfunction()

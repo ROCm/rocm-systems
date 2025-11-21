@@ -3,10 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-sdk-tests-rocprofv3-summary
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-rocprofv3-summary LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 
@@ -16,11 +13,19 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/input-summary.yml.in
-               ${CMAKE_CURRENT_BINARY_DIR}/input-summary.yml @ONLY)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/input-summary.yml.in
+    ${CMAKE_CURRENT_BINARY_DIR}/input-summary.yml
+    @ONLY
+)
 
 ##########################################################################################
 #
@@ -40,7 +45,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}" "ARBITRARY_ENV_VARIABLE=%tag%-trace-cmd-line"
-    FIXTURES_SETUP rocprofv3-test-summary-cmd-line)
+    FIXTURES_SETUP rocprofv3-test-summary-cmd-line
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-summary-cmd-line
@@ -57,7 +63,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_summary.txt
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-summary-cmd-line)
+    FIXTURES_REQUIRED rocprofv3-test-summary-cmd-line
+)
 
 ##########################################################################################
 #
@@ -65,7 +72,10 @@ rocprofiler_add_integration_validate_test(
 #
 ##########################################################################################
 
-set(summary-yaml-env ${summary-env} "ARBITRARY_ENV_VARIABLE=%tag%-trace-inp-yaml")
+set(summary-yaml-env
+    ${summary-env}
+    "ARBITRARY_ENV_VARIABLE=%tag%-trace-inp-yaml"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-summary-inp-yaml
@@ -77,7 +87,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ARBITRARY_ENV_VARIABLE=%tag%-trace-inp-yaml"
-    FIXTURES_SETUP rocprofv3-test-summary-inp-yaml)
+    FIXTURES_SETUP rocprofv3-test-summary-inp-yaml
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-summary-inp-yaml
@@ -94,4 +105,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_summary.txt
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-summary-inp-yaml)
+    FIXTURES_REQUIRED rocprofv3-test-summary-inp-yaml
+)

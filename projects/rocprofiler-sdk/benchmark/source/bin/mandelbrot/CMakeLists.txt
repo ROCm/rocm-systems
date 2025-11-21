@@ -4,9 +4,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -36,12 +41,18 @@ set_source_files_properties(utils.cpp PROPERTIES LANGUAGE HIP)
 
 add_executable(mandelbrot)
 target_sources(mandelbrot PRIVATE mandelbrot.cpp utils.cpp)
-target_compile_options(mandelbrot PRIVATE -W -Wall -Wextra -Wpedantic -Werror
-                                          -ffp-contract=fast)
+target_compile_options(
+    mandelbrot
+    PRIVATE -W -Wall -Wextra -Wpedantic -Werror -ffp-contract=fast
+)
 target_include_directories(mandelbrot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(mandelbrot PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+target_link_libraries(
+    mandelbrot
+    PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+)
 
 install(
     TARGETS mandelbrot
     DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT benchmark)
+    COMPONENT benchmark
+)

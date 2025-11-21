@@ -11,11 +11,15 @@ if(ROCPROFILER_ENABLE_CLANG_TIDY)
 
     if(NOT ROCPROFILER_CLANG_TIDY_COMMAND)
         message(
-            WARNING "ROCPROFILER_ENABLE_CLANG_TIDY is ON but clang-tidy is not found!")
+            WARNING
+            "ROCPROFILER_ENABLE_CLANG_TIDY is ON but clang-tidy is not found!"
+        )
         set(ROCPROFILER_ENABLE_CLANG_TIDY OFF)
     else()
-        set(CMAKE_CXX_CLANG_TIDY ${ROCPROFILER_CLANG_TIDY_COMMAND}
-                                 -header-filter=${PROJECT_SOURCE_DIR}/.*)
+        set(CMAKE_CXX_CLANG_TIDY
+            ${ROCPROFILER_CLANG_TIDY_COMMAND}
+            -header-filter=${PROJECT_SOURCE_DIR}/.*
+        )
 
         # Create a preprocessor definition that depends on .clang-tidy content so the
         # compile command will change when .clang-tidy changes.  This ensures that a

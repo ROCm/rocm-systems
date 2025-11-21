@@ -93,12 +93,12 @@ The user has two options for building:
 
 ## Tool Usage and Features
 
-- rocsys: This is a frontend command line utility to launch/start/stop/exit a session with the required application to be traced or profiled in rocprofv2 context. 
+- rocsys: This is a frontend command line utility to launch/start/stop/exit a session with the required application to be traced or profiled in rocprofv2 context.
   Usage:
   ```bash
     # Launch the application with the required profiling and tracing options with giving a session identifier to be used later
     rocsys --session session_name launch mpiexec -n 2 ./rocprofv2 -i samples/input.txt Histogram
-  
+
     # Start a session with a given identifier created at launch
     rocsys --session session_name start
 

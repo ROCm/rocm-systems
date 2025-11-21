@@ -78,7 +78,7 @@ Metadata JSON Sample
 
    .. code-block:: json
       :linenos:
-      
+
       {
       "rocprofiler-systems": {
          "metadata": {

@@ -6,14 +6,21 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-attachment-attach-once
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer"
-                               "ThreadSanitizer")
+set(ROCPROFILER_MEMCHECK_TYPES
+    "AddressSanitizer"
+    "UndefinedBehaviorSanitizer"
+    "ThreadSanitizer"
+)
 
-if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
+if(
+    ROCPROFILER_MEMCHECK
+    AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES
+)
     set(IS_DISABLED ON)
 else()
     set(IS_DISABLED OFF)
@@ -25,12 +32,17 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 set(attachment-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
+)
 
 # Test that launches the app and attaches to it (CSV format)
 rocprofiler_add_integration_execute_test(
@@ -47,7 +59,8 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${attachment-env}"
     SKIP_REGULAR_EXPRESSION "This test is skipped."
     FIXTURES_SETUP rocprofv3-test-attachment-attach-once
-    FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+)
 # Validate the output from the attached profiling
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-attachment-attach-once-csv
@@ -68,7 +81,8 @@ rocprofiler_add_integration_validate_test(
          --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
          --skip-if
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-attachment-attach-once-json
@@ -89,4 +103,5 @@ rocprofiler_add_integration_validate_test(
          --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
          --skip-if
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped
+)

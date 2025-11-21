@@ -20,26 +20,33 @@
 
 # Common Tests - Test independent of all platforms
 
-set(TEST_SRC
-    hipApiName.cc
-    hipGetStreamDeviceId.cc
-    hipKernelNameRef.cc
-)
+set(TEST_SRC hipApiName.cc hipGetStreamDeviceId.cc hipKernelNameRef.cc)
 
 if(UNIX)
     set(TEST_SRC ${TEST_SRC} hipKernelNameRefByPtr.cc)
 
-    add_custom_target(SimpleKernel.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
-                      ${CMAKE_CURRENT_SOURCE_DIR}/SimpleKernel.cc
-                      -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/callback/SimpleKernel.code
-                      -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                      --hip-path=${HIP_PATH})
-    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/SimpleKernel.code)
+    add_custom_target(
+        SimpleKernel.code
+        COMMAND
+            ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/SimpleKernel.cc -o
+            ${CMAKE_CURRENT_BINARY_DIR}/../../unit/callback/SimpleKernel.code
+            -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+            --hip-path=${HIP_PATH}
+    )
+    set_property(
+        GLOBAL
+        APPEND
+        PROPERTY
+            G_INSTALL_CUSTOM_TARGETS
+                ${CMAKE_CURRENT_BINARY_DIR}/SimpleKernel.code
+    )
 endif()
 
 hip_add_exe_to_target(NAME CallbackTest
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests)
+                      TEST_TARGET_NAME build_tests
+)
 
 if(UNIX)
     add_dependencies(CallbackTest SimpleKernel.code)

@@ -106,4 +106,3 @@ Once the tests are [built](#build_tests), you can run them by executing the
 
 To build the documentation, follow the instructions at [Building
 documentation](https://rocm.docs.amd.com/en/latest/contribute/building.html).
-

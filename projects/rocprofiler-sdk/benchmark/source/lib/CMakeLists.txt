@@ -8,4 +8,5 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIB64DIR}
     FILES_MATCHING
     PATTERN "*libtimem.*"
-    PATTERN "*/timemory/*")
+    PATTERN "*/timemory/*"
+)

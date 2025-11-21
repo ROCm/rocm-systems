@@ -174,6 +174,3 @@ For more information on the data comprising a single sample, see `pc_sampling.h 
 
 .. note::
     A user can synchronously flush buffers via ``rocprofiler_buffer_flush`` that triggers ``pc_sampling_callback``.
-
-
-

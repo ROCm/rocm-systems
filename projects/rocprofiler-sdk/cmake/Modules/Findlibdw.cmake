@@ -28,25 +28,27 @@ if(PkgConfig_FOUND)
     set(ENV{PKG_CONFIG_SYSTEM_INCLUDE_PATH} "")
     pkg_check_modules(DW libdw)
 
-    if(DW_FOUND
-       AND DW_INCLUDE_DIRS
-       AND DW_LINK_LIBRARIES)
+    if(DW_FOUND AND DW_INCLUDE_DIRS AND DW_LINK_LIBRARIES)
         set(libdw_INCLUDE_DIR
             "${DW_INCLUDE_DIRS}"
-            CACHE FILEPATH "libdw include directory")
+            CACHE FILEPATH
+            "libdw include directory"
+        )
         set(libdw_LIBRARY
             "${DW_LINK_LIBRARIES}"
-            CACHE FILEPATH "libdw libraries")
+            CACHE FILEPATH
+            "libdw libraries"
+        )
         if(DW_PREFIX)
             set(libdw_ROOT_DIR
                 "${DW_PREFIX}"
-                CACHE FILEPATH "libdw root directory")
+                CACHE FILEPATH
+                "libdw root directory"
+            )
         endif()
 
         if(DW_VERSION)
-            set(libdw_VERSION
-                "${DW_VERSION}"
-                CACHE FILEPATH "libdw version")
+            set(libdw_VERSION "${DW_VERSION}" CACHE FILEPATH "libdw version")
         endif()
     endif()
 endif()
@@ -56,7 +58,8 @@ if(NOT libdw_INCLUDE_DIR OR NOT libdw_LIBRARY)
         libdw_ROOT_DIR
         NAMES include/elfutils/libdw.h
         HINTS ${libdw_ROOT}
-        PATHS ${libdw_ROOT})
+        PATHS ${libdw_ROOT}
+    )
 
     mark_as_advanced(libdw_ROOT_DIR)
 
@@ -65,18 +68,25 @@ if(NOT libdw_INCLUDE_DIR OR NOT libdw_LIBRARY)
         NAMES elfutils/libdw.h
         HINTS ${libdw_ROOT}
         PATHS ${libdw_ROOT}
-        PATH_SUFFIXES include)
+        PATH_SUFFIXES include
+    )
 
     find_library(
         libdw_LIBRARY
         NAMES dw
         HINTS ${libdw_ROOT}
         PATHS ${libdw_ROOT}
-        PATH_SUFFIXES lib lib64)
+        PATH_SUFFIXES lib lib64
+    )
 endif()
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(libdw DEFAULT_MSG libdw_LIBRARY libdw_INCLUDE_DIR)
+find_package_handle_standard_args(
+    libdw
+    DEFAULT_MSG
+    libdw_LIBRARY
+    libdw_INCLUDE_DIR
+)
 
 if(libdw_FOUND)
     if(NOT TARGET libdw::libdw)
@@ -86,7 +96,11 @@ if(libdw_FOUND)
             target_link_libraries(libdw::libdw INTERFACE PkgConfig::DW)
         else()
             target_link_libraries(libdw::libdw INTERFACE ${libdw_LIBRARY})
-            target_include_directories(libdw::libdw SYSTEM INTERFACE ${libdw_INCLUDE_DIR})
+            target_include_directories(
+                libdw::libdw
+                SYSTEM
+                INTERFACE ${libdw_INCLUDE_DIR}
+            )
         endif()
     endif()
 endif()

@@ -139,4 +139,3 @@ needed), they may leave a comment. You can follow up and respond to the comment,
 When a modification request has been completed, the conversation thread about it will be marked as resolved.
 
 To update the code in your PR (eg. in response to a code review discussion), you can simply push another commit to the branch used in your pull request.
-

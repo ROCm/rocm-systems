@@ -187,8 +187,8 @@ There are two distinct approaches for collecting PAPI-based hardware counters, e
 
 **Example 1: Using ``papi_array`` for a fixed list of events**
 
-.. code-block:: shell   
-   
+.. code-block:: shell
+
    # Enable profiling mode (required)
    export ROCPROFSYS_PROFILE=ON
 
@@ -197,30 +197,30 @@ There are two distinct approaches for collecting PAPI-based hardware counters, e
 
    # Specify which PAPI events to collect
    export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
-   
+
 
 **Example 2: Using ``papi_vector`` for dynamically allocated array of events**
 
-.. code-block:: shell 
-   
+.. code-block:: shell
+
    # Include papi_vector for dynamic event lists
    export ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock,papi_vector"
 
    # Alternative: Use perf event names
    export ROCPROFSYS_PAPI_EVENTS="perf::INSTRUCTIONS,perf::CACHE-REFERENCES,perf::CACHE-MISSES"
-   
+
 
 2. **Sampling-based collection:** Periodically interrupts program execution to capture hardware counters along with call stack information. This works with the sampling mode.
 
-.. code-block:: shell 
-   
+.. code-block:: shell
+
    # Enable sampling mode (required)
    export ROCPROFSYS_USE_SAMPLING=ON
 
    # Specify PAPI events for sampling
    export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
 
-You can also enable overflow sampling for PAPI events with ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``: 
+You can also enable overflow sampling for PAPI events with ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``:
 
 .. code-block:: shell
 
@@ -309,8 +309,8 @@ Use the following command to view the available domains:
 
 .. note::
 
-   Some settings can enable tracing for multiple domains, such as: 
-   
+   Some settings can enable tracing for multiple domains, such as:
+
    * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
    * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
    * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.

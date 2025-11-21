@@ -94,5 +94,3 @@ Error codes
 .. doxygengroup:: error-codes
    :content-only:
    :inner:
-
-

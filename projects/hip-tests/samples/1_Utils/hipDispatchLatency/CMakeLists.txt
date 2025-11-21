@@ -25,15 +25,19 @@ cmake_minimum_required(VERSION 3.10)
 include_directories(../../common)
 
 if(UNIX)
-  if(NOT DEFINED ROCM_PATH)
-    if(DEFINED ENV{ROCM_PATH})
-      set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
-    else()
-      set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory.")
+    if(NOT DEFINED ROCM_PATH)
+        if(DEFINED ENV{ROCM_PATH})
+            set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
+        else()
+            set(ROCM_PATH
+                "/opt/rocm"
+                CACHE STRING
+                "Default ROCM installation directory."
+            )
+        endif()
     endif()
-  endif()
-  # Search for rocm in common locations
-  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+    # Search for rocm in common locations
+    list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
 # Find hip
@@ -41,23 +45,29 @@ find_package(hip)
 
 # Set compiler and linker
 set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+set(CMAKE_CXX_LINKER ${HIP_HIPCC_EXECUTABLE})
 set(CMAKE_BUILD_TYPE Release)
 
 # Create the excutable
 if(TARGET build_utils)
-set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
+    set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
 else()
-set(EXCLUDE_OPTION )
+    set(EXCLUDE_OPTION)
 endif()
 add_executable(hipDispatchLatency ${EXCLUDE_OPTION} hipDispatchLatency.cpp)
-add_executable(hipDispatchEnqueueRateMT ${EXCLUDE_OPTION} hipDispatchEnqueueRateMT.cpp)
+add_executable(
+    hipDispatchEnqueueRateMT
+    ${EXCLUDE_OPTION}
+    hipDispatchEnqueueRateMT.cpp
+)
 
 # Generate code object
 add_custom_target(
-  codeobj2
-  COMMAND  ${HIP_HIPCC_EXECUTABLE} --genco  ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.cpp -o test_kernel.code
-  COMMENT "codeobj2 generated"
+    codeobj2
+    COMMAND
+        ${HIP_HIPCC_EXECUTABLE} --genco
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.cpp -o test_kernel.code
+    COMMENT "codeobj2 generated"
 )
 
 add_dependencies(hipDispatchLatency codeobj2)
@@ -67,11 +77,11 @@ add_dependencies(hipDispatchEnqueueRateMT codeobj2)
 target_link_libraries(hipDispatchLatency hip::host)
 target_link_libraries(hipDispatchEnqueueRateMT hip::host)
 if(UNIX)
-  target_link_libraries(hipDispatchEnqueueRateMT pthread)
+    target_link_libraries(hipDispatchEnqueueRateMT pthread)
 endif()
 set_property(TARGET hipDispatchLatency PROPERTY CXX_STANDARD 11)
 set_property(TARGET hipDispatchEnqueueRateMT PROPERTY CXX_STANDARD 11)
 
 if(TARGET build_utils)
-add_dependencies(build_utils hipDispatchLatency hipDispatchEnqueueRateMT)
+    add_dependencies(build_utils hipDispatchLatency hipDispatchEnqueueRateMT)
 endif()

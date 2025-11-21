@@ -55,4 +55,3 @@ LIB_API_PUBLIC VerErrors printBuildInfo();
 #endif
 
 #endif  //_ROCM_VERSION_H_  header guard
-

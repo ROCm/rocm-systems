@@ -13,9 +13,11 @@ set(ROCPROFILER_HSA_HEADER_FILES
     image_ext_api_id.h
     scratch_memory_args.h
     scratch_memory_id.h
-    table_id.h)
+    table_id.h
+)
 
 install(
     FILES ${ROCPROFILER_HSA_HEADER_FILES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk/hsa
-    COMPONENT development)
+    COMPONENT development
+)

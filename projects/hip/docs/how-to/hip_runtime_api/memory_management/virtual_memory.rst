@@ -384,4 +384,3 @@ aliases of the same memory allocation:
         *pointerA = 0;
         *pointerB = 42;
     }
-

@@ -183,7 +183,7 @@ do
         --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION} \
         --build-arg BOOST_DOWNLOAD_VERSION=${BOOST_VERSION} \
         --build-arg GPU_TYPE=${GPU_TYPE} \
-        --build-arg GPU_TARBALL=${GPU_TARBALL} 
+        --build-arg GPU_TARBALL=${GPU_TARBALL}
 done
 
 if [ "${PUSH}" -gt 0 ]; then

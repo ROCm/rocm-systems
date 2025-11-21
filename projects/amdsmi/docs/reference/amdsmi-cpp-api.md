@@ -18,4 +18,3 @@ functionalities and how to implement them in your applications.
 - {doc}`Globals <../doxygen/docBin/html/globals>`
 
 - {doc}`Data structures <../doxygen/docBin/html/annotated>`
-

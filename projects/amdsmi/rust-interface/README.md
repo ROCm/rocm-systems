@@ -262,4 +262,3 @@ pub fn amdsmi_get_gpu_id(processor_handle: AmdsmiProcessorHandle) -> AmdsmiResul
     Ok(id)
 }
 ```
-

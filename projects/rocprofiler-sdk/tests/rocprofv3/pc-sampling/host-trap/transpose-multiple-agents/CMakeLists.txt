@@ -6,15 +6,21 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-pc-sampling-host-trap-transpose-multiple-agents
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
 # Check if PC sampling is disabled and whether we should skip the tests.
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 # To ensure we sample all agents, use 16 threads each assigned to one agent in a round
 # robin manner. To keep the job per device reasonable, each thread offloads 100 instances
@@ -36,7 +42,8 @@ rocprofiler_add_integration_execute_test(
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-cmd
-    DISABLED "${IS_PC_SAMPLING_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_DISABLED}"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-cmd
@@ -56,7 +63,8 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-cmd
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-    DISABLED "${IS_PC_SAMPLING_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_DISABLED}"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-json
@@ -72,7 +80,8 @@ rocprofiler_add_integration_execute_test(
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-json
-    DISABLED "${IS_PC_SAMPLING_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_DISABLED}"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-json
@@ -92,7 +101,8 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-json
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-    DISABLED "${IS_PC_SAMPLING_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_DISABLED}"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-yaml
@@ -107,7 +117,8 @@ rocprofiler_add_integration_execute_test(
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-yaml
-    DISABLED "${IS_PC_SAMPLING_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_DISABLED}"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-yaml
@@ -127,4 +138,5 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-yaml
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-    DISABLED "${IS_PC_SAMPLING_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_DISABLED}"
+)

@@ -6,14 +6,16 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-rocpd-scratch
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
 set(rocprofv3-rocpd-scratch-env
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     "OMPI_ALLOW_RUN_AS_ROOT=1"
-    "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1")
+    "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1"
+)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
 
@@ -36,7 +38,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-scratch)
+    FIXTURES_SETUP rocprofv3-test-rocpd-scratch
+)
 
 #########################################################################################
 #
@@ -56,7 +59,8 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-scratch-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch)
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch
+)
 
 #########################################################################################
 #
@@ -74,4 +78,5 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 120
     LABELS "integration-tests;rocpd" PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch-generation)
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch-generation
+)

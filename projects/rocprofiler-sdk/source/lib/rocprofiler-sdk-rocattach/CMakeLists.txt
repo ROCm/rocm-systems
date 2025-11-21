@@ -23,28 +23,35 @@
 rocprofiler_activate_clang_tidy()
 
 add_library(rocprofiler-sdk-rocattach-shared-library SHARED)
-target_sources(rocprofiler-sdk-rocattach-shared-library PRIVATE rocattach.cpp
-                                                                ptrace_session.cpp)
+target_sources(
+    rocprofiler-sdk-rocattach-shared-library
+    PRIVATE rocattach.cpp ptrace_session.cpp
+)
 
 target_link_libraries(
     rocprofiler-sdk-rocattach-shared-library
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
-            rocprofiler-sdk::rocprofiler-sdk-headers
-            rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-cereal)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk-shared-library
+        rocprofiler-sdk::rocprofiler-sdk-headers
+        rocprofiler-sdk::rocprofiler-sdk-build-flags
+        rocprofiler-sdk::rocprofiler-sdk-common-library
+        rocprofiler-sdk::rocprofiler-sdk-cereal
+)
 
 set_target_properties(
     rocprofiler-sdk-rocattach-shared-library
-    PROPERTIES OUTPUT_NAME rocprofiler-sdk-rocattach
-               LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}
-               SOVERSION ${PROJECT_VERSION_MAJOR}
-               VERSION ${PROJECT_VERSION}
-               BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
-               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+    PROPERTIES
+        OUTPUT_NAME rocprofiler-sdk-rocattach
+        LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+        VERSION ${PROJECT_VERSION}
+        BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
+        INSTALL_RPATH "\$ORIGIN:\$ORIGIN/.."
+)
 
 install(
     TARGETS rocprofiler-sdk-rocattach-shared-library
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
     COMPONENT rocattach
-    EXPORT rocprofiler-sdk-rocattach-targets)
+    EXPORT rocprofiler-sdk-rocattach-targets
+)

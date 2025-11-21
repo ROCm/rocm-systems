@@ -33,4 +33,3 @@ Start the Prometheus
     $ prometheus --config.file=<full path of the rdc_prometheus_example.yml>
 
 Browse to localhost:9090 in the management computer for metrics from RDC.
-

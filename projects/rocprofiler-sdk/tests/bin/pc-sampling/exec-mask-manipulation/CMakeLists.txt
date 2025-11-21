@@ -7,9 +7,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -17,7 +22,10 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-sdk-tests-bin-pc-sampling-exec-mask-manipulation LANGUAGES CXX HIP)
+project(
+    rocprofiler-sdk-tests-bin-pc-sampling-exec-mask-manipulation
+    LANGUAGES CXX HIP
+)
 
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
@@ -36,8 +44,10 @@ set_source_files_properties(exec_mask_manipulation.cpp PROPERTIES LANGUAGE HIP)
 add_executable(exec-mask-manipulation)
 target_sources(exec-mask-manipulation PRIVATE exec_mask_manipulation.cpp)
 # debug symbols required for PC sampling decoding validation
-target_compile_options(exec-mask-manipulation PRIVATE -W -Wall -Wextra -Wpedantic
-                                                      -Wshadow -Werror -g)
+target_compile_options(
+    exec-mask-manipulation
+    PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror -g
+)
 
 find_package(Threads REQUIRED)
 target_link_libraries(exec-mask-manipulation PRIVATE Threads::Threads)

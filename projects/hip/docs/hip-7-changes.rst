@@ -94,7 +94,7 @@ HIP header clean up
 
 HIP header files previously included unnecessary Standard Template Libraries (STL) headers.
 With the 7.0 release, unnecessary STL headers are no longer included, and only the required STL headers
-are included. 
+are included.
 
 Applications relying on HIP runtime header files might need to be updated to include STL header
 files that have been removed in 7.0.
@@ -121,7 +121,7 @@ In addition, the following APIs have signature changes:
 
 These signature changes do not require code modifications but do require rebuilding the application.
 
-Deprecated struct ``HIP_MEMSET_NODE_PARAMS`` 
+Deprecated struct ``HIP_MEMSET_NODE_PARAMS``
 --------------------------------------------
 
 The deprecated structure ``HIP_MEMSET_NODE_PARAMS`` is removed.
@@ -189,7 +189,7 @@ The following APIs will check the stream capture mode and return error codes to 
 * :cpp:func:`hipEventQuery` - Returns an error ``hipErrorStreamCaptureUnsupported`` in global capture mode
 * :cpp:func:`hipStreamAddCallback` - The stream capture behavior is updated. The function now checks if any of the blocking streams are capturing. If so, it returns an error and invalidates all capturing streams. The usage of this API is restricted during stream capture to match CUDA.
 
-Stream capture error return 
+Stream capture error return
 ---------------------------
 
 During stream capture, the following HIP APIs return the ``hipErrorStreamCaptureUnsupported`` error on the HIP runtime, but not always ``hipSuccess``, to match behavior with CUDA.
@@ -240,7 +240,7 @@ Conditions are added in the API implementation of :cpp:func:`hipModuleLaunchCoop
 
 * If the input stream is invalid, returns ``hipErrorContextIsDestroyed``, instead of ``hipErrorInvalidValue``
 * If any grid dimension or block dimension is zero, returns ``hipErrorInvalidValue``
-* If any grid dimension exceeds the maximum dimension limit, or work group size exceeds the maximum size, returns ``hipErrorInvalidConfiguration`` , instead of ``hipErrorInvalidValue`` 
+* If any grid dimension exceeds the maximum dimension limit, or work group size exceeds the maximum size, returns ``hipErrorInvalidConfiguration`` , instead of ``hipErrorInvalidValue``
 * If shared memory size in bytes exceeds the device local memory size per CU, returns ``hipErrorCooperativeLaunchTooLarge``
 
 ``hipModuleLoad``

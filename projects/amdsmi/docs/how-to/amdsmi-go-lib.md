@@ -78,7 +78,7 @@ To include the AMD SMI Go API in your project, update your Makefile or Go module
 to fetch the appropriate version of the AMD SMI library.
 
 ```shell
-go get github.com/ROCm/amdsmi@amd-staging 
+go get github.com/ROCm/amdsmi@amd-staging
 ```
 
 When using a Makefile, ensure you're fetching the latest AMD SMI repository

@@ -26,12 +26,18 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-hip-streams-per-thread
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 set(NUM_THREADS 9)
 
@@ -46,7 +52,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-hip-streams-per-thread
-    DISABLED $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)
+    DISABLED $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-hip-streams-per-thread
@@ -62,4 +69,5 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 60
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-hip-streams-per-thread
-    DISABLED $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)
+    DISABLED $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>
+)

@@ -6,7 +6,8 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-collection-period
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
     set(IS_THREAD_SANITIZER ON)
@@ -16,10 +17,18 @@ endif()
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "ROCPROF_PRELOAD="
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
-set(collection-period-env "${PRELOAD_ENV}" ROCPROF_COLLECTION_PERIOD_TESTING=true)
+set(collection-period-env
+    "${PRELOAD_ENV}"
+    ROCPROF_COLLECTION_PERIOD_TESTING=true
+)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
@@ -42,7 +51,8 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROF_COLLECTION_PERIOD_TESTING=true"
     FIXTURES_SETUP rocprofv3-test-collection-period
-    UNSTABLE)
+    UNSTABLE
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-collection-period
@@ -60,4 +70,5 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-collection-period
-    UNSTABLE)
+    UNSTABLE
+)

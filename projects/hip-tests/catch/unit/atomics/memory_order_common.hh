@@ -286,7 +286,7 @@ namespace SequentialConsistency {
 
 template <BuiltinAtomicOperation operation, int memory_scope>
 __host__ __device__ void Producer(int* const flag) {
-  #ifdef __HIP_DEVICE_COMPILE__ 
+  #ifdef __HIP_DEVICE_COMPILE__
     if constexpr (operation == BuiltinAtomicOperation::kAnd) {
       __hip_atomic_store(flag, 0, __ATOMIC_SEQ_CST, memory_scope);
     }
@@ -317,7 +317,7 @@ __host__ __device__ void Consumer(int* const flag1, int* const counter) {
 template <BuiltinAtomicOperation operation, int memory_scope>
 __global__ void TestKernel(int* flag1, int* flag2, int* const counter1, int* const counter2) {
   __shared__ int shared_mem[2];
-    
+
   if (flag1 == nullptr && flag2 == nullptr) {
     flag1 = &shared_mem[0];
     flag2 = &shared_mem[1];

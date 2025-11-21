@@ -56,7 +56,7 @@ int main()
         std::cout << "This example requires at least two HIP devices." << std::endl;
         return EXIT_SUCCESS;
     }
-    
+
     double* deviceData0;
     double* deviceData1;
     constexpr std::size_t elems = 1024;

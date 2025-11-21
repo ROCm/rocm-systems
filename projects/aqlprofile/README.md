@@ -11,7 +11,7 @@ AQLprofile builds on concepts from the Heterogeneous System Architecture (HSA) a
 
 ## Overview
 
-AQLprofile is a companion library to [rocprofiler-sdk](https://github.com/ROCm/rocprofiler-sdk). 
+AQLprofile is a companion library to [rocprofiler-sdk](https://github.com/ROCm/rocprofiler-sdk).
 It provides the low-level mechanisms required by rocprofiler-sdk to enable advanced GPU profiling and tracing capabilities on AMD platforms. The development and evolution of AQLprofile are closely aligned with the needs of rocprofiler-sdk, ensuring compatibility and feature support for new GPU architectures and profiling requirements.
 
 AQLprofile abstracts the complexity of constructing and managing AQL (Architected Queuing Language) packets, command buffers, and register programming. These components are essential for orchestrating profiling operations such as performance counter collection and thread tracing. The library supports a range of AMD GPU architecture families such as GFX9, GFX10, GFX11, GFX12 and so on.

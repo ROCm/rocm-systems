@@ -97,5 +97,3 @@ Optional RocRTst Arguments:
    >= 2 -- print out even more monitor information (test specific)
 
 ```
-
-

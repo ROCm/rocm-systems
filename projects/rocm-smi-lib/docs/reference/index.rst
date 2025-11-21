@@ -13,4 +13,3 @@ This section provides technical descriptions and important information about the
 * {doc}`Library <../doxygen/docBin/html/files>`
 * {doc}`Functions <../doxygen/docBin/html/globals>`
 * {doc}`Data structures <../doxygen/docBin/html/annotated>`
-

@@ -27,18 +27,21 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 include(FindPackageHandleStandardArgs)
 
-project(
-    rocprofiler-sdk-tests-rocprofv3-att
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-rocprofv3-att LANGUAGES CXX VERSION 0.0.0)
 
 set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
 
-string(REPLACE "LD_PRELOAD=" "--preload;" PRELOAD_ARGS
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    "--preload;"
+    PRELOAD_ARGS
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
-                                                          att_input.json)
+                                                          att_input.json
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
@@ -47,22 +50,37 @@ find_library(
     NAMES rocprof-trace-decoder
     HINTS ${ROCM_PATH}
     PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
+    PATH_SUFFIXES lib
+)
 
 if(attdecoder_LIBRARY)
     cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
 endif()
 
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
+find_package_handle_standard_args(
+    attdecoder
+    REQUIRED_VARS attdecoder_LIB_DIR attdecoder_LIBRARY
+)
 
-set(COMMON_PARAMS_NO_LIB ${PRELOAD_ARGS} --att --output-format json --log-level env -d
-                         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/)
+set(COMMON_PARAMS_NO_LIB
+    ${PRELOAD_ARGS}
+    --att
+    --output-format
+    json
+    --log-level
+    env
+    -d
+    ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/
+)
 
 set(IS_DISABLED ON)
 if(attdecoder_FOUND)
     set(IS_DISABLED OFF)
-    set(COMMON_PARAMS --att-library-path ${attdecoder_LIB_DIR} ${COMMON_PARAMS_NO_LIB})
+    set(COMMON_PARAMS
+        --att-library-path
+        ${attdecoder_LIB_DIR}
+        ${COMMON_PARAMS_NO_LIB}
+    )
 endif()
 if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
     set(IS_DISABLED ON)
@@ -80,7 +98,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
-    FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path)
+    FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path
+)
 
 # hsa multiqueue dependency test with json input
 rocprofiler_add_integration_execute_test(
@@ -93,7 +112,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
-    FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-json)
+    FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-json
+)
 
 # validate output
 rocprofiler_add_integration_validate_test(
@@ -111,7 +131,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}
          --output-path
          ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/cmd_input
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    FAIL_REGULAR_EXPRESSION "AssertionError"
+)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-att-hsa-multiqueue-json
@@ -128,12 +149,16 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}
          --output-path
          ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    FAIL_REGULAR_EXPRESSION "AssertionError"
+)
 
 function(configure_att_input _FILENAME)
     set(LIB_PATH_LOC "${attdecoder_LIB_DIR}")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}//${_FILENAME}.in
-                   ${CMAKE_CURRENT_BINARY_DIR}/${_FILENAME} @ONLY)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}//${_FILENAME}.in
+        ${CMAKE_CURRENT_BINARY_DIR}/${_FILENAME}
+        @ONLY
+    )
 endfunction()
 
 configure_att_input(att_input.yml)
@@ -149,7 +174,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS hsa_code_object_testapp
     TIMEOUT 45
     LABELS "integration-tests"
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+)
 
 # Invalid lib path has to fail
 rocprofiler_add_integration_execute_test(
@@ -162,7 +188,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     WILL_FAIL
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-library-path-cmd-line-will-fail
@@ -172,7 +199,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     WILL_FAIL
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-library-path-env-var-will-fail
@@ -183,7 +211,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     WILL_FAIL
     DISABLED ${IS_DISABLED}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}")
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-env-var
@@ -193,7 +222,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}")
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+)
 #
 # Uses ATT and Counter Collection at the same time
 #
@@ -204,7 +234,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+)
 
 # Check for conflict PMC + activity
 rocprofiler_add_integration_execute_test(
@@ -215,7 +246,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     WILL_FAIL
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+)
 
 # Check for conflict Perfcounters + activity
 rocprofiler_add_integration_execute_test(
@@ -226,7 +258,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     WILL_FAIL
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+)
 
 # ATT plus PC sampling
 
@@ -239,8 +272,16 @@ endif()
 if(${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
     set(ATT_PLUS_PCS_DISABLE ON)
 endif()
-set(PCS_ARGS --pc-sampling-beta-enabled 1 --pc-sampling-unit cycles
-             --pc-sampling-interval 16384 --pc-sampling-method stochastic)
+set(PCS_ARGS
+    --pc-sampling-beta-enabled
+    1
+    --pc-sampling-unit
+    cycles
+    --pc-sampling-interval
+    16384
+    --pc-sampling-method
+    stochastic
+)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-plus-pc-sampling
@@ -249,7 +290,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 90
     LABELS "integration-tests;thread-trace;pc-sampling"
-    DISABLED ${ATT_PLUS_PCS_DISABLE})
+    DISABLED ${ATT_PLUS_PCS_DISABLE}
+)
 
 # Trace two GPUs
 rocprofiler_add_integration_execute_test(
@@ -259,7 +301,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+)
 
 # No machine has gpu index = 9999 The FAIL regex for this test is the ROCP_ERROR specific
 # to invalid device index
@@ -272,4 +315,5 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     WILL_FAIL
     DISABLED ${IS_DISABLED}
-    FAIL_REGULAR_EXPRESSION "Invalid GPU Device Index")
+    FAIL_REGULAR_EXPRESSION "Invalid GPU Device Index"
+)

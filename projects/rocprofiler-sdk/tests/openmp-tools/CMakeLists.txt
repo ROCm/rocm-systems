@@ -3,22 +3,28 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-sdk-tests-openmp-tools
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-openmp-tools LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 
 set(PYTEST_ARGS)
-if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer" OR ROCPROFILER_BUILD_CODECOV)
+if(
+    ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer"
+    OR ROCPROFILER_BUILD_CODECOV
+)
     set(PYTEST_ARGS -k "not test_total_runtime")
 endif()
 
-set(ROCPROFILER_MEMCHECK_TYPES "ThreadSanitizer" "AddressSanitizer"
-                               "UndefinedBehaviorSanitizer")
+set(ROCPROFILER_MEMCHECK_TYPES
+    "ThreadSanitizer"
+    "AddressSanitizer"
+    "UndefinedBehaviorSanitizer"
+)
 
-if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
+if(
+    ROCPROFILER_MEMCHECK
+    AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES
+)
     set(IS_DISABLED ON)
 else()
     set(IS_DISABLED OFF)
@@ -37,7 +43,7 @@ set(openmp-tools-env
     "ROCR_VISIBLE_DEVICES=0"
     "ROCPROFILER_TOOL_OUTPUT_FILE=openmp-tools-test.json"
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
+)
 
 rocprofiler_add_integration_execute_test(
     openmp-tools
@@ -47,7 +53,8 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
     ENVIRONMENT "${openmp-tools-env}"
     DISABLED "${IS_DISABLED}"
-    FIXTURES_SETUP openmp-tools)
+    FIXTURES_SETUP openmp-tools
+)
 
 rocprofiler_add_integration_validate_test(
     openmp-tools
@@ -59,4 +66,5 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED openmp-tools
     DISABLED "${IS_DISABLED}"
     ARGS ${PYTEST_ARGS} --input ${CMAKE_CURRENT_BINARY_DIR}/openmp-tools-test.json
-    DISCOVERY_ARGS ${PYTEST_ARGS})
+    DISCOVERY_ARGS ${PYTEST_ARGS}
+)

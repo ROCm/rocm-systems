@@ -28,13 +28,21 @@ set(SRC
     hipAPI.cpp
     hipAPIGroup.cpp
     reportGenerators.cpp
-    hipAPICoverageUtils.cpp)
+    hipAPICoverageUtils.cpp
+)
 
 add_executable(generateHipAPICoverage ${SRC})
 
-add_custom_target(clean-cov-report
+add_custom_target(
+    clean-cov-report
     COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_LIST_DIR}/*.xml
-    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_LIST_DIR}/coverageReportHTML/testModules
-    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_LIST_DIR}/coverageReportHTML/testAPIs
-    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_LIST_DIR}/coverageReportHTML/*.html
+    COMMAND
+        ${CMAKE_COMMAND} -E remove_directory
+        ${CMAKE_CURRENT_LIST_DIR}/coverageReportHTML/testModules
+    COMMAND
+        ${CMAKE_COMMAND} -E remove_directory
+        ${CMAKE_CURRENT_LIST_DIR}/coverageReportHTML/testAPIs
+    COMMAND
+        ${CMAKE_COMMAND} -E remove
+        ${CMAKE_CURRENT_LIST_DIR}/coverageReportHTML/*.html
 )

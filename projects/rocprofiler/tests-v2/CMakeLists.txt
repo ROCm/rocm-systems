@@ -4,7 +4,8 @@ add_dependencies(tests rocprofiler_tool)
 add_custom_target(
     check
     COMMAND ${PROJECT_BINARY_DIR}/run_tests.sh
-    DEPENDS tests)
+    DEPENDS tests
+)
 add_subdirectory(featuretests)
 add_subdirectory(memorytests)
 add_subdirectory(microbenchmarks)

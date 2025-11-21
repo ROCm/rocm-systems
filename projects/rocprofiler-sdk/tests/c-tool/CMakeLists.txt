@@ -3,16 +3,14 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(
-    rocprofiler-sdk-tests-c-tool
-    LANGUAGES CXX
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-c-tool LANGUAGES CXX VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 
 if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
     set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:rocprofiler-sdk-c-tool>")
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:rocprofiler-sdk-c-tool>"
+    )
 else()
     set(PRELOAD_ENV "$<TARGET_FILE:rocprofiler-sdk-c-tool>")
 endif()
@@ -30,7 +28,7 @@ rocprofiler_add_integration_execute_test(
         "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
     FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Internal thread for rocprofiler-sdk should not be created"
-    )
+)
 
 # this test uses ROCP_TOOL_LIBRARIES instead of LD_PRELOAD
 rocprofiler_add_integration_execute_test(
@@ -47,4 +45,4 @@ rocprofiler_add_integration_execute_test(
         "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
     FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Internal thread for rocprofiler-sdk should not be created"
-    )
+)

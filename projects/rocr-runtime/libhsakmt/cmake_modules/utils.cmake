@@ -43,97 +43,90 @@
 ## Parses the VERSION_STRING variable and places
 ## the first, second and third number values in
 ## the major, minor and patch variables.
-function( parse_version VERSION_STRING )
+function(parse_version VERSION_STRING)
+    string(FIND ${VERSION_STRING} "-" STRING_INDEX)
 
-    string ( FIND ${VERSION_STRING} "-" STRING_INDEX )
+    if(${STRING_INDEX} GREATER -1)
+        math(EXPR STRING_INDEX "${STRING_INDEX} + 1")
+        string(SUBSTRING ${VERSION_STRING} ${STRING_INDEX} -1 VERSION_BUILD)
+    endif()
 
-    if ( ${STRING_INDEX} GREATER -1 )
-        math ( EXPR STRING_INDEX "${STRING_INDEX} + 1" )
-        string ( SUBSTRING ${VERSION_STRING} ${STRING_INDEX} -1 VERSION_BUILD )
-    endif ()
+    string(REGEX MATCHALL "[0123456789]+" VERSIONS ${VERSION_STRING})
+    list(LENGTH VERSIONS VERSION_COUNT)
 
-    string ( REGEX MATCHALL "[0123456789]+" VERSIONS ${VERSION_STRING} )
-    list ( LENGTH VERSIONS VERSION_COUNT )
+    if(${VERSION_COUNT} GREATER 0)
+        list(GET VERSIONS 0 MAJOR)
+        set(VERSION_MAJOR ${MAJOR} PARENT_SCOPE)
+        set(TEMP_VERSION_STRING "${MAJOR}")
+    endif()
 
-    if ( ${VERSION_COUNT} GREATER 0)
-        list ( GET VERSIONS 0 MAJOR )
-        set ( VERSION_MAJOR ${MAJOR} PARENT_SCOPE )
-        set ( TEMP_VERSION_STRING "${MAJOR}" )
-    endif ()
+    if(${VERSION_COUNT} GREATER 1)
+        list(GET VERSIONS 1 MINOR)
+        set(VERSION_MINOR ${MINOR} PARENT_SCOPE)
+        set(TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${MINOR}")
+    endif()
 
-    if ( ${VERSION_COUNT} GREATER 1 )
-        list ( GET VERSIONS 1 MINOR )
-        set ( VERSION_MINOR ${MINOR} PARENT_SCOPE )
-        set ( TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${MINOR}" )
-    endif ()
+    if(${VERSION_COUNT} GREATER 2)
+        list(GET VERSIONS 2 PATCH)
+        set(VERSION_PATCH ${PATCH} PARENT_SCOPE)
+        set(TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${PATCH}")
+    endif()
 
-    if ( ${VERSION_COUNT} GREATER 2 )
-        list ( GET VERSIONS 2 PATCH )
-        set ( VERSION_PATCH ${PATCH} PARENT_SCOPE )
-        set ( TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${PATCH}" )
-    endif ()
+    if(DEFINED VERSION_BUILD)
+        set(VERSION_BUILD "${VERSION_BUILD}" PARENT_SCOPE)
+    endif()
 
-    if ( DEFINED VERSION_BUILD )
-        set ( VERSION_BUILD "${VERSION_BUILD}" PARENT_SCOPE )
-    endif ()
-
-    set ( VERSION_STRING "${TEMP_VERSION_STRING}" PARENT_SCOPE )
-
-endfunction ()
+    set(VERSION_STRING "${TEMP_VERSION_STRING}" PARENT_SCOPE)
+endfunction()
 
 ## Gets the current version of the repository
 ## using versioning tags and git describe.
 ## Passes back a packaging version string
 ## and a library version string.
-function ( get_version DEFAULT_VERSION_STRING )
+function(get_version DEFAULT_VERSION_STRING)
+    parse_version( ${DEFAULT_VERSION_STRING} )
 
-    parse_version ( ${DEFAULT_VERSION_STRING} )
+    find_program(GIT NAMES git)
 
-    find_program ( GIT NAMES git )
+    if(GIT)
+        execute_process(
+            COMMAND git describe --tags --dirty --long
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            OUTPUT_VARIABLE GIT_TAG_STRING
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE RESULT
+        )
 
-    if ( GIT )
+        if(${RESULT} EQUAL 0)
+            parse_version( ${GIT_TAG_STRING} )
+        endif()
+    endif()
 
-        execute_process ( COMMAND git describe --tags --dirty --long
-                          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                          OUTPUT_VARIABLE GIT_TAG_STRING
-                          OUTPUT_STRIP_TRAILING_WHITESPACE
-                          RESULT_VARIABLE RESULT )
-
-        if ( ${RESULT} EQUAL 0 )
-
-            parse_version ( ${GIT_TAG_STRING} )
-
-        endif ()
-
-    endif ()
-
-    set( VERSION_STRING "${VERSION_STRING}" PARENT_SCOPE )
-    set( VERSION_MAJOR  "${VERSION_MAJOR}" PARENT_SCOPE )
-    set( VERSION_MINOR  "${VERSION_MINOR}" PARENT_SCOPE )
-    set( VERSION_PATCH  "${VERSION_PATCH}" PARENT_SCOPE )
-    set( VERSION_BUILD  "${VERSION_BUILD}" PARENT_SCOPE )
-
+    set(VERSION_STRING "${VERSION_STRING}" PARENT_SCOPE)
+    set(VERSION_MAJOR "${VERSION_MAJOR}" PARENT_SCOPE)
+    set(VERSION_MINOR "${VERSION_MINOR}" PARENT_SCOPE)
+    set(VERSION_PATCH "${VERSION_PATCH}" PARENT_SCOPE)
+    set(VERSION_BUILD "${VERSION_BUILD}" PARENT_SCOPE)
 endfunction()
 
 #get the OS version
 function(get_os_info)
-if( EXISTS "/etc/os-release")
-    file(STRINGS "/etc/os-release" DISTRO_ID REGEX "^ID=")
-    file(STRINGS "/etc/os-release" DISTRO_RELEASE REGEX "^VERSION_ID=")
-    string(REPLACE "ID=" "" DISTRO_ID "${DISTRO_ID}")
-    string(REPLACE "VERSION_ID=" "" DISTRO_RELEASE "${DISTRO_RELEASE}")
-    message(STATUS "Detected distribution: ${DISTRO_ID}:${DISTRO_RELEASE}")
-elseif(EXISTS "/etc/centos-release" )
-    # Example: CentOS release 6.10 (Final)
-    file(STRINGS "/etc/centos-release" DISTRO_FULL_STR REGEX "release")
-    string(REGEX MATCH "^[a-zA-Z]+" DISTRO_ID "${DISTRO_FULL_STR}")
-    string(TOLOWER "${DISTRO_ID}" DISTRO_ID)
-    string(REGEX MATCH "[0-9]+" DISTRO_RELEASE "${DISTRO_FULL_STR}")
-    message(STATUS "Detected distribution: ${DISTRO_ID}:${DISTRO_RELEASE}")
-else()
-     message(STATUS "Not able to detect OS")
-endif()
-    set(DISTRO_ID "${DISTRO_ID}" PARENT_SCOPE )
-    set(DISTRO_RELEASE "${DISTRO_RELEASE}" PARENT_SCOPE )
-
+    if(EXISTS "/etc/os-release")
+        file(STRINGS "/etc/os-release" DISTRO_ID REGEX "^ID=")
+        file(STRINGS "/etc/os-release" DISTRO_RELEASE REGEX "^VERSION_ID=")
+        string(REPLACE "ID=" "" DISTRO_ID "${DISTRO_ID}")
+        string(REPLACE "VERSION_ID=" "" DISTRO_RELEASE "${DISTRO_RELEASE}")
+        message(STATUS "Detected distribution: ${DISTRO_ID}:${DISTRO_RELEASE}")
+    elseif(EXISTS "/etc/centos-release")
+        # Example: CentOS release 6.10 (Final)
+        file(STRINGS "/etc/centos-release" DISTRO_FULL_STR REGEX "release")
+        string(REGEX MATCH "^[a-zA-Z]+" DISTRO_ID "${DISTRO_FULL_STR}")
+        string(TOLOWER "${DISTRO_ID}" DISTRO_ID)
+        string(REGEX MATCH "[0-9]+" DISTRO_RELEASE "${DISTRO_FULL_STR}")
+        message(STATUS "Detected distribution: ${DISTRO_ID}:${DISTRO_RELEASE}")
+    else()
+        message(STATUS "Not able to detect OS")
+    endif()
+    set(DISTRO_ID "${DISTRO_ID}" PARENT_SCOPE)
+    set(DISTRO_RELEASE "${DISTRO_RELEASE}" PARENT_SCOPE)
 endfunction()

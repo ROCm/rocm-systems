@@ -3,4 +3,3 @@ jobs:
     output_format: [csv]
     sys_trace: True
     agent_index: type-relative
-

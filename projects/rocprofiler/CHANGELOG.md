@@ -381,7 +381,7 @@ Example for file plugin output:
 - Fixed missing profiler records issue caused while running `--trace-period`
 - Fixed the hang issue of `ProfilerAPITest` of `runFeatureTests` on AMD Instinct MI300 accelerator
 - Fixed segment fault on Navi32
-  
+
 ## ROCProfiler for ROCm 6.4
 
 ### Added
@@ -403,4 +403,3 @@ Example for file plugin output:
 ### Removed
 
 - `rocprofv2` doesn't support gfx12. For gfx12, use `rocprofv3` tool.
-

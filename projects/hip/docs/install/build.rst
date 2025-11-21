@@ -43,7 +43,7 @@ In addition, the following components are also part of the monrepository:
 
 * ``clr``, AMD's Compute Language Runtime, includes ROCclr, HIPAMD and OpenCl.
 * ``hipother``, provides files required to support the HIP back-end implementation on some non-AMD platforms, like NVIDIA.
-* ``hip-tests``, the HIP testing suite. 
+* ``hip-tests``, the HIP testing suite.
 
 Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for ROCM 7.1, use:
 
@@ -60,7 +60,7 @@ Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for 
 
         .. code-block:: shell
 
-           git clone -b "$ROCM_BRANCH" git@github.com:ROCm/rocm-systems.git   
+           git clone -b "$ROCM_BRANCH" git@github.com:ROCm/rocm-systems.git
 
      #. Set the environment variables.
 
@@ -87,7 +87,7 @@ Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for 
            By default, the release version of HIP is built. If you need a debug version, you can put the option ``CMAKE_BUILD_TYPE=Debug`` in the command line.
 
         Default paths and environment variables:
-         
+
         * HIP is installed into ``<ROCM_PATH>``. This can be overridden by setting the ``INSTALL_PREFIX`` as the command option.
 
         * HSA is in ``<ROCM_PATH>``. This can be overridden by setting the ``HSA_PATH``

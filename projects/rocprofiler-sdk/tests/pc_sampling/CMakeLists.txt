@@ -7,9 +7,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -30,26 +35,31 @@ find_package(rocprofiler-sdk REQUIRED)
 add_library(pc-sampling-integration-test-client SHARED)
 target_sources(
     pc-sampling-integration-test-client
-    PRIVATE address_translation.cpp
-            address_translation.hpp
-            client.cpp
-            client.hpp
-            cid_retirement.cpp
-            cid_retirement.hpp
-            codeobj.cpp
-            codeobj.hpp
-            external_cid.cpp
-            external_cid.hpp
-            kernel_tracing.cpp
-            kernel_tracing.hpp
-            pcs.hpp
-            pcs.cpp
-            utils.hpp
-            utils.cpp)
+    PRIVATE
+        address_translation.cpp
+        address_translation.hpp
+        client.cpp
+        client.hpp
+        cid_retirement.cpp
+        cid_retirement.hpp
+        codeobj.cpp
+        codeobj.hpp
+        external_cid.cpp
+        external_cid.hpp
+        kernel_tracing.cpp
+        kernel_tracing.hpp
+        pcs.hpp
+        pcs.cpp
+        utils.hpp
+        utils.cpp
+)
 target_link_libraries(
     pc-sampling-integration-test-client
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-            rocprofiler-sdk::tests-common-library)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk
+        rocprofiler-sdk::tests-build-flags
+        rocprofiler-sdk::tests-common-library
+)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 find_package(Threads REQUIRED)
@@ -58,8 +68,11 @@ add_executable(pc-sampling-integration-test)
 target_sources(pc-sampling-integration-test PRIVATE main.cpp)
 target_link_libraries(
     pc-sampling-integration-test
-    PRIVATE pc-sampling-integration-test-client Threads::Threads
-            rocprofiler-sdk::tests-build-flags)
+    PRIVATE
+        pc-sampling-integration-test-client
+        Threads::Threads
+        rocprofiler-sdk::tests-build-flags
+)
 
 # Check if PC sampling is disabled and whether we should disable the test
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
@@ -72,4 +85,5 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     SKIP_REGULAR_EXPRESSION "PC sampling unavailable"
-    DISABLED "${IS_PC_SAMPLING_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_DISABLED}"
+)

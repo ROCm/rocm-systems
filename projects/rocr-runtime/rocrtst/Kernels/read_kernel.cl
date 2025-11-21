@@ -1,6 +1,6 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -10,7 +10,7 @@
  *
  * @param src Pointer to an array of 16 unsigned integers (32-bit) i.e. one instance
  * has 16 * 32-bit = 64 bytes
- * 
+ *
  * @param size Specifies number of uint16 elements in the array
  *
  * @param threads Number of threads running this kernel
@@ -32,7 +32,7 @@ __kernel void
   uint16 pval;
   int idx = get_global_id(0);
   __global uint16 *srcEnd = src + size;
-  
+
   uint tmp = 0;
   src = &src[idx];
   while (src < srcEnd) {
@@ -45,4 +45,3 @@ __kernel void
   }
   atomic_add(dst, tmp);
 }
-

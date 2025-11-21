@@ -277,7 +277,7 @@ inline auto getNormalizedFloatType(const T &t) {
       return f;
     }
     if constexpr (rank<T>() == 2) {
-      float2 f{static_cast<float>(t.x) / std::numeric_limits<decltype(T::x)>::max(), 
+      float2 f{static_cast<float>(t.x) / std::numeric_limits<decltype(T::x)>::max(),
                static_cast<float>(t.y) / std::numeric_limits<decltype(T::y)>::max()};
       return f;
     }

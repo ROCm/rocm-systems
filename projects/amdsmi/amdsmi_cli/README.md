@@ -25,4 +25,3 @@ portal](https://rocm.docs.amd.com/projects/en/latest/index.html).
 - [Install AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html)
 
 - [CLI tool usage](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-cli-tool.html).
-

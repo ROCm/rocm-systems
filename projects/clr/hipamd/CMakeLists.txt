@@ -38,7 +38,6 @@ include(GNUInstallDirs)
 #  By default, CMake will search for a folder named opencl or ROCm-OpenCL-Runtime relative to the current path. Specify -DAMD_OPENCL_PATH=$OPENCL_DIR if opencl source is in obscure location.
 list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 
-
 #############################
 # Options
 #############################
@@ -46,17 +45,21 @@ option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 if(MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DEBUG:FULL")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DEBUG:FULL")
 endif()
 
 # Set default HIPCC_BIN_DIR to /opt/rocm/bin
-set(HIPCC_BIN_DIR "/opt/rocm/bin" CACHE STRING "HIPCC and HIPCONFIG binary directories")
+set(HIPCC_BIN_DIR
+    "/opt/rocm/bin"
+    CACHE STRING
+    "HIPCC and HIPCONFIG binary directories"
+)
 
 if(__HIP_ENABLE_PCH)
-  set(_pchStatus 1)
+    set(_pchStatus 1)
 else()
-  set(_pchStatus 0)
+    set(_pchStatus 0)
 endif()
 
 message(STATUS "HIPCC_BIN_DIR found at ${HIPCC_BIN_DIR}")
@@ -64,12 +67,12 @@ message(STATUS "HIP_COMMON_DIR found at ${HIP_COMMON_DIR}")
 message(STATUS "HIPNV_DIR found at ${HIPNV_DIR}")
 set(HIP_COMMON_INCLUDE_DIR ${HIP_COMMON_DIR}/include)
 set(HIP_COMMON_BIN_DIR ${HIP_COMMON_DIR}/bin)
-if (WIN32)
-  set(HIPCC_EXECUTABLE "hipcc.exe")
-  set(HIPCONFIG_EXECUTABLE "hipconfig.exe")
+if(WIN32)
+    set(HIPCC_EXECUTABLE "hipcc.exe")
+    set(HIPCONFIG_EXECUTABLE "hipconfig.exe")
 else()
-  set(HIPCC_EXECUTABLE "hipcc")
-  set(HIPCONFIG_EXECUTABLE "hipconfig")
+    set(HIPCC_EXECUTABLE "hipcc")
+    set(HIPCONFIG_EXECUTABLE "hipconfig")
 endif()
 
 #############################
@@ -95,38 +98,56 @@ list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
 list(GET VERSION_LIST 2 HIP_VERSION_PATCH)
 
 if(HIP_VERSION_PATCH EQUAL 0 AND GIT_FOUND AND UNIX)
-  execute_process(
-    COMMAND ${GIT_EXECUTABLE} fetch --tags origin
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-    OUTPUT_QUIET
-    ERROR_QUIET)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} fetch --tags origin
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
 
-  execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --tags --match "hip-version_*" --abbrev=0 HEAD
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-    RESULT_VARIABLE _git_tag_result
-    OUTPUT_VARIABLE _git_tag_string
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET)
+    execute_process(
+        COMMAND
+            ${GIT_EXECUTABLE} describe --tags --match "hip-version_*" --abbrev=0
+            HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+        RESULT_VARIABLE _git_tag_result
+        OUTPUT_VARIABLE _git_tag_string
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
 
-  if(_git_tag_result EQUAL 0 AND _git_tag_string)
-    string(REGEX MATCH "hip-version_([0-9]+)\\.([0-9]+)\\.([0-9]+)" _version_matched "${_git_tag_string}")
+    if(_git_tag_result EQUAL 0 AND _git_tag_string)
+        string(
+            REGEX MATCH
+            "hip-version_([0-9]+)\\.([0-9]+)\\.([0-9]+)"
+            _version_matched
+            "${_git_tag_string}"
+        )
 
-    if(_version_matched)
-      set(HIP_VERSION_MAJOR ${CMAKE_MATCH_1})
-      set(HIP_VERSION_MINOR ${CMAKE_MATCH_2})
-      set(HIP_VERSION_PATCH ${CMAKE_MATCH_3})
+        if(_version_matched)
+            set(HIP_VERSION_MAJOR ${CMAKE_MATCH_1})
+            set(HIP_VERSION_MINOR ${CMAKE_MATCH_2})
+            set(HIP_VERSION_PATCH ${CMAKE_MATCH_3})
 
-      file(WRITE ${HIP_COMMON_DIR}/VERSION
-           "#HIP_VERSION_MAJOR\n${HIP_VERSION_MAJOR}\n"
-           "#HIP_VERSION_MINOR\n${HIP_VERSION_MINOR}\n"
-           "#HIP_VERSION_PATCH\n${HIP_VERSION_PATCH}\n")
+            file(
+                WRITE
+                ${HIP_COMMON_DIR}/VERSION
+                "#HIP_VERSION_MAJOR\n${HIP_VERSION_MAJOR}\n"
+                "#HIP_VERSION_MINOR\n${HIP_VERSION_MINOR}\n"
+                "#HIP_VERSION_PATCH\n${HIP_VERSION_PATCH}\n"
+            )
 
-      message(STATUS "Updated HIP version from git tag: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH} -> ${HIP_COMMON_DIR}/VERSION")
+            message(
+                STATUS
+                "Updated HIP version from git tag: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH} -> ${HIP_COMMON_DIR}/VERSION"
+            )
+        endif()
     endif()
-  endif()
 else()
-  message(STATUS "Using HIP version from VERSION file: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
+    message(
+        STATUS
+        "Using HIP version from VERSION file: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}"
+    )
 endif()
 
 set(HIP_VERSION_GITDATE 0)
@@ -134,97 +155,125 @@ set(HIP_VERSION_GITDATE 0)
 # FIXME: Two different version strings used.
 # Below we use UNIX commands, not compatible with Windows.
 if(GIT_FOUND)
-  # use the commit date, instead of build date
-  execute_process(COMMAND ${GIT_EXECUTABLE} show -s --format=%ct
-    RESULT_VARIABLE git_result
-    OUTPUT_VARIABLE git_output
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(git_result EQUAL 0)
-    set(HIP_VERSION_UNIXDATE ${git_output})
-  endif()
+    # use the commit date, instead of build date
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} show -s --format=%ct
+        RESULT_VARIABLE git_result
+        OUTPUT_VARIABLE git_output
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(git_result EQUAL 0)
+        set(HIP_VERSION_UNIXDATE ${git_output})
+    endif()
 
-  # get date information based on UTC
-  # use the last two digits of year + week number + day in the week as HIP_VERSION_GITDATE
-  execute_process(COMMAND ${PERL_EXECUTABLE} "-MPOSIX=strftime" "-le" "print strftime \'%y%W%w\',gmtime(${HIP_VERSION_UNIXDATE})"
-    RESULT_VARIABLE git_result
-    OUTPUT_VARIABLE git_output
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(git_result EQUAL 0)
-    set(HIP_VERSION_GITDATE ${git_output})
-  endif()
+    # get date information based on UTC
+    # use the last two digits of year + week number + day in the week as HIP_VERSION_GITDATE
+    execute_process(
+        COMMAND
+            ${PERL_EXECUTABLE} "-MPOSIX=strftime" "-le"
+            "print strftime \'%y%W%w\',gmtime(${HIP_VERSION_UNIXDATE})"
+        RESULT_VARIABLE git_result
+        OUTPUT_VARIABLE git_output
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(git_result EQUAL 0)
+        set(HIP_VERSION_GITDATE ${git_output})
+    endif()
 
-  # get commit short hash
-  execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    RESULT_VARIABLE git_result
-    OUTPUT_VARIABLE git_output
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(git_result EQUAL 0)
-    set(HIP_VERSION_GITHASH ${git_output})
-  endif()
+    # get commit short hash
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        RESULT_VARIABLE git_result
+        OUTPUT_VARIABLE git_output
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(git_result EQUAL 0)
+        set(HIP_VERSION_GITHASH ${git_output})
+    endif()
 
-  set(HIP_VERSION_BUILD_ID 0)
-  set(HIP_VERSION_BUILD_NAME "")
+    set(HIP_VERSION_BUILD_ID 0)
+    set(HIP_VERSION_BUILD_NAME "")
 
-  if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
-  else()
-    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
-  endif()
+    if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
+        set(HIP_PACKAGING_VERSION_PATCH
+            ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION}
+        )
+    else()
+        set(HIP_PACKAGING_VERSION_PATCH
+            ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH}
+        )
+    endif()
 else()
-  set(HIP_VERSION_BUILD_ID 0)
-  set(HIP_VERSION_BUILD_NAME "")
-  # FIXME: Some parts depend on this being set.
-  set(HIP_PACKAGING_VERSION_PATCH "0")
+    set(HIP_VERSION_BUILD_ID 0)
+    set(HIP_VERSION_BUILD_NAME "")
+    # FIXME: Some parts depend on this being set.
+    set(HIP_PACKAGING_VERSION_PATCH "0")
 endif()
 
 ## Debian package specific variables
-if ( DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE} )
-  set ( CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE} )
+if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+    set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
 else()
-  set ( CPACK_DEBIAN_PACKAGE_RELEASE "local" )
+    set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
 endif()
-message (STATUS "Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}" )
+message(
+    STATUS
+    "Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}"
+)
 
 ## RPM package specific variables
-if ( DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE} )
-  set ( CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE} )
+if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
+    set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
 else()
-  set ( CPACK_RPM_PACKAGE_RELEASE "local" )
+    set(CPACK_RPM_PACKAGE_RELEASE "local")
 endif()
 
-set ( EL7_DISTRO "FALSE" )
+set(EL7_DISTRO "FALSE")
 ## 'dist' breaks manual builds on debian systems due to empty Provides
-execute_process( COMMAND rpm --eval %{?dist}
-                 RESULT_VARIABLE PROC_RESULT
-                 OUTPUT_VARIABLE EVAL_RESULT
-                 OUTPUT_STRIP_TRAILING_WHITESPACE )
+execute_process(
+    COMMAND rpm --eval %{?dist}
+    RESULT_VARIABLE PROC_RESULT
+    OUTPUT_VARIABLE EVAL_RESULT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 
-if ( PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "" )
-  string ( APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}" )
-  if ( "${EVAL_RESULT}" STREQUAL ".el7" )
-     set ( EL7_DISTRO "TRUE" )
-  endif() # end check string el7
+if(PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "")
+    string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
+    if("${EVAL_RESULT}" STREQUAL ".el7")
+        set(EL7_DISTRO "TRUE")
+    endif() # end check string el7
 endif()
 message(STATUS "CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
 
-set (DEB10_DISTRO "FALSE")
-execute_process( COMMAND sh "-c" "cat /etc/os-release | grep \"^NAME=\""
-                 RESULT_VARIABLE PROC_RESULT_NAME
-                 OUTPUT_VARIABLE OS_NAME_RESULT
-                 OUTPUT_STRIP_TRAILING_WHITESPACE )
-execute_process( COMMAND sh "-c" "cat /etc/os-release | grep \"^VERSION_ID=\""
-                 RESULT_VARIABLE PROC_RESULT_VERSION
-                 OUTPUT_VARIABLE OS_VERSION_ID_RESULT
-                 OUTPUT_STRIP_TRAILING_WHITESPACE )
+set(DEB10_DISTRO "FALSE")
+execute_process(
+    COMMAND sh "-c" "cat /etc/os-release | grep \"^NAME=\""
+    RESULT_VARIABLE PROC_RESULT_NAME
+    OUTPUT_VARIABLE OS_NAME_RESULT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+execute_process(
+    COMMAND sh "-c" "cat /etc/os-release | grep \"^VERSION_ID=\""
+    RESULT_VARIABLE PROC_RESULT_VERSION
+    OUTPUT_VARIABLE OS_VERSION_ID_RESULT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 
-if ( PROC_RESULT_NAME EQUAL "0" AND NOT OS_NAME_RESULT STREQUAL "" AND
-     PROC_RESULT_VERSION EQUAL "0" AND NOT OS_VERSION_ID_RESULT STREQUAL "")
-  if ( "${OS_NAME_RESULT}" STREQUAL "NAME=\"Debian GNU/Linux\"" AND "${OS_VERSION_ID_RESULT}" STREQUAL "VERSION_ID=\"10\"")
-     set ( DEB10_DISTRO "TRUE" )
-  endif()
+if(
+    PROC_RESULT_NAME EQUAL "0"
+    AND NOT OS_NAME_RESULT STREQUAL ""
+    AND PROC_RESULT_VERSION EQUAL "0"
+    AND NOT OS_VERSION_ID_RESULT STREQUAL ""
+)
+    if(
+        "${OS_NAME_RESULT}" STREQUAL "NAME=\"Debian GNU/Linux\""
+        AND "${OS_VERSION_ID_RESULT}" STREQUAL "VERSION_ID=\"10\""
+    )
+        set(DEB10_DISTRO "TRUE")
+    endif()
 endif()
 
 add_to_config(_versionInfo HIP_PACKAGING_VERSION_PATCH)
@@ -236,23 +285,27 @@ add_to_config(_versionInfo HIP_VERSION_MINOR)
 add_to_config(_versionInfo HIP_VERSION_PATCH)
 add_to_config(_versionInfo HIP_VERSION_GITHASH)
 
-set (HIP_LIB_VERSION_MAJOR ${HIP_VERSION_MAJOR})
-set (HIP_LIB_VERSION_MINOR ${HIP_VERSION_MINOR})
-if (${ROCM_PATCH_VERSION} )
-   set (HIP_LIB_VERSION_PATCH ${ROCM_PATCH_VERSION})
-elseif (DEFINED HIP_VERSION_GITHASH)
-   set (HIP_LIB_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
-else ()
-   set (HIP_LIB_VERSION_PATCH ${HIP_VERSION_PATCH})
-endif ()
-set (HIP_LIB_VERSION_STRING "${HIP_LIB_VERSION_MAJOR}.${HIP_LIB_VERSION_MINOR}.${HIP_LIB_VERSION_PATCH}")
+set(HIP_LIB_VERSION_MAJOR ${HIP_VERSION_MAJOR})
+set(HIP_LIB_VERSION_MINOR ${HIP_VERSION_MINOR})
+if(${ROCM_PATCH_VERSION})
+    set(HIP_LIB_VERSION_PATCH ${ROCM_PATCH_VERSION})
+elseif(DEFINED HIP_VERSION_GITHASH)
+    set(HIP_LIB_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
+else()
+    set(HIP_LIB_VERSION_PATCH ${HIP_VERSION_PATCH})
+endif()
+set(HIP_LIB_VERSION_STRING
+    "${HIP_LIB_VERSION_MAJOR}.${HIP_LIB_VERSION_MINOR}.${HIP_LIB_VERSION_PATCH}"
+)
 
 # overwrite HIP_VERSION_PATCH for packaging
-set(HIP_VERSION ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_PACKAGING_VERSION_PATCH})
+set(HIP_VERSION
+    ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_PACKAGING_VERSION_PATCH}
+)
 
 # Remove when CI is updated
 if(HIP_PLATFORM STREQUAL "rocclr")
-   set(HIP_PLATFORM "amd")
+    set(HIP_PLATFORM "amd")
 endif()
 #############################
 # Configure variables
@@ -260,9 +313,11 @@ endif()
 # Determine HIP_PLATFORM
 if(NOT DEFINED HIP_PLATFORM)
     if(NOT DEFINED ENV{HIP_PLATFORM})
-        execute_process(COMMAND ${__HIPCONFIG_EXECUTABLE__} --platform
+        execute_process(
+            COMMAND ${__HIPCONFIG_EXECUTABLE__} --platform
             OUTPUT_VARIABLE HIP_PLATFORM
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
     else()
         set(HIP_PLATFORM $ENV{HIP_PLATFORM} CACHE STRING "HIP Platform")
     endif()
@@ -270,10 +325,13 @@ endif()
 message(STATUS "HIP Platform: " ${HIP_PLATFORM})
 
 if(HIP_PLATFORM STREQUAL "nvidia")
-    set(HIP_RUNTIME "cuda"  CACHE STRING "HIP Runtime")
+    set(HIP_RUNTIME "cuda" CACHE STRING "HIP Runtime")
     set(HIP_COMPILER "nvcc" CACHE STRING "HIP Compiler")
-    if (NOT EXISTS ${HIPNV_DIR})
-      message(FATAL_ERROR "Invalid path HIPNV_DIR=${HIPNV_DIR}, please pass valid path -DHIPNV_DIR=<path>" )
+    if(NOT EXISTS ${HIPNV_DIR})
+        message(
+            FATAL_ERROR
+            "Invalid path HIPNV_DIR=${HIPNV_DIR}, please pass valid path -DHIPNV_DIR=<path>"
+        )
     endif()
 elseif(HIP_PLATFORM STREQUAL "amd")
     set(HIP_RUNTIME "rocclr" CACHE STRING "HIP Runtime")
@@ -288,37 +346,61 @@ message(STATUS "HIP Compiler: " ${HIP_COMPILER})
 add_to_config(_buildInfo HIP_RUNTIME)
 add_to_config(_buildInfo HIP_COMPILER)
 
-if (NOT DEFINED ROCM_PATH )
-     set ( ROCM_PATH "/opt/rocm"  CACHE STRING "Default ROCM installation directory." )
-endif ()
-message (STATUS "ROCM Installation path(ROCM_PATH): ${ROCM_PATH}")
+if(NOT DEFINED ROCM_PATH)
+    set(ROCM_PATH
+        "/opt/rocm"
+        CACHE STRING
+        "Default ROCM installation directory."
+    )
+endif()
+message(STATUS "ROCM Installation path(ROCM_PATH): ${ROCM_PATH}")
 
 # Determine HIP install path
-if (UNIX)
+if(UNIX)
     set(HIP_DEFAULT_INSTALL_PREFIX "${ROCM_PATH}")
 endif()
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX ${HIP_DEFAULT_INSTALL_PREFIX} CACHE PATH "Installation path for HIP" FORCE)
+    set(CMAKE_INSTALL_PREFIX
+        ${HIP_DEFAULT_INSTALL_PREFIX}
+        CACHE PATH
+        "Installation path for HIP"
+        FORCE
+    )
 endif()
 
 if(DEV_LOG_ENABLE MATCHES "yes")
-  add_definitions(-DDEV_LOG_ENABLE)
+    add_definitions(-DDEV_LOG_ENABLE)
 endif()
 
 # Set default install path as "${ROCM_PATH}", can override the path from cmake build.
-set(CPACK_INSTALL_PREFIX ${HIP_DEFAULT_INSTALL_PREFIX} CACHE PATH "Package Installation path for HIP")
+set(CPACK_INSTALL_PREFIX
+    ${HIP_DEFAULT_INSTALL_PREFIX}
+    CACHE PATH
+    "Package Installation path for HIP"
+)
 
 if(IS_ABSOLUTE ${CMAKE_INSTALL_PREFIX})
     message(STATUS "HIP will be installed in: " ${CMAKE_INSTALL_PREFIX})
 else()
-    message(FATAL_ERROR "Don't know where to install HIP. Please specify absolute path using -DCMAKE_INSTALL_PREFIX")
+    message(
+        FATAL_ERROR
+        "Don't know where to install HIP. Please specify absolute path using -DCMAKE_INSTALL_PREFIX"
+    )
 endif()
 
 # set the installation path for the installer package
-set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
-if (NOT CPACK_SET_DESTDIR)
-  set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Default installation path of hcc installer package")
-endif (NOT CPACK_SET_DESTDIR)
+set(CPACK_SET_DESTDIR
+    ON
+    CACHE BOOL
+    "Installer package will install hip to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX"
+)
+if(NOT CPACK_SET_DESTDIR)
+    set(CPACK_PACKAGING_INSTALL_PREFIX
+        "${ROCM_PATH}"
+        CACHE PATH
+        "Default installation path of hcc installer package"
+    )
+endif(NOT CPACK_SET_DESTDIR)
 
 #############################
 # Build steps
@@ -332,7 +414,7 @@ set(CONFIG_RTC_PACKAGE_INSTALL_DIR ${LIB_INSTALL_DIR}/cmake/hiprtc)
 
 # Generate hip_version.h
 set(_versionInfoHeader
-"// Auto-generated by cmake\n
+    "// Auto-generated by cmake\n
 #ifndef HIP_VERSION_H
 #define HIP_VERSION_H\n
 #define HIP_VERSION_MAJOR ${HIP_VERSION_MAJOR}
@@ -344,8 +426,13 @@ set(_versionInfoHeader
 #define HIP_VERSION    (HIP_VERSION_MAJOR * 10000000 + HIP_VERSION_MINOR * 100000 + HIP_VERSION_PATCH)\n
 #define __HIP_HAS_GET_PCH ${_pchStatus}\n
 #endif\n
-")
-file(WRITE "${PROJECT_BINARY_DIR}/include/hip/hip_version.h" ${_versionInfoHeader})
+"
+)
+file(
+    WRITE
+    "${PROJECT_BINARY_DIR}/include/hip/hip_version.h"
+    ${_versionInfoHeader}
+)
 
 # Generate .hipInfo
 file(WRITE "${PROJECT_BINARY_DIR}/share/hip/.hipInfo" ${_buildInfo})
@@ -354,20 +441,33 @@ file(WRITE "${PROJECT_BINARY_DIR}/share/hip/.hipInfo" ${_buildInfo})
 file(WRITE "${PROJECT_BINARY_DIR}/share/hip/version" ${_versionInfo})
 
 if(HIP_RUNTIME STREQUAL "rocclr")
-   add_subdirectory(src)
+    add_subdirectory(src)
 endif()
 
 # Build doxygen documentation
 find_program(DOXYGEN_EXE doxygen)
 if(DOXYGEN_EXE)
     if(EXISTS "${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg")
-        add_custom_target(doc COMMAND HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE} ${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
+        add_custom_target(
+            doc
+            COMMAND
+                HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE}
+                ${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs
+        )
     elseif(EXISTS "${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile")
-        add_custom_target(doc COMMAND HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE} ${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
+        add_custom_target(
+            doc
+            COMMAND
+                HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE}
+                ${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs
+        )
     else()
-        message(STATUS "Unable to find doxygen config file. Will not generate doxygen output")
+        message(
+            STATUS
+            "Unable to find doxygen config file. Will not generate doxygen output"
+        )
     endif()
 endif()
 
@@ -376,82 +476,139 @@ endif()
 #############################
 
 # Install .hipInfo
-install(FILES ${PROJECT_BINARY_DIR}/share/hip/.hipInfo DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(
+    FILES ${PROJECT_BINARY_DIR}/share/hip/.hipInfo
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 # Install version
-install(FILES ${PROJECT_BINARY_DIR}/share/hip/version DESTINATION ${CMAKE_INSTALL_DATADIR}/hip)
+install(
+    FILES ${PROJECT_BINARY_DIR}/share/hip/version
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/hip
+)
 # .hipVersion is added to satisfy Windows compute build.
 #TODO to be removed
 if(WIN32)
-    install(FILES ${PROJECT_BINARY_DIR}/share/hip/version DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME .hipVersion)
+    install(
+        FILES ${PROJECT_BINARY_DIR}/share/hip/version
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+        RENAME .hipVersion
+    )
 endif()
 
 # Install src, bin, include & cmake if necessary
-execute_process(COMMAND test ${CMAKE_INSTALL_PREFIX} -ef ${CMAKE_CURRENT_SOURCE_DIR}
-    RESULT_VARIABLE INSTALL_SOURCE)
+execute_process(
+    COMMAND test ${CMAKE_INSTALL_PREFIX} -ef ${CMAKE_CURRENT_SOURCE_DIR}
+    RESULT_VARIABLE INSTALL_SOURCE
+)
 if(NOT ${INSTALL_SOURCE} EQUAL 0)
     if(WIN32)
-      install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS)
-      if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/src/" DESTINATION ${CMAKE_INSTALL_BINDIR}
-                FILES_MATCHING PATTERN "*.pdb"
-                               PATTERN "*.ilk"
-                               PATTERN "CMakeFiles" EXCLUDE
-                               PATTERN "hip_rtc_gen" EXCLUDE
-                               PATTERN "libelf" EXCLUDE
-                               PATTERN "loader" EXCLUDE
-                               PATTERN "pal" EXCLUDE
-                               PATTERN "libamdhsacode" EXCLUDE)
-      endif()
+        install(
+            DIRECTORY ${HIP_COMMON_BIN_DIR}
+            DESTINATION .
+            USE_SOURCE_PERMISSIONS
+        )
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            install(
+                DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/src/"
+                DESTINATION ${CMAKE_INSTALL_BINDIR}
+                FILES_MATCHING
+                PATTERN "*.pdb"
+                PATTERN "*.ilk"
+                PATTERN "CMakeFiles" EXCLUDE
+                PATTERN "hip_rtc_gen" EXCLUDE
+                PATTERN "libelf" EXCLUDE
+                PATTERN "loader" EXCLUDE
+                PATTERN "pal" EXCLUDE
+                PATTERN "libamdhsacode" EXCLUDE
+            )
+        endif()
     else()
-      # Exclude .bat files on Linux.
-      #Hip bin files moved to /opt/rocm/bin and the file permission need to set properly
-      install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS
-              DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-              PATTERN *.bat EXCLUDE)
+        # Exclude .bat files on Linux.
+        #Hip bin files moved to /opt/rocm/bin and the file permission need to set properly
+        install(
+            DIRECTORY ${HIP_COMMON_BIN_DIR}
+            DESTINATION .
+            USE_SOURCE_PERMISSIONS
+            DIRECTORY_PERMISSIONS
+                OWNER_READ
+                OWNER_WRITE
+                OWNER_EXECUTE
+                GROUP_READ
+                GROUP_EXECUTE
+                WORLD_READ
+                WORLD_EXECUTE
+            PATTERN *.bat EXCLUDE
+        )
     endif()
 
     if(WIN32) #not required for flat folder structure
-      # The following two lines will be removed after upstream updation
-      install(CODE "MESSAGE(\"Removing ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}\")")
-      install(CODE "file(REMOVE_RECURSE ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})")
+        # The following two lines will be removed after upstream updation
+        install(
+            CODE
+                "MESSAGE(\"Removing ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}\")"
+        )
+        install(
+            CODE
+                "file(REMOVE_RECURSE ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})"
+        )
     endif()
 
     install(DIRECTORY include DESTINATION .)
     if(DEFINED HIPNV_DIR)
-        install(DIRECTORY ${HIPNV_DIR}/include/hip/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/)
+        install(
+            DIRECTORY ${HIPNV_DIR}/include/hip/
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/
+        )
     endif()
-    install(DIRECTORY ${HIP_COMMON_INCLUDE_DIR}/hip/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/)
+    install(
+        DIRECTORY ${HIP_COMMON_INCLUDE_DIR}/hip/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/
+    )
     if(WIN32)
-      install(DIRECTORY ${HIP_COMMON_DIR}/cmake DESTINATION .)
+        install(DIRECTORY ${HIP_COMMON_DIR}/cmake DESTINATION .)
     else()
-      install(DIRECTORY ${HIP_COMMON_DIR}/cmake/ DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR})
+        install(
+            DIRECTORY ${HIP_COMMON_DIR}/cmake/
+            DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+        )
     endif()
 endif()
 
 # Install generated headers
 # FIXME: Associate with individual targets.
 if(HIP_PLATFORM STREQUAL "amd")
-install(FILES ${PROJECT_BINARY_DIR}/include/hip/amd_detail/hip_prof_str.h
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/amd_detail)
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin DESTINATION . USE_SOURCE_PERMISSIONS)
+    install(
+        FILES ${PROJECT_BINARY_DIR}/include/hip/amd_detail/hip_prof_str.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/amd_detail
+    )
+    install(
+        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin
+        DESTINATION .
+        USE_SOURCE_PERMISSIONS
+    )
 endif()
-install(FILES ${PROJECT_BINARY_DIR}/include/hip/hip_version.h
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip)
+install(
+    FILES ${PROJECT_BINARY_DIR}/include/hip/hip_version.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip
+)
 
 set(HIP_INSTALLS_HIPCC OFF)
-if (NOT ${HIPCC_BIN_DIR} STREQUAL "")
-  file(TO_CMAKE_PATH "${HIPCC_BIN_DIR}" HIPCC_BIN_DIR)
-  if(EXISTS ${HIPCC_BIN_DIR})
-    set(HIP_INSTALLS_HIPCC ON)
-    install(PROGRAMS ${HIPCC_BIN_DIR}/${HIPCC_EXECUTABLE} DESTINATION bin)
-    install(PROGRAMS ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE} DESTINATION bin)
+if(NOT ${HIPCC_BIN_DIR} STREQUAL "")
+    file(TO_CMAKE_PATH "${HIPCC_BIN_DIR}" HIPCC_BIN_DIR)
+    if(EXISTS ${HIPCC_BIN_DIR})
+        set(HIP_INSTALLS_HIPCC ON)
+        install(PROGRAMS ${HIPCC_BIN_DIR}/${HIPCC_EXECUTABLE} DESTINATION bin)
+        install(
+            PROGRAMS ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE}
+            DESTINATION bin
+        )
 
-    if(NOT UNIX)
-      install(PROGRAMS ${HIPCC_BIN_DIR}/hipcc.bat DESTINATION bin)
-      install(PROGRAMS ${HIPCC_BIN_DIR}/hipconfig.bat DESTINATION bin)
+        if(NOT UNIX)
+            install(PROGRAMS ${HIPCC_BIN_DIR}/hipcc.bat DESTINATION bin)
+            install(PROGRAMS ${HIPCC_BIN_DIR}/hipconfig.bat DESTINATION bin)
+        endif()
     endif()
-  endif()
 endif()
 
 #############################
@@ -464,36 +621,35 @@ configure_package_config_file(
     ${CMAKE_CURRENT_BINARY_DIR}/hip-config.cmake
     INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
     PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR
-    )
+)
 
 configure_package_config_file(
-      hip-config-amd.cmake.in
-      ${CMAKE_CURRENT_BINARY_DIR}/hip-config-amd.cmake
-      INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
-      PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR
-      )
+    hip-config-amd.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-config-amd.cmake
+    INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+    PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR
+)
 
 configure_package_config_file(
-      hip-config-nvidia.cmake.in
-      ${CMAKE_CURRENT_BINARY_DIR}/hip-config-nvidia.cmake
-      INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
-      PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR
-      )
+    hip-config-nvidia.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-config-nvidia.cmake
+    INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+    PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR
+)
 
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/hip-config-version.cmake
     VERSION "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}"
     COMPATIBILITY SameMajorVersion
-    )
+)
 install(
     FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-config.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-config-amd.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-config-nvidia.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-config-version.cmake
-    DESTINATION
-    ${CONFIG_PACKAGE_INSTALL_DIR}
-    )
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-config-amd.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-config-nvidia.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-config-version.cmake
+    DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+)
 # Packaging invokes UNIX commands, which are not available on Windows.
 
 if(NOT WIN32)
@@ -505,9 +661,17 @@ endif()
 #############################
 # Target: clang
 if(HIP_HIPCC_EXECUTABLE)
-    add_custom_target(analyze
-        COMMAND ${HIP_HIPCC_EXECUTABLE} -fvisibility=hidden -fvisibility-inlines-hidden --analyze --analyzer-outputtext  -isystem ${ROCM_PATH}/${CMAKE_INSTALL_INCLUDEDIR} -Wno-unused-command-line-argument -I${ROCM_PATH}/${CMAKE_INSTALL_INCLUDEDIR} -c  src/*.cpp -Iinclude/ -I./
-    WORKING_DIRECTORY ${HIP_SRC_PATH})
+    add_custom_target(
+        analyze
+        COMMAND
+            ${HIP_HIPCC_EXECUTABLE} -fvisibility=hidden
+            -fvisibility-inlines-hidden --analyze --analyzer-outputtext -isystem
+            ${ROCM_PATH}/${CMAKE_INSTALL_INCLUDEDIR}
+            -Wno-unused-command-line-argument
+            -I${ROCM_PATH}/${CMAKE_INSTALL_INCLUDEDIR} -c src/*.cpp -Iinclude/
+            -I./
+        WORKING_DIRECTORY ${HIP_SRC_PATH}
+    )
     if(CPPCHECK_EXE)
         add_dependencies(analyze cppcheck)
     endif()

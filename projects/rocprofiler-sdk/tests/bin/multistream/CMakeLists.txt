@@ -7,9 +7,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -35,7 +40,10 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(multistream_app.cpp PROPERTIES LANGUAGE HIP)
 add_executable(multistream)
 target_sources(multistream PRIVATE multistream_app.cpp)
-target_compile_options(multistream PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
+target_compile_options(
+    multistream
+    PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
+)
 
 find_package(Threads REQUIRED)
 target_link_libraries(multistream PRIVATE Threads::Threads)

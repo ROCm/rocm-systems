@@ -62,5 +62,3 @@ object file.  All of them have default values, and defined as following:
   $ cd build
   $ cmake -D${OPENCL_DIR} -D${BITCODE_DIR} -D${LLVM_DIR} -D${TARGET_DEVICES} ..
   $ make opencl_blit_objects.cpp
-
-

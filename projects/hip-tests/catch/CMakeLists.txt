@@ -10,7 +10,7 @@ option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
 
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
-if (TEST_CLOCK_CYCLE)
+if(TEST_CLOCK_CYCLE)
     add_definitions(-DTEST_CLOCK_CYCLE)
 endif()
 
@@ -18,7 +18,11 @@ endif()
 message(STATUS "STANDALONE_TESTS : ${STANDALONE_TESTS}")
 
 if(NOT WIN32)
-    set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
+    set(CPACK_SET_DESTDIR
+        ON
+        CACHE BOOL
+        "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX"
+    )
 endif()
 
 # Check if platform is set
@@ -63,34 +67,39 @@ endif()
 message(STATUS "HIP_PATH: ${HIP_PATH}")
 message(STATUS "ROCM_PATH: ${ROCM_PATH}")
 
-if (WIN32)
-  set(HIPCC_EXEC "hipcc.exe")
-  set(HIPCONFIG_EXEC "hipconfig.exe")
+if(WIN32)
+    set(HIPCC_EXEC "hipcc.exe")
+    set(HIPCONFIG_EXEC "hipconfig.exe")
 else()
-  set(HIPCC_EXEC "hipcc")
-  set(HIPCONFIG_EXEC "hipconfig")
+    set(HIPCC_EXEC "hipcc")
+    set(HIPCONFIG_EXEC "hipconfig")
 endif()
 
-set(CMAKE_C_COMPILER   "${HIP_PATH}/bin/${HIPCC_EXEC}")
+set(CMAKE_C_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
 set(CMAKE_CXX_COMPILER "${HIP_PATH}/bin/${HIPCC_EXEC}")
-execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version
-                OUTPUT_VARIABLE HIP_VERSION
-                RESULT_VARIABLE result
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(
+    COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version
+    OUTPUT_VARIABLE HIP_VERSION
+    RESULT_VARIABLE result
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 
 if(result AND NOT result EQUAL 0)
-  message(FATAL_ERROR "Failure trying to obtain HIP version via command: ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version: ${result}")
+    message(
+        FATAL_ERROR
+        "Failure trying to obtain HIP version via command: ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version: ${result}"
+    )
 endif()
 
 if(NOT WIN32)
-  if(NOT BUILD_SHARED_LIBS)
-    list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/llvm)
-    find_package(amd_comgr)
-    find_package(hsa-runtime64)
-    link_libraries(hsa-runtime64::hsa-runtime64)
-    link_libraries(amd_comgr)
-    link_libraries(hiprtc-builtins)
-  endif() # end BUILD_SHARED_LIBS
+    if(NOT BUILD_SHARED_LIBS)
+        list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/llvm)
+        find_package(amd_comgr)
+        find_package(hsa-runtime64)
+        link_libraries(hsa-runtime64::hsa-runtime64)
+        link_libraries(amd_comgr)
+        link_libraries(hiprtc-builtins)
+    endif() # end BUILD_SHARED_LIBS
 endif() # end win32
 
 # enforce c++17
@@ -99,9 +108,15 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++17")
 # Address sanitizer options
 if(ENABLE_ADDRESS_SANITIZER)
     message(STATUS "Building catch tests with Address Sanitizer options")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan")
+    set(CMAKE_C_FLAGS
+        "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz"
+    )
+    set(CMAKE_CXX_FLAGS
+        "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz"
+    )
+    set(CMAKE_EXE_LINKER_FLAGS
+        "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan"
+    )
 endif()
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
@@ -113,9 +128,11 @@ list(GET VERSION_LIST 0 HIP_VERSION_PATCH)
 list(GET VERSION_LIST 1 HIP_VERSION_GITHASH)
 
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-   set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
+    set(HIP_PACKAGING_VERSION_PATCH
+        ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION}
+    )
 else()
-   set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
+    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
 endif()
 
 if(NOT DEFINED CATCH2_PATH)
@@ -137,11 +154,11 @@ if(NOT DEFINED JSON_PARSER)
 endif()
 
 message(STATUS "Searching Catch2 in: ${CMAKE_CURRENT_LIST_DIR}/external")
-find_package(Catch2 REQUIRED
-    PATHS
-        ${CMAKE_CURRENT_LIST_DIR}/external
-    PATH_SUFFIXES
-    Catch2/cmake/Catch2
+find_package(
+    Catch2
+    REQUIRED
+    PATHS ${CMAKE_CURRENT_LIST_DIR}/external
+    PATH_SUFFIXES Catch2/cmake/Catch2
 )
 include(Catch)
 include(CTest)
@@ -158,46 +175,66 @@ include_directories(
 )
 
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
-if (RTC_TESTING)
+if(RTC_TESTING)
     add_definitions(-DRTC_TESTING=ON)
 endif()
 add_definitions(-DKERNELS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/kernels/")
 
 set(CATCH_BUILD_DIR catch_tests)
-set(HIP_TEST_CONFIG_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/config)
+set(HIP_TEST_CONFIG_BINARY_DIR
+    ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/config
+)
 file(MAKE_DIRECTORY ${HIP_TEST_CONFIG_BINARY_DIR})
 file(GLOB JSON_FILES "./hipTestMain/config/*.json")
 foreach(json IN LISTS JSON_FILES)
-    file(COPY ${json}
-         DESTINATION ${HIP_TEST_CONFIG_BINARY_DIR})
+    file(COPY ${json} DESTINATION ${HIP_TEST_CONFIG_BINARY_DIR})
 endforeach()
-set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
-file(COPY ./external/Catch2/cmake/Catch2/CatchAddTests.cmake
-     DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
-file(COPY ./external/Catch2/cmake/Catch2/catch_include.cmake
-     DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
+set(CATCH_SCRIPT_BINARY_DIR
+    ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script
+)
+file(
+    COPY ./external/Catch2/cmake/Catch2/CatchAddTests.cmake
+    DESTINATION ${CATCH_SCRIPT_BINARY_DIR}
+)
+file(
+    COPY ./external/Catch2/cmake/Catch2/catch_include.cmake
+    DESTINATION ${CATCH_SCRIPT_BINARY_DIR}
+)
 set(ADD_SCRIPT_PATH ${CATCH_SCRIPT_BINARY_DIR}/CatchAddTests.cmake)
 set(CATCH_INCLUDE_PATH ${CATCH_SCRIPT_BINARY_DIR}/catch_include.cmake)
 
-if (WIN32)
-  configure_file(catchProp_in_rc.in ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc @ONLY)
-  cmake_path(SET LLVM_RC_PATH "${HIP_PATH}/../lc/bin/llvm-rc.exe")
-  cmake_path(SET LLVM_RC_PATH NORMALIZE "${LLVM_RC_PATH}")
+if(WIN32)
+    configure_file(
+        catchProp_in_rc.in
+        ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc
+        @ONLY
+    )
+    cmake_path(SET LLVM_RC_PATH "${HIP_PATH}/../lc/bin/llvm-rc.exe")
+    cmake_path(SET LLVM_RC_PATH NORMALIZE "${LLVM_RC_PATH}")
 
-  # generates the .res files to be used by executables to populate the properties
-  # expects LC folder with clang, llvm-rc to be present one level up of HIP
-  execute_process(COMMAND ${LLVM_RC_PATH} ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc
-                  OUTPUT_VARIABLE RC_OUTPUT)
-  set(PROP_RC ${CMAKE_CURRENT_BINARY_DIR})
-  # When args to linker exceeds max chars.
-  # msbuild writes args to a rsp file.
-  # This is used to reference the obj file correctly
-  SET(CMAKE_C_RESPONSE_FILE_LINK_FLAG "")
-  SET(CMAKE_CXX_RESPONSE_FILE_LINK_FLAG "")
+    # generates the .res files to be used by executables to populate the properties
+    # expects LC folder with clang, llvm-rc to be present one level up of HIP
+    execute_process(
+        COMMAND ${LLVM_RC_PATH} ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc
+        OUTPUT_VARIABLE RC_OUTPUT
+    )
+    set(PROP_RC ${CMAKE_CURRENT_BINARY_DIR})
+    # When args to linker exceeds max chars.
+    # msbuild writes args to a rsp file.
+    # This is used to reference the obj file correctly
+    set(CMAKE_C_RESPONSE_FILE_LINK_FLAG "")
+    set(CMAKE_CXX_RESPONSE_FILE_LINK_FLAG "")
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
-    add_compile_options(-Wall -Wextra -Wvla -Werror -Wno-deprecated -Wno-option-ignored)
+    add_compile_options(
+        -Wall
+        -Wextra
+        -Wvla
+        -Werror
+        -Wno-deprecated
+        -Wno-option-ignored
+    )
 endif()
 
 cmake_policy(PUSH)
@@ -220,22 +257,29 @@ message(STATUS "CMAKE HIP ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 # preference to pass arch -
 # OFFLOAD_ARCH_STR
 # rocm_agent_enumerator
-if(NOT DEFINED OFFLOAD_ARCH_STR
-   AND EXISTS "${ROCM_PATH}/bin/rocm_agent_enumerator"
-   AND HIP_PLATFORM STREQUAL "amd" AND UNIX)
-    execute_process(COMMAND "${ROCM_PATH}/bin/rocm_agent_enumerator"
-         OUTPUT_VARIABLE HIP_GPU_ARCH
-         RESULT_VARIABLE ROCM_AGENT_ENUM_RESULT
-         OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(
+    NOT DEFINED OFFLOAD_ARCH_STR
+    AND EXISTS "${ROCM_PATH}/bin/rocm_agent_enumerator"
+    AND HIP_PLATFORM STREQUAL "amd"
+    AND UNIX
+)
+    execute_process(
+        COMMAND "${ROCM_PATH}/bin/rocm_agent_enumerator"
+        OUTPUT_VARIABLE HIP_GPU_ARCH
+        RESULT_VARIABLE ROCM_AGENT_ENUM_RESULT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
     # Trim out gfx000
     string(REPLACE "gfx000\n" "" HIP_GPU_ARCH ${HIP_GPU_ARCH})
-    if (NOT HIP_GPU_ARCH STREQUAL "")
+    if(NOT HIP_GPU_ARCH STREQUAL "")
         string(REGEX REPLACE "\n" ";" HIP_GPU_ARCH_LIST "${HIP_GPU_ARCH}")
-        list(REMOVE_DUPLICATES  HIP_GPU_ARCH_LIST)
+        list(REMOVE_DUPLICATES HIP_GPU_ARCH_LIST)
         list(LENGTH HIP_GPU_ARCH_LIST HIP_GPU_ARCH_LEN)
         set(OFFLOAD_ARCH_STR "")
         foreach(_hip_gpu_arch ${HIP_GPU_ARCH_LIST})
-            set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
+            set(OFFLOAD_ARCH_STR
+                "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}"
+            )
         endforeach()
     else()
         message(STATUS "ROCm Agent Enumerator found no valid architectures")
@@ -251,25 +295,27 @@ message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
 
 find_package(Git)
 # get hip-tests commit short hash
-execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  RESULT_VARIABLE git_result
-  OUTPUT_VARIABLE git_output
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(
+    COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    RESULT_VARIABLE git_result
+    OUTPUT_VARIABLE git_output
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 if(git_result EQUAL 0)
-  set(HIP_TESTS_GITHASH ${git_output})
+    set(HIP_TESTS_GITHASH ${git_output})
 endif()
 
 set(OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR})
 separate_arguments(OFFLOAD_ARCH_LIST)
-list(REMOVE_DUPLICATES  OFFLOAD_ARCH_LIST)
+list(REMOVE_DUPLICATES OFFLOAD_ARCH_LIST)
 set(hip_gpu_arch_list "")
 foreach(__offload_arch ${OFFLOAD_ARCH_LIST})
     string(REPLACE "--offload-arch=" "" targetid ${__offload_arch})
     string(REPLACE ":" ";" target_id_list ${targetid})
     list(GET target_id_list 0 arch)
     string(APPEND hip_gpu_arch_list "${arch};")
-    list(REMOVE_DUPLICATES  hip_gpu_arch_list)
+    list(REMOVE_DUPLICATES hip_gpu_arch_list)
 endforeach()
 
 if(WIN32)
@@ -278,21 +324,26 @@ if(WIN32)
     set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
     set(CLANG_CPP "${HIP_PATH}/../lc/bin/clang-cpp.exe")
 
-    set(cmd "${CLANG_CPP} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
+    set(cmd
+        "${CLANG_CPP} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}"
+    )
     message(${cmd})
-    execute_process(COMMAND cmd.exe /C ${cmd}
-    RESULT_VARIABLE json_result)
+    execute_process(COMMAND cmd.exe /C ${cmd} RESULT_VARIABLE json_result)
     message(STATUS "${configToUse}.json file generation result: ${json_result}")
 else()
     set(configToUse "config_amd_linux")
     foreach(arch ${hip_gpu_arch_list})
         set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
         set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
-        set(cmd "${ROCM_PATH}/llvm/bin/clang-cpp -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
+        set(cmd
+            "${ROCM_PATH}/llvm/bin/clang-cpp -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}"
+        )
         message(${cmd})
-        execute_process(COMMAND bash -c ${cmd}
-        RESULT_VARIABLE json_result)
-        message(STATUS "${configToUse}_${arch}.json file generation result: ${json_result}")
+        execute_process(COMMAND bash -c ${cmd} RESULT_VARIABLE json_result)
+        message(
+            STATUS
+            "${configToUse}_${arch}.json file generation result: ${json_result}"
+        )
     endforeach()
 endif()
 # prints the catch info to a file
@@ -302,23 +353,48 @@ set(_catchInfo ${_autogen} "HIP_VERSION=${HIP_VERSION}\n")
 set(_catchInfo ${_catchInfo} "HIP_PLATFORM=${HIP_PLATFORM}\n")
 set(_catchInfo ${_catchInfo} "HIP_TESTS_GITHASH=${HIP_TESTS_GITHASH}\n")
 set(_catchInfo ${_catchInfo} "ARCHS=${HIP_GPU_ARCH_LIST}\n")
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt ${_catchInfo})
+file(
+    WRITE
+    ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt
+    ${_catchInfo}
+)
 # allows user to run ctest from catch_tests level
 set(_subdirs ${_autogen} "subdirs(..)\n")
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
+file(
+    WRITE
+    ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake
+    ${_subdirs}
+)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 # copy python script and headers to catch test package
 set(CATCH_INCLUDE_DIR include)
-execute_process(COMMAND ${CMAKE_COMMAND} -E
-                make_directory ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR})
+execute_process(
+    COMMAND
+        ${CMAKE_COMMAND} -E make_directory
+        ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR}
+)
 
-file(COPY ./unit/compileAndCaptureOutput.py
-            DESTINATION  ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/unit )
+file(
+    COPY ./unit/compileAndCaptureOutput.py
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/unit
+)
 
-file(COPY ./include/hip_test_common.hh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR})
-file(COPY ./include/hip_test_context.hh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR})
-file(COPY ./external/Catch2/catch.hpp DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR})
+file(
+    COPY ./include/hip_test_common.hh
+    DESTINATION
+        ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR}
+)
+file(
+    COPY ./include/hip_test_context.hh
+    DESTINATION
+        ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR}
+)
+file(
+    COPY ./external/Catch2/catch.hpp
+    DESTINATION
+        ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR}
+)
 
 # Enable device lambda on nvidia platforms
 if(HIP_PLATFORM STREQUAL "nvidia")
@@ -341,12 +417,14 @@ add_subdirectory(perftests ${CATCH_BUILD_DIR}/perftests)
 add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
 add_subdirectory(performance ${CATCH_BUILD_DIR}/performance)
 
-add_custom_target(gen_coverage
-                  COMMAND ${CMAKE_COMMAND} -B build/
-                  COMMAND ${CMAKE_COMMAND} --build build/
-                  COMMAND ./build/generateHipAPICoverage ${HIP_PATH}/include
-                  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../utils/coverage
-                  COMMENT "Generating Test Coverage Report")
+add_custom_target(
+    gen_coverage
+    COMMAND ${CMAKE_COMMAND} -B build/
+    COMMAND ${CMAKE_COMMAND} --build build/
+    COMMAND ./build/generateHipAPICoverage ${HIP_PATH}/include
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../utils/coverage
+    COMMENT "Generating Test Coverage Report"
+)
 
 cmake_policy(POP)
 
@@ -355,15 +433,21 @@ cmake_policy(POP)
 set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/)
 add_subdirectory(packaging)
 if(UNIX)
-add_custom_target(package_test COMMAND ${CMAKE_COMMAND} .
-    COMMAND rm -rf *.deb *.rpm *.tar.gz
-    COMMAND make package
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_custom_target(
+        package_test
+        COMMAND ${CMAKE_COMMAND} .
+        COMMAND rm -rf *.deb *.rpm *.tar.gz
+        COMMAND make package
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
 else()
-file(TO_NATIVE_PATH ${PROJECT_BINARY_DIR} CATCH_BINARY_DIR)
-add_custom_target(package_test COMMAND ${CMAKE_COMMAND} .
-    COMMAND cpack
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    file(TO_NATIVE_PATH ${PROJECT_BINARY_DIR} CATCH_BINARY_DIR)
+    add_custom_target(
+        package_test
+        COMMAND ${CMAKE_COMMAND} .
+        COMMAND cpack
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
 endif()
 
 # Doxygen documentation
@@ -375,9 +459,14 @@ if(DOXYGEN_FOUND)
     set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/DoxyfileTests.out)
     configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
 
-    add_custom_target(build_docs
+    add_custom_target(
+        build_docs
         COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
-        COMMENT "Generating test plan documentation with Doxygen")
+        COMMENT "Generating test plan documentation with Doxygen"
+    )
 else()
-    message(STATUS "Doxygen was not found. Building test plan documentation will not be available")
+    message(
+        STATUS
+        "Doxygen was not found. Building test plan documentation will not be available"
+    )
 endif()

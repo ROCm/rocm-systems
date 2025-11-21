@@ -7,9 +7,14 @@ if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
         NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
+    )
     mark_as_advanced(amdclangpp_EXECUTABLE)
 
     if(amdclangpp_EXECUTABLE)
@@ -35,7 +40,10 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(hip-graph.cpp PROPERTIES LANGUAGE HIP)
 add_executable(hip-graph)
 target_sources(hip-graph PRIVATE hip-graph.cpp)
-target_compile_options(hip-graph PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
+target_compile_options(
+    hip-graph
+    PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
+)
 
 find_package(Threads REQUIRED)
 target_link_libraries(hip-graph PRIVATE Threads::Threads)

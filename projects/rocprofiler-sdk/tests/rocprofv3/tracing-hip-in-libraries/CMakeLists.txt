@@ -6,11 +6,18 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-rocprofv3-tracing-hip-in-libraries
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "" PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(
+    REPLACE
+    "LD_PRELOAD="
+    ""
+    PRELOAD_ENV
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+)
 
 if(PRELOAD_ENV)
     set(PRELOAD_ARGS --suppress-marker-preload --preload ${PRELOAD_ENV})
@@ -30,7 +37,8 @@ foreach(_OUTPUT_FORMAT csv json pftrace otf2)
         TIMEOUT 120
         LABELS "integration-tests"
         PRELOAD "${PRELOAD_ENV}"
-        FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries)
+        FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries
+    )
 endforeach()
 
 rocprofiler_add_integration_validate_test(
@@ -66,4 +74,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.otf2
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-trace-hip-in-libraries)
+    FIXTURES_REQUIRED rocprofv3-test-trace-hip-in-libraries
+)

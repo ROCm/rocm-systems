@@ -19,49 +19,53 @@
 # THE SOFTWARE.
 
 set(TEST_SRC
-  hipPerfMemcpy.cc
-  hipPerfBufferCopyRectSpeed.cc
-  hipPerfBufferCopySpeed.cc
-  hipPerfDevMemReadSpeed.cc
-  hipPerfDevMemWriteSpeed.cc
-  hipPerfMemFill.cc
-  hipPerfMemMallocCpyFree.cc
-  hipPerfMemset.cc
-  hipPerfSampleRate.cc
-  hipPerfSharedMemReadSpeed.cc
-  hipPerfBufferCopySpeedP2P.cc
-  hipPerfBufferCopySpeedAll2All.cc
-  hipPerfMempool.cc
-  hipPerfDeviceHeapMemory.cc
-  hipPerfBufferCopyInterGpuPerformance.cc
-  hipPerfMemcpyAsyncSpeed.cc
-  hipPerfMemsetAsyncSpeed.cc
+    hipPerfMemcpy.cc
+    hipPerfBufferCopyRectSpeed.cc
+    hipPerfBufferCopySpeed.cc
+    hipPerfDevMemReadSpeed.cc
+    hipPerfDevMemWriteSpeed.cc
+    hipPerfMemFill.cc
+    hipPerfMemMallocCpyFree.cc
+    hipPerfMemset.cc
+    hipPerfSampleRate.cc
+    hipPerfSharedMemReadSpeed.cc
+    hipPerfBufferCopySpeedP2P.cc
+    hipPerfBufferCopySpeedAll2All.cc
+    hipPerfMempool.cc
+    hipPerfDeviceHeapMemory.cc
+    hipPerfBufferCopyInterGpuPerformance.cc
+    hipPerfMemcpyAsyncSpeed.cc
+    hipPerfMemsetAsyncSpeed.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")
-  if(WIN32)
-    set(TEST_SRC ${TEST_SRC} hipPerfHostNumaAllocWin.cc)
-    hip_add_exe_to_target(NAME perfMemoryTest
-                      TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME perf_test)
-  else()
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
-    find_package(NUMA)
-    if(NUMA_FOUND)
-      # Test code still use libnuma apis
-      set(TEST_SRC ${TEST_SRC} hipPerfHostNumaAlloc.cc)
-      hip_add_exe_to_target(NAME perfMemoryTest
-                      TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME perf_test
-                      LINKER_LIBS numa)
+    if(WIN32)
+        set(TEST_SRC ${TEST_SRC} hipPerfHostNumaAllocWin.cc)
+        hip_add_exe_to_target(NAME perfMemoryTest
+                          TEST_SRC ${TEST_SRC}
+                          TEST_TARGET_NAME perf_test
+        )
     else()
-      hip_add_exe_to_target(NAME perfMemoryTest
-                      TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME perf_test)
+        list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+        find_package(NUMA)
+        if(NUMA_FOUND)
+            # Test code still use libnuma apis
+            set(TEST_SRC ${TEST_SRC} hipPerfHostNumaAlloc.cc)
+            hip_add_exe_to_target(NAME perfMemoryTest
+                            TEST_SRC ${TEST_SRC}
+                            TEST_TARGET_NAME perf_test
+                            LINKER_LIBS numa
+            )
+        else()
+            hip_add_exe_to_target(NAME perfMemoryTest
+                            TEST_SRC ${TEST_SRC}
+                            TEST_TARGET_NAME perf_test
+            )
+        endif()
     endif()
-  endif()
 else()
-  hip_add_exe_to_target(NAME perfMemoryTest
-                      TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME perf_test)
+    hip_add_exe_to_target(NAME perfMemoryTest
+                        TEST_SRC ${TEST_SRC}
+                        TEST_TARGET_NAME perf_test
+    )
 endif()

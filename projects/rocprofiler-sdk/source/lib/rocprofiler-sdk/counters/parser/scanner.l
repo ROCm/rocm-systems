@@ -26,8 +26,8 @@ EXP	([Ee][-+]?[0-9]+)
 \[  { return O_SQ; }
 \]  { return C_SQ; }
 
-[0-9]+"."[0-9]*{EXP}? | 
-"."?[0-9]+{EXP}? { 
+[0-9]+"."[0-9]*{EXP}? |
+"."?[0-9]+{EXP}? {
     yylval.d = atoi(yytext);
     return NUMBER; }
 
@@ -35,8 +35,8 @@ EXP	([Ee][-+]?[0-9]+)
 "select" { return SELECT; }
 "accumulate" { return ACCUMULATE; }
 
-[a-z_A-Z][a-z_A-Z0-9]*  { 
-    yylval.s = strdup(yytext); 
+[a-z_A-Z][a-z_A-Z0-9]*  {
+    yylval.s = strdup(yytext);
     return NAME; }
 
 ([0-9]+(:[0-9]+)?)(,[0-9]+(:[0-9]+)?)* {
@@ -46,7 +46,7 @@ EXP	([Ee][-+]?[0-9]+)
 
 
 \n      { return EOL; }
-"//".*  
+"//".*
 [ \t]   { /* ignore white space */ }
 .	{ throw std::runtime_error(fmt::format("Mystery character {}", *yytext)); }
 %%
