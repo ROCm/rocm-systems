@@ -40,7 +40,8 @@ This testcase verifies hipMemcpyDtoDAsync API
 7.DtoH copy and validating the result
 */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "", int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
+                   double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
   int numDevices = 0;
   TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr}, *X_d{nullptr}, *Y_d{nullptr}, *Z_d{nullptr};

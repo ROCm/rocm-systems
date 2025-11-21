@@ -343,9 +343,12 @@ struct ThreadTraceInfo
             uint32 threadTraceTokenConfig                :  1;
             uint32 threadTraceStallAllSimds              :  1;
             uint32 threadTraceExcludeNonDetailShaderData :  1;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 899
             uint32 threadTraceEnableExecPop              :  1;
-            uint32 placeholder3                          :  1;
-            uint32 reserved                              : 15;
+#else
+            uint32 placeholder2                          :  1;
+#endif
+            uint32 reserved                              : 16;
         };
         uint32 u32All;
     } optionFlags;
@@ -370,7 +373,9 @@ struct ThreadTraceInfo
         uint32                    threadTraceStallBehavior;
         bool                      threadTraceStallAllSimds;
         bool                      threadTraceExcludeNonDetailShaderData;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 899
         bool                      threadTraceEnableExecPop;
+#endif
     } optionValues;
 };
 

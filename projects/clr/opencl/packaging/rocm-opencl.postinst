@@ -5,7 +5,7 @@ set -e
 INSTALL_PATH=@CPACK_PACKAGING_INSTALL_PREFIX@
 
 do_ldconfig() {
-  echo ${INSTALL_PATH}/@CMAKE_INSTALL_LIBDIR@ > /@CMAKE_INSTALL_SYSCONFDIR@/ld.so.conf.d/10-rocm-opencl.conf && ldconfig
+  echo ${INSTALL_PATH}/@CMAKE_INSTALL_LIBDIR@/@AMDOCL_INSTALL_LIBDIR@ > /@CMAKE_INSTALL_SYSCONFDIR@/ld.so.conf.d/10-rocm-opencl.conf && ldconfig
 
 }
 

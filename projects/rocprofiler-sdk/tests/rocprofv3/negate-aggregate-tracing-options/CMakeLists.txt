@@ -35,9 +35,9 @@ find_package(rocprofiler-sdk REQUIRED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(negate-aggregate-tracing-options-env "${PRELOAD_ENV}")
-
-rocprofiler_configure_pytest_files(CONFIG input-negate-aggregate-tracing-options.yml)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/input-negate-aggregate-tracing-options.yml.in
+    ${CMAKE_CURRENT_BINARY_DIR}/input-negate-aggregate-tracing-options.yml @ONLY)
 
 ##########################################################################################
 #
@@ -45,8 +45,8 @@ rocprofiler_configure_pytest_files(CONFIG input-negate-aggregate-tracing-options
 #
 ##########################################################################################
 
-add_test(
-    NAME rocprofv3-test-negate-aggregate-tracing-options-cmd-line
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-negate-aggregate-tracing-options-cmd-line
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --sys-trace -d
         ${CMAKE_CURRENT_BINARY_DIR} -o out --log-level info --hip-trace=no --hsa-trace=no
@@ -55,20 +55,12 @@ add_test(
         --kokkos-trace=no --rocdecode-trace=no --rocjpeg-trace=no --hip-runtime-trace=no
         --hip-compiler-trace=no --hsa-core-trace=no --hsa-amd-trace=no
         --hsa-image-trace=no --hsa-finalizer-trace=no --advanced-thread-trace=no
-        --kernel-rename=no --summary --echo -- ${CMAKE_COMMAND})
-
-set_tests_properties(
-    rocprofv3-test-negate-aggregate-tracing-options-cmd-line
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${negate-aggregate-tracing-options-env}"
-               PASS_REGULAR_EXPRESSION
-               "command:.*${CMAKE_COMMAND}"
-               WILL_FAIL
-               ON)
+        --kernel-rename=no --summary --echo -- ${CMAKE_COMMAND}
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    WILL_FAIL)
 
 ##########################################################################################
 #
@@ -76,22 +68,14 @@ set_tests_properties(
 #
 ##########################################################################################
 
-add_test(
-    NAME rocprofv3-test-negate-aggregate-tracing-options-inp-yaml
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-negate-aggregate-tracing-options-inp-yaml
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input-negate-aggregate-tracing-options.yml --
-        ${CMAKE_COMMAND})
-
-set_tests_properties(
-    rocprofv3-test-negate-aggregate-tracing-options-inp-yaml
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${negate-aggregate-tracing-options-env}"
-               PASS_REGULAR_EXPRESSION
-               "command:.*${CMAKE_COMMAND}"
-               WILL_FAIL
-               ON)
+        ${CMAKE_COMMAND}
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    WILL_FAIL)
