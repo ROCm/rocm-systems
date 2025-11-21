@@ -193,7 +193,6 @@ static void run_graph_topology_test(const TestOptions& opt) {
     
     int kernel_count = 0;
     int current_batch_size = 0;
-    int batch_number = 0;
     
     for (int i = 0; i < opt.length; ++i) {
       std::string node_type;
@@ -205,7 +204,6 @@ static void run_graph_topology_test(const TestOptions& opt) {
         if (current_batch_size > 0) {
           kernel_batches.push_back(current_batch_size);
           current_batch_size = 0;
-          batch_number++;
         }
       } else {
         int step = i % 9; // 9-step pattern
@@ -222,7 +220,6 @@ static void run_graph_topology_test(const TestOptions& opt) {
           if (current_batch_size > 0) {
             kernel_batches.push_back(current_batch_size);
             current_batch_size = 0;
-            batch_number++;
           }
           hipGraphNode_t n = add_memcpy_node(graph, &prev, 1, d_mem2, d_mem1, mem_size);
           all_nodes.push_back(n);
@@ -241,7 +238,6 @@ static void run_graph_topology_test(const TestOptions& opt) {
           if (current_batch_size > 0) {
             kernel_batches.push_back(current_batch_size);
             current_batch_size = 0;
-            batch_number++;
           }
           hipGraphNode_t n = add_empty_node(graph, &prev, 1);
           all_nodes.push_back(n);

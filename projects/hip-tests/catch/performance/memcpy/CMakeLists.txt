@@ -31,12 +31,15 @@ set(TEST_SRC
     hipMemcpyHtoD.cc
     hipMemcpyHtoDAsync.cc
     hipMemcpyWithKernel.cc
+    hipMemcpyWithKernel_Benchmark.cc
     hipMemcpyToSymbol.cc
     hipMemcpyToSymbolAsync.cc
     hipMemcpyFromSymbol.cc
     hipMemcpyFromSymbolAsync.cc
     hipMemcpy2D.cc
+    hipMemcpy2D_Benchmark.cc
     hipMemcpy2DAsync.cc
+    hipMemcpy2DAsync_Benchmark.cc
     hipMemcpy2DToArray.cc
     hipMemcpy2DToArrayAsync.cc
     hipMemcpy2DFromArray.cc
@@ -51,3 +54,4 @@ hip_add_exe_to_target(NAME MemcpyPerformance
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS -std=c++17)
+target_compile_definitions(MemcpyPerformance PRIVATE CATCH_CONFIG_ENABLE_BENCHMARKING)                      

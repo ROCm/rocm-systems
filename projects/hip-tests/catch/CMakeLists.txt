@@ -6,6 +6,8 @@ set(CMAKE_CXX_COMPILER_WORKS 1)
 
 project(hiptests)
 
+add_compile_definitions(CATCH_CONFIG_ENABLE_BENCHMARKING)
+
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
 
