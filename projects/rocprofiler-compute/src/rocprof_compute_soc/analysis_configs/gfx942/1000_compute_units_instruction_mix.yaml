@@ -273,7 +273,7 @@ Panel Config:
       floating-point operands issued to the VALU per normalization unit.
     F64-Trans: The total number of transcendental instructions (such as sqrt) operating
       on 64-bit floating-point operands issued to the VALU per normalization unit.
-    Conversion: |-
+    Conversion: >-
       The total number of type conversion instructions (such as converting
       data to or from F32\u2194F64) issued to the VALU per normalization unit.
     Global/Generic Instr: The total number of global & generic memory instructions

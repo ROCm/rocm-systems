@@ -23,10 +23,9 @@
 #include "rocprof-sys-causal.hpp"
 
 #include "common/defines.h"
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
-#include "common/setup.hpp"
+#include "common/path.hpp"
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
 
@@ -38,8 +37,6 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -52,7 +49,6 @@
 #include <string>
 #include <string_view>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -60,6 +56,7 @@ namespace color    = ::tim::log::color;
 namespace filepath = ::tim::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
+namespace path     = rocprofsys::common::path;
 using namespace ::timemory::join;
 using ::rocprofsys::utility::parse_numeric_range;
 using ::tim::get_env;
@@ -78,9 +75,9 @@ to_string(bool _v)
 namespace
 {
 int  verbose       = 0;
-auto updated_envs  = std::set<std::string_view>{};
-auto original_envs = std::set<std::string>{};
-auto child_pids    = std::set<pid_t>{};
+auto updated_envs  = std::unordered_set<std::string_view>{};
+auto original_envs = std::unordered_set<std::string>{};
+auto child_pids    = std::unordered_set<pid_t>{};
 auto launcher      = std::string{};
 
 inline signal_handler&
@@ -158,15 +155,6 @@ int
 diagnose_status(pid_t _pid, int _status)
 {
     return ::rocprofsys::mproc::diagnose_status(_pid, _status, get_verbose());
-}
-
-std::string
-get_realpath(const std::string& _v)
-{
-    auto* _tmp = realpath(_v.c_str(), nullptr);
-    auto  _ret = std::string{ _tmp };
-    free(_tmp);
-    return _ret;
 }
 
 void
@@ -250,43 +238,14 @@ prepare_environment_for_run(std::vector<char*>& _env)
 {
     if(launcher.empty())
     {
-        update_env(_env, "LD_PRELOAD",
-                   join(":", LIBPTHREAD_SO,
-                        get_realpath(get_internal_libpath("librocprof-sys-dl.so"))),
-                   true);
-        update_env(_env, "ROCPROFSYS_SCRIPT_DIR", get_internal_script_path());
-        update_env(_env, "ROCPROFSYS_ROOT", get_rocprofsys_root());
+        update_env(
+            _env, "LD_PRELOAD",
+            join(":", LIBPTHREAD_SO,
+                 path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"))),
+            true);
+        update_env(_env, "ROCPROFSYS_SCRIPT_DIR", path::get_internal_script_path());
+        update_env(_env, "ROCPROFSYS_ROOT", path::get_rocprofsys_root());
     }
-}
-
-std::string
-get_rocprofsys_root(void)
-{
-    char*       _tmp = realpath("/proc/self/exe", nullptr);
-    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
-
-    if(_tmp) free(_tmp);
-
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-
-    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
-
-    return rocprofsys::common::join("/", _dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
 }
 
 void
@@ -398,22 +357,6 @@ add_default_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _e
         strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
 }
 
-void
-remove_env(std::vector<char*>& _environ, std::string_view _env_var)
-{
-    auto _key   = join("", _env_var, "=");
-    auto _match = [&_key](auto itr) { return std::string_view{ itr }.find(_key) == 0; };
-
-    _environ.erase(std::remove_if(_environ.begin(), _environ.end(), _match),
-                   _environ.end());
-
-    for(const auto& itr : original_envs)
-    {
-        if(std::string_view{ itr }.find(_key) == 0)
-            _environ.emplace_back(strdup(itr.c_str()));
-    }
-}
-
 std::vector<char*>
 parse_args(int argc, char** argv, std::vector<char*>& _env,
            std::vector<std::map<std::string_view, std::string>>& _causal_envs)
@@ -422,7 +365,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
     using parser_err_t = typename parser_t::result_type;
 
     auto help_check = [](parser_t& p, int _argc, char** _argv) {
-        std::set<std::string> help_args = { "-h", "--help", "-?" };
+        std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
         return (p.exists("help") || _argc == 1 ||
                 (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
     };

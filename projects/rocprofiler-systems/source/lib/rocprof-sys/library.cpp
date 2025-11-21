@@ -45,7 +45,7 @@
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
-#include "core/trace_cache/cache_utility.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
@@ -578,7 +578,7 @@ rocprofsys_init_tooling_hidden(void)
         ROCPROFSYS_DEBUG_F("State: %s -> State::Active\n",
                            std::to_string(get_state()).c_str());
 
-        trace_cache::get_buffer_storage().start_flushing_thread(getpid());
+        trace_cache::get_buffer_storage().start(getpid());
         set_state(State::Active);  // set to active as very last operation
     } };
 
@@ -798,7 +798,7 @@ rocprofsys_finalize_hidden(void)
         const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
         const auto metadata_filepath =
-            trace_cache::get_metadata_filepath(get_root_process_id(), getpid());
+            trace_cache::utility::get_metadata_filepath(get_root_process_id(), getpid());
         _manager.get_metadata_registry().save_to_file(metadata_filepath, _agents);
 
         std::quick_exit(EXIT_SUCCESS);

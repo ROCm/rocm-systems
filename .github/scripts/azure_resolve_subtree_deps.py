@@ -78,6 +78,7 @@ def main(argv=None) -> None:
     }
     # Azure pipeline IDs for each project, to be populated as projects are enabled
     definition_ids = {
+        "projects/amdsmi": 376,
         "projects/aqlprofile": 365,
         "projects/clr": 335,
         #"projects/hip-tests": 362,
