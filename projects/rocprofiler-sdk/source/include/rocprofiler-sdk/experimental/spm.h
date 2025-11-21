@@ -94,7 +94,7 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
                                       rocprofiler_spm_parameter_t*         parameters,
                                       size_t                               parameter_count,
                                       rocprofiler_spm_counter_config_id_t* config_id)
-    ROCPROFILER_API ROCPROFILER_NONNULL(2);
+    ROCPROFILER_API ROCPROFILER_NONNULL(2, 6);
 
 /**
  * @brief (experimental) Destroy SPM Profile Configuration.
@@ -209,7 +209,7 @@ ROCPROFILER_SDK_EXPERIMENTAL typedef rocprofiler_status_t (
  * @retval ROCPROFILER_STATUS_SUCCESS if all counters found for agent
  * @retval ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND invalid agent
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
- * @retbal ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED agent has no supported SPM counter
+ * @retval ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED agent has no supported SPM counter
  */
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t                  agent_id,
