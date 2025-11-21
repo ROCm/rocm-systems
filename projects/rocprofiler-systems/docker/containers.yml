@@ -14,6 +14,9 @@ matrix:
   - os-distro: "ubuntu"
     os-version: "22.04"
     rocm-version: "7.0"
+  - os-distro: "ubuntu"
+    os-version: "22.04"
+    rocm-version: "7.1"
   # ubuntu 24.04
   - os-distro: "ubuntu"
     os-version: "24.04"
@@ -27,6 +30,9 @@ matrix:
   - os-distro: "ubuntu"
     os-version: "24.04"
     rocm-version: "7.0"
+  - os-distro: "ubuntu"
+    os-version: "24.04"
+    rocm-version: "7.1"
   # opensuse 15.5
   - os-distro: "opensuse"
     os-version: "15.5"
@@ -60,6 +66,9 @@ matrix:
   - os-distro: "rhel"
     os-version: "8.10"
     rocm-version: "7.0"
+  - os-distro: "rhel"
+    os-version: "8.10"
+    rocm-version: "7.1"
   # RHEL 9.4
   - os-distro: "rhel"
     os-version: "9.4"
@@ -73,6 +82,9 @@ matrix:
   - os-distro: "rhel"
     os-version: "9.4"
     rocm-version: "7.0"
+  - os-distro: "rhel"
+    os-version: "9.4"
+    rocm-version: "7.1"
   # RHEL 9.5
   - os-distro: "rhel"
     os-version: "9.5"
@@ -86,3 +98,10 @@ matrix:
   - os-distro: "rhel"
     os-version: "9.5"
     rocm-version: "7.0"
+# RHEL 9.6
+  - os-distro: "rhel"
+    os-version: "9.6"
+    rocm-version: "7.0"
+  - os-distro: "rhel"
+    os-version: "9.6"
+    rocm-version: "7.1"
