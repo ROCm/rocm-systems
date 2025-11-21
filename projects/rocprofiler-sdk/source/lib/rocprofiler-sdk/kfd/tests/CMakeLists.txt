@@ -41,4 +41,6 @@ rocprofiler_add_unit_test(
     SOURCES ${ROCPROFILER_LIB_KFD_EVENTS_TEST_SOURCES}
     TIMEOUT 45
     LABELS "unittests;kfd-events"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

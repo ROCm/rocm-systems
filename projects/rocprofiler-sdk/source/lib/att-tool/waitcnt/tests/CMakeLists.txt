@@ -23,4 +23,7 @@ target_link_libraries(
 rocprofiler_add_unit_test(
     TARGET att-decoder-waitcnt-test
     SOURCES ${waitcnt_sources}
-    TIMEOUT 10)
+    TIMEOUT 10
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    )

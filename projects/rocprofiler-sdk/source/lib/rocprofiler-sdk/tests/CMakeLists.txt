@@ -41,6 +41,8 @@ rocprofiler_add_unit_test(
     TEST_LIST lib_TESTS
     TIMEOUT 30
     LABELS "unittests"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # -------------------------------------------------------------------------------------- #
@@ -75,5 +77,7 @@ rocprofiler_add_unit_test(
     TEST_LIST shared_lib_TESTS
     TIMEOUT 120
     LABELS "unittests"
-    ENVIRONMENT "${rocprofiler-sdk-lib-tests-env}"
+    ENVIRONMENT
+        "${rocprofiler-sdk-lib-tests-env}"
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

@@ -74,5 +74,9 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-elf)
 
-rocprofiler_add_unit_test(TARGET codeobj-library-tests
-                          SOURCES ${CODEOBJ_LIB_TEST_SOURCES})
+rocprofiler_add_unit_test(
+    TARGET codeobj-library-tests
+    SOURCES ${CODEOBJ_LIB_TEST_SOURCES}
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    )

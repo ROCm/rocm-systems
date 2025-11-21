@@ -37,7 +37,10 @@ rocprofiler_add_unit_test(
     TARGET pcs_gfx9_test
     SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX9_TEST_SOURCES}
     LABELS "unittests;pc-sampling;gfx9"
-    TIMEOUT 45)
+    TIMEOUT 45
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    )
 
 add_executable(pcs_id_test)
 
@@ -55,6 +58,8 @@ rocprofiler_add_unit_test(
     SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_ID_TEST_SOURCES}
     LABELS "unittests"
     TIMEOUT 45
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_executable(pcs_bench_test)
@@ -88,6 +93,8 @@ rocprofiler_add_unit_test(
     SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_MULTIGPU_TEST_SOURCES}
     LABELS "unittests"
     TIMEOUT 75
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_executable(pcs_gfx12_test)
@@ -107,4 +114,6 @@ rocprofiler_add_unit_test(
     SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX12_TEST_SOURCES}
     LABELS "unittests"
     TIMEOUT 45
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

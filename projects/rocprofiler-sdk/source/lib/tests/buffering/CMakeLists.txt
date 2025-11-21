@@ -15,4 +15,9 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library GTest::gtest
             GTest::gtest_main)
 
-rocprofiler_add_unit_test(TARGET buffering-tests SOURCES ${buffering_sources})
+rocprofiler_add_unit_test(
+    TARGET buffering-tests
+    SOURCES ${buffering_sources}
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    )

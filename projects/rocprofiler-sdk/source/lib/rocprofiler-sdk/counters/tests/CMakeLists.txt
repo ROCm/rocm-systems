@@ -90,7 +90,9 @@ rocprofiler_add_unit_test(
     TARGET counter-tests
     SOURCES ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES}
     TIMEOUT 45
-    ENVIRONMENT "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
+    ENVIRONMENT
+        "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION
         "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
@@ -117,4 +119,6 @@ rocprofiler_add_unit_test(
     TARGET consumer-tests
     SOURCES ${ROCPROFILER_LIB_CONSUMER_TEST_SOURCES}
     TIMEOUT 45
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
