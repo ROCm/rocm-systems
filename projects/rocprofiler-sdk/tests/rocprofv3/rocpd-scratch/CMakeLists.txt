@@ -11,7 +11,6 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 set(rocprofv3-rocpd-scratch-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     "OMPI_ALLOW_RUN_AS_ROOT=1"
     "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1")
@@ -26,25 +25,18 @@ find_package(Python3 REQUIRED)
 #
 #########################################################################################
 
-add_test(
-    NAME rocprofv3-test-rocpd-scratch-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-scratch
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --scratch-memory-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o out --output-format rocpd json
-        --runtime-trace --kernel-rename -- $<TARGET_FILE:scratch-memory>)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-scratch-execute
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-scratch-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-scratch)
+        --runtime-trace --kernel-rename -- $<TARGET_FILE:scratch-memory>
+    DEPENDS scratch-memory
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-scratch)
 
 #########################################################################################
 #
@@ -52,29 +44,19 @@ set_tests_properties(
 #
 #########################################################################################
 
-add_test(
-    NAME rocprofv3-test-rocpd-scratch-perfetto-generation
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-scratch-perfetto-generation
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-scratch-perfetto-generation
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-scratch-env}"
-               DEPENDS
-               "rocprofv3-test-rocpd-scratch-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-scratch-generation
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd-scratch)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-scratch-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch)
 
 #########################################################################################
 #
@@ -82,26 +64,14 @@ set_tests_properties(
 #
 #########################################################################################
 
-set(VALIDATION_DEPENDS rocprofv3-test-rocpd-scratch-perfetto-generation)
-
-add_test(
-    NAME rocprofv3-test-rocpd-scratch-validation
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-scratch-validation
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-scratch-env}"
-               DEPENDS
-               rocprofv3-test-rocpd-scratch-perfetto-generation
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd-scratch-generation)
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-scratch
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
+         --pftrace-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd" PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch-generation)

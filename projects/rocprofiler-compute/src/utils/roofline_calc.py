@@ -412,13 +412,13 @@ def calc_ai_analyze(
                 metric = row.get("Metric", "")
                 value = row.get("Value", 0)
                 if metric == "AI HBM":
-                    ai_hbm = value if value and value != "" else 0
+                    ai_hbm = value if value and value not in ("", "N/A") else 0
                 elif metric == "AI L2":
-                    ai_l2 = value if value and value != "" else 0
+                    ai_l2 = value if value and value not in ("", "N/A") else 0
                 elif metric == "AI L1":
-                    ai_l1 = value if value and value != "" else 0
+                    ai_l1 = value if value and value not in ("", "N/A") else 0
                 elif metric == "Performance (GFLOPs)":
-                    performance = value if value and value != "" else 0
+                    performance = value if value and value not in ("", "N/A") else 0
 
         console_debug(
             "roofline",

@@ -2,7 +2,14 @@
 # Waitcnt ISA tests
 #
 
+project(rocprofiler-sdk-tests-att-decoder-waitcnt LANGUAGES C CXX)
+
+include(GoogleTest)
+
+set(waitcnt_sources att_decoder_waitcnt_test.cpp)
+
 add_executable(att-decoder-waitcnt-test)
+target_sources(att-decoder-waitcnt-test PRIVATE ${waitcnt_sources})
 target_link_libraries(
     att-decoder-waitcnt-test
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-att-parser
@@ -12,12 +19,11 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library
             GTest::gtest
             GTest::gtest_main)
-target_sources(att-decoder-waitcnt-test PRIVATE att_decoder_waitcnt_test.cpp)
 
-gtest_add_tests(
+rocprofiler_add_unit_test(
     TARGET att-decoder-waitcnt-test
-    SOURCES att_decoder_waitcnt_test.cpp
-    TEST_LIST att-decoder-waitcnt-test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(${att-decoder-waitcnt-test_TESTS} PROPERTIES TIMEOUT 10 LABELS
-                                                                  "unittests")
+    SOURCES ${waitcnt_sources}
+    TIMEOUT 10
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    )

@@ -10,50 +10,48 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY input.json)
-# basic-metrics
-add_test(
-    NAME rocprofv3-test-list-avail-execute
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
-            ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2 -o metrics --list-avail)
-
-# list-metrics-stdout
-add_test(NAME rocprofv3-test-list-avail-std-out-execute
-         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-                 ${CMAKE_CURRENT_BINARY_DIR}/input.json)
-
-# list-metrics with tracing
-add_test(
-    NAME rocprofv3-test-list-avail-trace-execute
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2 -o metrics --list-avail
-        --sys-trace --log-level warning -- $<TARGET_FILE:transpose>)
-
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(cc-env-list-metrics "${PRELOAD_ENV}" "ROCPD_LOG_LEVEL=info")
+rocprofiler_configure_pytest_files(
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    CONFIG pytest.ini
+    COPY input.json)
 
-set_tests_properties(
-    rocprofv3-test-list-avail-execute
-    PROPERTIES TIMEOUT 60 LABELS "integration-tests" ENVIRONMENT "${cc-env-list-metrics}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+# basic-metrics
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-list-avail
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
+            ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2 -o metrics --list-avail
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 60
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ROCPD_LOG_LEVEL=info")
 
-set_tests_properties(
-    rocprofv3-test-list-avail-std-out-execute
-    PROPERTIES
-        TIMEOUT
-        45
-        LABELS
-        "integration-tests"
-        ENVIRONMENT
-        "${cc-env-list-metrics}"
-        PASS_REGULAR_EXPRESSION
+# list-metrics-stdout
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-list-avail-std-out
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+            ${CMAKE_CURRENT_BINARY_DIR}/input.json
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ROCPD_LOG_LEVEL=info"
+    PASS_REGULAR_EXPRESSION
         "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;counter_name:\\t[a-zA-Z_]*\\n;description:\\t(.*)\\n*;expression:\\t(.)*\\n*;block:\\t[a-zA-Z]*\\n*;dimension_name:\\t([A-Z_]*)\\n*; dimension_instances:\\t([[0-9]*:[0-9]*\\])*\\n*;method:(.*)\\n*;unit:(.*)\\n*;min_interval:[0-9]*\\n*;max_interval:[0-9]*\\n*;flags:(.*)\\n*"
     )
 
-set_tests_properties(
-    rocprofv3-test-list-avail-trace-execute
-    PROPERTIES TIMEOUT 60 LABELS "integration-tests" ENVIRONMENT "${cc-env-list-metrics}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+# list-metrics with tracing
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-list-avail-trace
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2 -o metrics --list-avail
+        --sys-trace --log-level warning -- $<TARGET_FILE:transpose>
+    DEPENDS transpose
+    TIMEOUT 60
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ROCPD_LOG_LEVEL=info")
