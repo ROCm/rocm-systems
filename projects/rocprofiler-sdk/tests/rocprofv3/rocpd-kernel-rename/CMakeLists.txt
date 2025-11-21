@@ -30,11 +30,8 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 set(rocprofv3-rocpd-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
-
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
 
 find_package(Python3 REQUIRED)
 
@@ -44,45 +41,31 @@ find_package(Python3 REQUIRED)
 #
 #########################################################################################
 
-add_test(
-    NAME rocprofv3-test-rocpd-no-rename-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-no-rename
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename -o out --output-format rocpd
-        json csv --kernel-trace -- $<TARGET_FILE:simple-transpose>)
+        json csv --kernel-trace -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-rename)
 
-set_tests_properties(
-    rocprofv3-test-rocpd-no-rename-execute
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-no-rename)
-
-add_test(
-    NAME rocprofv3-test-rocpd-rename-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-rename
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-kernel-rename -o out --output-format csv
-        --kernel-trace --kernel-rename -- $<TARGET_FILE:simple-transpose>)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-rename-execute
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-rename)
+        --kernel-trace --kernel-rename -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-rename)
 
 #########################################################################################
 #
@@ -90,53 +73,33 @@ set_tests_properties(
 #
 #########################################################################################
 
-add_test(
-    NAME rocprofv3-test-rocpd-rename-csv-generation
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-rename-csv-generation
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d
         ${CMAKE_CURRENT_BINARY_DIR}/generated-rename-csv/ -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-rename-csv-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-rename)
 
-set_tests_properties(
-    rocprofv3-test-rocpd-rename-csv-generation
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               DEPENDS
-               "rocprofv3-test-rocpd-no-rename-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-rename-generation
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd-no-rename)
-
-add_test(
-    NAME rocprofv3-test-rocpd-no-rename-csv-generation
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-no-rename-csv-generation
     COMMAND
         ${Python3_EXECUTABLE} -m rocpd convert -f csv -d
         ${CMAKE_CURRENT_BINARY_DIR}/generated-no-rename-csv/ -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.db)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-no-rename-csv-generation
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               DEPENDS
-               "rocprofv3-test-rocpd-no-rename-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-rocpd-no-rename-generation
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd-no-rename)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-rename-csv-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-rename)
 
 #########################################################################################
 #
@@ -144,32 +107,20 @@ set_tests_properties(
 #
 #########################################################################################
 
-set(VALIDATION_DEPENDS rocprofv3-test-rocpd-rename-csv-generation
-                       rocprofv3-test-rocpd-no-rename-csv-generation)
-
-add_test(
-    NAME rocprofv3-test-rocpd-rename-validation
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --rename-csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-kernel-rename/out_kernel_trace.csv
-        --no-rename-csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_kernel_trace.csv
-        --generated-rename-csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/generated-rename-csv/out_kernel_trace.csv
-        --generated-no-rename-csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/generated-no-rename-csv/out_kernel_trace.csv)
-
-set_tests_properties(
-    rocprofv3-test-rocpd-rename-validation
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;rocpd"
-               ENVIRONMENT
-               "${rocprofv3-rocpd-env}"
-               DEPENDS
-               "${VALIDATION_DEPENDS}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_REQUIRED
-               rocprofv3-test-rocpd-no-rename-generation)
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-rename
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --rename-csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-kernel-rename/out_kernel_trace.csv
+         --no-rename-csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_kernel_trace.csv
+         --generated-rename-csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/generated-rename-csv/out_kernel_trace.csv
+         --generated-no-rename-csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/generated-no-rename-csv/out_kernel_trace.csv
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd" PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-rename-csv-generation)

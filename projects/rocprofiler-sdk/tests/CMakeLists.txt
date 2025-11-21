@@ -50,6 +50,7 @@ find_package(Python3 REQUIRED)
 
 # generally needed
 find_package(rocprofiler-sdk REQUIRED)
+find_package(rocprofiler_sdk_pytest REQUIRED)
 
 # get the gfx architectures that are present on the system
 rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
@@ -59,6 +60,9 @@ add_subdirectory(pytest-packages)
 
 # common utilities
 add_subdirectory(common)
+
+# unit-test subdirectory only exists in rocprofiler-sdk-tests package
+add_subdirectory(unit-tests)
 
 # tool libraries used for data collection during integration tests
 add_subdirectory(tools)
