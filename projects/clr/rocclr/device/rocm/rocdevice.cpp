@@ -983,12 +983,12 @@ bool Device::populateOCLDeviceConstants() {
     }
   }
 
-  LUID localUID = {0};
+  hsa_luid_t localUID = {0};
   if (HSA_STATUS_SUCCESS == Hsa::agent_get_info(bkendDevice_,
                                             static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
                                             &localUID)) {
-    info_.luidLowPart_ = localUID.LowPart;
-    info_.luidHighPart_ = localUID.HighPart;
+    info_.luidLowPart_ = localUID.low;
+    info_.luidHighPart_ = localUID.high;
   }
 
   if (HSA_STATUS_SUCCESS !=

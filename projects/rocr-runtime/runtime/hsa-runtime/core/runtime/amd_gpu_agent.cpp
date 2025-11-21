@@ -1711,8 +1711,13 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       return HSA_STATUS_ERROR;
     }
     case HSA_AMD_AGENT_INFO_LUID:
-      static_cast<LUID*>(value)->LowPart = properties_.LuidLowPart;
-      static_cast<LUID*>(value)->HighPart = properties_.LuidHighPart;
+#ifdef __linux__
+      static_cast<hsa_luid_t*>(value)->low = 0;
+      static_cast<hsa_luid_t*>(value)->high = 0;
+#else
+      static_cast<hsa_luid_t*>(value)->low = properties_.LuidLowPart;
+      static_cast<hsa_luid_t*>(value)->high = properties_.LuidHighPart;
+#endif
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

@@ -382,7 +382,7 @@ bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext
 #endif
 
 #if defined(_WIN32)
-glinterop_funcs_t gGlInteropFuncs = {MesaInterop::glAssociate, MesaInterop::glDissociate};
+glinterop_funcs_t gGlInteropFuncs = {WGLInterop::glAssociate, WGLInterop::glDissociate};
 #else
 glinterop_funcs_t gGlInteropFuncs = {MesaInterop::glAssociate, MesaInterop::glDissociate};
 #endif
