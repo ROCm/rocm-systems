@@ -34,8 +34,18 @@ hsa_status_t CountedQueuePoolManager::AcquireQueue(
   core::Queue* core_queue = FindOrCreateHardwareQueue(type, priority, callback, data, flags);
   if (!core_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  // Create unique handle even if reusing existing HW queue
-  hsa_queue_t* unique_handle = new hsa_queue_t(core_queue->amd_queue_.hsa_queue);
+  // Create unique SharedQueue structure and store the unique handle in it
+  SharedQueue* shared_queue = new SharedQueue();
+  if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // Copy amd_queue from HW queue
+  shared_queue->amd_queue = core_queue->amd_queue_;
+
+  // Point to the SAME underlying core::Queue (shared HW queue)
+  shared_queue->core_queue = core_queue;
+
+  // Create a unique handle from this new SharedQueue
+  hsa_queue_t* unique_handle = &shared_queue->amd_queue.hsa_queue;
 
   // Track metadata
   CountedQueue* counted_q = new CountedQueue(core_queue, callback, data);
@@ -43,6 +53,11 @@ hsa_status_t CountedQueuePoolManager::AcquireQueue(
 
   // Increment use count
   core_queue->use_count++;
+  
+  // Mark as a counted queue, if not already set
+  if (!core_queue->is_counted_queue) {
+    core_queue->is_counted_queue = true;
+  }
 
   *out_queue = unique_handle;
   return HSA_STATUS_SUCCESS;
@@ -91,15 +106,15 @@ hsa_status_t CountedQueuePoolManager::ReleaseQueue(hsa_queue_t* queue) {
   CountedQueue* counted_q = it->second;
 
   // Decrement internal ref count inside core::Queue object
-  if (counted_q->hw_queue->use_count > 0) counted_q->hw_queue->use_count--;
+  if (counted_q->hw_queue->use_count > 0) {
+    counted_q->hw_queue->use_count--;
+  }
 
-  // Remove the unique handle entry from map
-  counted_queues_.erase(it);
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t CountedQueuePoolManager::GetQueueInfo(hsa_queue_t* queue,
-                                                   hsa_counted_queue_info_attribute_t attribute,
+                                                   hsa_queue_info_attribute_t attribute,
                                                    void* value) {
   if (!queue || !value) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -113,6 +128,11 @@ hsa_status_t CountedQueuePoolManager::GetQueueInfo(hsa_queue_t* queue,
         // Queue has not been created using hsa_amd_counted_queue_acquire API
         *static_cast<int32_t*>(value) = -1;
       } else {
+        if (it->second->hw_queue->use_count == 0) {
+          // Queue was created using hsa_amd_counted_queue_acquire API but has been released 
+          // it is not in use anymore by any application
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
         *static_cast<uint32_t*>(value) = it->second->hw_queue->use_count;
       }
       return HSA_STATUS_SUCCESS;

@@ -3524,7 +3524,7 @@ hsa_status_t GpuAgent::ReleaseCountedQueue(hsa_queue_t* queue) {
   return queue_pool_.ReleaseQueue(queue);
 }
 
-hsa_status_t GpuAgent::GetCountedQueueInfo(hsa_queue_t* queue, hsa_counted_queue_info_attribute_t attribute, void* value) {
+hsa_status_t GpuAgent::GetCountedQueueInfo(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute, void* value) {
   return queue_pool_.GetQueueInfo(queue, attribute, value);
 }
 

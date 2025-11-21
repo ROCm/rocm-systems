@@ -1,6 +1,6 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -38,6 +38,12 @@ class CountedQueuesTest : public TestBase {
   void CountedQueuesAllPrioritiesLimitTest();
   void CountedQueuesSetPriorityNackTest();
   void CountedQueuesSetCUMaskNackTest();
+  void CountedQueuesDispatchTest();
+  void CountedQueuesMultithreadedDispatchTest();
+
+ private:
+  void* src_buffer_;
+  void* dst_buffer_;
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_COUNTED_QUEUES_H

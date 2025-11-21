@@ -176,7 +176,9 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
         shared_queue_(shared_queue),
         agent_(agent),
         flags_(queue_flags),
-        pcie_write_ordering_(pcie_write_ordering) {
+        pcie_write_ordering_(pcie_write_ordering), 
+        use_count(0), 
+        is_counted_queue(false) {
     public_handle_ = Convert(this);
     shared_queue->core_queue = this;
   }
@@ -378,6 +380,7 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
 
   // @brief Attributes specifically for counted queue types
   uint32_t use_count;
+  bool is_counted_queue;
 
   typedef void* rtti_t;
 

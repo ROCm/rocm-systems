@@ -388,11 +388,7 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
                                                             hsa_queue_t* source, void* data),
                                            void* data, uint64_t flags, hsa_queue_t** queue);
 // Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_agent_t agent, hsa_queue_t* queue);
-
-// Mirrors Amd Extension Apis
-hsa_status_t HSA_API hsa_amd_counted_queue_get_info(hsa_agent_t agent, hsa_queue_t* queue, hsa_counted_queue_info_attribute_t attribute,
-                                            void* value);
+hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file);

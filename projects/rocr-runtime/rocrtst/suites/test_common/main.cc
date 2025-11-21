@@ -501,12 +501,6 @@ TEST(rocrtstFunc, Filter_Devices_Test) {
   );
 }
 
-/* The following Counted Queue tests must be executed in separate child processes
-   because they rely on a Singleton instance that persists for the lifetime of the
-   process in which it is created. When run individually, these tests pass even
-   without process isolation; however, when executed sequentially within the same
-   process, they can fail with HSA_STATUS_ERROR_NOT_INITIALIZED. */
-
 TEST(rocrtstFunc, Counted_Queue_Basic_Test) {
   CountedQueuesTest cq;
   RunCustomTestProlog(&cq);
@@ -543,9 +537,23 @@ TEST(rocrtstFunc, Counted_Queue_Set_Priority_Nack_Test) {
 }
 
 TEST(rocrtstFunc, Counted_Queue_Set_CUMask_Nack_Test) {
-    CountedQueuesTest cq;
+  CountedQueuesTest cq;
   RunCustomTestProlog(&cq);
   cq.CountedQueuesSetCUMaskNackTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Dispatch_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesDispatchTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Multithreaded_Dispatch_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesMultithreadedDispatchTest();
   RunCustomTestEpilog(&cq);
 }
 

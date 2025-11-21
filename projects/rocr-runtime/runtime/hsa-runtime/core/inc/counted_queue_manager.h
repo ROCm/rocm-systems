@@ -45,7 +45,7 @@ class CountedQueuePoolManager {
   hsa_status_t ReleaseQueue(hsa_queue_t* queue);
 
   // Query info (use count, hw id)
-  hsa_status_t GetQueueInfo(hsa_queue_t* queue, hsa_counted_queue_info_attribute_t attribute,
+  hsa_status_t GetQueueInfo(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
                             void* value);
 
  private:

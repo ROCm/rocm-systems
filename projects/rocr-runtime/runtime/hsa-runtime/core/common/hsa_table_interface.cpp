@@ -1353,14 +1353,8 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(
                                                     queue);
 }
 
-hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_agent_t agent, hsa_queue_t* queue) {
-  return amdExtTable->hsa_amd_counted_queue_release_fn(agent, queue);
-}
-
-hsa_status_t HSA_API hsa_amd_counted_queue_get_info(hsa_agent_t agent, hsa_queue_t* queue,
-                                                    hsa_counted_queue_info_attribute_t attribute,
-                                                    void* value) {
-  return amdExtTable->hsa_amd_counted_queue_get_info_fn(agent, queue, attribute, value);
+hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue) {
+  return amdExtTable->hsa_amd_counted_queue_release_fn(queue);
 }
 
 // Tools only table interfaces.

@@ -3662,6 +3662,18 @@ typedef enum {
    * The type of this attribute is uint64_t.
    */
   HSA_AMD_QUEUE_INFO_DOORBELL_ID,
+  /*
+  * Returns how many times the underlying hardware queue has been shared.
+  * @p value will be set to -1 if this queue was not allocated using 
+  * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
+  */
+  HSA_QUEUE_INFO_USE_COUNT,
+  /*
+  * Returns a unique ID representing the HW resource used by a counted queue. Two queues
+  * with the same HW_ID use the same underlying hardware queue. This query can be
+  * used on counted and non-counted queues. The type of this attribute is uint32_t.
+  */
+  HSA_QUEUE_INFO_HW_ID,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
@@ -3764,7 +3776,7 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  * is less than GPU_MAX_HW_QUEUES. Once the GPU_MAX_HW_QUEUES limit is reached, this function will
  * stop creating new hardware queues and return a reference to an existing queue of the requested
  * @p priority instead. Each successful call will return a different @p queue handle.
- * The hsa_amd_counted_queue_get_info API can be used to determine whether this queue is currently shared.
+ * The hsa_amd_queue_get_info API can be used to determine whether this queue is currently shared.
  *
  * When there are multiple eligible hardware queues available, the queue with the lowest
  * HSA_QUEUE_INFO_USE_COUNT will be returned.
@@ -3815,25 +3827,7 @@ hsa_status_t hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t t
  * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
  * @retval ::HSA_STATUS_ERROR Invalid queue or queue was already released
  */
-hsa_status_t hsa_amd_counted_queue_release(hsa_agent_t agent, hsa_queue_t* queue);
-
-typedef enum {
-  /*
-   * Returns how many times the underlying hardware queue has been shared.
-   * @p value will be set to -1 if this queue was not allocated using
-   * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
-   */
-  HSA_QUEUE_INFO_USE_COUNT,
-  /*
-   * Returns a unique ID representing the HW resource used by this queue. Two queues
-   * with the same HW_ID use the same underlying hardware queue. This query can be
-   * used on counted and non-counted queues. The type of this attribute is uint32_t.
-   */
-  HSA_QUEUE_INFO_HW_ID,
-} hsa_counted_queue_info_attribute_t;
-
-hsa_status_t hsa_amd_counted_queue_get_info(hsa_agent_t agent, hsa_queue_t* queue, hsa_counted_queue_info_attribute_t attribute,
-                                            void* value);
+hsa_status_t hsa_amd_counted_queue_release(hsa_queue_t* queue);
 
 /**
  * @brief logging types
