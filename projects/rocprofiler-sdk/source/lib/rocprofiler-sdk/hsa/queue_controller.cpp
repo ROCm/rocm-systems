@@ -533,11 +533,11 @@ queue_controller_init(HsaApiTable* table)
 }
 
 void
-queue_controller_sync(bool is_detaching)
+queue_controller_sync(bool set_timeout)
 {
     if(get_queue_controller())
         get_queue_controller()->iterate_queues(
-            [is_detaching](const Queue* _queue) { _queue->sync(is_detaching); });
+            [set_timeout](const Queue* _queue) { _queue->sync(set_timeout); });
 }
 
 void
