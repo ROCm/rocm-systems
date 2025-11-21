@@ -53,6 +53,11 @@ set(EXECUTABLE_NAME "rocprof-compute")
 
 include(ExternalProject)
 include(GNUInstallDirs)
+include( utils.cmake )
+
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+set( COMP_TYPE "main" )
 
 # version control info
 execute_process(
@@ -340,6 +345,15 @@ add_test(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
 )
 
+add_test(
+    NAME test_profile_iteration_multiplexing
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -s -m iteration_multiplexing
+        --junitxml=tests/test_profile_iteration_multiplexing.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -354,6 +368,7 @@ set_tests_properties(
     test_profile_pc_sampling
     test_profile_sets_func
     test_profile_live_attach_detach
+    test_profile_iteration_multiplexing
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
@@ -583,7 +598,7 @@ install(
     COMPONENT main
 )
 
-#install librocprofiler-compute-tool.so
+# install librocprofiler-compute-tool.so
 install(
     TARGETS rocprofiler-compute-tool
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
@@ -686,6 +701,8 @@ message(STATUS "Install tests: ${INSTALL_TESTS}")
 # Packaging
 # ----------
 
+set(PKG_MAINTAINER_NM  "rocprofiler compute support")
+set(PKG_MAINTAINER_EMAIL  "dl.omnitools@amd.com")
 message(STATUS "Packaging config...")
 set(CPACK_GENERATOR "DEB" "RPM" CACHE STRING "")
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
@@ -789,5 +806,7 @@ set(CPACK_SOURCE_IGNORE_FILES
     /tests
     /build
 )
+
+configure_pkg( ${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
 
 include(CPack)

@@ -75,6 +75,23 @@ void Gfx9Factory::Print(const GpuBlockInfo* block_info) {
   }
 }
 
+void Gfx9Factory::InitSpmBlockDelay(GpuBlockInfo* block_info) {
+  static_assert(static_cast<size_t>(AQLPROFILE_BLOCKS_NUMBER) > SPM_GLOBAL_BLOCK_NAME_LAST,
+                "AQLPROFILE_BLOCKS_NUMBER must be greater than SPM_GLOBAL_BLOCK_NAME_LAST");
+  static_assert(static_cast<size_t>(AQLPROFILE_BLOCKS_NUMBER) > SPM_SE_BLOCK_NAME_LAST,
+                "AQLPROFILE_BLOCKS_NUMBER must be greater than SPM_SE_BLOCK_NAME_LAST");
+
+  if (block_info->delay_info.reg == REG_32B_NULL) return;
+
+  if (block_info->attr & CounterBlockSpmGlobalAttr) {
+    if (block_info->spm_block_id > SPM_GLOBAL_BLOCK_NAME_LAST) return;
+    block_info->delay_info.val = spm_block_delay_global[block_info->spm_block_id];
+  } else {
+    if (block_info->spm_block_id > SPM_SE_BLOCK_NAME_LAST) return;
+    block_info->delay_info.val = spm_block_delay_se[block_info->spm_block_id];
+  }
+}
+
 // GFX9 block table
 const GpuBlockInfo* Gfx9Factory::block_table_[AQLPROFILE_BLOCKS_NUMBER] = {
     &CpcCounterBlockInfo, &CpfCounterBlockInfo, &GdsCounterBlockInfo, &GrbmCounterBlockInfo,
