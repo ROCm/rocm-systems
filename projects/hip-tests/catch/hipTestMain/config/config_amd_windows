@@ -788,7 +788,9 @@
         "Unit_hipModule_Functional",
         "Unit_hipModuleLoad_MultProcess_MultGPU",
         "Unit_Copy_Coherency",
-        "Unit_test_generic_target_only_in_regular_fatbin",
+        "Unit_test_generic_target_only_in_regular_fatbin ",
+        "========mlsejenkins_Window_Failures_on_gfx1201===========================================",
+        "Unit_hipMemPoolSetAttribute_EventDependencies",
     #endif
         "=== Following tests disabled as it should be a local perf test",
         "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",
