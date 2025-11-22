@@ -861,9 +861,13 @@ static void __exit amdgpu_pmu_exit(void)
     pmu_info("Unloading PMU Stub module\n");
 
     if (pmu) {
-        /* Cancel timer */
+        /* Step 1: Stop timer to prevent new work from being queued */
         hrtimer_cancel(&pmu->timer);
 
+        /* Step 2: Flush all measurement workqueues BEFORE session cleanup */
+        aql_pmu_flush_all_measurements();
+
+        /* Step 3: Now safe to release session */
         aql_pmu_cleanup();
         pmu_info("AQL hardware acceleration disabled\n");
 

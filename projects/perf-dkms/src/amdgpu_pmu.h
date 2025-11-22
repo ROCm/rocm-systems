@@ -99,6 +99,7 @@ void amdgpu_pmu_cleanup_sysfs(struct amdgpu_pmu *pmu);
 /* AQL Hardware Integration Functions */
 int aql_pmu_init(void);
 void aql_pmu_cleanup(void);
+void aql_pmu_flush_all_measurements(void);
 bool aql_pmu_is_available(void);
 int aql_pmu_get_gpu_count(void);
 uint32_t aql_pmu_get_gpu_id_for_event(struct perf_event *event);

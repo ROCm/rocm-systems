@@ -6,21 +6,18 @@
 #include "counter_registry.h"
 #include "gfx12_events.h"
 
-#ifdef USERSPACE_BUILD
-#include <string.h>
-#include <stddef.h>
-#else
+#ifdef __KERNEL__
 #include <linux/string.h>
 #include <linux/kernel.h>
+#include <linux/errno.h>
+#else
+#include <string.h>
+#include <stddef.h>
+#include <errno.h>
 #endif
 
 /* Include dimension support for validation */
-#ifndef USERSPACE_BUILD
 #include "../pmu_dimension.h"
-#else
-/* Userspace builds don't need dimension validation */
-struct pmu_dimension_coords;
-#endif
 
 /* Base counter definitions - architecture agnostic */
 static const counter_def_t base_counters[] = {

@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms
+CMAKE_SOURCE_DIR = /home/ben/rocm-systems/projects/perf-dkms
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build
+CMAKE_BINARY_DIR = /home/ben/rocm-systems/projects/perf-dkms/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -142,14 +142,14 @@ install/strip/fast: preinstall/fast
 
 # The main all target
 all: cmake_check_build_system
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(CMAKE_COMMAND) -E cmake_progress_start /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build/CMakeFiles /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build/src/aql_c/tools//CMakeFiles/progress.marks
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build/CMakeFiles 0
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(CMAKE_COMMAND) -E cmake_progress_start /home/ben/rocm-systems/projects/perf-dkms/build/CMakeFiles /home/ben/rocm-systems/projects/perf-dkms/build/src/aql_c/tools//CMakeFiles/progress.marks
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/ben/rocm-systems/projects/perf-dkms/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
 clean:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/clean
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/clean
 .PHONY : clean
 
 # The main clean target
@@ -158,22 +158,22 @@ clean/fast: clean
 
 # Prepare targets for installation.
 preinstall: all
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/preinstall
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/preinstall
 .PHONY : preinstall
 
 # Prepare targets for installation.
 preinstall/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/preinstall
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/preinstall
 .PHONY : preinstall/fast
 
 # clear depends
 depend:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
 .PHONY : depend
 
 # Convenience name for target.
 src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/rule
 .PHONY : src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/rule
 
 # Convenience name for target.
@@ -182,12 +182,12 @@ packet_gen_tool: src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/rule
 
 # fast build rule for target.
 packet_gen_tool/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build
 .PHONY : packet_gen_tool/fast
 
 # Convenience name for target.
 src/aql_c/tools/CMakeFiles/pm4_decoder.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/CMakeFiles/pm4_decoder.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/CMakeFiles/pm4_decoder.dir/rule
 .PHONY : src/aql_c/tools/CMakeFiles/pm4_decoder.dir/rule
 
 # Convenience name for target.
@@ -196,12 +196,12 @@ pm4_decoder: src/aql_c/tools/CMakeFiles/pm4_decoder.dir/rule
 
 # fast build rule for target.
 pm4_decoder/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/pm4_decoder.dir/build.make src/aql_c/tools/CMakeFiles/pm4_decoder.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/pm4_decoder.dir/build.make src/aql_c/tools/CMakeFiles/pm4_decoder.dir/build
 .PHONY : pm4_decoder/fast
 
 # Convenience name for target.
 src/aql_c/tools/CMakeFiles/tools-help.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/CMakeFiles/tools-help.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tools/CMakeFiles/tools-help.dir/rule
 .PHONY : src/aql_c/tools/CMakeFiles/tools-help.dir/rule
 
 # Convenience name for target.
@@ -210,7 +210,7 @@ tools-help: src/aql_c/tools/CMakeFiles/tools-help.dir/rule
 
 # fast build rule for target.
 tools-help/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/tools-help.dir/build.make src/aql_c/tools/CMakeFiles/tools-help.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/tools-help.dir/build.make src/aql_c/tools/CMakeFiles/tools-help.dir/build
 .PHONY : tools-help/fast
 
 __/arch_creator.o: __/arch_creator.c.o
@@ -218,7 +218,7 @@ __/arch_creator.o: __/arch_creator.c.o
 
 # target to build an object file
 __/arch_creator.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/arch_creator.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/arch_creator.c.o
 .PHONY : __/arch_creator.c.o
 
 __/arch_creator.i: __/arch_creator.c.i
@@ -226,7 +226,7 @@ __/arch_creator.i: __/arch_creator.c.i
 
 # target to preprocess a source file
 __/arch_creator.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/arch_creator.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/arch_creator.c.i
 .PHONY : __/arch_creator.c.i
 
 __/arch_creator.s: __/arch_creator.c.s
@@ -234,7 +234,7 @@ __/arch_creator.s: __/arch_creator.c.s
 
 # target to generate assembly for a file
 __/arch_creator.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/arch_creator.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/arch_creator.c.s
 .PHONY : __/arch_creator.c.s
 
 __/counter_registry.o: __/counter_registry.c.o
@@ -242,7 +242,7 @@ __/counter_registry.o: __/counter_registry.c.o
 
 # target to build an object file
 __/counter_registry.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/counter_registry.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/counter_registry.c.o
 .PHONY : __/counter_registry.c.o
 
 __/counter_registry.i: __/counter_registry.c.i
@@ -250,7 +250,7 @@ __/counter_registry.i: __/counter_registry.c.i
 
 # target to preprocess a source file
 __/counter_registry.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/counter_registry.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/counter_registry.c.i
 .PHONY : __/counter_registry.c.i
 
 __/counter_registry.s: __/counter_registry.c.s
@@ -258,7 +258,7 @@ __/counter_registry.s: __/counter_registry.c.s
 
 # target to generate assembly for a file
 __/counter_registry.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/counter_registry.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/counter_registry.c.s
 .PHONY : __/counter_registry.c.s
 
 __/gfx12_creator.o: __/gfx12_creator.c.o
@@ -266,7 +266,7 @@ __/gfx12_creator.o: __/gfx12_creator.c.o
 
 # target to build an object file
 __/gfx12_creator.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_creator.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_creator.c.o
 .PHONY : __/gfx12_creator.c.o
 
 __/gfx12_creator.i: __/gfx12_creator.c.i
@@ -274,7 +274,7 @@ __/gfx12_creator.i: __/gfx12_creator.c.i
 
 # target to preprocess a source file
 __/gfx12_creator.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_creator.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_creator.c.i
 .PHONY : __/gfx12_creator.c.i
 
 __/gfx12_creator.s: __/gfx12_creator.c.s
@@ -282,7 +282,7 @@ __/gfx12_creator.s: __/gfx12_creator.c.s
 
 # target to generate assembly for a file
 __/gfx12_creator.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_creator.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_creator.c.s
 .PHONY : __/gfx12_creator.c.s
 
 __/gfx12_events.o: __/gfx12_events.c.o
@@ -290,7 +290,7 @@ __/gfx12_events.o: __/gfx12_events.c.o
 
 # target to build an object file
 __/gfx12_events.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_events.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_events.c.o
 .PHONY : __/gfx12_events.c.o
 
 __/gfx12_events.i: __/gfx12_events.c.i
@@ -298,7 +298,7 @@ __/gfx12_events.i: __/gfx12_events.c.i
 
 # target to preprocess a source file
 __/gfx12_events.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_events.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_events.c.i
 .PHONY : __/gfx12_events.c.i
 
 __/gfx12_events.s: __/gfx12_events.c.s
@@ -306,7 +306,7 @@ __/gfx12_events.s: __/gfx12_events.c.s
 
 # target to generate assembly for a file
 __/gfx12_events.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_events.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/gfx12_events.c.s
 .PHONY : __/gfx12_events.c.s
 
 __/packet_generation.o: __/packet_generation.c.o
@@ -314,7 +314,7 @@ __/packet_generation.o: __/packet_generation.c.o
 
 # target to build an object file
 __/packet_generation.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/packet_generation.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/packet_generation.c.o
 .PHONY : __/packet_generation.c.o
 
 __/packet_generation.i: __/packet_generation.c.i
@@ -322,7 +322,7 @@ __/packet_generation.i: __/packet_generation.c.i
 
 # target to preprocess a source file
 __/packet_generation.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/packet_generation.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/packet_generation.c.i
 .PHONY : __/packet_generation.c.i
 
 __/packet_generation.s: __/packet_generation.c.s
@@ -330,7 +330,7 @@ __/packet_generation.s: __/packet_generation.c.s
 
 # target to generate assembly for a file
 __/packet_generation.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/packet_generation.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/packet_generation.c.s
 .PHONY : __/packet_generation.c.s
 
 __/pm4_packets.o: __/pm4_packets.c.o
@@ -338,7 +338,7 @@ __/pm4_packets.o: __/pm4_packets.c.o
 
 # target to build an object file
 __/pm4_packets.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/pm4_packets.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/pm4_packets.c.o
 .PHONY : __/pm4_packets.c.o
 
 __/pm4_packets.i: __/pm4_packets.c.i
@@ -346,7 +346,7 @@ __/pm4_packets.i: __/pm4_packets.c.i
 
 # target to preprocess a source file
 __/pm4_packets.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/pm4_packets.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/pm4_packets.c.i
 .PHONY : __/pm4_packets.c.i
 
 __/pm4_packets.s: __/pm4_packets.c.s
@@ -354,7 +354,7 @@ __/pm4_packets.s: __/pm4_packets.c.s
 
 # target to generate assembly for a file
 __/pm4_packets.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/pm4_packets.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/__/pm4_packets.c.s
 .PHONY : __/pm4_packets.c.s
 
 packet_gen_tool.o: packet_gen_tool.c.o
@@ -362,7 +362,7 @@ packet_gen_tool.o: packet_gen_tool.c.o
 
 # target to build an object file
 packet_gen_tool.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/packet_gen_tool.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/packet_gen_tool.c.o
 .PHONY : packet_gen_tool.c.o
 
 packet_gen_tool.i: packet_gen_tool.c.i
@@ -370,7 +370,7 @@ packet_gen_tool.i: packet_gen_tool.c.i
 
 # target to preprocess a source file
 packet_gen_tool.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/packet_gen_tool.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/packet_gen_tool.c.i
 .PHONY : packet_gen_tool.c.i
 
 packet_gen_tool.s: packet_gen_tool.c.s
@@ -378,7 +378,7 @@ packet_gen_tool.s: packet_gen_tool.c.s
 
 # target to generate assembly for a file
 packet_gen_tool.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/packet_gen_tool.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/build.make src/aql_c/tools/CMakeFiles/packet_gen_tool.dir/packet_gen_tool.c.s
 .PHONY : packet_gen_tool.c.s
 
 pm4_decoder.o: pm4_decoder.c.o
@@ -386,7 +386,7 @@ pm4_decoder.o: pm4_decoder.c.o
 
 # target to build an object file
 pm4_decoder.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/pm4_decoder.dir/build.make src/aql_c/tools/CMakeFiles/pm4_decoder.dir/pm4_decoder.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/pm4_decoder.dir/build.make src/aql_c/tools/CMakeFiles/pm4_decoder.dir/pm4_decoder.c.o
 .PHONY : pm4_decoder.c.o
 
 pm4_decoder.i: pm4_decoder.c.i
@@ -394,7 +394,7 @@ pm4_decoder.i: pm4_decoder.c.i
 
 # target to preprocess a source file
 pm4_decoder.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/pm4_decoder.dir/build.make src/aql_c/tools/CMakeFiles/pm4_decoder.dir/pm4_decoder.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/pm4_decoder.dir/build.make src/aql_c/tools/CMakeFiles/pm4_decoder.dir/pm4_decoder.c.i
 .PHONY : pm4_decoder.c.i
 
 pm4_decoder.s: pm4_decoder.c.s
@@ -402,7 +402,7 @@ pm4_decoder.s: pm4_decoder.c.s
 
 # target to generate assembly for a file
 pm4_decoder.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/pm4_decoder.dir/build.make src/aql_c/tools/CMakeFiles/pm4_decoder.dir/pm4_decoder.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tools/CMakeFiles/pm4_decoder.dir/build.make src/aql_c/tools/CMakeFiles/pm4_decoder.dir/pm4_decoder.c.s
 .PHONY : pm4_decoder.c.s
 
 # Help Target
@@ -456,6 +456,6 @@ help:
 # No rule that depends on this can have commands that come from listfiles
 # because they might be regenerated.
 cmake_check_build_system:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
 .PHONY : cmake_check_build_system
 

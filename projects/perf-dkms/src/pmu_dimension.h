@@ -13,7 +13,14 @@
 #ifndef _PMU_DIMENSION_H
 #define _PMU_DIMENSION_H
 
+#ifdef __KERNEL__
 #include <linux/types.h>
+#else
+#include <stdint.h>
+#include <stdbool.h>
+typedef uint8_t u8;
+typedef uint64_t u64;
+#endif
 
 /*
  * config1 Bit Field Layout for Dimension Encoding
