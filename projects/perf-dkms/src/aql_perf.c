@@ -240,8 +240,50 @@ static void aql_perf_session_release(struct aql_perf_session *session)
 
     aql_debug("Releasing session %llu", session->session_id);
 
-    /* Ensure all measurements are stopped */
-    // This will be implemented in measurement management
+    /* Ensure all measurements are stopped and cleaned up */
+    {
+        struct aql_measurement *measurement, *tmp;
+        struct list_head local_list;
+
+        INIT_LIST_HEAD(&local_list);
+
+        /* Move all measurements to local list to avoid holding spinlock during cleanup */
+        spin_lock(&session->measurement_lock);
+        list_splice_init(&session->active_measurements, &local_list);
+        spin_unlock(&session->measurement_lock);
+
+        /* Stop and cleanup each measurement */
+        list_for_each_entry_safe(measurement, tmp, &local_list, list) {
+            aql_debug("Cleaning up measurement for GPU %u", measurement->gpu_id);
+
+            /* Stop measurement if active */
+            if (measurement->state == MEASUREMENT_ACTIVE) {
+                aql_perf_measurement_stop(measurement);
+            }
+
+            /* Flush and destroy workqueue */
+            if (measurement->work_queue) {
+                flush_workqueue(measurement->work_queue);
+                destroy_workqueue(measurement->work_queue);
+                measurement->work_queue = NULL;
+            }
+
+            /* Release counter if owned */
+            if (measurement->owns_counter && measurement->allocated_counter) {
+                aql_counter_release(measurement->allocated_counter);
+                measurement->allocated_counter = NULL;
+            }
+
+            /* Release shared reference */
+            if (measurement->shared_ref) {
+                release_shared_counter(session, measurement->shared_ref);
+                measurement->shared_ref = NULL;
+            }
+
+            /* Free measurement (already removed from active_measurements by list_splice_init) */
+            kfree(measurement);
+        }
+    }
 
     /* Clean up any remaining shared counter refs */
     {

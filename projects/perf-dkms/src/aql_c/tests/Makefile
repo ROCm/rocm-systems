@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms
+CMAKE_SOURCE_DIR = /home/ben/rocm-systems/projects/perf-dkms
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build
+CMAKE_BINARY_DIR = /home/ben/rocm-systems/projects/perf-dkms/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -142,14 +142,14 @@ install/strip/fast: preinstall/fast
 
 # The main all target
 all: cmake_check_build_system
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(CMAKE_COMMAND) -E cmake_progress_start /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build/CMakeFiles /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build/src/aql_c/tests//CMakeFiles/progress.marks
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build/CMakeFiles 0
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(CMAKE_COMMAND) -E cmake_progress_start /home/ben/rocm-systems/projects/perf-dkms/build/CMakeFiles /home/ben/rocm-systems/projects/perf-dkms/build/src/aql_c/tests//CMakeFiles/progress.marks
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/ben/rocm-systems/projects/perf-dkms/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
 clean:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/clean
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/clean
 .PHONY : clean
 
 # The main clean target
@@ -158,22 +158,22 @@ clean/fast: clean
 
 # Prepare targets for installation.
 preinstall: all
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/preinstall
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/preinstall
 .PHONY : preinstall
 
 # Prepare targets for installation.
 preinstall/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/preinstall
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/preinstall
 .PHONY : preinstall/fast
 
 # clear depends
 depend:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
 .PHONY : depend
 
 # Convenience name for target.
 src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/rule
 .PHONY : src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/rule
 
 # Convenience name for target.
@@ -182,12 +182,12 @@ test_pm4_lib: src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/rule
 
 # fast build rule for target.
 test_pm4_lib/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/build
 .PHONY : test_pm4_lib/fast
 
 # Convenience name for target.
 src/aql_c/tests/CMakeFiles/test_pm4.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_pm4.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_pm4.dir/rule
 .PHONY : src/aql_c/tests/CMakeFiles/test_pm4.dir/rule
 
 # Convenience name for target.
@@ -196,12 +196,12 @@ test_pm4: src/aql_c/tests/CMakeFiles/test_pm4.dir/rule
 
 # fast build rule for target.
 test_pm4/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4.dir/build
 .PHONY : test_pm4/fast
 
 # Convenience name for target.
 src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/rule
 .PHONY : src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/rule
 
 # Convenience name for target.
@@ -210,12 +210,12 @@ test_counter_registry_lib: src/aql_c/tests/CMakeFiles/test_counter_registry_lib.
 
 # fast build rule for target.
 test_counter_registry_lib/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build
 .PHONY : test_counter_registry_lib/fast
 
 # Convenience name for target.
 src/aql_c/tests/CMakeFiles/test_counter_registry.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_counter_registry.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_counter_registry.dir/rule
 .PHONY : src/aql_c/tests/CMakeFiles/test_counter_registry.dir/rule
 
 # Convenience name for target.
@@ -224,12 +224,12 @@ test_counter_registry: src/aql_c/tests/CMakeFiles/test_counter_registry.dir/rule
 
 # fast build rule for target.
 test_counter_registry/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry.dir/build
 .PHONY : test_counter_registry/fast
 
 # Convenience name for target.
 src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/rule
 .PHONY : src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/rule
 
 # Convenience name for target.
@@ -238,12 +238,12 @@ test_packet_generation_lib: src/aql_c/tests/CMakeFiles/test_packet_generation_li
 
 # fast build rule for target.
 test_packet_generation_lib/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build
 .PHONY : test_packet_generation_lib/fast
 
 # Convenience name for target.
 src/aql_c/tests/CMakeFiles/test_packet_generation.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_packet_generation.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/test_packet_generation.dir/rule
 .PHONY : src/aql_c/tests/CMakeFiles/test_packet_generation.dir/rule
 
 # Convenience name for target.
@@ -252,12 +252,12 @@ test_packet_generation: src/aql_c/tests/CMakeFiles/test_packet_generation.dir/ru
 
 # fast build rule for target.
 test_packet_generation/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation.dir/build
 .PHONY : test_packet_generation/fast
 
 # Convenience name for target.
 src/aql_c/tests/CMakeFiles/run-tests.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/run-tests.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/run-tests.dir/rule
 .PHONY : src/aql_c/tests/CMakeFiles/run-tests.dir/rule
 
 # Convenience name for target.
@@ -266,12 +266,12 @@ run-tests: src/aql_c/tests/CMakeFiles/run-tests.dir/rule
 
 # fast build rule for target.
 run-tests/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/run-tests.dir/build.make src/aql_c/tests/CMakeFiles/run-tests.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/run-tests.dir/build.make src/aql_c/tests/CMakeFiles/run-tests.dir/build
 .PHONY : run-tests/fast
 
 # Convenience name for target.
 src/aql_c/tests/CMakeFiles/run-pm4-test.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/run-pm4-test.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/run-pm4-test.dir/rule
 .PHONY : src/aql_c/tests/CMakeFiles/run-pm4-test.dir/rule
 
 # Convenience name for target.
@@ -280,12 +280,12 @@ run-pm4-test: src/aql_c/tests/CMakeFiles/run-pm4-test.dir/rule
 
 # fast build rule for target.
 run-pm4-test/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/run-pm4-test.dir/build.make src/aql_c/tests/CMakeFiles/run-pm4-test.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/run-pm4-test.dir/build.make src/aql_c/tests/CMakeFiles/run-pm4-test.dir/build
 .PHONY : run-pm4-test/fast
 
 # Convenience name for target.
 src/aql_c/tests/CMakeFiles/run-counter-test.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/run-counter-test.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/run-counter-test.dir/rule
 .PHONY : src/aql_c/tests/CMakeFiles/run-counter-test.dir/rule
 
 # Convenience name for target.
@@ -294,12 +294,12 @@ run-counter-test: src/aql_c/tests/CMakeFiles/run-counter-test.dir/rule
 
 # fast build rule for target.
 run-counter-test/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/run-counter-test.dir/build.make src/aql_c/tests/CMakeFiles/run-counter-test.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/run-counter-test.dir/build.make src/aql_c/tests/CMakeFiles/run-counter-test.dir/build
 .PHONY : run-counter-test/fast
 
 # Convenience name for target.
 src/aql_c/tests/CMakeFiles/run-packet-test.dir/rule:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/run-packet-test.dir/rule
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/aql_c/tests/CMakeFiles/run-packet-test.dir/rule
 .PHONY : src/aql_c/tests/CMakeFiles/run-packet-test.dir/rule
 
 # Convenience name for target.
@@ -308,7 +308,7 @@ run-packet-test: src/aql_c/tests/CMakeFiles/run-packet-test.dir/rule
 
 # fast build rule for target.
 run-packet-test/fast:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/run-packet-test.dir/build.make src/aql_c/tests/CMakeFiles/run-packet-test.dir/build
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/run-packet-test.dir/build.make src/aql_c/tests/CMakeFiles/run-packet-test.dir/build
 .PHONY : run-packet-test/fast
 
 __/arch_creator.o: __/arch_creator.c.o
@@ -316,8 +316,8 @@ __/arch_creator.o: __/arch_creator.c.o
 
 # target to build an object file
 __/arch_creator.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/arch_creator.c.o
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/arch_creator.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/arch_creator.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/arch_creator.c.o
 .PHONY : __/arch_creator.c.o
 
 __/arch_creator.i: __/arch_creator.c.i
@@ -325,8 +325,8 @@ __/arch_creator.i: __/arch_creator.c.i
 
 # target to preprocess a source file
 __/arch_creator.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/arch_creator.c.i
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/arch_creator.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/arch_creator.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/arch_creator.c.i
 .PHONY : __/arch_creator.c.i
 
 __/arch_creator.s: __/arch_creator.c.s
@@ -334,8 +334,8 @@ __/arch_creator.s: __/arch_creator.c.s
 
 # target to generate assembly for a file
 __/arch_creator.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/arch_creator.c.s
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/arch_creator.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/arch_creator.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/arch_creator.c.s
 .PHONY : __/arch_creator.c.s
 
 __/counter_registry.o: __/counter_registry.c.o
@@ -343,8 +343,8 @@ __/counter_registry.o: __/counter_registry.c.o
 
 # target to build an object file
 __/counter_registry.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/counter_registry.c.o
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/counter_registry.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/counter_registry.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/counter_registry.c.o
 .PHONY : __/counter_registry.c.o
 
 __/counter_registry.i: __/counter_registry.c.i
@@ -352,8 +352,8 @@ __/counter_registry.i: __/counter_registry.c.i
 
 # target to preprocess a source file
 __/counter_registry.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/counter_registry.c.i
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/counter_registry.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/counter_registry.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/counter_registry.c.i
 .PHONY : __/counter_registry.c.i
 
 __/counter_registry.s: __/counter_registry.c.s
@@ -361,8 +361,8 @@ __/counter_registry.s: __/counter_registry.c.s
 
 # target to generate assembly for a file
 __/counter_registry.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/counter_registry.c.s
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/counter_registry.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/counter_registry.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/counter_registry.c.s
 .PHONY : __/counter_registry.c.s
 
 __/gfx12_creator.o: __/gfx12_creator.c.o
@@ -370,8 +370,8 @@ __/gfx12_creator.o: __/gfx12_creator.c.o
 
 # target to build an object file
 __/gfx12_creator.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_creator.c.o
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_creator.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_creator.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_creator.c.o
 .PHONY : __/gfx12_creator.c.o
 
 __/gfx12_creator.i: __/gfx12_creator.c.i
@@ -379,8 +379,8 @@ __/gfx12_creator.i: __/gfx12_creator.c.i
 
 # target to preprocess a source file
 __/gfx12_creator.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_creator.c.i
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_creator.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_creator.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_creator.c.i
 .PHONY : __/gfx12_creator.c.i
 
 __/gfx12_creator.s: __/gfx12_creator.c.s
@@ -388,8 +388,8 @@ __/gfx12_creator.s: __/gfx12_creator.c.s
 
 # target to generate assembly for a file
 __/gfx12_creator.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_creator.c.s
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_creator.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_creator.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_creator.c.s
 .PHONY : __/gfx12_creator.c.s
 
 __/gfx12_events.o: __/gfx12_events.c.o
@@ -397,8 +397,8 @@ __/gfx12_events.o: __/gfx12_events.c.o
 
 # target to build an object file
 __/gfx12_events.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_events.c.o
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_events.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_events.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_events.c.o
 .PHONY : __/gfx12_events.c.o
 
 __/gfx12_events.i: __/gfx12_events.c.i
@@ -406,8 +406,8 @@ __/gfx12_events.i: __/gfx12_events.c.i
 
 # target to preprocess a source file
 __/gfx12_events.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_events.c.i
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_events.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_events.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_events.c.i
 .PHONY : __/gfx12_events.c.i
 
 __/gfx12_events.s: __/gfx12_events.c.s
@@ -415,8 +415,8 @@ __/gfx12_events.s: __/gfx12_events.c.s
 
 # target to generate assembly for a file
 __/gfx12_events.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_events.c.s
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_events.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry_lib.dir/__/gfx12_events.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/gfx12_events.c.s
 .PHONY : __/gfx12_events.c.s
 
 __/packet_generation.o: __/packet_generation.c.o
@@ -424,7 +424,7 @@ __/packet_generation.o: __/packet_generation.c.o
 
 # target to build an object file
 __/packet_generation.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/packet_generation.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/packet_generation.c.o
 .PHONY : __/packet_generation.c.o
 
 __/packet_generation.i: __/packet_generation.c.i
@@ -432,7 +432,7 @@ __/packet_generation.i: __/packet_generation.c.i
 
 # target to preprocess a source file
 __/packet_generation.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/packet_generation.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/packet_generation.c.i
 .PHONY : __/packet_generation.c.i
 
 __/packet_generation.s: __/packet_generation.c.s
@@ -440,7 +440,7 @@ __/packet_generation.s: __/packet_generation.c.s
 
 # target to generate assembly for a file
 __/packet_generation.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/packet_generation.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/packet_generation.c.s
 .PHONY : __/packet_generation.c.s
 
 __/pm4_packets.o: __/pm4_packets.c.o
@@ -448,8 +448,8 @@ __/pm4_packets.o: __/pm4_packets.c.o
 
 # target to build an object file
 __/pm4_packets.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/__/pm4_packets.c.o
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/pm4_packets.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/__/pm4_packets.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/pm4_packets.c.o
 .PHONY : __/pm4_packets.c.o
 
 __/pm4_packets.i: __/pm4_packets.c.i
@@ -457,8 +457,8 @@ __/pm4_packets.i: __/pm4_packets.c.i
 
 # target to preprocess a source file
 __/pm4_packets.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/__/pm4_packets.c.i
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/pm4_packets.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/__/pm4_packets.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/pm4_packets.c.i
 .PHONY : __/pm4_packets.c.i
 
 __/pm4_packets.s: __/pm4_packets.c.s
@@ -466,8 +466,8 @@ __/pm4_packets.s: __/pm4_packets.c.s
 
 # target to generate assembly for a file
 __/pm4_packets.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/__/pm4_packets.c.s
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/pm4_packets.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4_lib.dir/__/pm4_packets.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation_lib.dir/__/pm4_packets.c.s
 .PHONY : __/pm4_packets.c.s
 
 test_counter_registry.o: test_counter_registry.c.o
@@ -475,7 +475,7 @@ test_counter_registry.o: test_counter_registry.c.o
 
 # target to build an object file
 test_counter_registry.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry.dir/test_counter_registry.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry.dir/test_counter_registry.c.o
 .PHONY : test_counter_registry.c.o
 
 test_counter_registry.i: test_counter_registry.c.i
@@ -483,7 +483,7 @@ test_counter_registry.i: test_counter_registry.c.i
 
 # target to preprocess a source file
 test_counter_registry.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry.dir/test_counter_registry.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry.dir/test_counter_registry.c.i
 .PHONY : test_counter_registry.c.i
 
 test_counter_registry.s: test_counter_registry.c.s
@@ -491,7 +491,7 @@ test_counter_registry.s: test_counter_registry.c.s
 
 # target to generate assembly for a file
 test_counter_registry.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry.dir/test_counter_registry.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_counter_registry.dir/build.make src/aql_c/tests/CMakeFiles/test_counter_registry.dir/test_counter_registry.c.s
 .PHONY : test_counter_registry.c.s
 
 test_packet_generation.o: test_packet_generation.c.o
@@ -499,7 +499,7 @@ test_packet_generation.o: test_packet_generation.c.o
 
 # target to build an object file
 test_packet_generation.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation.dir/test_packet_generation.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation.dir/test_packet_generation.c.o
 .PHONY : test_packet_generation.c.o
 
 test_packet_generation.i: test_packet_generation.c.i
@@ -507,7 +507,7 @@ test_packet_generation.i: test_packet_generation.c.i
 
 # target to preprocess a source file
 test_packet_generation.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation.dir/test_packet_generation.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation.dir/test_packet_generation.c.i
 .PHONY : test_packet_generation.c.i
 
 test_packet_generation.s: test_packet_generation.c.s
@@ -515,7 +515,7 @@ test_packet_generation.s: test_packet_generation.c.s
 
 # target to generate assembly for a file
 test_packet_generation.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation.dir/test_packet_generation.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_packet_generation.dir/build.make src/aql_c/tests/CMakeFiles/test_packet_generation.dir/test_packet_generation.c.s
 .PHONY : test_packet_generation.c.s
 
 test_pm4_packets.o: test_pm4_packets.c.o
@@ -523,7 +523,7 @@ test_pm4_packets.o: test_pm4_packets.c.o
 
 # target to build an object file
 test_pm4_packets.c.o:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4.dir/test_pm4_packets.c.o
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4.dir/test_pm4_packets.c.o
 .PHONY : test_pm4_packets.c.o
 
 test_pm4_packets.i: test_pm4_packets.c.i
@@ -531,7 +531,7 @@ test_pm4_packets.i: test_pm4_packets.c.i
 
 # target to preprocess a source file
 test_pm4_packets.c.i:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4.dir/test_pm4_packets.c.i
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4.dir/test_pm4_packets.c.i
 .PHONY : test_pm4_packets.c.i
 
 test_pm4_packets.s: test_pm4_packets.c.s
@@ -539,7 +539,7 @@ test_pm4_packets.s: test_pm4_packets.c.s
 
 # target to generate assembly for a file
 test_pm4_packets.c.s:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4.dir/test_pm4_packets.c.s
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(MAKE) $(MAKESILENT) -f src/aql_c/tests/CMakeFiles/test_pm4.dir/build.make src/aql_c/tests/CMakeFiles/test_pm4.dir/test_pm4_packets.c.s
 .PHONY : test_pm4_packets.c.s
 
 # Help Target
@@ -603,6 +603,6 @@ help:
 # No rule that depends on this can have commands that come from listfiles
 # because they might be regenerated.
 cmake_check_build_system:
-	cd /home/ben/rocm-systems/worktrees/rename/projects/perf-dkms/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
+	cd /home/ben/rocm-systems/projects/perf-dkms/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
 .PHONY : cmake_check_build_system
 

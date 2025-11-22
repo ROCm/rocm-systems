@@ -299,6 +299,8 @@ counter_reg_info_t* aql_counter_try_allocate(block_info_t *block,
                                              uint32_t event_id,
                                              struct perf_event *perf_event);
 void aql_counter_release(counter_reg_info_t *reg);
+void release_shared_counter(struct aql_perf_session *session,
+                            struct shared_counter_ref *ref);
 int aql_build_counter_info(uint32_t counter_id,
                            arch_t *arch,
                            counter_reg_info_t *allocated_counter,

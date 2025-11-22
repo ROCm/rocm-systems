@@ -61,6 +61,72 @@ int aql_pmu_init(void)
 }
 
 /**
+ * aql_pmu_flush_all_measurements - Flush all measurement workqueues before cleanup
+ *
+ * This function ensures all pending work items complete before session cleanup.
+ * Must be called AFTER timer is cancelled but BEFORE session is released.
+ *
+ * IMPORTANT: This prevents use-after-free by ensuring no work handlers are running
+ * or queued when we free session resources.
+ *
+ * FIX: Use array-based approach to avoid list iterator invalidation.
+ * The previous version released the spinlock during iteration, which could cause
+ * use-after-free if another thread modified the list (poison value dead000000000100).
+ */
+void aql_pmu_flush_all_measurements(void)
+{
+    struct aql_perf_session *session;
+    struct aql_measurement *measurement;
+    struct workqueue_struct **queues;
+    int count = 0;
+    int capacity = 16;
+    unsigned long flags;
+    int i;
+
+    mutex_lock(&aql_pmu_mutex);
+
+    session = global_aql_session;
+    if (!session) {
+        mutex_unlock(&aql_pmu_mutex);
+        return;
+    }
+
+    /* Take reference to prevent session from being freed */
+    aql_perf_session_get(session);
+
+    /* Allocate array to hold workqueue pointers */
+    queues = kmalloc(capacity * sizeof(struct workqueue_struct *), GFP_KERNEL);
+    if (!queues) {
+        aql_perf_session_put(session);
+        mutex_unlock(&aql_pmu_mutex);
+        pmu_err("Failed to allocate memory for workqueue flush");
+        return;
+    }
+
+    /* Build array of workqueue pointers while holding lock */
+    spin_lock_irqsave(&session->measurement_lock, flags);
+    list_for_each_entry(measurement, &session->active_measurements, list) {
+        if (measurement->work_queue && count < capacity) {
+            queues[count++] = measurement->work_queue;
+        }
+    }
+    spin_unlock_irqrestore(&session->measurement_lock, flags);
+
+    /* Flush all workqueues outside the lock (safe - no list iteration) */
+    for (i = 0; i < count; i++) {
+        pmu_info("Flushing workqueue %d/%d", i + 1, count);
+        flush_workqueue(queues[i]);
+    }
+
+    kfree(queues);
+
+    aql_perf_session_put(session);
+    mutex_unlock(&aql_pmu_mutex);
+
+    pmu_info("All measurement workqueues flushed (%d total)", count);
+}
+
+/**
  * aql_pmu_cleanup - Cleanup AQL PMU integration
  */
 void aql_pmu_cleanup(void)
@@ -513,6 +579,7 @@ void aql_pmu_get_stats(struct aql_perf_stats *stats)
 
 EXPORT_SYMBOL_GPL(aql_pmu_init);
 EXPORT_SYMBOL_GPL(aql_pmu_cleanup);
+EXPORT_SYMBOL_GPL(aql_pmu_flush_all_measurements);
 EXPORT_SYMBOL_GPL(aql_pmu_is_available);
 EXPORT_SYMBOL_GPL(aql_pmu_event_init);
 EXPORT_SYMBOL_GPL(aql_pmu_event_destroy);

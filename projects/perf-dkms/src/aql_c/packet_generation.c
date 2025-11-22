@@ -11,6 +11,7 @@
 #else
 #include <errno.h>
 #include <stdbool.h>
+#include <stdio.h>
 #endif
 
 #define VALIDATE_BLOCK_ID(arch, counter) \
@@ -244,14 +245,45 @@ int generate_start_packet(pm4_buffer_t *buffer, const arch_t *arch,
       return ret;
   }
 
-  /* 5. Configure each counter in broadcast mode */
+  /* 5. Configure each counter */
   for (size_t i = 0; i < collection->counter_count; i++) {
     counter_info_t *counter = &collection->counters[i];
 
-    /* Configure the counter (broadcast mode already set) */
-    ret = generate_counter_config(buffer, arch, counter);
-    if (ret < 0)
-      return ret;
+    /* GL2C and TCC counters need per-instance configuration instead of broadcast.
+     * Other blocks (SQ, GRBM, TA) work correctly with broadcast mode. */
+    bool needs_per_instance_config = (counter->block_id == HW_IP_BLOCK_GL2C ||
+                                      counter->block_id == HW_IP_BLOCK_TCC);
+
+    if (needs_per_instance_config) {
+      /* Get block info to determine number of instances */
+      block_info_t *block = arch->block_map.blocks[counter->block_id];
+      uint32_t num_instances = block->instance_count;
+
+      /* Configure each instance separately */
+      for (uint32_t instance = 0; instance < num_instances; instance++) {
+        /* Set GRBM_GFX_INDEX to select this specific instance */
+        uint32_t grbm_value = 0xa0000000u | instance;
+        ret = pm4_append_set_uconfig_reg(buffer, arch->control_regs.grbm_gfx_index, grbm_value);
+        if (ret < 0)
+          return ret;
+
+        /* Configure the counter for this instance */
+        ret = generate_counter_config(buffer, arch, counter);
+        if (ret < 0)
+          return ret;
+      }
+
+      /* Reset to broadcast mode after per-instance config */
+      ret = generate_grbm_broadcast(buffer, arch);
+      if (ret < 0)
+        return ret;
+
+    } else {
+      /* Other blocks: Configure once in broadcast mode (already set) */
+      ret = generate_counter_config(buffer, arch, counter);
+      if (ret < 0)
+        return ret;
+    }
   }
 
   /* 6. GRBM broadcast again */
@@ -327,10 +359,16 @@ int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
       return -ENOENT;
     }
 
-    /* Reset to broadcast mode for each counter */
-    ret = generate_grbm_broadcast(buffer, arch);
-    if (ret < 0)
-      return ret;
+    /* Reset to broadcast mode for each counter
+     * Skip for multi-instance global blocks (GL2C, TCC) - they handle broadcast per-instance */
+    bool is_multi_instance_global = (counter->block_id == HW_IP_BLOCK_GL2C ||
+                                      counter->block_id == HW_IP_BLOCK_TCC);
+
+    if (!is_multi_instance_global) {
+      ret = generate_grbm_broadcast(buffer, arch);
+      if (ret < 0)
+        return ret;
+    }
 
     /* Get register info */
     counter_reg_info_t *reg_info =
@@ -418,21 +456,177 @@ int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
         }
       }
     } else {
-      /* No SE dimension found - global block, read once */
-      pm4_copy_data_flags_t flags = {
-          .bits = {.src_sel = 0,      /* Non-priv registers */
-                   .dst_sel = 2,      /* TC_L2 memory */
-                   .src_temporal = 3, /* LU cache policy */
-                   .dst_temporal = 3, /* LU cache policy */
-                   .count_sel = 0,    /* 32-bit data */
-                   .wr_confirm = 0}};
+      /* No SE dimension found - global block
+       * Check if block has multiple instances (e.g., GL2C has 16 instances, TCC has 16)
+       */
+      uint32_t num_instances = block->instance_count;
 
-      ret = pm4_append_copy_data(buffer, flags, reg_info->register_addr_lo,
-                                 reg_info->register_addr_hi, current_addr);
-      if (ret < 0)
-        return ret;
+      if (num_instances > 1) {
+        /* Multi-instance global block - iterate through each instance
+         *
+         * This handles blocks like GL2C and TCC which have multiple hardware instances
+         * that must be read separately. Each instance is selected by setting the
+         * INSTANCE_INDEX field in GRBM_GFX_INDEX while broadcasting to all SE/SA.
+         *
+         * Reference: aqlprofile pmc_builder.h lines 593-594:
+         *   else if (block_info->instance_count > 1) {
+         *     grbm_value = Primitives::grbm_inst_index_value(block_des.index);
+         *   }
+         */
 
-      current_addr += 8; /* 64-bit counter value */
+        /* GL2C and TCC blocks require separate LO+HI reads like GRBM.
+         * Our register addresses already include BASE_IDX adjustments, so we can
+         * use them directly in COPY_DATA packets.
+         */
+        bool is_split_read_block = (counter->block_id == HW_IP_BLOCK_GL2C ||
+                                     counter->block_id == HW_IP_BLOCK_TCC);
+
+        for (uint32_t instance = 0; instance < num_instances; instance++) {
+          /* GL2C requires a broadcast->instance toggle sequence per rocprofv3.
+           * Reset to broadcast mode first, then set the specific instance.
+           * This ensures the GPU properly routes subsequent operations to the correct instance. */
+          ret = generate_grbm_broadcast(buffer, arch);
+          if (ret < 0)
+            return ret;
+
+          /* Set GRBM index to select specific instance
+           * GRBM_GFX_INDEX format for instance selection:
+           * - INSTANCE_INDEX = instance number (bits 0-7)
+           * - SE_BROADCAST_WRITES = 1 (broadcast to all SEs, bit 30)
+           * - SA_BROADCAST_WRITES = 1 (broadcast to all SAs, bit 29)
+           * Value = 0xa0000000 | instance
+           */
+          uint32_t grbm_value = 0xa0000000u | instance;
+          ret = pm4_append_set_uconfig_reg(buffer, arch->control_regs.grbm_gfx_index, grbm_value);
+          if (ret < 0)
+            return ret;
+
+          if (is_split_read_block) {
+            /* GL2C/TCC: Read LO and HI separately as 32-bit values
+             *
+             * GL2C and TCC counters must be read as separate 32-bit LO/HI operations
+             * instead of combined 64-bit reads. This matches aqlprofile's implementation
+             * for these blocks on GFX12.
+             *
+             * The register addresses in gfx12_creator.c are already absolute UCONFIG
+             * addresses with BASE_IDX=1 adjustment applied (e.g., GL2C_PERFCOUNTER0_LO
+             * is defined as 0xd380 = 0xc000 + (0x3380 - 0x2000)).
+             *
+             * For COPY_DATA, pm4_append_copy_data expects the UCONFIG-relative offset,
+             * so we subtract UCONFIG_SPACE_START (0xc000) to get the packet register field.
+             */
+
+            pm4_copy_data_flags_t flags = {
+                .bits = {.src_sel = 0,      /* Non-priv registers */
+                         .dst_sel = 2,      /* TC_L2 memory */
+                         .src_temporal = 3, /* LU cache policy */
+                         .dst_temporal = 3, /* LU cache policy */
+                         .count_sel = 0,    /* 32-bit data */
+                         .wr_confirm = 0}};
+
+            /* COPY_DATA expects absolute UCONFIG addresses, not offsets.
+             * GL2C register definitions are already absolute (e.g., 0xd380), so use them directly. */
+            uint32_t reg_lo = reg_info->register_addr_lo;
+            uint32_t reg_hi = reg_info->register_addr_hi;
+
+            /* Read LO register (32-bit) */
+            ret = pm4_append_copy_data(buffer, flags, reg_lo,
+                                       0, current_addr);
+            if (ret < 0)
+              return ret;
+            current_addr += 4; /* 32-bit value */
+
+            /* Read HI register (32-bit) */
+            ret = pm4_append_copy_data(buffer, flags, reg_hi,
+                                       0, current_addr);
+            if (ret < 0)
+              return ret;
+            current_addr += 4; /* 32-bit value */
+          } else {
+            /* Other multi-instance blocks: Combined 64-bit read */
+            pm4_copy_data_flags_t flags = {
+                .bits = {.src_sel = 0,      /* Non-priv registers */
+                         .dst_sel = 2,      /* TC_L2 memory */
+                         .src_temporal = 3, /* LU cache policy */
+                         .dst_temporal = 3, /* LU cache policy */
+                         .count_sel = 0,    /* 32-bit data */
+                         .wr_confirm = 0}};
+
+            ret = pm4_append_copy_data(buffer, flags, reg_info->register_addr_lo,
+                                       reg_info->register_addr_hi, current_addr);
+            if (ret < 0)
+              return ret;
+
+            current_addr += 8; /* 64-bit counter value */
+          }
+        }
+      } else {
+        /* Single-instance global block - read once
+         *
+         * Special case for GRBM: Read LO and HI as separate 32-bit COPY_DATA packets
+         * instead of one combined 64-bit read. This matches aqlprofile's implementation
+         * for GRBM counters on GFX12.
+         *
+         * Reference: aqlprofile pmc_builder.h ReadXccPackets() - GRBM counters are read
+         * with two separate BuildCopyCounterDataPacket() calls for LO and HI registers.
+         */
+        if (counter->block_id == HW_IP_BLOCK_GRBM) {
+          /* GRBM: Read LO and HI separately as 32-bit values
+           *
+           * GRBM registers have BASE_IDX=1 in gc_12_0_0_offset.h, which means
+           * they need an offset adjustment of -0x2000 to convert from the defined
+           * register offset to the UCONFIG register space offset.
+           *
+           * Example: regGRBM_PERFCOUNTER0_LO = 0x3040 (BASE_IDX=1)
+           *          UCONFIG offset = 0x3040 - 0x2000 = 0x1040
+           *          Absolute UCONFIG address = 0xc000 + 0x1040 = 0xd040
+           *
+           * This matches how aqlprofile handles GRBM registers on GFX12.
+           */
+          pm4_copy_data_flags_t flags = {
+              .bits = {.src_sel = 0,      /* Non-priv registers */
+                       .dst_sel = 2,      /* TC_L2 memory */
+                       .src_temporal = 3, /* LU cache policy */
+                       .dst_temporal = 3, /* LU cache policy */
+                       .count_sel = 0,    /* 32-bit data */
+                       .wr_confirm = 0}};
+
+          /* GRBM register offset adjustment for BASE_IDX=1 */
+          const uint32_t grbm_base_offset = 0x2000;
+          uint32_t grbm_reg_lo = reg_info->register_addr_lo - grbm_base_offset;
+          uint32_t grbm_reg_hi = reg_info->register_addr_hi - grbm_base_offset;
+
+          /* Read LO register (32-bit) */
+          ret = pm4_append_copy_data(buffer, flags, grbm_reg_lo,
+                                     0, current_addr);
+          if (ret < 0)
+            return ret;
+          current_addr += 4; /* 32-bit value */
+
+          /* Read HI register (32-bit) */
+          ret = pm4_append_copy_data(buffer, flags, grbm_reg_hi,
+                                     0, current_addr);
+          if (ret < 0)
+            return ret;
+          current_addr += 4; /* 32-bit value */
+        } else {
+          /* Normal global block: Read LO+HI as one 64-bit value */
+          pm4_copy_data_flags_t flags = {
+              .bits = {.src_sel = 0,      /* Non-priv registers */
+                       .dst_sel = 2,      /* TC_L2 memory */
+                       .src_temporal = 3, /* LU cache policy */
+                       .dst_temporal = 3, /* LU cache policy */
+                       .count_sel = 0,    /* 32-bit data */
+                       .wr_confirm = 0}};
+
+          ret = pm4_append_copy_data(buffer, flags, reg_info->register_addr_lo,
+                                     reg_info->register_addr_hi, current_addr);
+          if (ret < 0)
+            return ret;
+
+          current_addr += 8; /* 64-bit counter value */
+        }
+      }
     }
   }
 
@@ -498,11 +692,23 @@ size_t calculate_counter_memory_size(const arch_t *arch,
 
     size_t counter_size = 8; /* Base 64-bit counter size */
 
-    /* Multiply by topology dimensions - use block-specific dimension sizes */
+    /* Check if block has SE/SA/WGP dimensions */
+    bool has_se_dimension = false;
     for (size_t dim_idx = 0; dim_idx < block->dimension_count; dim_idx++) {
       dimension_t *dim = &block->dimensions[dim_idx];
-      /* Always use the dimension size from the block, not the arch defaults */
+      if (dim->dim == HARDWARE_DIM_SE) {
+        has_se_dimension = true;
+      }
+      /* Multiply by topology dimensions - use block-specific dimension sizes */
       counter_size *= dim->size;
+    }
+
+    /* For global blocks (no SE dimension) with multiple instances,
+     * multiply by instance count to allocate space for all instances.
+     * This handles blocks like GL2C (16 instances) and TCC (16 instances).
+     */
+    if (!has_se_dimension && block->instance_count > 1) {
+      counter_size *= block->instance_count;
     }
 
     total_size += counter_size;

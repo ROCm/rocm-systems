@@ -65,19 +65,23 @@
 #define mmGRBM_PERFCOUNTER1_LO              12355
 #define mmGRBM_PERFCOUNTER1_HI              12356
 
-/* GL2C registers */
-#define mmGL2C_PERFCOUNTER0_SELECT          15232
-#define mmGL2C_PERFCOUNTER0_LO              13184
-#define mmGL2C_PERFCOUNTER0_HI              13185
-#define mmGL2C_PERFCOUNTER1_SELECT          15234
-#define mmGL2C_PERFCOUNTER1_LO              13186
-#define mmGL2C_PERFCOUNTER1_HI              13187
-#define mmGL2C_PERFCOUNTER2_SELECT          15236
-#define mmGL2C_PERFCOUNTER2_LO              13188
-#define mmGL2C_PERFCOUNTER2_HI              13189
-#define mmGL2C_PERFCOUNTER3_SELECT          15238
-#define mmGL2C_PERFCOUNTER3_LO              13190
-#define mmGL2C_PERFCOUNTER3_HI              13191
+/* GL2C registers - BASE_IDX=1, absolute UCONFIG addresses
+ * Hardware register (gc_12_0_0_offset.h): regGL2C_PERFCOUNTER0_SELECT = 0x3b80, BASE_IDX=1
+ * Absolute UCONFIG address = 0xC000 + (0x3b80 - 0x2000) = 0xdb80 = 56192
+ * Same pattern applies to LO/HI: 0xc000 + (reg - 0x2000)
+ */
+#define mmGL2C_PERFCOUNTER0_SELECT          56192  /* 0xdb80 = 0xc000 + (0x3b80 - 0x2000) */
+#define mmGL2C_PERFCOUNTER0_LO              54144  /* 0xd380 = 0xc000 + (0x3380 - 0x2000) */
+#define mmGL2C_PERFCOUNTER0_HI              54145  /* 0xd381 = 0xc000 + (0x3381 - 0x2000) */
+#define mmGL2C_PERFCOUNTER1_SELECT          56194  /* 0xdb82 = 0xc000 + (0x3b82 - 0x2000) */
+#define mmGL2C_PERFCOUNTER1_LO              54146  /* 0xd382 = 0xc000 + (0x3382 - 0x2000) */
+#define mmGL2C_PERFCOUNTER1_HI              54147  /* 0xd383 = 0xc000 + (0x3383 - 0x2000) */
+#define mmGL2C_PERFCOUNTER2_SELECT          56196  /* 0xdb84 = 0xc000 + (0x3b84 - 0x2000) */
+#define mmGL2C_PERFCOUNTER2_LO              54148  /* 0xd384 = 0xc000 + (0x3384 - 0x2000) */
+#define mmGL2C_PERFCOUNTER2_HI              54149  /* 0xd385 = 0xc000 + (0x3385 - 0x2000) */
+#define mmGL2C_PERFCOUNTER3_SELECT          56198  /* 0xdb86 = 0xc000 + (0x3b86 - 0x2000) */
+#define mmGL2C_PERFCOUNTER3_LO              54150  /* 0xd386 = 0xc000 + (0x3386 - 0x2000) */
+#define mmGL2C_PERFCOUNTER3_HI              54151  /* 0xd387 = 0xc000 + (0x3387 - 0x2000) */
 
 /* SPI registers */
 #define mmSPI_PERFCOUNTER0_SELECT           14720
@@ -260,11 +264,19 @@
 #define GFX12_COUNTER_BLOCK_DFLT_ATTR             1
 #define GFX12_COUNTER_BLOCK_SPM_GLOBAL_ATTR       0x1000
 
-/* GFX12 Architecture parameters - from Rust demo.rs */
+/* GFX12 Architecture parameters - from actual gfx1200 GPU topology
+ * These values should match the physical GPU configuration.
+ * For reference gfx1200 (AMD Radeon RX 9060 XT):
+ *   - 32 Compute Units (CUs)
+ *   - 2 Shader Engines (SEs)
+ *   - 2 Shader Arrays per SE (SAs)
+ *   - 16 Workgroup Processors (WGPs = CUs / 2)
+ *   - 4 WGPs per SA (16 WGPs / 4 SAs)
+ */
 #define GFX12_NUM_XCC           1
-#define GFX12_NUM_SE            4
+#define GFX12_NUM_SE            2
 #define GFX12_NUM_SA            2
-#define GFX12_NUM_CU            64
+#define GFX12_NUM_CU            32
 #define GFX12_NUM_WGP_PER_SA    4
 
 /**
@@ -1403,7 +1415,11 @@ arch_t* create_gfx12_arch(void) {
     arch->block_map.blocks[HW_IP_BLOCK_PA_SC] = pa_sc_block;
     arch->block_map.blocks[HW_IP_BLOCK_PA_SU] = pa_su_block;
     arch->block_map.blocks[HW_IP_BLOCK_GDS] = gds_block;
-    arch->block_map.block_count = 14;
+    /* Block count must be >= highest block ID + 1
+     * Highest registered block is HW_IP_BLOCK_TCC=19, so we need at least 20
+     * Using HW_IP_BLOCK_LAST allows for all possible blocks
+     */
+    arch->block_map.block_count = HW_IP_BLOCK_LAST;
 
     /* Initialize control registers for GFX12 */
     arch->control_regs = (arch_control_regs_t) {

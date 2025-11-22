@@ -124,7 +124,7 @@ static struct shared_counter_ref *create_shared_counter(
  *
  * Decrements reference count. When count reaches zero, removes from list and frees.
  */
-static void release_shared_counter(
+void release_shared_counter(
     struct aql_perf_session *session,
     struct shared_counter_ref *ref)
 {
