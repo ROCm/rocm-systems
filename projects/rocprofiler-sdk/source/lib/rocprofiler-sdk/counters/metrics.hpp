@@ -96,9 +96,9 @@ using ArchMetric  = std::pair<std::string, Metric>;
 
 struct counter_metrics_t
 {
-    const MetricMap   arch_to_metric;
-    const MetricIdMap id_to_metric;
-    const ArchToId    arch_to_id;
+    MetricMap   arch_to_metric;
+    MetricIdMap id_to_metric;
+    ArchToId    arch_to_id;
 };
 
 std::shared_ptr<const counter_metrics_t>

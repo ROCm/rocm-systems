@@ -218,33 +218,29 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
     ROCP_FATAL_IF(current_id > 65536)
         << "Counter count exceeds 16 bits, which may break counter id output";
 
-    return {.arch_to_metric = ret,
-            .id_to_metric =
-                [&]() {
-                    MetricIdMap map;
-                    for(const auto& [agent_name, metrics] : ret)
-                    {
-                        for(const auto& m : metrics)
-                        {
-                            map.emplace(m.id(), m);
-                        }
-                    }
-                    return map;
-                }(),
-            .arch_to_id =
-                [&]() {
-                    ArchToId map;
-                    for(const auto& [agent_name, metrics] : ret)
-                    {
-                        std::unordered_set<uint64_t> ids;
-                        for(const auto& m : metrics)
-                        {
-                            ids.insert(m.id());
-                        }
-                        map.emplace(agent_name, std::move(ids));
-                    }
-                    return map;
-                }()};
+    MetricIdMap id_map;
+    for(const auto& [agent_name, metrics] : ret)
+    {
+        for(const auto& m : metrics)
+        {
+            id_map.emplace(m.id(), m);
+        }
+    }
+
+    ArchToId arch_id_map;
+    for(const auto& [agent_name, metrics] : ret)
+    {
+        std::unordered_set<uint64_t> ids;
+        for(const auto& m : metrics)
+        {
+            ids.insert(m.id());
+        }
+        arch_id_map.emplace(agent_name, std::move(ids));
+    }
+
+    return {.arch_to_metric = std::move(ret),
+            .id_to_metric   = std::move(id_map),
+            .arch_to_id     = std::move(arch_id_map)};
 }
 
 std::string

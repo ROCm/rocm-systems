@@ -186,7 +186,7 @@ using EvaluateASTMap = std::unordered_map<std::string, EvaluateAST>;
 
 struct ASTs
 {
-    const std::unordered_map<std::string, EvaluateASTMap> arch_to_counter_asts;
+    std::unordered_map<std::string, EvaluateASTMap> arch_to_counter_asts;
 };
 
 rocprofiler_status_t

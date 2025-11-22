@@ -304,7 +304,7 @@ load_asts()
         }
     }
 
-    return {.arch_to_counter_asts = data};
+    return {.arch_to_counter_asts = std::move(data)};
 }
 
 }  // namespace
