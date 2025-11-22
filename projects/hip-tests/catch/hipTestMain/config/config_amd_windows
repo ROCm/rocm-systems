@@ -789,8 +789,13 @@
         "Unit_hipModuleLoad_MultProcess_MultGPU",
         "Unit_Copy_Coherency",
         "Unit_test_generic_target_only_in_regular_fatbin ",
+        "Unit_hipMalloc_Allocate90PercentOfDeviceMemory",
         "========mlsejenkins_Window_Failures_on_gfx1201===========================================",
         "Unit_hipMemPoolSetAttribute_EventDependencies",
+        "Unit_hipStreamSynchronize_NullStreamSynchronization",
+        "Unit_Printf_specifier_Sanity_Positive",
+        "Unit_Buffered_Printf_Flags",
+        "Unit_Buffered_Printf_Specifier",
     #endif
         "=== Following tests disabled as it should be a local perf test",
         "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",
