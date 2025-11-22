@@ -81,7 +81,7 @@ def make_test_files_portable(filenames):
                 modified_content = re.sub(ctest_test_pattern, replace_ctest_pattern, modified_content)
                 # 7 use script folder as cwd
                 cwd_pattern = r"TEST_WORKING_DIR\s+\[==\[(.*?)\]==\]"
-                replace_cwd_pattern = r'TEST_WORKING_DIR  ${CTEST_CURRENT_DIR}'
+                replace_cwd_pattern = r'TEST_WORKING_DIR  ${EXE_PATH}'
                 modified_content = re.sub(cwd_pattern, replace_cwd_pattern, modified_content)
                 # 8 modify ld_library_path
                 if os.name == 'posix':
