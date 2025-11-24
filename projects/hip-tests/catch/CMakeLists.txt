@@ -1,21 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 
-<<<<<<< HEAD
 if (HIP_PLATFORM MATCHES "nvidia")
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES 75)
   endif()
   set(GPGPU_LANGUAGE "CUDA")
+  set(CMAKE_HIP_COMPILER /usr/local/cuda-12.9/bin/nvcc)
 elseif (HIP_PLATFORM MATCHES "amd")
   set(GPGPU_LANGUAGE "HIP")
 endif()
 enable_language(${GPGPU_LANGUAGE})
 message(STATUS "USING GPGPU_LANGUAGE ${GPGPU_LANGUAGE}")
 project(hiptests LANGUAGES C CXX ${GPGPU_LANGUAGE})                                         
-
-=======
-project(hiptests LANGUAGES C CXX HIP)                                         
->>>>>>> b0d0373c081b48173e5c7ae8709f66e38c7045ec
 
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
