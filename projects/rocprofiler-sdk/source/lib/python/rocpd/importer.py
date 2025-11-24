@@ -47,8 +47,30 @@ def internal_init(_input, _output, skip_auto_merge, automerge_limit):
     assert _check_for_valid_dbs(
         _input
     ), "RocpdImportData error, invalid SQLite3 database provided"
+
     _connection = libpyrocpd.connect(_output)
     _connection.execute("PRAGMA foreign_keys = ON")
+    _connection.execute(
+        "PRAGMA journal_mode = WAL;"
+    )  # Write-Ahead Logging for better concurrency
+    _connection.execute(f"PRAGMA cache_size = -{64 * 1024 * 1024};")  # Use 64MB for cache
+    _connection.execute("PRAGMA temp_store = MEMORY;")
+    _connection.execute("PRAGMA foreign_keys = OFF;")  # defer FK checks until end
+
+    # Enable mmap to increase the performance of reading large DB files
+    # The maximum size of mmap is 2GB (2*1024*1024*1024)
+    # Get total size of all the database files
+    total_size = sum(
+        os.path.getsize(db_file) for db_file in _input if os.path.exists(db_file)
+    )
+
+    # Get the buffer size for mmap
+    mmap_size = total_size + (256 * 1024 * 1024)  # Add 256MB buffer
+
+    if mmap_size < 2 * 1024 * 1024 * 1024:
+        # do not use mmap for large files
+        _connection.execute(f"PRAGMA mmap_size = {mmap_size};")
+
     _table_info = _create_temp_views(_connection, _input)
     _create_meta_views(_connection)
     return (_connection, _input, _table_info)
