@@ -30,54 +30,36 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
-
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(hip-stream-env "${PRELOAD_ENV}")
 set(NUM_THREADS 9)
 
-add_test(
-    NAME rocprofv3-test-hip-streams-per-thread-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-hip-streams-per-thread
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -s -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json pftrace csv
-        --log-level env -- $<TARGET_FILE:hip-streams-per-thread> ${NUM_THREADS})
+        --log-level env -- $<TARGET_FILE:hip-streams-per-thread> ${NUM_THREADS}
+    DEPENDS hip-streams-per-thread
+    TIMEOUT 60
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-hip-streams-per-thread
+    DISABLED $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)
 
-set_tests_properties(
-    rocprofv3-test-hip-streams-per-thread-execute
-    PROPERTIES TIMEOUT
-               60
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${hip-stream-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)
-
-add_test(
-    NAME rocprofv3-test-hip-streams-per-thread-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_results.json
-        --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_results.pftrace
-        --memory-copy-csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_memory_copy_trace.csv
-    )
-
-set_tests_properties(
-    rocprofv3-test-hip-streams-per-thread-validate
-    PROPERTIES TIMEOUT
-               60
-               LABELS
-               "integration-tests"
-               DEPENDS
-               rocprofv3-test-hip-streams-per-thread-execute
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               DISABLED
-               $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-hip-streams-per-thread
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_results.json
+         --pftrace-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_results.pftrace
+         --memory-copy-csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_memory_copy_trace.csv
+    TIMEOUT 60
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-hip-streams-per-thread
+    DISABLED $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)

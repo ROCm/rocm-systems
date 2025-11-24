@@ -1009,8 +1009,7 @@ def pc_sampling_prof(
         options.update({
             # no counter collection for pc sampling
             "ROCPROF_COUNTER_COLLECTION": "0",
-            # no kernel tracing for pc sampling
-            "ROCPROF_KERNEL_TRACE": "0",
+            "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": "csv,json",
             "ROCPROF_OUTPUT_PATH": workload_dir,
             "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
