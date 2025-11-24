@@ -7,16 +7,49 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
-    - `hipLibraryEnumerateKernels` Return Kernel handles within a library
-    - `hipKernelGetLibrary` Return Library handle for a hipKernel_t handle
-    - `hipKernelGetName` Return function name for a hipKernel_t handle
+    - `hipLibraryEnumerateKernels` returns kernel handles within a library
+    - `hipKernelGetLibrary` returns library handle for a hipKernel_t handle
+    - `hipKernelGetName` returns function name for a hipKernel_t handle
     - `hipLibraryLoadData`      creates library object from code
     - `hipLibraryLoadFromFile`  creates library object from file
     - `hipLibraryUnload`        unloads library
     - `hipLibraryGetKernel`     gets a kernel from library
     - `hipLibraryGetKernelCount` gets kernel count in library
     - `hipStreamCopyAttributes` copies attributes from source stream to destination stream
-    - `hipOccupancyAvailableDynamicSMemPerBlock` Returns dynamic shared memory available per block when launching numBlocks blocks on CU.
+    - `hipOccupancyAvailableDynamicSMemPerBlock` returns dynamic shared memory available per block when launching numBlocks blocks on CU.
+* New HIP flags
+   - `hipMemLocationTypeHost` enables handling virtual memory management in host memory location, in addition to device memory.
+   - Support for flags in hipGetProcAddress, enables searching for the per-thread version symbols.
+     - `HIP_GET_PROC_ADDRESS_DEFAULT`
+     - `HIP_GET_PROC_ADDRESS_LEGACY_STREAM`
+     - `HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM`
+
+### Resolved issues
+
+* Corrected the calculation of the value of maximum shared memory per multiprocessor, in HIP device properties.
+
+### Optimized
+
+* Graph node scaling:
+HIP runtime implements optimized doorbell ring mechanism for certain topologies of graph execution. It enables efficient batching of graph nodes. This enhancement provides better alignment with CUDA Graph optimizations.
+HIP also adds a new performance test for HIP graphs with programmable topologies to measure graph performance across different structures. The test evaluates graph instantiation time, first launch time, repeat launch times, and end-to-end execution for various graph topologies. The test implements comprehensive timing measurements including CPU overhead and device execution time.
+* Back memory set (memset) optimization:
+HIP runtime now implements a back memory set (memset) optimization to improve how memset nodes are processed during graph execution. This enhancement specifically handles varying number of AQL (Architected Queue Language) packets for memset graph node due to graph node set params for AQL batch submission approach.
+* Async handler performance improvement:
+HIP runtime has removed the lock contention in async handler enqueue path. This enhancement reduces runtime overhead and maximizes GPU throughput, for asynchronous kernel execution, especially in multi-threaded applications.
+
+## HIP 7.1.1 for ROCm 7.1.1
+
+### Added
+
+* Support for the flag hipHostRegisterIoMemory in hipHostRegister, used to register I/O memory with HIP runtime so it can be accessed by the GPU.
+
+### Resolved issues
+
+* Incorrect Compute Unit (CU) mask in logging. HIP runtime now correctly sets the field width for the output print operation. When logging is enabled via the environment variable AMD_LOG_LEVEL, the runtime logs the accurate CU mask.
+* A segmentation fault occurred when dynamic queue management mechanism was enabled. HIP runtime now ensures GPU queues aren't NULL during marker submission, preventing crashes and improving robustness.
+* An error encountered on hip tear-down after device reset in certain applications due to accessing stale memory objects. HIP runtime now properly releases memory associated with host calls, ensuring reliable device resets.
+* A race condition occurred in certain graph-related applications when pending asynchronous signal handlers referenced device memory that had already been released, leading to memory corruption. HIP runtime now uses a reference counting strategy to manage access to device objects in asynchronous event handlers, ensuring safe and reliable memory usage.
 
 ## HIP 7.1 for ROCm 7.1
 
@@ -48,12 +81,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipLibraryUnload`        Unload library
     - `hipLibraryGetKernel`     Get a kernel from library
     - `hipLibraryGetKernelCount` Get kernel count in library
-* Changed HIP APIs
-    - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
-    - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from
-      hipMemAllocationType and allocates uncached memory if so
-    - `hipHostRegister` now supports hipHostRegisterIoMemory flag
-* Support for the flag `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory.
 * Support for nested tile partitioning within cooperative groups, matching NVIDIA CUDA functionality.
 
 ### Resolved issues
