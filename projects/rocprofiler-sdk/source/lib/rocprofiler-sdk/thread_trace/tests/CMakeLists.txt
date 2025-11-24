@@ -19,13 +19,16 @@ target_link_libraries(
             GTest::gtest_main
             rocprofiler-sdk::counter-test-constants)
 
-gtest_add_tests(
+set(_ROCPROFILER_SHARE_DIR
+    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
+
+rocprofiler_add_unit_test(
     TARGET thread-trace-packet-test
     SOURCES ${ROCPROFILER_THREAD_TRACE_TEST_SOURCES}
     TEST_LIST thread-trace-packet-test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${thread-trace-packet-test_TESTS}
-    PROPERTIES TIMEOUT 10 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    TIMEOUT 10
+    LABELS "unittests"
+    ENVIRONMENT
+        "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

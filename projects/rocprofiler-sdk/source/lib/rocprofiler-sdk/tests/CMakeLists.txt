@@ -35,15 +35,15 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
+rocprofiler_add_unit_test(
     TARGET rocprofiler-sdk-lib-tests
     SOURCES ${rocprofiler_lib_sources}
     TEST_LIST lib_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${lib_TESTS} PROPERTIES TIMEOUT 30 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-                            "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    TIMEOUT 30
+    LABELS "unittests"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -68,17 +68,16 @@ target_link_libraries(
 set_target_properties(rocprofiler-sdk-lib-tests-shared PROPERTIES BUILD_RPATH
                                                                   "\$ORIGIN/../lib")
 
-gtest_add_tests(
-    TARGET rocprofiler-sdk-lib-tests-shared
-    SOURCES ${rocprofiler_shared_lib_sources}
-    TEST_LIST shared_lib_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
 set(rocprofiler-sdk-lib-tests-env
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}")
 
-set_tests_properties(
-    ${shared_lib_TESTS}
-    PROPERTIES TIMEOUT 120 LABELS "unittests" ENVIRONMENT
-               "${rocprofiler-sdk-lib-tests-env}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+rocprofiler_add_unit_test(
+    TARGET rocprofiler-sdk-lib-tests-shared
+    SOURCES ${rocprofiler_shared_lib_sources}
+    TEST_LIST shared_lib_TESTS
+    TIMEOUT 120
+    LABELS "unittests"
+    ENVIRONMENT
+        "${rocprofiler-sdk-lib-tests-env}"
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

@@ -261,15 +261,35 @@ findViaInstallPath(const std::string& filename)
 }
 
 std::string
-findViaEnvironment(const std::string& filename)
+locateMetricsFile(std::string_view name)
 {
-    if(const char* metrics_path = nullptr; (metrics_path = getenv("ROCPROFILER_METRICS_PATH")))
+    namespace fs = common::filesystem;
+
+    // 1) Try env var
+    if(const char* env = std::getenv("ROCPROFILER_METRICS_PATH"))
     {
-        ROCP_INFO << filename << " is being looked up via env variable ROCPROFILER_METRICS_PATH";
-        return common::filesystem::path{std::string{metrics_path}} / filename;
+        fs::path candidate = fs::path{env} / std::string{name};
+        if(fs::exists(candidate))
+        {
+            ROCP_INFO << name << " found via ROCPROFILER_METRICS_PATH: " << candidate.string();
+            return candidate.string();
+        }
+        ROCP_WARNING << name << " not found at ROCPROFILER_METRICS_PATH (" << env
+                     << "). Falling back to install path.";
     }
-    // No environment variable, lookup via install path
-    return findViaInstallPath(filename);
+
+    // 2) Fall back to install path
+    auto install_candidate = findViaInstallPath(std::string{name});
+    if(fs::exists(install_candidate))
+    {
+        ROCP_INFO << name << " found via install path: " << install_candidate;
+        return install_candidate;
+    }
+
+    // 3) Neither found -> fatal
+    ROCP_FATAL << "Metric file '" << name << "' not found.\n"
+               << "  Tried: ROCPROFILER_METRICS_PATH/" << name << " and " << install_candidate;
+    return {};
 }
 
 }  // namespace
@@ -298,7 +318,7 @@ loadMetrics(bool reload, const std::optional<ArchMetric> add_metric)
     }
 
     auto reload_func = [&]() {
-        auto counters_path = findViaEnvironment("counter_defs.yaml");
+        auto counters_path = locateMetricsFile("counter_defs.yaml");
         ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
             << "metric xml file '" << counters_path << "' does not exist";
         return std::make_shared<counter_metrics_t>(loadYAML(counters_path, add_metric));

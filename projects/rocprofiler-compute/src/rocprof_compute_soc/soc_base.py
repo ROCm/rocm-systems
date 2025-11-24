@@ -414,13 +414,28 @@ class OmniSoC_Base:
         os.environ["ROCPROFILER_METRICS_PATH"] = str(
             config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
         )
-        sys.path.append(
-            str(
-                Path(args.rocprofiler_sdk_tool_path).parents[1]
-                / "python3/site-packages"
-            )
+
+        # Backward compatibility support for sdk avail module moved from
+        # <rocm_path>/bin/rocprofv3_avail_module/avail.py to
+        # <rocm_path>/lib/python3/site-packages/rocprofv3/avail.py
+        new_path = str(
+            Path(args.rocprofiler_sdk_tool_path).parents[1] / "python3/site-packages"
         )
-        from rocprofv3 import avail
+        old_path = str(Path(args.rocprofiler_sdk_tool_path).parents[2] / "bin")
+        try:
+            sys.path.append(new_path)
+            from rocprofv3 import avail
+        except ImportError:
+            console_debug(
+                f"Could not import rocprofiler-sdk avail module from {new_path}, "
+                f"trying {old_path}"
+            )
+            try:
+                sys.path.remove(new_path)
+                sys.path.append(old_path)
+                from rocprofv3_avail_module import avail
+            except ImportError:
+                console_error("Failed to import rocprofiler-sdk avail module.")
 
         avail.loadLibrary.libname = str(
             Path(args.rocprofiler_sdk_tool_path).parent / "librocprofv3-list-avail.so"

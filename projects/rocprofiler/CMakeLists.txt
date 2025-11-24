@@ -21,6 +21,9 @@
 # ##############################################################################
 
 cmake_minimum_required(VERSION 3.18.0 FATAL_ERROR)
+set( ROCPROFILER "rocprofiler" )
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
 set(CMAKE_C_FLAGS_COVERAGE_INIT
     "-Og -g3 -fno-omit-frame-pointer -fprofile-abs-path -fprofile-arcs -ftest-coverage --coverage"
@@ -303,7 +306,9 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
     set(CPACK_PACKAGE_VERSION
         "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}"
         )
-    set(CPACK_PACKAGE_CONTACT "ROCm Profiler Support <dl.ROCm-Profiler.support@amd.com>")
+    set(PKG_MAINTAINER_NM  "ROCm Profiler Support")
+    set(PKG_MAINTAINER_EMAIL  "dl.ROCm-Profiler.support@amd.com")
+    set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
     set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
         "ROCPROFILER library for AMD HSA runtime API extension support")
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
@@ -449,9 +454,13 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
     if(ENABLE_ASAN_PACKAGING)
         # ASAN Package requires only asan component with libraries and license file
         set(CPACK_COMPONENTS_ALL asan)
+	set( COMP_TYPE "asan" )
     else()
         set(CPACK_COMPONENTS_ALL runtime dev tests docs plugins samples)
+	set( COMP_TYPE "runtime" )
     endif()
+
+    configure_pkg( ${ROCPROFILER} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
 
     include(CPack)
 

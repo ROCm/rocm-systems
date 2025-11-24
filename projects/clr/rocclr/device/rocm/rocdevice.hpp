@@ -232,12 +232,12 @@ class NullDevice : public amd::Device {
     return false;
   }
 
-  virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
+  virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override {
     ShouldNotReachHere();
     return false;
   }
 
-  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const {
+  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override {
     ShouldNotReachHere();
     return true;
   }
@@ -371,33 +371,33 @@ class Device : public NullDevice {
   ///////////////////////////////////////////////////////////////////////////////
 
   //! Instantiate a new virtual device
-  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr);
+  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override;
 
   //! Construct an device program object from the ELF assuming it is valid
   virtual device::Program* createProgram(amd::Program& owner,
-                                         amd::option::Options* options = nullptr);
+                                         amd::option::Options* options = nullptr) override;
 
-  virtual device::Memory* createMemory(amd::Memory& owner) const;
-  virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const;
+  virtual device::Memory* createMemory(amd::Memory& owner) const override;
+  virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const override;
   //! Sampler object allocation
   virtual bool createSampler(const amd::Sampler& owner,  //!< abstraction layer sampler object
                              device::Sampler** sampler   //!< device sampler object
-  ) const;
+  ) const override;
 
   //! Just returns nullptr for the dummy device
   virtual device::Memory* createView(
       amd::Memory& owner,           //!< Owner memory object
       const device::Memory& parent  //!< Parent device memory object for the view
-  ) const {
+  ) const override {
     return nullptr;
   }
 
-  virtual device::Signal* createSignal() const;
+  virtual device::Signal* createSignal() const override;
 
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
   virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                                  bool validateOnly);
+                                  bool validateOnly) override;
 
   /**
    * @brief Removes the external device as an available device.
@@ -412,66 +412,66 @@ class Device : public NullDevice {
       void* gfxContext,         //!< HGLRC/GLXContext handle
       bool validateOnly         //!< Only validate if the device can inter-operate with
                                 //!< pDevice/pContext, do not bind.
-  );
+  ) override;
 
   //! Gets free memory on a GPU device
-  virtual bool globalFreeMemory(size_t* freeMemory) const;
+  virtual bool globalFreeMemory(size_t* freeMemory) const override;
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = MemorySegment::kNoAtomics,
                           const void* agentInfo = nullptr) const override;  // nullptr uses default CPU agent
-  virtual void hostFree(void* ptr, size_t size = 0) const;
+  virtual void hostFree(void* ptr, size_t size = 0) const override;
 
   virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
                         uint64_t* size_copied, int32_t* status) override;
   virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
                          uint64_t* size_copied, int32_t* status) override;
 
-  bool deviceAllowAccess(void* dst) const;
+  bool deviceAllowAccess(void* dst) const override;
 
-  bool allowPeerAccess(device::Memory* memory) const;
+  bool allowPeerAccess(device::Memory* memory) const override;
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
   void* deviceLocalAlloc(size_t size,
-                        const AllocationFlags& flags = AllocationFlags{}) const;
+                        const AllocationFlags& flags = AllocationFlags{}) const override;
   void* reserveMemory(size_t size, size_t alignment) const;
   void releaseMemory(void* ptr, size_t size) const;
   void memFree(void* ptr, size_t size) const;
 
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
-                         cl_svm_mem_flags flags = CL_MEM_READ_WRITE, void* svmPtr = nullptr) const;
+                         cl_svm_mem_flags flags = CL_MEM_READ_WRITE, void* svmPtr = nullptr) const override;
 
-  virtual void svmFree(void* ptr) const;
+  virtual void svmFree(void* ptr) const override;
 
   virtual bool SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
-                                bool use_cpu = false, int numa_id = kDefaultNumaNode) const;
+                                bool use_cpu = false, int numa_id = kDefaultNumaNode) const override;
   virtual bool GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
-                                size_t num_attributes, const void* dev_ptr, size_t count) const;
+                                size_t num_attributes, const void* dev_ptr, size_t count) const override;
   virtual size_t ScratchLimitCurrent() const final;
   virtual bool UpdateScratchLimitCurrent(size_t limit) const final;
-  virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment);
-  virtual bool virtualFree(void* addr);
+  virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override;
+  virtual bool virtualFree(void* addr) override;
 
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice);
-  virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const;
-  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const { return true; }
+                            VmmLocationType = VmmLocationType::kDevice) override;
+  virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
+  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
 
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle);
+  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle) override;
 
   bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) const;
 
-  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle);
+  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle) override;
 
   virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
-                            cl_set_device_clock_mode_output_amd* pSetClockModeOutput);
+                            cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override;
 
   virtual bool IsHwEventReady(const amd::Event& event, bool wait = false,
-                              amd::SyncPolicy policy = amd::SyncPolicy::Auto) const;
-  virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const;
-  virtual void ReleaseGlobalSignal(void* signal) const;
-  virtual bool CreateUserEvent(amd::UserEvent* event) const;
-  virtual void SetUserEvent(amd::UserEvent* event) const;
+                              amd::SyncPolicy policy = amd::SyncPolicy::Auto) const override;
+  virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override;
+  virtual void ReleaseGlobalSignal(void* signal) const override;
+  virtual bool CreateUserEvent(amd::UserEvent* event) const override;
+  virtual void SetUserEvent(amd::UserEvent* event) const override;
 
   //! Allocate host memory in terms of numa policy set by user
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
@@ -545,7 +545,7 @@ class Device : public NullDevice {
   address MGSync() const { return mg_sync_; }
 
   //! Returns value for corresponding Link Attributes in a vector, given other device
-  virtual bool findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attr);
+  virtual bool findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attr) override;
 
   //! Returns a GPU memory object from AMD memory object
   roc::Memory* getGpuMemory(amd::Memory* mem  //!< Pointer to AMD memory object
@@ -560,11 +560,11 @@ class Device : public NullDevice {
 
   static void RegisterBackendErrorCb();
 
-  virtual amd::Memory* GetArenaMemObj(const void* ptr, size_t& offset, size_t size = 0);
+  virtual amd::Memory* GetArenaMemObj(const void* ptr, size_t& offset, size_t size = 0) override;
 
   virtual uint32_t getPreferredNumaNode() const final { return preferred_numa_node_; }
 
-  const bool isFineGrainSupported() const;
+  const bool isFineGrainSupported() const override;
 
   //! Returns True if memory pointer is known to ROCr (excludes HMM allocations)
   bool IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer_info_t* ptr_info);
@@ -574,7 +574,7 @@ class Device : public NullDevice {
   //! Init hidden heap for device memory allocations
   void HiddenHeapInit(const VirtualGPU& gpu);
   void getSdmaRWMasks(uint32_t* readMask, uint32_t* writeMask) const;
-  bool isXgmi() const { return isXgmi_; }
+  bool isXgmi() const override { return isXgmi_; }
 
   //! Returns the map of code objects to kernels
   const auto& KernelMap() const { return kernel_map_; }

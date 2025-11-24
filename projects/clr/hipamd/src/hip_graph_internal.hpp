@@ -591,6 +591,9 @@ class Graph {
     }
     graphUserObj_.clear();
     memAllocNodePtrs_.clear();
+    if (instantiateDeviceId_ != -1) {
+      static_cast<amd::ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->release();
+    }
   }
 
   void AddManualNodeDuringCapture(GraphNode* node) { capturedNodes_.insert(node); }
@@ -779,6 +782,7 @@ class Graph {
   //!< Used to track which devices are accessed by each parallel stream
   //!< during multi-device graph execution scheduling.
   std::unordered_map<int, std::set<int>> streams_dev_ids_;
+  int instantiateDeviceId_ = -1;
 
  private:
   friend class GraphExec;
@@ -835,9 +839,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
       if (kernArgManager_ != nullptr) {
         kernArgManager_->release();
       }
-    }
-    if (instantiateDeviceId_ != -1) {
-      static_cast<ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->release();
     }
 
     packetBatches_.clear();
@@ -899,7 +900,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   uint64_t flags_ = 0;
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
-  int instantiateDeviceId_ = -1;
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   bool repeatLaunch_ = false;
 
@@ -2716,7 +2716,7 @@ class hipGraphExternalSemSignalNode : public GraphNode {
 
   GraphNode* clone() const override { return new hipGraphExternalSemSignalNode(*this); }
 
-  hipError_t CreateCommand(hip::Stream* stream) {
+  hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
@@ -2769,7 +2769,7 @@ class hipGraphExternalSemWaitNode : public GraphNode {
 
   GraphNode* clone() const override { return new hipGraphExternalSemWaitNode(*this); }
 
-  hipError_t CreateCommand(hip::Stream* stream) {
+  hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
@@ -2821,7 +2821,7 @@ class hipGraphBatchMemOpNode : public GraphNode {
 
   GraphNode* clone() const override { return new hipGraphBatchMemOpNode(*this); }
 
-  hipError_t CreateCommand(hip::Stream* stream) {
+  hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;

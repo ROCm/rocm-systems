@@ -21,37 +21,53 @@
 // SOFTWARE.
 
 #pragma once
-#include "library/runtime.hpp"
-#include "sample_type.hpp"
-#include <array>
-#include <string>
-#include <timemory/units.hpp>
-#include <unistd.h>
+#include "core/trace_cache/cache_type_traits.hpp"
+
+#include <functional>
+#include <map>
+#include <optional>
 
 namespace rocprofsys
 {
 namespace trace_cache
 {
-constexpr size_t buffer_size     = 100 * tim::units::megabyte;
-constexpr size_t flush_threshold = 80 * tim::units::megabyte;
 
-const auto tmp_directory = std::string{ "/tmp/" };
+template <typename TypeIdentifierEnum, typename... SupportedTypes>
+class type_registry
+{
+    static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
+                  "TypeIdentifierEnum must be an enum class");
 
-const auto get_buffered_storage_filename = [](const int& ppid, const int& pid) {
-    return std::string{ tmp_directory + "buffered_storage_" + std::to_string(ppid) + "_" +
-                        std::to_string(pid) + ".bin" };
+public:
+    using variant_t = typename std::variant<SupportedTypes...>;
+
+    type_registry() { (register_type<SupportedTypes>(), ...); }
+
+    std::optional<variant_t> get_type(TypeIdentifierEnum id, uint8_t*& data)
+    {
+        auto it = deserializers.find(id);
+        if(it != deserializers.end())
+        {
+            return it->second(data);
+        }
+        return std::nullopt;
+    }
+
+private:
+    std::map<TypeIdentifierEnum, std::function<variant_t(uint8_t*&)>> deserializers;
+
+    template <typename T>
+    inline void register_type()
+    {
+        static_assert(type_traits::has_type_identifier<T, TypeIdentifierEnum>::value,
+                      "Type must have type_identifier");
+        static_assert(type_traits::has_deserialize<T>::value,
+                      "Type must have deserialize function");
+        deserializers[T::type_identifier] = [](uint8_t*& data) -> variant_t {
+            return deserialize<T>(data);
+        };
+    }
 };
-
-const auto get_metadata_filepath = [](const int& ppid, const int& pid) {
-    return std::string{ tmp_directory + "metadata_" + std::to_string(ppid) + "_" +
-                        std::to_string(pid) + ".json" };
-};
-
-constexpr size_t minimal_fragmented_memory_size = sizeof(entry_type) + sizeof(size_t);
-using buffer_array_t                            = std::array<uint8_t, buffer_size>;
-
-constexpr auto ABSOLUTE   = "ABS";
-constexpr auto PERCENTAGE = "%";
 
 }  // namespace trace_cache
 }  // namespace rocprofsys
