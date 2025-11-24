@@ -32,7 +32,6 @@
 #include <timemory/utility/join.hpp>
 
 #include <dlfcn.h>
-#include <ios>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>

@@ -1093,7 +1093,8 @@ void* PlatformState::getDynamicLibraryHandle() {
 #ifdef _WIN32
   const char* libName = "amdhip64.dll";
 #else
-  const char* libName = "libamdhip64.so";
+  std::string so_name = std::string("libamdhip64.so." + std::to_string(HIP_VERSION_MAJOR));
+  const char* libName = so_name.c_str();
 #endif
 
   dynamicLibraryHandle_ = amd::Os::loadLibrary(libName);

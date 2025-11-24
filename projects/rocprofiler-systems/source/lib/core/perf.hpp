@@ -277,9 +277,6 @@ enum class record_type
 #endif
 };
 
-std::vector<std::string>
-get_config_choices();
-
 event_type get_event_type(std::string_view);
 hw_config  get_hw_config(std::string_view);
 sw_config  get_sw_config(std::string_view);
