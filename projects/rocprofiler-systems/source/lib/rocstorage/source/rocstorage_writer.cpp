@@ -98,8 +98,6 @@ struct rocstorage_writer::data_identifiers
 rocstorage_writer::rocstorage_writer(std::shared_ptr<data_storage::database> database)
 : m_database(std::move(database))
 , m_uuid(m_database->get_uuid())
-, m_insert_statements(
-      std::make_unique<data_storage::insert_statements>(m_database, m_uuid))
 , m_data_identifiers(std::make_unique<data_identifiers>())
 {
     if(!m_database)
@@ -109,6 +107,9 @@ rocstorage_writer::rocstorage_writer(std::shared_ptr<data_storage::database> dat
     m_database->initialize_schema();
 
     initialize_metadata(m_database, m_uuid);
+
+    m_insert_statements =
+        std::make_unique<data_storage::insert_statements>(m_database, m_uuid);
 }
 
 rocstorage_writer::~rocstorage_writer() = default;

@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <rocstorage/data_storage/database.hpp>
 #include <rocstorage/data_storage/insert_statements.hpp>
 
@@ -36,7 +37,7 @@ struct rocstorage_writer
 {
 public:
     explicit rocstorage_writer(std::shared_ptr<data_storage::database> database);
-    ~rocstorage_writer();
+    virtual ~rocstorage_writer();
 
     rocstorage_writer()                                     = delete;
     rocstorage_writer(const rocstorage_writer&)             = delete;
@@ -57,7 +58,7 @@ public:
 
     size_t insert_agent(size_t node_id, size_t pid, const char* agent_type,
                         size_t absolute_index, size_t logical_index, size_t type_index,
-                        uint64_t uuid, const char* name, const char* model_name,
+                        size_t uuid, const char* name, const char* model_name,
                         const char* vendor_name, const char* product_name,
                         const char* user_name, const char* extdata = "{}");
 
@@ -81,16 +82,16 @@ public:
                                 const char* expression, uint32_t is_constant,
                                 uint32_t is_derived, const char* extdata = "{}");
 
-    void insert_sample(const char* track, uint64_t timestamp, size_t event_id,
+    void insert_sample(const char* track, size_t timestamp, size_t event_id,
                        const char* extdata = "{}");
 
-    void insert_region(size_t node_id, size_t process_id, size_t thread_id,
-                       uint64_t start, uint64_t end, size_t name_id, size_t event_id,
+    void insert_region(size_t node_id, size_t process_id, size_t thread_id, size_t start,
+                       size_t end, size_t name_id, size_t event_id,
                        const char* extdata = "{}");
 
     size_t insert_thread_info(size_t node_id, size_t parent_process_id, size_t process_id,
-                              size_t thread_id, const char* name, uint64_t start = 0,
-                              uint64_t end = 0, const char* extdata = "{}");
+                              size_t thread_id, const char* name, size_t start,
+                              size_t end, const char* extdata = "{}");
 
     void insert_stream_info(size_t stream_id, size_t node_id, size_t process_id,
                             const char* name, const char* extdata = "{}");
@@ -99,8 +100,8 @@ public:
 
     void insert_kernel_dispatch(size_t node_id, size_t process_id, size_t thread_id,
                                 size_t agent_id, size_t kernel_id, size_t dispatch_id,
-                                size_t queue_id, size_t stream_id, uint64_t start,
-                                uint64_t end, size_t private_segment_size,
+                                size_t queue_id, size_t stream_id, size_t start,
+                                size_t end, size_t private_segment_size,
                                 size_t group_segment_size, size_t workgroup_size_x,
                                 size_t workgroup_size_y, size_t workgroup_size_z,
                                 size_t grid_size_x, size_t grid_size_y,
@@ -108,14 +109,14 @@ public:
                                 size_t event_id, const char* extdata = "{}");
 
     void insert_memory_copy(size_t node_id, size_t process_id, size_t thread_id,
-                            uint64_t start, uint64_t end, size_t name_id,
-                            size_t dst_agent_id, size_t dst_addr, size_t src_agent_id,
-                            size_t src_addr, size_t size, size_t queue_id,
-                            size_t stream_id, size_t region_name_id, size_t event_id,
+                            size_t start, size_t end, size_t name_id, size_t dst_agent_id,
+                            size_t dst_addr, size_t src_agent_id, size_t src_addr,
+                            size_t size, size_t queue_id, size_t stream_id,
+                            size_t region_name_id, size_t event_id,
                             const char* extdata = "{}");
 
     void insert_kernel_symbol(size_t id, size_t node_id, size_t process_id,
-                              uint64_t code_obj_id, const char* name,
+                              size_t code_obj_id, const char* name,
                               const char* display_name, uint32_t kernel_obj,
                               uint32_t kernarg_segmnt_size,
                               uint32_t kernarg_segment_alignment,
@@ -124,8 +125,8 @@ public:
                               uint32_t accum_vgrp_count, const char* extdata = "{}");
 
     void insert_code_object(size_t id, size_t node_id, size_t process_id, size_t agent_id,
-                            const char* uri, uint64_t ld_base, uint64_t ld_size,
-                            uint64_t ld_delta, const char* storage_type,
+                            const char* uri, size_t ld_base, size_t ld_size,
+                            size_t ld_delta, const char* storage_type,
                             const char* extdata = "{}");
 
     void insert_args(size_t event_id, size_t position, const char* type, const char* name,
@@ -133,10 +134,9 @@ public:
 
     void insert_memory_alloc(size_t node_id, size_t process_id, size_t thread_id,
                              std::optional<size_t> agent_id, const char* type,
-                             const char* level, uint64_t start, uint64_t end,
-                             size_t address, size_t size, size_t queue_id,
-                             size_t stream_id, size_t event_id,
-                             const char* extdata = "{}");
+                             const char* level, size_t start, size_t end, size_t address,
+                             size_t size, size_t queue_id, size_t stream_id,
+                             size_t event_id, const char* extdata = "{}");
 
     size_t map_thread_id_to_primary_key(size_t thread_id);
 

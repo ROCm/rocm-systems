@@ -32,14 +32,16 @@ insert_statements::insert_statements(std::shared_ptr<database> database, std::st
 : m_database(std::move(database))
 , m_uuid(std::move(uuid))
 {
-    initialize_pmc_event_stmt();
     initialize_event_stmt();
+    initialize_pmc_event_stmt();
     initialize_sample_stmt();
     initialize_region_stmt();
     initialize_kernel_dispatch_stmt();
     initialize_memory_copy_stmt();
     initialize_kernel_symbol_stmt();
     initialize_code_object_stmt();
+    initialize_args_stmt();
+    initialize_memory_alloc_stmt();
 }
 
 void
