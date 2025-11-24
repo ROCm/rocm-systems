@@ -104,13 +104,32 @@ template <typename BenchmarkType> static void RunBenchmark(LinearAllocs host_all
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
+ 
 TEST_CASE("Performance_hipMemcpyHtoDKernelDtoHV1Async_Benchmark") {
   const auto allocation_size =
-      GENERATE(16, 128, 1_KB, 4_KB, 16_KB, 256_KB, 512_KB, 1_MB, 4_MB, 16_MB, 128_MB);
+      // GENERATE(16, 128, 1_KB, 4_KB, 16_KB, 256_KB, 512_KB, 1_MB, 4_MB, 16_MB, 128_MB);
+       GENERATE(256_KB);
   const auto device_allocation_type = LinearAllocs::hipMalloc;
-  const auto host_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
-  RunBenchmark<MemcpyHtoDKernelDtoHv1AsyncBenchmark>(host_allocation_type, device_allocation_type,
-                                                     allocation_size);
+  // const auto host_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
+    const auto host_allocation_type = GENERATE(LinearAllocs::malloc);
+
+  std::string benchmark_name = Catch::getResultCapture().getCurrentTestName();
+  auto AddSectionName = [&](const std::string& section_name) {
+    benchmark_name += "/" + section_name;
+  };
+
+
+  if (allocation_size < 1_KB) {
+    AddSectionName(std::to_string(allocation_size));
+  } else if (allocation_size < 1_MB) {
+    AddSectionName(std::to_string(allocation_size / 1024) + std::string(" KB"));
+  } else {
+    AddSectionName(std::to_string(allocation_size / (1024 * 1024)) + std::string(" MB"));
+  }
+  AddSectionName(GetAllocationSectionName(host_allocation_type));
+
+  std::cout << benchmark_name << std::endl;
+
   const StreamGuard stream_guard(Streams::created);
   const hipStream_t stream = stream_guard.stream();
   LinearAllocGuard<size_t> device_allocation(device_allocation_type, allocation_size);
@@ -126,6 +145,21 @@ TEST_CASE("Performance_hipMemcpyHtoDKernelDtoHV1Async_Benchmark") {
 
   int iter = 0;
 
+  // BENCHMARK_ADVANCED("Benchmark Test")(Catch::Benchmark::Chronometer meter) {
+  //   std::cout << "here" << std::endl;
+  //   meter.measure([&] {
+  //      std::cout << "measuring" << std::endl;
+  //     HIP_CHECK(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(device_mem), host_mem,
+  //                                  allocation_size, stream));
+  //     int threads_num = 32;
+  //     Sum<<<count / threads_num + 1, threads_num, 0, stream>>>(device_mem, count);
+  //     HIP_CHECK(hipMemcpyDtoHAsync(host_mem, reinterpret_cast<hipDeviceptr_t>(device_mem),
+  //                                  allocation_size, stream));
+  //     HIP_CHECK(hipStreamSynchronize(stream));
+  //     ++iter;
+  //   });
+  // };
+
   BENCHMARK("Benchmark Test") {
     HIP_CHECK(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(device_mem), host_mem,
                                  allocation_size, stream));
@@ -137,6 +171,7 @@ TEST_CASE("Performance_hipMemcpyHtoDKernelDtoHV1Async_Benchmark") {
     ++iter;
   };
 
+  std::cout << "Number of calls to algorithm: " << iter << std::endl;
   size_t sum = ((size_t*)host_mem)[0];
   REQUIRE(sum == iter * count * (count - 1) / 2);
 };

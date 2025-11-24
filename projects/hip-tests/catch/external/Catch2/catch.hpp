@@ -7217,6 +7217,7 @@ template <typename Duration> struct SampleAnalysis {
 #include <algorithm>
 #include <iterator>
 #include <vector>
+#include <iostream>
 
 namespace Catch {
 namespace Benchmark {
@@ -7228,6 +7229,11 @@ SampleAnalysis<Duration> analyse(const IConfig& cfg, Environment<Duration>, Iter
     std::vector<double> samples;
     samples.reserve(last - first);
     std::transform(first, last, std::back_inserter(samples), [](Duration d) { return d.count(); });
+
+    for (auto it = samples.begin(); it != samples.end(); ++it) {
+      std::cout << *it << " ";
+    }
+    std::cout << std::endl;
 
     auto analysis = Catch::Benchmark::Detail::analyse_samples(cfg.benchmarkConfidenceInterval(),
                                                               cfg.benchmarkResamples(),
@@ -7694,6 +7700,11 @@ double erf_inv(double x) {
 }
 
 double standard_deviation(std::vector<double>::iterator first, std::vector<double>::iterator last) {
+  // for (auto it = first; it != last; ++it) {
+  //   std::cout << *it << " ";
+  // }
+  // std::cout << std::endl;
+
   auto m = Catch::Benchmark::Detail::mean(first, last);
   double variance = std::accumulate(first, last, 0.,
                                     [m](double a, double b) {

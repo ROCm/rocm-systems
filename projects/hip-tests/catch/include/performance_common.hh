@@ -159,6 +159,11 @@ template <typename Derived> class Benchmark {
       time_ = .0;
     }
 
+    for (auto& sample: samples) {
+      std::cout << sample * 1000 << " ";
+    }
+    std::cout << std::endl;
+
     float sum = std::accumulate(cbegin(samples), cend(samples), .0);
     float mean = sum / samples.size();
 
@@ -170,9 +175,9 @@ template <typename Derived> class Benchmark {
     float best = *std::min_element(cbegin(samples), cend(samples));
     float worst = *std::max_element(cbegin(samples), cend(samples));
 
-    PrintStats(mean, deviation, best, worst);
+    PrintStats(mean * 1000, deviation * 1000, best * 1000, worst * 1000);
 
-    return {mean, deviation, best, worst};
+    return {mean * 1000, deviation * 1000, best * 1000, worst * 1000};
   }
 
  protected:
@@ -216,9 +221,9 @@ template <typename Derived> class Benchmark {
 
   void PrintStats(float mean, float deviation, float best, float worst) {
     if (!display_output_) return;
-    Print("Average time: " + std::to_string(mean) + " ms, Standard deviation: " +
-          std::to_string(deviation) + " ms, Fastest: " + std::to_string(best) +
-          " ms, Slowest: " + std::to_string(worst) + " ms\n");
+    Print("Average time: " + std::to_string(mean) + " us, Standard deviation: " +
+          std::to_string(deviation) + " us, Fastest: " + std::to_string(best) +
+          " us, Slowest: " + std::to_string(worst) + " us\n");
   }
 };
 

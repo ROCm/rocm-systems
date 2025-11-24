@@ -23,13 +23,28 @@ THE SOFTWARE.
 #include "reportGenerators.h"
 
 int main(int argc, char** argv) {
-  if (argc != 2) {
-    std::cout << "Please provide the path to the cloned HIP/include/ directory as an argument! "
-                 "Only one argument supported."
+  if (argc == 2 && std::string(argv[1]) == "--help") {
+    std::cout << "HIP API Test Coverage Report Generator\n\n"
+              << "Usage: \n"
+              << argv[0] << " <HIP_INCLUDE_DIR> <CATCH_TEST_DIR>\n\n"
+              << "Arguments:\n"
+              << "  HIP_INCLUDE_DIR   Path to the directory containing HIP headers.\n"
+              << "                    Example: <project-root>/projects/hip/include\n"
+              << "  CATCH_TEST_DIR    Path to the directory containing Catch2 tests\n"
+              << "                    Example: <project-root>/projects/hip-tests/catch2\n"
               << std::endl;
-    std::cout << "\tExample: ./generateHipAPICoverage /workspace/user1/HIP/include/" << std::endl;
-    return -1;
   }
+
+  if (argc != 3) {
+    std::cerr << "Error: Invalid number of arguments. Use --help for usage information.\n";
+    return 1;
+  }
+
+
+  std::cout << "Using hip path: " << std::endl;
+  std::cout << "Using hip tests path:" << std::endl;
+
+
   std::string hip_include_path = argv[1];
   /*
   Relative paths to all needed files, as it is expected that the application
