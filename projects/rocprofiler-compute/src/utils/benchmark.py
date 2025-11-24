@@ -485,7 +485,7 @@ def lds_bw_benchmark(device):
     iters = 2000
 
     workgroups = 128 * cus
-    total_bytes = workgroups * workgroup_size * iters * 4
+    total_bytes = workgroups * workgroup_size * iters * sizeof(c_float)
 
     dummy = hip.hipMalloc(workgroup_size * sizeof(c_float))
 
@@ -625,8 +625,7 @@ using f64_4vec = __attribute__((__vector_size__(4 * sizeof(double)))) double;
 */
 template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
 {
-// MI350 series only
-#if defined(__gfx950__)
+    // MI350 series only
     // Input: 8 i32 registers
     int32_8vec a;
     a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = a[6] = a[7] = threadIdx.x;
@@ -673,13 +672,11 @@ template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
     {
         dummy[0] = result[0];
     }
-#endif
 }
 
 extern "C" __global__ void mfma_f8(int iter, float *dummy)
 {
-// MI300 series only - note gfx940/gfx941/gfx942 only uses fnuz f8
-#if defined(__gfx940__) or defined(__gfx941__) or defined(__gfx942__) or defined(__gfx950__)
+    // MI300 series only - note gfx940/gfx941/gfx942 only uses fnuz f8
     // Input: 2 F32 registers
     // builtin mfma expects double input
     double a =  threadIdx.x;
@@ -697,7 +694,6 @@ extern "C" __global__ void mfma_f8(int iter, float *dummy)
     {
         dummy[0] = result[0];
     }
-#endif
 }
 
 
@@ -788,8 +784,7 @@ extern "C" __global__ void mfma_f32(int iter, float *dummy)
 
 extern "C" __global__ void mfma_f64(int iter, float *dummy)
 {
-// MI200 and above
-#if not defined(__gfx908__)
+    // MI200 and above
     // Input: 1 F64 register
     double a =  threadIdx.x;
 
@@ -807,7 +802,6 @@ extern "C" __global__ void mfma_f64(int iter, float *dummy)
     {
         dummy[0] = result[0];
     }
-#endif
 }
 
 extern "C" __global__ void mfma_i8(int iter, float *dummy)
