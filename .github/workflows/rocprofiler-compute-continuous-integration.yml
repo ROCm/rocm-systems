@@ -93,7 +93,7 @@ jobs:
             EXCLUDED_TESTS=""
           else
             MODE=Continuous
-            EXCLUDED_TESTS="test_profile_live_attach_detach"
+            EXCLUDED_TESTS="test_profile_live_attach_detach|test_profile_roofline"
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
           echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
@@ -114,13 +114,8 @@ jobs:
           wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
-          apt install -y amd-smi-lib libdw-dev rocjpeg-test rocdecode-test rccl-dev
+          apt install -y amd-smi-lib libdw-dev rccl-dev
           echo "✅ amdgpu and ROCm dependencies Installed!"
-
-      - name: Install MPI
-        run: |
-          apt install -y libopenmpi-dev
-          echo "✅ MPI Installed!"
 
       - name: Install Latest Nightly ROCm
         run: |
