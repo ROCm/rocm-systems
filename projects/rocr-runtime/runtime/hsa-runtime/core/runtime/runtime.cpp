@@ -1537,7 +1537,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
       if (isDmabufSysmem)
         HSAKMT_CALL(hsaKmtDeregisterMemory(*importAddress));
-      
+
       AMD::GpuAgent* agent = reinterpret_cast<AMD::GpuAgent*>(agents_by_node_[info.NodeId][0]);
 
       HsaExternalHandleDesc desc;
@@ -2447,7 +2447,7 @@ void Runtime::Unload() {
   // Close IPC socket server
   if (ipc_sock_server_conns_.size())
     IPCClientImport(getpid(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
-                    0, NULL, NULL, NULL, false, 0);
+                    0, nullptr, nullptr, nullptr, false, 0);
 
   svm_profile_.reset(nullptr);
 
@@ -2589,17 +2589,13 @@ int fn_amdgpu_device_get_fd_nosupport(HsaAMDGPUDeviceHandle device_handle) {
 
 int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
                                  int *drm_fd, uint64_t *cpu_addr) {
-#if defined(__linux__) 
   auto devhandle = static_cast<AMD::GpuAgent*>(agent)->libThunkDev();
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, 
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle,
                          reinterpret_cast<HSAint32*>(drm_fd), reinterpret_cast<HSAuint64*>(cpu_addr)));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
-#else
-  assert(!"Unimplemented!");
-#endif
   return HSA_STATUS_SUCCESS;
 }
 

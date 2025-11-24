@@ -540,8 +540,8 @@ class Runtime {
           size_requested(0),
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
-          ldrm_bo(NULL),
-          thunk_bo(NULL) {}
+          ldrm_bo(nullptr),
+          thunk_bo(nullptr) {}
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags)
         : region(region_arg),
@@ -549,8 +549,8 @@ class Runtime {
           size_requested(size_requested),
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
-          ldrm_bo(NULL),
-          thunk_bo(NULL) {}
+          ldrm_bo(nullptr),
+          thunk_bo(nullptr) {}
 
     struct notifier_t {
       void* ptr;
