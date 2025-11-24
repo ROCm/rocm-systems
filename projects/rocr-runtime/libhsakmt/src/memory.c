@@ -977,7 +977,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
 		uint32_t size_metadata = info.metadata.size_metadata;
 		if (flags->ui32.UpdateMetadata && !flags->ui32.SysMem) {
 			if (!!size_metadata) { // return pre-exisiting metadata
-				import_res->metadata = (HSAuint32)metadata; 
+				import_res->metadata = (HSAuint32)metadata;
 			} else {
     			struct amdgpu_bo_metadata buf_info = {0};
     			buf_info.size_metadata = sizeof(HSAuint32);
@@ -987,7 +987,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
 		} else if (import_desc->metadata != metadata) {
 			import_res->metadata = (HSAuint32)metadata;
 			return HSAKMT_STATUS_INVALID_PARAMETER;
-		}  	
+		}
 	}
 
 	import_res->buf_handle = (HsaMemoryObjectHandle)res.buf_handle;
