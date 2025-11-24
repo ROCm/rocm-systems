@@ -1,4 +1,4 @@
-# Matrix definitions for rocprofiler-systems-continuous-integration
+# Matrix definitions for rocprofiler-compute-continuous-integration
 
 matrix-ubuntu-nightly:
   # MI355
