@@ -157,7 +157,7 @@ void verify_linked_lists_on_device(hipStream_t stream, Node* pNodes, unsigned in
 *  - Fine grain access supported on devices and host
 *  - HIP_VERSION >= 5.7
 */
-TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
+TEST_CASE("test_svm_shared_address_space_fine_grain_buffers", "[multigpu]") {
   const unsigned int num_elements = 1024;
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
@@ -247,7 +247,7 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
 *  - System fine grain access supported on devices
 *  - HIP_VERSION >= 5.7
 */
-TEST_CASE("test_svm_shared_address_space_fine_grain_system") {
+TEST_CASE("test_svm_shared_address_space_fine_grain_system", "[multigpu]") {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 

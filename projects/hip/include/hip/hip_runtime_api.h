@@ -604,6 +604,19 @@ typedef enum hipDeviceAttribute_t {
   // Extended attributes for vendors
 } hipDeviceAttribute_t;
 
+// Flags that can be used with hipGetProcAddress.
+/** Default flag. Equivalent to HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM if compiled with
+ *  -fgpu-default-stream=per-thread flag or HIP_API_PER_THREAD_DEFAULT_STREAM macro is
+ * defined.*/
+#define HIP_GET_PROC_ADDRESS_DEFAULT 0x0
+
+/** Search for all symbols except the corresponding per-thread versions.*/
+#define HIP_GET_PROC_ADDRESS_LEGACY_STREAM 0x1
+
+/** Search for all symbols including the per-thread versions. If a per-thread version cannot be
+ * found, returns the legacy version.*/
+#define HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM 0x2
+
 typedef enum hipDriverProcAddressQueryResult {
   HIP_GET_PROC_ADDRESS_SUCCESS = 0,
   HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND = 1,
@@ -6452,6 +6465,19 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
  * @return #hipSuccess, #hipErrorInvalidValue
 */
 hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
+
+/**
+ * @brief Returns the offset and size of a kernel parameter
+ *
+ * @param [in] kernel       Kernel handle to retrieve parameter info
+ * @param [in] paramIndex   Index of the parameter
+ * @param [out] paramOffset returns the offset of the parameter
+ * @param [out] paramSize   Optionally returns the size of the parameter
+ *
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                 size_t* paramSize);
 
 /**
  * @brief Find out attributes for a given function.

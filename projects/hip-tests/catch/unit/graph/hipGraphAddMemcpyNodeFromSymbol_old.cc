@@ -255,7 +255,8 @@ in GPU-0 and add the MemcpyNodeFromSymbol node to the graph and
 verifying the result in GPU-1
 */
 #if HT_NVIDIA
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice",
+          "[multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   if (numDevices > 1) {
@@ -276,7 +277,8 @@ in GPU-0 and add the MemcpyNodeFromSymbol node to the graph and
 verifying the result in GPU-1
 */
 
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice",
+          "[multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   if (numDevices > 1) {

@@ -38,9 +38,7 @@
 #include "palLinearAllocator.h"
 #include "amd_hsa_queue.h"
 
-#ifdef _WIN32
-#include <winnt.h>
-#endif  // _WIN32
+#include <atomic>
 
 /*! \addtogroup PAL PAL Resource Implementation
  *  @{
@@ -62,7 +60,11 @@ struct AqlPacketMgmt : public amd::EmbeddedObject {
   static constexpr uint32_t kAqlPacketsListSize = 4 * Ki;
   AqlPacketMgmt(const Device& dev);
 
+#if defined(WITH_HSA_DEVICE)
+  amd_queue_v2_t amd_queue_{};
+#else
   amd_queue_t amd_queue_{};
+#endif
   alignas(sizeof(hsa_kernel_dispatch_packet_t))
       hsa_kernel_dispatch_packet_t aql_packets_[kAqlPacketsListSize];  //!< The list of AQL packets
   GpuEvent aql_events_[kAqlPacketsListSize];    //!< The list of gpu for each AQL packet
@@ -605,16 +607,9 @@ class VirtualGPU : public device::VirtualDevice {
   std::pair<hsa_kernel_dispatch_packet_t* /* packet address */, uint64_t /* packet id */>
   GetAqlPacketSlot() const {
     auto& mgmt = *queues_[MainEngine]->aql_mgmt_;
-    // Atomic increment global AQL index and wrap around max AQL list size
-    uint64_t packet_id =
-#if defined(__GNUC__)
-        __atomic_fetch_add(&mgmt.amd_queue_.write_dispatch_id, 1, __ATOMIC_RELAXED);
-#elif defined(_MSC_VER)
-        InterlockedExchangeAdd64(
-            reinterpret_cast<LONG64 volatile*>(&mgmt.amd_queue_.write_dispatch_id), 1);
-#else  // !defined (_MSV_VER) && !defined(__GNUC__)
-#error Not implemented
-#endif  // !defined (_MSV_VER) && !defined(__GNUC__)
+
+    std::atomic_ref write_ptr(*const_cast<uint64_t *>(&mgmt.amd_queue_.write_dispatch_id));
+    uint64_t packet_id = write_ptr.fetch_add (1, std::memory_order::relaxed);
 
     uint32_t index = packet_id % mgmt.amd_queue_.hsa_queue.size;
     if (mgmt.aql_events_[index].isValid()) {
@@ -709,19 +704,19 @@ class VirtualGPU : public device::VirtualDevice {
                   amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   );
 
-  void PrintChildren(const pal::Kernel& hsaKernel,  //!< The parent HSAIL kernel
+  void PrintChildren(const pal::Kernel& hsaKernel,  //!< The parent HSA kernel
                      VirtualGPU* gpuDefQueue        //!< Device queue for children execution
   );
 
   bool PreDeviceEnqueue(const amd::Kernel& kernel,     //!< Parent amd kernel object
-                        const pal::Kernel& hsaKernel,  //!< Parent HSAIL object
+                        const pal::Kernel& hsaKernel,  //!< Parent HSA kernel object
                         VirtualGPU** gpuDefQueue,      //!< [Return] GPU default queue
                         uint64_t* vmDefQueue           //!< [Return] VM handle to the virtual queue
   );
 
   void PostDeviceEnqueue(
       const amd::Kernel& kernel,     //!< Parent amd kernel object
-      const pal::Kernel& hsaKernel,  //!< Parent HSAIL object
+      const pal::Kernel& hsaKernel,  //!< Parent HSA kernel object
       VirtualGPU* gpuDefQueue,       //!< GPU default queue
       uint64_t vmDefQueue,           //!< VM handle to the virtual queue
       uint64_t vmParentWrap,         //!< VM handle to the wrapped AQL packet location

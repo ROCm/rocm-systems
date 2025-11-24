@@ -584,7 +584,7 @@ TEST_CASE("Unit_hipGraphAddMemAllocNode_Functional_1") {
 * ------------------------
 *  - HIP_VERSION >= 6.1
 */
-TEST_CASE("Unit_hipGraphAddMemAllocNode_Functional_2") {
+TEST_CASE("Unit_hipGraphAddMemAllocNode_Functional_2", "[multigpu]") {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -653,7 +653,7 @@ TEST_CASE("Unit_hipGraphAddMemAllocNode_Functional_2") {
  * ------------------------
  * - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipGraphAddMemAllocNode_Functional_3") {
+TEST_CASE("Unit_hipGraphAddMemAllocNode_Functional_3", "[multigpu]") {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -727,7 +727,7 @@ TEST_CASE("Unit_hipGraphAddMemAllocNode_Functional_3") {
  * ------------------------
  * - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipGraphAddMemAllocNode_Functional_4") {
+TEST_CASE("Unit_hipGraphAddMemAllocNode_Functional_4", "[multigpu]") {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {

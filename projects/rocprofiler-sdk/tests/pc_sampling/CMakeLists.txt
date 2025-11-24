@@ -64,22 +64,12 @@ target_link_libraries(
 # Check if PC sampling is disabled and whether we should disable the test
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
 
-add_test(NAME pc-sampling-integration-test
-         COMMAND $<TARGET_FILE:pc-sampling-integration-test>)
-
-set(pc-sampling-integration-test-env "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
-
-set_tests_properties(
+rocprofiler_add_integration_execute_test(
     pc-sampling-integration-test
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests;pc-sampling"
-               SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable"
-               ENVIRONMENT
-               "${pc-sampling-integration-test-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${IS_PC_SAMPLING_DISABLED}")
+    COMMAND $<TARGET_FILE:pc-sampling-integration-test>
+    DEPENDS pc-sampling-integration-test-client
+    TIMEOUT 45
+    LABELS "integration-tests;pc-sampling"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    SKIP_REGULAR_EXPRESSION "PC sampling unavailable"
+    DISABLED "${IS_PC_SAMPLING_DISABLED}")

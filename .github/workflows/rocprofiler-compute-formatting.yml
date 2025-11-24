@@ -80,6 +80,33 @@ jobs:
           exit 1
         fi
 
+  cxx:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-compute
+    - name: Install dependencies
+      working-directory: projects/rocprofiler-compute
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-pip
+        python3 -m pip install clang-format
+    - name: clang-format
+      working-directory: projects/rocprofiler-compute
+      run: |
+        set +e
+        clang-format -i $(find src -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
+        if [ $(git diff | wc -l) -gt 0 ]; then
+          echo -e "\nError! cxx code not formatted. Run clang-format...\n"
+          echo -e "\nFiles:\n"
+          git diff --name-only
+          echo -e "\nFull diff:\n"
+          git diff
+          exit 1
+        fi
+
   python-bytecode:
     runs-on: ubuntu-22.04
 

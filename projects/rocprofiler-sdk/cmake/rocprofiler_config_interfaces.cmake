@@ -23,6 +23,8 @@ target_compile_definitions(
 # ensure the env overrides the appending /opt/rocm later
 string(REPLACE ":" ";" CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH};${CMAKE_PREFIX_PATH}")
 
+list(APPEND CMAKE_PREFIX_PATH "$ENV{HOME}/.local")
+
 set(ROCPROFILER_DEFAULT_ROCM_PATH
     /opt/rocm
     CACHE PATH "Default search path for ROCM")
@@ -198,8 +200,13 @@ target_link_libraries(rocprofiler-sdk-ptl INTERFACE PTL::ptl-static)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(libelf REQUIRED)
-target_link_libraries(rocprofiler-sdk-elf INTERFACE libelf::libelf)
+find_package(LibElf)
+if(LibElf_FOUND)
+    target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
+else()
+    find_package(libelf REQUIRED)
+    target_link_libraries(rocprofiler-sdk-elf INTERFACE libelf::libelf)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #

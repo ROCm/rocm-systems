@@ -39,6 +39,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.cpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
@@ -66,6 +67,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.hpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.hpp
     ${CMAKE_CURRENT_LIST_DIR}/locking.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp
@@ -132,22 +134,6 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
 )
-
-file(GLOB ROCPD_SCHEMA_FILES "${CMAKE_CURRENT_LIST_DIR}/rocpd/data_storage/schema/*.sql")
-
-foreach(_SRC ${ROCPD_SCHEMA_FILES})
-    cmake_path(GET _SRC FILENAME _BASE)
-    configure_file(
-        ${_SRC}
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/${_BASE}
-        COPYONLY
-    )
-    install(
-        FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/${_BASE}
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
-        COMPONENT core
-    )
-endforeach()
 
 set_target_properties(
     rocprofiler-systems-core-library

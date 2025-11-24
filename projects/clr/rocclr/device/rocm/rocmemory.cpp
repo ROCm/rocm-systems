@@ -206,12 +206,7 @@ hsa_status_t Memory::interopMapBuffer(amd::Os::FileDesc fdn) {
   size_t size;
   size_t metadata_size = 0;
   void* metadata;
-#if IS_WINDOWS
-  int fd = 0;
-  assert(!"Unimplemented");
-#else
   auto fd = fdn;
-#endif
   hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, 0, &size, &interop_deviceMemory_,
                                                 &metadata_size, (const void**)&metadata);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
@@ -857,6 +852,7 @@ bool Buffer::create(bool alloc_local) {
         flags.atomics_ = (memFlags & CL_MEM_SVM_ATOMICS) != 0;
         flags.pseudo_fine_grain_ = (memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0;
         flags.contiguous_ = (memFlags & ROCCLR_MEM_HSA_CONTIGUOUS) != 0;
+        flags.uncached_ = (memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0;
         deviceMemory_ = dev().deviceLocalAlloc(size(), flags);
       }
       owner()->setSvmPtr(deviceMemory_);
