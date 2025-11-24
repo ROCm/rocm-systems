@@ -1,0 +1,47 @@
+# - Config file for @PACKAGE_NAME@ and its component libraries
+# It defines the following variables:
+#
+# @PACKAGE_NAME@_VERSION
+# @PACKAGE_NAME@_BIN_DIR
+#
+
+# prevent "target already exists" error
+include_guard(DIRECTORY)
+
+# compute paths
+get_filename_component(@PACKAGE_NAME@_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
+@PACKAGE_INIT@
+
+set_and_check(@PACKAGE_NAME@_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+get_filename_component(@PACKAGE_NAME@_ROOT_DIR ${@PACKAGE_NAME@_INCLUDE_DIR} PATH)
+set_and_check(@PACKAGE_NAME@_ROOT "${@PACKAGE_NAME@_ROOT_DIR}")
+
+# extra validation
+foreach(_FILE @PROJECT_INCLUDE_FILES@)
+    set_and_check(_@PACKAGE_NAME@_INCLUDE_FILE_CHECK
+                  "${@PACKAGE_NAME@_INCLUDE_DIR}/${_FILE}")
+    unset(_@PACKAGE_NAME@_INCLUDE_FILE_CHECK)
+endforeach()
+
+include("${@PACKAGE_NAME@_CMAKE_DIR}/@PACKAGE_NAME@-targets.cmake")
+
+set(@PACKAGE_NAME@_TEST_FILES)
+
+foreach(_FILE @PROJECT_INCLUDE_FILES@)
+    list(APPEND @PACKAGE_NAME@_TEST_FILES "${@PACKAGE_NAME@_INCLUDE_DIR}/${_FILE}")
+endforeach()
+
+function(@PACKAGE_NAME_UNDERSCORED@_add_tests)
+    foreach(_FILE ${@PACKAGE_NAME@_TEST_FILES})
+        include("${_FILE}")
+    endforeach()
+endfunction()
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(
+    @PACKAGE_NAME@
+    FOUND_VAR @PACKAGE_NAME@_FOUND
+    VERSION_VAR @PACKAGE_NAME@_VERSION
+    REQUIRED_VARS @PACKAGE_NAME@_ROOT @PACKAGE_NAME@_VERSION
+    HANDLE_COMPONENTS HANDLE_VERSION_RANGE)
