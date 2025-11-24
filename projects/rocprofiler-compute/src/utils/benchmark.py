@@ -32,11 +32,13 @@ lds_sizes = {
 unsupported_data_types = {
     "gfx908": [
         "MALL",
-        "F16",
         "MFMA-F4",
         "MFMA-F6",
         "MFMA-F8",
+        "MFMA-F16",
+        "MFMA-BF16",
         "MFMA-F64",
+        "MFMA-I8",
     ],  # MI100 series
     "gfx90a": ["MALL", "MFMA-F4", "MFMA-F6", "MFMA-F8"],  # MI200 series
     "gfx940": ["MFMA-F4", "MFMA-F6"],  # MI300A_A0
@@ -606,6 +608,31 @@ def flops_bench(device, type, unit, rate):
     return perf_metrics
 
 
+mfma_f32_src = """
+using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
+
+extern "C" __global__ void mfma_f32(int iter, float *dummy)
+{
+    // Input: 1 F32 register
+    float a =  threadIdx.x;
+
+    // Output: 16 F32 registers
+    f32_16vec result = {0};
+
+    // CDNA2: v_mfma_f32_32x32x2f32 ops: 32x32x2x2 = 4096
+    // CDNA3: v_mfma_f32_32x32x2_f32
+    for(int i = 0; i < iter; ++i)
+    {
+        result = __builtin_amdgcn_mfma_f32_32x32x2f32(a, a, result, 0, 0, 0);
+    }
+
+    if (result[0] != 2*result[0])
+    {
+        dummy[0] = result[0];
+    }
+}
+"""
+
 mfma_src = """
 
 using int32_16vec = __attribute__((__vector_size__(16 * sizeof(int)))) int;
@@ -758,30 +785,6 @@ extern "C" __global__ void mfma_f16(int iter, float *dummy)
 
 }
 
-
-extern "C" __global__ void mfma_f32(int iter, float *dummy)
-{
-    // Input: 1 F32 register
-    float a =  threadIdx.x;
-
-    // Output: 16 F32 registers
-    f32_16vec result = {0};
-
-    // CDNA2: v_mfma_f32_32x32x2f32 ops: 32x32x2x2 = 4096
-    // CDNA3: v_mfma_f32_32x32x2_f32
-    for(int i = 0; i < iter; ++i)
-    {
-        result = __builtin_amdgcn_mfma_f32_32x32x2f32(a, a, result, 0, 0, 0);
-    }
-
-    if (result[0] != 2*result[0])
-    {
-        dummy[0] = result[0];
-    }
-
-}
-
-
 extern "C" __global__ void mfma_f64(int iter, float *dummy)
 {
     // MI200 and above
@@ -856,7 +859,10 @@ def mfma_bench(device, type, unit, rate):
     dummy = hip.hipMalloc(64 * sizeof(c_float))
 
     kernel_name = mfma_kernel_selector[type]
-    prog = Program(mfma_src, [kernel_name])
+
+    src = mfma_f32_src if type == "F32" else mfma_src
+
+    prog = Program(src, [kernel_name])
     func = prog.get_kernel(kernel_name)
 
     samples = run_get_samples(
@@ -1055,3 +1061,16 @@ def dump_csv(metrics, file_path):
                 row.append(metrics[d][t].high)
 
             writer.writerow(row)
+
+
+if __name__ == "__main__":
+    import sys
+
+    device_id = 0
+
+    if len(sys.argv) >= 3:
+        if sys.argv[1] == "-d":
+            device_id = int(sys.argv[2])
+
+    metrics = run_on_devices([device_id])
+    dump_csv(metrics, "roofline.csv")
