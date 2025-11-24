@@ -49,16 +49,16 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_inf
     uint8_t  no_issue_reason; ///< if wave_issue=0, reason for not issuing the instruction (see ::rocprofiler_pc_sampling_no_issue_reason_t);
                              ///< otherwise irrelevant
     uint8_t  wave_count; ///< number of concurrently running waves on CU (on GFX9) or SIMD (GFX12+) at the moment of sampling
-    uint32_t arbiter_state;  ///< upper 4 bits tells about the arbiter version (see ::rocprofiler_pc_sampling_arbiter_version_t)
-                             ///< and indicates how to decode subfields 
-                             ///< (see ::rocprofiler_pc_sampling_arbiter_state_offset_* and ::rocprofiler_pc_sampling_arbiter_state_width_*)
+    uint32_t arbiter_state;  ///< arbiter state bitfield. To decode, extract the hardware version from the lower 6 bits of hw_id.
+                             ///< For GFX9: use ::rocprofiler_pc_sampling_arbiter_state_gfx9_field_offset_t and ::rocprofiler_pc_sampling_arbiter_state_gfx9_field_width_t
+                             ///< For GFX12: use ::rocprofiler_pc_sampling_arbiter_state_gfx12_field_offset_t and ::rocprofiler_pc_sampling_arbiter_state_gfx12_field_width_t
 } rocprofiler_pc_sampling_snapshot_information_t;
 
 /**
  * @brief (experimental) Hardware version enumeration for PC sampling records.
  *
  * Indicates which GPU architecture generated the PC sampling record.
- * This value determines which member of ::rocprofiler_pc_sampling_memory_counterss_t
+ * This value determines which member of ::rocprofiler_pc_sampling_memory_counters_t
  * union should be accessed:
  * - GFX12 -> use .gfx12 member
  * - FUTURE -> use .future member
@@ -121,12 +121,12 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_count
  *
  * Total size must not exceed 16 bytes.
  */
-typedef union ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counterss_t
+typedef union ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counters_t
 {
     rocprofiler_pc_sampling_memory_counters_gfx12_t gfx12;   ///< GFX12-specific counters (6 bytes)
     rocprofiler_pc_sampling_memory_counters_future_t future;  ///< Future architecture counters (16 bytes)
     uint64_t raw[2];  ///< Raw access ensuring 16-byte size
-} rocprofiler_pc_sampling_memory_counterss_t; 
+} rocprofiler_pc_sampling_memory_counters_t; 
 
 /* To save space, we use bit fields
 typedef struct rocprofiler_pc_sampling_hw_id_record_t
@@ -230,17 +230,17 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_t
     // 8B (only valid if ROCPROFILER_PC_SAMPLING_RECORD_FLAG_HAS_SNAPSHOT_INFORMATION is set)
     rocprofiler_pc_sampling_snapshot_information_t snapshot_information;
     // 16B (only valid if ROCPROFILER_PC_SAMPLING_RECORD_FLAG_HAS_MEMORY_COUNTERS is set)
-    rocprofiler_pc_sampling_memory_counterss_t memory_counters;
+    rocprofiler_pc_sampling_memory_counters_t memory_counters;
 
     // 8B
     rocprofiler_pc_sampling_record_flags_t flags;  ///< Flags indicating validity and available fields
-    uint8_t            pcs_hw_version; ///< Hardware version (see ::rocprofiler_pc_sampling_hardware_version_t)
     uint8_t            wave_in_group; ///< wave position in the workgroup
-    uint8_t            reserved1;
-    uint8_t            reserved2;
-    uint8_t            reserved3;
-    uint8_t            reserved4;
-    uint8_t            reserved_padding; ///< reserved for the future use.
+    uint8_t            reserved1;  ///< reserved for the future use, must be 0
+    uint8_t            reserved2;  ///< reserved for the future use, must be 0
+    uint8_t            reserved3;  ///< reserved for the future use, must be 0
+    uint8_t            reserved4;  ///< reserved for the future use, must be 0
+    uint8_t            reserved5;  ///< reserved for the future use, must be 0
+    uint8_t            reserved6;  ///< reserved for the future use, must be 0
 
     /// @var correlation_id
     /// @brief API launch call id that matches dispatch ID
