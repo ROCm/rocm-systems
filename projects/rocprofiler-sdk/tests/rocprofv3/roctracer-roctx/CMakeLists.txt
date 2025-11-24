@@ -13,10 +13,8 @@ find_package(rocprofiler-sdk REQUIRED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(tracing-env "${PRELOAD_ENV}")
-
-rocprofiler_configure_pytest_files(CONFIG pytest.ini roctracer-roctx-input.yml
-                                   COPY validate.py conftest.py)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/roctracer-roctx-input.yml.in
+               ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-input.yml @ONLY)
 
 if(TARGET transpose-roctracer-roctx)
     set(TRANSPOSE_ROCTRACER_ROCTX_EXE $<TARGET_FILE:transpose-roctracer-roctx>)
@@ -26,33 +24,31 @@ else()
     set(TRANSPOSE_ROCTRACER_ROCTX_DISABLED ON)
 endif()
 
-add_test(NAME rocprofv3-test-roctracer-roctx-trace-execute
-         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i roctracer-roctx-input.yml
-                 -- ${TRANSPOSE_ROCTRACER_ROCTX_EXE})
-
-set_tests_properties(
-    rocprofv3-test-roctracer-roctx-trace-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${tracing-env}"
-               DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}")
-
-add_test(
-    NAME rocprofv3-test-roctracer-roctx-trace-validate
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-roctracer-roctx-trace
     COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.json
-        --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.pftrace
-        --otf2-input ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.otf2)
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-input.yml --
+        ${TRANSPOSE_ROCTRACER_ROCTX_EXE}
+    DEPENDS transpose-roctracer-roctx
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"
+    FIXTURES_SETUP rocprofv3-test-roctracer-roctx-trace)
 
-set_tests_properties(
-    rocprofv3-test-roctracer-roctx-trace-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               "rocprofv3-test-roctracer-roctx-trace-execute"
-               DISABLED
-               "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-roctracer-roctx-trace
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.json
+         --pftrace-input
+         ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.pftrace
+         --otf2-input
+         ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.otf2
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-roctracer-roctx-trace
+    DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}")

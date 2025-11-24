@@ -19,6 +19,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * kernel: Counters are collected in a round robin fashion for unique kernels.
     * kernel_launch_params: Counters are collected in a round robin fashion for unique kernels having the exact same launch parameters.
 
+* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
@@ -33,6 +35,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * The meaning of --dispatch option in analyze is still the same which is which dispatch ids to analyze
 
 * Fix the functioning of --dispatch option to act as 1-based index and ensure that correct kernel iterations are being profiled
+
+* Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
 
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
@@ -96,7 +100,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
 
 ### Resolved issues
-
 * Bugfixes for stability
 
 ## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
@@ -254,7 +257,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * A workaround has been implemented using max(0, calculated_value) to prevent negative display values while the root cause is under investigation.
 
 * The profile mode crashes when `--format-rocprof-output json` is selected.
-  * As a workaround, this option should either not be provided or should be set to `csv` instead of `json`. This issue does not affect the profiling results since both `csv` and `json` output formats lead to the same profiling data.  
+  * As a workaround, this option should either not be provided or should be set to `csv` instead of `json`. This issue does not affect the profiling results since both `csv` and `json` output formats lead to the same profiling data.
 
 ### Upcoming changes
 

@@ -134,3 +134,27 @@ def get_gpu_memory_partition() -> str:
     except Exception as e:
         console_warning(f"Error getting GPU memory partition: {e}")
         return "N/A"
+
+
+def get_amdgpu_driver_version() -> str:
+    """Get the AMDGPU driver version."""
+    try:
+        driver_info = amdsmi.amdsmi_get_gpu_driver_info(get_device_handle())
+        driver_version = driver_info["driver_version"]
+        console_debug(f"AMDGPU Driver Version: {driver_version}")
+        return driver_version
+    except Exception as e:
+        console_warning(f"Error getting AMDGPU driver version: {e}")
+        return "N/A"
+
+
+def get_gpu_vram_size() -> int:
+    """Get the GPU VRAM size in MB."""
+    try:
+        vram_info = amdsmi.amdsmi_get_gpu_vram_info(get_device_handle())
+        vram_size = str(int(vram_info["vram_size"]) * 1024)  # MB -> KB
+        console_debug(f"GPU VRAM Size: {vram_size} MB")
+        return vram_size
+    except Exception as e:
+        console_warning(f"Error getting GPU VRAM size: {e}")
+        return 0
