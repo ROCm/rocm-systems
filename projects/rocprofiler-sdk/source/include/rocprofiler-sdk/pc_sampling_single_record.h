@@ -156,8 +156,8 @@ typedef struct rocprofiler_pc_sampling_hw_id_record_t
  */
 typedef struct rocprofiler_pc_sampling_hw_id_record_t
 {
-    uint64_t value; ///< Upper 4 bits tells the hw_id version. The lower 60 bits are encoded as specifiec in the
-                    ///<  that's encoded inside the rocprofiler_pc_sampling_hw_id_v*_offset_t
+    uint64_t value; ///< Lower 6 bits tell the pcs_hw_version. The upper 58 bits are encoded as specified in
+                    ///< rocprofiler_pc_sampling_hw_id_v*_offset_t
                     ///< and the rocprofiler_pc_sampling_hw_id_v*_width_t.
 } rocprofiler_pc_sampling_hw_id_record_t;
 
@@ -277,6 +277,7 @@ typedef enum
 typedef enum
 {
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PCS_HW_VERSION,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CHIPLET,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WAVE_ID,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SIMD_ID,
@@ -288,7 +289,6 @@ typedef enum
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_VM_ID,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_QUEUE_ID,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_MICROENGINE_ID,
-    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PERF_SNAPSHOT_HW_VERSION,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_LAST
 } rocprofiler_pc_sampling_hw_id_field_id_t;
 
@@ -298,6 +298,7 @@ typedef enum
  *
  * The hw_id field encodes information about the GPU part where wave was executing
  * at the moment of sampling. The hw_id tells a user about the:
+ * - PC sampling hardware version (see ::rocprofiler_pc_sampling_hardware_version_t)
  * - chiplet index
  * - wave slot index
  * - SIMD index
@@ -309,22 +310,20 @@ typedef enum
  * - virtual memory ID
  * - queue id
  * - ACE (microengine) index
- * - version of the perf snapshot block (please see ::rocprofiler_pc_sampling_perf_snapshot_hw_version_t)
  */
 typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_v0_offset_t {
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_CHIPLET = 0,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WAVE_ID = 6,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_SIMD_ID = 13,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_PIPE_ID = 15,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_CU_OR_WGP_ID = 19,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_SHADER_ARRAY_ID = 23,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_SHADER_ENGINE_ID = 24,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WORKGROUP_ID = 29,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_VM_ID = 36,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_QUEUE_ID = 42,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_MICROENGINE_ID = 46,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_PERF_SNAPSHOT_HW_VERSION = 48,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_RESERVED0 = 56
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_PCS_HW_VERSION = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_CHIPLET = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WAVE_ID = 12,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_SIMD_ID = 19,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_PIPE_ID = 21,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_CU_OR_WGP_ID = 25,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_SHADER_ARRAY_ID = 29,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_SHADER_ENGINE_ID = 30,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WORKGROUP_ID = 35,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_VM_ID = 42,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_QUEUE_ID = 48,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_MICROENGINE_ID = 52
 } rocprofiler_pc_sampling_hw_id_v0_offset_t;
 
 /**
@@ -334,6 +333,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_v0_offse
  */
 typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_v0_width_t {
     ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_PCS_HW_VERSION = 6,
     ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_CHIPLET = 6,
     ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_WAVE_ID = 7,
     ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_SIMD_ID = 2,
@@ -344,9 +344,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_v0_width
     ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_WORKGROUP_ID = 7,
     ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_VM_ID = 6,
     ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_QUEUE_ID = 4,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_MICROENGINE_ID = 2,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_PERF_SNAPSHOT_HW_VERSION = 8,  // NOTE: we could reduce this to e.g., 6 bits (64 should be sufficient)
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_RESERVED0 = 8
+    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_MICROENGINE_ID = 2
 } rocprofiler_pc_sampling_hw_id_v0_width_t;
 
 /**
@@ -663,17 +661,14 @@ rocprofiler_pc_sampling_get_hw_id_field(
     uint64_t                                 hw_id,
     rocprofiler_pc_sampling_hw_id_field_id_t field_id)
 {
-    // Extract version from upper 4 bits (bits 60-63)
-    uint64_t version = (hw_id >> 60) & 0xF;
+    // Extract version from lower 6 bits (bits 0-5)
+    uint64_t version = hw_id & 0x3F;
 
     // Check if version is valid
     if(version >= ROCPROFILER_PC_SAMPLING_HW_ID_VERSION_LAST)
     {
         return -1;
     }
-
-    // Get the lower 60 bits containing the field data
-    uint64_t field_data = hw_id & 0x0FFFFFFFFFFFFFFFULL;
 
     int offset = -1;
     int width  = -1;
@@ -683,6 +678,10 @@ rocprofiler_pc_sampling_get_hw_id_field(
         // Handle V0 fields
         switch(field_id)
         {
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PCS_HW_VERSION:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_PCS_HW_VERSION;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_PCS_HW_VERSION;
+                break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CHIPLET:
                 offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_CHIPLET;
                 width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_CHIPLET;
@@ -727,10 +726,6 @@ rocprofiler_pc_sampling_get_hw_id_field(
                 offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_MICROENGINE_ID;
                 width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_MICROENGINE_ID;
                 break;
-            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PERF_SNAPSHOT_HW_VERSION:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_PERF_SNAPSHOT_HW_VERSION;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_PERF_SNAPSHOT_HW_VERSION;
-                break;
             default: return -1;
         }
     }
@@ -743,7 +738,7 @@ rocprofiler_pc_sampling_get_hw_id_field(
 
     // Extract and return the field value
     uint64_t mask = (1ull << width) - 1;
-    return (field_data >> offset) & mask;
+    return (hw_id >> offset) & mask;
 }
 
 /** @} */
