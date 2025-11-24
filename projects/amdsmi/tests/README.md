@@ -39,7 +39,8 @@ Output File:
     Path to output file, default=.
 ```
 
-<details open>
+Command line examples:
+<details close>
   <summary>Click for example: <i><b>From amdsmi root directory with test ouput in build directory</i></b></summary>
 
 ~~~shell
@@ -51,7 +52,7 @@ api_summary.py --output summary_dir
 ~~~
 </details>
 
-<details open>
+<details close>
   <summary>Click for example: <i><b>From amdsmi root directory with test ouput in current directory</i></b></summary>
 
 ~~~shell
@@ -59,7 +60,7 @@ api_summary.py --log_dir .
 ~~~
 </details>
 
-<details open>
+<details close>
   <summary>Click for example: <i><b>All input and output in current directory</i></b></summary>
 
 ~~~shell
@@ -67,14 +68,14 @@ api_summary.py --amdsmi ./amdsmi.h --log_dir . --output_dir .
 ~~~
 </details>
 
-Output Files:
+<br> Output Files:
 ```
   api_summary.csv
   api_summary_table.txt
   api_summary_support.txt
 ```
-ex.
-<details open>
+
+<details close>
   <summary>Click for example: <i><b>api_summary.csv</i></b></summary>
 
 ~~~shell
@@ -93,7 +94,7 @@ amdsmi_get_node_handle, 0, 0, 0, 0, 0
 ~~~
 </details>
 
-<details open>
+<details close>
   <summary>Click for example: <i><b>api_summary_table.txt</i></b></summary>
 
 ~~~shell
@@ -105,7 +106,7 @@ Num APIs: 187
 ~~~
 </details>
 
-<details open>
+<details close>
   <summary>Click for example: <i><b>api_summary_support.txt</i></b></summary>
 
 ~~~shell
@@ -122,4 +123,4 @@ API Supported: 129
 	amdsmi_get_cpu_core_boostlimit()
   ...
 ~~~
-/details
+</details>
