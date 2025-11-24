@@ -7,6 +7,8 @@ set ( LIB_SRC
   ${LIB_DIR}/core/counters.cpp
   ${LIB_DIR}/core/threadtrace.cpp
   ${LIB_DIR}/core/spm_data.cpp
+  ${LIB_DIR}/core/spm_decode.cpp
+  ${LIB_DIR}/core/spm_v2.cpp
   ${LIB_DIR}/core/populate_aql.cpp
   ${LIB_DIR}/core/memorymanager.cpp
   ${LIB_DIR}/core/pm4_factory.cpp
@@ -16,6 +18,7 @@ set ( LIB_SRC
   ${LIB_DIR}/core/gfx940_factory.cpp
   ${LIB_DIR}/core/gfx10_factory.cpp
   ${LIB_DIR}/core/gfx11_factory.cpp
+  ${LIB_DIR}/core/gfx115x_factory.cpp
   ${LIB_DIR}/core/gfx12_factory.cpp
   ${LIB_DIR}/core/vega20_reg_init.cpp
   ${LIB_DIR}/core/parse_ip_discovery.cpp

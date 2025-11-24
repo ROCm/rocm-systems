@@ -191,7 +191,7 @@ Filtering Options:
 
 - The `-k` / `--kernel` \<kernel-substr> flag allows for kernel filtering. Usage is equivalent with the current rocProf utility ([see details below](#kernel-filtering)).
 
-- The `-d` / `--dispatch` \<dispatch-id> flag allows for dispatch ID filtering. Usage is equivalent with the current rocProf utility ([see details below](#dispatch-filtering)).
+- The `-d` / `--dispatch` \<dispatch-id> flag allows for dispatch iteration filtering. Usage is equivalent with the current rocProf utility ([see details below](#dispatch-filtering)).
 
 - The `-b` / `--block` \<block-name> flag allows system profiling on one or more selected hardware components to speed up the profiling process ([see details below](#hardware-component-filtering)).
 
@@ -315,7 +315,7 @@ Standalone Roofline Options:
 
 - The `--device` \<gpu_id> allows you to specify a device id to collect performance data from when running our roofline benchmark on your system.
 
-- If you would like to distinguish different kernels in your .pdf roofline plot use `--kernel-names`. This will give each kernel a unique marker identifiable from the plot's key.
+- Each kernel in your .pdf roofline plot is automatically distinguished with a unique marker identifiable from the plot's key.
 
 
 #### Roofline Only

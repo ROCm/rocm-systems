@@ -43,7 +43,6 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 # Options
 #############################
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
-option(HIP_OFFICIAL_BUILD "Enable/Disable for mainline/staging builds" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 if(MSVC)
@@ -168,9 +167,6 @@ if(GIT_FOUND)
 
   set(HIP_VERSION_BUILD_ID 0)
   set(HIP_VERSION_BUILD_NAME "")
-  if(NOT DEFINED ENV{HIP_OFFICIAL_BUILD} AND NOT HIP_OFFICIAL_BUILD)
-    set(HIP_VERSION_PATCH ${HIP_VERSION_GITDATE})
-  endif()
 
   if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
     set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})

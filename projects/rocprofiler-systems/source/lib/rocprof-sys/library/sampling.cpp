@@ -32,6 +32,7 @@
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
+#include "library/amd_smi.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
 #include "library/components/backtrace_timestamp.hpp"
@@ -315,13 +316,12 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
             auto _call_stack = generate_call_stack_json(iitr);
             auto _line_info  = generate_line_info_json(iitr);
 
-            trace_cache::get_buffer_storage().store(
-                trace_cache::entry_type::backtrace_region_sample,
+            trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
                 static_cast<uint64_t>(_thread_info->index_data->system_value),
                 _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
                 trait::name<category::timer_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}");
+                _line_info.c_str(), "{}" });
         }
     }
 
@@ -348,13 +348,12 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
             auto _call_stack = generate_call_stack_json(iitr);
             auto _line_info  = generate_line_info_json(iitr);
 
-            trace_cache::get_buffer_storage().store(
-                trace_cache::entry_type::backtrace_region_sample,
+            trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
                 static_cast<uint64_t>(_thread_info->index_data->system_value),
                 _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
                 trait::name<category::overflow_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}");
+                _line_info.c_str(), "{}" });
         }
     }
 }
@@ -1837,6 +1836,19 @@ struct sampling_initialization
     }
 };
 }  // namespace
+void
+postfork_parent_reinit()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        amd_smi::postfork_parent_reinit();
+}
+
+void
+postfork_child_cleanup()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        amd_smi::postfork_child_cleanup();
+}
 }  // namespace sampling
 }  // namespace rocprofsys
 

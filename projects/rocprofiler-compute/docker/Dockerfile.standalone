@@ -1,8 +1,8 @@
 FROM redhat/ubi8:8.10
 
-WORKDIR /app
+WORKDIR /app/projects/rocprofiler-compute
 
-RUN yum install -y curl gcc cmake git
+RUN yum install -y curl git cmake gcc-c++
 
 # Allows running git commands in /app
 RUN git config --global --add safe.directory /app
@@ -14,10 +14,25 @@ RUN yum install -y python39 python39-devel && \
     python3 get-pip.py
 
 CMD ["/bin/bash", "-c", "\
-    cd /app/projects/rocprofiler-compute \
-    && python3 -m pip install -r requirements.txt \
+    python3 -m pip install -r requirements.txt \
     && python3 -m pip install nuitka patchelf \
-    && rm -rf build \
-    && cmake -B build -S . \
-    && make -C build standalonebinary \
+    && git rev-parse HEAD > VERSION.sha \
+    && python3 -m nuitka --mode=onefile --no-deployment-flag=self-execution \
+        --enable-plugin=no-qt \
+        --include-data-files=VERSION*=./ \
+        --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp \
+        --include-package=dash_svg --include-package-data=dash_svg \
+        --include-package=dash_bootstrap_components \
+        --include-package-data=dash_bootstrap_components \
+        --include-package=plotly --include-package-data=plotly \
+        --include-package=kaleido --include-package-data=kaleido \
+        --include-package=rocprof_compute_analyze \
+        --include-package-data=rocprof_compute_analyze \
+        --include-package=rocprof_compute_profile \
+        --include-package-data=rocprof_compute_profile \
+        --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui \
+        --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc \
+        --include-package=utils --include-package-data=utils \
+        src/rocprof-compute \
+    && patchelf --remove-rpath rocprof-compute.bin \
 "]

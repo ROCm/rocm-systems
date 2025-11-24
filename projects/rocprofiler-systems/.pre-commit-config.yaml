@@ -44,7 +44,7 @@ repos:
         files: \.(c|cpp|h.*)$
 
   - repo: https://github.com/BlankSpruce/gersemi
-    rev: 0.19.3
+    rev: 0.23.1
     hooks:
     - id: gersemi
 

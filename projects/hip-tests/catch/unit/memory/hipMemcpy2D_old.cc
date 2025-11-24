@@ -309,7 +309,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D-D2D-D2H_Managed_WithOffset", "", int, f
  *  - HIP_VERSION >= 6.0
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_multiDevice-D2D", "", int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_multiDevice-D2D", "[multigpu]", int, float,
+                   double) {
   CHECK_IMAGE_SUPPORT
   auto mem_type = GENERATE(0, 1);
   int numDevices = 0;
@@ -524,7 +525,7 @@ static void hipMemcpy2D_Basic_Size_Test(size_t inc) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy2D_multiDevice_Basic_Size_Test") {
+TEST_CASE("Unit_hipMemcpy2D_multiDevice_Basic_Size_Test", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   size_t input = 1 << 20;
   int numDevices = 0;
