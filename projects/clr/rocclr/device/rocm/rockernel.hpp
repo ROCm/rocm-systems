@@ -48,20 +48,14 @@ class Kernel : public device::Kernel {
 
   //! Pull demangled name, used only for logging
   const std::string& getDemangledName() {
-    if (demangled_name_.empty()) {
-      initDemangledName();
-    }
+    std::call_once(demangle_once_, [this] {
+      amd::Os::CxaDemangle(name(), &demangled_name_);
+    });
     return demangled_name_;
   }
 
- private:
-  void initDemangledName() {
-    if (demangled_name_.empty()) {
-      amd::Os::CxaDemangle(name(), &demangled_name_);
-    }
-  }
-
   std::string demangled_name_;  //!< Cache demangled name
+  std::once_flag demangle_once_;
 };
 
 }  // namespace amd::roc

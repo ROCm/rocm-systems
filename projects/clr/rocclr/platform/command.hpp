@@ -90,7 +90,7 @@ class Event : public RuntimeObject {
   std::atomic_flag notified_;              //!< Command queue was notified
 
   void* hw_event_;        //!< HW event ID associated with SW event
-  Event* notify_event_;   //!< Notify event, which should contain HW signal
+  std::atomic<Event*> notify_event_;   //!< Notify event, which should contain HW signal
   const Device* device_;  //!< Device, this event associated with
 
   std::atomic<int32_t> event_entry_scope_;  //!< Command entry scope
@@ -219,7 +219,7 @@ class Event : public RuntimeObject {
   void* HwEvent() const { return hw_event_; }
 
   //! Returns notify even associated with the current command
-  Event* NotifyEvent() const {ScopedLock l(notify_lock_); return notify_event_; }
+  Event* NotifyEvent() const { return notify_event_; }
 
   //! Get entry scope of the event
   int32_t getCommandEntryScope() const {
