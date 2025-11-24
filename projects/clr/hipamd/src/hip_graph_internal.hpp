@@ -1879,9 +1879,6 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     } else if (dstMemory != nullptr && srcMemory == nullptr) {
       status = ihipMemcpyCommand(command, dstMemory, src_, count_, kind_, *stream, dOffset, true);
       type = ihipGetMemcpyType(src_, dstMemory);
-    } else {
-      status = ihipMemcpyCommand(command, dst_, src_, count_, kind_, *stream);
-      type = ihipGetMemcpyType(src_, dst_); 
     }
 
     if (type == hipCopyBuffer) {

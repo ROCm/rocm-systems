@@ -51,9 +51,6 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
                              size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
                              size_t dstOffset, size_t srcOffset, bool isAsync = true);
 
-hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src, size_t sizeBytes,
-                             hipMemcpyKind kind, hip::Stream& stream, bool isAsync = true);
-
 void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, hip::Stream& stream);
 
 bool IsHtoHMemcpy(void* dst, const void* src);
