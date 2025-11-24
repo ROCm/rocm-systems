@@ -97,7 +97,6 @@ void BesselSinglePrecisionRangeTest(kernel_bessel_n_sig<float> kernel,
                                     const float a, const float b) {
   const auto [grid_size, block_size] = GetOccupancyMaxPotentialBlockSize(kernel);
   const auto reduction_factor = GetTestReductionFactor();
-  const auto inv_reduction_factor = 1 / reduction_factor;
   const auto max_batch_size = GetMaxAllowedDeviceMemoryUsage() / (sizeof(float) * 2 + sizeof(int));
   LinearAllocGuard<int> x1s{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(int)};
   LinearAllocGuard<float> x2s{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(float)};
@@ -105,84 +104,11 @@ void BesselSinglePrecisionRangeTest(kernel_bessel_n_sig<float> kernel,
   MathTest math_test(kernel, max_batch_size);
   std::fill_n(x1s.ptr(), max_batch_size, n_input);
 
-  size_t inserted = 0u;
+  const auto run = [&, gs = grid_size, bs = block_size](size_t inserted) {
+    math_test.Run(validator_builder, gs, bs, ref_func, inserted, x1s.ptr(), x2s.ptr());
+  };
 
-  bool test_positive = true;
-  float positive_start = 0.0f;
-  float positive_end = 0.0f;
-  bool test_negative = true;
-  float negative_start = 0.0f;
-  float negative_end = 0.0f;
-  if (a < 0 && b <= 0) {
-    test_positive = false;
-    negative_start = -b;
-    negative_end = -a;
-  }
-  if (a < 0 && b > 0) {
-    positive_start = 0.0f;
-    positive_end = b;
-    negative_start = 0.0f;
-    negative_end = -a;
-  }
-  if (a >= 0 && b > 0) {
-    positive_start = a;
-    positive_end = b;
-    test_negative = false;
-  }
-
-  const int radix = std::numeric_limits<float>::radix;
-
-  float increment = std::numeric_limits<float>::min() * std::numeric_limits<float>::epsilon();
-  float limit = std::numeric_limits<float>::min() * radix;
-
-  if (test_positive) {
-    for (float v = positive_start; v < positive_end; limit *= radix, increment *= radix) {
-      const auto start_v = v;
-      double count = 0ul;
-      while (v < limit && v < positive_end) {
-        x2s.ptr()[inserted++] = v;
-        count += inv_reduction_factor;
-        v = start_v + increment * static_cast<uint64_t>(std::floor(count));
-        if (inserted < max_batch_size) continue;
-
-        math_test.Run(validator_builder, grid_size, block_size, ref_func, inserted, x1s.ptr(),
-                      x2s.ptr());
-        inserted = 0u;
-      }
-    }
-
-    if (inserted > 0u) {
-      math_test.Run(validator_builder, grid_size, block_size, ref_func, inserted, x1s.ptr(),
-                    x2s.ptr());
-      inserted = 0u;
-    }
-  }
-
-  increment = std::numeric_limits<float>::min() * std::numeric_limits<float>::epsilon();
-  limit = std::numeric_limits<float>::min() * radix;
-
-  if (test_negative) {
-    for (float v = negative_start; v < negative_end; limit *= radix, increment *= radix) {
-      const auto start_v = v;
-      double count = 0ul;
-      while (v < limit && v < negative_end) {
-        x2s.ptr()[inserted++] = -v;
-        count += inv_reduction_factor;
-        v = start_v + increment * static_cast<uint64_t>(std::floor(count));
-        if (inserted < max_batch_size) continue;
-
-        math_test.Run(validator_builder, grid_size, block_size, ref_func, inserted, x1s.ptr(),
-                      x2s.ptr());
-        inserted = 0u;
-      }
-    }
-
-    if (inserted > 0u) {
-      math_test.Run(validator_builder, grid_size, block_size, ref_func, inserted, x1s.ptr(),
-                    x2s.ptr());
-      inserted = 0u;
-    }
-  }
+  SinglePrecisionReducedRun(run, x2s, a, b, reduction_factor, max_batch_size);
 }
 
 template <typename T, typename F, typename ValidatorBuilder>
