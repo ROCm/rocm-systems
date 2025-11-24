@@ -526,7 +526,6 @@ get_mem_alloc_address(
 }
 #endif
 
-// clang-format off
 void
 cache_region(const rocprofiler_callback_tracing_record_t* record,
              const rocprofiler_timestamp_t                start_timestamp,
@@ -538,92 +537,62 @@ cache_region(const rocprofiler_callback_tracing_record_t* record,
         trace_cache::get_metadata_registry().get_callback_tracing_info();
     auto _name = std::string{ callback_tracing_info.at(record->kind, record->operation) };
 
-    trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::region,
-        record->thread_id,
-        _name.c_str(),
-        record->correlation_id.internal,
-        get_parent_stack_id(record->correlation_id),
-        start_timestamp,
-        end_timestamp,
-        call_stack.c_str(),
-        args_str.c_str(),
-        category.c_str());
+    trace_cache::get_buffer_storage().store(trace_cache::region_sample{
+        record->thread_id, _name.c_str(), record->correlation_id.internal,
+        get_parent_stack_id(record->correlation_id), start_timestamp, end_timestamp,
+        call_stack.c_str(), args_str.c_str(), category.c_str() });
 }
 
 void
-cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* record, uint64_t stream_handle)
+cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* record,
+                      uint64_t                                             stream_handle)
 {
-    auto queue_handle  = record->dispatch_info.queue_id.handle;
+    auto queue_handle = record->dispatch_info.queue_id.handle;
 
     trace_cache::get_metadata_registry().add_queue(queue_handle);
     trace_cache::get_metadata_registry().add_stream(stream_handle);
 
-    trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::kernel_dispatch,
-        record->start_timestamp,
-        record->end_timestamp,
-        record->thread_id,
-        record->dispatch_info.agent_id.handle,
-        record->dispatch_info.kernel_id,
-        record->dispatch_info.dispatch_id,
-        record->dispatch_info.queue_id.handle,
-        record->correlation_id.internal,
-        get_parent_stack_id(record->correlation_id),
+    trace_cache::get_buffer_storage().store(trace_cache::kernel_dispatch_sample{
+        record->start_timestamp, record->end_timestamp, record->thread_id,
+        record->dispatch_info.agent_id.handle, record->dispatch_info.kernel_id,
+        record->dispatch_info.dispatch_id, record->dispatch_info.queue_id.handle,
+        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
         record->dispatch_info.private_segment_size,
-        record->dispatch_info.group_segment_size,
-        record->dispatch_info.workgroup_size.x,
-        record->dispatch_info.workgroup_size.y,
-        record->dispatch_info.workgroup_size.z,
-        record->dispatch_info.grid_size.x,
-        record->dispatch_info.grid_size.y,
-        record->dispatch_info.grid_size.z,
-        stream_handle);
-
+        record->dispatch_info.group_segment_size, record->dispatch_info.workgroup_size.x,
+        record->dispatch_info.workgroup_size.y, record->dispatch_info.workgroup_size.z,
+        record->dispatch_info.grid_size.x, record->dispatch_info.grid_size.y,
+        record->dispatch_info.grid_size.z, stream_handle });
 }
 
 void
-cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record, uint64_t stream_handle)
+cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record,
+                  uint64_t                                         stream_handle)
 {
     trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::memory_copy,
-        record->start_timestamp,
-        record->end_timestamp,
-        record->thread_id,
-        record->dst_agent_id.handle,
-        record->src_agent_id.handle,
-        static_cast<int32_t>(record->kind),
-        static_cast<int32_t>(record->operation),
-        record->bytes,
-        record->correlation_id.internal,
-        get_parent_stack_id(record->correlation_id),
-        get_mem_copy_dst_address(*record),
-        get_mem_copy_src_address(*record),
-        stream_handle);
+    trace_cache::get_buffer_storage().store(trace_cache::memory_copy_sample{
+
+        record->start_timestamp, record->end_timestamp, record->thread_id,
+        record->dst_agent_id.handle, record->src_agent_id.handle,
+        static_cast<int32_t>(record->kind), static_cast<int32_t>(record->operation),
+        record->bytes, record->correlation_id.internal,
+        get_parent_stack_id(record->correlation_id), get_mem_copy_dst_address(*record),
+        get_mem_copy_src_address(*record), stream_handle });
 }
 
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
 void
-cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* record, uint64_t stream_handle)
+cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* record,
+                        uint64_t stream_handle)
 {
     trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(
-        trace_cache::entry_type::memory_alloc,
-        record->start_timestamp,
-        record->end_timestamp,
-        record->thread_id,
-        record->agent_id.handle,
-        static_cast<int32_t>(record->kind),
-        static_cast<int32_t>(record->operation),
-        record->allocation_size,
-        record->correlation_id.internal,
-        get_parent_stack_id(record->correlation_id),
-        get_mem_alloc_address(*record),
-        stream_handle);
+    trace_cache::get_buffer_storage().store(trace_cache::memory_allocate_sample{
+        record->start_timestamp, record->end_timestamp, record->thread_id,
+        record->agent_id.handle, static_cast<int32_t>(record->kind),
+        static_cast<int32_t>(record->operation), record->allocation_size,
+        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
+        get_mem_alloc_address(*record), stream_handle });
 }
 #endif
-// clang-format on
 
 std::string
 get_args_string(const function_args_t& args)
