@@ -252,27 +252,16 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_t
     /// @brief Memory counters (only valid if HAS_MEMORY_COUNTERS flag is set). Unused in current generation.
 } rocprofiler_pc_sampling_record_t;
 
-/**
- * @brief HW ID versions.
- *
- * As we're limited with space in the hw_id field, 0 is used as the first version,
- * and ROCPROFILER_PC_SAMPLING_HW_ID_VERSION_NONE doesn't exist.
- */
-typedef enum
-{
-    ROCPROFILER_PC_SAMPLING_HW_ID_VERSION_V0 = 0,  ///< GFX9 hw_id
-    ROCPROFILER_PC_SAMPLING_HW_ID_VERSION_LAST
-} rocprofiler_pc_sampling_hw_id_version_t;
 
 /**
  * @brief (experimental) IDs of hw_id field.
  *
- * This enumeration contains a union of all fields available in different hw_id versions
- * (see ::rocprofiler_pc_sampling_hw_id_version_t).
+ * This enumeration contains a union of all fields available in different hardware (hw_id) versions.
  * The offsets and widths for a specific version is encoded inside:
- * - ::rocprofiler_pc_sampling_hw_id_v0_offset_t and
- * ::rocprofiler_pc_sampling_hw_id_v0_width_t for
- * ROCPROFILER_PC_SAMPLING_HW_ID_VERSION_V0
+ * - ::rocprofiler_pc_sampling_hw_id_gfx9_offset_t and
+ *   ::rocprofiler_pc_sampling_hw_id_gfx9_width_t for ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX9
+ * - ::rocprofiler_pc_sampling_hw_id_gfx12_offset_t and
+ *   ::rocprofiler_pc_sampling_hw_id_gfx12_width_t for ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12
  */
 typedef enum
 {
@@ -282,7 +271,8 @@ typedef enum
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WAVE_ID,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SIMD_ID,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PIPE_ID,
-    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CU_OR_WGP_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CU_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WGP_ID,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ARRAY_ID,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ENGINE_ID,
     ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WORKGROUP_ID,
@@ -293,8 +283,7 @@ typedef enum
 } rocprofiler_pc_sampling_hw_id_field_id_t;
 
 /**
- * @brief (experimental) Enumeration for bitfield offsets in the ABI-compatible version of a hw_id field
- * available in host-trap and stochastic PC sampling records.
+ * @brief (experimental) Enumeration for bitfield offsets in hw_id field for GFX9 architectures.
  *
  * The hw_id field encodes information about the GPU part where wave was executing
  * at the moment of sampling. The hw_id tells a user about the:
@@ -303,49 +292,103 @@ typedef enum
  * - wave slot index
  * - SIMD index
  * - pipe index
- * - compute unit index on GFX9 or workgroup processor index on GFX10+
+ * - compute unit index
  * - shader array index
  * - shader engine index
- * - thread_group index on GFX9, and workgroup index on GFX10+
+ * - thread_group index
  * - virtual memory ID
  * - queue id
  * - ACE (microengine) index
  */
-typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_v0_offset_t {
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_PCS_HW_VERSION = 0,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_CHIPLET = 6,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WAVE_ID = 12,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_SIMD_ID = 19,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_PIPE_ID = 21,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_CU_OR_WGP_ID = 25,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_SHADER_ARRAY_ID = 29,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_SHADER_ENGINE_ID = 30,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WORKGROUP_ID = 35,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_VM_ID = 42,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_QUEUE_ID = 48,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_MICROENGINE_ID = 52
-} rocprofiler_pc_sampling_hw_id_v0_offset_t;
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_gfx9_offset_t {
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_PCS_HW_VERSION = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_CHIPLET = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_WAVE_ID = 12,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SIMD_ID = 19,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_PIPE_ID = 21,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_CU_ID = 25,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SHADER_ARRAY_ID = 29,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SHADER_ENGINE_ID = 30,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_WORKGROUP_ID = 35,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_VM_ID = 42,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_QUEUE_ID = 48,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_MICROENGINE_ID = 52
+} rocprofiler_pc_sampling_hw_id_gfx9_offset_t;
 
 /**
- * @brief (experimental) Enumeration for bitfield widths in the ABI-compatible version of hw_id field.
- * 
- * @see rocprofiler_pc_sampling_hw_id_v0_offset_t for more information about each subfield.
+ * @brief (experimental) Enumeration for bitfield widths in hw_id field for GFX9 architectures.
+ *
+ * @see rocprofiler_pc_sampling_hw_id_gfx9_offset_t for more information about each subfield.
  */
-typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_v0_width_t {
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_NONE = 0,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_PCS_HW_VERSION = 6,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_CHIPLET = 6,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_WAVE_ID = 7,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_SIMD_ID = 2,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_PIPE_ID = 4,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_CU_OR_WGP_ID = 4,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_SHADER_ARRAY_ID = 1,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_SHADER_ENGINE_ID = 5,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_WORKGROUP_ID = 7,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_VM_ID = 6,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_QUEUE_ID = 4,
-    ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_MICROENGINE_ID = 2
-} rocprofiler_pc_sampling_hw_id_v0_width_t;
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_gfx9_width_t {
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_PCS_HW_VERSION = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_CHIPLET = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_WAVE_ID = 7,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SIMD_ID = 2,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_PIPE_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_CU_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SHADER_ARRAY_ID = 1,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SHADER_ENGINE_ID = 5,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_WORKGROUP_ID = 7,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_VM_ID = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_QUEUE_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_MICROENGINE_ID = 2
+} rocprofiler_pc_sampling_hw_id_gfx9_width_t;
+
+/**
+ * @brief (experimental) Enumeration for bitfield offsets in hw_id field for GFX12 architectures.
+ *
+ * The hw_id field encodes information about the GPU part where wave was executing
+ * at the moment of sampling. The hw_id tells a user about the:
+ * - PC sampling hardware version (see ::rocprofiler_pc_sampling_hardware_version_t)
+ * - chiplet index
+ * - wave slot index
+ * - SIMD index
+ * - pipe index
+ * - workgroup processor index
+ * - shader array index
+ * - shader engine index
+ * - workgroup index
+ * - virtual memory ID
+ * - queue id
+ * - ACE (microengine) index
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_gfx12_offset_t {
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_PCS_HW_VERSION = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_CHIPLET = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WAVE_ID = 12,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SIMD_ID = 19,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_PIPE_ID = 21,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WGP_ID = 25,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SHADER_ARRAY_ID = 29,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SHADER_ENGINE_ID = 30,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WORKGROUP_ID = 35,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_VM_ID = 42,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_QUEUE_ID = 48,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_MICROENGINE_ID = 52
+} rocprofiler_pc_sampling_hw_id_gfx12_offset_t;
+
+/**
+ * @brief (experimental) Enumeration for bitfield widths in hw_id field for GFX12 architectures.
+ *
+ * @see rocprofiler_pc_sampling_hw_id_gfx12_offset_t for more information about each subfield.
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_gfx12_width_t {
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_PCS_HW_VERSION = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_CHIPLET = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WAVE_ID = 7,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SIMD_ID = 2,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_PIPE_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WGP_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SHADER_ARRAY_ID = 1,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SHADER_ENGINE_ID = 5,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WORKGROUP_ID = 7,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_VM_ID = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_QUEUE_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_MICROENGINE_ID = 2
+} rocprofiler_pc_sampling_hw_id_gfx12_width_t;
 
 /**
  * @brief (experimental) IDs of arbiter_state field.
@@ -661,11 +704,12 @@ rocprofiler_pc_sampling_get_hw_id_field(
     uint64_t                                 hw_id,
     rocprofiler_pc_sampling_hw_id_field_id_t field_id)
 {
-    // Extract version from lower 6 bits (bits 0-5)
-    uint64_t version = hw_id & 0x3F;
+    // Extract hardware version from lower 6 bits (bits 0-5)
+    rocprofiler_pc_sampling_hardware_version_t hw_version =
+        (rocprofiler_pc_sampling_hardware_version_t)(hw_id & 0x3F);
 
     // Check if version is valid
-    if(version >= ROCPROFILER_PC_SAMPLING_HW_ID_VERSION_LAST)
+    if(hw_version >= ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_LAST)
     {
         return -1;
     }
@@ -673,58 +717,114 @@ rocprofiler_pc_sampling_get_hw_id_field(
     int offset = -1;
     int width  = -1;
 
-    if(version == ROCPROFILER_PC_SAMPLING_HW_ID_VERSION_V0)
+    if(hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX9)
     {
-        // Handle V0 fields
+        // Handle GFX9 fields
         switch(field_id)
         {
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PCS_HW_VERSION:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_PCS_HW_VERSION;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_PCS_HW_VERSION;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_PCS_HW_VERSION;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_PCS_HW_VERSION;
                 break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CHIPLET:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_CHIPLET;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_CHIPLET;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_CHIPLET;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_CHIPLET;
                 break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WAVE_ID:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WAVE_ID;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_WAVE_ID;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_WAVE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_WAVE_ID;
                 break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SIMD_ID:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_SIMD_ID;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_SIMD_ID;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SIMD_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SIMD_ID;
                 break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PIPE_ID:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_PIPE_ID;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_PIPE_ID;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_PIPE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_PIPE_ID;
                 break;
-            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CU_OR_WGP_ID:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_CU_OR_WGP_ID;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_CU_OR_WGP_ID;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CU_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_CU_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_CU_ID;
                 break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ARRAY_ID:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_SHADER_ARRAY_ID;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_SHADER_ARRAY_ID;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SHADER_ARRAY_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SHADER_ARRAY_ID;
                 break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ENGINE_ID:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_SHADER_ENGINE_ID;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_SHADER_ENGINE_ID;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SHADER_ENGINE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SHADER_ENGINE_ID;
                 break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WORKGROUP_ID:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WORKGROUP_ID;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_WORKGROUP_ID;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_WORKGROUP_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_WORKGROUP_ID;
                 break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_VM_ID:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_VM_ID;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_VM_ID;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_VM_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_VM_ID;
                 break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_QUEUE_ID:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_QUEUE_ID;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_QUEUE_ID;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_QUEUE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_QUEUE_ID;
                 break;
             case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_MICROENGINE_ID:
-                offset = ROCPROFILER_PC_SAMPLING_HW_ID_V0_MICROENGINE_ID;
-                width  = ROCPROFILER_PC_SAMPLING_HW_ID_V0_WIDTH_MICROENGINE_ID;
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_MICROENGINE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_MICROENGINE_ID;
+                break;
+            default: return -1;
+        }
+    }
+    else if(hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12)
+    {
+        // Handle GFX12 fields
+        switch(field_id)
+        {
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PCS_HW_VERSION:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_PCS_HW_VERSION;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_PCS_HW_VERSION;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CHIPLET:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_CHIPLET;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_CHIPLET;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WAVE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WAVE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WAVE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SIMD_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SIMD_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SIMD_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PIPE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_PIPE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_PIPE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WGP_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WGP_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WGP_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ARRAY_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SHADER_ARRAY_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SHADER_ARRAY_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ENGINE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SHADER_ENGINE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SHADER_ENGINE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WORKGROUP_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WORKGROUP_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WORKGROUP_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_VM_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_VM_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_VM_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_QUEUE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_QUEUE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_QUEUE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_MICROENGINE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_MICROENGINE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_MICROENGINE_ID;
                 break;
             default: return -1;
         }
