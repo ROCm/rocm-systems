@@ -932,14 +932,13 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
 def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_compute):
     """
     Test roofline behavior when kernel filter doesn't match any
-    kernels during initial profiling.
+    kernels during profiling.
 
-    When profiling with a non-matching kernel filter, no counter
-    data is collected, so roofline generation is skipped with a
-    warning (but returns success code 0).
-
-    This is different from filtering existing profiling data with
-    a non-matching kernel name, which produces an explicit error.
+    When profiling with a non-matching kernel filter, the workload
+    still executes and profiling data is collected for all kernels.
+    However, when roofline attempts to filter the collected data
+    to match the requested kernel name, it finds no match and
+    produces an error.
     """
     if soc in ("MI100"):
         pytest.skip("Skipping roofline test for MI100")
@@ -958,7 +957,7 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
         config, workload_dir, options, check_success=False, roof=True
     )
 
-    assert returncode == 0, f"Expected success (returncode=0), got {returncode}"
+    assert returncode == 1, f"Expected error (returncode=1), got {returncode}"
 
     pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
     assert len(pdf_files) == 0, (

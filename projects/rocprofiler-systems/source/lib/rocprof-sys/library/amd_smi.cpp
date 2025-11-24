@@ -1292,6 +1292,35 @@ device_count()
 {
     return gpu::device_count();
 }
+
+void
+postfork_child_cleanup()
+{
+    // In child process, disable AMD SMI to prevent shutdown errors
+    ROCPROFSYS_VERBOSE_F(2, "Disabling AMD SMI in child process after fork...\n");
+
+    // Set to Finalized to prevent any sampling attempts (though is_child_process() check
+    // in sample() already handles this)
+    get_state().store(State::Finalized);
+
+    // Mark as not initialized so shutdown won't try to cleanup AMD SMI library
+    is_initialized() = false;
+
+    // Clear device list to prevent any GPU operations
+    data::device_list.clear();
+}
+
+void
+postfork_parent_reinit()
+{
+    // In parent process, AMD SMI device handles may be corrupted after fork
+    // Reinitialize AMD SMI to get fresh handles
+    ROCPROFSYS_VERBOSE_F(2, "Reinitializing AMD SMI in parent process after fork...\n");
+
+    // Shutdown and reinitialize to get fresh device handles
+    shutdown();
+    setup();
+}
 }  // namespace amd_smi
 }  // namespace rocprofsys
 
