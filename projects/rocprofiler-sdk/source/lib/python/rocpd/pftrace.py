@@ -34,15 +34,13 @@ def write_pftrace(importData, config):
 
 def execute(input, config=None, **kwargs):
 
-    importData = RocpdImportData(input)
-
     config = (
         output_config.output_config(**kwargs)
         if config is None
         else config.update(**kwargs)
     )
 
-    write_pftrace(importData, config)
+    write_pftrace(input, config)
 
 
 def add_args(parser):
@@ -133,7 +131,9 @@ def main(argv=None):
     process_time_window_args = add_args_time_window(parser)
 
     args = parser.parse_args(argv)
-    input = RocpdImportData(args.input)
+    input = RocpdImportData(
+        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+    )
 
     out_cfg_args = process_out_config_args(input, args)
     pftrace_args = process_pftrace_args(input, args)
