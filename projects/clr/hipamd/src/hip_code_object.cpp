@@ -120,6 +120,7 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, std::string func_name) {
     return hipErrorNotFound;
   }
 
+  // Potentially nested lock
   /* See if this could be solved */
   return it->second->getDynFunc(hfunc, module_);
 }
