@@ -115,7 +115,11 @@ class MainView(Horizontal):
         self.kernel_to_df_dict = {}
         self.top_kernel_to_df_list = []
 
+        # -----------------------------
+        # 1. No directory selected
+        # -----------------------------
         if not self.selected_path:
+            self.app.notify("No directory selected for analysis", severity="warning")
             self._update_kernel_view(
                 "No directory selected for analysis", LogLevel.ERROR
             )
@@ -125,43 +129,74 @@ class MainView(Horizontal):
             self.logger.info(f"Starting analysis on: {self.selected_path}")
             self.logger.info("Loading...")
 
+            # -----------------------------
+            # 2. Inform user analysis is starting
+            # -----------------------------
+            self.app.notify(
+                f"Running analysis on: {self.selected_path}", severity="information"
+            )
+
             self._update_kernel_view(
                 f"Running analysis on: {self.selected_path}", LogLevel.SUCCESS
             )
 
-            # 1. Create and TUI analyzer
+            # ------------------------------------
+            # 3. Initialize analyzer
+            # ------------------------------------
             analyzer = tui_analysis(
                 self.app.args, self.app.supported_archs, str(self.selected_path)
             )
             analyzer.sanitize()
 
-            # 2. Load and process system info and Configure SoC
+            # ------------------------------------
+            # 4. Load sysinfo
+            # ------------------------------------
             sysinfo_path = self.selected_path / "sysinfo.csv"
             if not sysinfo_path.exists():
+                self.app.notify(
+                    f"sysinfo.csv not found at: {sysinfo_path}", severity="error"
+                )
                 raise FileNotFoundError(f"sysinfo.csv not found at {sysinfo_path}")
 
             sys_info = file_io.load_sys_info(str(sysinfo_path)).iloc[0].to_dict()
             self.app.load_soc_specs(sys_info)
             analyzer.set_soc(self.app.soc)
 
-            # 3. run analysis
+            # ------------------------------------
+            # 5. Run preprocessing
+            # ------------------------------------
             analyzer.pre_processing()
+            self.app.notify("Profiling data loaded", severity="information")
+
+            # ------------------------------------
+            # 6. Kernel analysis
+            # ------------------------------------
             self.kernel_to_df_dict = analyzer.run_kernel_analysis()
             self.top_kernel_to_df_list = analyzer.run_top_kernel()
 
             if not self.kernel_to_df_dict or not self.top_kernel_to_df_list:
+                self.app.notify(
+                    "Analysis completed but not all data was produced",
+                    severity="warning",
+                )
                 self._update_kernel_view(
                     "Analysis completed but not all data was returned", LogLevel.WARNING
                 )
             else:
                 self.app.call_from_thread(self.refresh_results)
                 self.logger.info("Kernel Analysis completed successfully")
+                self.app.notify("Kernel analysis completed", severity="information")
 
         except Exception as e:
             import traceback
 
             error_msg = f"Analysis failed: {str(e)}"
+
+            # -----------------------------
+            # 7. Fatal error notification
+            # -----------------------------
             self.logger.error(f"{error_msg}\n{traceback.format_exc()}")
+            self.app.notify(error_msg, severity="error")
             self._update_kernel_view(error_msg, LogLevel.ERROR)
 
     def _update_kernel_view(self, message: str, log_level: LogLevel) -> None:

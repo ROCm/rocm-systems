@@ -84,13 +84,22 @@ class RocprofTUIApp(App):
 
     def action_refresh(self) -> None:
         self.main_view.refresh_view()
+        self.notify("View refreshed", severity="information")
 
     def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
-        self.mspec = generate_machine_specs(self.args, sysinfo)
-        arch = self.mspec.gpu_arch
-        soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
-        soc_class = getattr(soc_module, f"{arch}_soc")
-        self.soc[arch] = soc_class(self.args, self.mspec)
+        try:
+            self.mspec = generate_machine_specs(self.args, sysinfo)
+            arch = self.mspec.gpu_arch
+
+            soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
+            soc_class = getattr(soc_module, f"{arch}_soc")
+            self.soc[arch] = soc_class(self.args, self.mspec)
+
+            self.notify(f"Loaded system specs for {arch}", severity="information")
+
+        except Exception as e:
+            self.notify(f"Failed to load system specs: {e}", severity="error")
+            raise
 
     def _load_recent_dirs(self) -> list[str]:
         recent_file = Path.home() / ".textual_browser_recent.json"
@@ -116,10 +125,13 @@ class RocprofTUIApp(App):
 
     def on_recent_selected(self, selected_dir: Optional[str]) -> None:
         if not selected_dir:
+            self.notify("Directory selection cancelled", severity="information")
             return
 
         if Path(selected_dir) != self.main_view.selected_path:
             self.main_view.selected_path = Path(selected_dir)
+
+        self.notify(f"Selected: {selected_dir}", severity="information")
 
         self.main_view.run_analysis()
 
@@ -138,11 +150,19 @@ class RocprofTUIApp(App):
             picker = DirectoryPicker()
             if opened := await self.push_screen_wait(picker):
                 self.log(f"Directory selected: {opened}")
+                self.notify(f"Selected directory: {opened}", severity="information")
+
                 self.add_recent_dir(str(opened))
                 self.main_view.selected_path = opened
+
+                self.notify("Running analysis…", severity="information")
                 self.main_view.run_analysis()
+                self.notify("Analysis completed", severity="information")
+
             else:
                 self.log("Directory selection cancelled")
+                self.notify("Directory selection cancelled", severity="information")
+
         except Exception as e:
             self.log(f"Error in directory picker: {e}")
             self.notify(f"Error opening directory picker: {e}", severity="error")
