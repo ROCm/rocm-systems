@@ -141,19 +141,30 @@ DEFAULT_NUM_ITERS = 10
 DEFAULT_DATASET_SIZE = 512 * 1024 * 1024
 
 
-# Returns a tuple with the mean, std deviation and confidence
+def show_progress(pct):
+
+    bar_char = "|"
+    bar_size = 60
+
+    count = int(bar_size * pct)
+    bar = "[" + bar_char * count + " " * (bar_size - count) + "]"
+
+    print(f"\r{int(pct * 100):3d}% {bar}", end="", flush=True)
+
+
+# Returns a named tuple with the mean, std deviation and confidence
 def calc_stats(samples):
 
     mean = sum(samples) / len(samples)
 
-    stdev = 0
+    stdev = 0.0
 
     for i in range(len(samples)):
-        stdev += (samples[i] - mean) ** 2
+        stdev += math.pow(samples[i] - mean, 2)
 
     stdev = math.sqrt(stdev / len(samples))
 
-    return Stats(mean, stdev, 1.960 * stdev / math.sqrt(len(samples)))
+    return Stats(mean, stdev, 1.96 * stdev / math.sqrt(len(samples)))
 
 
 # Helper class for loading and compiling kerels
@@ -214,11 +225,12 @@ def launch_kernel(func, grid_size, block_size, shared_mem_size, stream, args=[])
         args_ptr,
     )
 
-
+# Retrieve the gfx architecture
 def get_gfx_arch(device):
 
     arch_str = hip.hipGetDeviceProperties(device).gcnArchName
 
+    # Parse out only gfx
     return arch_str.split(":", 1)[0]
 
 
@@ -238,7 +250,7 @@ def run_get_samples(
     event_stop = hip.hipEventCreate()
 
     samples = []
-    for _ in range(count):
+    for i in range(count):
         hip.hipEventRecord(event_start)
         launch_kernel(
             func,
@@ -250,10 +262,12 @@ def run_get_samples(
         )
         hip.hipEventRecord(event_stop)
         hip.hipDeviceSynchronize()
-
+        show_progress(float(i + 1) / count)
         event_ms = hip.hipEventElapsedTime(event_start, event_stop)
 
         samples.append(work_per_kernel / event_ms / 1e6)
+
+    print()
 
     return samples
 
