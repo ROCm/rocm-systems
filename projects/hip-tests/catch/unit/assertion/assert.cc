@@ -77,6 +77,19 @@ TEST_CASE("Unit_Assert_Positive_Basic_KernelPass") {
   const int num_blocks = 2;
   const int num_threads = 16;
 
+#ifdef NDEBUG
+  HipTest::HIP_SKIP_TEST("Assertions are disabled on this build.");
+  return;
+#endif
+
+#if HT_AMD
+  if (isAbortOnErrorEnabled()) {
+    HipTest::HIP_SKIP_TEST(
+        "Test incompatible with aborts enabled through HIP_SKIP_ABORT_ON_GPU_ERROR.");
+    return;
+  }
+#endif
+
   int* d_a;
   HIP_CHECK(hipMalloc(&d_a, sizeof(int)));
 
