@@ -150,11 +150,12 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
          * because it has small local memory
         */
         if (device->IsDgpu())
-          total_local_size += wsl::AlignUp(device->LocalHeapSize(), align) * 4;
+          total_local_size = wsl::Max(device->LocalHeapSize(), total_local_size);
         else
-          total_local_size += wsl::AlignUp(device->NonLocalHeapSize(), align) * 4;
+          total_local_size = wsl::Max(device->LocalHeapSize(), device->NonLocalHeapSize(), total_local_size);
     }
 
+    total_local_size = wsl::AlignUp(total_local_size, align) * 4;
     local_heap_space_start_ = 0;
     local_heap_space_size_ = total_local_size;
 
