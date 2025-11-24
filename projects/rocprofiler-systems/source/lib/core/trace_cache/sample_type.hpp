@@ -114,7 +114,7 @@ serialize(uint8_t* buffer, const kernel_dispatch_sample& item)
         item.correlation_id_internal, item.correlation_id_ancestor,
         item.private_segment_size, item.group_segment_size, item.workgroup_size_x,
         item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x, item.grid_size_y,
-        item.grid_size_z, (uint64_t) item.stream_handle);
+        item.grid_size_z, static_cast<uint64_t>(item.stream_handle));
 }
 
 template <>
@@ -144,7 +144,7 @@ get_size(const kernel_dispatch_sample& item)
         item.correlation_id_internal, item.correlation_id_ancestor,
         item.private_segment_size, item.group_segment_size, item.workgroup_size_x,
         item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x, item.grid_size_y,
-        item.grid_size_z, (uint64_t) item.stream_handle);
+        item.grid_size_z, static_cast<uint64_t>(item.stream_handle));
 }
 
 struct memory_copy_sample : cacheable_t
@@ -196,7 +196,8 @@ serialize(uint8_t* buffer, const memory_copy_sample& item)
                          item.dst_agent_id_handle, item.src_agent_id_handle, item.kind,
                          item.operation, item.bytes, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.dst_address_value,
-                         item.src_address_value, (uint64_t) item.stream_handle);
+                         item.src_address_value,
+                         static_cast<uint64_t>(item.stream_handle));
 }
 
 template <>
@@ -218,11 +219,12 @@ template <>
 inline size_t
 get_size(const memory_copy_sample& item)
 {
-    return utility::get_size(
-        item.start_timestamp, item.end_timestamp, item.thread_id,
-        item.dst_agent_id_handle, item.src_agent_id_handle, item.kind, item.operation,
-        item.bytes, item.correlation_id_internal, item.correlation_id_ancestor,
-        item.dst_address_value, item.src_address_value, (uint64_t) item.stream_handle);
+    return utility::get_size(item.start_timestamp, item.end_timestamp, item.thread_id,
+                             item.dst_agent_id_handle, item.src_agent_id_handle,
+                             item.kind, item.operation, item.bytes,
+                             item.correlation_id_internal, item.correlation_id_ancestor,
+                             item.dst_address_value, item.src_address_value,
+                             static_cast<uint64_t>(item.stream_handle));
 }
 
 struct memory_allocate_sample : cacheable_t
@@ -270,7 +272,7 @@ serialize(uint8_t* buffer, const memory_allocate_sample& item)
                          item.agent_id_handle, item.kind, item.operation,
                          item.allocation_size, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.address_value,
-                         (uint64_t) item.stream_handle);
+                         static_cast<uint64_t>(item.stream_handle));
 }
 
 template <>
@@ -291,10 +293,11 @@ template <>
 inline size_t
 get_size(const memory_allocate_sample& item)
 {
-    return utility::get_size(
-        item.start_timestamp, item.end_timestamp, item.thread_id, item.agent_id_handle,
-        item.kind, item.operation, item.allocation_size, item.correlation_id_internal,
-        item.correlation_id_ancestor, item.address_value, (uint64_t) item.stream_handle);
+    return utility::get_size(item.start_timestamp, item.end_timestamp, item.thread_id,
+                             item.agent_id_handle, item.kind, item.operation,
+                             item.allocation_size, item.correlation_id_internal,
+                             item.correlation_id_ancestor, item.address_value,
+                             static_cast<uint64_t>(item.stream_handle));
 }
 
 struct region_sample : cacheable_t
@@ -404,10 +407,11 @@ inline void
 serialize(uint8_t* buffer, const in_time_sample& item)
 {
     utility::store_value(
-        buffer, std::string_view(item.track_name), (uint64_t) item.timestamp_ns,
-        std::string_view(item.event_metadata), (uint64_t) item.stack_id,
-        (uint64_t) item.parent_stack_id, (uint64_t) item.correlation_id,
-        std::string_view(item.call_stack), std::string_view(item.line_info));
+        buffer, std::string_view(item.track_name),
+        static_cast<uint64_t>(item.timestamp_ns), std::string_view(item.event_metadata),
+        static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
+        static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
+        std::string_view(item.line_info));
 }
 
 template <>
@@ -440,9 +444,9 @@ get_size(const in_time_sample& item)
 {
     return utility::get_size(
         item.category_enum_id, std::string_view(item.track_name),
-        (uint64_t) item.timestamp_ns, std::string_view(item.event_metadata),
-        (uint64_t) item.stack_id, (uint64_t) item.parent_stack_id,
-        (uint64_t) item.correlation_id, std::string_view(item.call_stack),
+        static_cast<uint64_t>(item.timestamp_ns), std::string_view(item.event_metadata),
+        static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
+        static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
         std::string_view(item.line_info));
 }
 
@@ -479,9 +483,9 @@ serialize(uint8_t* buffer, const pmc_event_with_sample& item)
 {
     utility::store_value(
         buffer, item.category_enum_id, std::string_view(item.track_name),
-        (uint64_t) item.timestamp_ns, std::string_view(item.event_metadata),
-        (uint64_t) item.stack_id, (uint64_t) item.parent_stack_id,
-        (uint64_t) item.correlation_id, std::string_view(item.call_stack),
+        static_cast<uint64_t>(item.timestamp_ns), std::string_view(item.event_metadata),
+        static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
+        static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
         std::string_view(item.line_info), item.device_id, item.device_type,
         std::string_view(item.pmc_info_name), item.value);
 }
@@ -518,9 +522,9 @@ get_size(const pmc_event_with_sample& item)
 {
     return utility::get_size(
         item.category_enum_id, std::string_view(item.track_name),
-        (uint64_t) item.timestamp_ns, std::string_view(item.event_metadata),
-        (uint64_t) item.stack_id, (uint64_t) item.parent_stack_id,
-        (uint64_t) item.correlation_id, std::string_view(item.call_stack),
+        static_cast<uint64_t>(item.timestamp_ns), std::string_view(item.event_metadata),
+        static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
+        static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
         std::string_view(item.line_info), item.device_id, item.device_type,
         std::string_view(item.pmc_info_name), item.value);
 }
@@ -575,10 +579,10 @@ template <>
 inline void
 serialize(uint8_t* buffer, const amd_smi_sample& item)
 {
-    utility::store_value(buffer, item.settings, item.device_id, (uint64_t) item.timestamp,
-                         item.gfx_activity, item.umc_activity, item.mm_activity,
-                         item.power, item.temperature, (uint64_t) item.mem_usage,
-                         item.gpu_activity);
+    utility::store_value(
+        buffer, item.settings, item.device_id, static_cast<uint64_t>(item.timestamp),
+        item.gfx_activity, item.umc_activity, item.mm_activity, item.power,
+        item.temperature, static_cast<uint64_t>(item.mem_usage), item.gpu_activity);
 }
 
 template <>
@@ -599,10 +603,10 @@ template <>
 inline size_t
 get_size(const amd_smi_sample& item)
 {
-    return utility::get_size(item.settings, item.device_id, (uint64_t) item.timestamp,
-                             item.gfx_activity, item.umc_activity, item.mm_activity,
-                             item.power, item.temperature, (uint64_t) item.mem_usage,
-                             item.gpu_activity);
+    return utility::get_size(
+        item.settings, item.device_id, static_cast<uint64_t>(item.timestamp),
+        item.gfx_activity, item.umc_activity, item.mm_activity, item.power,
+        item.temperature, static_cast<uint64_t>(item.mem_usage), item.gpu_activity);
 }
 
 struct cpu_freq_sample : cacheable_t
@@ -641,7 +645,7 @@ template <>
 inline void
 serialize(uint8_t* buffer, const cpu_freq_sample& item)
 {
-    utility::store_value(buffer, (uint64_t) item.timestamp, item.page_rss,
+    utility::store_value(buffer, static_cast<uint64_t>(item.timestamp), item.page_rss,
                          item.virt_mem_usage, item.peak_rss, item.context_switch_count,
                          item.page_faults, item.user_mode_time, item.kernel_mode_time,
                          item.freqs);
@@ -664,7 +668,7 @@ template <>
 inline size_t
 get_size(const cpu_freq_sample& item)
 {
-    return utility::get_size((uint64_t) item.timestamp, item.page_rss,
+    return utility::get_size(static_cast<uint64_t>(item.timestamp), item.page_rss,
                              item.virt_mem_usage, item.peak_rss,
                              item.context_switch_count, item.page_faults,
                              item.user_mode_time, item.kernel_mode_time, item.freqs);

@@ -27,7 +27,6 @@
 #include "core/gpu_metrics.hpp"
 #include "library/tracing.hpp"
 #include "perfetto.hpp"
-#include "rocprofiler-sdk/fwd.h"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
 #include "trace_cache/storage_parser.hpp"
@@ -472,13 +471,13 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas
         }
     };
 
-    auto _thrd_id    = _mas.thread_id;
-    auto _corr_id    = _mas.correlation_id_internal;
-    auto _stream_id  = _mas.stream_handle;
-    auto _beg_ts     = _mas.start_timestamp;
-    auto _end_ts     = _mas.end_timestamp;
-    auto _addr_val   = _mas.address_value;
-    auto _alloc_size = _mas.allocation_size;
+    const auto _thrd_id    = _mas.thread_id;
+    const auto _corr_id    = _mas.correlation_id_internal;
+    const auto _stream_id  = _mas.stream_handle;
+    const auto _beg_ts     = _mas.start_timestamp;
+    const auto _end_ts     = _mas.end_timestamp;
+    const auto _addr_val   = _mas.address_value;
+    const auto _alloc_size = _mas.allocation_size;
 
     const auto invalid_context = ROCPROFILER_CONTEXT_NONE;
     if(_mas.agent_id_handle != invalid_context.handle)
@@ -520,13 +519,13 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const region_sample& _rs)
+perfetto_processor_t::handle(const region_sample& _rs)
 {
-    auto _corr_id  = _rs.correlation_id_internal;
-    auto _beg_ts   = _rs.start_timestamp;
-    auto _end_ts   = _rs.end_timestamp;
-    auto _category = _rs.category;
-    auto _name     = _rs.name;
+    const auto _corr_id  = _rs.correlation_id_internal;
+    const auto _beg_ts   = _rs.start_timestamp;
+    const auto _end_ts   = _rs.end_timestamp;
+    const auto _category = _rs.category;
+    const auto _name     = _rs.name;
 
     auto args = process_arguments_string(_rs.args_str);
 
@@ -764,10 +763,10 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
             } } }
     };
 
-    auto _track_name = _pmc.track_name;
-    auto _value      = _pmc.value;
-    auto _beg_ts     = _pmc.timestamp_ns;
-    auto _device_id  = _pmc.device_id;
+    const auto _track_name = _pmc.track_name;
+    const auto _value      = _pmc.value;
+    const auto _beg_ts     = _pmc.timestamp_ns;
+    const auto _device_id  = _pmc.device_id;
 
     auto track_key = std::hash<std::string>{}(_track_name + std::to_string(_device_id));
 
