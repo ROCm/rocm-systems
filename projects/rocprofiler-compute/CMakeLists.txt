@@ -177,7 +177,7 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
     file(
         APPEND
-        ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
         ${mod_additions}
     )
     list(POP_BACK CMAKE_MESSAGE_INDENT)
@@ -533,8 +533,7 @@ install(
         src/config.py
         src/rocprof_compute_base.py
         src/roofline.py
-        VERSION
-        VERSION.sha
+        VERSION VERSION.sha
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
 )
