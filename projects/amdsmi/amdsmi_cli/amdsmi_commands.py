@@ -914,6 +914,18 @@ class AMDSMICommands():
                     policy_info = "N/A"
                     logging.debug("Failed to get soc pstate policy info for gpu %s | %s", gpu_id, e.get_error_info())
 
+                # Format for CSV output
+                if self.logger.is_csv_format() and isinstance(policy_info, dict):
+                    if 'policies' in policy_info and isinstance(policy_info['policies'], list):
+                        # Format as "0:soc_pstate_default, 1:soc_pstate_0, ..."
+                        policy_strings = [f"{p['policy_id']}:{p['policy_description']}" 
+                                         for p in policy_info['policies'] 
+                                         if 'policy_id' in p and 'policy_description' in p]
+                        policy_info = {
+                            'num_supported': policy_info.get('num_supported', 'N/A'),
+                            'current_id': policy_info.get('current_id', 'N/A'),
+                            'policies': ', '.join(policy_strings) if policy_strings else 'N/A'
+                        }
                 static_dict['soc_pstate'] = policy_info
         if 'xgmi_plpd' in current_platform_args:
             if args.xgmi_plpd:
@@ -923,6 +935,18 @@ class AMDSMICommands():
                     policy_info = "N/A"
                     logging.debug("Failed to get xgmi_plpd info for gpu %s | %s", gpu_id, e.get_error_info())
 
+                # Format for CSV output
+                if self.logger.is_csv_format() and isinstance(policy_info, dict):
+                    if 'policies' in policy_info and isinstance(policy_info['policies'], list):
+                        # Format as "0:plpd_disallow, 1:plpd_default, ..."
+                        policy_strings = [f"{p['policy_id']}:{p['policy_description']}" 
+                                         for p in policy_info['policies'] 
+                                         if 'policy_id' in p and 'policy_description' in p]
+                        policy_info = {
+                            'num_supported': policy_info.get('num_supported', 'N/A'),
+                            'current_id': policy_info.get('current_id', 'N/A'),
+                            'policies': ', '.join(policy_strings) if policy_strings else 'N/A'
+                        }
                 static_dict['xgmi_plpd'] = policy_info
         if 'process_isolation' in current_platform_args:
             if args.process_isolation:
@@ -1153,34 +1177,6 @@ class AMDSMICommands():
         # Convert and store output by pid for csv format
         multiple_devices_csv_override = False
         if self.logger.is_csv_format():
-            # Format soc_pstate for CSV output
-            if 'soc_pstate' in static_dict and isinstance(static_dict['soc_pstate'], dict):
-                pstate_data = static_dict['soc_pstate']
-                if 'policies' in pstate_data and isinstance(pstate_data['policies'], list):
-                    # Format as "0:soc_pstate_default, 1:soc_pstate_0, ..."
-                    policy_strings = [f"{p['policy_id']}:{p['policy_description']}" 
-                                     for p in pstate_data['policies'] 
-                                     if 'policy_id' in p and 'policy_description' in p]
-                    static_dict['soc_pstate'] = {
-                        'num_supported': pstate_data.get('num_supported', 'N/A'),
-                        'current_id': pstate_data.get('current_id', 'N/A'),
-                        'policies': ', '.join(policy_strings) if policy_strings else 'N/A'
-                    }
-            
-            # Format xgmi_plpd for CSV output
-            if 'xgmi_plpd' in static_dict and isinstance(static_dict['xgmi_plpd'], dict):
-                plpd_data = static_dict['xgmi_plpd']
-                if 'policies' in plpd_data and isinstance(plpd_data['policies'], list):
-                    # Format as "0:plpd_disallow, 1:plpd_default, ..."
-                    policy_strings = [f"{p['policy_id']}:{p['policy_description']}" 
-                                     for p in plpd_data['policies'] 
-                                     if 'policy_id' in p and 'policy_description' in p]
-                    static_dict['xgmi_plpd'] = {
-                        'num_supported': plpd_data.get('num_supported', 'N/A'),
-                        'current_id': plpd_data.get('current_id', 'N/A'),
-                        'policies': ', '.join(policy_strings) if policy_strings else 'N/A'
-                    }
-            
             # For NUMA data - flatten CPU affinity lists
             if 'numa' in static_dict and isinstance(static_dict['numa'], dict):
                 numa_data = static_dict.pop('numa')
@@ -4821,16 +4817,17 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    
-                    # If AMDSMI_STATUS_INVAL, show valid policy list
-                    error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set soc pstate dpm policy to {args.soc_pstate}"
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
-                        valid_policies = self.helpers.get_soc_pstates()
-                        if valid_policies and valid_policies[0] != "N/A":
-                            valid_policies_str = f"[{', '.join(valid_policies)}]"
-                            self.logger.print_output(f"Valid SOC P-State Policies: {valid_policies_str}\n", None, None)
-                    
-                    self.logger.store_output(args.gpu, 'socpstate', error_msg)
+                        soc_pstate_info = amdsmi_interface.amdsmi_get_soc_pstate(args.gpu)
+                        policy_string = "N/A"
+                        # Check if 'policies' key exists before accessing it
+                        if 'policies' in soc_pstate_info and soc_pstate_info['policies']:
+                            policy_string = ""
+                            for policy in soc_pstate_info['policies']:
+                                policy_string += f"{policy['policy_id']}: {policy['policy_description']}, "
+                            policy_string = policy_string.rstrip(", ")  # Remove trailing comma and space
+                        print(f"Valid SOC P-State Policies: [{policy_string}]\n")
+                    self.logger.store_output(args.gpu, 'socpstate', f"[{e.get_error_info(detailed=False)}] Unable to set soc pstate dpm policy to {args.soc_pstate}")
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
@@ -4844,16 +4841,17 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    
-                    # If AMDSMI_STATUS_INVAL, show valid policy list
-                    error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set XGMI per-link power down policy to {args.xgmi_plpd}"
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
-                        valid_policies = self.helpers.get_xgmi_plpd_policies()
-                        if valid_policies and valid_policies[0] != "N/A":
-                            valid_policies_str = f"[{', '.join(valid_policies)}]"
-                            self.logger.print_output(f"Valid XGMI PLPD Policies: {valid_policies_str}\n", None, None)
-                    
-                    self.logger.store_output(args.gpu, 'xgmiplpd', error_msg)
+                        xgmi_plpd_info = amdsmi_interface.amdsmi_get_xgmi_plpd(args.gpu)
+                        policy_string = "N/A"
+                        # Check if 'policies' key exists before accessing it
+                        if 'policies' in xgmi_plpd_info and xgmi_plpd_info['policies']:
+                            policy_string = ""
+                            for policy in xgmi_plpd_info['policies']:
+                                policy_string += f"{policy['policy_id']}: {policy['policy_description']}, "
+                            policy_string = policy_string.rstrip(", ")  # Remove trailing comma and space
+                        print(f"Valid XGMI PLPD Policies: [{policy_string}]\n")
+                    self.logger.store_output(args.gpu, 'xgmiplpd', f"[{e.get_error_info(detailed=False)}] Unable to set XGMI per-link power down policy to {args.xgmi_plpd}")
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return

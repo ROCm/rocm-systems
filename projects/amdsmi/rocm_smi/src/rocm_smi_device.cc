@@ -1080,7 +1080,6 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevComputePartition:
     case kDevMemoryPartition:
     case kDevXcpConfig:
-      return writeDevInfoStr(type, val, true);
     case kDevSocPstate:
     case kDevXgmiPlpd:
       return writeDevInfoStr(type, val, true);
