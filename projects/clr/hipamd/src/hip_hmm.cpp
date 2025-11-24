@@ -24,33 +24,9 @@
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
-
-#if defined(__linux__)
-#include <sched.h>
-#include <numa.h>
-#endif
+#include "os/os.hpp"
 
 namespace hip {
-
-// Get the CPU ID of the current thread
-static int getCurrentNumaId() {
-#if defined(__linux__)
-  int cpu = sched_getcpu();
-  if (cpu < 0) {
-    return hipCpuDeviceId;
-  }
-
-  int numa_node = numa_node_of_cpu(cpu);
-  if (numa_node < 0) {
-    return hipCpuDeviceId;
-  }
-
-  return numa_node;
-#else
-  return hipCpuDeviceId;
-#endif
-}
-
 
 // Forward declaraiton of a function
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
@@ -336,13 +312,15 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
 
   // Determine the target device index:
   //  - for host-prefetch, use default CPU agent
-  //  - for host-current, query the current thread's CPU ID
+  //  - for host-current, query the current thread's NUMA node ID
   //  - for host-NUMA or device-prefetch, use the provided id
   int targetDevice;
   if (isHost) {
     targetDevice = hipCpuDeviceId;
   } else if (isHostCurrent) {
-    targetDevice = getCurrentNumaId();
+    uint32_t numa_node = amd::numa::getCurrentNumaNode();
+    targetDevice =
+        (numa_node == static_cast<uint32_t>(-1)) ? hipCpuDeviceId : static_cast<int>(numa_node);
   } else {
     targetDevice = location.id;
   }
@@ -414,10 +392,13 @@ hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advi
       targetDevice = hipCpuDeviceId;
       use_cpu = true;
       break;
-    case hipMemLocationTypeHostNumaCurrent:
-      targetDevice = getCurrentNumaId();  // Query current NUMA node ID
+    case hipMemLocationTypeHostNumaCurrent: {
+      uint32_t numa_node = amd::numa::getCurrentNumaNode();
+      targetDevice =
+          (numa_node == static_cast<uint32_t>(-1)) ? hipCpuDeviceId : static_cast<int>(numa_node);
       use_cpu = true;
       break;
+    }
     default:
       return hipErrorInvalidValue;
   }
