@@ -107,11 +107,11 @@ void Runtime::tearDown() {
 // ~RuntimeTearDown() will reference listenerLock.
 // listenerLock will be constructed earlier and destructed later than
 // runtime_tear_down.
-amd::Monitor listenerLock ROCCLR_INIT_PRIORITY(101)("Hostcall listener lock");
-std::vector<ReferenceCountedObject*> RuntimeTearDown::external_ ROCCLR_INIT_PRIORITY(101){};
+amd::Monitor listenerLock{};
+std::vector<ReferenceCountedObject*> RuntimeTearDown::external_{};
 std::vector<std::pair<std::string, RuntimeTearDown::TearDownCallback>> 
-  RuntimeTearDown::tear_down_funcs_ ROCCLR_INIT_PRIORITY(101){};
-class RuntimeTearDown runtime_tear_down ROCCLR_INIT_PRIORITY(101){};
+  RuntimeTearDown::tear_down_funcs_{};
+class RuntimeTearDown runtime_tear_down{};
 
 // =================================================================================================
 RuntimeTearDown::~RuntimeTearDown() {
