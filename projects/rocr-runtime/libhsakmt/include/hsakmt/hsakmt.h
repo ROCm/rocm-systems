@@ -1254,10 +1254,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(
 
 /**
  * Check if the HSA KMT Model is enabled
- * 
+ *
  *  Arguments:
  *   @enable (OUT) - true if the HSA KMT Model is enabled, false otherwise
- * 
+ *
  *  Return:
  *   HSAKMT_STATUS_ERROR             - failed
  *   HSAKMT_STATUS_SUCCESS           - successfully complete
@@ -1276,7 +1276,6 @@ hsaKmtHandleImport(
     HsaHandleImportResult* ImportResult,
     HsaHandleImportFlags* Flags
 );
-
 
 HSAKMT_STATUS
 HSAKMTAPI
@@ -1303,7 +1302,6 @@ hsaKmtMemoryCpuMap(
     HsaMemoryObjectHandle Handle,
     void** out_cpu_ptr
 );
-
 
 HSAKMT_STATUS
 HSAKMTAPI

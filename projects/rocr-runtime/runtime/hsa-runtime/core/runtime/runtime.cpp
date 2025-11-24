@@ -1552,7 +1552,8 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       HsaHandleImportResult res;
       HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
       if (status != HSAKMT_STATUS_SUCCESS) {
-        fprintf(stderr, "IPC Client Import: Invalid IPC handle! %u and %u\n", shared_handle, res.metadata);
+        fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
+                shared_handle, res.metadata);
         close(dmabuf_fd);
         return -1;
       }
@@ -1664,7 +1665,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       HSAKMT_CALL(hsaKmtMemHandleFree(bo));
       return HSA_STATUS_ERROR;
     };
-    
+
     // Create a shared cpu access pointer for user
     void *cpuPtr;
     HsaMemoryObjectHandle bo = allocation_map_[importAddress].thunk_bo;
