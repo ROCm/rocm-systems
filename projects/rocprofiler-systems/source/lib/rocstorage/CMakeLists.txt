@@ -27,20 +27,23 @@
 
 add_subdirectory(source)
 
-get_filename_component(ROCSTORAGE_BASE_DIR ${CMAKE_CURRENT_LIST_DIR} DIRECTORY)
-set(ROCSTORAGE_INCLUDE_DIR ${PROJECT_BINARY_DIR}/include)
+file(GLOB_RECURSE ROCSTORAGE_PUBLIC_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp)
 
-foreach(_HEADER ${rocstorage_public_headers})
-    string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/source/" "" _RELATIVE_PATH ${_HEADER})
-    set(_DEST_FILE "${ROCSTORAGE_INCLUDE_DIR}/rocstorage/${_RELATIVE_PATH}")
-    configure_file(${_HEADER} ${_DEST_FILE} COPYONLY)
+foreach(HEADER_FILE ${ROCSTORAGE_PUBLIC_HEADERS})
+    file(RELATIVE_PATH HEADER_REL ${CMAKE_CURRENT_SOURCE_DIR}/include ${HEADER_FILE})
+    configure_file(
+        ${HEADER_FILE}
+        ${CMAKE_BINARY_DIR}/include/rocstorage/${HEADER_REL}
+        COPYONLY
+    )
 endforeach()
 
 target_include_directories(
     rocstorage
     PUBLIC
-        $<BUILD_INTERFACE:${ROCSTORAGE_INCLUDE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/source
 )
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_MODULE_PATH})

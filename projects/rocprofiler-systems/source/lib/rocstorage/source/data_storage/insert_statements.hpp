@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <rocstorage/data_storage/database.hpp>
+#include "database.hpp"
 
 #include <cstdint>
 #include <functional>

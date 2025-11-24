@@ -22,7 +22,7 @@
 
 #include "database.hpp"
 
-#include <rocstorage/common/directory.hpp>
+#include "common/directory.hpp"
 
 #include <iostream>
 #include <regex>

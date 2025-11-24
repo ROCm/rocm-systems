@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <rocstorage/common/traits.hpp>
+#include "common/traits.hpp"
 
 #include <sqlite3.h>
 

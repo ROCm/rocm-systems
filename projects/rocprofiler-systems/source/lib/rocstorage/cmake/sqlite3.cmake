@@ -26,8 +26,16 @@
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPD_BUILD_SQLITE3)
-    message(STATUS "Building SQLite3 from source!")
+message(STATUS "[rocstorage] Looking for SQLite3 library...")
+find_package(SQLite3 QUIET)
+
+if(SQLite3_FOUND)
+    message(STATUS "[rocstorage] Using system SQLite3 library")
+
+    add_library(rocstorage-sqlite3 INTERFACE)
+    target_link_libraries(rocstorage-sqlite3 INTERFACE SQLite::SQLite3)
+else()
+    message(STATUS "[rocstorage] Building SQLite3 from source!")
 
     include(FetchContent)
     include(ExternalProject)
@@ -48,7 +56,7 @@ if(ROCPD_BUILD_SQLITE3)
 
     FetchContent_GetProperties(sqlite3_source)
     if(NOT sqlite3_source_POPULATED)
-        message(STATUS "Fetching SQLite3 version ${SQLITE3_VERSION}...")
+        message(STATUS "[rocstorage] Fetching SQLite3 version ${SQLITE3_VERSION}...")
         FetchContent_Populate(sqlite3_source)
     endif()
 
@@ -93,10 +101,5 @@ if(ROCPD_BUILD_SQLITE3)
         INTERFACE $<BUILD_INTERFACE:${SQLITE3_INCLUDE_DIR}>
     )
 
-    message(STATUS "SQLite3 will be installed to: ${SQLITE3_INSTALL_DIR}")
-else()
-    message(STATUS "[rocstorage-library] Using system SQLite3 library")
-    find_package(SQLite3 REQUIRED)
-    add_library(rocstorage-sqlite3 INTERFACE)
-    target_link_libraries(rocstorage-sqlite3 INTERFACE SQLite::SQLite3)
+    message(STATUS "[rocstorage] SQLite3 will be installed to: ${SQLITE3_INSTALL_DIR}")
 endif()

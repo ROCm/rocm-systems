@@ -23,27 +23,37 @@
 #pragma once
 
 #include <cstddef>
-#include <rocstorage/data_storage/database.hpp>
-#include <rocstorage/data_storage/insert_statements.hpp>
-
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <string>
+
+namespace rocm
+{
+class storage;
+}
 
 namespace rocstorage
 {
-struct rocstorage_writer
+namespace data_storage
 {
-public:
-    explicit rocstorage_writer(std::shared_ptr<data_storage::database> database);
-    virtual ~rocstorage_writer();
+class database;
+}
 
-    rocstorage_writer()                                     = delete;
-    rocstorage_writer(const rocstorage_writer&)             = delete;
-    rocstorage_writer& operator=(const rocstorage_writer&)  = delete;
-    rocstorage_writer(const rocstorage_writer&&)            = delete;
-    rocstorage_writer& operator=(const rocstorage_writer&&) = delete;
+struct writer
+{
+    friend class rocm::storage;
+
+private:
+    explicit writer(std::shared_ptr<data_storage::database> database, std::string uuid);
+
+public:
+    virtual ~writer();
+
+    writer()                          = delete;
+    writer(const writer&)             = delete;
+    writer& operator=(const writer&)  = delete;
+    writer(const writer&&)            = delete;
+    writer& operator=(const writer&&) = delete;
 
     size_t insert_string(const char* str);
 
@@ -143,12 +153,8 @@ public:
     void flush();
 
 private:
-    struct data_identifiers;
-
-    std::shared_ptr<data_storage::database>          m_database{ nullptr };
-    std::string                                      m_uuid{};
-    std::unique_ptr<data_storage::insert_statements> m_insert_statements{ nullptr };
-    std::unique_ptr<data_identifiers>                m_data_identifiers{ nullptr };
+    struct impl;
+    std::unique_ptr<impl> m_impl;
 };
 
 }  // namespace rocstorage

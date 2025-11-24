@@ -54,10 +54,7 @@ function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES)
         configure_file("${TEMPLATE_FILE}" "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp" @ONLY)
     endforeach()
 
-    message(
-        STATUS
-        "[rocstorage-library] Generating schema headers in ${SCHEMA_BINARY_DIR}"
-    )
+    message(STATUS "[rocstorage] Generating schema headers in ${SCHEMA_BINARY_DIR}")
 endfunction()
 
 set(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD
@@ -67,7 +64,7 @@ set(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD
     FORCE
 )
 
-find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
+find_package(rocprofiler-sdk-rocpd QUIET)
 
 if(rocprofiler-sdk-rocpd_FOUND)
     set(ROCPD_HAS_SQL_H FALSE)
@@ -90,18 +87,18 @@ if(rocprofiler-sdk-rocpd_FOUND)
 
         message(
             STATUS
-            "[rocstorage-library] rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
+            "[rocstorage] rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
         )
     else()
         message(
             STATUS
-            "[rocstorage-library] rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
+            "[rocstorage] rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
         )
     endif()
 else()
     message(
         STATUS
-        "[rocstorage-library] rocprofiler-sdk-rocpd not found - using local schema files"
+        "[rocstorage] rocprofiler-sdk-rocpd not found - using local schema files"
     )
 endif()
 

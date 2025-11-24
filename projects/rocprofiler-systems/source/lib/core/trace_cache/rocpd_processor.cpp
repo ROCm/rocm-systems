@@ -31,8 +31,7 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/thread_info.hpp"
 
-#include <rocstorage/data_processor.hpp>
-#include <rocstorage/data_storage/database.hpp>
+#include <rocstorage/storage.hpp>
 
 #include <cstdint>
 #include <limits>
@@ -79,9 +78,9 @@ rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
         m_agent_manager->get_agent_by_handle(_kds.agent_id_handle).base_id;
 
     auto thread_primary_key =
-        m_data_processor->map_thread_id_to_primary_key(_kds.thread_id);
+        m_rocstorage_writer->map_thread_id_to_primary_key(_kds.thread_id);
 
-    auto category_id = m_data_processor->insert_string(
+    auto category_id = m_rocstorage_writer->insert_string(
         trait::name<category::rocm_kernel_dispatch>::value);
 
     auto kernel_symbol = m_metadata->get_kernel_symbol(_kds.kernel_id);
@@ -91,17 +90,17 @@ rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
         throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
     }
 
-    auto region_name_primary_key = m_data_processor->insert_string(
+    auto region_name_primary_key = m_rocstorage_writer->insert_string(
         tim::demangle(kernel_symbol->kernel_name).c_str());
 
     auto stack_id        = _kds.correlation_id_internal;
     auto parent_stack_id = _kds.correlation_id_ancestor;
     auto correlation_id  = 0;
 
-    auto event_id = m_data_processor->insert_event(category_id, stack_id, parent_stack_id,
-                                                   correlation_id);
+    auto event_id = m_rocstorage_writer->insert_event(category_id, stack_id,
+                                                      parent_stack_id, correlation_id);
 
-    m_data_processor->insert_kernel_dispatch(
+    m_rocstorage_writer->insert_kernel_dispatch(
         n_info.id, process.pid, thread_primary_key, agent_primary_key, _kds.kernel_id,
         _kds.dispatch_id, _kds.queue_id_handle, _kds.stream_handle, _kds.start_timestamp,
         _kds.end_timestamp, _kds.private_segment_size, _kds.group_segment_size,
@@ -121,13 +120,13 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_copy_sample& _mcs)
     auto _name            = std::string{ m_metadata->get_buffer_name_info().at(
         static_cast<rocprofiler_buffer_tracing_kind_t>(_mcs.kind),
         static_cast<rocprofiler_tracing_operation_t>(_mcs.operation)) };
-    auto name_primary_key = m_data_processor->insert_string(_name.c_str());
+    auto name_primary_key = m_rocstorage_writer->insert_string(_name.c_str());
 
-    auto category_primary_key =
-        m_data_processor->insert_string(trait::name<category::rocm_memory_copy>::value);
+    auto category_primary_key = m_rocstorage_writer->insert_string(
+        trait::name<category::rocm_memory_copy>::value);
 
     auto thread_primary_key =
-        m_data_processor->map_thread_id_to_primary_key(_mcs.thread_id);
+        m_rocstorage_writer->map_thread_id_to_primary_key(_mcs.thread_id);
 
     auto dst_agent_primary_key =
         m_agent_manager->get_agent_by_handle(_mcs.dst_agent_id_handle).base_id;
@@ -139,10 +138,10 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_copy_sample& _mcs)
     auto correlation_id  = 0;
     auto queue_id        = 0;
 
-    auto event_primary_key = m_data_processor->insert_event(
+    auto event_primary_key = m_rocstorage_writer->insert_event(
         category_primary_key, stack_id, parent_stack_id, correlation_id);
 
-    m_data_processor->insert_memory_copy(
+    m_rocstorage_writer->insert_memory_copy(
         n_info.id, process.pid, thread_primary_key, _mcs.start_timestamp,
         _mcs.end_timestamp, name_primary_key, dst_agent_primary_key,
         _mcs.dst_address_value, src_agent_primary_key, _mcs.src_address_value, _mcs.bytes,
@@ -197,7 +196,7 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
-        m_data_processor->map_thread_id_to_primary_key(_mas.thread_id);
+        m_rocstorage_writer->map_thread_id_to_primary_key(_mas.thread_id);
     auto agent_primary_key = std::optional<uint64_t>{};
 
     const auto invalid_context = ROCPROFILER_CONTEXT_NONE;
@@ -218,13 +217,13 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
         auto correlation_id  = 0;
         auto queue_id        = 0;
 
-        auto category_primary_key = m_data_processor->insert_string(
+        auto category_primary_key = m_rocstorage_writer->insert_string(
             trait::name<category::rocm_memory_allocate>::value);
 
-        auto event_primary_key = m_data_processor->insert_event(
+        auto event_primary_key = m_rocstorage_writer->insert_event(
             category_primary_key, stack_id, parent_stack_id, correlation_id);
 
-        m_data_processor->insert_memory_alloc(
+        m_rocstorage_writer->insert_memory_alloc(
             n_info.id, process.pid, thread_primary_key, agent_primary_key, type.c_str(),
             level.c_str(), _mas.start_timestamp, _mas.end_timestamp, _mas.address_value,
             _mas.allocation_size, queue_id, _mas.stream_handle, event_primary_key);
@@ -281,30 +280,30 @@ rocpd_processor_t::handle([[maybe_unused]] const region_sample& _rs)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
-        m_data_processor->map_thread_id_to_primary_key(_rs.thread_id);
+        m_rocstorage_writer->map_thread_id_to_primary_key(_rs.thread_id);
 
-    auto name_primary_key     = m_data_processor->insert_string(_rs.name.c_str());
-    auto category_primary_key = m_data_processor->insert_string(_rs.category.c_str());
+    auto name_primary_key     = m_rocstorage_writer->insert_string(_rs.name.c_str());
+    auto category_primary_key = m_rocstorage_writer->insert_string(_rs.category.c_str());
 
     size_t stack_id        = _rs.correlation_id_internal;
     size_t parent_stack_id = _rs.correlation_id_ancestor;
     size_t correlation_id  = 0;
 
     auto event_primary_key =
-        m_data_processor->insert_event(category_primary_key, stack_id, parent_stack_id,
-                                       correlation_id, _rs.call_stack.c_str());
+        m_rocstorage_writer->insert_event(category_primary_key, stack_id, parent_stack_id,
+                                          correlation_id, _rs.call_stack.c_str());
 
     auto args = parse_args(_rs.args_str);
     for(const auto& arg : args)
     {
-        m_data_processor->insert_args(event_primary_key, arg.arg_number,
-                                      arg.arg_type.c_str(), arg.arg_name.c_str(),
-                                      arg.arg_value.c_str());
+        m_rocstorage_writer->insert_args(event_primary_key, arg.arg_number,
+                                         arg.arg_type.c_str(), arg.arg_name.c_str(),
+                                         arg.arg_value.c_str());
     }
 
-    m_data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
-                                    _rs.start_timestamp, _rs.end_timestamp,
-                                    name_primary_key, event_primary_key);
+    m_rocstorage_writer->insert_region(n_info.id, process.pid, thread_primary_key,
+                                       _rs.start_timestamp, _rs.end_timestamp,
+                                       name_primary_key, event_primary_key);
 #endif
 }
 
@@ -315,19 +314,19 @@ rocpd_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bts)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
-        m_data_processor->map_thread_id_to_primary_key(_bts.thread_id);
-    auto name_primary_key     = m_data_processor->insert_string(_bts.name.c_str());
-    auto category_primary_key = m_data_processor->insert_string(_bts.category.c_str());
+        m_rocstorage_writer->map_thread_id_to_primary_key(_bts.thread_id);
+    auto name_primary_key     = m_rocstorage_writer->insert_string(_bts.name.c_str());
+    auto category_primary_key = m_rocstorage_writer->insert_string(_bts.category.c_str());
 
-    auto event_primary_key = m_data_processor->insert_event(
+    auto event_primary_key = m_rocstorage_writer->insert_event(
         category_primary_key, 0, 0, 0, _bts.call_stack.c_str(), _bts.line_info.c_str(),
         _bts.extdata.c_str());
 
-    m_data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
-                                    _bts.start_timestamp, _bts.end_timestamp,
-                                    name_primary_key, event_primary_key);
-    m_data_processor->insert_sample(_bts.track_name.c_str(), _bts.start_timestamp,
-                                    event_primary_key);
+    m_rocstorage_writer->insert_region(n_info.id, process.pid, thread_primary_key,
+                                       _bts.start_timestamp, _bts.end_timestamp,
+                                       name_primary_key, event_primary_key);
+    m_rocstorage_writer->insert_sample(_bts.track_name.c_str(), _bts.start_timestamp,
+                                       event_primary_key);
 #endif
 }
 
@@ -335,13 +334,13 @@ void
 rocpd_processor_t::handle([[maybe_unused]] const in_time_sample& _its)
 {
 #if ROCPROFSYS_USE_ROCM > 0
-    auto track_primary_key = m_data_processor->insert_string(_its.track_name.c_str());
+    auto track_primary_key = m_rocstorage_writer->insert_string(_its.track_name.c_str());
 
-    auto event_id = m_data_processor->insert_event(
+    auto event_id = m_rocstorage_writer->insert_event(
         track_primary_key, _its.stack_id, _its.parent_stack_id, _its.correlation_id,
         _its.call_stack.c_str(), _its.line_info.c_str(), _its.event_metadata.c_str());
-    m_data_processor->insert_sample(_its.track_name.c_str(), _its.timestamp_ns, event_id,
-                                    "{}");
+    m_rocstorage_writer->insert_sample(_its.track_name.c_str(), _its.timestamp_ns,
+                                       event_id, "{}");
 #endif
 }
 
@@ -349,21 +348,21 @@ void
 rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 {
 #if ROCPROFSYS_USE_ROCM > 0
-    auto track_primary_key = m_data_processor->insert_string(_pmc.track_name.c_str());
+    auto track_primary_key = m_rocstorage_writer->insert_string(_pmc.track_name.c_str());
 
     auto agent_primary_key =
         m_agent_manager
             ->get_agent_by_id(_pmc.device_id, static_cast<agent_type>(_pmc.device_type))
             .base_id;
 
-    auto event_id = m_data_processor->insert_event(
+    auto event_id = m_rocstorage_writer->insert_event(
         track_primary_key, _pmc.stack_id, _pmc.parent_stack_id, _pmc.correlation_id,
         _pmc.call_stack.c_str(), _pmc.line_info.c_str(), _pmc.event_metadata.c_str());
-    m_data_processor->insert_sample(_pmc.track_name.c_str(), _pmc.timestamp_ns, event_id,
-                                    "{}");
+    m_rocstorage_writer->insert_sample(_pmc.track_name.c_str(), _pmc.timestamp_ns,
+                                       event_id, "{}");
 
-    m_data_processor->insert_pmc_event(event_id, agent_primary_key,
-                                       _pmc.pmc_info_name.c_str(), _pmc.value);
+    m_rocstorage_writer->insert_pmc_event(event_id, agent_primary_key,
+                                          _pmc.pmc_info_name.c_str(), _pmc.value);
 #endif
 }
 
@@ -373,8 +372,8 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 #if ROCPROFSYS_USE_ROCM > 0
 
     const auto* _name            = trait::name<category::amd_smi>::value;
-    auto        name_primary_key = m_data_processor->insert_string(_name);
-    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
+    auto        name_primary_key = m_rocstorage_writer->insert_string(_name);
+    auto        event_id = m_rocstorage_writer->insert_event(name_primary_key, 0, 0, 0);
 
     auto base_id =
         m_agent_manager->get_agent_by_type_index(_amd_smi.device_id, agent_type::GPU)
@@ -383,8 +382,8 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
     auto insert_event_and_sample = [&](bool enabled, const char* pmc_name,
                                        const char* track_name, double value) {
         if(!enabled) return;
-        m_data_processor->insert_pmc_event(event_id, base_id, pmc_name, value);
-        m_data_processor->insert_sample(track_name, _amd_smi.timestamp, event_id);
+        m_rocstorage_writer->insert_pmc_event(event_id, base_id, pmc_name, value);
+        m_rocstorage_writer->insert_sample(track_name, _amd_smi.timestamp, event_id);
     };
 
     using pos = trace_cache::amd_smi_sample::settings_positions;
@@ -596,8 +595,8 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
     };
 
     const auto* _name            = trait::name<category::cpu_freq>::value;
-    auto        name_primary_key = m_data_processor->insert_string(_name);
-    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
+    auto        name_primary_key = m_rocstorage_writer->insert_string(_name);
+    auto        event_id = m_rocstorage_writer->insert_event(name_primary_key, 0, 0, 0);
 
     auto device_id = 0;
 
@@ -605,8 +604,8 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
         m_agent_manager->get_agent_by_type_index(device_id, agent_type::CPU).base_id;
 
     auto insert_event_and_sample = [&](const char* name, double value) {
-        m_data_processor->insert_pmc_event(event_id, base_id, name, value);
-        m_data_processor->insert_sample(name, _cpu_freq_sample.timestamp, event_id);
+        m_rocstorage_writer->insert_pmc_event(event_id, base_id, name, value);
+        m_rocstorage_writer->insert_sample(name, _cpu_freq_sample.timestamp, event_id);
     };
 
     insert_event_and_sample(trait::name<category::process_page>::value,
@@ -643,11 +642,10 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 : processor_t<rocpd_processor_t>()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
-, m_data_processor(std::make_shared<rocstorage::rocstorage_writer>(
-      std::make_shared<rocstorage::data_storage::database>(
-          rocprofsys::get_database_absolute_path("rocpd", std::to_string(pid)),
-          rocprofsys::common::md5sum{ node_info::get_instance().id, pid, ppid }
-              .hexdigest())))
+, m_rocstorage(std::make_shared<rocm::storage>(
+      rocprofsys::get_database_absolute_path("rocpd", std::to_string(pid)),
+      rocprofsys::common::md5sum{ node_info::get_instance().id, pid, ppid }.hexdigest()))
+, m_rocstorage_writer(m_rocstorage->get_writer())
 {}
 
 void
@@ -659,7 +657,7 @@ rocpd_processor_t::prepare_for_processing()
 void
 rocpd_processor_t::finalize_processing()
 {
-    m_data_processor->flush();
+    m_rocstorage_writer->flush();
 }
 
 void
@@ -673,21 +671,21 @@ rocpd_processor_t::post_process_metadata()
     ROCPROFSYS_DEBUG("Post processing metadata..\n");
     auto n_info = node_info::get_instance();
 
-    m_data_processor->insert_node_info(
+    m_rocstorage_writer->insert_node_info(
         n_info.id, n_info.hash, n_info.machine_id.c_str(), n_info.system_name.c_str(),
         n_info.node_name.c_str(), n_info.release.c_str(), n_info.version.c_str(),
         n_info.machine.c_str(), n_info.domain_name.c_str());
 
     auto process_info = m_metadata->get_process_info();
-    m_data_processor->insert_process_info(n_info.id, process_info.ppid, process_info.pid,
-                                          0, 0, process_info.start, process_info.end,
-                                          process_info.command.c_str(), "{}");
+    m_rocstorage_writer->insert_process_info(
+        n_info.id, process_info.ppid, process_info.pid, 0, 0, process_info.start,
+        process_info.end, process_info.command.c_str(), "{}");
 
     const auto& agents  = m_agent_manager->get_agents();
     int         counter = 0;
     for(const auto& rocpd_agent : agents)
     {
-        auto _base_id = m_data_processor->insert_agent(
+        auto _base_id = m_rocstorage_writer->insert_agent(
             n_info.id, process_info.pid,
             ((rocpd_agent->type == agent_type::GPU) ? "GPU" : "CPU"), counter++,
             rocpd_agent->logical_node_id, rocpd_agent->logical_node_type_id,
@@ -699,7 +697,7 @@ rocpd_processor_t::post_process_metadata()
     auto _string_list = m_metadata->get_string_list();
     for(auto& _string : _string_list)
     {
-        m_data_processor->insert_string(std::string(_string).c_str());
+        m_rocstorage_writer->insert_string(std::string(_string).c_str());
     }
 
     auto _thread_info_list = m_metadata->get_thread_info_list();
@@ -713,11 +711,11 @@ rocpd_processor_t::post_process_metadata()
     {
         auto thread_id = track.thread_id.has_value()
                              ? std::make_optional<size_t>(
-                                   m_data_processor->map_thread_id_to_primary_key(
+                                   m_rocstorage_writer->map_thread_id_to_primary_key(
                                        track.thread_id.value()))
                              : std::nullopt;
-        m_data_processor->insert_track(track.track_name.c_str(), n_info.id,
-                                       process_info.pid, thread_id);
+        m_rocstorage_writer->insert_track(track.track_name.c_str(), n_info.id,
+                                          process_info.pid, thread_id);
     }
 
     auto _code_object_list = m_metadata->get_code_object_list();
@@ -734,17 +732,17 @@ rocpd_processor_t::post_process_metadata()
             case ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY: strg_type = "MEMORY"; break;
             default: break;
         }
-        m_data_processor->insert_code_object(code_object.code_object_id, n_info.id,
-                                             process_info.pid, dev_id, code_object.uri,
-                                             code_object.load_base, code_object.load_size,
-                                             code_object.load_delta, strg_type);
+        m_rocstorage_writer->insert_code_object(
+            code_object.code_object_id, n_info.id, process_info.pid, dev_id,
+            code_object.uri, code_object.load_base, code_object.load_size,
+            code_object.load_delta, strg_type);
     }
 
     auto _kernel_symbols_list = m_metadata->get_kernel_symbol_list();
     for(const auto& kernel_symbol : _kernel_symbols_list)
     {
         auto kernel_name = tim::demangle(kernel_symbol.kernel_name);
-        m_data_processor->insert_kernel_symbol(
+        m_rocstorage_writer->insert_kernel_symbol(
             kernel_symbol.kernel_id, n_info.id, process_info.pid,
             kernel_symbol.code_object_id, kernel_symbol.kernel_name, kernel_name.c_str(),
             kernel_symbol.kernel_object, kernel_symbol.kernarg_segment_size,
@@ -752,7 +750,7 @@ rocpd_processor_t::post_process_metadata()
             kernel_symbol.private_segment_size, kernel_symbol.sgpr_count,
             kernel_symbol.arch_vgpr_count, kernel_symbol.accum_vgpr_count);
 
-        m_data_processor->insert_string(kernel_name.c_str());
+        m_rocstorage_writer->insert_string(kernel_name.c_str());
     }
 
     auto _queue_list = m_metadata->get_queue_list();
@@ -760,8 +758,8 @@ rocpd_processor_t::post_process_metadata()
     {
         std::stringstream ss;
         ss << "Queue " << queue_handle;
-        m_data_processor->insert_queue_info(queue_handle, n_info.id, process_info.pid,
-                                            ss.str().c_str());
+        m_rocstorage_writer->insert_queue_info(queue_handle, n_info.id, process_info.pid,
+                                               ss.str().c_str());
     }
 
     auto _stream_list = m_metadata->get_stream_list();
@@ -769,8 +767,8 @@ rocpd_processor_t::post_process_metadata()
     {
         std::stringstream ss;
         ss << "Stream " << stream_handle;
-        m_data_processor->insert_stream_info(stream_handle, n_info.id, process_info.pid,
-                                             ss.str().c_str());
+        m_rocstorage_writer->insert_stream_info(stream_handle, n_info.id,
+                                                process_info.pid, ss.str().c_str());
     }
 
     auto buffer_info_list = m_metadata->get_buffer_name_info();
@@ -778,7 +776,7 @@ rocpd_processor_t::post_process_metadata()
     {
         for(const auto& item : buffer_info.items())
         {
-            m_data_processor->insert_string(*item.second);
+            m_rocstorage_writer->insert_string(*item.second);
         }
     }
 
@@ -787,7 +785,7 @@ rocpd_processor_t::post_process_metadata()
     {
         for(const auto& item : cb_info.items())
         {
-            m_data_processor->insert_string(*item.second);
+            m_rocstorage_writer->insert_string(*item.second);
         }
     }
 
@@ -799,7 +797,7 @@ rocpd_processor_t::post_process_metadata()
                 ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
                 .base_id;
 
-        m_data_processor->insert_pmc_description(
+        m_rocstorage_writer->insert_pmc_description(
             n_info.id, process_info.pid, agent_primary_key, pmc_info.target_arch.c_str(),
             pmc_info.event_code, pmc_info.instance_id, pmc_info.name.c_str(),
             pmc_info.symbol.c_str(), pmc_info.description.c_str(),
@@ -823,9 +821,9 @@ rocpd_processor_t::insert_thread_id(info::thread& t_info, const node_info& n_inf
 
     std::stringstream ss;
     ss << "Thread " << t_info.thread_id;
-    m_data_processor->insert_thread_info(n_info.id, process_info.ppid, process_info.pid,
-                                         t_info.thread_id, ss.str().c_str(), t_info.start,
-                                         t_info.end);
+    m_rocstorage_writer->insert_thread_info(n_info.id, process_info.ppid,
+                                            process_info.pid, t_info.thread_id,
+                                            ss.str().c_str(), t_info.start, t_info.end);
 }
 
 }  // namespace trace_cache
