@@ -62,7 +62,7 @@ Any amd-smi instances created thereafter will inherit the Singleton object metri
 Each amd-smi creation increases the usage counter in the Singleton object.
 And each amd-smi destruction decreases the usage counter.
 When the Singleton counter reaches zero, the metrics cache is destroyed along with the Singleton object.
-This principle follows the Singlton Design Principal of sharing cached data across multiple objects.
+This principle follows the Singleton Design Principal of sharing cached data across multiple objects.
 
 ```mermaid
 graph LR
