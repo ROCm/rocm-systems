@@ -23,7 +23,7 @@ set_and_check(FINDROCM_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 set_and_check(FINDROCM_BIN_DIR "@PACKAGE_CMAKE_INSTALL_BINDIR@")
 
 # ROCm path (if set during build)
-set(FINDROCM_ROCM_PATH "@ROCM_PATH@")
+set(FINDROCM_ROCM_PATH "")
 
 # List of available components that were built
 set(FINDROCM_AVAILABLE_COMPONENTS "@FINDROCM_AVAILABLE_COMPONENTS@")

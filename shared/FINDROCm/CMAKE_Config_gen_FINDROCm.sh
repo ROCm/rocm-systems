@@ -94,7 +94,6 @@ cd "$BUILD_DIR"
 # CMake command
 CMAKE_ARGS=(
     -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
-    -DROCM_PATH="$ROCM_PATH"
 )
 
 # Configure
