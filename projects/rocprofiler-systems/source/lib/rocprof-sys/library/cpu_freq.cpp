@@ -254,6 +254,8 @@ config()
 void
 sample()
 {
+    if(get_state() >= State::Finalized) return;
+
     auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
 
     auto _rcache = tim::rusage_cache{ RUSAGE_SELF };
