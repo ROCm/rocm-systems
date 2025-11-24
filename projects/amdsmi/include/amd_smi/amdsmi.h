@@ -6727,6 +6727,8 @@ amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
                           amdsmi_ptl_data_format_t data_format1,
                           amdsmi_ptl_data_format_t data_format2);
 
+/** @} End tagPTL */
+
 #ifdef ENABLE_ESMI_LIB
 
 /*****************************************************************************/
