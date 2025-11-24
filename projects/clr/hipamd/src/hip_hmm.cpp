@@ -27,21 +27,28 @@
 
 #if defined(__linux__)
 #include <sched.h>
-#include <stdio.h>
+#include <numa.h>
 #endif
 
 namespace hip {
 
 // Get the CPU ID of the current thread
-static int getCurrentCpuId() {
+static int getCurrentNumaId() {
 #if defined(__linux__)
   int cpu = sched_getcpu();
-  if (cpu >= 0) {
-    return cpu;
+  if (cpu < 0) {
+    return hipCpuDeviceId;
   }
-#endif
-  // Default to default if we can't determine the CPU
+
+  int numa_node = numa_node_of_cpu(cpu);
+  if (numa_node < 0) {
+    return hipCpuDeviceId;
+  }
+
+  return numa_node;
+#else
   return hipCpuDeviceId;
+#endif
 }
 
 
@@ -335,7 +342,7 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   if (isHost) {
     targetDevice = hipCpuDeviceId;
   } else if (isHostCurrent) {
-    targetDevice = getCurrentCpuId();
+    targetDevice = getCurrentNumaId();
   } else {
     targetDevice = location.id;
   }
@@ -408,7 +415,7 @@ hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advi
       use_cpu = true;
       break;
     case hipMemLocationTypeHostNumaCurrent:
-      targetDevice = getCurrentCpuId();  // Query current thread's CPU ID
+      targetDevice = getCurrentNumaId();  // Query current NUMA node ID
       use_cpu = true;
       break;
     default:
