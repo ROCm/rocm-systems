@@ -49,10 +49,8 @@ kernel_symbol::operator=(kernel_symbol&& rhs) noexcept
 {
     if(this != &rhs)
     {
-        beg_notified.store(rhs.beg_notified.load(std::memory_order_relaxed),
-                           std::memory_order_relaxed);
-        end_notified.store(rhs.end_notified.load(std::memory_order_relaxed),
-                           std::memory_order_relaxed);
+        beg_notified = rhs.beg_notified;
+        end_notified = rhs.end_notified;
         name           = rhs.name;
         hsa_executable = rhs.hsa_executable;
         hsa_agent      = rhs.hsa_agent;
