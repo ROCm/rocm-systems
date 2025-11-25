@@ -21,15 +21,26 @@
 # SOFTWARE.
 
 # TODO: Remove block below, this is for local development only
-# cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-# project(rocstorage)
-# set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+project(rocstorage)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# ------------------------------------------------------------ #
+# Library
+# ------------------------------------------------------------ #
+add_library(rocstorage SHARED)
 add_subdirectory(source)
 
-file(GLOB_RECURSE ROCSTORAGE_PUBLIC_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp)
+# ------------------------------------------------------------ #
+# Public API
+# ------------------------------------------------------------ #
+set(rocstorage_public_headers
+    ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
+)
 
-foreach(HEADER_FILE ${ROCSTORAGE_PUBLIC_HEADERS})
+foreach(HEADER_FILE ${rocstorage_public_headers})
     file(RELATIVE_PATH HEADER_REL ${CMAKE_CURRENT_SOURCE_DIR}/include ${HEADER_FILE})
     configure_file(
         ${HEADER_FILE}
@@ -43,16 +54,27 @@ target_include_directories(
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/source
 )
 
+# ------------------------------------------------------------ #
+# CMake modules
+# ------------------------------------------------------------ #
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_MODULE_PATH})
 
-include(rocm)
+# ------------------------------------------------------------ #
+# SQLite3
+# ------------------------------------------------------------ #
 include(sqlite3)
-include(rocprofiler-sdk-rocpd)
-
 target_link_libraries(rocstorage PRIVATE $<BUILD_INTERFACE:rocstorage-sqlite3>)
+
+# ------------------------------------------------------------ #
+# Schema from rocprofiler-sdk-rocpd
+# ------------------------------------------------------------ #
+set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
+set(SQL_SCHEMA_BINARY_DIR ${CMAKE_BINARY_DIR}/source/data_storage/)
+
+include(rocm)
+include(rocprofiler-sdk-rocpd)
 
 if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
     target_link_libraries(rocstorage PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd)
@@ -62,10 +84,14 @@ if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
         PRIVATE $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
     )
 else()
-    target_include_directories(rocstorage PRIVATE ${CMAKE_BINARY_DIR})
+    target_include_directories(rocstorage PRIVATE ${SQL_SCHEMA_BINARY_DIR})
 
     target_compile_definitions(
         rocstorage
         PRIVATE $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
     )
 endif()
+
+# ------------------------------------------------------------ #
+# CMake packaging
+# ------------------------------------------------------------ #

@@ -22,12 +22,11 @@
 
 #pragma once
 
-#include "common/traits.hpp"
+#include "traits.hpp"
 
 #include <sqlite3.h>
 
 #include <memory>
-#include <mutex>
 #include <sstream>
 #include <stdexcept>
 

@@ -26,7 +26,7 @@
 #
 # ----------------------------------------------------------------------------------------#
 
-function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES)
+function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES SCHEMA_DIR SCHEMA_BINARY_DIR)
     set(SCHEMA_FILES
         "rocpd_tables.sql"
         "rocpd_views.sql"
@@ -35,14 +35,18 @@ function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES)
         "summary_views.sql"
     )
 
-    set(SCHEMA_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../data_storage/schema")
-    set(SCHEMA_BINARY_DIR "${CMAKE_BINARY_DIR}/schema")
-    set(TEMPLATE_FILE "${CMAKE_CURRENT_LIST_DIR}/../data_storage/schema/rocpd_shema.in")
+    foreach(SCHEMA_FILE ${SCHEMA_FILES})
+        if(NOT EXISTS "${SCHEMA_DIR}/${SCHEMA_FILE}")
+            message(FATAL_ERROR "Schema file ${SCHEMA_FILE} not found in ${SCHEMA_DIR}")
+        endif()
+    endforeach()
 
-    file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR})
+    set(TEMPLATE_FILE "${SCHEMA_DIR}/rocpd_shema.in")
+
+    file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR}/schema)
 
     foreach(SCHEMA_FILE ${SCHEMA_FILES})
-        file(READ "${SCHEMA_SOURCE_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
+        file(READ "${SCHEMA_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
 
         string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
         string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")
@@ -51,10 +55,17 @@ function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES)
         get_filename_component(SCHEMA_NAME ${SCHEMA_FILE} NAME_WE)
         string(TOUPPER ${SCHEMA_NAME} SCHEMA_NAME_UPPER)
 
-        configure_file("${TEMPLATE_FILE}" "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp" @ONLY)
+        configure_file(
+            "${TEMPLATE_FILE}"
+            "${SCHEMA_BINARY_DIR}/schema/${SCHEMA_NAME}.hpp"
+            @ONLY
+        )
     endforeach()
 
-    message(STATUS "[rocstorage] Generating schema headers in ${SCHEMA_BINARY_DIR}")
+    message(
+        STATUS
+        "[rocstorage] Generating schema headers in ${SCHEMA_BINARY_DIR}/schema"
+    )
 endfunction()
 
 set(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD
@@ -103,5 +114,5 @@ else()
 endif()
 
 if(NOT USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    rocpd_configure_rocpd_schema_files()
+    rocpd_configure_rocpd_schema_files(${SQL_SCHEMA_DIR} ${SQL_SCHEMA_BINARY_DIR})
 endif()

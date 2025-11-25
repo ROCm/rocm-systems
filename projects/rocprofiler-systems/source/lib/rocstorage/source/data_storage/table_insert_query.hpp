@@ -37,7 +37,8 @@ struct table_insert_query
     : _query_columns_builder{ _ss }
     {}
 
-    query_builders::query_columns_builder& set_table_name(const std::string& tableName)
+    inline query_builders::query_columns_builder& set_table_name(
+        const std::string& tableName)
     {
         _ss.str("");
         _ss << "INSERT INTO " << tableName << " ";

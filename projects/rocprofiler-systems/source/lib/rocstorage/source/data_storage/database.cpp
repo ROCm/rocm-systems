@@ -22,7 +22,7 @@
 
 #include "database.hpp"
 
-#include "common/directory.hpp"
+#include "directory.hpp"
 
 #include <iostream>
 #include <regex>

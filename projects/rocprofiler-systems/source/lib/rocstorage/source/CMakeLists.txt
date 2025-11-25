@@ -25,17 +25,11 @@ set(rocstorage_sources
     ${CMAKE_CURRENT_LIST_DIR}/reader.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
 )
+target_sources(rocstorage PRIVATE ${rocstorage_sources})
 
-set(rocstorage_public_headers
-    ${CMAKE_CURRENT_LIST_DIR}/../include/writer.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/../include/reader.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/../include/storage.hpp
-)
+# ------------------------------------------------------------ #
+# Common headers
+# ------------------------------------------------------------ #
+target_include_directories(rocstorage PRIVATE ${CMAKE_CURRENT_LIST_DIR}/common)
 
-add_library(rocstorage STATIC ${rocstorage_sources})
-
-add_subdirectory(common)
 add_subdirectory(data_storage)
-
-target_sources(rocstorage PRIVATE ${rocstorage_public_headers})
-set(rocstorage_public_headers ${rocstorage_public_headers} PARENT_SCOPE)

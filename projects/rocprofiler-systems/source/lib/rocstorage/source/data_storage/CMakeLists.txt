@@ -20,17 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-target_sources(
-    rocstorage
-    PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}/database.cpp
-        ${CMAKE_CURRENT_LIST_DIR}/insert_statements.cpp
+set(data_storage_sources
+    ${CMAKE_CURRENT_LIST_DIR}/database.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/insert_statements.cpp
 )
 
-list(
-    APPEND rocstorage_public_headers
-    ${CMAKE_CURRENT_LIST_DIR}/database.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/insert_statements.hpp
-)
-
-set(rocstorage_public_headers ${rocstorage_public_headers} PARENT_SCOPE)
+target_sources(rocstorage PRIVATE ${data_storage_sources})

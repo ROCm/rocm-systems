@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "common/traits.hpp"
+#include "traits.hpp"
 
 #include <sstream>
 #include <string>

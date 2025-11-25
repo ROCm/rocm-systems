@@ -20,10 +20,22 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-list(
-    APPEND rocstorage_public_headers
-    ${CMAKE_CURRENT_LIST_DIR}/traits.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/directory.hpp
-)
+@PACKAGE_INIT@
 
-set(rocstorage_public_headers ${rocstorage_public_headers} PARENT_SCOPE)
+if(NOT TARGET rocstorage::rocstorage)
+    set(_rocstorage_build_tree @ROCSTORAGE_BUILD_TREE@)
+
+    if(_rocstorage_build_tree)
+        if(NOT TARGET rocstorage)
+            message(FATAL_ERROR "rocstorage target not found. Make sure to call add_subdirectory(rocstorage) before find_package(rocstorage).")
+        endif()
+        add_library(rocstorage::rocstorage ALIAS rocstorage)
+    else()
+        include("${CMAKE_CURRENT_LIST_DIR}/rocstorage-targets.cmake")
+    endif()
+
+    unset(_rocstorage_build_tree)
+endif()
+
+set(rocstorage_FOUND TRUE)
+check_required_components(rocstorage)
