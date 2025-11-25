@@ -107,31 +107,38 @@ AsyncSignalHandler(hsa_signal_value_t signal_v, void* data)
 {
     if(!data) return true;
 
+    // Get session info early to log queue ID
+    auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
+    auto& queue_info_session = *shared_ptr_info;
+    auto queue_id = queue_info_session.queue.get_id().handle;
+
     // if we have fully finalized, delete the data and return
+    // BUT ALWAYS call async_complete() to decrement the signal, otherwise Queue::sync() hangs
     auto _fini_status = registration::get_fini_status();
     if(_fini_status > 0)
     {
         static std::atomic<size_t> count{0};
         ROCP_ERROR << "[DEBUG] AsyncSignalHandler early exit #" << count.fetch_add(1)
-                   << " - fini_status=" << _fini_status
-                   << " (async_complete will NOT be called!)";
+                   << " - Queue " << queue_id << " fini_status=" << _fini_status
+                   << " (calling async_complete to prevent hang!)";
+
+        // CRITICAL FIX: Still decrement the signal to prevent Queue::sync() from hanging
+        queue_info_session.queue.async_complete();
+
         auto* _session = static_cast<Queue::queue_info_session_t**>(data);
         delete _session;
         return false;
     }
 
-    get_balanced_signal_slots().fetch_add(1);
-
-    auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
-    auto& queue_info_session = *shared_ptr_info;
-
-    // Log completions for Queue 4 during or near detach to debug hang
-    if(queue_info_session.queue.get_id().handle == 4 && _fini_status != 0)
+    // Log all Queue 4 completions during detach for debugging
+    if(queue_id == 4 && _fini_status != 0)
     {
         static std::atomic<size_t> q4_count{0};
         ROCP_ERROR << "[DEBUG] AsyncSignalHandler Queue 4 completion #" << q4_count.fetch_add(1)
-                   << " during detach (fini_status=" << _fini_status << ")";
+                   << " (fini_status=" << _fini_status << ")";
     }
+
+    get_balanced_signal_slots().fetch_add(1);
 
     auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
 
@@ -167,12 +174,17 @@ AsyncSignalHandler(hsa_signal_value_t signal_v, void* data)
             signals.erase(queue_info_session.interrupt_signal.handle);
         });
 #endif
+        ROCP_ERROR << "[DEBUG] AsyncSignalHandler - Destroying interrupt signal "
+                   << queue_info_session.interrupt_signal.handle << " for Queue " << queue_id;
         hsa::get_core_table()->hsa_signal_store_screlease_fn(queue_info_session.interrupt_signal,
                                                              -1);
         hsa::get_core_table()->hsa_signal_destroy_fn(queue_info_session.interrupt_signal);
     }
     if(queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal.handle != 0u)
     {
+        ROCP_ERROR << "[DEBUG] AsyncSignalHandler - Destroying completion signal "
+                   << queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal.handle
+                   << " for Queue " << queue_id;
         hsa::get_core_table()->hsa_signal_destroy_fn(
             queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal);
     }
@@ -683,8 +695,19 @@ Queue::signal_async_handler(const hsa_signal_t& signal, void* data) const
         signals[signal.handle] = signal;
     });
 #endif
+
+    auto current_value = _core_api.hsa_signal_load_relaxed_fn(signal);
+    ROCP_ERROR << "[DEBUG] Queue::signal_async_handler - Queue " << get_id().handle
+               << " registering handler for signal " << signal.handle
+               << " (current value=" << current_value << ") fini_status=" << registration::get_fini_status();
+
     hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
         signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
+
+    ROCP_ERROR << "[DEBUG] Queue::signal_async_handler - Queue " << get_id().handle
+               << " handler registration returned status=" << status
+               << " for signal " << signal.handle;
+
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_async_handler failed with error code " << status
         << " :: " << hsa::get_hsa_status_string(status);
@@ -697,6 +720,13 @@ Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_create failed with error code " << status
         << " :: " << hsa::get_hsa_status_string(status);
+
+    auto current_value = _core_api.hsa_signal_load_relaxed_fn(*signal);
+    static std::atomic<size_t> signal_create_count{0};
+    auto count = signal_create_count.fetch_add(1);
+    ROCP_ERROR << "[DEBUG] Queue::create_signal #" << count << " - Queue " << get_id().handle
+               << " created signal " << signal->handle
+               << " (initial value=" << current_value << ") fini_status=" << registration::get_fini_status();
 }
 
 void

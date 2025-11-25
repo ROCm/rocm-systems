@@ -100,13 +100,21 @@ write_interceptor(const void*                             packets,
     ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a valid pointer";
     const auto* entry = static_cast<const queue_entry_t*>(data);
 
+    static std::atomic<size_t> total_intercepts{0};
+    static std::atomic<size_t> passthrough_intercepts{0};
+
     if(entry->user_write_interceptor_func)
     {
+        total_intercepts.fetch_add(1);
         entry->user_write_interceptor_func(
             packets, pkt_count, unused, entry->user_write_interceptor_data, writer);
     }
     else
     {
+        auto count = passthrough_intercepts.fetch_add(1);
+        ROCP_ERROR << "[DEBUG ATTACH] write_interceptor passthrough #" << count
+                   << " - pkt_count=" << pkt_count
+                   << " (no user interceptor registered)";
         writer(packets, pkt_count);
     }
 }
@@ -217,6 +225,11 @@ set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
         ROCP_ERROR << "couldn't find registration to set write interceptor for queue " << queue;
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
+
+    ROCP_ERROR << "[DEBUG ATTACH] set_write_interceptor - queue=" << queue
+               << " func=" << (void*)func
+               << " (previous func=" << (void*)qr_pair->second.user_write_interceptor_func << ")";
+
     qr_pair->second.user_write_interceptor_func = func;
     qr_pair->second.user_write_interceptor_data = data;
     return 0;
