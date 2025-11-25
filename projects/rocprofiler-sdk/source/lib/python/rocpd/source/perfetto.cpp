@@ -211,23 +211,24 @@ write_perfetto(
 
     static auto     orig_process_track = ::perfetto::ProcessTrack::Current();
     static auto     orig_process_desc  = orig_process_track.Serialize();
-    static uint64_t global_flow_index  = 0;
-    static uint64_t global_track_index = 0;
+    static uint64_t global_flow_index  = 0x100000000;
 
     auto*          conn             = perfetto_session.connection;
     const auto&    tracing_session  = perfetto_session.tracing_session;
     const auto&    ocfg             = perfetto_session.config;
     const uint64_t this_pid         = process.pid;
     const uint64_t this_pid_init_ns = process.init;
+    const uint64_t this_nid         = process.nid;
     auto           command_line     = ::rocprofiler::sdk::parse::tokenize(process.command, " ");
 
-    auto this_pid_track = ::perfetto::Track::Global(++global_track_index);
+    auto uuid_pid       = common::fnv1a_hasher::combine(this_nid, this_pid_init_ns, this_pid);
+    auto this_pid_track = ::perfetto::Track{uuid_pid, ::perfetto::Track{}};
 
     common::consume_args(schema_version);
 
     {
         auto desc = orig_process_desc;
-        desc.set_uuid(this_pid_track.uuid);
+        desc.set_uuid(uuid_pid);
         desc.set_parent_uuid(0);
         desc.mutable_process()->set_pid(this_pid);
         desc.mutable_process()->set_start_timestamp_ns(this_pid_init_ns);
@@ -349,7 +350,7 @@ write_perfetto(
             auto is_main_thread = (static_cast<uint64_t>(itr.tid) == this_pid);
             auto _idx           = (is_main_thread) ? 0 : ++nthrn;
             thread_indexes.emplace(itr.tid, _idx);
-            auto _track = ::perfetto::Track::Global(++global_track_index);
+            auto _track = ::perfetto::Track{static_cast<uint64_t>(itr.tid), this_pid_track};
             auto _desc  = _track.Serialize();
             if(is_main_thread)
                 _desc.set_name(fmt::format("{}", ::basename(command_line.front().c_str())));
@@ -366,8 +367,9 @@ write_perfetto(
 
             thread_tracks.emplace(itr.tid, _track);
 
-            auto _sampling_track = ::perfetto::Track::Global(++global_track_index);
-            auto _sampling_desc  = _sampling_track.Serialize();
+            auto _sampling_track =
+                ::perfetto::Track{get_hash_id(fmt::format("sampling_{}", itr.tid)), this_pid_track};
+            auto _sampling_desc = _sampling_track.Serialize();
             _sampling_desc.set_name(fmt::format("THREAD {} (S) {}", _idx, itr.tid));
             ::perfetto::TrackEvent::SetTrackDescriptor(_sampling_track, _sampling_desc);
 
@@ -393,7 +395,7 @@ write_perfetto(
             else
                 _namess << "(UNK)";
 
-            auto _track = ::perfetto::Track::Global(++global_track_index);
+            auto _track = ::perfetto::Track{get_hash_id(_namess.str()), this_pid_track};
             auto _desc  = _track.Serialize();
             _desc.set_name(_namess.str());
 
@@ -417,7 +419,7 @@ write_perfetto(
                     << "] QUEUE [" << nqueue++ << "] ";
             _namess << agent_index_info.type;
 
-            auto _track = ::perfetto::Track::Global(++global_track_index);
+            auto _track = ::perfetto::Track{get_hash_id(_namess.str()), this_pid_track};
             auto _desc  = _track.Serialize();
             _desc.set_name(_namess.str());
 
@@ -433,7 +435,7 @@ write_perfetto(
 
         auto _name = fmt::format("STREAM [{}]", stream_id);
 
-        auto _track = ::perfetto::Track::Global(++global_track_index);
+        auto _track = ::perfetto::Track{get_hash_id(_name), this_pid_track};
         auto _desc  = _track.Serialize();
         _desc.set_name(_name);
 
@@ -503,7 +505,9 @@ write_perfetto(
                     perfetto_session.get_static_event_name(_name),
                     track,
                     itr.start,
-                    ::perfetto::Flow::Global(++global_flow_index),
+                    ::perfetto::Flow::Global(
+                        (itr.stack_id == 0) ? (++global_flow_index)
+                                            : (itr.stack_id ^ this_pid_track.uuid)),
                     "begin_ns",
                     itr.start,
                     "end_ns",
