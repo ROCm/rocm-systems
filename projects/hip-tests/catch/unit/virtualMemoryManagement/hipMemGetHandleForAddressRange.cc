@@ -402,7 +402,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice",
   REQUIRE(srcDevMem != nullptr);
 
   int handle = -1;
-  HIP_CHECK(hipMemGetHandleForAddressRange(&handle,reinterpret_cast<hipDeviceptr_t>(srcDevMem), sizeBytes,
+  HIP_CHECK(hipMemGetHandleForAddressRange(&handle, reinterpret_cast<hipDeviceptr_t>(srcDevMem), sizeBytes,
                                            hipMemRangeHandleTypeDmaBufFd, 0));
   REQUIRE(handle > 0);
 
@@ -691,7 +691,7 @@ void launchForDevMem() {
   void* srcDevMem = createDeviceMemoryAndFillData(size);
 
   int handle = -1;
-  HIP_CHECK(hipMemGetHandleForAddressRange(&handle,reinterpret_cast<hipDeviceptr_t>(srcDevMem), sizeBytes,
+  HIP_CHECK(hipMemGetHandleForAddressRange(&handle, reinterpret_cast<hipDeviceptr_t>(srcDevMem), sizeBytes,
                                            hipMemRangeHandleTypeDmaBufFd, 0));
   REQUIRE(handle > 0);
   HIP_CHECK(hipFree(srcDevMem));

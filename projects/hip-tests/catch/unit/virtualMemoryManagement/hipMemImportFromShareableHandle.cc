@@ -85,6 +85,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
             hipMemHandleTypePosixFileDescriptor));
   HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemRelease(imported_handle));
+
   CTX_DESTROY();
 }
 
@@ -485,7 +486,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
       // Invoke kernel
       hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
                          reinterpret_cast<int*>(ptrA));
-      HIP_CHECK(hipMemcpyDtoH(B_h.data(),reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
+      HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
       HIP_CHECK(hipDeviceSynchronize());
       // validate
       REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
