@@ -282,7 +282,6 @@ FatBinaryInfo** StatCO::addFatBinary(const void* data, bool initialized, bool& s
   }
 
   hipError_t err = digestFatBinary(data, modules_[data]);
-
   success = (err == hipSuccess);
   return &modules_[data];
 }
@@ -454,7 +453,7 @@ hipError_t StatCO::getStatFunc(hipFunction_t* hfunc, const void* hostFunction, i
     amd::ScopedLock lock(sclock_);
     if (*(module) == nullptr) {
       hipError_t err = digestFatBinary(module_to_hostModule_[module], *module);
-      assert(err == hipSuccess);
+
       if (err != hipSuccess) {
         return err;
       }
@@ -479,8 +478,7 @@ hipError_t StatCO::getStatFuncAttr(hipFuncAttributes* func_attr, const void* hos
   // Lazy load
   FatBinaryInfo** module = it->second->moduleInfo();
   if (*(module) == nullptr) {
-    hipError_t err = digestFatBinary(module_to_hostModule_[module], *module);
-    assert(err == hipSuccess);
+    std::ignore = digestFatBinary(module_to_hostModule_[module], *module);
   }
 
   return it->second->getStatFuncAttr(func_attr, deviceId);
@@ -511,8 +509,7 @@ hipError_t StatCO::getStatGlobalVar(const void* hostVar, int deviceId, hipDevice
   // Lazy load
   FatBinaryInfo** module = it->second->moduleInfo();
   if (*(module) == nullptr) {
-    hipError_t err = digestFatBinary(module_to_hostModule_[module], *module);
-    assert(err == hipSuccess);
+    std::ignore = digestFatBinary(module_to_hostModule_[module], *module);
   }
 
   DeviceVar* dvar = nullptr;
@@ -538,8 +535,7 @@ hipError_t StatCO::initStatManagedVarDevicePtr(int deviceId) {
         // Lazy load
         FatBinaryInfo** module = var->moduleInfo();
         if (*(module) == nullptr) {
-          err = digestFatBinary(module_to_hostModule_[module], *module);
-          assert(err == hipSuccess);
+          std::ignore = digestFatBinary(module_to_hostModule_[module], *module);
         }
         hip::Stream* stream = g_devices.at(deviceId)->NullStream();
         if (stream == nullptr) {
