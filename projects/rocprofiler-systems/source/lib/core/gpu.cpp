@@ -245,12 +245,14 @@ add_device_metadata()
  * Required amdsmi methods to get processors and handles
  */
 
-uint32_t                             processors::total_processor_count   = 0;
-std::vector<amdsmi_processor_handle> processors::processors_list         = {};
-std::vector<bool>                    processors::vcn_activity_supported  = {};
-std::vector<bool>                    processors::jpeg_activity_supported = {};
-std::vector<bool>                    processors::vcn_busy_supported      = {};
-std::vector<bool>                    processors::jpeg_busy_supported     = {};
+uint32_t                             processors::total_processor_count  = 0;
+std::vector<amdsmi_processor_handle> processors::processors_list        = {};
+std::vector<bool>                    processors::vcn_device_level_only  = {};
+std::vector<bool>                    processors::jpeg_device_level_only = {};
+std::vector<bool>                    processors::vcn_busy_supported     = {};
+std::vector<bool>                    processors::jpeg_busy_supported    = {};
+std::vector<bool>                    processors::xgmi_supported         = {};
+std::vector<bool>                    processors::pcie_supported         = {};
 
 void
 get_processor_handles()
@@ -299,49 +301,74 @@ get_processor_handles()
             amdsmi_gpu_metrics_t gpu_metrics;
             bool                 vcn_supported = false, jpeg_supported = false;
             bool                 v_busy_supported = false, j_busy_supported = false;
+            bool                 xgmi_supported = false, pcie_supported = false;
             // AMD SMI will not report VCN_activity and JPEG_activity, if VCN_busy or
             // JPEG_busy fields are available.
             if(amdsmi_get_gpu_metrics_info(processor, &gpu_metrics) ==
                AMDSMI_STATUS_SUCCESS)
             {
-                // Helper lambda to check if any value in the array is valid
-                auto has_valid = [](const auto& arr) {
+                // Helper lambda to check if any value in the array is valid (not
+                // UINT16_MAX)
+                auto has_valid_u16 = [](const auto& arr) {
                     return std::any_of(std::begin(arr), std::end(arr),
                                        [](auto val) { return val != UINT16_MAX; });
                 };
-                vcn_supported  = has_valid(gpu_metrics.vcn_activity);
-                jpeg_supported = has_valid(gpu_metrics.jpeg_activity);
+
+                // Helper lambda to check if any value in the array is valid (not
+                // UINT64_MAX)
+                auto has_valid_u64 = [](const auto& arr) {
+                    return std::any_of(std::begin(arr), std::end(arr),
+                                       [](auto val) { return val != UINT64_MAX; });
+                };
+
+                vcn_supported  = has_valid_u16(gpu_metrics.vcn_activity);
+                jpeg_supported = has_valid_u16(gpu_metrics.jpeg_activity);
+
                 // Check if VCN and JPEG busy metrics are available
                 for(const auto& xcp : gpu_metrics.xcp_stats)
                 {
-                    if(!v_busy_supported && has_valid(xcp.vcn_busy))
+                    if(!v_busy_supported && has_valid_u16(xcp.vcn_busy))
                         v_busy_supported = true;
-                    if(!j_busy_supported && has_valid(xcp.jpeg_busy))
+                    if(!j_busy_supported && has_valid_u16(xcp.jpeg_busy))
                         j_busy_supported = true;
                     if(v_busy_supported && j_busy_supported) break;
                 }
+
+                // Check if XGMI metrics are supported (any value not at max)
+                xgmi_supported = (gpu_metrics.xgmi_link_width != UINT16_MAX) ||
+                                 (gpu_metrics.xgmi_link_speed != UINT16_MAX) ||
+                                 has_valid_u64(gpu_metrics.xgmi_read_data_acc) ||
+                                 has_valid_u64(gpu_metrics.xgmi_write_data_acc);
+
+                // Check if PCIe metrics are supported (any value not at max)
+                pcie_supported = (gpu_metrics.pcie_link_width != UINT16_MAX) ||
+                                 (gpu_metrics.pcie_link_speed != UINT16_MAX) ||
+                                 (gpu_metrics.pcie_bandwidth_acc != UINT64_MAX) ||
+                                 (gpu_metrics.pcie_bandwidth_inst != UINT64_MAX);
             }
-            processors::vcn_activity_supported.push_back(vcn_supported);
-            processors::jpeg_activity_supported.push_back(jpeg_supported);
+            processors::vcn_device_level_only.push_back(vcn_supported);
+            processors::jpeg_device_level_only.push_back(jpeg_supported);
             processors::vcn_busy_supported.push_back(v_busy_supported);
             processors::jpeg_busy_supported.push_back(j_busy_supported);
+            processors::xgmi_supported.push_back(xgmi_supported);
+            processors::pcie_supported.push_back(pcie_supported);
         }
     }
     processors::total_processor_count = processors::processors_list.size();
 }
 
 bool
-is_vcn_activity_supported(uint32_t dev_id)
+vcn_is_device_level_only(uint32_t dev_id)
 {
-    if(dev_id >= processors::vcn_activity_supported.size()) return false;
-    return processors::vcn_activity_supported[dev_id];
+    if(dev_id >= processors::vcn_device_level_only.size()) return false;
+    return processors::vcn_device_level_only[dev_id];
 }
 
 bool
-is_jpeg_activity_supported(uint32_t dev_id)
+jpeg_is_device_level_only(uint32_t dev_id)
 {
-    if(dev_id >= processors::jpeg_activity_supported.size()) return false;
-    return processors::jpeg_activity_supported[dev_id];
+    if(dev_id >= processors::jpeg_device_level_only.size()) return false;
+    return processors::jpeg_device_level_only[dev_id];
 }
 
 bool
@@ -356,6 +383,20 @@ is_jpeg_busy_supported(uint32_t dev_id)
 {
     if(dev_id >= processors::jpeg_busy_supported.size()) return false;
     return processors::jpeg_busy_supported[dev_id];
+}
+
+bool
+is_xgmi_supported(uint32_t dev_id)
+{
+    if(dev_id >= processors::xgmi_supported.size()) return false;
+    return processors::xgmi_supported[dev_id];
+}
+
+bool
+is_pcie_supported(uint32_t dev_id)
+{
+    if(dev_id >= processors::pcie_supported.size()) return false;
+    return processors::pcie_supported[dev_id];
 }
 
 uint32_t

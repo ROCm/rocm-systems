@@ -361,6 +361,62 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
   return hipSuccess;
 }
 
+// =================================================================================================
+void StatCO::RemoveAllFatBinaries() {
+  amd::ScopedLock lock(sclock_);
+
+  // Clear mapping tables that associate modules with host-side constructs
+  module_to_hostModule_.clear();
+  module_to_hostFunctions_.clear();
+  module_to_hostVars_.clear();
+
+  // Delete all registered variables and clear the container
+  for (auto const& [_, var] : vars_) {
+    delete var;
+  }
+  vars_.clear();
+
+  // Clean up managed variables - these require special handling for memory on each device
+  for (auto& [_, managed_vars] : managedVars_) {
+    for (auto& managed_var : managed_vars) {
+      // Free device-specific allocations across all devices
+      for (auto dev : g_devices) {
+        DeviceVar* dvar = nullptr;
+        if (managed_var->getDeviceVarPtr(&dvar, dev->deviceId()) == hipSuccess && dvar) {
+          // Free device memory (also deletes the device ptr)
+          [[maybe_unused]] hipError_t err = ihipFree(dvar->device_ptr());
+          assert(err == hipSuccess);
+        }
+      }
+
+      // Free the managed memory allocation itself
+      void** managed_ptr = static_cast<void**>(managed_var->getManagedVarPtr());
+      if (managed_var->getAllocFlag()) {
+        // Memory was allocated with ihipMallocManaged - use ihipFree
+        [[maybe_unused]] hipError_t err = ihipFree(*managed_ptr);
+        assert(err == hipSuccess);
+      } else {
+        // Memory was allocated with OS-level allocator - use OS release
+        amd::Os::releaseMemory(*managed_ptr, managed_var->getSize());
+      }
+      delete managed_var;
+    }
+  }
+  managedVars_.clear();
+
+  // Delete all registered functions and clear the container
+  for (auto const& [_, func] : functions_) {
+    delete func;
+  }
+  functions_.clear();
+
+  // Delete all fat binary info objects and clear the modules container
+  for (auto const& [_, fb_info] : modules_) {
+    delete fb_info;
+  }
+  modules_.clear();
+}
+
 hipError_t StatCO::registerStatFunction(const void* hostFunction, Function* func) {
   amd::ScopedLock lock(sclock_);
 

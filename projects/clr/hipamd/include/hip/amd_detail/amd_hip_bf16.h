@@ -1748,7 +1748,9 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hsin(const __hip_bfloat16 h) {
  * \brief Calculate sqrt of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hsqrt(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_sqrt_f32(__bfloat162float(h)));
+  // FIXME: Just directly use elementwise sqrt on the bfloat value
+  // and don't promote
+  return __float2bfloat16(__builtin_elementwise_sqrt(__bfloat162float(h)));
 }
 
 /**

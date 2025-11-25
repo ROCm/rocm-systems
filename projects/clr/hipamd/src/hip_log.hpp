@@ -40,20 +40,16 @@ public:
     return *lginfo_;
   }
 
-private:
   size_t log_level_;
   size_t log_size_;
   size_t log_mask_;
 
   amd::Monitor lg_lock_{true};
 
+private:
   // Singleton object
   static LoggingInfo* lginfo_;
   LoggingInfo() {}
   ~LoggingInfo() {}
-
-  friend hipError_t hipExtEnableLogging();
-  friend hipError_t hipExtDisableLogging();
-  friend hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
 };
 } // namespace::hip_impl

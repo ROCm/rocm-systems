@@ -108,7 +108,8 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange") {
   - for 0 < block_size_limit < attr.maxThreadsPerBlock
   - for block_size_limit > attr.maxThreadsPerBlock
 */
-TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu") {
+TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu",
+          "[multigpu]") {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return

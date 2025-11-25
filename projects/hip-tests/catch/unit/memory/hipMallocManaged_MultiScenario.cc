@@ -161,7 +161,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiChunkSingleDevice") {
 // Equal parts of Hmm is accessed on available gpus and
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
-TEST_CASE("Unit_hipMallocManaged_MultiChunkMultiDevice") {
+TEST_CASE("Unit_hipMallocManaged_MultiChunkMultiDevice", "[multigpu]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -304,7 +304,8 @@ TEST_CASE("Unit_hipMallocManaged_Negative") {
 // Allocate two pointers using hipMallocManaged(), initialize,
 // then launch kernel using these pointers directly and
 // later validate the content without using any Memcpy.
-TEMPLATE_TEST_CASE("Unit_hipMallocManaged_TwoPointers", "", int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMallocManaged_TwoPointers", "[multigpu]", int,
+                   float, double) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -344,8 +345,8 @@ TEMPLATE_TEST_CASE("Unit_hipMallocManaged_TwoPointers", "", int, float, double) 
 // to all other devices. This include verification and Device two Device
 // transfers and kernel launch o discover if there any access issues.
 
-TEMPLATE_TEST_CASE("Unit_hipMallocManaged_DeviceContextChange", "", unsigned char, int, float,
-                   double) {
+TEMPLATE_TEST_CASE("Unit_hipMallocManaged_DeviceContextChange", "[multigpu]",
+                   unsigned char, int, float, double) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");

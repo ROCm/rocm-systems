@@ -362,7 +362,8 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM") {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice") {
+TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice",
+          "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -414,7 +415,8 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice") {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice") {
+TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice",
+          "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
