@@ -239,7 +239,10 @@ address VmHeap::Alloc(size_t size) {
   size_t offset = 0;
   auto hb = AllocBlock(size + block_alignment_);
   if (hb != nullptr) {
-    offset = ((hb->Offset() & ~kChunkSize) == 0) ? hb->Offset() + block_alignment_ : hb->Offset();
+    // Add 256-byte offset if virtual address matches chunk address to avoid map conflicts
+    offset = ((hb->Offset() & (kChunkSize - 1)) == 0)
+               ? hb->Offset() + block_alignment_
+               : hb->Offset();
     ptr = base_address_ + offset;
   } else {
     return nullptr;
