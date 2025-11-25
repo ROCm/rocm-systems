@@ -1015,6 +1015,9 @@ def run_benchmark(device):
     metrics_dict = {}
 
     arch = get_gfx_arch(device)
+    cus = hip.hipGetDeviceProperties(device).multiProcessorCount
+
+    print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
 
     for name, func in tests.items():
         if arch in unsupported_data_types and name in unsupported_data_types[arch]:
