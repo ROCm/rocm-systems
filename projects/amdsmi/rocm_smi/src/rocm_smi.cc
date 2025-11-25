@@ -7971,7 +7971,7 @@ rsmi_set_gpu_ptl_state(uint32_t dv_ind, bool enable) {
 }
 
 rsmi_status_t
-rsmi_dev_read_ptl_format(uint32_t dv_ind, char* format, size_t length)
+rsmi_get_gpu_ptl_formats(uint32_t dv_ind, char* format, size_t length)
 {
   TRY
   std::ostringstream ss;
@@ -8001,7 +8001,7 @@ rsmi_dev_read_ptl_format(uint32_t dv_ind, char* format, size_t length)
 }
 
 rsmi_status_t
-rsmi_dev_write_ptl_format(uint32_t dv_ind, const char* format)
+rsmi_set_gpu_ptl_formats(uint32_t dv_ind, const char* format)
 {
   TRY
   std::ostringstream ss;

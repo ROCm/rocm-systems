@@ -5326,7 +5326,7 @@ amdsmi_status_t amdsmi_read_supported_ptl_formats(
   {
     char buf[AMDSMI_MAX_STRING_LENGTH] = {0};
     amdsmi_status_t st = rsmi_wrapper(
-        rsmi_dev_read_ptl_supported, processor_handle, 0, buf, AMDSMI_MAX_STRING_LENGTH);
+        rsmi_read_supported_ptl_formats, processor_handle, 0, buf, AMDSMI_MAX_STRING_LENGTH);
 
     if (st != AMDSMI_STATUS_SUCCESS) {
         return st;
@@ -5376,7 +5376,7 @@ amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
     std::string line;
     {
         char buf[AMDSMI_MAX_STRING_LENGTH] = {0};
-        st = rsmi_wrapper(rsmi_dev_read_ptl_format, processor_handle, 0, buf, AMDSMI_MAX_STRING_LENGTH);
+        st = rsmi_wrapper(rsmi_get_gpu_ptl_formats, processor_handle, 0, buf, AMDSMI_MAX_STRING_LENGTH);
         if (st != AMDSMI_STATUS_SUCCESS) {
             return st;
         }
@@ -5444,7 +5444,7 @@ amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
         std::string(amdsmi_fmt_to_token(data_format1)) + "," +
                     amdsmi_fmt_to_token(data_format2);
 
-    return rsmi_wrapper(rsmi_dev_write_ptl_format, processor_handle, 0, format.c_str());   
+    return rsmi_wrapper(rsmi_set_gpu_ptl_formats, processor_handle, 0, format.c_str());   
 }
 
 amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle processor_handle,

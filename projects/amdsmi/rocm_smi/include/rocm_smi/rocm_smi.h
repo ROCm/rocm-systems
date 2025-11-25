@@ -5670,7 +5670,7 @@ rsmi_set_gpu_ptl_state(uint32_t dv_ind, bool enabled);
  *
  */
 rsmi_status_t
-rsmi_dev_read_ptl_format(uint32_t dv_ind, char* format, size_t len);
+rsmi_get_gpu_ptl_formats(uint32_t dv_ind, char* format, size_t len);
 
 /**
  *  @brief Set ptl data formats
@@ -5686,7 +5686,7 @@ rsmi_dev_read_ptl_format(uint32_t dv_ind, char* format, size_t len);
  *
  */
 rsmi_status_t
-rsmi_dev_write_ptl_format(uint32_t dv_ind, const char* format);
+rsmi_set_gpu_ptl_formats(uint32_t dv_ind, const char* format);
 
 /**
  *  @brief Get supported ptl formats
@@ -5704,7 +5704,7 @@ rsmi_dev_write_ptl_format(uint32_t dv_ind, const char* format);
  *
  */
 rsmi_status_t
-rsmi_dev_read_ptl_supported(uint32_t dv_ind, char* supported, size_t length);
+rsmi_read_supported_ptl_formats(uint32_t dv_ind, char* supported, size_t length);
 
 /**
  *  @brief Get the log from the GPU metrics associated with the device
