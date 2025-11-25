@@ -943,7 +943,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         bad_pages_parser.add_argument('-p', '--pending', action='store_true', required=False, help=pending_help)
         bad_pages_parser.add_argument('-r', '--retired', action='store_true', required=False, help=retired_help)
         bad_pages_parser.add_argument('-u', '--un-res', action='store_true', required=False, help=un_res_help)
-        bad_pages_parser.add_argument('--hex', action='store_true', required=False, help=hex_help)
+        bad_pages_parser.add_argument('-h', '--hex', action='store_true', required=False, help=hex_help)
 
         # Add Universal Arguments
         self._add_device_arguments(bad_pages_parser, required=False)
