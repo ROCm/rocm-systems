@@ -353,14 +353,6 @@ def hipMemcpyDtoH(dst, src, size):
         raise HIPError(res)
 
 
-# def hipFree(ptr):
-
-#     status = _lib.hipFree(ptr)
-
-#     if status != 0:
-#         raise HIPError(status)
-
-
 def hipSetDevice(id):
 
     status = _lib.hipSetDevice(id)
@@ -399,14 +391,6 @@ def hipModuleGetFunction(module, name):
         raise HIPError(res)
 
     return func
-
-
-# def hipModuleUnload(module):
-
-#     res = _lib.hipModuleUnload(module)
-
-#     if res != 0:
-#         raise HIPError(res)
 
 
 def hipModuleLaunchKernel(
@@ -451,14 +435,6 @@ def hipEventCreate():
         raise HIPError(res)
 
     return HIPEvent(handle)
-
-
-# def hipEventDestroy(handle):
-
-#     res = _lib.hipEventDestroy(handle)
-
-#     if res != 0:
-#         raise HIPError(res)
 
 
 def hipEventRecord(event, stream=None):

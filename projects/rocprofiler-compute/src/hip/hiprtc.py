@@ -126,15 +126,7 @@ def hiprtcCreateProgram(src: str, name: str):
     return HIPRTCProgram(prog)
 
 
-# def hiprtcDestroyProgram(prog):
-
-#     res = _lib.hiprtcDestroyProgram(prog)
-
-#     if res != 0:
-#         raise HIPRTCError(res)
-
-
-# TODO: Handle options
+# TODO: Handle compile options
 def hiprtcCompileProgram(prog):
 
     res = _lib.hiprtcCompileProgram(prog.handle, 0, None)
