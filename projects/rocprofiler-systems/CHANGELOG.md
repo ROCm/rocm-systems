@@ -19,6 +19,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Fixed a crash when running `rocprof-sys-python` with ROCPROFSYS_USE_ROCPD enabled.
 - Fixed an issue where kernel/memory-copy events could appear on the wrong Perfetto track (e.g., queue track when stream grouping was requested) because _group_by_queue state leaked between records.
+- Fixed a soft hang in collecting available PAPI metrics on some systems with Intel CPU.
+- Fixed some duplicate HIP and HSA API events in `rocpd` output.
 
 ## ROCm Systems Profiler 1.2.1 for ROCm 7.1.1
 
