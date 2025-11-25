@@ -1365,6 +1365,64 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 ${TEST_PROPERTIES}
         )
     endforeach()
+
+    if(TEST_ROCPD_FILE)
+        set(_DB_FIXTURE "rocprofsys-${TEST_NAME}-db")
+
+        add_test(
+            NAME ${TEST_NAME}-cleanup-db
+            COMMAND
+                sh -c
+                "rm -f ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/*.db"
+            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        )
+
+        set_tests_properties(
+            ${TEST_NAME}-cleanup-db
+            PROPERTIES
+                FIXTURES_CLEANUP ${_DB_FIXTURE}
+                LABELS "cleanup;db;rocpd"
+                TIMEOUT 30
+        )
+
+        if(TEST ${TEST_NAME})
+            get_test_property(${TEST_NAME} FIXTURES_REQUIRED _EXISTING_FIXTURES)
+            if(_EXISTING_FIXTURES)
+                set_tests_properties(
+                    ${TEST_NAME}
+                    PROPERTIES FIXTURES_REQUIRED "${_EXISTING_FIXTURES};${_DB_FIXTURE}"
+                )
+            else()
+                set_tests_properties(
+                    ${TEST_NAME}
+                    PROPERTIES FIXTURES_REQUIRED "${_DB_FIXTURE}"
+                )
+            endif()
+        endif()
+
+        foreach(
+            _VAL_TEST
+            validate-${TEST_NAME}-timemory
+            validate-${TEST_NAME}-perfetto
+            validate-${TEST_NAME}-rocpd
+        )
+            if(TEST ${_VAL_TEST})
+                get_test_property(${_VAL_TEST} FIXTURES_REQUIRED _EXISTING_FIXTURES)
+                if(_EXISTING_FIXTURES)
+                    set_tests_properties(
+                        ${_VAL_TEST}
+                        PROPERTIES
+                            FIXTURES_REQUIRED "${_EXISTING_FIXTURES};${_DB_FIXTURE}"
+                    )
+                else()
+                    set_tests_properties(
+                        ${_VAL_TEST}
+                        PROPERTIES FIXTURES_REQUIRED "${_DB_FIXTURE}"
+                    )
+                endif()
+            endif()
+        endforeach()
+    endif()
 endfunction()
 
 # -------------------------------------------------------------------------------------- #
