@@ -103,16 +103,26 @@ context_filter(const context::context* ctx)
 }
 
 bool
-AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
+AsyncSignalHandler(hsa_signal_value_t signal_v, void* data)
 {
-    if(!data) return true;
+    static std::atomic<size_t> handler_call_count{0};
+    auto call_num = handler_call_count.fetch_add(1);
+
+    ROCP_ERROR << "[DEBUG] AsyncSignalHandler #" << call_num << " ENTRY - signal_value=" << signal_v
+               << " data=" << data << " fini_status=" << registration::get_fini_status();
+
+    if(!data)
+    {
+        ROCP_ERROR << "[DEBUG] AsyncSignalHandler #" << call_num << " - data is null, returning true";
+        return true;
+    }
 
     // if we have fully finalized, delete the data and return
     auto _fini_status = registration::get_fini_status();
     if(_fini_status > 0)
     {
         static std::atomic<size_t> count{0};
-        ROCP_ERROR << "[DEBUG] AsyncSignalHandler early exit #" << count.fetch_add(1)
+        ROCP_ERROR << "[DEBUG] AsyncSignalHandler #" << call_num << " early exit #" << count.fetch_add(1)
                    << " - fini_status=" << _fini_status
                    << " (async_complete will NOT be called - signal will NOT decrement!)";
         auto* _session = static_cast<Queue::queue_info_session_t**>(data);
@@ -124,6 +134,10 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
     auto& queue_info_session = *shared_ptr_info;
+
+    ROCP_ERROR << "[DEBUG] AsyncSignalHandler #" << call_num
+               << " - Processing completion for Queue " << queue_info_session.queue.get_id().handle
+               << " dispatch_id=" << queue_info_session.callback_record.dispatch_info.dispatch_id;
 
     auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
 
@@ -180,7 +194,11 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         _corr_id->sub_ref_count();
     }
 
+    ROCP_ERROR << "[DEBUG] AsyncSignalHandler #" << call_num
+               << " - About to call async_complete() for Queue "
+               << queue_info_session.queue.get_id().handle;
     queue_info_session.queue.async_complete();
+    ROCP_ERROR << "[DEBUG] AsyncSignalHandler #" << call_num << " - EXIT after async_complete()";
     delete &shared_ptr_info;
 
     return false;
@@ -319,11 +337,15 @@ WriteInterceptor(const void* packets,
             ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
             internal_corr_id);
 
+        ROCP_ERROR << "[DEBUG] WriteInterceptor - Queue " << queue.get_id().handle
+                   << " about to dispatch kernel, calling async_started() fini_status="
+                   << registration::get_fini_status();
+
         queue.async_started();
 
+        const uint64_t kernel_id = code_object::get_kernel_id(original_packet.kernel_object);
         const auto     original_completion_signal = original_packet.completion_signal;
         const bool     existing_completion_signal = (original_completion_signal.handle != 0);
-        const uint64_t kernel_id = code_object::get_kernel_id(original_packet.kernel_object);
 
         // Copy kernel pkt, copy is to allow for signal to be modified
         rocprofiler_packet kernel_pkt = packets_arr[i];
@@ -501,8 +523,16 @@ WriteInterceptor(const void* packets,
 
             auto shared = std::make_shared<Queue::queue_info_session_t>(std::move(info_session));
 
+            ROCP_ERROR << "[DEBUG] WriteInterceptor - Queue " << queue.get_id().handle
+                       << " registering async handler for dispatch_id=" << dispatch_id
+                       << " completion_signal=" << completion_signal.handle
+                       << " fini_status=" << registration::get_fini_status();
+
             queue.signal_async_handler(completion_signal,
                                        new std::shared_ptr<Queue::queue_info_session_t>(shared));
+
+            ROCP_ERROR << "[DEBUG] WriteInterceptor - Queue " << queue.get_id().handle
+                       << " async handler registration complete for dispatch_id=" << dispatch_id;
 
             auto tracer_data = callback_record;
             tracing::execute_phase_exit_callbacks(tracing_data_v.callback_contexts,
@@ -663,6 +693,9 @@ Queue::~Queue()
 void
 Queue::signal_async_handler(const hsa_signal_t& signal, void* data) const
 {
+    ROCP_ERROR << "[DEBUG] Queue::signal_async_handler() - Queue " << get_id().handle
+               << " registering async handler for signal " << signal.handle
+               << " (waiting for signal==-1) fini_status=" << registration::get_fini_status();
 #if !defined(NDEBUG)
     CHECK_NOTNULL(hsa::get_queue_controller())->_debug_signals.wlock([&](auto& signals) {
         signals[signal.handle] = signal;
@@ -673,6 +706,9 @@ Queue::signal_async_handler(const hsa_signal_t& signal, void* data) const
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_async_handler failed with error code " << status
         << " :: " << hsa::get_hsa_status_string(status);
+    ROCP_ERROR << "[DEBUG] Queue::signal_async_handler() - Queue " << get_id().handle
+               << " async handler registered successfully for signal " << signal.handle
+               << " status=" << status;
 }
 
 void
@@ -682,6 +718,28 @@ Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_create failed with error code " << status
         << " :: " << hsa::get_hsa_status_string(status);
+}
+
+void
+Queue::async_started()
+{
+    auto old_val = _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
+    _core_api.hsa_signal_add_relaxed_fn(_active_kernels, 1);
+    auto new_val = _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
+    ROCP_ERROR << "[DEBUG] Queue::async_started() - Queue " << get_id().handle
+               << " signal incremented from " << old_val << " to " << new_val
+               << " fini_status=" << registration::get_fini_status();
+}
+
+void
+Queue::async_complete()
+{
+    auto old_val = _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
+    _core_api.hsa_signal_subtract_relaxed_fn(_active_kernels, 1);
+    auto new_val = _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
+    ROCP_ERROR << "[DEBUG] Queue::async_complete() - Queue " << get_id().handle
+               << " signal decremented from " << old_val << " to " << new_val
+               << " fini_status=" << registration::get_fini_status();
 }
 
 void

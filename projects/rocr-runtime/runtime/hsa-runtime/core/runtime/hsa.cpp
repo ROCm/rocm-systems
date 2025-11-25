@@ -1244,8 +1244,16 @@ hsa_signal_value_t
   TRY;
   core::Signal* signal = core::Signal::Convert(hsa_signal);
   assert(IsValid(signal));
-  return signal->WaitRelaxed(condition, compare_value, timeout_hint,
+  hsa_signal_value_t current_value = signal->LoadRelaxed();
+  fprintf(stderr, "[DEBUG HSA] hsa_signal_wait_relaxed - signal=%lu current_value=%ld "
+          "condition=%d compare_value=%ld timeout=%lu\n",
+          hsa_signal.handle, (long)current_value, (int)condition,
+          (long)compare_value, timeout_hint);
+  hsa_signal_value_t result = signal->WaitRelaxed(condition, compare_value, timeout_hint,
                              wait_state_hint);
+  fprintf(stderr, "[DEBUG HSA] hsa_signal_wait_relaxed - signal=%lu RETURNED with value=%ld\n",
+          hsa_signal.handle, (long)result);
+  return result;
   CATCHRET(hsa_signal_value_t);
 }
 
