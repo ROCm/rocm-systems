@@ -95,8 +95,12 @@ amdsmi_init()
     auto _amdsmi_init = []() {
         try
         {
-            // Currently, only AMDSMI_INIT_AMD_GPUS is supported
-            ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(AMDSMI_INIT_AMD_GPUS));
+            // Currently, AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_AINIC are supported.
+            uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
+#if USE_AINIC
+            init_flags |= AMDSMI_INIT_AMD_AINIC;
+#endif
+            ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(init_flags));
             get_processor_handles();
             _amdsmi_is_initialized() = true;  // Mark as initialized
         } catch(std::exception& _e)
