@@ -42,7 +42,8 @@ void CountedQueuesTest::SetUp() {
   const ::testing::TestInfo* test_info = ::testing::UnitTest::GetInstance()->current_test_info();
   if (test_info) {
     std::string test_name = test_info->name();
-    if (test_name == "Counted_Queue_Multithreaded_Dispatch_Test") {
+    if (test_name == "Counted_Queue_Multithreaded_Dispatch_Test" ||
+        test_name == "Counted_Queue_Overflow_And_Wraparound_Test") {
       // This test will try to create 1 CP queue with multiple threads
       // All of the user apps will share the same queue
       rocrtst::SetEnv("GPU_MAX_HW_QUEUES", "1");
@@ -111,14 +112,14 @@ void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
   ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
 
   hsa_queue_t *q1 = nullptr, *q2 = nullptr, *q3 = nullptr, *q4 = nullptr;
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &q1));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &q2));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &q3));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &q4));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &q1));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &q2));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &q3));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &q4));
 
   // Get HW queue ids of all queues
   uint32_t hwid1 = 0, hwid2 = 0, hwid3 = 0, hwid4 = 0;
@@ -179,8 +180,8 @@ void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
   // Acquire another queue again and see if we get the existing HW queue or a new one with id > 2
   hsa_queue_t* new_queue = nullptr;
   uint32_t new_hw_id = 0, refCount = 0;
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &new_queue));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &new_queue));
   ASSERT_SUCCESS(hsa_amd_queue_get_info(new_queue, HSA_QUEUE_INFO_HW_ID, &new_hw_id));
   ASSERT_SUCCESS(hsa_amd_queue_get_info(new_queue, HSA_QUEUE_INFO_USE_COUNT, &refCount));
 
@@ -234,28 +235,30 @@ void CountedQueuesTest::CountedQueuesAllPrioritiesLimitTest() {
   hsa_queue_t *high1 = nullptr, *high2 = nullptr, *high3 = nullptr;
 
   // Low Priority
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &low1));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &low2));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &low3));  // should reuse low1
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &low1));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &low2));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI,
+                                               HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0,
+                                               &low3));  // should reuse low1
 
   // Normal Priority
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_NORMAL,
-                                    nullptr, nullptr, 0, &normal1));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_NORMAL,
-                                    nullptr, nullptr, 0, &normal2));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_NORMAL,
-                                    nullptr, nullptr, 0, &normal3));  // should reuse normal1
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_NORMAL, nullptr, nullptr, 0, &normal1));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_NORMAL, nullptr, nullptr, 0, &normal2));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI,
+                                               HSA_AMD_QUEUE_PRIORITY_NORMAL, nullptr, nullptr, 0,
+                                               &normal3));  // should reuse normal1
 
   // High Priority
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI,
-                                          HSA_AMD_QUEUE_PRIORITY_HIGH, nullptr, nullptr, 0, &high1));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI,
-                                          HSA_AMD_QUEUE_PRIORITY_HIGH, nullptr, nullptr, 0, &high2));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI,
-                                          HSA_AMD_QUEUE_PRIORITY_HIGH, nullptr, nullptr, 0, &high3));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_HIGH, nullptr, nullptr, 0, &high1));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_HIGH, nullptr, nullptr, 0, &high2));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_HIGH, nullptr, nullptr, 0, &high3));
 
   // Verify reuse and independence per priority
   uint32_t low_id1 = 0, low_id2 = 0, low_id3 = 0;
@@ -341,8 +344,8 @@ void CountedQueuesTest::CountedQueuesSetPriorityNackTest() {
 
   // Create a counted queue
   hsa_queue_t* queue = nullptr;
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &queue));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &queue));
   EXPECT_NE(queue, nullptr);
 
   // Try to set priority on this queue; should fail
@@ -362,8 +365,8 @@ void CountedQueuesTest::CountedQueuesSetCUMaskNackTest() {
 
   // Create a counted queue
   hsa_queue_t* queue = nullptr;
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &queue));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &queue));
   EXPECT_NE(queue, nullptr);
 
   // Attempt to set CU mask on counted queue; should fail
@@ -392,8 +395,8 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
 
   // Create a counted queue
   hsa_queue_t* queue = nullptr;
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpu_dev, HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW,
-                                          nullptr, nullptr, 0, &queue));
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
+      gpu_dev, HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &queue));
   EXPECT_NE(queue, nullptr);
   set_main_queue(queue);
 
@@ -403,7 +406,7 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
   // Allocate buffers for source and destination and add values into the source buffer
   hsa_agent_t ag_list[2] = {*gpu_device1(), *cpu_device()};
   ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0,
-                                        reinterpret_cast<void**>(&src_buffer_)));
+                                              reinterpret_cast<void**>(&src_buffer_)));
   ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, src_buffer_));
 
   for (uint32_t i = 0; i < 256; ++i) {
@@ -411,7 +414,7 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
   }
 
   ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0,
-                                        reinterpret_cast<void**>(&dst_buffer_)));
+                                              reinterpret_cast<void**>(&dst_buffer_)));
   ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, dst_buffer_));
 
   struct __attribute__((aligned(16))) local_args_t {
@@ -449,7 +452,8 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
 
   for (int i = 0; i < it; i++) {
     queue_aql_packet = WriteAQLToQueue(this, &index);
-    ASSERT_EQ(queue_aql_packet, reinterpret_cast<hsa_kernel_dispatch_packet_t*>(main_queue()->base_address) + index);
+    ASSERT_EQ(queue_aql_packet,
+              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(main_queue()->base_address) + index);
 
     // Prepare the AQL packet header
     uint32_t aql_header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
@@ -481,7 +485,8 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
   // Release the counted queue
   ASSERT_SUCCESS(hsa_amd_counted_queue_release(queue));
 
-  // Get use count info after release; should return invalid arg error since queue has been released
+  // Get use count info after release; should return invalid arg error since queue has been
+  // released
   status = hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &count);
   ASSERT_EQ(status, HSA_STATUS_ERROR_INVALID_ARGUMENT);
 }
@@ -502,7 +507,8 @@ void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {
 
   // Shared source buffer (read-only)
   void* shared_src_buffer = nullptr;
-  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &shared_src_buffer));
+  ASSERT_SUCCESS(
+      hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &shared_src_buffer));
   ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, shared_src_buffer));
 
   // Initialize source data
@@ -515,10 +521,11 @@ void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {
   std::vector<uint32_t> allHwIds;
   std::atomic<int32_t> maxUseCount{0};
 
-  auto func = [&](int thread_id) {
+  auto func = [&]() {
     // local dest buffer for each user application
     void* local_dst_buffer = nullptr;
-    ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &local_dst_buffer));
+    ASSERT_SUCCESS(
+        hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &local_dst_buffer));
     ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, local_dst_buffer));
 
     // Local completion signal for every user application
@@ -528,7 +535,8 @@ void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {
     // Get a counted queue
     hsa_queue_t* queue = nullptr;
     ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(*gpu_device1(), HSA_QUEUE_TYPE_MULTI,
-                                           HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &queue));
+                                                 HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0,
+                                                 &queue));
     EXPECT_NE(queue, nullptr);
 
     if (queue == nullptr) {
@@ -544,7 +552,7 @@ void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {
     ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &localUseCount));
     ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_HW_ID, &localHwId));
 
-    // Update use_count if it is larger than previous value 
+    // Update use_count if it is larger than previous value
     int expected = maxUseCount.load();
     while (localUseCount > expected &&
            !maxUseCount.compare_exchange_weak(expected, localUseCount)) {
@@ -580,7 +588,8 @@ void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {
     local_args.completion_action = 0;
 
     void* kernarg_address = nullptr;
-    ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kern_arg_pool(), sizeof(local_args), 0, &kernarg_address));
+    ASSERT_SUCCESS(
+        hsa_amd_memory_pool_allocate(kern_arg_pool(), sizeof(local_args), 0, &kernarg_address));
     ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, kernarg_address));
 
     memcpy(kernarg_address, &local_args, sizeof(local_args));
@@ -595,8 +604,9 @@ void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {
 
       // Get pointer to the reserved packet slot and validate address
       hsa_kernel_dispatch_packet_t* queue_aql_packet = &(
-          reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address))[index & queue_mask]; 
-      ASSERT_EQ(queue_aql_packet, reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address) + index);
+          reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address))[index & queue_mask];
+      ASSERT_EQ(queue_aql_packet,
+                reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address) + index);
 
       // Fill packet fields
       queue_aql_packet->setup = 1;
@@ -645,7 +655,7 @@ void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {
   constexpr int kThreads = 2;
   std::vector<std::thread> threads;
   for (int i = 0; i < kThreads; i++) {
-    threads.emplace_back(func, i);
+    threads.emplace_back(func);
   }
 
   for (auto& th : threads) {
@@ -661,6 +671,167 @@ void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {
   for (size_t i = 1; i < allHwIds.size(); i++) {
     EXPECT_EQ(allHwIds[i], allHwIds[0]);
   }
+
+  hsa_amd_memory_pool_free(shared_src_buffer);
+}
+
+void CountedQueuesTest::CountedQueuesOverflowWrapAroundTest() {
+  hsa_status_t status;
+
+  // Common setup
+  ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
+  ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
+
+  // Load kernel
+  set_kernel_file_name("test_case_template_kernels.hsaco");
+  set_kernel_name("square");
+  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, gpu_device1()));
+
+  hsa_agent_t ag_list[2] = {*gpu_device1(), *cpu_device()};
+
+  void* shared_src_buffer = nullptr;
+  ASSERT_SUCCESS(
+      hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &shared_src_buffer));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, shared_src_buffer));
+
+  for (uint32_t i = 0; i < 256; ++i) {
+    reinterpret_cast<uint32_t*>(shared_src_buffer)[i] = i;
+  }
+
+  // To verify that after the queue has been used up, next index wraps around
+  std::atomic<uint64_t> maxIndexSeen{0};
+
+  auto func = [&]() {
+    // local dest buffer for each user application
+    void* local_dst_buffer = nullptr;
+    ASSERT_SUCCESS(
+        hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &local_dst_buffer));
+    ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, local_dst_buffer));
+
+    // Local completion signal for every user application
+    hsa_signal_t local_signal;
+    ASSERT_SUCCESS(hsa_signal_create(1, 0, nullptr, &local_signal));
+
+    // Get a counted queue
+    hsa_queue_t* queue = nullptr;
+    ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(*gpu_device1(), HSA_QUEUE_TYPE_MULTI,
+                                                 HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0,
+                                                 &queue));
+    EXPECT_NE(queue, nullptr);
+
+    if (queue == nullptr) {
+      hsa_signal_destroy(local_signal);
+      hsa_amd_memory_pool_free(local_dst_buffer);
+      return;
+    }
+
+    uint32_t queue_size = queue->size;           // should be 16384
+    const uint32_t queue_mask = queue_size - 1;  // used for index wraparound
+
+    struct __attribute__((aligned(16))) local_args_t {
+      uint32_t* dstArray;
+      uint32_t* srcArray;
+      uint32_t size;
+      uint32_t pad;
+      uint64_t global_offset_x;
+      uint64_t global_offset_y;
+      uint64_t global_offset_z;
+      uint64_t printf_buffer;
+      uint64_t default_queue;
+      uint64_t completion_action;
+    } local_args;
+
+    local_args.dstArray = reinterpret_cast<uint32_t*>(local_dst_buffer);
+    local_args.srcArray = reinterpret_cast<uint32_t*>(shared_src_buffer);
+    local_args.size = 256;
+    local_args.global_offset_x = 0;
+    local_args.global_offset_y = 0;
+    local_args.global_offset_z = 0;
+    local_args.printf_buffer = 0;
+    local_args.default_queue = 0;
+    local_args.completion_action = 0;
+
+    void* kernarg_address = nullptr;
+    ASSERT_SUCCESS(
+        hsa_amd_memory_pool_allocate(kern_arg_pool(), sizeof(local_args), 0, &kernarg_address));
+    ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, kernarg_address));
+
+    memcpy(kernarg_address, &local_args, sizeof(local_args));
+
+    // Dispatch more packets than queue size to force overflow and ensure that indices wrap around
+    int it = queue_size + 5;
+
+    for (int i = 0; i < it; i++) {
+      // Reserve a slot in the queue
+      uint64_t index = hsa_queue_add_write_index_relaxed(queue, 1);
+
+      uint64_t curr_max = maxIndexSeen.load();
+      while (index > curr_max && !maxIndexSeen.compare_exchange_weak(curr_max, index)) {
+      }
+
+      // Get pointer to the reserved packet slot using wraparound masking
+      uint64_t wrapped_index = index & queue_mask;
+      hsa_kernel_dispatch_packet_t* queue_aql_packet =
+          &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address))[wrapped_index];
+
+      // Fill packet fields
+      queue_aql_packet->setup = 1;
+      queue_aql_packet->workgroup_size_x = 256;
+      queue_aql_packet->workgroup_size_y = 1;
+      queue_aql_packet->workgroup_size_z = 1;
+      queue_aql_packet->grid_size_x = 256;
+      queue_aql_packet->grid_size_y = 1;
+      queue_aql_packet->grid_size_z = 1;
+      queue_aql_packet->private_segment_size = 0;
+      queue_aql_packet->group_segment_size = 0;
+      queue_aql_packet->kernel_object = kernel_object();
+      queue_aql_packet->kernarg_address = kernarg_address;
+      queue_aql_packet->completion_signal = local_signal;
+
+      // Write header for packet
+      uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+      header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+      header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+      __atomic_store_n(reinterpret_cast<uint16_t*>(&queue_aql_packet->header), header,
+                       __ATOMIC_RELEASE);
+
+      // Ring doorbell to notify GPU
+      hsa_signal_store_screlease(queue->doorbell_signal, index);
+
+      // Wait for completion signal to be less than 1
+      while (hsa_signal_wait_scacquire(local_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                       HSA_WAIT_STATE_ACTIVE)) {
+      }
+
+      // Reset signal for next iteration
+      hsa_signal_store_screlease(local_signal, 1);
+
+      // Verify results are still correct after wraparound
+      ASSERT_TRUE(VerifyResult(reinterpret_cast<uint32_t*>(local_dst_buffer), 256));
+    }
+
+    // Cleanup
+    hsa_amd_memory_pool_free(kernarg_address);
+    hsa_signal_destroy(local_signal);
+    hsa_amd_memory_pool_free(local_dst_buffer);
+
+    // Release the counted queue
+    ASSERT_SUCCESS(hsa_amd_counted_queue_release(queue));
+  };
+
+  constexpr int kThreads = 2;
+  std::vector<std::thread> threads;
+  for (int i = 0; i < kThreads; i++) {
+    threads.emplace_back(func);
+  }
+
+  for (auto& th : threads) {
+    th.join();
+  }
+
+  // Verify value of max seen index
+  uint64_t maxId = maxIndexSeen.load();
+  EXPECT_EQ(maxId, (16384 + 5) * kThreads - 1);
 
   hsa_amd_memory_pool_free(shared_src_buffer);
 }

@@ -557,6 +557,13 @@ TEST(rocrtstFunc, Counted_Queue_Multithreaded_Dispatch_Test) {
   RunCustomTestEpilog(&cq);
 }
 
+TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesOverflowWrapAroundTest();
+  RunCustomTestEpilog(&cq);
+}
+
 TEST(rocrtstNeg, Memory_Negative_Tests) {
   RUN_IF_NOT_EMU_MODE(
     MemoryAllocateNegativeTest mt;

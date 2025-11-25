@@ -40,6 +40,7 @@ class CountedQueuesTest : public TestBase {
   void CountedQueuesSetCUMaskNackTest();
   void CountedQueuesDispatchTest();
   void CountedQueuesMultithreadedDispatchTest();
+  void CountedQueuesOverflowWrapAroundTest();
 
  private:
   void* src_buffer_;
