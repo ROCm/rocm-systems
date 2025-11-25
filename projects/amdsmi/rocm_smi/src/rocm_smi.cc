@@ -7899,7 +7899,7 @@ rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value)
 
 // Internal only helper
 rsmi_status_t
-rsmi_dev_read_ptl_supported(uint32_t dv_ind, char* supported, size_t length){
+rsmi_read_supported_ptl_formats(uint32_t dv_ind, char* supported, size_t length){
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start ======="
