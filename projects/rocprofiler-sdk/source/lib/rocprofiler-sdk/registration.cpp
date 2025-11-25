@@ -743,6 +743,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
         if(itr && itr->internal_client_id.handle == client_id.handle &&
            itr->mutable_client_id.handle == client_id.handle)
         {
+            ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - Stopping contexts for client " << client_id.handle;
             context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)
             {
@@ -750,8 +751,11 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
                 std::swap(_finalize_func, itr->configure_result->finalize);
 
+                ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - Calling async_copy_sync()";
                 hsa::async_copy_sync();
+                ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - Calling queue_controller_sync()";
                 hsa::queue_controller_sync();
+                ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - queue_controller_sync() completed";
                 pc_sampling::service_sync();
 
                 auto _fini_status = get_fini_status();
@@ -879,6 +883,8 @@ initialize()
 void
 finalize()
 {
+    ROCP_ERROR << "[DEBUG] finalize() - ENTRY (fini_status=" << get_fini_status() << ")";
+
 #if defined(CODECOV) && CODECOV > 0
     if(get_fini_status() > 0) __gcov_dump();
 #endif
@@ -886,6 +892,7 @@ finalize()
     if(get_fini_status() != 0)
     {
         ROCP_INFO << "ignoring finalization request (value=" << get_fini_status() << ")";
+        ROCP_ERROR << "[DEBUG] finalize() - Ignoring, already finalized or in progress";
         return;
     }
 
@@ -903,10 +910,16 @@ finalize()
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         auto num_clients = get_num_clients();
+        ROCP_ERROR << "[DEBUG] finalize() - Setting fini_status to -1, num_clients=" << num_clients;
         set_fini_status(-1);
+        ROCP_ERROR << "[DEBUG] finalize() - Calling hsa::async_copy_fini()";
         hsa::async_copy_fini();
+        ROCP_ERROR << "[DEBUG] finalize() - Calling counters::device_counting_service_finalize()";
         counters::device_counting_service_finalize();
+        ROCP_ERROR << "[DEBUG] finalize() - Calling hsa::queue_controller_fini()";
         hsa::queue_controller_fini();
+        ROCP_ERROR << "[DEBUG] finalize() - hsa::queue_controller_fini() completed";
+        ROCP_ERROR << "[DEBUG] finalize() - Calling thread_trace::finalize()";
         thread_trace::finalize();
         ompt::finalize_ompt();
         kfd::finalize();
@@ -923,12 +936,16 @@ finalize()
             invoke_client_finalizers();
         }
         if(num_clients > 0) internal_threading::finalize();
+        ROCP_ERROR << "[DEBUG] finalize() - Setting fini_status to 1 (complete)";
         set_fini_status(1);
+        ROCP_ERROR << "[DEBUG] finalize() - Finalization complete!";
     });
 
 #if defined(CODECOV) && CODECOV > 0
     __gcov_dump();
 #endif
+
+    ROCP_ERROR << "[DEBUG] finalize() - EXIT";
 }
 
 rocprofiler_status_t

@@ -1869,6 +1869,8 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
+    ROCP_ERROR << "[DEBUG] tool_attach() - ENTRY (context_ids_length=" << context_ids_length << ")";
+
     // save the existing config for comparison
     auto original_config = tool::get_config();
 
@@ -2831,16 +2833,22 @@ generate_output(cleanup_mode _cleanup_mode)
 void
 tool_detach(void* /*tool_data*/)
 {
+    ROCP_ERROR << "[DEBUG] tool_detach() - ENTRY";
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
 
     // Flush all buffers (same as tool_fini)
+    ROCP_ERROR << "[DEBUG] tool_detach() - Calling flush()";
     flush();
+    ROCP_ERROR << "[DEBUG] tool_detach() - flush() completed";
 
     // Set process end timestamp for this detachment cycle
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
+    ROCP_ERROR << "[DEBUG] tool_detach() - Calling generate_output()";
     generate_output(cleanup_mode::reset);
+    ROCP_ERROR << "[DEBUG] tool_detach() - generate_output() completed";
+    ROCP_ERROR << "[DEBUG] tool_detach() - EXIT";
 }
 
 void
