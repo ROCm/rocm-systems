@@ -258,6 +258,13 @@ WriteInterceptor(const void* packets,
     if(pkt_count == 0 ||
        (queue.get_notifiers() == 0 && context::get_active_contexts(context_filter).empty()))
     {
+        if(pkt_count > 0 && registration::get_fini_status() != 0)
+        {
+            static std::atomic<size_t> passthrough_count{0};
+            ROCP_ERROR << "[DEBUG] WriteInterceptor passthrough #" << passthrough_count.fetch_add(1)
+                       << " - pkt_count=" << pkt_count
+                       << " during finalization (no active contexts) for Queue " << queue.get_id().handle;
+        }
         writer(packets, pkt_count);
         return;
     }
