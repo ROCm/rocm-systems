@@ -542,8 +542,22 @@ queue_controller_sync()
 void
 queue_controller_fini()
 {
+    ROCP_ERROR << "DEBUG: ENTRY queue_controller_fini()";
+
     if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    {
+        size_t queue_count = 0;
+        get_queue_controller()->iterate_queues([&queue_count](const Queue* _queue) {
+            queue_count++;
+            ROCP_ERROR << fmt::format("DEBUG: queue_controller_fini() syncing queue #{} id={:#x}",
+                                      queue_count, _queue->get_id().handle);
+            _queue->sync();
+        });
+
+        ROCP_ERROR << fmt::format("DEBUG: queue_controller_fini() synced {} queues", queue_count);
+    }
+
+    ROCP_ERROR << "DEBUG: EXIT queue_controller_fini()";
 }
 
 void

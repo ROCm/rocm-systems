@@ -115,10 +115,16 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         return false;
     }
 
+    auto signal_slots_before = get_balanced_signal_slots().load();
     get_balanced_signal_slots().fetch_add(1);
+    auto signal_slots_after = get_balanced_signal_slots().load();
 
     auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
     auto& queue_info_session = *shared_ptr_info;
+
+    ROCP_ERROR << fmt::format("DEBUG: AsyncSignalHandler ENTRY queue_id={:#x} signal_slots: {} -> {} (target={})",
+                              queue_info_session.queue.get_id().handle,
+                              signal_slots_before, signal_slots_after, NUM_SIGNALS);
 
     auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
 
@@ -168,14 +174,26 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     auto* _corr_id = queue_info_session.correlation_id;
     if(_corr_id)
     {
+        auto ref_count_before = _corr_id->get_ref_count();
         ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
             << "reference counter for correlation id " << _corr_id->internal << " from thread "
             << _corr_id->thread_idx << " has no reference count";
         _corr_id->sub_kern_count();
         _corr_id->sub_ref_count();
+        auto ref_count_after = _corr_id->get_ref_count();
+
+        ROCP_ERROR << fmt::format("DEBUG: AsyncSignalHandler correlation_id={} ref_count: {} -> {}",
+                                  _corr_id->internal, ref_count_before, ref_count_after);
     }
 
+    auto active_before = queue_info_session.queue.active_async_packets();
     queue_info_session.queue.async_complete();
+    auto active_after = queue_info_session.queue.active_async_packets();
+
+    ROCP_ERROR << fmt::format("DEBUG: AsyncSignalHandler EXIT queue_id={:#x} active_kernels: {} -> {}",
+                              queue_info_session.queue.get_id().handle,
+                              active_before, active_after);
+
     delete &shared_ptr_info;
 
     return false;
@@ -314,7 +332,12 @@ WriteInterceptor(const void* packets,
             ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
             internal_corr_id);
 
+        auto active_before = queue.active_async_packets();
         queue.async_started();
+        auto active_after = queue.active_async_packets();
+
+        ROCP_ERROR << fmt::format("DEBUG: WriteInterceptor async_started corr_id={} queue_id={:#x} active_kernels: {} -> {}",
+                                  internal_corr_id, queue.get_id().handle, active_before, active_after);
 
         const auto     original_completion_signal = original_packet.completion_signal;
         const bool     existing_completion_signal = (original_completion_signal.handle != 0);
@@ -375,11 +398,16 @@ WriteInterceptor(const void* packets,
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
         // If there is a lot of contention for HSA signals, then schedule out the thread
+        auto signal_slots_before = get_balanced_signal_slots().load();
         if(get_balanced_signal_slots().fetch_sub(1) <= 0)
         {
             sched_yield();
             std::this_thread::sleep_for(std::chrono::nanoseconds(100));
         }
+        auto signal_slots_after = get_balanced_signal_slots().load();
+
+        ROCP_ERROR << fmt::format("DEBUG: WriteInterceptor dispatch_id={} corr_id={} signal_slots: {} -> {}",
+                                  dispatch_id, internal_corr_id, signal_slots_before, signal_slots_after);
 
         // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
         // along with an ID of the client we got the packet from (this will be returned via
@@ -682,16 +710,33 @@ Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
 void
 Queue::sync() const
 {
+    auto active_count = active_async_packets();
+    auto signal_slots = get_balanced_signal_slots().load();
+
+    ROCP_ERROR << fmt::format("DEBUG: ENTRY Queue::sync() queue_id={:#x} active_kernels={} signal_slots={} (expected={})",
+                              get_id().handle, active_count, signal_slots, NUM_SIGNALS);
+
     if(_active_kernels.handle != 0u)
     {
         _core_api.hsa_signal_wait_relaxed_fn(
             _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
     }
+
+    auto active_count_after = active_async_packets();
+    auto signal_slots_after = get_balanced_signal_slots().load();
+    auto incomplete_count = NUM_SIGNALS - signal_slots_after;
+
+    ROCP_ERROR << fmt::format("DEBUG: AFTER_WAIT Queue::sync() queue_id={:#x} active_kernels={} signal_slots={} incomplete={}",
+                              get_id().handle, active_count_after, signal_slots_after, incomplete_count);
+
     // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
     // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()
     // should be equivalent to NUM_SIGNALS if all kernel dispatches are completed
     ROCP_CI_LOG_IF(WARNING, get_balanced_signal_slots().load() != NUM_SIGNALS) << fmt::format(
         "There are {} incomplete dispatches", NUM_SIGNALS - get_balanced_signal_slots().load());
+
+    ROCP_ERROR << fmt::format("DEBUG: EXIT Queue::sync() queue_id={:#x} status={}",
+                              get_id().handle, (signal_slots_after == NUM_SIGNALS ? "OK" : "INCOMPLETE"));
 }
 
 void
