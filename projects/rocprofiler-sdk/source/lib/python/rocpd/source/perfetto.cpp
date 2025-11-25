@@ -572,12 +572,11 @@ write_perfetto(
                     kernel_groups[group_index].push_back({it, (it->start + it->end) / 2});
                 }
 
-                for(auto group_it = begin(kernel_groups); group_it != end(kernel_groups);
-                    ++group_it)
+                for(auto& kernel_group : kernel_groups)
                 {
                     // Sort dispatches within the group by timestamp to ensure proper temporal
                     // ordering.
-                    auto& group_data = group_it->second;
+                    auto& group_data = kernel_group.second;
                     std::sort(begin(group_data),
                               end(group_data),
                               [&](const kernel_dispatch_data& a, const kernel_dispatch_data& b) {
@@ -636,10 +635,8 @@ write_perfetto(
                 }
             }
 
-            for(auto it = begin(gen); it != end(gen); ++it)
+            for(auto& current : gen)
             {
-                auto& current = *it;
-
                 ::perfetto::Track* _track    = nullptr;
                 auto               agent_id  = current.agent_abs_index;
                 auto               queue_id  = rocprofiler_queue_id_t{.handle = current.queue_id};

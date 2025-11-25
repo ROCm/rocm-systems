@@ -130,28 +130,59 @@ def create_df_kernel_top_stats(
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
 
     # First, create a dispatches file used to populate global vars
-    dispatch_columns = (
-        ["Node", "Dispatch_ID", "Kernel_Name", "GPU_ID"]
-        if "Node" in df.columns
-        else ["Dispatch_ID", "Kernel_Name", "GPU_ID"]
-    )
+    dispatch_columns = ["Kernel_Name", "GPU_ID"]
+    if "Dispatch_ID" in df.columns:
+        dispatch_columns.insert(0, "Dispatch_ID")
+    if "Node" in df.columns:
+        dispatch_columns.insert(0, "Node")
+
     dispatch_info = df[dispatch_columns]
     dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
     dispatch_info.to_csv(dispatch_output_path, index=False)
 
-    # Calculate execution times
-    execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
-    time_stats = pd.DataFrame({
-        "Kernel_Name": df["Kernel_Name"],
-        "ExeTime": execution_times,
-    })
+    if "Dispatch_ID" in df.columns:
+        # Calculate execution times
+        execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
+        time_stats = pd.DataFrame({
+            "Kernel_Name": df["Kernel_Name"],
+            "ExeTime": execution_times,
+        })
 
-    grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
-        "count",
-        "sum",
-        "mean",
-        "median",
-    ])
+        grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
+            "count",
+            "sum",
+            "mean",
+            "median",
+        ])
+    else:
+        time_stats = pd.DataFrame({
+            "Kernel_Name": df["Kernel_Name"],
+            "count": df["Count"],
+            "sum": df["Mean_Time"] * df["Count"],
+            "mean": df["Mean_Time"],
+            "median": df["Median_Time"],
+        })
+
+        result_data: list[dict[str, Any]] = []
+        for _, group in time_stats.groupby("Kernel_Name"):
+            row: dict[str, Any] = {}
+
+            row["Kernel_Name"] = group["Kernel_Name"].iloc[0]
+            row["count"] = group["count"].sum()
+            row["sum"] = group["sum"].sum()
+            row["mean"] = row["sum"] / row["count"]
+
+            sorted_data_by_mean = group.sort_values("mean")
+            sorted_data_by_mean["count_cumsum"] = sorted_data_by_mean["count"].cumsum()
+            median_threshold = row["count"] / 2
+            median_value = sorted_data_by_mean.loc[
+                sorted_data_by_mean["count_cumsum"] >= median_threshold, "median"
+            ].iloc[0]
+            row["median"] = median_value
+
+            result_data.append(row)
+
+        grouped = pd.DataFrame(result_data)
 
     # Rename columns with time unit
     time_unit_suffix = f"({time_unit})"
@@ -172,7 +203,8 @@ def create_df_kernel_top_stats(
     ]:
         grouped[col] = grouped[col] / time_divisor
 
-    grouped = grouped.reset_index()
+    if "Dispatch_ID" in df.columns:
+        grouped = grouped.reset_index()
 
     # Calculate percentage
     sum_column = f"Sum{time_unit_suffix}"

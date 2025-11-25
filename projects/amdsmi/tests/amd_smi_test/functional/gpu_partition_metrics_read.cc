@@ -83,6 +83,43 @@ void TestGpuPartitionMetricsRead::Run(void) {
         std::cout << "\n\n";
         std::cout << "\t**GPU PARTITION METRICS: Using static struct (Backwards Compatibility):\n";
     }
+
+    // Test if xcp_metrics causes kernel crash
+    pid_t test_pid = fork();
+    if (test_pid == 0) {
+      // Child: try reading xcp_metrics
+      amdsmi_gpu_metrics_t test_smu = {};
+      amdsmi_get_gpu_partition_metrics_info(processor_handles_[i], &test_smu);
+      _exit(0);
+    }
+    if (test_pid < 0) {
+      FAIL() << "Fork failed";
+    }
+
+    // Parent: wait for child (3 second timeout: 30 iterations × 100ms)
+    constexpr int MAX_WAIT_RETRIES = 30;
+    constexpr int WAIT_INTERVAL_US = 100000; // 100ms in microseconds
+    int status;
+    bool child_exited = false;
+    for (int retry = 0; retry < MAX_WAIT_RETRIES; retry++) {
+      if (waitpid(test_pid, &status, WNOHANG) > 0) {
+        child_exited = true;
+        if (WIFSIGNALED(status)) {
+          // Child process terminated by signal - fail the test
+          FAIL() << "FAILED: Child process terminated by signal (signal " << WTERMSIG(status) << ")";
+        }
+        break;
+      }
+      usleep(WAIT_INTERVAL_US);
+    }
+
+    // Handle timeout - child still running after 3 seconds
+    if (!child_exited) {
+      kill(test_pid, SIGKILL);
+      waitpid(test_pid, &status, 0);  // Clean up zombie process
+      FAIL() << "FAILED: Timeout waiting for child process (hung for 3+ seconds)";
+    }
+
     amdsmi_gpu_metrics_t smu = {};
     err =  amdsmi_get_gpu_partition_metrics_info(processor_handles_[i], &smu);
     const char *status_string;

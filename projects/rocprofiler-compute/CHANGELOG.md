@@ -6,28 +6,65 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Add `--list-blocks <arch>` option to general options to list available IP blocks on specified arch (similar to `--list-metrics`), cannot be used with `--block`.
+* Native tool to perform counter collection using ROCprofiler-SDK public API. It is only supported for ROCm version 7.0.0 (and later).
+  * Native tool is now the default for counter collection.
+  * Native tool for counter collection will not be used under the following conditions:
+    * Specific profiler is provided through the ``ROCPROF`` environment variable.
+    * ``--no-native-tool`` option is provided, forcing usage of the default profiler.
+    * When performing a dynamic attach to a process for profiling.
 
-* Added `config_delta/gfx950_diff.yaml` to analysis config yamls to track the revision between a gfx9 architecture against the latest supported architecture gfx950
+* Iteration multiplexing to collect counters in single application run:
+  * Is incompatible with --no-native-tool
+  * Two options:
+    * kernel: Counters are collected in a round robin fashion for unique kernels.
+    * kernel_launch_params: Counters are collected in a round robin fashion for unique kernels having the exact same launch parameters.
 
-* Analysis db features
-  * Add support for per kernel metrics analysis.
-  * Add support for dispatch timeline analysis.
-  * Show duration as median in addition to mean in kernel view.
+* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
 
 ### Changed
 
-* `-b/--block` accepts block alias(es) (See block aliases using command-line option `--list-blocks <arch>`).
+* Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
+  * If the ROCprofiler-SDK ``rocpd`` public library is not available, will fall back to ``csv`` format
 
-* analysis configs yamls are now managed with the new config management workflow in `tools/config_management/`
+* Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-tool-library-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool and not the library.
+
+### Resolved issues
+
+* Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations of the kernel to profile and not which dispatch ids to profile.
+
+* The meaning of --dispatch option in analyze is still the same which is which dispatch ids to analyze
+
+* Fix the functioning of --dispatch option to act as 1-based index and ensure that correct kernel iterations are being profiled
+
+* Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
+
+## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
+
+### Added
+
+* `--list-blocks <arch>` option to general options. It lists the available IP blocks on the specified arch (similar to `--list-metrics`), however cannot be used with `--block`.
+
+* `config_delta/gfx950_diff.yaml` to analysis config YAMLs to track the revision between the gfx9xx GPUs against the latest supported gfx950 GPUs.
+
+* Analysis db features
+  * Adds support for per kernel metrics analysis.
+  * Adds support for dispatch timeline analysis.
+  * Shows duration as median in addition to mean in kernel view.
+
+### Changed
+
+* `-b/--block` accepts block alias(es). See block aliases using command-line option `--list-blocks <arch>`.
+
+* Analysis configs YAMLs are now managed with the new config management workflow in `tools/config_management/`.
 
 * `amdsmi` python API is used instead of `amd-smi` CLI to query GPU specifications.
 
+* Empty cells replaced with `N/A` for unavailable metrics in analysis.
+
 
 ### Removed
-* Removed `database` mode from `rocprofiler-compute`. This is to move our focus from grafana
-  and mongodb integration to other visualization methods such as:
-  * Analysis DB based Visualizer (upcoming)
+
+* Removed `database` mode from ROCm Compute Profiler in favor of other visualization methods, rather than Grafana and MongoDB integration, such as the upcoming Analysis DB-based Visualizer.
   * Plotly server based standalone GUI
   * Commandline based Textual User Interface
 
@@ -63,7 +100,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
 
 ### Resolved issues
-
 * Bugfixes for stability
 
 ## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
@@ -221,7 +257,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * A workaround has been implemented using max(0, calculated_value) to prevent negative display values while the root cause is under investigation.
 
 * The profile mode crashes when `--format-rocprof-output json` is selected.
-  * As a workaround, this option should either not be provided or should be set to `csv` instead of `json`. This issue does not affect the profiling results since both `csv` and `json` output formats lead to the same profiling data.  
+  * As a workaround, this option should either not be provided or should be set to `csv` instead of `json`. This issue does not affect the profiling results since both `csv` and `json` output formats lead to the same profiling data.
 
 ### Upcoming changes
 
