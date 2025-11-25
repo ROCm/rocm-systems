@@ -66,6 +66,13 @@ struct EventRequest : public aqlprofile_pmc_event_t {
   }
 };
 
+struct MemoryDeleter
+{
+    aqlprofile_memory_dealloc_callback_t free_fn;
+    void* userdata;
+    void operator()(void* ptr) const { if (ptr && free_fn) free_fn(ptr, userdata); };
+};
+
 class MemoryManager {
  public:
   MemoryManager(hsa_agent_t agent, aqlprofile_memory_alloc_callback_t alloc,
@@ -129,14 +136,6 @@ class MemoryManager {
   }
 
  protected:
-  struct MemoryDeleter {
-    aqlprofile_memory_dealloc_callback_t free_fn;
-    void* userdata;
-    void operator()(void* ptr) const {
-      if (ptr && free_fn) free_fn(ptr, userdata);
-    };
-  };
-
   std::unique_ptr<void, MemoryDeleter> AllocMemory(size_t size,
                                                    aqlprofile_buffer_desc_flags_t flags) const {
     void* ptr;
@@ -279,4 +278,21 @@ class CodeobjMemoryManager : public MemoryManager {
 
   void CreateOutputBuf(size_t size) override{};
   std::unique_ptr<void, MemoryDeleter> cmd_buffer;
+};
+
+class SPMMemoryManager : public MemoryManager {
+ public:
+  SPMMemoryManager(aqlprofile_agent_handle_t aql_agent, hsa_agent_t hsa_agent,
+                   aqlprofile_memory_alloc_callback_t alloc,
+                   aqlprofile_memory_dealloc_callback_t dealloc, void* data)
+      : MemoryManager(agent, alloc, dealloc, data) { this->agent_handle = aql_agent; }
+
+  void CreateOutputBuf(size_t size) override {
+    aqlprofile_buffer_desc_flags_t flags{};
+    flags.host_access = true;  // flags.device_access = true;
+    this->outputbuf = AllocMemory(size, flags);
+    outputbuf_size = size;
+  }
+
+  pm4_builder::TraceConfig config{};
 };

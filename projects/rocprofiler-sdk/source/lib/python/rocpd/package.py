@@ -26,7 +26,6 @@
 import os
 import shutil
 import datetime
-import yaml
 import argparse
 from . import output_config
 
@@ -96,37 +95,45 @@ def flatten_rocpd_yaml_input_file(input, **kwargs) -> list:
         Returns:
             list: Expanded list of database file paths.
         """
-        with open(yaml_path, "r") as f:
-            meta = yaml.safe_load(f)
-            rocpd_meta = meta.get("rocprofiler-sdk", {}).get("rocpd", {})
+        try:
+            import yaml
 
-            # Check version compatibility
-            version = rocpd_meta.get(rocpd_metadata_param_version, "0")
-            if version < rocpd_package_version:
-                print(
-                    f"Warning: {yaml_path} is using an outdated version of rocpd package ({version})."
+            with open(yaml_path, "r") as f:
+                meta = yaml.safe_load(f)
+                rocpd_meta = meta.get("rocprofiler-sdk", {}).get("rocpd", {})
+
+                # Check version compatibility
+                version = rocpd_meta.get(rocpd_metadata_param_version, "0")
+                if version < rocpd_package_version:
+                    print(
+                        f"Warning: {yaml_path} is using an outdated version of rocpd package ({version})."
+                    )
+
+                # Determine working directory for relative paths
+                cwd = (
+                    base_dir
+                    if base_dir is not None
+                    else rocpd_meta.get("path", os.getcwd())
                 )
 
-            # Determine working directory for relative paths
-            cwd = (
-                base_dir if base_dir is not None else rocpd_meta.get("path", os.getcwd())
-            )
+                # Get database file list from YAML
+                dbs = rocpd_meta.get("files", [])
+                if isinstance(dbs, str):
+                    dbs = [dbs]
 
-            # Get database file list from YAML
-            dbs = rocpd_meta.get("files", [])
-            if isinstance(dbs, str):
-                dbs = [dbs]
+                # Expand each database path (handle wildcards and relative paths)
+                files = []
+                for db in dbs:
+                    db_path = os.path.join(cwd, db) if not os.path.isabs(db) else db
+                    if _contains_wildcard(db_path):
+                        files.extend(glob.glob(db_path))
+                    else:
+                        files.append(db_path)
 
-            # Expand each database path (handle wildcards and relative paths)
-            files = []
-            for db in dbs:
-                db_path = os.path.join(cwd, db) if not os.path.isabs(db) else db
-                if _contains_wildcard(db_path):
-                    files.extend(glob.glob(db_path))
-                else:
-                    files.append(db_path)
-
-            return files
+                return files
+        except Exception as e:
+            print(f"Error: {e}")
+            return None
 
     def _contains_wildcard(path):
         """Check if path contains wildcard characters."""
@@ -354,31 +361,38 @@ def create_metadata_file(db_files, output_path=".", metadata_filename="index.yam
     Returns:
         str: Path to the created metadata file.
     """
-    # Ensure output directory exists
-    os.makedirs(output_path, exist_ok=True)
+    try:
+        import yaml
 
-    # Compute relative paths
-    rel_paths = [os.path.relpath(db_file, output_path) for db_file in db_files]
+        # Ensure output directory exists
+        os.makedirs(output_path, exist_ok=True)
 
-    # Compose the YAML structure
-    metadata = {
-        "rocprofiler-sdk": {
-            "rocpd": {
-                rocpd_metadata_param_version: rocpd_package_version,
-                # "source": "rocprofv3",  # omitting source, not sure why we need this, and how we determine the source as rocprof-sys, for example.
-                "path": ".",
-                "files": (
-                    rel_paths
-                    if len(rel_paths) > 1
-                    else (rel_paths[0] if rel_paths else "")
-                ),
+        # Compute relative paths
+        rel_paths = [os.path.relpath(db_file, output_path) for db_file in db_files]
+
+        # Compose the YAML structure
+        metadata = {
+            "rocprofiler-sdk": {
+                "rocpd": {
+                    rocpd_metadata_param_version: rocpd_package_version,
+                    # "source": "rocprofv3",  # omitting source, not sure why we need this, and how we determine the source as rocprof-sys, for example.
+                    "path": ".",
+                    "files": (
+                        rel_paths
+                        if len(rel_paths) > 1
+                        else (rel_paths[0] if rel_paths else "")
+                    ),
+                }
             }
         }
-    }
 
-    metadata_path = os.path.join(output_path, metadata_filename)
-    with open(metadata_path, "w") as f:
-        yaml.safe_dump(metadata, f, default_flow_style=False)
+        metadata_path = os.path.join(output_path, metadata_filename)
+        with open(metadata_path, "w") as f:
+            yaml.safe_dump(metadata, f, default_flow_style=False)
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
 
     return metadata_path
 
