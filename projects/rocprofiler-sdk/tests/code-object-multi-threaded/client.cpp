@@ -67,9 +67,6 @@ codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                          rocprofiler_user_data_t*              /* user_data */,
                          void*                                 /* callback_data */)
 {
-    (void) user_data;
-    (void) callback_data;
-
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
 
     // Track thread activity
@@ -105,8 +102,6 @@ codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 void
 tool_fini(void* /* tool_data */)
 {
-    (void) tool_data;
-
     std::cout << "\n=== ROCProfiler Multi-Threaded Code Object Test Results ===\n";
     std::cout << "Code objects loaded:        " << g_code_object_load_count.load() << "\n";
     std::cout << "Code objects unloaded:      " << g_code_object_unload_count.load() << "\n";
@@ -199,10 +194,6 @@ rocprofiler_configure(uint32_t                 /* version */,
 {
     id->name  = "CodeObjectMultiThreadedClient";
     client_id = id;
-
-    (void) version;
-    (void) runtime_version;
-    (void) priority;
 
     static auto cfg = rocprofiler_tool_configure_result_t{
         sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, nullptr};
