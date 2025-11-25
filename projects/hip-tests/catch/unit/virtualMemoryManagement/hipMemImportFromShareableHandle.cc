@@ -576,8 +576,9 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Capture") {
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle, &shareable_handle,
-                                            hipMemHandleTypePosixFileDescriptor));
+  HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
+            hipMemHandleTypePosixFileDescriptor));
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));

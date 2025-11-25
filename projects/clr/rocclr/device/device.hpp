@@ -569,6 +569,8 @@ struct Info : public amd::EmbeddedObject {
   uint32_t localMemSizePerCU_;
   //! Number of banks of local memory
   uint32_t localMemBanks_;
+  //! LDS alignment
+  uint32_t ldsAlignment_;
   //! Number of available async queues
   uint32_t numAsyncQueues_;
   //! Number of available real time queues
@@ -1081,9 +1083,6 @@ class ClBinary : public amd::HeapObject {
                       amd::Elf::ElfSections& elfSectionType  //!< LLVMIR binary is in SPIR format
   ) const;
 
-  //! Check if the binary is recompilable
-  bool isRecompilable(std::string& llvmBinary, amd::Elf::ElfPlatform thePlatform);
-
   void saveOrigBinary(const char* origBinary, size_t origSize) {
     origBinary_ = origBinary;
     origSize_ = origSize;
@@ -1453,9 +1452,6 @@ class Isa {
   /// @returns This Isa's target ID name.
   const char* targetId() const { return targetId_; }
 
-  /// @returns This Isa's name to use with the HSAIL compiler.
-  const char* hsailName() const { return hsailId_; }
-
   /// @returns If the ROCm runtime supports the ISA.
   bool runtimeRocSupported() const {
     if (!IS_HIP && (versionMajor_ == 8)) {
@@ -1511,6 +1507,9 @@ class Isa {
   /// @returns This Isa's number of banks of local memory.
   uint32_t localMemBanks() const { return localMemBanks_; }
 
+  /// @returns This Isa's LDS alignment
+  uint32_t ldsAlignment() const { return ldsAlignment_; }
+
   /// @returns True if @p codeObjectIsa and @p agentIsa are compatible,
   /// false otherwise.
   static bool isCompatible(const Isa& codeObjectIsa, const Isa& agentIsa);
@@ -1529,13 +1528,12 @@ class Isa {
   static const Isa* end();
 
  private:
-  constexpr Isa(const char* targetId, const char* hsailId, bool runtimeRocSupported,
-                bool runtimePalSupported, uint32_t versionMajor, uint32_t versionMinor,
-                uint32_t versionStepping, Feature sramecc, Feature xnack, uint32_t simdPerCU,
-                uint32_t simdWidth, uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
-                uint32_t localMemSizePerCU, uint32_t localMemBanks)
+  constexpr Isa(const char* targetId, bool runtimeRocSupported, bool runtimePalSupported,
+                uint32_t versionMajor, uint32_t versionMinor, uint32_t versionStepping,
+                Feature sramecc, Feature xnack, uint32_t simdPerCU, uint32_t simdWidth,
+                uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
+                uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment)
       : targetId_(targetId),
-        hsailId_(hsailId),
         runtimeRocSupported_(runtimeRocSupported),
         runtimePalSupported_(runtimePalSupported),
         versionMajor_(versionMajor),
@@ -1548,7 +1546,8 @@ class Isa {
         simdInstructionWidth_(simdInstructionWidth),
         memChannelBankWidth_(memChannelBankWidth),
         localMemSizePerCU_(localMemSizePerCU),
-        localMemBanks_(localMemBanks) {}
+        localMemBanks_(localMemBanks),
+        ldsAlignment_(ldsAlignment) {}
 
   // @brief Returns the begin and end iterators for the suppported ISAs.
   static std::pair<const Isa*, const Isa*> supportedIsas();
@@ -1556,11 +1555,6 @@ class Isa {
   // @brief Isa's target ID name. Used for LLVM COde Object Manager
   // compilations.
   const char* targetId_;
-
-  // @brief Isa's HSAIL name. Used for the Compiler Library for HSAIL
-  // compilation using the Shader Compiler Finalizer. Empty string if
-  // unsupported.
-  const char* hsailId_;
 
   bool runtimeRocSupported_;       //!< ROCm runtime is supported.
   bool runtimePalSupported_;       //!< PAL runtime is supported.
@@ -1575,6 +1569,7 @@ class Isa {
   uint32_t memChannelBankWidth_;   //!< Memory channel bank width.
   uint32_t localMemSizePerCU_;     //!< Local memory size per CU.
   uint32_t localMemBanks_;         //!< Number of banks of local memory.
+  uint32_t ldsAlignment_;          //!< LDS alignment.
 };  // class Isa
 
 /*! \addtogroup Runtime
@@ -1819,7 +1814,8 @@ class Device : public RuntimeObject {
       uint32_t pseudo_fine_grain_ : 1; //!< True if pseudo fine grain memory is required
       uint32_t contiguous_ : 1;        //!< True if contiguous memory allocation is required
       uint32_t executable_ : 1;        //!< True if executable memory is required
-      uint32_t reserved_ : 28;         //!< Reserved for future use
+      uint32_t uncached_ : 1;          //!< True if uncached memory is required
+      uint32_t reserved_ : 27;         //!< Reserved for future use
     };
     uint32_t data_;
   } AllocationFlags;

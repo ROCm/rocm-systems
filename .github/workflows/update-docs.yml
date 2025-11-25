@@ -62,7 +62,6 @@ jobs:
         run: |
           branch_name="${GITHUB_REF#refs/heads/}"
           version_slug="${branch_name//\//-}"
-
           echo "Target github branch: $branch_name"
           echo "Read the Docs version slug: $version_slug"
 
@@ -76,7 +75,23 @@ jobs:
           for project in $changed_projects; do
             slug="advanced-micro-devices-$project"
             if echo "$project_list" | grep -Fxq "$slug"; then
-              echo "Triggering RTD build for $project"
+              latest_branch=$(curl -s \
+                  -H "Authorization: Token $RTD_TOKEN" \
+                  "https://app.readthedocs.com/api/v3/projects/$slug/" \
+                  | jq -r ".default_branch" \
+                  | tr -d '[:space:]')
+              echo "Latest branch for $project: $latest_branch"
+              if [ "$branch_name" = "$latest_branch" ]; then
+                echo "Detected latest release branch, trigger builds for 'latest' version"
+                response=$(curl -f -s -X POST \
+                      -H "Authorization: Token $RTD_TOKEN" \
+                      "https://readthedocs.com/api/v3/projects/$slug/versions/latest/builds/") || {
+                      echo "Failed to trigger RTD build for $project. Response: $response"
+                      exit 1
+                    }
+                echo "Successfully triggered RTD build for $project 'latest' version. Response: $response"
+              fi
+              echo "Triggering RTD build for $project, version: $version_slug"
               response=$(curl -f -s -X POST \
                   -H "Authorization: Token $RTD_TOKEN" \
                   "https://readthedocs.com/api/v3/projects/$slug/versions/$version_slug/builds/") || {

@@ -676,6 +676,7 @@ api_map = {
   'hipMemcpy3DAsync': '',
   'hipMemcpyParam2DAsync': '',
   'hipArray3DCreate': '',
+  'hipOccupancyAvailableDynamicSMemPerBlock': '',
   'hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags': '',
   'hipOccupancyMaxPotentialBlockSize': '',
   'hipMallocManaged': '',

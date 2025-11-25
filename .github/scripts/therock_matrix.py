@@ -6,11 +6,16 @@ subtree_to_project_map = {
     'projects/clr': 'core', 
     'projects/hip': 'core', 
     'projects/hip-tests': 'core', 
+    'projects/hipother': 'core', 
+    'projects/rdc': 'rdc', 
+    'projects/rocm-core': 'core', 
+    'projects/rocm-smi-lib': 'core', 
     'projects/rocminfo': 'core', 
-    'projects/rocprofiler': 'profiler', 
     'projects/rocprofiler-compute': 'profiler', 
+    'projects/rocprofiler-register': 'profiler', 
     'projects/rocprofiler-sdk': 'profiler', 
     'projects/rocprofiler-systems': 'profiler', 
+    'projects/rocprofiler': 'profiler', 
     'projects/rocr-runtime': 'core', 
     'projects/roctracer': 'profiler'
 }
@@ -24,4 +29,8 @@ project_map = {
         "cmake_options": "-DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "rocprofiler-tests",
     },
+    "all": {
+        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "project_to_test": "hip-tests, rocprofiler-tests",
+    }
 }

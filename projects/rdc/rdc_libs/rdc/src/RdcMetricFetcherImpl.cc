@@ -87,7 +87,10 @@ RdcMetricFetcherImpl::~RdcMetricFetcherImpl() {
 }
 
 uint64_t RdcMetricFetcherImpl::now() {
+  // WHY does clang-format like to randomly add space after tv and then randomly remove it?
+  // clang-format off
   struct timeval tv {};
+  // clang-format on
   gettimeofday(&tv, nullptr);
   return static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 }
@@ -592,12 +595,46 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_COUNT: {
+      uint32_t gpu_count = 0;
       uint32_t socket_count = 0;
+      std::vector<amdsmi_socket_handle> socket_handles;
       value->status = amdsmi_get_socket_handles(&socket_count, nullptr);
       value->type = INTEGER;
-      if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(socket_count);
+      if (value->status != AMDSMI_STATUS_SUCCESS) {
+        break;
       }
+      socket_handles.resize(socket_count);
+      value->status = amdsmi_get_socket_handles(&socket_count, socket_handles.data());
+      if (value->status != AMDSMI_STATUS_SUCCESS) {
+        break;
+      }
+      for (uint32_t i = 0; i < socket_count; i++) {
+        uint32_t proc_count = 0;
+        amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
+        status = amdsmi_get_processor_handles(socket_handles[i], &proc_count, nullptr);
+        if ((status != AMDSMI_STATUS_SUCCESS) || (proc_count < 1)) {
+          continue;
+        }
+        // only need to check the first processor in socket.
+        // sockets don't mix CPUs and GPUs.. I hope.
+        proc_count = 1;
+        amdsmi_processor_handle proc = nullptr;
+        status = amdsmi_get_processor_handles(socket_handles[i], &proc_count, &proc);
+        if ((status != AMDSMI_STATUS_SUCCESS) || (proc_count < 1)) {
+          continue;
+        }
+        processor_type_t proc_type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
+        status = amdsmi_get_processor_type(proc, &proc_type);
+        if (status != AMDSMI_STATUS_SUCCESS) {
+          continue;
+        }
+        // only count AMD GPUs
+        // only count 1 GPU per socket
+        if (proc_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+          gpu_count++;
+        }
+      }
+      value->value.l_int = static_cast<int64_t>(gpu_count);
     } break;
     case RDC_FI_GPU_PARTITION_COUNT: {
       uint32_t partition_count = 0;

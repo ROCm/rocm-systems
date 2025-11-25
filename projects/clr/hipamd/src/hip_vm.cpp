@@ -388,10 +388,6 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
     if (accessLocationType != hipMemLocationTypeDevice && accessLocationType != hipMemLocationTypeHost) {
       HIP_RETURN(hipErrorInvalidValue);
     }
-    if (accessLocationType == hipMemLocationTypeHost &&
-        memLocationType != hipMemLocationTypeHost) {
-      HIP_RETURN(hipErrorInvalidValue)
-    }
 
     if (desc[desc_idx].location.id >= g_devices.size()) {
       HIP_RETURN(hipErrorInvalidValue)

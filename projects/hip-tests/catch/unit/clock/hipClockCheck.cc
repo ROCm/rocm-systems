@@ -57,12 +57,8 @@ bool verify_time_execution(float ratio, float time1, float time2, float expected
                            float expected_time2) {
   bool test_status = false;
 
-#if (HT_WIN == 1)
-  if (time1 > ratio * expected_time1 && time2 > ratio * expected_time2) {
-#else
   if (fabs(time1 - expected_time1) < (ratio * expected_time1) &&
       fabs(time2 - expected_time2) < (ratio * expected_time2)) {
-#endif
     INFO("Succeeded: Expected Vs Actual: Kernel1 - " << expected_time1 << " Vs " << time1
                                                      << ", Kernel2 - " << expected_time2 << " Vs "
                                                      << time2);
@@ -106,11 +102,7 @@ bool kernel_time_execution(void (*kernel)(int, uint64_t), int clock_rate, uint64
   HIP_CHECK(hipEventDestroy(start_event2));
   HIP_CHECK(hipEventDestroy(end_event2));
 
-#if HT_WIN == 1
-  float ratio = 1.0f;
-#else
   float ratio = kernel == kernel_wc64 ? 0.01 : 0.5;
-#endif
 
   return verify_time_execution(ratio, time1, time2, expected_time1, expected_time2);
 }

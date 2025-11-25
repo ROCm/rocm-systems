@@ -653,14 +653,47 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
       if (it != batch.nodeToRangeIndex.end()) {
         // Found the batch containing this node - update packets
         PacketBatch::NodeRange& range = batch.nodeRanges[it->second];
-
         // Capture new packets for this node
         std::vector<uint8_t*> newPackets;
         std::vector<std::string> newKernelNames;
-        hipError_t status =
-            node->CaptureAndFormPacket(kernArgManager_, &newPackets, &newKernelNames);
+        hipError_t status = node->CaptureAndFormPacket(kernArgManager_, &newPackets,
+                                                                        &newKernelNames);
         if (status != hipSuccess) {
           return status;
+        }
+        // Number of packets per node can change
+        if (newPackets.size() != range.packetCount) {
+          size_t rangeIdx = it->second;
+          size_t oldPacketCount = range.packetCount;
+          size_t newPacketCount = newPackets.size();
+          int64_t packetDelta = static_cast<int64_t>(newPacketCount) -
+                                static_cast<int64_t>(oldPacketCount);
+          ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+                  "[hipGraph] Handling packet count change for node (type=%d): %zu -> %zu packets",
+                  node->GetType(), oldPacketCount, newPacketCount);
+          if (packetDelta > 0) {
+            // Need to insert additional packets
+            // Insert new slots at the end of this node's range
+            size_t insertPos = range.startIndex + oldPacketCount;
+            batch.dispatchPackets.insert(batch.dispatchPackets.begin() + insertPos,
+                                        packetDelta, nullptr);
+            batch.dispatchKernelNames.insert(batch.dispatchKernelNames.begin() + insertPos,
+                                            packetDelta, std::string());
+          } else if (packetDelta < 0) {
+            // Need to remove packets
+            size_t removePos = range.startIndex + newPacketCount;
+            size_t removeCount = std::abs(packetDelta);
+            batch.dispatchPackets.erase(batch.dispatchPackets.begin() + removePos,
+                                        batch.dispatchPackets.begin() + removePos + removeCount);
+            batch.dispatchKernelNames.erase(batch.dispatchKernelNames.begin() + removePos,
+                                    batch.dispatchKernelNames.begin() + removePos + removeCount);
+          }
+          // Update this node's packet count
+          range.packetCount = newPacketCount;
+          // Adjust startIndex for all subsequent nodes in this batch
+          for (size_t i = rangeIdx + 1; i < batch.nodeRanges.size(); ++i) {
+            batch.nodeRanges[i].startIndex += packetDelta;
+          }
         }
         // Update dispatch packets (always update regardless of enabled state)
         // The enabled/disabled check happens during dispatch, not here
@@ -679,7 +712,8 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
 }
 
 // ================================================================================================
-hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
+hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node,
+                                                              bool isEnabled) {
   if (max_streams_ != 1 && max_streams_dev_.size() == 1 && !node->GraphCaptureEnabled()) {
     // Only handle single stream and single device case with captured nodes
     return hipSuccess;

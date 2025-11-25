@@ -1702,7 +1702,6 @@ Program::file_type_t Program::getNextCompilationStageFromBinary(amd::option::Opt
     bool recompile = false;
     //! @todo Should we also check for ACL_TYPE_OPENCL & ACL_TYPE_LLVMIR_TEXT?
     switch (continueCompileFrom) {
-      case FILE_TYPE_HSAIL_BINARY:
       case FILE_TYPE_CG:
       case FILE_TYPE_ISA: {
         // Compare options loaded from binary with current ones, recompile if differ;

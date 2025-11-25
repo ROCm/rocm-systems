@@ -31,35 +31,6 @@ namespace perf
 {
 namespace units = ::tim::units;
 
-std::vector<std::string>
-get_config_choices()
-{
-    namespace regex_const = ::std::regex_constants;
-
-    auto       _data        = std::vector<std::string>{};
-    auto       _papi_events = tim::papi::available_events_info();
-    const auto _prefix      = std::string_view{ "perf::" };
-    auto       _regex =
-        std::regex{ "^(perf::|)PERF_COUNT_(HW|SW|HW_CACHE)_([A-Z_]+)(|:[A-Z]+)$",
-                    regex_const::optimize };
-
-    for(const auto& itr : _papi_events)
-    {
-        if(std::regex_match(itr.symbol(), _regex))
-        {
-            auto _symbol = itr.symbol();
-            auto _pos    = _symbol.find(_prefix);
-            if(_pos == 0) _symbol = _symbol.substr(_prefix.length());
-            _data.emplace_back(_symbol);
-        }
-    }
-
-    std::sort(_data.begin(), _data.end());
-    _data.erase(std::unique(_data.begin(), _data.end()), _data.end());
-
-    return _data;
-}
-
 event_type
 get_event_type(std::string_view _v)
 {

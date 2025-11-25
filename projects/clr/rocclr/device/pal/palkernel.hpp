@@ -84,9 +84,6 @@ class Kernel : public device::Kernel {
   //! Returns LDS size used in this kernel
   uint32_t ldsSize() const { return WorkgroupGroupSegmentByteSize(); }
 
-  //! Returns pointer on CPU to AQL code info
-  const amd_kernel_code_t* cpuAqlCode() const { return &akc_; }
-
   //! Returns pointer on CPU to AQL kernel descriptor info
   const llvm::amdhsa::kernel_descriptor_t* cpuAqlKd() const { return &akd_; }
 
@@ -104,15 +101,14 @@ class Kernel : public device::Kernel {
 
   //! Returns AQL packet in CPU memory
   //! if the kernel arguments were successfully loaded, otherwise NULL
-  hsa_kernel_dispatch_packet_t* loadArguments(
-      VirtualGPU& gpu,                     //!< Running GPU context
-      const amd::Kernel& kernel,           //!< AMD kernel object
-      const amd::NDRangeContainer& sizes,  //!< NDrange container
-      const_address params,                //!< Application arguments for the kernel
-      size_t ldsAddress,                   //!< LDS address that includes all arguments.
-      uint64_t vmDefQueue,                 //!< GPU VM default queue pointer
-      uint64_t* vmParentWrap,              //!< GPU VM parent aql wrap object
-      uint32_t* aql_index                  //!< AQL packet index in the packets array for debugger
+  std::pair<hsa_kernel_dispatch_packet_t* /* packet address */, uint64_t /* packet id */>
+  loadArguments(VirtualGPU& gpu,                     //!< Running GPU context
+                const amd::Kernel& kernel,           //!< AMD kernel object
+                const amd::NDRangeContainer& sizes,  //!< NDrange container
+                const_address params,                //!< Application arguments for the kernel
+                size_t ldsAddress,                   //!< LDS address that includes all arguments.
+                uint64_t vmDefQueue,                 //!< GPU VM default queue pointer
+                uint64_t* vmParentWrap               //!< GPU VM parent aql wrap object
   ) const;
 
   //! Returns the kernel index in the program
@@ -136,14 +132,10 @@ class Kernel : public device::Kernel {
   void setWorkGroupInfo(const uint32_t privateSegmentSize, const uint32_t groupSegmentSize,
                         const uint16_t numSGPRs, const uint16_t numVGPRs);
 
-  union {
-    amd_kernel_code_t akc_;                  //!< AQL kernel code on CPU, used by HSAIL
-    llvm::amdhsa::kernel_descriptor_t akd_;  //!< AQL kernel descriptor on CPU, used by LC
-  };
-  uint index_;  //!< Kernel index in the program
-
-  uint64_t code_;    //!< GPU memory pointer to the kernel
-  size_t codeSize_;  //!< Size of ISA code
+  llvm::amdhsa::kernel_descriptor_t akd_;  //!< AQL kernel descriptor on CPU, used by LC
+  uint index_;                             //!< Kernel index in the program
+  uint64_t code_;                          //!< GPU memory pointer to the kernel
+  size_t codeSize_;                        //!< Size of ISA code
 };
 
 /*@}*/  // namespace amd::pal

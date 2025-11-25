@@ -407,7 +407,7 @@ Resource::~Resource() {
 }
 
 // ================================================================================================
-static uint32_t GetHSAILImageFormatType(const cl_image_format& format) {
+static uint32_t GetHSAImageFormatType(const cl_image_format& format) {
   static const uint32_t FormatType[] = {HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8,
                                         HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT16,
                                         HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8,
@@ -431,7 +431,7 @@ static uint32_t GetHSAILImageFormatType(const cl_image_format& format) {
 }
 
 // ================================================================================================
-static uint32_t GetHSAILImageOrderType(const cl_image_format& format) {
+static uint32_t GetHSAImageOrderType(const cl_image_format& format) {
   static const uint32_t OrderType[] = {HSA_EXT_IMAGE_CHANNEL_ORDER_R,
                                        HSA_EXT_IMAGE_CHANNEL_ORDER_A,
                                        HSA_EXT_IMAGE_CHANNEL_ORDER_RG,
@@ -569,8 +569,8 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     }
 
     dev().iDev()->CreateTypedBufferViewSrds(1, &viewInfo, hwState_);
-    hwState_[8] = GetHSAILImageFormatType(desc().format_);
-    hwState_[9] = GetHSAILImageOrderType(desc().format_);
+    hwState_[8] = GetHSAImageFormatType(desc().format_);
+    hwState_[9] = GetHSAImageOrderType(desc().format_);
     hwState_[10] = static_cast<uint32_t>(desc().width_);
     hwState_[11] = 0;  // one extra reserved field in the argument
     return true;
@@ -741,8 +741,8 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   viewInfo.subresRange = ImgSubresRange;
   dev().iDev()->CreateImageViewSrds(1, &viewInfo, hwState_);
 
-  hwState_[8] = GetHSAILImageFormatType(desc().format_);
-  hwState_[9] = GetHSAILImageOrderType(desc().format_);
+  hwState_[8] = GetHSAImageFormatType(desc().format_);
+  hwState_[9] = GetHSAImageOrderType(desc().format_);
   hwState_[10] = static_cast<uint32_t>(desc().width_);
   hwState_[11] = 0;  // one extra reserved field in the argument
 
@@ -961,8 +961,8 @@ bool Resource::CreateInterop(CreateParams* params) {
       viewInfo.possibleLayouts.usages = Pal::LayoutShaderWrite;
       dev().iDev()->CreateImageViewSrds(1, &viewInfo, hwState_);
 
-      hwState_[8] = GetHSAILImageFormatType(desc().format_);
-      hwState_[9] = GetHSAILImageOrderType(desc().format_);
+      hwState_[8] = GetHSAImageFormatType(desc().format_);
+      hwState_[9] = GetHSAImageOrderType(desc().format_);
       hwState_[10] = static_cast<uint32_t>(desc().width_);
       hwState_[11] = 0;  // one extra reserved field in the argument
     }
@@ -983,8 +983,8 @@ bool Resource::CreateInterop(CreateParams* params) {
     }
 
     dev().iDev()->CreateTypedBufferViewSrds(1, &viewInfo, hwState_);
-    hwState_[8] = GetHSAILImageFormatType(desc().format_);
-    hwState_[9] = GetHSAILImageOrderType(desc().format_);
+    hwState_[8] = GetHSAImageFormatType(desc().format_);
+    hwState_[9] = GetHSAImageOrderType(desc().format_);
     hwState_[10] = static_cast<uint32_t>(desc().width_);
     hwState_[11] = 0;  // one extra reserved field in the argument
   } else {
@@ -1047,8 +1047,8 @@ bool Resource::CreateInterop(CreateParams* params) {
         (desc().format_.image_channel_data_type == CL_UNORM_INT24)) {
       hwState_[1] = (hwState_[1] & ~0x1ff00000) | 0x08d00000;
     }
-    hwState_[8] = GetHSAILImageFormatType(desc().format_);
-    hwState_[9] = GetHSAILImageOrderType(desc().format_);
+    hwState_[8] = GetHSAImageFormatType(desc().format_);
+    hwState_[9] = GetHSAImageOrderType(desc().format_);
     hwState_[10] = static_cast<uint32_t>(desc().width_);
     hwState_[11] = 0;  // one extra reserved field in the argument
   }
@@ -1565,7 +1565,11 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
     copyRegion.gpuMemoryDepthPitch =
         (srcOrigin[2]) ? srcOrigin[2]
                        : copyRegion.gpuMemoryRowPitch * copyRegion.imageExtent.height;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 955
     gpu.iCmd()->CmdCopyMemoryToImage(*iMem(), *dstResource.image_, imgLayout, 1, &copyRegion);
+#else
+    gpu.iCmd()->CmdCopyMemoryToImage(*iMem(), *dstResource.image_, imgLayout, 1, &copyRegion, 0);
+#endif
   } else if (!desc().buffer_ && dstResource.desc().buffer_) {
     Pal::MemoryImageCopyRegion copyRegion = {};
     uint32_t arraySliceIdx = img2Darray ? srcOrigin[2] : img1Darray ? srcOrigin[1] : 0;

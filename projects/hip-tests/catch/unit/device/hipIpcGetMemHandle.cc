@@ -65,34 +65,6 @@ TEST_CASE("Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Separate_Allocations"
 /**
  * Test Description
  * ------------------------
- *  - Check that unique handles are returned for the same address,
- *    but separate allocations.
- * Test source
- * ------------------------
- *  - unit/device/hipIpcGetMemHandle.cc
- * Test requirements
- * ------------------------
- *  - Host specific (LINUX)
- *  - HIP_VERSION >= 5.2
- */
-TEST_CASE("Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Reused_Memory") {
-  void *ptr1 = nullptr, *ptr2 = nullptr;
-  hipIpcMemHandle_t handle1, handle2;
-  HIP_CHECK(hipMalloc(&ptr1, 1024));
-  HIP_CHECK(hipIpcGetMemHandle(&handle1, ptr1));
-  HIP_CHECK(hipFree(ptr1));
-
-  HIP_CHECK(hipMalloc(&ptr2, 1024));
-  HIP_CHECK(hipIpcGetMemHandle(&handle2, ptr2));
-
-  if (ptr1 == ptr2) CHECK(memcmp(&handle1, &handle2, sizeof(handle1)) != 0);
-
-  HIP_CHECK(hipFree(ptr2));
-}
-
-/**
- * Test Description
- * ------------------------
  *  - Test if previously freed memory will generate an invalid handle:
  *    -# When memory is freed before getting handle
  *      - Expected output: return `hipErrorInvalidValue

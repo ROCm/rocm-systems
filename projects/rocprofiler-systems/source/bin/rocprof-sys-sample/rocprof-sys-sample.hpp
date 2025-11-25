@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -34,9 +33,6 @@ enum update_mode : int
     UPD_WEAK    = 1 << 2,  // 0x04
 };
 
-std::string
-get_realpath(const std::string& _fpath);
-
 void
 print_command(const std::vector<char*>& _argv);
 
@@ -46,22 +42,10 @@ print_updated_environment(std::vector<char*> _env);
 std::vector<char*>
 get_initial_environment();
 
-std::string
-get_rocprofsys_root(void);
-
-std::string
-get_internal_libpath(const std::string& _lib);
-
-std::string
-get_internal_script_path(void);
-
 template <typename Tp>
 void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
            update_mode&& _mode = UPD_REPLACE, std::string_view _join_delim = ":");
-
-void
-remove_env(std::vector<char*>& _environ, std::string_view _env_var);
 
 std::vector<char*>
 parse_args(int argc, char** argv, std::vector<char*>& envp);

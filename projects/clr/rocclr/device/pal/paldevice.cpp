@@ -122,7 +122,7 @@ static std::tuple<const amd::Isa*, const char*> findIsa(uint32_t gfxipMajor, uin
       sramecc ? amd::Isa::Feature::Enabled : amd::Isa::Feature::Disabled,
       xnack ? amd::Isa::Feature::Enabled : amd::Isa::Feature::Disabled);
   return std::make_tuple(
-      isa, (palDeviceIter->gfxipMajor_ > 8) ? isa->hsailName() : palDeviceIter->palName_);
+      isa, (palDeviceIter->gfxipMajor_ > 8) ? isa->targetId() : palDeviceIter->palName_);
 }
 
 static std::tuple<Pal::GfxIpLevel, Pal::AsicRevision, const char*> findPal(uint32_t gfxipMajor,

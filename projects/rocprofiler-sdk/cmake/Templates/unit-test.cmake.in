@@ -1,0 +1,55 @@
+#
+# Unit Test for @RAUT_TARGET@
+#
+
+project(rocprofiler-sdk-tests-unit-tests-@RAUT_TARGET@ LANGUAGES C CXX)
+
+include(GoogleTest)
+
+set(_NAME @RAUT_TARGET@)
+set(_SOURCES @RAUT_SOURCES@)
+set(_LABELS @RAUT_LABELS@)
+set(_FAIL_REGEX "@RAUT_FAIL_REGULAR_EXPRESSION@")
+set(_PASS_REGEX "@RAUT_PASS_REGULAR_EXPRESSION@")
+set(_SKIP_REGEX "@RAUT_SKIP_REGULAR_EXPRESSION@")
+set(_DISABLED "@RAUT_DISABLED@")
+set(_ENVIRONMENT "@RAUT_ENVIRONMENT@")
+set(_PREFIX "@RAUT_TEST_PREFIX@")
+
+# test sources are in a subfolder
+set(_TEST_SOURCES)
+foreach(_FILE ${_SOURCES})
+    list(APPEND _TEST_SOURCES "${CMAKE_CURRENT_LIST_DIR}/${_NAME}/${_FILE}")
+endforeach()
+
+gtest_add_tests(
+    TARGET @RAUT_TARGET@
+    SOURCES ${_TEST_SOURCES}
+    TEST_LIST @RAUT_TARGET@_TESTS
+    TEST_PREFIX ${_PREFIX}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+
+set_tests_properties(
+    ${@RAUT_TARGET@_TESTS}
+    PROPERTIES TIMEOUT
+               @RAUT_TIMEOUT@
+               LABELS
+               "${_LABELS}"
+               FAIL_REGULAR_EXPRESSION
+               "${_FAIL_REGEX}"
+               PASS_REGULAR_EXPRESSION
+               "${_PASS_REGEX}"
+               SKIP_REGULAR_EXPRESSION
+               "${_SKIP_REGEX}"
+               ENVIRONMENT
+               "${_ENVIRONMENT}"
+               DISABLED
+               "${_DISABLED}")
+
+# Disable specific tests
+set(_DISABLE_TESTS "@RAUT_DISABLE_TESTS@")
+if(_DISABLE_TESTS)
+    set_tests_properties(
+        ${_DISABLE_TESTS}
+        PROPERTIES DISABLED ON)
+endif()

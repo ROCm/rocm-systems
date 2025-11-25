@@ -65,7 +65,7 @@ static bool testSetLimitFunc(hipLimit_t limit_to_test) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceSetLimit_SetGet") {
+TEST_CASE("Unit_hipDeviceSetLimit_SetGet", "[multigpu]") {
   size_t value = 0;
   // Scenario1
   SECTION("Set Get Test hipLimitStackSize") {

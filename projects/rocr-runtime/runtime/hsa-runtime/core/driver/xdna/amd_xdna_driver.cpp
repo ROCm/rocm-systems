@@ -47,6 +47,10 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <array>
+#include <filesystem>
+#include <fstream>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -62,6 +66,37 @@ namespace AMD {
 static_assert((sizeof(core::ShareableHandle::handle) >= sizeof(uint32_t)) &&
                   (alignof(core::ShareableHandle::handle) >= alignof(uint32_t)),
               "ShareableHandle cannot store a XDNA handle");
+
+/// @brief XDNA device type.
+enum class XDNADeviceType {
+  Phx,
+  Stx,     // Strix Halo / Krackan
+  Unknown  // Unknown device
+};
+
+/// @brief XDNA device ID.
+struct XDNADeviceId {
+  uint16_t device;
+
+  bool operator<(const XDNADeviceId& other) const { return device < other.device; }
+};
+
+/// @brief Supported XDNA devices.
+static const std::map<XDNADeviceId, XDNADeviceType> supported_xdna_devices = {
+    {{0x1502}, XDNADeviceType::Phx},  // Phoenix
+    {{0x17f0}, XDNADeviceType::Stx},  // Strix Halo / Krackan
+};
+
+namespace fs = std::filesystem;
+
+/// @brief Devnode path for XDNA devices.
+static const fs::path devnodes_path = "/dev/accel";
+/// @brief Sysfs path for XDNA devices.
+static const fs::path sysfs_path = "/sys/class/accel";
+/// @brief Devnode prefix for XDNA devices.
+static const std::string devnode_prefix = "accel";
+/// @brief Maximum devnode minor number for XDNA devices.
+static const uint32_t devnode_max_minor_num = 64;
 
 /// @brief Index of the first operand in a command.
 ///
@@ -103,14 +138,12 @@ XdnaDriver::XdnaDriver(std::string devnode_name)
     : core::Driver(core::DriverType::XDNA, std::move(devnode_name)) {}
 
 hsa_status_t XdnaDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
-  const int max_minor_num(64);
-  static const std::string devnode_prefix("/dev/accel/accel");
-
-  for (int i = 0; i < max_minor_num; ++i) {
-    auto tmp_driver = std::unique_ptr<Driver>(new XdnaDriver(devnode_prefix + std::to_string(i)));
+  for (uint32_t i = 0; i < devnode_max_minor_num; ++i) {
+    auto tmp_driver = std::make_unique<XdnaDriver>(devnode_prefix + std::to_string(i));
     if (tmp_driver->Open() == HSA_STATUS_SUCCESS) {
       if (tmp_driver->QueryKernelModeDriver(core::DriverQuery::GET_DRIVER_VERSION) ==
           HSA_STATUS_SUCCESS) {
+        // XDNADriver supports only one XDNA device. Once found, the driver is initialized.
         driver = std::move(tmp_driver);
         return HSA_STATUS_SUCCESS;
       } else {
@@ -147,7 +180,8 @@ hsa_status_t XdnaDriver::QueryKernelModeDriver(core::DriverQuery query) {
 }
 
 hsa_status_t XdnaDriver::Open() {
-  fd_ = open(devnode_name_.c_str(), O_RDWR | O_CLOEXEC);
+  const auto devnode_path = devnodes_path / devnode_name_;
+  fd_ = open(devnode_path.c_str(), O_RDWR | O_CLOEXEC);
   if (fd_ < 0) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -182,13 +216,78 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
     return HSA_STATUS_ERROR;
   }
 
-  // Right now can only target N-1 columns as that is the number of shim DMAs
-  // in NPU1 devices.
-  node_props.NumNeuralCores = (aie_metadata.cols - 1) * aie_metadata.core.row_count;
+  const auto sysfs_device_path = sysfs_path / devnode_name_ / "device";
+
+  // Find device type.
+  XDNADeviceType device_type = XDNADeviceType::Unknown;
+  {
+    const auto device_id_file = sysfs_device_path / "device";
+    if (!fs::exists(device_id_file)) {
+      assert(false && "Device file not found in sysfs.");
+      return HSA_STATUS_ERROR;
+    }
+
+    XDNADeviceId device_id = {};
+    std::ifstream is(device_id_file);
+    // Device ID is in hex.
+    if (!(is >> std::hex >> device_id.device)) {
+      assert(false && "Failed to read device ID from sysfs.");
+      return HSA_STATUS_ERROR;
+    }
+
+    const auto device_type_it = supported_xdna_devices.find(device_id);
+    if (device_type_it == supported_xdna_devices.end()) {
+      assert(false && "Unsupported XDNA device.");
+      return HSA_STATUS_ERROR;
+    }
+    device_type = device_type_it->second;
+  }
+
+  // Fill in node properties that depend on device type.
+  std::fill_n(node_props.AMDName, HSA_PUBLIC_NAME_SIZE, 0);
+  switch (device_type) {
+    case XDNADeviceType::Phx: {
+      constexpr std::string_view name("aie2");
+      assert(name.size() < HSA_PUBLIC_NAME_SIZE);
+      std::copy(name.begin(), name.end(), node_props.AMDName);
+      // Only target N-1 columns as that is the number of shim DMAs in NPU1 devices.
+      node_props.NumNeuralCores = (aie_metadata.cols - 1) * aie_metadata.core.row_count;
+    } break;
+
+    case XDNADeviceType::Stx: {
+      constexpr std::string_view name("aie2p");
+      assert(name.size() < HSA_PUBLIC_NAME_SIZE);
+      std::copy(name.begin(), name.end(), node_props.AMDName);
+      node_props.NumNeuralCores = aie_metadata.cols * aie_metadata.core.row_count;
+    } break;
+
+    default:
+      assert(false && "Unsupported XDNA device.");
+      return HSA_STATUS_ERROR;
+  }
+
+  // Read device name from sysfs.
+  {
+    const auto device_name_file = sysfs_device_path / "vbnv";
+    if (!fs::exists(device_name_file)) {
+      assert(false && "Device file name not found in sysfs.");
+      return HSA_STATUS_ERROR;
+    }
+    std::array<char, HSA_PUBLIC_NAME_SIZE> device_name = {};
+    std::ifstream is(device_name_file);
+    if (!is.getline(device_name.data(), device_name.size() - 1)) {
+      assert(false && "Failed to read device name from sysfs.");
+      return HSA_STATUS_ERROR;
+    }
+    // Convert device name from ASCII to UTF-16 for MarketingName.
+    std::copy(device_name.begin(), device_name.end(), node_props.MarketingName);
+  }
+
   /// @todo XDNA driver currently only supports single-node AIE
   /// devices over PCIe. Update this once we can get topology
   /// information dynamically from the sysfs.
   node_props.NumIOLinks = 0;
+
   return HSA_STATUS_SUCCESS;
 }
 

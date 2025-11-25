@@ -24,7 +24,7 @@
 from __future__ import absolute_import
 
 __author__ = "AMD ROCm"
-__copyright__ = "Copyright 2024, Advanced Micro Devices, Inc."
+__copyright__ = "Copyright 2025, Advanced Micro Devices, Inc."
 __license__ = "MIT"
 __version__ = "@PROJECT_VERSION@"
 __maintainer__ = "AMD ROCm"
@@ -36,9 +36,18 @@ This submodule imports the timemory Python function profiler
 
 try:
     import os
+    from pathlib import Path
 
-    os.environ["ROCPROFSYS_PATH"] = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "../../..")
+    # Set up ROCPROFSYS environment variables
+    rocprofsys_root = Path(__file__).resolve().parents[4]
+    os.environ.update(
+        {
+            "ROCPROFSYS_ROOT": str(rocprofsys_root),
+            "ROCPROFSYS_PATH": str(rocprofsys_root / "lib"),
+            "ROCPROFSYS_SCRIPT_PATH": str(
+                rocprofsys_root / "libexec/rocprofiler-systems"
+            ),
+        }
     )
 
     from .libpyrocprofsys import coverage
