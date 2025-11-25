@@ -103,7 +103,7 @@ context_filter(const context::context* ctx)
 }
 
 bool
-AsyncSignalHandler(hsa_signal_value_t signal_v, void* data)
+AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
     if(!data) return true;
 
@@ -174,17 +174,12 @@ AsyncSignalHandler(hsa_signal_value_t signal_v, void* data)
             signals.erase(queue_info_session.interrupt_signal.handle);
         });
 #endif
-        ROCP_ERROR << "[DEBUG] AsyncSignalHandler - Destroying interrupt signal "
-                   << queue_info_session.interrupt_signal.handle << " for Queue " << queue_id;
         hsa::get_core_table()->hsa_signal_store_screlease_fn(queue_info_session.interrupt_signal,
                                                              -1);
         hsa::get_core_table()->hsa_signal_destroy_fn(queue_info_session.interrupt_signal);
     }
     if(queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal.handle != 0u)
     {
-        ROCP_ERROR << "[DEBUG] AsyncSignalHandler - Destroying completion signal "
-                   << queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal.handle
-                   << " for Queue " << queue_id;
         hsa::get_core_table()->hsa_signal_destroy_fn(
             queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal);
     }
@@ -696,17 +691,19 @@ Queue::signal_async_handler(const hsa_signal_t& signal, void* data) const
     });
 #endif
 
-    auto current_value = _core_api.hsa_signal_load_relaxed_fn(signal);
-    ROCP_ERROR << "[DEBUG] Queue::signal_async_handler - Queue " << get_id().handle
-               << " registering handler for signal " << signal.handle
-               << " (current value=" << current_value << ") fini_status=" << registration::get_fini_status();
-
     hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
         signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
 
-    ROCP_ERROR << "[DEBUG] Queue::signal_async_handler - Queue " << get_id().handle
-               << " handler registration returned status=" << status
-               << " for signal " << signal.handle;
+    // Only log failures or during finalization
+    auto _fini_status = registration::get_fini_status();
+    if(status != HSA_STATUS_SUCCESS || _fini_status != 0)
+    {
+        auto current_value = _core_api.hsa_signal_load_relaxed_fn(signal);
+        ROCP_ERROR << "[DEBUG] Queue::signal_async_handler - Queue " << get_id().handle
+                   << " handler registration status=" << status
+                   << " signal=" << signal.handle
+                   << " (value=" << current_value << ") fini_status=" << _fini_status;
+    }
 
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_async_handler failed with error code " << status
@@ -721,12 +718,17 @@ Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
         << "Error: hsa_amd_signal_create failed with error code " << status
         << " :: " << hsa::get_hsa_status_string(status);
 
-    auto current_value = _core_api.hsa_signal_load_relaxed_fn(*signal);
+    // Only log during finalization or first few signals
     static std::atomic<size_t> signal_create_count{0};
     auto count = signal_create_count.fetch_add(1);
-    ROCP_ERROR << "[DEBUG] Queue::create_signal #" << count << " - Queue " << get_id().handle
-               << " created signal " << signal->handle
-               << " (initial value=" << current_value << ") fini_status=" << registration::get_fini_status();
+    auto _fini_status = registration::get_fini_status();
+    if(_fini_status != 0 || count < 10)
+    {
+        auto current_value = _core_api.hsa_signal_load_relaxed_fn(*signal);
+        ROCP_ERROR << "[DEBUG] Queue::create_signal #" << count << " - Queue " << get_id().handle
+                   << " created signal " << signal->handle
+                   << " (initial value=" << current_value << ") fini_status=" << _fini_status;
+    }
 }
 
 void
