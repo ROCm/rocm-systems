@@ -105,6 +105,7 @@ context_filter(const context::context* ctx)
 bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
+    //test
     if(!data) return true;
 
     // Get session info early to log queue ID
