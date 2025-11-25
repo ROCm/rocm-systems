@@ -36,7 +36,7 @@ from rocprof_compute_tui.widgets.recent_directories import RecentDirectoriesScre
 
 
 class DropdownMenu(Container):
-    """Dropdown menu container with proper visibility handling."""
+    """Dropdown menu container with robust visibility / hit-testing control."""
 
     BINDINGS = [
         Binding("escape", "close_menu", "Close", show=False),
@@ -53,19 +53,58 @@ class DropdownMenu(Container):
         yield Button("Exit", id="menu-exit", classes="menu-item")
 
     def on_mount(self) -> None:
-        self.display = False  # Use display instead of CSS class for reliability
+        # Start fully hidden and non-hit-testable.
+        self.display = False
+        self._apply_hidden_state()
 
+    # -------------------------------------------------------------------------
+    # Visibility helpers
+    # -------------------------------------------------------------------------
+    def _apply_visible_state(self) -> None:
+        """Ensure the menu is visible and hit-testable."""
+        styles = self.styles
+        styles.offset = (0, 0)
+        styles.pointer_events = "auto"
+        styles.visibility = "visible"
+        styles.opacity = 1.0
+        styles.height = "auto"
+        styles.width = "auto"
+
+    def _apply_hidden_state(self) -> None:
+        """Ensure the menu is completely removed from hit-testing."""
+        styles = self.styles
+        # Move off-screen to avoid any stale geometry being hit.
+        styles.offset = (-10000, -10000)
+        styles.pointer_events = "none"
+        styles.visibility = "hidden"
+        styles.opacity = 0.0
+        # Let display=False remove it from layout; dimensions are defensive.
+        styles.height = 0
+        styles.width = 0
+
+    # -------------------------------------------------------------------------
+    # Public show/hide API
+    # -------------------------------------------------------------------------
     def show(self) -> None:
+        """Show the dropdown and make it focusable + hit-testable."""
         self.display = True
+        self._apply_visible_state()
+        self.refresh(layout=True)
         self.focus()
 
     def hide(self) -> None:
+        """Hide the dropdown and remove it from hit-testing."""
         self.display = False
+        self._apply_hidden_state()
+        self.refresh(layout=True)
         self.post_message(self.Closed())
 
     def action_close_menu(self) -> None:
         self.hide()
 
+    # -------------------------------------------------------------------------
+    # Focus handling: close when focus leaves menu & menu button
+    # -------------------------------------------------------------------------
     def on_blur(self) -> None:
         # Check if focus moved to a child or the parent menu button
         if self.display:
@@ -124,7 +163,7 @@ class MenuButton(Button):
         self.is_open = not self.is_open
 
     @on(DropdownMenu.Closed)
-    def on_dropdown_closed(self, event: DropdownMenu.Closed) -> None:
+    def on_dropdown_closed(self, event: DropdownMenu.Closed) -> None:  # noqa: ARG002
         self.is_open = False
 
 
@@ -137,7 +176,8 @@ class MenuBar(Container):
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-            MenuButton("File", "file-dropdown", id="menu-file"), id="menu-buttons"
+            MenuButton("File", "file-dropdown", id="menu-file"),
+            id="menu-buttons",
         )
         with Container(id="dropdown-container"):
             yield DropdownMenu(id="file-dropdown")
@@ -147,31 +187,43 @@ class MenuBar(Container):
         self.add_class("section")
 
     def action_close_all_menus(self) -> None:
+        """Close all open menus in the bar."""
         for menu_btn in self.query(MenuButton):
             menu_btn.is_open = False
 
     def close_dropdown(self) -> None:
+        """Close the File menu dropdown."""
         menu_button = self.query_one("#menu-file", MenuButton)
         menu_button.is_open = False
 
+    # -------------------------------------------------------------------------
+    # Menu item actions
+    # -------------------------------------------------------------------------
     @on(Button.Pressed, "#menu-open-recent")
     def show_recent(self) -> None:
+        """Open the Recent Directories screen."""
         if not self.app.recent_dirs:
             self.notify("No recent directories found", severity="warning")
             return
 
+        # Close the dropdown when opening a modal
         self.close_dropdown()
+
         self.app.push_screen(
-            RecentDirectoriesScreen(self.app.recent_dirs), self.app.on_recent_selected
+            RecentDirectoriesScreen(self.app.recent_dirs),
+            self.app.on_recent_selected,
         )
 
     @on(Button.Pressed, "#menu-exit")
     def exit_app(self) -> None:
+        """Exit the application."""
         self.app.exit()
 
+    # -------------------------------------------------------------------------
+    # Click outside to close menu
+    # -------------------------------------------------------------------------
     def on_click(self, event) -> None:  # noqa: ANN001
         """Close menus when clicking outside dropdown area."""
-        # Check if click was outside menu system
         menu_btn = self.query_one("#menu-file", MenuButton)
         dropdown = self.query_one("#file-dropdown", DropdownMenu)
 

@@ -5,7 +5,9 @@ from textual import on
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
-from textual.widgets import Button, DirectoryTree, Label, Static
+from textual.widgets import DirectoryTree, Label, Static
+
+from rocprof_compute_tui.widgets.instant_button import InstantButton
 
 
 class DirectoryPicker(ModalScreen[Optional[Path]]):
@@ -85,11 +87,15 @@ class DirectoryPicker(ModalScreen[Optional[Path]]):
         padding: 1 0;
     }
 
-    #picker-buttons Button {
+    #picker-buttons InstantButton {
         margin: 0 1;
         min-width: 16;
     }
     """
+
+    # Don't capture pointer at the modal root, let children receive events directly.
+    CAN_CAPTURE_POINTER = False
+    BUBBLE = True
 
     def __init__(self, start_path: Optional[Path] = None) -> None:
         super().__init__()
@@ -110,8 +116,8 @@ class DirectoryPicker(ModalScreen[Optional[Path]]):
             with Container(id="picker-footer"):
                 yield Static("", id="selection-info")
                 with Horizontal(id="picker-buttons"):
-                    yield Button("Select", variant="primary", id="select-dir")
-                    yield Button("Cancel", variant="error", id="cancel-dir")
+                    yield InstantButton("Select", id="select-dir", classes="primary")
+                    yield InstantButton("Cancel", id="cancel-dir", classes="error")
 
     def on_mount(self) -> None:
         tree = self.query_one("#dir-tree", DirectoryTree)
@@ -135,24 +141,34 @@ class DirectoryPicker(ModalScreen[Optional[Path]]):
 
     @on(DirectoryTree.DirectorySelected)
     def on_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
+        """Update selection when a directory is selected in the tree."""
         self.selected_path = event.path
         breadcrumb = self.query_one("#breadcrumb", Static)
         breadcrumb.update(self._format_breadcrumb(event.path))
         self._update_selection_info()
 
-    @on(Button.Pressed, "#select-dir")
-    def select_directory(self) -> None:
-        if self.selected_path:
-            self.dismiss(self.selected_path)
-        else:
-            self.notify("No directory selected", severity="warning")
+    def on_instant_button_instant_pressed(
+        self, event: InstantButton.InstantPressed
+    ) -> None:
+        """Handle instant button presses in this picker."""
+        bid = event.button.id
 
-    @on(Button.Pressed, "#cancel-dir")
-    def cancel_selection(self) -> None:
-        self.dismiss(None)
+        if bid == "select-dir":
+            event.stop()
+            if self.selected_path:
+                self.dismiss(self.selected_path)
+            else:
+                # Nothing selected; keep modal open and notify user.
+                self.notify("No directory selected", severity="warning")
+
+        elif bid == "cancel-dir":
+            event.stop()
+            self.dismiss(None)
 
     def on_key(self, event) -> None:  # noqa: ANN001
         if event.key == "enter":
-            self.select_directory()
+            button = self.query_one("#select-dir", InstantButton)
+            self.on_instant_button_instant_pressed(InstantButton.InstantPressed(button))
         elif event.key == "escape":
-            self.cancel_selection()
+            button = self.query_one("#cancel-dir", InstantButton)
+            self.on_instant_button_instant_pressed(InstantButton.InstantPressed(button))

@@ -23,54 +23,134 @@
 
 ##############################################################################
 
-from textual import on
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, ListItem, ListView
+from textual.widgets import Label, ListItem, ListView
+
+from rocprof_compute_tui.widgets.instant_button import InstantButton
+
+
+class ClickableListItem(ListItem):
+    """A ListItem that highlights on single click without selecting."""
+
+    def on_mouse_down(self, event) -> None:  # noqa: ANN001
+        event.stop()
+
+        # Find parent ListView
+        parent = self.parent
+        list_view = None
+        while parent is not None:
+            from textual.widgets import ListView
+
+            if isinstance(parent, ListView):
+                list_view = parent
+                break
+            parent = parent.parent
+
+        if list_view is None:
+            return
+
+        # Determine index
+        try:
+            index = list_view.children.index(self)
+        except ValueError:
+            return
+
+        # Update highlight immediately
+        list_view.index = index
+        list_view.refresh(layout=True)
+        self.refresh(layout=True)
+
+    def on_click(self, event) -> None:  # noqa: ANN001
+        event.stop()
+
+    def on_mouse_up(self, event) -> None:  # noqa: ANN001
+        event.stop()
 
 
 class RecentDirectoriesScreen(ModalScreen):
-    """Modal screen to display recent directories."""
+    """Modal screen to display recent directories as clickable list items."""
 
-    def __init__(self, recent_dirs: list[str]) -> None:
+    CAN_CAPTURE_POINTER = False
+    BUBBLE = True
+
+    def __init__(self, recent_dirs: list[str], current_dir: str | None = None) -> None:
         super().__init__()
         self.recent_dirs = recent_dirs
+        self.current_dir = current_dir
 
+    # -------------------------------------------------------------------------
+    # Compose UI
+    # -------------------------------------------------------------------------
     def compose(self) -> ComposeResult:
         with Container(id="recent-modal"):
             yield Label("Recent Directories", id="recent-title")
+
             if self.recent_dirs:
                 with ListView(id="recent-list"):
-                    for directory in self.recent_dirs:
-                        yield ListItem(Label(directory))
+                    for i, directory in enumerate(self.recent_dirs):
+                        # Normal-looking list item (NO InstantButton inside)
+                        yield ClickableListItem(
+                            Label(directory),
+                            id=f"recent-row-{i}",
+                        )
             else:
                 yield Label("No recent directories found", id="no-recent")
+
             with Horizontal(id="recent-buttons"):
-                yield Button("Select", variant="primary", id="select-recent")
-                yield Button("Close", variant="default", id="close-recent")
+                yield InstantButton("Select", variant="primary", id="select-recent")
+                yield InstantButton("Close", variant="default", id="close-recent")
 
+    # -------------------------------------------------------------------------
+    # Initialize highlight when screen opens
+    # -------------------------------------------------------------------------
     def on_mount(self) -> None:
-        if self.recent_dirs:
-            list_view = self.query_one("#recent-list", ListView)
-            list_view.focus()
-
-    @on(Button.Pressed, "#close-recent")
-    def close_modal(self) -> None:
-        """Close the modal without selection."""
-        self.dismiss(None)
-
-    @on(Button.Pressed, "#select-recent")
-    def select_directory(self) -> None:
-        """Select the highlighted directory."""
+        if not self.recent_dirs:
+            return
 
         list_view = self.query_one("#recent-list", ListView)
-        if list_view and list_view.highlighted_child:
-            selected_dir = self.recent_dirs[list_view.index or 0]
-            self.dismiss(selected_dir)
 
+        # Default to first item
+        index = 0
+
+        # If current_dir matches one of the recent dirs
+        if self.current_dir:
+            try:
+                index = self.recent_dirs.index(self.current_dir)
+            except ValueError:
+                pass
+
+        list_view.index = index
+        list_view.focus()
+
+    # -------------------------------------------------------------------------
+    # Buttons
+    # -------------------------------------------------------------------------
+    def on_instant_button_instant_pressed(
+        self, event: InstantButton.InstantPressed
+    ) -> None:
+        """Handle Select / Close / row-selection."""
+        button = event.button
+        bid = button.id
+
+        # Close
+        if bid == "close-recent":
+            event.stop()
+            self.dismiss(None)
+            return
+
+        # Select highlighted row
+        if bid == "select-recent":
+            event.stop()
+            list_view = self.query_one("#recent-list", ListView)
+            idx = list_view.index or 0
+            self.dismiss(self.recent_dirs[idx])
+            return
+
+    # -------------------------------------------------------------------------
+    # Keyboard activation (Enter or double-click)
+    # -------------------------------------------------------------------------
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        """Handle double-click or Enter on list item."""
-
-        selected_dir = self.recent_dirs[event.list_view.index or 0]
-        self.dismiss(selected_dir)
+        idx = event.list_view.index or 0
+        self.dismiss(self.recent_dirs[idx])
