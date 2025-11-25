@@ -114,7 +114,7 @@ gpu_worker(int gpu_id, int iterations)
     {
         // Use hiprtc to compile kernel source at runtime, then load the compiled module
         // This triggers parallel module loading across threads
-        hiprtcProgram prog;
+        hiprtcProgram prog{};
         hiprtcResult  rtc_result =
             hiprtcCreateProgram(&prog, kernel_code, "dynamic_kernels.cu", 0, nullptr, nullptr);
 
@@ -127,11 +127,11 @@ gpu_worker(int gpu_id, int iterations)
 
             if(rtc_result != HIPRTC_SUCCESS)
             {
-                size_t log_size;
+                size_t log_size{0};
                 hiprtcGetProgramLogSize(prog, &log_size);
                 if(log_size > 1)
                 {
-                    std::vector<char> log(log_size);
+                    auto log = std::vector<char>(log_size);
                     hiprtcGetProgramLog(prog, log.data());
                     std::cerr << "Compilation failed:\n" << log.data() << "\n";
                 }
@@ -142,7 +142,7 @@ gpu_worker(int gpu_id, int iterations)
         if(use_dynamic_loading)
         {
             // Get the compiled code
-            size_t code_size;
+            size_t code_size{0};
             hiprtcGetCodeSize(prog, &code_size);
 
             std::vector<char> code(code_size);
@@ -162,8 +162,8 @@ gpu_worker(int gpu_id, int iterations)
                 HIP_CHECK(hipModuleGetFunction(&func_c, module, "dynamic_kernel_c"));
 
                 // Allocate device memory
-                int*   d_int_data;
-                float* d_float_data;
+                int*   d_int_data{nullptr};
+                float* d_float_data{nullptr};
                 HIP_CHECK(hipMalloc(&d_int_data, n * sizeof(int)));
                 HIP_CHECK(hipMalloc(&d_float_data, n * sizeof(float)));
 
@@ -190,8 +190,8 @@ gpu_worker(int gpu_id, int iterations)
         if(!use_dynamic_loading)
         {
             // Fallback to regular kernel launches if module loading fails
-            int*   d_int_data;
-            float* d_float_data;
+            int*   d_int_data{nullptr};
+            float* d_float_data{nullptr};
             HIP_CHECK(hipMalloc(&d_int_data, n * sizeof(int)));
             HIP_CHECK(hipMalloc(&d_float_data, n * sizeof(float)));
 
@@ -229,7 +229,7 @@ main()
     constexpr int iterations = 3;
 
     // Create worker threads - four per GPU
-    std::vector<std::thread> threads;
+    auto threads = std::vector<std::thread>{};
     threads.reserve(num_threads);
 
     for(int gpu_id = 0; gpu_id < num_gpus; ++gpu_id)

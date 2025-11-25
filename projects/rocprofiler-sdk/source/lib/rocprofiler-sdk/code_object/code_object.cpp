@@ -983,7 +983,7 @@ executable_destroy(hsa_executable_t executable)
     // 1. Concurrent access to code objects in shutdown()
     // 2. Use-after-free when multiple threads destroy same executable
     // 3. Race on end_notified flags (now atomic, but still need serialization for callbacks)
-    auto _lk = std::lock_guard<std::mutex>{get_destroy_mutex()};
+    auto _lk = std::unique_lock{get_destroy_mutex()};
 
     if(is_shutdown.load(std::memory_order_acquire)) return HSA_STATUS_SUCCESS;
 
