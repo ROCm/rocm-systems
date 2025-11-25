@@ -536,7 +536,21 @@ void
 queue_controller_sync()
 {
     if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    {
+        ROCP_ERROR << "[DEBUG] queue_controller_sync() - Starting sync for all queues. "
+                   << "fini_status=" << registration::get_fini_status();
+        std::atomic<size_t> queue_count{0};
+        get_queue_controller()->iterate_queues([&queue_count](const Queue* _queue) {
+            queue_count.fetch_add(1);
+            _queue->sync();
+        });
+        ROCP_ERROR << "[DEBUG] queue_controller_sync() - Completed sync for " << queue_count.load()
+                   << " queues";
+    }
+    else
+    {
+        ROCP_ERROR << "[DEBUG] queue_controller_sync() - No queue controller available";
+    }
 }
 
 void

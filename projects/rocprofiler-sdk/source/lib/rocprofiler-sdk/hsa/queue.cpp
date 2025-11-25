@@ -108,8 +108,13 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     if(!data) return true;
 
     // if we have fully finalized, delete the data and return
-    if(registration::get_fini_status() > 0)
+    auto _fini_status = registration::get_fini_status();
+    if(_fini_status > 0)
     {
+        static std::atomic<size_t> count{0};
+        ROCP_ERROR << "[DEBUG] AsyncSignalHandler early exit #" << count.fetch_add(1)
+                   << " - fini_status=" << _fini_status
+                   << " (async_complete will NOT be called - signal will NOT decrement!)";
         auto* _session = static_cast<Queue::queue_info_session_t**>(data);
         delete _session;
         return false;
@@ -684,8 +689,15 @@ Queue::sync() const
 {
     if(_active_kernels.handle != 0u)
     {
+        auto _active_count = _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
+        ROCP_ERROR << "[DEBUG] Queue::sync() - Queue " << get_id().handle
+                   << " waiting for " << _active_count << " active kernels to complete. "
+                   << "fini_status=" << registration::get_fini_status();
+
         _core_api.hsa_signal_wait_relaxed_fn(
             _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
+
+        ROCP_ERROR << "[DEBUG] Queue::sync() - Queue " << get_id().handle << " sync completed";
     }
     // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
     // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()

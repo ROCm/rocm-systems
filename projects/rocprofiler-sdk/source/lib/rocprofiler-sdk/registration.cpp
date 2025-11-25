@@ -690,16 +690,32 @@ invoke_client_detaches()
     {
         if(itr && itr->configure_attach_result && itr->configure_attach_result->tool_detach)
         {
+            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - Detaching client "
+                       << itr->internal_client_id.handle << " (" << itr->name << ")";
+
             context::stop_client_contexts(itr->internal_client_id);
 
+            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - Starting sync operations. "
+                       << "fini_status=" << get_fini_status();
+
             hsa::async_copy_sync();
+            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - async_copy_sync completed";
+
             hsa::queue_controller_sync();
+            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - queue_controller_sync completed";
+
             pc_sampling::service_sync();
+            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - pc_sampling::service_sync completed";
 
             auto _fini_status = get_fini_status();
+            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - Before tool_detach callback. "
+                       << "Setting fini_status from " << _fini_status << " to "
+                       << (_fini_status == 0 ? -1 : _fini_status);
             if(_fini_status == 0) set_fini_status(-1);
             itr->configure_attach_result->tool_detach(itr->configure_attach_result->tool_data);
             if(_fini_status == 0) set_fini_status(_fini_status);
+            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - After tool_detach callback. "
+                       << "fini_status=" << get_fini_status();
             context::deactivate_client_contexts(itr->internal_client_id);
 
             ret = ROCPROFILER_STATUS_SUCCESS;
