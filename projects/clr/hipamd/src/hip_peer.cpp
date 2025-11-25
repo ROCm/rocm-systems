@@ -251,12 +251,14 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
 
 hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags) {
   HIP_INIT_API(hipCtxEnablePeerAccess, peerCtx, flags);
+  CHECK_STREAM_CAPTURE_SUPPORTED()
 
   HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipCtxDisablePeerAccess(hipCtx_t peerCtx) {
   HIP_INIT_API(hipCtxDisablePeerAccess, peerCtx);
+  CHECK_STREAM_CAPTURE_SUPPORTED()
 
   HIP_RETURN(hipSuccess);
 }

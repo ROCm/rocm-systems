@@ -220,6 +220,7 @@ hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem) {
 hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
                                       const hipExternalSemaphoreHandleDesc* semHandleDesc) {
   HIP_INIT_API(hipImportExternalSemaphore, extSem_out, semHandleDesc);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (extSem_out == nullptr || semHandleDesc == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -255,6 +256,7 @@ hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t* extSem
                                             const hipExternalSemaphoreSignalParams* paramsArray,
                                             unsigned int numExtSems, hipStream_t stream) {
   HIP_INIT_API(hipSignalExternalSemaphoresAsync, extSemArray, paramsArray, numExtSems, stream);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (extSemArray == nullptr || paramsArray == nullptr || !hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -290,6 +292,7 @@ hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemAr
                                           const hipExternalSemaphoreWaitParams* paramsArray,
                                           unsigned int numExtSems, hipStream_t stream) {
   HIP_INIT_API(hipWaitExternalSemaphoresAsync, extSemArray, paramsArray, numExtSems, stream);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (extSemArray == nullptr || paramsArray == nullptr || !hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -325,6 +328,7 @@ hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemAr
 
 hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem) {
   HIP_INIT_API(hipDestroyExternalSemaphore, extSem);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (extSem == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -3035,6 +3039,7 @@ hipError_t hipMemset_spt(void* dst, int value, size_t sizeBytes) {
 
 hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
   HIP_INIT_API(hipMemset, dst, value, sizeBytes);
+  CHECK_STREAM_CAPTURING()
   HIP_RETURN(hipMemset_common(dst, value, sizeBytes));
 }
 
