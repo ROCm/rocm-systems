@@ -125,6 +125,14 @@ AsyncSignalHandler(hsa_signal_value_t signal_v, void* data)
     auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
     auto& queue_info_session = *shared_ptr_info;
 
+    // Log completions for Queue 4 during or near detach to debug hang
+    if(queue_info_session.queue.get_id().handle == 4 && _fini_status != 0)
+    {
+        static std::atomic<size_t> q4_count{0};
+        ROCP_ERROR << "[DEBUG] AsyncSignalHandler Queue 4 completion #" << q4_count.fetch_add(1)
+                   << " during detach (fini_status=" << _fini_status << ")";
+    }
+
     auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
 
     kernel_dispatch::dispatch_complete(queue_info_session, dispatch_time);
@@ -706,8 +714,23 @@ Queue::sync() const
                    << " waiting for " << _active_count << " active kernels to complete. "
                    << "fini_status=" << registration::get_fini_status();
 
-        _core_api.hsa_signal_wait_relaxed_fn(
-            _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
+        // Use timeout-based wait with periodic logging to debug hangs
+        constexpr uint64_t timeout_ns = 5000000000ULL; // 5 seconds
+        int iteration = 0;
+        while(true)
+        {
+            auto result = _core_api.hsa_signal_wait_relaxed_fn(
+                _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, timeout_ns, HSA_WAIT_STATE_ACTIVE);
+
+            auto current_count = _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
+            if(current_count == 0) break;
+
+            iteration++;
+            ROCP_ERROR << "[DEBUG] Queue::sync() - Queue " << get_id().handle
+                       << " still waiting after " << (iteration * 5) << "s"
+                       << " - signal value=" << current_count
+                       << " fini_status=" << registration::get_fini_status();
+        }
 
         ROCP_ERROR << "[DEBUG] Queue::sync() - Queue " << get_id().handle << " sync completed";
     }
