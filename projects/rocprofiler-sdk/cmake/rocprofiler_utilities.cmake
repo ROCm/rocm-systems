@@ -1037,6 +1037,145 @@ function(rocprofiler_install_env_setup_files)
 endfunction()
 
 # ----------------------------------------------------------------------------
+# Adds a unit test subdirectory
+#
+
+function(rocprofiler_add_unit_test)
+    cmake_policy(PUSH)
+    if(POLICY CMP0174)
+        cmake_policy(SET CMP0174 OLD)
+    endif()
+
+    # parse args
+    set(_FLAG_OPTS)
+    set(_SINGLE_OPTS
+        "TARGET"
+        "TEST_LIST"
+        "TEST_PREFIX"
+        "TIMEOUT"
+        "LABELS"
+        "DISABLED"
+        "PASS_REGULAR_EXPRESSION"
+        "FAIL_REGULAR_EXPRESSION"
+        "SKIP_REGULAR_EXPRESSION")
+    set(_MULTI_OPTS "SOURCES" "ENVIRONMENT" "DISABLE_TESTS")
+
+    cmake_parse_arguments(RAUT "${_FLAG_OPTS}" "${_SINGLE_OPTS}" "${_MULTI_OPTS}" ${ARGN})
+
+    include(GoogleTest)
+
+    macro(set_arg_if_empty _VAR)
+        if(NOT ${_VAR})
+            set(${_VAR} ${ARGN})
+        endif()
+    endmacro()
+
+    foreach(_VAR TARGET SOURCES)
+        if(NOT RAUT_${_VAR})
+            message(
+                FATAL_ERROR "rocprofiler_add_unit_test missing required argument: ${_VAR}"
+                )
+        endif()
+    endforeach()
+
+    set_arg_if_empty(RAUT_TIMEOUT 45)
+    set_arg_if_empty(RAUT_LABELS "unittests")
+    set_arg_if_empty(RAUT_TEST_LIST "${RAUT_TARGET}_TESTS")
+    set_arg_if_empty(RAUT_FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    set_arg_if_empty(RAUT_DISABLED "OFF")
+    set_arg_if_empty(RAUT_TEST_PREFIX "unit.")
+
+    set(_DISABLE_TESTS_SOURCE "")
+    if(RAUT_DISABLE_TESTS)
+        foreach(_TEST ${RAUT_DISABLE_TESTS})
+            list(APPEND _DISABLE_TESTS_SOURCE "${RAUT_TEST_PREFIX}${_TEST}")
+        endforeach()
+    endif()
+
+    if(NOT "unittests" IN_LIST RAUT_LABELS)
+        list(APPEND RAUT_LABELS "unittests")
+    endif()
+
+    gtest_add_tests(
+        TARGET ${RAUT_TARGET}
+        SOURCES ${RAUT_SOURCES}
+        TEST_LIST ${RAUT_TEST_LIST}
+        TEST_PREFIX ${RAUT_TEST_PREFIX}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+    set_tests_properties(
+        ${${RAUT_TEST_LIST}}
+        PROPERTIES TIMEOUT
+                   ${RAUT_TIMEOUT}
+                   LABELS
+                   "${RAUT_LABELS}"
+                   FAIL_REGULAR_EXPRESSION
+                   "${RAUT_FAIL_REGULAR_EXPRESSION}"
+                   PASS_REGULAR_EXPRESSION
+                   "${RAUT_PASS_REGULAR_EXPRESSION}"
+                   SKIP_REGULAR_EXPRESSION
+                   "${RAUT_SKIP_REGULAR_EXPRESSION}"
+                   ENVIRONMENT
+                   "${RAUT_ENVIRONMENT}"
+                   DISABLED
+                   ${RAUT_DISABLED})
+
+    if(_DISABLE_TESTS_SOURCE)
+        set_tests_properties(${_DISABLE_TESTS_SOURCE} PROPERTIES DISABLED ON)
+    endif()
+
+    install(
+        TARGETS ${RAUT_TARGET}
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin
+        COMPONENT tests
+        EXPORT rocprofiler-sdk-tests-targets)
+
+    get_property(
+        _ROCP_SDK_TEST_TARGETS
+        DIRECTORY ${CMAKE_SOURCE_DIR}
+        PROPERTY rocprofiler-sdk-tests-targets)
+
+    if(RAUT_TARGET IN_LIST _ROCP_SDK_TEST_TARGETS)
+        message(
+            FATAL_ERROR
+                "Target ${RAUT_TARGET} already exists in rocprofiler-sdk-tests-targets")
+    endif()
+
+    set_property(
+        DIRECTORY ${CMAKE_SOURCE_DIR}
+        APPEND
+        PROPERTY rocprofiler-sdk-tests-targets ${RAUT_TARGET})
+
+    string(REPLACE "-" "_" _PACKAGE_NAME_UNDERSCORED "${CMAKE_PROJECT_NAME}")
+    set(RAUT_TEST_PREFIX "${_PACKAGE_NAME_UNDERSCORED}.${RAUT_TEST_PREFIX}")
+
+    set(_DISABLE_TESTS_INSTALLED "")
+    if(RAUT_DISABLE_TESTS)
+        foreach(_TEST ${RAUT_DISABLE_TESTS})
+            list(APPEND _DISABLE_TESTS_INSTALLED "${RAUT_TEST_PREFIX}${_TEST}")
+        endforeach()
+    endif()
+    set(RAUT_DISABLE_TESTS "${_DISABLE_TESTS_INSTALLED}")
+
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/cmake/Templates/unit-test.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/${RAUT_TARGET}.cmake
+        @ONLY)
+
+    install(
+        FILES ${RAUT_SOURCES}
+        DESTINATION
+            ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/${RAUT_TARGET}
+        COMPONENT tests)
+
+    install(
+        FILES
+            ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/${RAUT_TARGET}.cmake
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests
+        COMPONENT tests)
+
+    cmake_policy(POP)
+endfunction()
 # gets the user local python bin directory from `python3 -m pip install --user ...`
 #
 function(_rocprofiler_get_python_user_bin _OUT)

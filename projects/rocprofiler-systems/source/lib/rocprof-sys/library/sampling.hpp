@@ -65,5 +65,11 @@ void unblock_signals(std::set<int> = {});
 
 void
 post_process();
+
+void
+postfork_parent_reinit();
+
+void
+postfork_child_cleanup();
 }  // namespace sampling
 }  // namespace rocprofsys

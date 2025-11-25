@@ -27,9 +27,16 @@
 #include <string_view>
 #include <vector>
 
+#include "lib/common/filesystem.hpp"
+
 #ifndef CODEOBJ_BINARY_DIR
 static_assert(false && "Please define CODEOBJ_BINARY_DIR to codeobj tests binary, "
                        "e.g. ../source/lib/tests/codeobj/");
+#endif
+
+#ifndef CODEOBJ_INSTALL_DIR
+static_assert(false && "Please define CODEOBJ_INSTALL_DIR to the installed tests bin directory "
+                       "(e.g. <prefix>/share/rocprofiler-sdk/tests/unit-tests/bin/)");
 #endif
 
 namespace rocprofiler
@@ -38,6 +45,8 @@ namespace testing
 {
 namespace codeobjhelper
 {
+namespace fs = common::filesystem;
+
 std::string
 removeNull(std::string_view s)
 {
@@ -47,11 +56,24 @@ removeNull(std::string_view s)
     return u;
 }
 
+// Helper function for path to a test assets
+static std::string
+get_data_file_path(const char* name)
+{
+    for(const char* base : {CODEOBJ_BINARY_DIR, CODEOBJ_INSTALL_DIR})
+    {
+        std::error_code ec;
+        fs::path        p = fs::path(base) / name;
+        if(fs::exists(p, ec) && fs::is_regular_file(p, ec)) return p.string();
+    }
+    return {};  // not found
+}
+
 static const std::vector<std::string>&
 GetHipccOutput()
 {
     static std::vector<std::string> result = []() {
-        std::ifstream            file(CODEOBJ_BINARY_DIR "hipcc_output.s");
+        std::ifstream            file(get_data_file_path("hipcc_output.s"));
         std::vector<std::string> ret;
 
         while(file.good())
@@ -69,7 +91,7 @@ static const std::vector<char>&
 GetCodeobjContents()
 {
     static std::vector<char> buffer = []() {
-        std::string   filename = CODEOBJ_BINARY_DIR "smallkernel.bin";
+        std::string   filename = get_data_file_path("smallkernel.bin");
         std::ifstream file(filename.data(), std::ios::binary);
 
         using iterator_t = std::istreambuf_iterator<char>;
@@ -141,7 +163,9 @@ TEST(codeobj_library, decoder_component)
 
     CodeobjDecoderComponent component(objdata.data(), objdata.size());
 
-    std::string          kernel_with_protocol = "file://" CODEOBJ_BINARY_DIR "smallkernel.bin";
+    std::string smallkernel_path =
+        rocprofiler::testing::codeobjhelper::get_data_file_path("smallkernel.bin");
+    std::string          kernel_with_protocol = "file://" + smallkernel_path;
     LoadedCodeobjDecoder loadecomp(kernel_with_protocol.data(), loaded_offset, objdata.size());
 
     ASSERT_EQ(component.m_symbol_map.size(), 1);
