@@ -109,7 +109,7 @@ typedef enum {
                                          //!< being used
   RSMI_STATUS_REFCOUNT_OVERFLOW,         //!< An internal reference counter
                                          //!< exceeded INT32_MAX
-  RSMI_STATUS_DIRECTORY_NOT_FOUND,       //!< Error when a directory is not 
+  RSMI_STATUS_DIRECTORY_NOT_FOUND,       //!< Error when a directory is not
                                          //!< found, maps to ENOTDIR
   RSMI_STATUS_SETTING_UNAVAILABLE,       //!< Requested setting is unavailable
                                          //!< for the current device
@@ -2682,7 +2682,7 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t reserved,
  *
  *  @return ::rsmi_status_t | ::RSMI_STATUS_SUCCESS on success, non-zero on fail.
  */
-rsmi_status_t 
+rsmi_status_t
 rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
                                  uint32_t *sensor_inds, rsmi_power_cap_type_t *sensor_types);
 /** @} */  // end of PowerCont
@@ -5113,7 +5113,7 @@ rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
  *  @param[in] dv_ind a device index
  *
  *  @param[in] type a pointer to a requested resource using enum ::rsmi_accelerator_partition_resource_type_t
- * 
+ *
  *  @param[inout] profile a pointer to the requested rsmi_accelerator_partition_resource_profile_t details
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
@@ -5662,9 +5662,9 @@ rsmi_set_gpu_ptl_state(uint32_t dv_ind, bool enabled);
  *  @param[in] dv_ind a device index
  *
  *  @param[inout] format a pointer to data format to which the raw format string will be stored
- * 
+ *
  *  @param[in] len the length of the caller provided buffer @p name.
- * 
+ *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
  *
@@ -5680,7 +5680,7 @@ rsmi_get_gpu_ptl_formats(uint32_t dv_ind, char* format, size_t len);
  *  @param[in] dv_ind a device index
  *
  *  @param[inout] format string pointer format to set ptl level to
- * 
+ *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
  *
@@ -5696,9 +5696,9 @@ rsmi_set_gpu_ptl_formats(uint32_t dv_ind, const char* format);
  *  @param[in] dv_ind a device index
  *
  *  @param[inout] supported string pointer to return supported ptl formats
- * 
+ *
  *  @param[in] len the length of the caller provided buffer @p name.
- * 
+ *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
  *
@@ -5737,23 +5737,23 @@ rsmi_dev_metrics_log_get(uint32_t dv_ind);
  *  https://docs.kernel.org/admin-guide/sysctl/kernel.html#modprobe
  *  with no extra parameters as specified in
  *  https://docs.kernel.org/gpu/amdgpu/module-parameters.html.
- * 
+ *
  *  Use this function with caution, as it will unload and reload the AMD GPU
- *  driver: `modprobe -r amdgpu && modprobe amdgpu`. 
- *  
+ *  driver: `modprobe -r amdgpu && modprobe amdgpu`.
+ *
  *  Any process or workload using the AMD GPU driver is REQUIRED to be
  *  stopped before calling this function. Otherwise, function will return
  *  ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
  *  the amdgpu driver.
- * 
+ *
  *  User is REQUIRED to have root/admin privileges to call this function.
  *  Otherwise, this function will return ::RSMI_STATUS_PERMISSION.
- * 
+ *
  *  This API will take time to complete, as we are checking the driver's
  *  loading status to confirm it reloaded properly. If
  *  ::RSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
  *  did not reload properly and the user should check dmesg logs.
- * 
+ *
  *  This function has been created in order to conviently reload the
  *  AMD GPU driver once `rsmi_dev_memory_partition_set()`
  *  successfully has been changed on Baremetal systems.

@@ -2297,7 +2297,6 @@ AMDSMI_PTL_DATA_FORMAT_F32 = 3
 AMDSMI_PTL_DATA_FORMAT_F64 = 4
 AMDSMI_PTL_DATA_FORMAT_INVALID = 4294967295
 amdsmi_ptl_data_format_t = ctypes.c_uint32 # enum
-
 class struct_amdsmi_smu_fw_version_t(Structure):
     pass
 

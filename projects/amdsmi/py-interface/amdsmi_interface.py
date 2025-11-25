@@ -5576,12 +5576,11 @@ def amdsmi_set_gpu_ptl_state(
         )
     )
 
-def amdsmi_get_gpu_ptl_formats(    
+def amdsmi_get_gpu_ptl_formats(
     processor_handle: processor_handle_t
     ) -> tuple[int, int]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-    
     data_format1 = amdsmi_wrapper.amdsmi_ptl_data_format_t()
     data_format2 = amdsmi_wrapper.amdsmi_ptl_data_format_t()
 

@@ -473,7 +473,7 @@ typedef enum {
 
     // GPU Board Node temperature
     AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_FIRST = 100,
-    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_RETIMER_X 
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_RETIMER_X
       = AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_FIRST,         //!< Retimer X temperature
     AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_IBC,         //!< OAM X IBC temperature
     AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_IBC_2,       //!< OAM X IBC 2 temperature
@@ -482,7 +482,7 @@ typedef enum {
     AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR, //!< OAM X 0.4V HBM D voltage regulator temperature
     AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_LAST = 149,
 
-    // GPU Board VR (Voltage Regulator) temperature 
+    // GPU Board VR (Voltage Regulator) temperature
     AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_FIRST = 150,
     AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD0
          = AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_FIRST,   //!< VDDCR VDD0 voltage regulator temperature
@@ -500,7 +500,7 @@ typedef enum {
     AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_E32,      //!< VDDIO 1.1V E32 voltage regulator temperature
     AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_LAST = 199,
 
-    // Baseboard System temperature 
+    // Baseboard System temperature
     AMDSMI_TEMPERATURE_TYPE_BASEBOARD_FIRST = 200,
     AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA = AMDSMI_TEMPERATURE_TYPE_BASEBOARD_FIRST,  //!< UBB FPGA temperature
     AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FRONT,          //!< UBB front temperature
@@ -2422,7 +2422,7 @@ typedef struct {
  *  @platform{guest_mvf} @platform{guest_windows}
  *
  *  @details This function initializes the library and the internal data structures,
- *  including those corresponding to sources of information that SMI provides. 
+ *  including those corresponding to sources of information that SMI provides.
  *  Singleton Design, requires the same number of inits as shutdowns.
  *
  *  The @p init_flags decides which type of processor
@@ -2670,7 +2670,7 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
                                     amdsmi_processor_handle* processor_handles);
 
 /**
- *  @brief Get the node handle associated with processor handle. 
+ *  @brief Get the node handle associated with processor handle.
  *
  *  @ingroup tagProcDiscovery
  *
@@ -2680,7 +2680,7 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
  *  @p processor_handle must be provided for the processor.
  *  Currently, only AMD GPUs are supported.
  *
- *  @param[in] processor_handle A pointer to a ::amdsmi_processor_handle, this 
+ *  @param[in] processor_handle A pointer to a ::amdsmi_processor_handle, this
  *  is required to be OAM ID 0 otherwise the API will fail. OAM ID is sourced
  *  from amdsmi_get_gpu_asic_info API.
  *
@@ -3372,7 +3372,7 @@ amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_handle, uint32_t 
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
  */
-amdsmi_status_t 
+amdsmi_status_t
 amdsmi_get_supported_power_cap(amdsmi_processor_handle processor_handle, uint32_t *sensor_count,
                                  uint32_t *sensor_inds, amdsmi_power_cap_type_t *sensor_types);
 
@@ -6587,23 +6587,23 @@ amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *
  *  https://docs.kernel.org/admin-guide/sysctl/kernel.html#modprobe
  *  with no extra parameters as specified in
  *  https://docs.kernel.org/gpu/amdgpu/module-parameters.html.
- * 
+ *
  *  Use this function with caution, as it will unload and reload the AMD GPU
- *  driver: `modprobe -r amdgpu && modprobe amdgpu`. 
- *  
+ *  driver: `modprobe -r amdgpu && modprobe amdgpu`.
+ *
  *  Any process or workload using the AMD GPU driver is REQUIRED to be
  *  stopped before calling this function. Otherwise, function will return
  *  ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
  *  the amdgpu driver.
- * 
+ *
  *  User is REQUIRED to have root/admin privileges to call this function.
  *  Otherwise, this function will return ::AMDSMI_STATUS_NO_PERM.
- * 
+ *
  *  This API will take time to complete, as we are checking the driver's
  *  loading status to confirm it reloaded properly. If
  *  ::AMDSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
  *  did not reload properly and the user should check dmesg logs.
- * 
+ *
  *  This function has been created in order to conviently reload the
  *  AMD GPU driver once `amdsmi_set_gpu_memory_partition()` or
  *  `amdsmi_set_gpu_memory_partition_mode()` successfully has been changed
@@ -6642,10 +6642,10 @@ amdsmi_status_t amdsmi_gpu_driver_reload(void);
  *
  *  @param[in] processor_handle Device which to query
  *
- *  @param[out] enabled Pointer to boolean that will be set to true if PTL is 
+ *  @param[out] enabled Pointer to boolean that will be set to true if PTL is
  *  enabled, false if PTL is disabled
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, 
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if PTL is not supported on this device,
  *          non-zero on other failures
  */
@@ -6680,8 +6680,8 @@ amdsmi_status_t amdsmi_set_gpu_ptl_state(amdsmi_processor_handle processor_handl
  *  @platform{gpu_bm_linux} @platform{host}
  *
  *  @details This function retrieves the current PTL fromats
- *  for the specified processor. PTL constrains the product to never deliver more 
- *  than a specified TOPS/second. 
+ *  for the specified processor. PTL constrains the product to never deliver more
+ *  than a specified TOPS/second.
  *
  *  @param[in] processor_handle Device which to query
 *
@@ -6689,7 +6689,7 @@ amdsmi_status_t amdsmi_set_gpu_ptl_state(amdsmi_processor_handle processor_handl
  *
  *  @param[out] data_format2 Pointer to second preferred data format that receives peak performance
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, 
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if PTL is not supported on this device,
  *          non-zero on other failures
  */
@@ -6707,7 +6707,7 @@ amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
  *
  *  @details This function sets PTL with the specified preferred data format pair.
  *  PTL must be enabled first before calling this function using amdsmi_set_gpu_ptl_state.
- *  The two specified formats will receive accurate performance monitoring and peak 
+ *  The two specified formats will receive accurate performance monitoring and peak
  *  performance. F8 and XF32 formats always receive peak performance regardless of this setting.
  *
  *  @param[in] processor_handle Device to configure
@@ -6718,9 +6718,9 @@ amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
  *  @param[in] data_format2 Second preferred data format (must be from the limited set:
  *  I8, F16, BF16, F32, F64, and different from data_format1)
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, 
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if PTL is not supported on this device,
- *          non-zero on other failures 
+ *          non-zero on other failures
  **/
 amdsmi_status_t
 amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
