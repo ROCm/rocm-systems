@@ -74,9 +74,19 @@ TEMPORARY_BLACKLIST_ALL_ASICS=\
 "KFDDBGTest.SuspendQueues:"\
 "KFDDBGTest.HitAddressWatch"
 
+# This is the temporary blacklist for all ASICs when running in a secondary context.
+# Because userptr and memory register are not supported by the secondary context currently.
+# Once these features are supported, this blacklist can be removed.
+SECONDARY_CONTEXT_BLACKLIST=\
+"KFDMemoryTest.MemoryRegister:"\
+"KFDMemoryTest.MemoryRegisterSamePtr:"\
+"KFDMemoryTest.QueryPointerInfo:"\
+"KFDMemoryTest.MultiThreadRegisterUserptrTest"
+
 BLACKLIST_ALL_ASICS=\
 "$PERMANENT_BLACKLIST_ALL_ASICS:"\
 "$TEMPORARY_BLACKLIST_ALL_ASICS"
+#"$SECONDARY_CONTEXT_BLACKLIST"
 
 # SDMA-based tests (KFDIPCTest.BasicTest, KFDQM.*Sdma*, KFDMemoryTest.MMBench) are all
 # disabled on non-Hawaii due to SDMA instability - SWDEV-101666
