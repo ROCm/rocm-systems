@@ -263,6 +263,61 @@ MenuButton.selected {
     color: $text-accent;
 }
 
+/* InstantButton replacements for menu items */
+InstantButton.menu-item {
+    background: $accent;
+    width: 25;
+    height: 2;
+    padding: 0 2;
+    border: none;
+    align: center middle;
+    content-align: center middle;
+}
+
+InstantButton.menu-item:hover {
+    background: $accent-lighten-1;
+    color: $text-accent;
+}
+
+InstantButton.menu-item:focus {
+    background: $accent-darken-1;
+}
+
+InstantButton.menu-item.-active {
+    background: $accent-darken-2;
+}
+
+/* InstantMenuButton styling replacing MenuButton */
+InstantMenuButton {
+    background: $surface;
+    color: $text;
+    min-width: 10;
+    height: auto;
+    padding: 0 1;
+    border: none;
+    width: auto;
+    align: center middle;
+    content-align: center middle;
+}
+
+InstantMenuButton:hover {
+    background: $primary-background-lighten-1;
+    color: $text-accent;
+}
+
+InstantMenuButton:focus {
+    background: $primary-background;
+}
+
+InstantMenuButton.-active {
+    background: $primary-background-darken-1;
+}
+
+InstantMenuButton.selected {
+    background: $primary-background;
+    color: $text-accent;
+}
+
 #dropdown-container {
     width: 100%;
     height: auto;

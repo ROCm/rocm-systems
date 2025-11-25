@@ -20,7 +20,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-
 ##############################################################################
 """
 ROCm Compute Profiler TUI - Main Application with Analysis Methods
@@ -33,16 +32,18 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
-from textual import on, work
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Button, Footer, Header
+from textual.widgets import Footer, Header
 
 import config
 from rocprof_compute_tui.config import APP_TITLE
 from rocprof_compute_tui.views.main_view import MainView
 from rocprof_compute_tui.widgets.directory_picker import DirectoryPicker
-from rocprof_compute_tui.widgets.menu_bar.menu_bar import DropdownMenu, MenuButton
+from rocprof_compute_tui.widgets.instant_button import InstantButton
+from rocprof_compute_tui.widgets.menu_bar.menu_bar import DropdownMenu
+from rocprof_compute_tui.widgets.menu_button import InstantMenuButton
 from utils.specs import generate_machine_specs
 from utils.utils import get_version
 
@@ -76,6 +77,7 @@ class RocprofTUIApp(App):
         self.supported_archs = supported_archs or {}
         self.soc: dict[str, Any] = {}
         self.mspec: Optional[Any] = None
+        self.mouse = True
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -135,20 +137,27 @@ class RocprofTUIApp(App):
 
         self.main_view.run_analysis()
 
-    @on(Button.Pressed, "#menu-open-workload")
+    def on_instant_button_instant_pressed(
+        self, event: InstantButton.InstantPressed
+    ) -> None:
+        """Top-level handler for instant buttons not handled by child widgets."""
+        if event.button.id == "menu-open-workload":
+            event.stop()
+            self._start_pick_directory()
+
     @work
-    async def pick_directory(self) -> None:
-        """Open directory picker with custom implementation."""
+    async def _start_pick_directory(self) -> None:
+        """Open directory picker and handle selection."""
         # Close the dropdown first
         dropdown = self.query_one("#file-dropdown", DropdownMenu)
         dropdown.add_class("hidden")
-        menu_button = self.query_one("#menu-file", MenuButton)
+        menu_button = self.query_one("#menu-file", InstantMenuButton)
         menu_button.is_open = False
 
-        # Open custom directory picker
         try:
             picker = DirectoryPicker()
-            if opened := await self.push_screen_wait(picker):
+            opened = await self.push_screen_wait(picker)
+            if opened:
                 self.log(f"Directory selected: {opened}")
                 self.notify(f"Selected directory: {opened}", severity="information")
 
@@ -158,7 +167,6 @@ class RocprofTUIApp(App):
                 self.notify("Running analysis…", severity="information")
                 self.main_view.run_analysis()
                 self.notify("Analysis completed", severity="information")
-
             else:
                 self.log("Directory selection cancelled")
                 self.notify("Directory selection cancelled", severity="information")
