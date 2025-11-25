@@ -1871,13 +1871,14 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
 
     if (dstMemory != nullptr && srcMemory != nullptr) {
-      status = ihipMemcpyCommand(command, dstMemory, srcMemory, count_, kind_, *stream, dOffset, sOffset, true);
+      status = ihipMemcpyCommand(command, dstMemory, srcMemory, count_, kind_, *stream, dOffset,
+                                 sOffset);
       type = ihipGetMemcpyType(srcMemory, dstMemory, kind_);
     } else if (dstMemory == nullptr && srcMemory != nullptr) {
-      status = ihipMemcpyCommand(command, dst_, srcMemory, count_, kind_, *stream, sOffset, true);
+      status = ihipMemcpyCommand(command, dst_, srcMemory, count_, kind_, *stream, sOffset);
       type = ihipGetMemcpyType(srcMemory, dst_);
     } else if (dstMemory != nullptr && srcMemory == nullptr) {
-      status = ihipMemcpyCommand(command, dstMemory, src_, count_, kind_, *stream, dOffset, true);
+      status = ihipMemcpyCommand(command, dstMemory, src_, count_, kind_, *stream, dOffset);
       type = ihipGetMemcpyType(src_, dstMemory);
     }
 

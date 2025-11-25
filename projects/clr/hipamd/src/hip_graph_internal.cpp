@@ -78,7 +78,7 @@ hipError_t GraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t 
   amd::Memory* srcMemory = getMemoryObject(src, sOffset);
   size_t dOffset = 0;
   amd::Memory* dstMemory = getMemoryObject(dst, dOffset);
-  
+
   if ((srcMemory == nullptr) && (dstMemory != nullptr)) {  // host to device
     if ((kind != hipMemcpyHostToDevice) && (kind != hipMemcpyDefault)) {
       return hipErrorInvalidValue;
