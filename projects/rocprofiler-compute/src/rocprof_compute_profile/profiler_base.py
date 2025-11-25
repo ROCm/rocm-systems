@@ -122,6 +122,26 @@ class RocProfCompute_Base:
                 "./vcopy -n 1048576 -b 256"
             )
 
+    def detect_missing_counters(self, df: pd.DataFrame) -> None:
+        """Detect missing counter values in joined dataframe"""
+        args = self.get_args()
+        group_labels = ["Kernel_Name"]
+        if args.join_type == "grid":
+            group_labels.append("Grid_Size")
+
+        num_files = len(list(Path(args.path).glob("perfmon/*.txt")))
+        for _, groups in df.groupby(group_labels):
+            if groups["Dispatch_ID"].nunique() < num_files:
+                console_warning(
+                    "join_prof",
+                    (
+                        "Detected missing counter values. "
+                        "For accurate results, re-run profiling without"
+                        " iteration multiplexing"
+                    ),
+                )
+                return
+
     @demarcate
     def join_prof(self, out: Optional[str] = None) -> Optional[pd.DataFrame]:
         """Manually join separated rocprof runs"""
@@ -147,6 +167,10 @@ class RocProfCompute_Base:
                             writer.writerow(row)
 
             console_debug(f"Created file: {output_file}")
+
+            if args.iteration_multiplexing is not None:
+                df = pd.read_csv(output_file)
+                self.detect_missing_counters(df)
 
             # Delete results_*.csv files
             for file in result_files:
@@ -339,6 +363,11 @@ class RocProfCompute_Base:
         # finally, join the drop key
         if "key" in df.columns:
             df = df.drop(columns=["key"])
+
+        console_debug("join_prof", "Checking for missing counter values...")
+
+        if args.iteration_multiplexing is not None:
+            self.detect_missing_counters(df)
 
         # save to file and delete old file(s)
         # skip if we're being called outside of rocprof-compute
