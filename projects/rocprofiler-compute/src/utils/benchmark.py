@@ -1057,7 +1057,7 @@ def dump_csv(metrics, file_path):
         "MFMA-F4": "MFMAF4Flops",
         "MFMA-F6": "MFMAF6Flops",
         "MFMA-F8": "MFMAF8Flops",
-        "MFMA-F16": "MFMAF16FLops",
+        "MFMA-F16": "MFMAF16Flops",
         "MFMA-BF16": "MFMABF16Flops",
         "MFMA-F32": "MFMAF32Flops",
         "MFMA-F64": "MFMAF64Flops",
