@@ -194,7 +194,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 extern "C" rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t                 /* version */,
                       const char*              /* runtime_version */,
-                      uint32_t                 priority,
+                      uint32_t                 /* priority */,
                       rocprofiler_client_id_t* id)
 {
     id->name  = "CodeObjectMultiThreadedClient";
