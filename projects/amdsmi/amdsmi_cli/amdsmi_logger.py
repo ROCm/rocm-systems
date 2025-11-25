@@ -263,6 +263,9 @@ class AMDSMILogger():
                 # Remove excess two values after a new line in table_values
                 table_values = table_values[:table_values.rfind('\n')]
                 table_values += '\n'
+            # Board temperature key patterns
+            elif any(pattern in key for pattern in ['IBC', 'OAM', 'RETIMER', 'UBB', 'HSC', 'VR', 'VDDCR', 'NODE', 'VDD', 'HBM']):
+                table_values += string_value.rjust(max((len(key)+2), 7))
             # Default spacing
             else:
                 table_values += string_value.rjust(10)
