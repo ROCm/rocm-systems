@@ -20,20 +20,40 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# TODO: Remove block below, this is for local development only
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-project(rocstorage)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# Standalone build support - uncomment when extracting as separate project
+# cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+# project(rocstorage VERSION 0.1.0)
+# set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Detect if built standalone or as subdirectory
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(ROCSTORAGE_STANDALONE ON)
+else()
+    set(ROCSTORAGE_STANDALONE OFF)
+endif()
+
+# ------------------------------------------------------------ #
+# Version
+# ------------------------------------------------------------ #
+
+set(rocstorage_VERSION_MAJOR 0)
+set(rocstorage_VERSION_MINOR 1)
+set(rocstorage_VERSION_PATCH 0)
+set(rocstorage_VERSION
+    ${rocstorage_VERSION_MAJOR}.${rocstorage_VERSION_MINOR}.${rocstorage_VERSION_PATCH}
+)
 
 # ------------------------------------------------------------ #
 # Library
 # ------------------------------------------------------------ #
+
 add_library(rocstorage SHARED)
 add_subdirectory(source)
 
 # ------------------------------------------------------------ #
 # Public API
 # ------------------------------------------------------------ #
+
 set(rocstorage_public_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
@@ -59,19 +79,22 @@ target_include_directories(
 # ------------------------------------------------------------ #
 # CMake modules
 # ------------------------------------------------------------ #
+
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 # ------------------------------------------------------------ #
 # SQLite3
 # ------------------------------------------------------------ #
+
 include(sqlite3)
 target_link_libraries(rocstorage PRIVATE $<BUILD_INTERFACE:rocstorage-sqlite3>)
 
 # ------------------------------------------------------------ #
 # Schema from rocprofiler-sdk-rocpd
 # ------------------------------------------------------------ #
+
 set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
-set(SQL_SCHEMA_BINARY_DIR ${CMAKE_BINARY_DIR}/source/data_storage/)
+set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
 
 include(rocm)
 include(rocprofiler-sdk-rocpd)
@@ -93,5 +116,82 @@ else()
 endif()
 
 # ------------------------------------------------------------ #
-# CMake packaging
+# Install package support
 # ------------------------------------------------------------ #
+
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME rocstorage)
+set(PACKAGE_NAME "rocstorage")
+
+install(
+    TARGETS ${PACKAGE_NAME}
+    EXPORT ${PACKAGE_NAME}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT rocstorage
+)
+
+install(
+    EXPORT ${PACKAGE_NAME}
+    FILE ${PACKAGE_NAME}-targets.cmake
+    NAMESPACE ${PACKAGE_NAME}::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}
+    COMPONENT rocstorage
+)
+
+set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
+set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
+
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocstorage-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}
+    PATH_VARS INCLUDE_INSTALL_DIR LIB_INSTALL_DIR
+)
+
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
+    VERSION ${rocstorage_VERSION}
+    COMPATIBILITY SameMinorVersion
+)
+
+install(
+    FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}
+    COMPONENT rocstorage
+)
+
+# ------------------------------------------------------------ #
+# Build tree support (standalone builds only)
+# ------------------------------------------------------------ #
+
+if(ROCSTORAGE_STANDALONE)
+    export(
+        TARGETS ${PACKAGE_NAME}
+        NAMESPACE ${PACKAGE_NAME}::
+        FILE ${CMAKE_CURRENT_BINARY_DIR}/${PACKAGE_NAME}-targets.cmake
+    )
+
+    file(
+        WRITE ${CMAKE_CURRENT_BINARY_DIR}/${PACKAGE_NAME}-config.cmake
+        "include_guard(DIRECTORY)
+    set(${PACKAGE_NAME}_INCLUDE_DIR \"${CMAKE_BINARY_DIR}/include\")
+    set(${PACKAGE_NAME}_LIB_DIR \"${CMAKE_CURRENT_BINARY_DIR}\")
+    include(\"\${CMAKE_CURRENT_LIST_DIR}/${PACKAGE_NAME}-targets.cmake\")
+    "
+    )
+
+    file(
+        COPY
+            ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
+        DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
+    )
+
+    set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
+    export(PACKAGE ${PACKAGE_NAME})
+endif()
