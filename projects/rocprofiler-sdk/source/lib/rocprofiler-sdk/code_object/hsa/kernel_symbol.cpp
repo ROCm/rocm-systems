@@ -49,8 +49,8 @@ kernel_symbol::operator=(kernel_symbol&& rhs) noexcept
 {
     if(this != &rhs)
     {
-        beg_notified = rhs.beg_notified;
-        end_notified = rhs.end_notified;
+        beg_notified.store(rhs.beg_notified.load());
+        end_notified.store(rhs.end_notified.load());
         name           = rhs.name;
         hsa_executable = rhs.hsa_executable;
         hsa_agent      = rhs.hsa_agent;

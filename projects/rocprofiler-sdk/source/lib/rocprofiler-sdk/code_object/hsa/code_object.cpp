@@ -49,10 +49,8 @@ code_object::operator=(code_object&& rhs) noexcept
 {
     if(this != &rhs)
     {
-        beg_notified.store(rhs.beg_notified.load(std::memory_order_relaxed),
-                           std::memory_order_relaxed);
-        end_notified.store(rhs.end_notified.load(std::memory_order_relaxed),
-                           std::memory_order_relaxed);
+        beg_notified.store(rhs.beg_notified.load());
+        end_notified.store(rhs.end_notified.load());
         uri             = rhs.uri;
         hsa_executable  = rhs.hsa_executable;
         hsa_code_object = rhs.hsa_code_object;

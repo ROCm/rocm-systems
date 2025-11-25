@@ -64,8 +64,8 @@ rocprofiler_context_id_t      client_ctx       = {};
 
 void
 codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                         rocprofiler_user_data_t*              /* user_data */,
-                         void*                                 /* callback_data */)
+                         rocprofiler_user_data_t* /* user_data */,
+                         void* /* callback_data */)
 {
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
 
@@ -187,9 +187,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 }  // namespace
 
 extern "C" rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t                 /* version */,
-                      const char*              /* runtime_version */,
-                      uint32_t                 /* priority */,
+rocprofiler_configure(uint32_t /* version */,
+                      const char* /* runtime_version */,
+                      uint32_t /* priority */,
                       rocprofiler_client_id_t* id)
 {
     id->name  = "CodeObjectMultiThreadedClient";
