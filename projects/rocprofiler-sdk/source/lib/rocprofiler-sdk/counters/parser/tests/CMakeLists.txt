@@ -14,13 +14,15 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
+set(_ROCPROFILER_SHARE_DIR
+    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
+
+rocprofiler_add_unit_test(
     TARGET parser-test
     SOURCES ${ROCPROFILER_LIB_PARSER_TEST_SOURCES}
-    TEST_LIST parser-tests_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${parser-tests_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    TIMEOUT 45
+    LABELS unittests
+    ENVIRONMENT
+        "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

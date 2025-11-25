@@ -1412,6 +1412,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for Arguments only on Guest and BM platforms
         power_usage_help = "Monitor power usage and power cap in Watts"
         temperature_help = "Monitor temperature in Celsius"
+        base_board_temps_help = "Monitor base board temperatures in Celsius"
+        gpu_board_temps_help = "Monitor GPU board temperatures in Celsius"
         gfx_util_help = "Monitor graphics utilization (%%) and clock (MHz)"
         mem_util_help = "Monitor memory utilization (%%) and clock (MHz)"
         encoder_util_help = "Monitor encoder utilization (%%) and clock (MHz)"
@@ -1431,6 +1433,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add monitor arguments
         monitor_parser.add_argument('-p', '--power-usage', action='store_true', required=False, help=power_usage_help)
         monitor_parser.add_argument('-t', '--temperature', action='store_true', required=False, help=temperature_help)
+        monitor_parser.add_argument('-b', '--base-board-temps', action='store_true', required=False, help=base_board_temps_help)
+        monitor_parser.add_argument('-o', '--gpu-board-temps', action='store_true', required=False, help=gpu_board_temps_help)
         monitor_parser.add_argument('-u', '--gfx', action='store_true', required=False, help=gfx_util_help)
         monitor_parser.add_argument('-m', '--mem', action='store_true', required=False, help=mem_util_help)
         monitor_parser.add_argument('-n', '--encoder', action='store_true', required=False, help=encoder_util_help)

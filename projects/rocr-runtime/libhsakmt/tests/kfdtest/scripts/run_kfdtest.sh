@@ -140,7 +140,7 @@ getFilter() {
     esac
 
     # Check if the loaded driver is upstream (in-box) or DKMS
-    rdma_get_pages_func=$(cat /proc/kallsyms | grep rdma_get_pages)
+    rdma_get_pages_func=$(cat /proc/kallsyms | grep rdma_get_pages || true)
     if [ -z "$rdma_get_pages_func" ]; then
 	    gtestFilter="$gtestFilter:${FILTER[upstream]}"
     fi
@@ -205,9 +205,9 @@ runKfdTest() {
         PKG_ROOT="$(getPackageRoot)"
     fi
 
-    if [ -n "$GTEST_ARGS" ] && [ -n "$ADDITIONAL_EXCLUDE" ]; then
-	    echo "Cannot use -e and --gtest_filter flags together"
-	    exit 0
+    if [[ "$GTEST_ARGS" =~ "--gtest_filter" && -n "$ADDITIONAL_EXCLUDE" ]]; then
+        echo "Cannot use -e and --gtest_filter flags together"
+        exit 0
     fi
 
     if [ "$NODE" == "" ]; then
