@@ -105,7 +105,17 @@ Description: Checks the type of device with provided handle.
 
 Input parameters: device handle as an instance of `amdsmi_processor_handle`
 
-Output: Integer, type of gpu
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`processor_type` | A string representing the processor type name.
+
+* Possible `processor_type` values include:
+  * `"AMD_GPU"` - AMD GPU processor
+  * `"AMD_CPU"` - AMD CPU processor
+  * `"AMD_CPU_CORE"` - AMD CPU core processor
+  * `"UNKNOWN"` - Unknown processor type
 
 Exceptions that can be thrown by `amdsmi_get_processor_type` function:
 
@@ -122,8 +132,9 @@ Example:
 
 ```python
 try:
-    type_of_GPU = amdsmi_get_processor_type(processor_handle)
-    if type_of_GPU == 1:
+    info = amdsmi_get_processor_type(processor_handle)
+    processor_type = info["processor_type"]
+    if processor_type == AmdSmiProcessorType.AMD_GPU.name:
         print("This is an AMD GPU")
 except AmdSmiException as e:
     print(e)
@@ -3413,7 +3424,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventGroup.XGMI)
+            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventType.XGMI_0_REQUEST_TX)
 except AmdSmiException as e:
     print(e)
 ```
@@ -3450,7 +3461,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventGroup.XGMI)
+            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventType.XGMI_0_REQUEST_TX)
             amdsmi_gpu_destroy_counter(event_handle)
 except AmdSmiException as e:
     print(e)
