@@ -299,6 +299,7 @@ file(COPY ./include/hip_test_context.hh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/
 # Enable device lambda on nvidia platforms
 if(HIP_PLATFORM STREQUAL "nvidia")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --extended-lambda")
+    add_compile_options(-Xcompiler=-Wno-deprecated-declarations)
 endif()
 
 # Disable CXX extensions (gnu++11 etc)
