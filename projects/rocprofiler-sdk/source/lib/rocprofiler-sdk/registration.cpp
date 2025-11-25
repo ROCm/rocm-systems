@@ -693,9 +693,7 @@ invoke_client_detaches()
             ROCP_ERROR << "[DEBUG] invoke_client_detaches() - Detaching client "
                        << itr->internal_client_id.handle << " (" << itr->name << ")";
 
-            context::stop_client_contexts(itr->internal_client_id);
-
-            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - Starting sync operations. "
+            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - Starting sync operations (BEFORE stopping contexts). "
                        << "fini_status=" << get_fini_status();
 
             hsa::async_copy_sync();
@@ -706,6 +704,10 @@ invoke_client_detaches()
 
             pc_sampling::service_sync();
             ROCP_ERROR << "[DEBUG] invoke_client_detaches() - pc_sampling::service_sync completed";
+
+            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - Now stopping client contexts";
+            context::stop_client_contexts(itr->internal_client_id);
+            ROCP_ERROR << "[DEBUG] invoke_client_detaches() - Client contexts stopped";
 
             auto _fini_status = get_fini_status();
             ROCP_ERROR << "[DEBUG] invoke_client_detaches() - Before tool_detach callback. "
@@ -743,20 +745,23 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
         if(itr && itr->internal_client_id.handle == client_id.handle &&
            itr->mutable_client_id.handle == client_id.handle)
         {
-            ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - Stopping contexts for client " << client_id.handle;
-            context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)
             {
                 // set to nullptr so finalize only gets called once
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
                 std::swap(_finalize_func, itr->configure_result->finalize);
 
+                ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - Syncing BEFORE stopping contexts for client " << client_id.handle;
                 ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - Calling async_copy_sync()";
                 hsa::async_copy_sync();
                 ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - Calling queue_controller_sync()";
                 hsa::queue_controller_sync();
                 ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - queue_controller_sync() completed";
                 pc_sampling::service_sync();
+
+                ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - Now stopping contexts for client " << client_id.handle;
+                context::stop_client_contexts(itr->internal_client_id);
+                ROCP_ERROR << "[DEBUG] invoke_client_finalizer() - Contexts stopped";
 
                 auto _fini_status = get_fini_status();
                 if(_fini_status == 0) set_fini_status(-1);
