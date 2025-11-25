@@ -162,7 +162,7 @@ main(int argc, char** argv)
     _category_options.emplace("hw_counters::CPU");
     _category_options.emplace("hw_counters::GPU");
 
-    // Remove unused TIMEMORY tuples
+    // Remove unused TIMEMORY third-party libraries
     _category_options.erase("component::tpls::openmp");
 
     array_t<bool, TOTAL> options    = { false, false, false, false, false, false, false };
