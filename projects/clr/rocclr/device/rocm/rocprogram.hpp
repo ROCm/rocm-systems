@@ -57,7 +57,7 @@ class Program : public device::Program {
   }
 
   virtual bool createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, size_t* bytes,
-                                  const char* global_name) const;
+                                  const char* global_name) const override;
 
  protected:
   //! Disable default copy constructor
@@ -65,7 +65,7 @@ class Program : public device::Program {
   //! Disable operator=
   Program& operator=(const Program&) = delete;
 
-  virtual bool defineGlobalVar(const char* name, void* dptr);
+  virtual bool defineGlobalVar(const char* name, void* dptr) override;
 
   bool createBinary(amd::option::Options* options) override final;
 

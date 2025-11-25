@@ -66,30 +66,27 @@ if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
 endif()
 
 # consecutive kernel test
-add_test(
-    NAME rocprofv3-test-att-consecutive-kernels-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-consecutive-kernels
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${ATT_LIB} --att
         --att-consecutive-kernels 8 -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out
-        --log-level env -- $<TARGET_FILE:vector-ops>)
+        --log-level env -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-att-consecutive-kernels)
 
-set_tests_properties(
-    rocprofv3-test-att-consecutive-kernels-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED})
-
-add_test(NAME rocprofv3-test-att-consecutive-kernels-validate
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                 --csv-directory-input ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/)
-
-set_tests_properties(
-    rocprofv3-test-att-consecutive-kernels-validate
-    PROPERTIES TIMEOUT
-               60
-               LABELS
-               "integration-tests"
-               DEPENDS
-               rocprofv3-test-att-consecutive-kernels-execute
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               DISABLED
-               ${IS_DISABLED})
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-consecutive-kernels
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 60
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-att-consecutive-kernels
+    DISABLED ${IS_DISABLED}
+    ARGS --csv-directory-input ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/
+    FAIL_REGULAR_EXPRESSION "AssertionError")

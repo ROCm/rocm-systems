@@ -6,9 +6,9 @@ set(TEST_SRC
     gpu.cpp
 )
 # Creating Custom object file
-add_custom_command(OUTPUT LaunchKernel.o COMMAND gcc -c ${CMAKE_CURRENT_SOURCE_DIR}/LaunchKernel.c -I${HIP_PATH}/include -D__HIP_PLATFORM_AMD__ -o LaunchKernel.o)
+add_custom_command(OUTPUT LaunchKernel.o COMMAND gcc -c -Wno-deprecated-declarations ${CMAKE_CURRENT_SOURCE_DIR}/LaunchKernel.c -I${HIP_PATH}/include -D__HIP_PLATFORM_AMD__ -o LaunchKernel.o)
 add_custom_target(LaunchKernel_custom DEPENDS LaunchKernel.o)
-add_custom_command(OUTPUT hipMalloc.o COMMAND gcc -c ${CMAKE_CURRENT_SOURCE_DIR}/hipMalloc.c -I${HIP_PATH}/include -D__HIP_PLATFORM_AMD__ -o hipMalloc.o)
+add_custom_command(OUTPUT hipMalloc.o COMMAND gcc -c -Wno-deprecated-declarations ${CMAKE_CURRENT_SOURCE_DIR}/hipMalloc.c -I${HIP_PATH}/include -D__HIP_PLATFORM_AMD__ -o hipMalloc.o)
 add_custom_target(hipMalloc_custom DEPENDS hipMalloc.o)
 
 add_library(LaunchKernel_lib OBJECT IMPORTED)

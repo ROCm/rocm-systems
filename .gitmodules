@@ -82,3 +82,6 @@
 [submodule "projects/rocprofiler-systems/examples/openmp/external/ompvv"]
 	path = projects/rocprofiler-systems/examples/openmp/external/ompvv
 	url = https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV.git
+[submodule "projects/rocprofiler-systems/external/googletest"]
+	path = projects/rocprofiler-systems/external/googletest
+	url = https://github.com/google/googletest.git

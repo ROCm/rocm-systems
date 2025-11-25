@@ -204,7 +204,7 @@ Panel Config:
       in the kernel where a workgroup could not be scheduled to a CU due to a bottleneck
       within the workgroup manager rather than a lack of a CU or SIMD with sufficient
       resources.
-    Not-scheduled Rate (Scheduler-Pipe): |-
+    Not-scheduled Rate (Scheduler-Pipe): >-
       The percent of total scheduler-pipe cycles in the kernel where a workgroup
       could not be scheduled to a CU due to a bottleneck within the scheduler-pipes
       rather than a lack of a CU or SIMD with sufficient resources.

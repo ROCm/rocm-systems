@@ -35,6 +35,10 @@ class Mi200Factory : public Gfx9Factory {
 
   virtual int GetAccumLowID() const override { return 1; };
   virtual int GetAccumHiID() const override { return 185; };
+  virtual uint32_t GetSpmSampleDelayMax() { return 0x3e; };
+
+ private:
+  void InitSpmBlockDelayTable();
 
  protected:
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
@@ -42,8 +46,58 @@ class Mi200Factory : public Gfx9Factory {
 
 const GpuBlockInfo* Mi200Factory::block_table_[AQLPROFILE_BLOCKS_NUMBER] = {};
 
+static const uint32_t CpgBlockDelayValue[] = {0x38};
+static const uint32_t CpcBlockDelayValue[] = {0x36};
+static const uint32_t CpfBlockDelayValue[] = {0x3a};
+static const uint32_t GdsBlockDelayValue[] = {0x3a};
+static const uint32_t TccBlockDelayValue[] = {
+    0x11, 0x1b, 0x11, 0x23, 0x14, 0x1a, 0x13, 0x29, 0x15, 0x20, 0x12, 0x29, 0x19, 0x1c, 0x15, 0x2c,
+    0x1d, 0x26, 0x1a, 0x2d, 0x20, 0x23, 0x1d, 0x34, 0x20, 0x2a, 0x1e, 0x32, 0x24, 0x28, 0x22, 0x38};
+static const uint32_t TcaBlockDelayValue[] = {0x20, 0x20, 0x28, 0x2c};
+static const uint32_t SxBlockDelayValue[] = {0x02, 0x08, 0x0c, 0x16, 0x00, 0x0c, 0x11, 0x1e};
+static const uint32_t TaBlockDelayValue[] = {
+    0x18, 0x16, 0x14, 0x12, 0x10, 0x0e, 0x0c, 0x0a, 0x08, 0x06, 0x04, 0x04, 0x02, 0x00, 0, 0,  // se0
+    0x26, 0x24, 0x22, 0x20, 0x1e, 0x1c, 0x1a, 0x18, 0x16, 0x14, 0x12, 0x10, 0x0e, 0x0c, 0, 0,  // se1
+    0x20, 0x1e, 0x1c, 0x1a, 0x18, 0x16, 0x14, 0x12, 0x10, 0x0e, 0x0c, 0x0a, 0x08, 0x06, 0, 0,  // se2
+    0x2c, 0x2a, 0x28, 0x26, 0x24, 0x22, 0x20, 0x1e, 0x1c, 0x1a, 0x18, 0x16, 0x14, 0x12, 0, 0,  // se3
+    0x1e, 0x1c, 0x1a, 0x18, 0x16, 0x14, 0x12, 0x10, 0x0e, 0x0c, 0x0a, 0x08, 0x06, 0x04, 0, 0,  // se4
+    0x2a, 0x28, 0x26, 0x24, 0x22, 0x20, 0x1e, 0x1c, 0x1a, 0x18, 0x16, 0x14, 0x12, 0x10, 0, 0,  // se5
+    0x24, 0x22, 0x20, 0x1e, 0x1c, 0x1a, 0x18, 0x16, 0x14, 0x12, 0x10, 0x0e, 0x0c, 0x0a, 0, 0,  // se6
+    0x30, 0x2e, 0x2c, 0x2a, 0x28, 0x26, 0x24, 0x22, 0x20, 0x1e, 0x1c, 0x1a, 0x18, 0x16, 0, 0}; // se7
+static const uint32_t SpiBlockDelayValue[] = {0x20, 0x20, 0x26, 0x2e, 0x26, 0x26, 0x27, 0x32};
+static const uint32_t SqBlockDelayValue[] = {0x1a, 0x22, 0x28, 0x32, 0x1f, 0x24, 0x2c, 0x34};
+
+void Mi200Factory::InitSpmBlockDelayTable() {
+  cu_block_delay_table_size = sizeof(TaBlockDelayValue) / sizeof(TaBlockDelayValue[0]);
+  const uint32_t** p;
+  // Global Blocks
+  p = spm_block_delay_global;
+  *p++ = CpgBlockDelayValue;  // CPG = 0
+  *p++ = CpcBlockDelayValue;  // CPC = 1
+  *p++ = CpfBlockDelayValue;  // CPF = 2
+  *p++ = GdsBlockDelayValue;  // GDS = 3
+  *p++ = TccBlockDelayValue;  // TCC = 4
+  *p++ = TcaBlockDelayValue;  // TCA = 5
+  *p++ = NULL;                // IA = 6
+  *p++ = NULL;                // TCS = 7
+  // SE Blocks
+  p = spm_block_delay_se;
+  *p++ = NULL;                // CB = 0
+  *p++ = NULL;                // DB = 1
+  *p++ = NULL;                // PA = 2
+  *p++ = SxBlockDelayValue;   // SSX = 3
+  *p++ = NULL;                // SC = 4
+  *p++ = TaBlockDelayValue;   // TA = 5
+  *p++ = TaBlockDelayValue;   // TD = 6  - Same as TA
+  *p++ = TaBlockDelayValue;   // TCP = 7 - Same as TA
+  *p++ = SpiBlockDelayValue;  // SPI = 8
+  *p++ = SqBlockDelayValue;   // SQG = 9
+  *p++ = NULL;                // VGT = 10
+}
+
 Mi200Factory::Mi200Factory(const AgentInfo* agent_info)
     : Gfx9Factory(block_table_, sizeof(block_table_), agent_info) {
+  InitSpmBlockDelayTable();
   for (unsigned i = 0; i < AQLPROFILE_BLOCKS_NUMBER; ++i) {
     const GpuBlockInfo* base_table_ptr = Gfx9Factory::block_table_[i];
     if (base_table_ptr == NULL) continue;
@@ -54,12 +108,14 @@ Mi200Factory::Mi200Factory(const AgentInfo* agent_info)
       block_info = new GpuBlockInfo(*base_table_ptr);
     block_table_[i] = block_info;
     // overwrite block info for any update from gfx9 to mi100
+    InitSpmBlockDelay(block_info);
     switch (block_info->id) {
       case SqCounterBlockId:
         block_info->event_id_max = 303;
         break;
       case TcpCounterBlockId:
         block_info->event_id_max = 87;
+        assert(agent_info->se_num * block_info->instance_count == cu_block_delay_table_size);
         break;
       case TccCounterBlockId:
         block_info->instance_count = 32;
