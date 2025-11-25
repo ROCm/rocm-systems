@@ -1417,11 +1417,12 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   // Process segments level by level using the pre-calculated max_dependency_level_
   for (int level = 0; level <= max_dependency_level_; ++level) {
-    if (segments_per_level_.find(level) == segments_per_level_.end()) {
+    auto level_it = segments_per_level_.find(level);
+    if (level_it == segments_per_level_.end()) {
       continue;
     }
 
-    const auto& segments_at_level = segments_per_level_[level];
+    const auto& segments_at_level = level_it->second;
 
     // Assign streams to segments at this level
     AssignStreamsToSegments(segments_at_level, launch_stream, streams, segment_to_stream);
@@ -1436,17 +1437,19 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
       amd::Command::EventWaitList wait_list;
       for (int dep_segment_id : segment.segment_ids_dependencies) {
         // Dependencies are present in the segment_to_stream and segment_last_command map
-        if (segment_to_stream.find(dep_segment_id) == segment_to_stream.end()) {
+        auto stream_it = segment_to_stream.find(dep_segment_id);
+        if (stream_it == segment_to_stream.end()) {
           continue;
         }
-        hip::Stream* dep_stream = segment_to_stream[dep_segment_id];
+        hip::Stream* dep_stream = stream_it->second;
 
         // Need to wait if dependency is on a different stream
-        if (dep_stream != current_stream &&
-            segment_last_command.find(dep_segment_id) != segment_last_command.end()) {
-          amd::Command* dep_command = segment_last_command[dep_segment_id];
-          if (dep_command != nullptr) {
-            wait_list.push_back(dep_command);
+        if (dep_stream != current_stream) {
+          auto cmd_it = segment_last_command.find(dep_segment_id);
+          if (cmd_it != segment_last_command.end() && cmd_it->second != nullptr) {
+            // Retain command before adding to wait list for proper lifetime management
+            cmd_it->second->retain();
+            wait_list.push_back(cmd_it->second);
           }
         }
       }
@@ -1454,6 +1457,10 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
       // If there are cross-stream dependencies, insert a marker to wait
       if (!wait_list.empty()) {
         enqueueMarker(current_stream, wait_list);
+        // Release our retains - marker has its own retain on wait list events
+        for (auto* cmd : wait_list) {
+          cmd->release();
+        }
       }
 
       // Create accumulate command for this segment
@@ -1494,13 +1501,17 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   for (const auto& pair : segment_last_command) {
     int seg_id = pair.first;
     amd::Command* cmd = pair.second;
-    if (segment_to_stream.find(seg_id) != segment_to_stream.end()) {
-      hip::Stream* stream = segment_to_stream[seg_id];
+    auto stream_it = segment_to_stream.find(seg_id);
+    if (stream_it != segment_to_stream.end()) {
+      hip::Stream* stream = stream_it->second;
       int seg_dependency_level = segments_[seg_id].dependency_level;
 
-      // Only update if this segment is at a higher or equal level
-      if (stream_max_level.find(stream) == stream_max_level.end() ||
-          seg_dependency_level >= stream_max_level[stream]) {
+      // Only update if this segment is at a strictly higher level
+      // Using strict > ensures deterministic behavior when multiple segments
+      // are at the same level on the same stream
+      auto level_it = stream_max_level.find(stream);
+      if (level_it == stream_max_level.end() ||
+          seg_dependency_level > level_it->second) {
         stream_max_level[stream] = seg_dependency_level;
         stream_last_command_map[stream] = cmd;
       }
@@ -1537,8 +1548,9 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   // Get the last command enqueued on the launch_stream for parent dependency tracking
   // This is to prevent release in cleanup loop, this determines graph execution completion
   amd::Command* last_command = nullptr;
-  if (stream_last_command_map.find(launch_stream) != stream_last_command_map.end()) {
-    last_command = stream_last_command_map[launch_stream];
+  auto launch_stream_it = stream_last_command_map.find(launch_stream);
+  if (launch_stream_it != stream_last_command_map.end()) {
+    last_command = launch_stream_it->second;
     // Find the segment that produced this command and remove it from cleanup
     for (auto it = segment_last_command.begin(); it != segment_last_command.end(); ) {
       if (it->second == last_command) {
