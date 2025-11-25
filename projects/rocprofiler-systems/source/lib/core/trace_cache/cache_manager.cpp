@@ -63,7 +63,7 @@ struct format_t
 struct enabled_formats_t
 {
     std::vector<format_t> formats = { { true, get_use_rocpd(), "rocpd" },
-                                      { false, get_use_perfetto(), "perfetto" } };
+                                      { false, get_caching_perfetto(), "perfetto" } };
 
     void print() const
     {
@@ -328,6 +328,101 @@ clear_cache_files(const data::mapped_cache_files_t& _cache_files)
     }
 }
 
+void
+merge_perfetto_files(const std::vector<std::string>& perfetto_files,
+                     const std::string&              output_filename)
+{
+    if(perfetto_files.empty())
+    {
+        ROCPROFSYS_WARNING(0, "No perfetto files to merge\n");
+        return;
+    }
+
+    ROCPROFSYS_VERBOSE(1, "Merging %zu perfetto files into: %s\n", perfetto_files.size(),
+                       output_filename.c_str());
+
+    std::vector<char> merged_data;
+    size_t            total_size = 0;
+
+    for(const auto& file : perfetto_files)
+    {
+        try
+        {
+            std::ifstream ifs(file, std::ios::binary | std::ios::ate);
+            if(ifs)
+            {
+                total_size += ifs.tellg();
+                ifs.close();
+            }
+        } catch(const std::exception& e)
+        {
+            ROCPROFSYS_WARNING(0, "Failed to get size of file %s: %s\n", file.c_str(),
+                               e.what());
+        }
+    }
+
+    merged_data.reserve(total_size);
+
+    // Read and concatenate all files
+    for(const auto& file : perfetto_files)
+    {
+        try
+        {
+            std::ifstream ifs(file, std::ios::binary);
+            if(!ifs)
+            {
+                ROCPROFSYS_WARNING(0, "Failed to open perfetto file: %s\n", file.c_str());
+                continue;
+            }
+
+            ifs.seekg(0, std::ios::end);
+            size_t file_size = ifs.tellg();
+            ifs.seekg(0, std::ios::beg);
+
+            size_t current_size = merged_data.size();
+            merged_data.resize(current_size + file_size);
+
+            ifs.read(merged_data.data() + current_size, file_size);
+            ifs.close();
+
+            ROCPROFSYS_VERBOSE(2, "Merged file: %s (%zu bytes)\n", file.c_str(),
+                               file_size);
+        } catch(const std::exception& e)
+        {
+            ROCPROFSYS_WARNING(0, "Error reading file %s: %s\n", file.c_str(), e.what());
+        }
+    }
+
+    if(merged_data.empty())
+    {
+        ROCPROFSYS_WARNING(0, "No data collected from perfetto files\n");
+        return;
+    }
+
+    // Write merged data
+    try
+    {
+        std::ofstream ofs(output_filename, std::ios::binary);
+        if(!ofs)
+        {
+            ROCPROFSYS_WARNING(0, "Failed to create merged perfetto file: %s\n",
+                               output_filename.c_str());
+            return;
+        }
+
+        ofs.write(merged_data.data(), merged_data.size());
+        ofs.close();
+
+        ROCPROFSYS_VERBOSE(0, "Successfully merged perfetto files into: %s (%.2f MB)\n",
+                           output_filename.c_str(),
+                           static_cast<double>(merged_data.size()) / units::MB);
+    } catch(const std::exception& e)
+    {
+        ROCPROFSYS_WARNING(0, "Error writing merged file: %s\n", e.what());
+        return;
+    }
+}
+
 }  // namespace filesystem_utils
 
 namespace processing_utils
@@ -349,7 +444,7 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
     {
         processor_storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _processor_config->_metadata_registry, _processor_config->_agent_manager,
-            _processor_config->_pid, _processor_config->_ppid);
+            _processor_config->_pid);
         _type_processing->add_handler(*processor_storage.perfetto_processor);
     }
     return processor_storage;
@@ -494,6 +589,45 @@ cache_manager::post_process_bulk()
         std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
 
     processing_utils::dispatch_processing(processor_configs, enabled_formats);
+
+    if(enabled_formats.is_perfetto_enabled())
+    {
+        std::vector<std::string> perfetto_files;
+
+        for(const auto& config : processor_configs)
+        {
+            auto filename = config::get_perfetto_output_filename_with_suffix(
+                std::to_string(config->_pid));
+
+            if(tim::filepath::exists(filename))
+            {
+                perfetto_files.push_back(filename);
+            }
+        }
+
+        if(config::get_merge_perfetto_files() && perfetto_files.size() > 1)
+        {
+            // User wants merged output
+            auto final_filename = config::get_perfetto_output_filename();
+            filesystem_utils::merge_perfetto_files(perfetto_files, final_filename);
+
+            ROCPROFSYS_VERBOSE(0, "Merged %zu perfetto traces into: %s\n",
+                               perfetto_files.size(), final_filename.c_str());
+        }
+        else if(perfetto_files.size() > 1)
+        {
+            ROCPROFSYS_VERBOSE(
+                0,
+                "Generated %zu separate perfetto trace files. "
+                "Set ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON to merge them.\n",
+                perfetto_files.size());
+
+            for(const auto& file : perfetto_files)
+            {
+                ROCPROFSYS_VERBOSE(1, "  - %s\n", file.c_str());
+            }
+        }
+    }
 
     filesystem_utils::clear_cache_files(cache_files);
 }

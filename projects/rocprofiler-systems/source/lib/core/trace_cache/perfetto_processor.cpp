@@ -23,8 +23,10 @@
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "common.hpp"
 #include "core/agent_manager.hpp"
+#include "core/categories.hpp"
 #include "core/common_types.hpp"
 #include "core/gpu_metrics.hpp"
+#include "core/utility.hpp"
 #include "library/tracing.hpp"
 #include "perfetto.hpp"
 #include "trace_cache/metadata_registry.hpp"
@@ -65,7 +67,7 @@ annotate_perfetto(::perfetto::EventContext&            ctx,
             [&](auto&& val) { tracing::add_perfetto_annotation(ctx, ann.key, val); },
             ann.value);
     }
-}
+}  // close annotate_perfetto
 
 template <typename CategoryT>
 ::perfetto::Track
@@ -87,9 +89,65 @@ get_track(CategoryT, std::string name, uint64_t hash_arg)
     return ::perfetto::Track(_uuid, ::perfetto::ProcessTrack::Current());
 }
 
+using amd_smi_gfx_track   = perfetto_counter_track<category::amd_smi_gfx_busy>;
+using amd_smi_umc_track   = perfetto_counter_track<category::amd_smi_umc_busy>;
+using amd_smi_mm_track    = perfetto_counter_track<category::amd_smi_mm_busy>;
+using amd_smi_temp_track  = perfetto_counter_track<category::amd_smi_temp>;
+using amd_smi_power_track = perfetto_counter_track<category::amd_smi_power>;
+using amd_smi_mem_track   = perfetto_counter_track<category::amd_smi_memory_usage>;
+using amd_smi_vcn_track   = perfetto_counter_track<category::amd_smi_vcn_activity>;
+using amd_smi_jpeg_track  = perfetto_counter_track<category::amd_smi_jpeg_activity>;
+using amd_smi_xgmi_link_width_track =
+    perfetto_counter_track<category::amd_smi_xgmi_link_width>;
+using amd_smi_xgmi_link_speed_track =
+    perfetto_counter_track<category::amd_smi_xgmi_link_speed>;
+using amd_smi_xgmi_read_track = perfetto_counter_track<category::amd_smi_xgmi_read_data>;
+using amd_smi_xgmi_write_track =
+    perfetto_counter_track<category::amd_smi_xgmi_write_data>;
+using amd_smi_pcie_link_width_track =
+    perfetto_counter_track<category::amd_smi_pcie_link_width>;
+using amd_smi_pcie_link_speed_track =
+    perfetto_counter_track<category::amd_smi_pcie_link_speed>;
+using amd_smi_pcie_bandwidth_acc_track =
+    perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
+using amd_smi_pcie_bandwidth_inst_track =
+    perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
+
+void
+setup_amd_smi_tracks(const uint32_t _device_id, bool is_busy_enabled,
+                     bool is_temp_enabled, bool is_power_enabled,
+                     bool is_mem_usage_enabled)
+{
+    if(amd_smi_gfx_track::exists(_device_id)) return;
+
+    auto make_track_name = [&](const char* metric) {
+        return JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'), metric, "(S)");
+    };
+
+    if(is_busy_enabled)
+    {
+        amd_smi_gfx_track::emplace(_device_id, make_track_name("GFX Busy"), "%");
+        amd_smi_umc_track::emplace(_device_id, make_track_name("UMC Busy"), "%");
+        amd_smi_mm_track::emplace(_device_id, make_track_name("MM Busy"), "%");
+    }
+    if(is_temp_enabled)
+    {
+        amd_smi_temp_track::emplace(_device_id, make_track_name("Temperature"), "deg C");
+    }
+    if(is_power_enabled)
+    {
+        amd_smi_power_track::emplace(_device_id, make_track_name("Power"), "W");
+    }
+    if(is_mem_usage_enabled)
+    {
+        amd_smi_mem_track::emplace(_device_id, make_track_name("Memory Usage"), "MB");
+    }
+}
+
 template <typename Category>
 void
-write_track_data(const struct backtrace_region_sample& _sample, bool use_annotations)
+write_sampling_track_data(const struct backtrace_region_sample& _sample,
+                          bool                                  use_annotations)
 {
     auto _track_name = _sample.track_name;
     auto _thread_id  = _sample.thread_id;
@@ -129,11 +187,63 @@ write_track_data(const struct backtrace_region_sample& _sample, bool use_annotat
     tracing::pop_perfetto_track(Category{}, _main_name.c_str(), _track,
                                 _sample.end_timestamp);
 }
+
+template <typename CategoryT>
+void
+write_in_time_sample_data(CategoryT, const in_time_sample& _sample, bool use_annotations)
+{
+    const auto event_metadata = nlohmann::json::parse(_sample.event_metadata);
+
+    const auto _track_name = _sample.track_name;
+    const auto _timestamp  = _sample.timestamp_ns;
+
+    const std::string _name       = event_metadata.value("name", "");
+    const std::string _event_type = event_metadata.value("event_type", "");
+    const std::string _target     = event_metadata.value("target", "");
+
+    const auto _track_uuid = std::hash<std::string>{}(_track_name);
+
+    auto _track                   = get_track(CategoryT{}, _track_name, _track_uuid);
+    auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
+        if(!use_annotations) return;
+
+        annotate_perfetto(ctx, { { "timestamp_ns", _timestamp },
+                                 { "event_type", _event_type },
+                                 { "target", _target } });
+    };
+
+    TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, ::perfetto::DynamicString{ _name },
+                        _track, _timestamp, add_perfetto_annotations);
+}
+
+// Dispatch to write_in_time_sample_data with the correct category type
+// based on runtime category_enum_id, using category_type_id mapping from categories.hpp
+template <size_t... Idx>
+bool
+dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
+                        bool use_annotations, std::index_sequence<Idx...>)
+{
+    return ((category_enum_id == Idx
+                 ? (write_in_time_sample_data(category_type_id_t<Idx>{}, _sample,
+                                              use_annotations),
+                    true)
+                 : false) ||
+            ...);
+}
+
+inline bool
+dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
+                        bool use_annotations)
+{
+    return dispatch_in_time_sample(
+        category_enum_id, _sample, use_annotations,
+        rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
+}
 }  // namespace
 
 perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
-    const std::shared_ptr<agent_manager>& agent_mngr, int pid, [[maybe_unused]] int ppid)
+    const std::shared_ptr<agent_manager>& agent_mngr, int pid)
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
@@ -163,15 +273,15 @@ perfetto_processor_t::setup_perfetto()
     auto  track_event_cfg = ::perfetto::protos::gen::TrackEventConfig{};
     auto& cfg             = m_session_config;
 
-    auto buffer_size  = config::get_perfetto_buffer_size();
-    auto flush_period = config::get_perfetto_flush_period();
+    auto perfetto_buffer_size = config::get_perfetto_buffer_size();
+    auto flush_period         = config::get_perfetto_flush_period();
 
     auto _policy =
         config::get_perfetto_fill_policy() == "discard"
             ? ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
             : ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
     auto* buffer_config = cfg.add_buffers();
-    buffer_config->set_size_kb(buffer_size);
+    buffer_config->set_size_kb(perfetto_buffer_size);
     buffer_config->set_fill_policy(_policy);
 
     for(const auto& itr : config::get_disabled_categories())
@@ -272,10 +382,8 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
     auto trace_data = char_vec_t{};
     trace_data      = get_session_data();
 
-    auto output_dir = filepath::dirname(config::get_perfetto_output_filename());
     auto _filename =
-        JOIN("/", output_dir,
-             JOIN("-", "perfetto-cached-trace", std::to_string(m_process_id) + ".proto"));
+        config::get_perfetto_output_filename_with_suffix(std::to_string(m_process_id));
 
     if(!trace_data.empty())
     {
@@ -565,7 +673,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_sample)
+perfetto_processor_t::handle(const cpu_freq_sample& _cpu_sample)
 {
     using process_page_track = perfetto_counter_track<category::process_page>;
     using process_virt_track = perfetto_counter_track<category::process_virt>;
@@ -659,8 +767,8 @@ void
 perfetto_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bts)
 {
     (_bts.category == trait::name<category::timer_sampling>::value)
-        ? write_track_data<category::timer_sampling>(_bts, m_use_annotations)
-        : write_track_data<category::overflow_sampling>(_bts, m_use_annotations);
+        ? write_sampling_track_data<category::timer_sampling>(_bts, m_use_annotations)
+        : write_sampling_track_data<category::overflow_sampling>(_bts, m_use_annotations);
 }
 
 void
@@ -677,15 +785,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
         perfetto_counter_track<category::thread_hardware_counter>;
     using comm_data_track = perfetto_counter_track<category::comm_data>;
 
-    struct pmc_track_info
-    {
-        const char*                   default_units;
-        std::function<bool(uint64_t)> exists_fn;
-        std::function<void(uint64_t, const std::string&, const std::string&)> emplace_fn;
-        std::function<void(uint64_t, uint64_t, uint64_t, double)>             trace_fn;
-    };
-
-    static const std::map<size_t, pmc_track_info> pmc_track_map = {
+    m_pmc_track_map = {
         { ROCPROFSYS_CATEGORY_ROCM_COUNTER_COLLECTION,
           { "Unit Count", [](auto id) { return counter_collection_track::exists(id); },
             [](auto id, auto& n, auto& u) {
@@ -770,8 +870,8 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 
     auto track_key = std::hash<std::string>{}(_track_name + std::to_string(_device_id));
 
-    auto track_it = pmc_track_map.find(_pmc.category_enum_id);
-    if(track_it != pmc_track_map.end())
+    auto track_it = m_pmc_track_map.find(_pmc.category_enum_id);
+    if(track_it != m_pmc_track_map.end())
     {
         const auto& track_info = track_it->second;
 
@@ -793,30 +893,31 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 void
 perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 {
-    using amd_smi_gfx_track   = perfetto_counter_track<category::amd_smi_gfx_busy>;
-    using amd_smi_umc_track   = perfetto_counter_track<category::amd_smi_umc_busy>;
-    using amd_smi_mm_track    = perfetto_counter_track<category::amd_smi_mm_busy>;
-    using amd_smi_temp_track  = perfetto_counter_track<category::amd_smi_temp>;
-    using amd_smi_power_track = perfetto_counter_track<category::amd_smi_power>;
-    using amd_smi_mem_track   = perfetto_counter_track<category::amd_smi_memory_usage>;
-    using amd_smi_vcn_track   = perfetto_counter_track<category::amd_smi_vcn_activity>;
-    using amd_smi_jpeg_track  = perfetto_counter_track<category::amd_smi_jpeg_activity>;
-    using amd_smi_xgmi_link_width_track =
-        perfetto_counter_track<category::amd_smi_xgmi_link_width>;
-    using amd_smi_xgmi_link_speed_track =
-        perfetto_counter_track<category::amd_smi_xgmi_link_speed>;
-    using amd_smi_xgmi_read_track =
-        perfetto_counter_track<category::amd_smi_xgmi_read_data>;
-    using amd_smi_xgmi_write_track =
-        perfetto_counter_track<category::amd_smi_xgmi_write_data>;
-    using amd_smi_pcie_link_width_track =
-        perfetto_counter_track<category::amd_smi_pcie_link_width>;
-    using amd_smi_pcie_link_speed_track =
-        perfetto_counter_track<category::amd_smi_pcie_link_speed>;
-    using amd_smi_pcie_bandwidth_acc_track =
-        perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
-    using amd_smi_pcie_bandwidth_inst_track =
-        perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
+    // using amd_smi_gfx_track   = perfetto_counter_track<category::amd_smi_gfx_busy>;
+    // using amd_smi_umc_track   = perfetto_counter_track<category::amd_smi_umc_busy>;
+    // using amd_smi_mm_track    = perfetto_counter_track<category::amd_smi_mm_busy>;
+    // using amd_smi_temp_track  = perfetto_counter_track<category::amd_smi_temp>;
+    // using amd_smi_power_track = perfetto_counter_track<category::amd_smi_power>;
+    // using amd_smi_mem_track   = perfetto_counter_track<category::amd_smi_memory_usage>;
+    // using amd_smi_vcn_track   = perfetto_counter_track<category::amd_smi_vcn_activity>;
+    // using amd_smi_jpeg_track  =
+    // perfetto_counter_track<category::amd_smi_jpeg_activity>; using
+    // amd_smi_xgmi_link_width_track =
+    //     perfetto_counter_track<category::amd_smi_xgmi_link_width>;
+    // using amd_smi_xgmi_link_speed_track =
+    //     perfetto_counter_track<category::amd_smi_xgmi_link_speed>;
+    // using amd_smi_xgmi_read_track =
+    //     perfetto_counter_track<category::amd_smi_xgmi_read_data>;
+    // using amd_smi_xgmi_write_track =
+    //     perfetto_counter_track<category::amd_smi_xgmi_write_data>;
+    // using amd_smi_pcie_link_width_track =
+    //     perfetto_counter_track<category::amd_smi_pcie_link_width>;
+    // using amd_smi_pcie_link_speed_track =
+    //     perfetto_counter_track<category::amd_smi_pcie_link_speed>;
+    // using amd_smi_pcie_bandwidth_acc_track =
+    //     perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
+    // using amd_smi_pcie_bandwidth_inst_track =
+    //     perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
 
     // Use the shared gpu_metrics_t from core/gpu_metrics.hpp
     using gpu_metrics_t = gpu::gpu_metrics_t;
@@ -835,35 +936,38 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
     auto _ts        = _amd_smi.timestamp;
     auto _device_id = _amd_smi.device_id;
 
-    auto setup_tracks = [&]() {
-        if(amd_smi_gfx_track::exists(_device_id)) return;
+    // auto setup_tracks = [&]() {
+    //     if(amd_smi_gfx_track::exists(_device_id)) return;
 
-        auto make_track_name = [&](const char* metric) {
-            return JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'), metric, "(S)");
-        };
+    //     auto make_track_name = [&](const char* metric) {
+    //         return JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'), metric, "(S)");
+    //     };
 
-        if(is_busy_enabled)
-        {
-            amd_smi_gfx_track::emplace(_device_id, make_track_name("GFX Busy"), "%");
-            amd_smi_umc_track::emplace(_device_id, make_track_name("UMC Busy"), "%");
-            amd_smi_mm_track::emplace(_device_id, make_track_name("MM Busy"), "%");
-        }
-        if(is_temp_enabled)
-        {
-            amd_smi_temp_track::emplace(_device_id, make_track_name("Temperature"),
-                                        "deg C");
-        }
-        if(is_power_enabled)
-        {
-            amd_smi_power_track::emplace(_device_id, make_track_name("Power"), "W");
-        }
-        if(is_mem_usage_enabled)
-        {
-            amd_smi_mem_track::emplace(_device_id, make_track_name("Memory Usage"), "MB");
-        }
-    };
+    //     if(is_busy_enabled)
+    //     {
+    //         amd_smi_gfx_track::emplace(_device_id, make_track_name("GFX Busy"), "%");
+    //         amd_smi_umc_track::emplace(_device_id, make_track_name("UMC Busy"), "%");
+    //         amd_smi_mm_track::emplace(_device_id, make_track_name("MM Busy"), "%");
+    //     }
+    //     if(is_temp_enabled)
+    //     {
+    //         amd_smi_temp_track::emplace(_device_id, make_track_name("Temperature"),
+    //                                     "deg C");
+    //     }
+    //     if(is_power_enabled)
+    //     {
+    //         amd_smi_power_track::emplace(_device_id, make_track_name("Power"), "W");
+    //     }
+    //     if(is_mem_usage_enabled)
+    //     {
+    //         amd_smi_mem_track::emplace(_device_id, make_track_name("Memory Usage"),
+    //         "MB");
+    //     }
+    // };
 
-    setup_tracks();
+    // setup_tracks();
+    setup_amd_smi_tracks(_device_id, is_busy_enabled, is_temp_enabled, is_power_enabled,
+                         is_mem_usage_enabled);
 
     if(is_busy_enabled)
     {
@@ -1113,29 +1217,14 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 void
 perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
 {
-    auto event_metadata = nlohmann::json::parse(_sample.event_metadata);
-
-    auto _track_name = _sample.track_name;
-    auto _timestamp  = _sample.timestamp_ns;
-
-    std::string _name       = event_metadata.value("name", "");
-    std::string _event_type = event_metadata.value("event_type", "");
-    std::string _target     = event_metadata.value("target", "");
-
-    auto _track_uuid = std::hash<std::string>{}(_track_name);
-
-    auto _track = get_track(category::kokkos{}, _track_name, _track_uuid);
-    auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
-        if(!m_use_annotations) return;
-
-        annotate_perfetto(ctx, { { "timestamp_ns", _timestamp },
-                                 { "event_type", _event_type },
-                                 { "target", _target } });
-    };
-
-    TRACE_EVENT_INSTANT(trait::name<category::kokkos>::value,
-                        ::perfetto::DynamicString{ _name }, _track, _timestamp,
-                        add_perfetto_annotations);
+    // Dispatch based on category_enum_id using the category type mapping
+    if(!dispatch_in_time_sample(_sample.category_enum_id, _sample, m_use_annotations))
+    {
+        ROCPROFSYS_VERBOSE_F(
+            2, "Unknown in_time_sample category_enum_id: %zu, using user category\n",
+            _sample.category_enum_id);
+        write_in_time_sample_data(category::user{}, _sample, m_use_annotations);
+    }
 }
 
 }  // namespace trace_cache

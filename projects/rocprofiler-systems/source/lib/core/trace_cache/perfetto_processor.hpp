@@ -27,6 +27,7 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 
+#include <functional>
 #include <memory>
 #include <perfetto.h>
 
@@ -36,12 +37,19 @@ namespace trace_cache
 {
 using char_vec_t = std::vector<char>;
 
+struct pmc_track_info
+{
+    const char*                                                           default_units;
+    std::function<bool(uint64_t)>                                         exists_fn;
+    std::function<void(uint64_t, const std::string&, const std::string&)> emplace_fn;
+    std::function<void(uint64_t, uint64_t, uint64_t, double)>             trace_fn;
+};
+
 class perfetto_processor_t : public processor_t<perfetto_processor_t>
 {
 public:
     perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
-                         const std::shared_ptr<agent_manager>& agent_mngr, int pid,
-                         int ppid);
+                         const std::shared_ptr<agent_manager>& agent_mngr, int pid);
 
     void prepare_for_processing();
     void finalize_processing();
@@ -71,6 +79,8 @@ private:
     std::shared_ptr<tmp_file>                   m_tmp_file{ nullptr };
     std::unique_ptr<::perfetto::TracingSession> m_tracing_session{ nullptr };
     bool                                        m_use_annotations{ false };
+
+    std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys
