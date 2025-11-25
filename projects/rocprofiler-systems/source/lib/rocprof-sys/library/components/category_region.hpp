@@ -27,6 +27,7 @@
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/causal/data.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
@@ -55,9 +56,9 @@ cache_region(uint64_t thread_id, const std::string& name, uint64_t start_ts,
     constexpr const char* CALLSTACK         = "";
     constexpr const char* ARGUMENTS         = "";
     rocprofsys::trace_cache::get_buffer_storage().store(
-        rocprofsys::trace_cache::entry_type::region, thread_id, name.c_str(),
-        NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts, end_ts, CALLSTACK, ARGUMENTS,
-        category.c_str());
+        rocprofsys::trace_cache::region_sample{
+            thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
+            end_ts, CALLSTACK, ARGUMENTS, category.c_str() });
 }
 
 struct entry_key

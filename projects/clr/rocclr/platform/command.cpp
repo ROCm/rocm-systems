@@ -66,9 +66,8 @@ Event::~Event() {
     delete callback;
     callback = next;
   }
-  // Release the notify event
-  if (notify_event_ != nullptr) {
-    notify_event_->release();
+  if (auto* notifyEvent = notify_event_.load(std::memory_order_acquire)) {
+    notifyEvent->release();
   }
   // Destroy global HW event if available
   if ((hw_event_ != nullptr) && (device_ != nullptr)) {
@@ -269,11 +268,10 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
         // If HW event was assigned, then notification can be ignored, since a barrier was issued
         // @note: Force the marker always in OCL for now, since OCL events require precise
         // sequence of the status update
-        ((HwEvent() == nullptr) || !amd::IS_HIP) && !notified_.test_and_set()) {
+        ((HwEvent() == nullptr) || !amd::IS_HIP) && (notify_event_ == nullptr)) {
       // Make sure the queue is draining the enqueued commands.
       amd::Command* command = new amd::Marker(*queue, false, nullWaitList, this, cpu_wait);
       if (command == NULL) {
-        notified_.clear();
         return false;
       }
       command->enqueue();

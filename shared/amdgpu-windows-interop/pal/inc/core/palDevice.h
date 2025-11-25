@@ -583,7 +583,6 @@ struct PalPublicSettings
     bool forceLoadObjectFailure;
 #endif
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 956
     /// Controls the distribution mode for tessellation, which affects how patches are processed by different VGT
     /// units. 0: None - No distribution across VGTs (legacy mode). 1: Default - Optimal settings are chosen depending
     /// on the gfxip. 2: Patch - Individual patches are distributed to different VGTs. 3: Donut - Patches are split
@@ -591,7 +590,6 @@ struct PalPublicSettings
     /// distributed to different VGTs. Falls back to donut mode if HW does not support this mode. 5: Trapezoid only -
     /// Distribution turned off if HW does not support this mode.
     uint32 distributionTessMode;
-#endif
 
     /// Flags that control PAL optimizations to reduce context rolls. 0: Optimization disabled. 1: Pad parameter cache
     /// space. Sets VS export count and PS interpolant number to per-command buffer maximum value. Reduces context rolls
@@ -689,12 +687,10 @@ struct PalPublicSettings
     /// Disables MCBP on demand. This is a temporary setting until ATOMIC_MEM packet issue with MCBP is resolved.
     bool disableCommandBufferPreemption;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 956
     /// Disable the fast clear eliminate skipping optimization.  This optimization will conservatively track the usage
     /// of clear values to allow the vast majority of images that never clear to a value that isn't TC-compatible to
     /// skip the CPU and front-end GPU overhead of issuing a predicated fast clear eliminate BLT.
     bool disableSkipFceOptimization;
-#endif
 
     /// Sets the minimum BPP of surfaces which will have DCC enabled
     uint32 dccBitsPerPixelThreshold;
@@ -748,10 +744,8 @@ struct PalPublicSettings
     ///  0x12 - Forced Opaque White
     uint32 dccInitialClearKind;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 956
     /// Allows the client to not create internal VrsImage. Pal internal will create a 16M image as vrsImageSize.
     bool disableInternalVrsImage;
-#endif
 
     /// Allows the client to control binning persistent and context states per bin.
     /// A value of 0 tells PAL to pick the number of states per bin.
@@ -1401,17 +1395,9 @@ struct DeviceProperties
         /// any compute shader on any queue.
         uint32 maxAsyncComputeThreadGroupSize;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 951
-        DispatchDims maxComputeThreadGroupCount;  ///< Maximum number of thread groups supported for compute pipelines
-        DispatchDims maxTaskMeshThreadGroupCount; ///< Maximum number of thread groups supported for task+mesh pipelines
-        DispatchDims maxMeshThreadGroupCount;     ///< Maximum number of thread groups supported for mesh-only pipelines
-
-        uint32 maxTaskPayloadSize; ///< Maximum size in bytes of payload passed from task shader to mesh shader
-#else
         uint32 maxComputeThreadGroupCountX; ///< Maximum number of thread groups supported
         uint32 maxComputeThreadGroupCountY; ///< Maximum number of thread groups supported
         uint32 maxComputeThreadGroupCountZ; ///< Maximum number of thread groups supported
-#endif
 
         uint32 maxBufferViewStride; ///< Maximum stride, in bytes, that can be specified in a buffer view.
 
@@ -1654,10 +1640,8 @@ struct DeviceProperties
             uint32 tessFactorBufSizePerSe;  ///< Size of GPU's the tessellatio-factor buffer, per shader engine.
             uint32 tccSizeInBytes;          ///< Size of total L2 TCC cache in bytes.
             uint32 tcpSizeInBytes;          ///< Size of one L1 TCP cache in bytes. There is one TCP per CU.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 959
             uint32 maxLateAllocVsLimit;     ///< Maximum number of VS waves that can be in flight without
                                             ///  having param cache and position buffer space.
-#endif
             uint32 shaderPrefetchBytes;     ///< Number of bytes the SQ will prefetch, if any.
             uint32 gl1cSizePerSa;           ///< Size in bytes of GL1 cache per SA.
             uint32 instCacheSizePerCu;      ///< Size in bytes of instruction cache per CU/WGP.
@@ -1975,7 +1959,6 @@ struct GpuCompatibilityInfo
             uint32 sharedMemory        :  1;  ///< Devices can share memory objects with.  IDevice::OpenSharedMemory().
             uint32 sharedSync          :  1;  ///< Devices can share queue semaphores with
                                               ///  IDevice::OpenSharedQueueSemaphore().
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
             uint32 shareThisGpuScreen  :  1;  ///< Either device can present to this device.  Means that the device
                                               ///  indicated by the otherDevice param in
                                               ///  IDevice::GetMultiGpuCompatibility() can present to the device the
@@ -1983,9 +1966,6 @@ struct GpuCompatibilityInfo
             uint32 shareOtherGpuScreen :  1;  ///< Either device can present to the other device.  Means that the
                                               ///  device IDevice::GetMultiGpuCompatibility() was called on can present
                                               ///  to the GPU indicated by the otherGpu param.
-#else
-            uint32 reserved1           :  2;
-#endif
             uint32 peerEncode          :  1;  ///< whether encoding HW can access FB memory of remote GPU in chain
             uint32 peerDecode          :  1;  ///< whether decoding HW can access FB memory of remote GPU in chain
             uint32 peerTransferProtected : 1; ///< whether protected content can be transferred over P2P
@@ -2705,16 +2685,12 @@ struct GetPrimaryInfoOutput
     {
         struct
         {
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
             /// MGPU flag: this primary surface supports DVO HW compositing mode.
             uint32 dvoHwMode                    :  1;
             /// MGPU flag: this primary surface supports XDMA HW compositing mode.
             uint32 xdmaHwMode                   :  1;
             /// MGPU flag: this primary surface supports client doing SW compositing mode.
             uint32 swMode                       :  1;
-#else
-            uint32 reserved1                    :  3;
-#endif
             /// MGPU flag: this primary surface supports freesync.
             uint32 isFreeSyncEnabled            :  1;
             /// Single-GPU flag: gives hint to the client that they should use rotated tiling mode.
@@ -2761,7 +2737,6 @@ struct SetClockModeInput
     DeviceClockMode clockMode; ///< Used to specify the clock mode for the device.
 };
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
 /// Specifies primary surface MGPU compositing mode.
 enum MgpuMode : uint32
 {
@@ -2771,9 +2746,7 @@ enum MgpuMode : uint32
     MgpuModeXdma = 3,  ///< MGPU XDMA HW compositing mode
     MgpuModeCount
 };
-#endif
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 943
 /// Specifies input arguments for IDevice::SetMgpuMode(). A client set a particular MGPU compositing mode and whether
 /// frame pacing is enabled for a display.
 struct SetMgpuModeInput
@@ -2783,9 +2756,7 @@ struct SetMgpuModeInput
     bool        isFramePacingEnabled;   ///< True if frame pacing enabled. If so, the client creates a timer queue
                                         ///  to delay the present, and the delay value is calculated by KMD.
 };
-#endif
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
 constexpr uint32 XdmaMaxDevices = 8;    ///< Maximum number of Devices for XDMA compositing.
 
 /// Specifies XDMA cache buffer info for each gpu.
@@ -2801,7 +2772,6 @@ struct GetXdmaInfoOutput
 {
     XdmaBufferInfo  xdmaBufferInfo[XdmaMaxDevices]; ///< Output XDMA cache buffer info
 };
-#endif
 
 /// Specifies flipping status flags on a specific VidPnSource. It's Windows specific.
 union FlipStatusFlags
@@ -3621,7 +3591,6 @@ public:
     virtual Result SetStaticVmidMode(
         bool enable) = 0;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 943
     /// Set up MGPU compositing mode of a display provided by client.
     ///
     /// This function should not be called by clients that rely on PAL for compositor management.  Basically, if your
@@ -3630,11 +3599,9 @@ public:
     /// @param [in] setMgpuModeInput        Set MGPU compositing mode input arguments.
     ///
     /// @returns Success if the MGPU compositing mode were successfully set.
-    inline Result SetMgpuMode(
-        const SetMgpuModeInput& setMgpuModeInput) const { return Result::Success; }
-#endif
+    virtual Result SetMgpuMode(
+        const SetMgpuModeInput& setMgpuModeInput) const = 0;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
     /// Get XDMA cache buffer information of each GPU based upon video present source ID provided by client.
     ///
     /// This function should not be called by clients that rely on PAL for compositor management.  Basically, if your
@@ -3645,11 +3612,10 @@ public:
     /// @param [in,out] pGetXdmaInfoOutput      Set XDMA cache buffer info output arguments.
     ///
     /// @returns Success if the XDMA cache buffer information were successfully queried.
-    inline Result GetXdmaInfo(
+    virtual Result GetXdmaInfo(
         uint32              vidPnSrcId,
         const IGpuMemory&   gpuMemory,
-        GetXdmaInfoOutput*  pGetXdmaInfoOutput) const { return Result::ErrorUnavailable; }
-#endif
+        GetXdmaInfoOutput*  pGetXdmaInfoOutput) const = 0;
 
     /// Polls current fullscreen frame metadata controls on given vidPnSourceId, including extended data.
     ///

@@ -520,13 +520,20 @@ TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoH") { TestkindDtoH(); }
 
 TEST_CASE("Unit_hipMemcpyWithStream_TestkindHtoH") { TestkindHtoH(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoD") { TestkindDtoD(); }
+TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoD", "[multigpu]") {
+  TestkindDtoD();
+}
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream") { TestOnMultiGPUwithOneStream(); }
+TEST_CASE("Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream",
+          "[multigpu]") {
+  TestOnMultiGPUwithOneStream();
+}
 
 TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefault") { TestkindDefault(); }
 #ifndef __HIP_PLATFORM_NVIDIA__
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefaultForDtoD") { TestkindDefaultForDtoD(); }
+TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefaultForDtoD", "[multigpu]") {
+  TestkindDefaultForDtoD();
+}
 #endif
 
 TEST_CASE("Unit_hipMemcpyWithStream_TestDtoDonSameDevice") { TestDtoDonSameDevice(); }

@@ -30,11 +30,14 @@ if(HIP_PLATFORM MATCHES "amd")
     set(GENERIC_TARGET_ONLY_COMPRESSED_EXE hipSquareGenericTargetOnlyCompressed)
 
     set(LIBFS)
+    set(HIP_GENERIC_RPATH)
     if(WIN32)
       set(GENERIC_TARGET_ONLY_EXE ${GENERIC_TARGET_ONLY_EXE}.exe)
       set(GENERIC_TARGET_ONLY_COMPRESSED_EXE ${GENERIC_TARGET_ONLY_COMPRESSED_EXE}.exe)
     else()
         set(LIBFS -lstdc++fs)
+        set(HIP_GENERIC_RPATH
+          -Wl,-rpath,'$$ORIGIN/../lib:${HIP_PATH}/lib')
     endif()
 
     add_custom_target(hipSquareGenericTargetOnly ALL
@@ -43,6 +46,7 @@ if(HIP_PLATFORM MATCHES "amd")
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_features.cc
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
+                    ${HIP_GENERIC_RPATH}
                     -o ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_EXE}
                     -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
@@ -54,6 +58,7 @@ if(HIP_PLATFORM MATCHES "amd")
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_features.cc
                     ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
+                    ${HIP_GENERIC_RPATH}
                     -o ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_COMPRESSED_EXE}
                     -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
