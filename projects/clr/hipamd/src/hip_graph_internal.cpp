@@ -1006,6 +1006,13 @@ bool Graph::RunOneNode(Node node) {
     // Add a leaf node into the list for a wait.
     // Always use the last node, since it's the latest for the particular queue
     leafs_[node->stream_id_] = node;
+    // An extra retain is needed for the leaves in order to be able to later enqueue a marker
+    // on the app stream that has these commands in the waitlist.
+    if (node->GetType() != hipGraphNodeTypeGraph) {
+      for (auto command : node->GetCommands()) {
+        command->retain();
+      }
+    }
   }
 
   node->SetWait(false);
@@ -1061,11 +1068,13 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
   wait_list.clear();
   // Check if the graph has multiple leaf nodes
   for (uint32_t i = 0; i < DEBUG_HIP_FORCE_GRAPH_QUEUES; ++i) {
-    if ((base_stream != i) && (leafs_[i] != nullptr)) {
+    if ((leafs_[i] != nullptr) && (leafs_[i]->GetType() != hipGraphNodeTypeGraph)) {
       // Add all commands in the wait list
-      if (leafs_[i]->GetType() != hipGraphNodeTypeGraph) {
-        for (auto command : leafs_[i]->GetCommands()) {
+      for (auto command : leafs_[i]->GetCommands()) {
+        if (base_stream != i) {
           wait_list.push_back(command);
+        } else {
+          command->release();
         }
       }
     }
@@ -1076,6 +1085,9 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
     if (end_marker != nullptr) {
       end_marker->enqueue();
       end_marker->release();
+    }
+    for (auto command : wait_list) {
+      command->release();
     }
   }
 
