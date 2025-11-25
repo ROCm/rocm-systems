@@ -93,8 +93,14 @@ __global__ void jacobi_iteration(float *__restrict__ U_new,
   }
 }
 
-int main() {
+int main(int argc, char *argv[]) {
   int iter = 1000;
+
+  for (int i = 0; i < argc; i++) {
+    if (std::string(argv[i]) == "-i" && i + 1 < argc) {
+      iter = std::atoi(argv[i + 1]);
+    }
+  }
 
   // Problem size
   const int n_small = 1024;
