@@ -154,15 +154,35 @@ hsa_status_t CountedQueuePoolManager::GetQueueInfo(hsa_queue_t* queue,
   }
 }
 
-CountedQueuePoolManager::~CountedQueuePoolManager() {
+void CountedQueuePoolManager::Cleanup() {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  // Delete all CountedQueue objects
-  for (auto& entry : counted_queues_) {
-    delete entry.second;  // delete CountedQueue*
+  // Destroy hardware queues
+  for (auto& priority_pool : hw_queue_pools_) {
+    for (auto* hw_queue : priority_pool.second) {
+      if (hw_queue) {
+        hw_queue->Destroy();
+      }
+    }
+    priority_pool.second.clear();
+  }
+  hw_queue_pools_.clear();
+
+  // Clean up counted and shared queues
+  for (auto& cq : counted_queues_) {
+    CountedQueue* counted_q = cq.second;
+    delete counted_q;
+
+    // Recover SharedQueue from unique handle and free memory
+    hsa_queue_t* queue_handle = cq.first;
+    SharedQueue* shared = reinterpret_cast<SharedQueue*>(
+        reinterpret_cast<char*>(queue_handle) - offsetof(SharedQueue, amd_queue.hsa_queue));
+    delete shared;
   }
   counted_queues_.clear();
 }
+
+CountedQueuePoolManager::~CountedQueuePoolManager() {}
 
 
 }  // namespace core

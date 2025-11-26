@@ -925,6 +925,10 @@ void GpuAgent::PreloadBlits() {
 void GpuAgent::ReleaseResources() {
   if (this->Enabled()) {
     this->Disable();
+
+    // Remove all shared hardware queues from pool
+    queue_pool_.Cleanup();
+
     for (auto& blit : blits_) {
       if (!blit.empty()) {
         hsa_status_t status = blit->Destroy();

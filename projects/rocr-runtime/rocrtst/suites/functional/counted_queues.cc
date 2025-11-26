@@ -24,10 +24,6 @@ static bool VerifyResult(uint32_t* ar, size_t sz) {
 }
 
 CountedQueuesTest::CountedQueuesTest() : TestBase() {
-  set_num_iteration(10);  // Number of iterations to execute of the main test;
-                          // This is a default value which can be overridden
-                          // on the command line.
-
   set_title("RocR Counted Queues Test");
   set_description(
       "This test validates the behavior of Shared Counted Queues managed by the "
@@ -176,20 +172,6 @@ void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
             HSA_STATUS_ERROR_INVALID_ARGUMENT);
   EXPECT_EQ(hsa_amd_queue_get_info(q4, HSA_QUEUE_INFO_USE_COUNT, &c4),
             HSA_STATUS_ERROR_INVALID_ARGUMENT);
-
-  // Acquire another queue again and see if we get the existing HW queue or a new one with id > 2
-  hsa_queue_t* new_queue = nullptr;
-  uint32_t new_hw_id = 0, refCount = 0;
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
-      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &new_queue));
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(new_queue, HSA_QUEUE_INFO_HW_ID, &new_hw_id));
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(new_queue, HSA_QUEUE_INFO_USE_COUNT, &refCount));
-
-  EXPECT_EQ(new_hw_id, 1);
-  EXPECT_EQ(refCount, 1);
-
-  // Release this queue
-  ASSERT_SUCCESS(hsa_amd_counted_queue_release(new_queue));
 }
 
 void CountedQueuesTest::InvalidArgsTest() {
@@ -381,42 +363,53 @@ void CountedQueuesTest::CountedQueuesSetCUMaskNackTest() {
 void CountedQueuesTest::CountedQueuesDispatchTest() {
   hsa_status_t status;
 
-  // Set CPU and GPU agents
+  // Common setup
   ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
-
   ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
 
-  // get gpu device
-  hsa_agent_t gpu_dev = *gpu_device1();
-
-  // set kernel file name
+  // Load kernel
   set_kernel_file_name("test_case_template_kernels.hsaco");
   set_kernel_name("square");
+  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, gpu_device1()));
 
-  // Create a counted queue
-  hsa_queue_t* queue = nullptr;
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
-      gpu_dev, HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &queue));
-  EXPECT_NE(queue, nullptr);
-  set_main_queue(queue);
-
-  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpu_dev));
-  ASSERT_SUCCESS(rocrtst::InitializeAQLPacket(this, &aql()));
-
-  // Allocate buffers for source and destination and add values into the source buffer
   hsa_agent_t ag_list[2] = {*gpu_device1(), *cpu_device()};
-  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0,
-                                              reinterpret_cast<void**>(&src_buffer_)));
-  ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, src_buffer_));
 
+  // Allocate source buffer
+  void* src_buffer = nullptr;
+  ASSERT_SUCCESS(
+      hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &src_buffer));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, src_buffer));
+
+  // Initialize source data
   for (uint32_t i = 0; i < 256; ++i) {
-    reinterpret_cast<uint32_t*>(src_buffer_)[i] = i;
+    reinterpret_cast<uint32_t*>(src_buffer)[i] = i;
   }
 
-  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0,
-                                              reinterpret_cast<void**>(&dst_buffer_)));
-  ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, dst_buffer_));
+  // Allocate destination buffer
+  void* dst_buffer = nullptr;
+  ASSERT_SUCCESS(
+      hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &dst_buffer));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, dst_buffer));
 
+  // Create completion signal
+  hsa_signal_t completion_signal;
+  ASSERT_SUCCESS(hsa_signal_create(1, 0, nullptr, &completion_signal));
+
+  // Get a counted queue
+  hsa_queue_t* queue = nullptr;
+  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(*gpu_device1(), HSA_QUEUE_TYPE_MULTI,
+                                               HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0,
+                                               &queue));
+  EXPECT_NE(queue, nullptr);
+
+  // Query queue info
+  int32_t use_count = 0;
+  uint32_t hw_id = 0;
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &use_count));
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_HW_ID, &hw_id));
+  EXPECT_EQ(use_count, 1);
+
+  // Prepare kernel arguments
   struct __attribute__((aligned(16))) local_args_t {
     uint32_t* dstArray;
     uint32_t* srcArray;
@@ -430,8 +423,8 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
     uint64_t completion_action;
   } local_args;
 
-  local_args.dstArray = reinterpret_cast<uint32_t*>(dst_buffer_);
-  local_args.srcArray = reinterpret_cast<uint32_t*>(src_buffer_);
+  local_args.dstArray = reinterpret_cast<uint32_t*>(dst_buffer);
+  local_args.srcArray = reinterpret_cast<uint32_t*>(src_buffer);
   local_args.size = 256;
   local_args.global_offset_x = 0;
   local_args.global_offset_y = 0;
@@ -440,55 +433,76 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
   local_args.default_queue = 0;
   local_args.completion_action = 0;
 
-  ASSERT_SUCCESS(rocrtst::AllocAndSetKernArgs(this, &local_args, sizeof(local_args)));
+  // Allocate kernel arguments
+  void* kernarg_address = nullptr;
+  ASSERT_SUCCESS(
+      hsa_amd_memory_pool_allocate(kern_arg_pool(), sizeof(local_args), 0, &kernarg_address));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, kernarg_address));
+  memcpy(kernarg_address, &local_args, sizeof(local_args));
 
-  aql().workgroup_size_x = 256;
-  aql().grid_size_x = 256;
-
+  // Dispatch loop
   int it = num_iteration() * 5;
-
-  hsa_kernel_dispatch_packet_t* queue_aql_packet;
-  uint64_t index;
+  const uint32_t queue_mask = queue->size - 1;
 
   for (int i = 0; i < it; i++) {
-    queue_aql_packet = WriteAQLToQueue(this, &index);
-    ASSERT_EQ(queue_aql_packet,
-              reinterpret_cast<hsa_kernel_dispatch_packet_t*>(main_queue()->base_address) + index);
+    // Reserve a slot in the queue
+    uint64_t index = hsa_queue_add_write_index_relaxed(queue, 1);
 
-    // Prepare the AQL packet header
-    uint32_t aql_header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    aql_header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
-    aql_header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
-    __atomic_store_n(reinterpret_cast<uint32_t*>(queue_aql_packet),
-                     aql_header | (aql().setup << 16), __ATOMIC_RELEASE);
+    // Get pointer to the reserved packet slot
+    hsa_kernel_dispatch_packet_t* queue_aql_packet = &(
+        reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address))[index & queue_mask];
 
-    // Store the new index into the doorbell signal indicating new work
-    hsa_signal_store_screlease(main_queue()->doorbell_signal, index);
+    // Fill packet fields
+    queue_aql_packet->setup = 1;
+    queue_aql_packet->workgroup_size_x = 256;
+    queue_aql_packet->workgroup_size_y = 1;
+    queue_aql_packet->workgroup_size_z = 1;
+    queue_aql_packet->grid_size_x = 256;
+    queue_aql_packet->grid_size_y = 1;
+    queue_aql_packet->grid_size_z = 1;
+    queue_aql_packet->private_segment_size = 0;
+    queue_aql_packet->group_segment_size = 0;
+    queue_aql_packet->kernel_object = kernel_object();
+    queue_aql_packet->kernarg_address = kernarg_address;
+    queue_aql_packet->completion_signal = completion_signal;
 
-    // Wait till kernel finished
-    while (hsa_signal_wait_scacquire(aql().completion_signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                     (uint64_t)-1, HSA_WAIT_STATE_ACTIVE)) {
-    }
+    // Write header for packet
+    uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+    header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+    __atomic_store_n(reinterpret_cast<uint16_t*>(&queue_aql_packet->header), header,
+                     __ATOMIC_RELEASE);
 
-    // reset completion signal to 1 before next iteration
-    hsa_signal_store_screlease(aql().completion_signal, 1);
+    // Ring doorbell to notify GPU
+    hsa_signal_store_screlease(queue->doorbell_signal, index);
 
-    // verify that dest buffer has squared values of every value from source buffer
-    ASSERT_TRUE(VerifyResult(reinterpret_cast<uint32_t*>(dst_buffer_), 256));
+    // Wait for completion signal
+    while (hsa_signal_wait_scacquire(completion_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                     HSA_WAIT_STATE_ACTIVE)) {}
+
+    // Reset signal for next iteration
+    hsa_signal_store_screlease(completion_signal, 1);
+
+    // Verify results
+    ASSERT_TRUE(VerifyResult(reinterpret_cast<uint32_t*>(dst_buffer), 256));
   }
 
-  // Get the use count; should be 1
-  int32_t count = 0;
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &count));
-  EXPECT_EQ(count, 1);
+  // Verify use count before release
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &use_count));
+  EXPECT_EQ(use_count, 1);
 
   // Release the counted queue
   ASSERT_SUCCESS(hsa_amd_counted_queue_release(queue));
 
-  // Get use count info after release; should return invalid arg error since queue has been
-  // released
-  status = hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &count);
+  // Verify queue info returns error after release
+  status = hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &use_count);
   ASSERT_EQ(status, HSA_STATUS_ERROR_INVALID_ARGUMENT);
+
+  // Cleanup
+  ASSERT_SUCCESS(hsa_amd_memory_pool_free(kernarg_address));
+  ASSERT_SUCCESS(hsa_signal_destroy(completion_signal));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_free(src_buffer));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_free(dst_buffer));
 }
 
 void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {

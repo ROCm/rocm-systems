@@ -48,6 +48,9 @@ class CountedQueuePoolManager {
   hsa_status_t GetQueueInfo(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
                             void* value);
 
+  // Called during hsa_shutdown to remove all user and CP queues
+  void Cleanup();
+
  private:
   core::Queue* FindOrCreateHardwareQueue(hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
                                            void (*callback)(hsa_status_t, hsa_queue_t*, void*),
