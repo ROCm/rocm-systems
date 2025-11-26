@@ -399,12 +399,6 @@ if(NOT ${INSTALL_SOURCE} EQUAL 0)
                                PATTERN "pal" EXCLUDE
                                PATTERN "libamdhsacode" EXCLUDE)
       endif()
-    else()
-      # Exclude .bat files on Linux.
-      #Hip bin files moved to /opt/rocm/bin and the file permission need to set properly
-      install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS
-              DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-              PATTERN *.bat EXCLUDE)
     endif()
 
     if(WIN32) #not required for flat folder structure
