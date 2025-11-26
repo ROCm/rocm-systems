@@ -105,9 +105,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_count
     uint8_t reserved4;      ///< Reserved for future use
     uint8_t reserved5;      ///< Reserved for future use
     uint8_t reserved6;      ///< Reserved for future use
-    uint8_t reserved7;      ///< Reserved for future use
-    uint8_t reserved8;      ///< Reserved for future use
-    uint8_t reserved_padding[2];  ///< Room for additional counters
+    uint8_t reserved_padding[4];  ///< Reserved for the future use
 } rocprofiler_pc_sampling_memory_counters_future_t;
 
 /**
