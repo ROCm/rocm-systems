@@ -697,10 +697,6 @@ void Tester::print(uint64_t size) {
     return;
   }
 
-  if (args.unified_msg_size) {
-    size *= (args.num_wgs * args.wg_size);
-  }
-
   /**
    * Calculate total amount of data transfered
    */
@@ -716,6 +712,10 @@ void Tester::print(uint64_t size) {
 
   double bandwidth_avg_gbs =
       static_cast<double>(total_size * bw_factor) / time_s / pow(2, 30);
+
+  if (args.unified_msg_size) {
+    size *= (args.num_wgs * args.wg_size);
+  }
 
   float total_kern_time_ms;
   CHECK_HIP(hipEventElapsedTime(&total_kern_time_ms, start_event, stop_event));
