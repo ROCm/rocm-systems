@@ -20,17 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Standalone build support - uncomment when extracting as separate project
-# cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-# project(rocstorage VERSION 0.1.0)
-# set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# Detect if built standalone or as subdirectory
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    set(ROCSTORAGE_STANDALONE ON)
-else()
-    set(ROCSTORAGE_STANDALONE OFF)
-endif()
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+project(rocstorage VERSION 0.1.0)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ------------------------------------------------------------ #
 # Version
@@ -162,36 +154,36 @@ install(
     FILES
         ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Find${PACKAGE_NAME}.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}
     COMPONENT rocstorage
 )
 
 # ------------------------------------------------------------ #
-# Build tree support (standalone builds only)
+# Build tree support
 # ------------------------------------------------------------ #
 
-if(ROCSTORAGE_STANDALONE)
-    export(
-        TARGETS ${PACKAGE_NAME}
-        NAMESPACE ${PACKAGE_NAME}::
-        FILE ${CMAKE_CURRENT_BINARY_DIR}/${PACKAGE_NAME}-targets.cmake
-    )
+export(
+    TARGETS ${PACKAGE_NAME}
+    NAMESPACE ${PACKAGE_NAME}::
+    FILE ${CMAKE_CURRENT_BINARY_DIR}/${PACKAGE_NAME}-targets.cmake
+)
 
-    file(
-        WRITE ${CMAKE_CURRENT_BINARY_DIR}/${PACKAGE_NAME}-config.cmake
-        "include_guard(DIRECTORY)
-    set(${PACKAGE_NAME}_INCLUDE_DIR \"${CMAKE_BINARY_DIR}/include\")
-    set(${PACKAGE_NAME}_LIB_DIR \"${CMAKE_CURRENT_BINARY_DIR}\")
-    include(\"\${CMAKE_CURRENT_LIST_DIR}/${PACKAGE_NAME}-targets.cmake\")
-    "
-    )
+file(
+    WRITE ${CMAKE_CURRENT_BINARY_DIR}/${PACKAGE_NAME}-config.cmake
+    "include_guard(DIRECTORY)
+set(${PACKAGE_NAME}_INCLUDE_DIR \"${CMAKE_BINARY_DIR}/include\")
+set(${PACKAGE_NAME}_LIB_DIR \"${CMAKE_CURRENT_BINARY_DIR}\")
+include(\"\${CMAKE_CURRENT_LIST_DIR}/${PACKAGE_NAME}-targets.cmake\")
+"
+)
 
-    file(
-        COPY
-            ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
-        DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
-    )
+file(
+    COPY
+        ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Find${PACKAGE_NAME}.cmake
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
+)
 
-    set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
-    export(PACKAGE ${PACKAGE_NAME})
-endif()
+set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
+export(PACKAGE ${PACKAGE_NAME})
