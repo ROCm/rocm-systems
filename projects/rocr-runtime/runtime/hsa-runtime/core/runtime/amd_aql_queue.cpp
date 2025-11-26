@@ -1193,6 +1193,8 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
   const uint64_t lanes_per_wave = (error_code & 0x400) ? 32 : 64;
 
+  // TODO-GFX13: Adjust these calculations when wavegroups are enabled.
+  //             (Requires looking at the kernel descriptor.)
   const uint64_t size_per_thread =
       AlignUp(pkt->dispatch.private_segment_size,
               scratch.mem_alignment_size / lanes_per_wave);
@@ -2030,14 +2032,14 @@ void AqlQueue::FillComputeTmpRingSize_Gfx11() {
   uint32_t num_waves =
       queue_scratch_.main_size / (tmpring_size.bits.WAVESIZE * queue_scratch_.mem_alignment_size);
 
-  // For GFX11 we specify number of waves per engine instead of total
+  // For GFX11+ we specify number of waves per engine instead of total
   num_waves /= agent_->properties().NumShaderBanks;
   tmpring_size.bits.WAVES = std::min(num_waves, max_scratch_waves);
   amd_queue_.compute_tmpring_size = tmpring_size.u32All;
 }
 
 // Set concurrent wavefront limits only when scratch is being used.
-void AqlQueue::FillComputeTmpRingSize_Gfx12() {
+void AqlQueue::FillComputeTmpRingSize_Gfx12_Gfx13() {
   // For GFX12, struct field size changes.
   // Consider refactoring code for GFX11/GFX12 if no other changes.
   COMPUTE_TMPRING_SIZE_GFX12 tmpring_size = {};
@@ -2075,12 +2077,16 @@ void AqlQueue::FillComputeTmpRingSize_Gfx12() {
 // that enable kernel access scratch memory
 void AqlQueue::InitScratchSRD() {
   switch (agent_->supported_isas()[0]->GetMajorVersion()) {
+    case 13:
+      // We shouldn't be using the buffer resource descriptor anymore.
+      FillComputeTmpRingSize_Gfx12_Gfx13();
+      break;
     case 12:
       FillBufRsrcWord0();
       FillBufRsrcWord1_Gfx11();
       FillBufRsrcWord2();
       FillBufRsrcWord3_Gfx12();
-      FillComputeTmpRingSize_Gfx12();
+      FillComputeTmpRingSize_Gfx12_Gfx13();
       break;
     case 11:
       FillBufRsrcWord0();

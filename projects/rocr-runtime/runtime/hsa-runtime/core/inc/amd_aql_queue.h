@@ -296,7 +296,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   void FillComputeTmpRingSize();
   void FillAltComputeTmpRingSize();
   void FillComputeTmpRingSize_Gfx11();
-  void FillComputeTmpRingSize_Gfx12();
+  void FillComputeTmpRingSize_Gfx12_Gfx13();
 
   void FreeMainScratchSpace();
   void FreeAltScratchSpace();
