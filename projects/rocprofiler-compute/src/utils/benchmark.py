@@ -253,6 +253,7 @@ def launch_kernel(func, grid_size, block_size, shared_mem_size, stream, args=[])
         args_ptr,
     )
 
+
 # Retrieve the gfx architecture
 def get_gfx_arch(device):
 
