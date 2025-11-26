@@ -38,7 +38,6 @@ from ctypes import (
     Structure,
 )
 
-# TODO: Find library
 _lib = ctypes.CDLL("libamdhip64.so")
 
 
@@ -78,7 +77,7 @@ class HIPDeviceArch(Structure):
     ]
 
 
-# Mirrors hipDeviceProp_t
+# Mirrors hipDeviceProp_tR0600
 class HIPDeviceProperties(Structure):
     _fields_ = [
         ("name_str", c_char * 256),
