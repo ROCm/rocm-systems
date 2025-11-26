@@ -755,7 +755,8 @@ void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
 bool Kernel::GetAttrCodePropMetadata() {
   amd_comgr_metadata_node_t kernelMetaNode;
   if (!prog().getKernelMetadata(name(), &kernelMetaNode)) {
-    DevLogPrintfError("Cannot get program kernel metadata for %s \n", name().c_str());
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "Cannot get program kernel metadata for %s \n", name().c_str());
     return false;
   }
 
@@ -841,7 +842,8 @@ bool Kernel::GetPrintfStr(std::vector<std::string>* printfStr) {
       }
 
       if (status != AMD_COMGR_STATUS_SUCCESS) {
-        DevLogPrintfError("Comgr API failed with status: %d \n", status);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COMGR,
+                "Comgr API failed with status: %d \n", status);
         amd::Comgr::destroy_metadata(printfMeta);
         return false;
       }
