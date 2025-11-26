@@ -135,7 +135,7 @@ void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
     ASSERT_SUCCESS(hsa_amd_queue_get_info(queues[i], HSA_QUEUE_INFO_HW_ID, &hw_ids[i]));
   }
 
-  // Deduplicate HW IDs
+  // Sort and remove duplicate HW IDs
   std::sort(hw_ids.begin(), hw_ids.end());
   auto it = std::unique(hw_ids.begin(), hw_ids.end());
   hw_ids.resize(std::distance(hw_ids.begin(), it));
@@ -162,12 +162,9 @@ void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
 
   ASSERT_EQ(dist.size(), MAX_HW_QUEUES);
 
-  auto [min_it, max_it] = std::minmax_element(dist.begin(), dist.end());
-  uint32_t min_use = *min_it;
-  uint32_t max_use = *max_it;
-
   // Fair distribution: difference should not exceed 1
-  EXPECT_LE(max_use - min_use, 1);
+  auto [min_it, max_it] = std::minmax_element(dist.begin(), dist.end());
+  EXPECT_LE(*max_it - *min_it, 1);
 
   // Release queues
   for (auto* q : queues) {
