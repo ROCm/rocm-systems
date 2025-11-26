@@ -630,7 +630,9 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 #endif  // _WIN64
   }
   info_.virtualMemoryManagement_ = true;
-  info_.virtualMemAllocGranularity_ =
+  info_.virtualMemAllocGranularityMinimum_ =
+      static_cast<size_t>(palProp.gpuMemoryProperties.virtualMemAllocGranularity);
+  info_.virtualMemAllocGranularityRecommended_ =
       static_cast<size_t>(palProp.gpuMemoryProperties.virtualMemAllocGranularity);
   info_.vgprAllocGranularity_ = palProp.gfxipProperties.shaderCore.vgprAllocGranularity;
   info_.vgprsPerSimd_ = palProp.gfxipProperties.shaderCore.vgprsPerSimd;
