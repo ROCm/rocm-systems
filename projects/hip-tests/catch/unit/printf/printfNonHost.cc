@@ -67,7 +67,7 @@ __global__ void kernel_printf_thread(int* count) {
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE("Unit_NonHost_Printf_basic") {
+TEST_CASE("Unit_NonHost_Printf_basic", "[printf]") {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -102,7 +102,7 @@ TEST_CASE("Unit_NonHost_Printf_basic") {
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE("Unit_NonHost_Printf_loop") {
+TEST_CASE("Unit_NonHost_Printf_loop", "[printf]") {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -144,7 +144,7 @@ TEST_CASE("Unit_NonHost_Printf_loop") {
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE("Unit_NonHost_Printf_multiple_Threads") {
+TEST_CASE("Unit_NonHost_Printf_multiple_Threads", "[printf]") {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -189,7 +189,7 @@ TEST_CASE("Unit_NonHost_Printf_multiple_Threads") {
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE("Unit_NonHost_Printf_BufferAvailability") {
+TEST_CASE("Unit_NonHost_Printf_BufferAvailability", "[printf]") {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {

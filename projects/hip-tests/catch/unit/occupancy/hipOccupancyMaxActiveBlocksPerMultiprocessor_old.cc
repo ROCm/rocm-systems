@@ -27,7 +27,7 @@ template <typename T> static __global__ void f2(T* a) { *a = 1; }
  */
 #define OccupancyDisableCachingOverride 0x01
 
-TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative") {
+TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative", "[occupancy]") {
   hipError_t ret;
   int numBlock = 0, blockSize = 0;
   int gridSize = 0, defBlkSize = 32;
@@ -54,7 +54,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative") {
   REQUIRE(ret == hipSuccess);
 }
 
-TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_rangeValidation") {
+TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_rangeValidation", "[occupancy]") {
   hipDeviceProp_t devProp;
   int numBlock = 0, blockSize = 0;
   int gridSize = 0;
@@ -79,7 +79,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_rangeValidation") {
   REQUIRE((numBlock * blockSize) <= devProp.maxThreadsPerMultiProcessor);
 }
 
-TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_templateInvocation") {
+TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_templateInvocation", "[occupancy]") {
   int blockSize = 32;
   int numBlock = 0;
 

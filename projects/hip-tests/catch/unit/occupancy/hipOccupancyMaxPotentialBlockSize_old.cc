@@ -22,7 +22,7 @@ static __global__ void f1(float* a) { *a = 1.0; }
 
 template <typename T> static __global__ void f2(T* a) { *a = 1; }
 
-TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_Negative") {
+TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_Negative", "[occupancy]") {
   hipError_t ret;
   int blockSize = 0;
   int gridSize = 0;
@@ -41,7 +41,7 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_Negative") {
 #endif
 }
 
-TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_rangeValidation") {
+TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_rangeValidation", "[occupancy]") {
   hipDeviceProp_t devProp;
   int blockSize = 0;
   int gridSize = 0;
@@ -69,7 +69,7 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_rangeValidation") {
   REQUIRE(blockSize <= devProp.maxThreadsPerBlock);
 }
 
-TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_templateInvocation") {
+TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_templateInvocation", "[occupancy]") {
   int gridSize = 0, blockSize = 0;
 
   HIP_CHECK(hipOccupancyMaxPotentialBlockSize<void (*)(int*)>(&gridSize, &blockSize, f2, 0, 0));

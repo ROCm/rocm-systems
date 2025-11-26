@@ -122,7 +122,7 @@ CAST_FLOAT2INT_TEST_DEF(__float2int_rz, int, std::trunc)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float2int_Negative_RTC") { NegativeTestRTCWrapper<12>(kFloat2Int); }
+TEST_CASE("Unit_Device___float2int_Negative_RTC", "[math]") { NegativeTestRTCWrapper<12>(kFloat2Int); }
 
 /**
  * Test Description
@@ -197,7 +197,7 @@ CAST_FLOAT2INT_RZ_TEST_DEF(__float2uint_rz, unsigned int)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float2uint_Negative_RTC") { NegativeTestRTCWrapper<12>(kFloat2Uint); }
+TEST_CASE("Unit_Device___float2uint_Negative_RTC", "[math]") { NegativeTestRTCWrapper<12>(kFloat2Uint); }
 
 #define CAST_FLOAT2LL_TEST_DEF(kern_name, T, ref_func)                                             \
   CAST_KERNEL_DEF(kern_name, T, float)                                                             \
@@ -294,7 +294,7 @@ CAST_FLOAT2LL_RZ_TEST_DEF(__float2ll_rz, long long int)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float2ll_Negative_RTC") { NegativeTestRTCWrapper<12>(kFloat2LL); }
+TEST_CASE("Unit_Device___float2ll_Negative_RTC", "[math]") { NegativeTestRTCWrapper<12>(kFloat2LL); }
 
 /**
  * Test Description
@@ -369,7 +369,7 @@ CAST_FLOAT2LL_RZ_TEST_DEF(__float2ull_rz, unsigned long long int)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float2ull_Negative_RTC") { NegativeTestRTCWrapper<12>(kFloat2ULL); }
+TEST_CASE("Unit_Device___float2ull_Negative_RTC", "[math]") { NegativeTestRTCWrapper<12>(kFloat2ULL); }
 
 CAST_KERNEL_DEF(__float_as_int, int, float)
 
@@ -386,7 +386,7 @@ CAST_KERNEL_DEF(__float_as_int, int, float)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float_as_int_Positive") {
+TEST_CASE("Unit_Device___float_as_int_Positive", "[math]") {
   int (*ref)(float) = type2_as_type1_ref<int, float>;
   UnarySinglePrecisionTest(__float_as_int_kernel, ref, EqValidatorBuilderFactory<int>());
 }
@@ -403,7 +403,7 @@ TEST_CASE("Unit_Device___float_as_int_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float_as_int_Negative_RTC") { NegativeTestRTCWrapper<3>(kFloatAsInt); }
+TEST_CASE("Unit_Device___float_as_int_Negative_RTC", "[math]") { NegativeTestRTCWrapper<3>(kFloatAsInt); }
 
 CAST_KERNEL_DEF(__float_as_uint, unsigned int, float)
 
@@ -420,7 +420,7 @@ CAST_KERNEL_DEF(__float_as_uint, unsigned int, float)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float_as_uint_Positive") {
+TEST_CASE("Unit_Device___float_as_uint_Positive", "[math]") {
   unsigned int (*ref)(float) = type2_as_type1_ref<unsigned int, float>;
   UnarySinglePrecisionTest(__float_as_uint_kernel, ref, EqValidatorBuilderFactory<unsigned int>());
 }
@@ -437,7 +437,7 @@ TEST_CASE("Unit_Device___float_as_uint_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float_as_uint_Negative_RTC") { NegativeTestRTCWrapper<3>(kFloatAsUint); }
+TEST_CASE("Unit_Device___float_as_uint_Negative_RTC", "[math]") { NegativeTestRTCWrapper<3>(kFloatAsUint); }
 
 /**
  * End doxygen group MathTest.

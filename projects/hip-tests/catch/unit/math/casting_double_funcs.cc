@@ -122,7 +122,7 @@ CAST_DOUBLE2INT_RZ_TEST_DEF(__double2int_rz, int)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double2int_Negative_RTC") { NegativeTestRTCWrapper<12>(kDouble2Int); }
+TEST_CASE("Unit_Device___double2int_Negative_RTC", "[math]") { NegativeTestRTCWrapper<12>(kDouble2Int); }
 
 /**
  * Test Description
@@ -200,7 +200,7 @@ CAST_DOUBLE2INT_RZ_TEST_DEF(__double2uint_rz, unsigned int)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double2uint_Negative_RTC") { NegativeTestRTCWrapper<12>(kDouble2Uint); }
+TEST_CASE("Unit_Device___double2uint_Negative_RTC", "[math]") { NegativeTestRTCWrapper<12>(kDouble2Uint); }
 
 #define CAST_DOUBLE2LL_TEST_DEF(kern_name, T, ref_func)                                            \
   CAST_KERNEL_DEF(kern_name, T, double)                                                            \
@@ -300,7 +300,7 @@ CAST_DOUBLE2LL_RZ_TEST_DEF(__double2ll_rz, long long int)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double2ll_Negative_RTC") { NegativeTestRTCWrapper<12>(kDouble2LL); }
+TEST_CASE("Unit_Device___double2ll_Negative_RTC", "[math]") { NegativeTestRTCWrapper<12>(kDouble2LL); }
 
 /**
  * Test Description
@@ -378,7 +378,7 @@ CAST_DOUBLE2LL_RZ_TEST_DEF(__double2ull_rz, unsigned long long int)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double2ull_Negative_RTC") { NegativeTestRTCWrapper<12>(kDouble2ULL); }
+TEST_CASE("Unit_Device___double2ull_Negative_RTC", "[math]") { NegativeTestRTCWrapper<12>(kDouble2ULL); }
 
 #define CAST_DOUBLE2FLOAT_TEST_DEF(kern_name, round_dir)                                           \
   CAST_KERNEL_DEF(kern_name, float, double)                                                        \
@@ -474,7 +474,7 @@ CAST_DOUBLE2FLOAT_TEST_DEF(__double2float_rz, FE_TOWARDZERO)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double2float_Negative_RTC") { NegativeTestRTCWrapper<12>(kDouble2Float); }
+TEST_CASE("Unit_Device___double2float_Negative_RTC", "[math]") { NegativeTestRTCWrapper<12>(kDouble2Float); }
 
 CAST_KERNEL_DEF(__double2hiint, int, double)
 
@@ -498,7 +498,7 @@ int __double2hiint_ref(double arg) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double2hiint_Positive") {
+TEST_CASE("Unit_Device___double2hiint_Positive", "[math]") {
   int (*ref)(double) = __double2hiint_ref;
   CastDoublePrecisionTest(__double2hiint_kernel, ref, EqValidatorBuilderFactory<int>());
 }
@@ -515,7 +515,7 @@ TEST_CASE("Unit_Device___double2hiint_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double2hiint_Negative_RTC") { NegativeTestRTCWrapper<3>(kDouble2Hiint); }
+TEST_CASE("Unit_Device___double2hiint_Negative_RTC", "[math]") { NegativeTestRTCWrapper<3>(kDouble2Hiint); }
 
 CAST_KERNEL_DEF(__double2loint, int, double)
 
@@ -539,7 +539,7 @@ int __double2loint_ref(double arg) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double2loint_Positive") {
+TEST_CASE("Unit_Device___double2loint_Positive", "[math]") {
   int (*ref)(double) = __double2loint_ref;
   CastDoublePrecisionTest(__double2loint_kernel, ref, EqValidatorBuilderFactory<int>());
 }
@@ -556,7 +556,7 @@ TEST_CASE("Unit_Device___double2loint_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double2loint_Negative_RTC") { NegativeTestRTCWrapper<3>(kDouble2Loint); }
+TEST_CASE("Unit_Device___double2loint_Negative_RTC", "[math]") { NegativeTestRTCWrapper<3>(kDouble2Loint); }
 
 CAST_KERNEL_DEF(__double_as_longlong, long long int, double)
 
@@ -574,7 +574,7 @@ CAST_KERNEL_DEF(__double_as_longlong, long long int, double)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double_as_longlong_Positive") {
+TEST_CASE("Unit_Device___double_as_longlong_Positive", "[math]") {
   long long int (*ref)(double) = type2_as_type1_ref<long long int, double>;
   CastDoublePrecisionTest(__double_as_longlong_kernel, ref,
                           EqValidatorBuilderFactory<long long int>());
@@ -592,7 +592,7 @@ TEST_CASE("Unit_Device___double_as_longlong_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___double_as_longlong_Negative_RTC") {
+TEST_CASE("Unit_Device___double_as_longlong_Negative_RTC", "[math]") {
   NegativeTestRTCWrapper<3>(kDoubleAsLonglong);
 }
 
