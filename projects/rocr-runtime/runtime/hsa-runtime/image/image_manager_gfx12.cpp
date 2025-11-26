@@ -792,8 +792,9 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
     const UINT_32 ratioLow = 2;
     const UINT_32 ratioHigh = 1;
 
-    // Same behaviour as GFX11, remove linear if height is 1.
-    if (in.height > 1) {
+    // Remove linear swizzle mode for multi-dimensional or mipmapped textures.
+    // Linear mode is only appropriate for simple 1D single-level textures.
+    if (in.height > 1 || in.numMipLevels > 1) {
       swOut.validModes.swLinear = 0;
     }
 
@@ -805,9 +806,8 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
       if (swOut.validModes.value & (1 << i)) {
         ADDR3_COMPUTE_SURFACE_INFO_OUTPUT localOut = {0};
 
-        // Allocate temporary memory for mip info (freed after use)
-        localOut.pMipInfo = new ADDR3_MIP_INFO[num_mipmap_levels];
-        memset(localOut.pMipInfo, 0, sizeof(ADDR3_MIP_INFO) * num_mipmap_levels);
+        // pMipInfo not needed - set to nullptr and AddrLib will ignore it
+        localOut.pMipInfo = nullptr;
 
         localOut.size = sizeof(ADDR3_COMPUTE_SURFACE_INFO_OUTPUT);
 
@@ -816,7 +816,6 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
         if (ADDR_OK != Addr3ComputeSurfaceInfo(addr_lib_, &in, &localOut)) {
           // Should not happen, if it does, ignore this swizzle mode.
           debug_print("Addr3ComputeSurfaceInfo failed!\n");
-          delete[] localOut.pMipInfo;
           continue;
         }
 
@@ -829,9 +828,6 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
           minSize = surfaceSize;
           bestSwizzle = (Addr3SwizzleMode) i;
         }
-
-        // Clean up temporary mip info
-        delete[] localOut.pMipInfo;
       }
     }
 
@@ -1001,15 +997,13 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
     // Get ADDR3 surface information
     ADDR3_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
-    // Allocate persistent memory for mip info (freed in MipmappedArray destructor)
-    out.pMipInfo = new ADDR3_MIP_INFO[mipmap.num_levels];
-    memset(out.pMipInfo, 0, sizeof(ADDR3_MIP_INFO) * mipmap.num_levels);
+    // pMipInfo not needed - set to nullptr and AddrLib will ignore it
+    out.pMipInfo = nullptr;
 
     unsigned int swizzleMode = GetAddrlibSurfaceInfoNv(mipmap.component,
                             mipmap.desc, mipmap.num_levels, mipmap.tile_mode,
                             mipmap.row_pitch, mipmap.slice_pitch, out);
     if (swizzleMode == (uint32_t)(-1)) {
-      delete[] out.pMipInfo;
       return HSA_STATUS_ERROR;
     }
     mipmap.addr_output.addr3 = out;

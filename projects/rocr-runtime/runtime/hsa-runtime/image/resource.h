@@ -109,9 +109,9 @@ protected:
     tile_mode = LINEAR;
   }
 
-  ~Image() {}
+  virtual ~Image() {}
 
-public:
+ public:
   typedef enum TileMode {
     LINEAR,
     TILED
@@ -128,7 +128,11 @@ public:
 
   /// @brief Convert from HSA handle to vendor representation.
   static Image* Convert(uint64_t handle) {
-    return reinterpret_cast<Image*>(handle - offsetof(Image, srd));
+    // Compute offset manually to avoid offsetof warning with virtual destructor
+    Image* dummy = nullptr;
+    const ptrdiff_t srd_offset =
+        reinterpret_cast<const char*>(&dummy->srd) - reinterpret_cast<const char*>(dummy);
+    return reinterpret_cast<Image*>(handle - srd_offset);
   }
 
   // Vendor specific image object.
@@ -221,14 +225,7 @@ private:
   }
 
 ~MipmappedArray() {
-  // There is no pMipInfo for ADDR in pre-GFX9 versions
-  if (addr_output.addr2.pMipInfo) {
-    delete[] addr_output.addr2.pMipInfo;
-    addr_output.addr2.pMipInfo = nullptr;
-  } else if (addr_output.addr3.pMipInfo) {
-    delete[] addr_output.addr3.pMipInfo;
-    addr_output.addr3.pMipInfo = nullptr;
-  }
+
 }
 
 public:
@@ -244,7 +241,11 @@ public:
 
  /// @brief Convert from HSA handle to vendor representation.
  static MipmappedArray* Convert(uint64_t handle) {
-   return reinterpret_cast<MipmappedArray*>(handle - offsetof(MipmappedArray, srd));
+   // Compute offset manually to avoid offsetof warning with virtual destructor
+   MipmappedArray* dummy = nullptr;
+   const ptrdiff_t srd_offset =
+       reinterpret_cast<const char*>(&dummy->srd) - reinterpret_cast<const char*>(dummy);
+   return reinterpret_cast<MipmappedArray*>(handle - srd_offset);
  }
 
   // Total size of the allocated memory.

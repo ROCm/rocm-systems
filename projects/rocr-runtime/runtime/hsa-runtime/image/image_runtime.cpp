@@ -700,23 +700,21 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
 
   // Create a new mipmapped array object
   MipmappedArray* mipmap_array = MipmappedArray::Create(component);
-  if (!mipmap_array) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;  
+  if (!mipmap_array) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   // Determine the tile mode
-  hsa_profile_t profile;
-  status = HSA::hsa_agent_get_info(component, HSA_AGENT_INFO_PROFILE, &profile);
-  if (status != HSA_STATUS_SUCCESS) {
-    MipmappedArray::Destroy(mipmap_array);
-    return status;
-  }
-  if (mipmap_layout == HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR) {
+  // 1DB (1D buffered) geometry MUST always be LINEAR per HSA spec
+  // LINEAR layout forces linear swizzle mode (required by API)
+  // TILED allows AddrLib to use internal heuristics to select optimal swizzle mode
+  if (mipmap_descriptor.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
+    // 1DB always uses linear addressing per HSA specification
+    mipmap_array->tile_mode = Image::TileMode::LINEAR;
+  } else if (mipmap_layout == HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR) {
+    // Explicit LINEAR layout forces linear swizzle mode
     mipmap_array->tile_mode = Image::TileMode::LINEAR;
   } else {
-    Image::TileMode tileMode =
-    (profile == HSA_PROFILE_BASE && mipmap_descriptor.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)
-    ? Image::TileMode::TILED
-    : Image::TileMode::LINEAR;
-    mipmap_array->tile_mode = tileMode;
+    // OPAQUE layout: Let AddrLib choose the best swizzle mode
+    mipmap_array->tile_mode = Image::TileMode::TILED;
   }
 
   debug_print("Tile mode = %u (0: LINEAR, 1: TILED)", mipmap_array->tile_mode);

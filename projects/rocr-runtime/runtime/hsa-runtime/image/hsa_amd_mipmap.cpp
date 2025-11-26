@@ -174,23 +174,18 @@ hsa_amd_mipmap_array_destroy(const hsa_ext_image_t* image) {
 }
 
 // per-level view retrieval implementation
-hsa_status_t HSA_API
-hsa_amd_mipmap_array_get_level(
-        hsa_agent_t agent,
-        const hsa_ext_image_t* mipmapped_array,
-        uint32_t mip_level,
-        hsa_ext_image_t* level_image_out) {
-    TRY
-    if (!mipmapped_array || !level_image_out) {
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
+hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
+                                                          const hsa_ext_image_t* mipmapped_array,
+                                                          uint32_t mip_level,
+                                                          hsa_ext_image_t* level_image_out) {
+  TRY if (!mipmapped_array || !level_image_out) { return HSA_STATUS_ERROR_INVALID_ARGUMENT; }
 
-    auto* rt = rocr::image::ImageRuntime::instance();
-    if (!rt) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  auto* rt = rocr::image::ImageRuntime::instance();
+  if (!rt) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-    return rt->GetMipmapArrayLevelHandle(agent, *mipmapped_array, mip_level, *level_image_out);
+  return rt->GetMipmapArrayLevelHandle(agent, *mipmapped_array, mip_level, *level_image_out);
 
-    CATCH
+  CATCH
 }
 
 } // extern "C"

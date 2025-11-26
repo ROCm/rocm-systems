@@ -592,6 +592,9 @@ uint32_t ImageManagerAi::GetAddrlibSurfaceInfoAi(
       prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
       prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
       prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
+  } else {
+    // TILED mode: forbid linear swizzle to force tiled modes
+    prefSettingsInput.forbiddenBlock.linear = 1;
   }
 
   prefSettingsInput.forbiddenBlock.micro = 1; // but don't ever allow the 256b swizzle modes
@@ -674,15 +677,13 @@ hsa_status_t ImageManagerAi::PopulateMipmapSrd(MipmappedArray& mipmap) const {
 
     ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
-    // Allocate persistent memory for mip info (freed in MipmappedArray destructor)
-    out.pMipInfo = new ADDR2_MIP_INFO[mipmap.num_levels];
-    memset(out.pMipInfo, 0, sizeof(ADDR2_MIP_INFO) * mipmap.num_levels);
+    // pMipInfo not needed - set to nullptr and AddrLib will ignore it
+    out.pMipInfo = nullptr;
 
     uint32_t swizzleMode = GetAddrlibSurfaceInfoAi(
                         mipmap.component, mipmap.desc, mipmap.num_levels,
                         mipmap.tile_mode, mipmap.row_pitch, mipmap.slice_pitch, out);
     if (swizzleMode == (uint32_t)(-1)) {
-      delete[] out.pMipInfo;
       return HSA_STATUS_ERROR;
     }
     mipmap.addr_output.addr2 = out;

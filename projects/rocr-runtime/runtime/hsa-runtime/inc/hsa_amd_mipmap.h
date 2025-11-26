@@ -180,12 +180,10 @@ hsa_amd_mipmap_array_destroy(const hsa_ext_image_t* image);
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT (null pointers, bad level, bad handle)
  * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES (allocation of view metadata failed)
  */
-hsa_status_t HSA_API
-hsa_amd_mipmap_array_get_level(
-    hsa_agent_t agent,
-    const hsa_ext_image_t* mipmapped_array,
-    uint32_t mip_level,
-    hsa_ext_image_t* level_image_out);
+hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
+                                                          const hsa_ext_image_t* mipmapped_array,
+                                                          uint32_t mip_level,
+                                                          hsa_ext_image_t* level_image_out);
 
 
 #ifdef __cplusplus
