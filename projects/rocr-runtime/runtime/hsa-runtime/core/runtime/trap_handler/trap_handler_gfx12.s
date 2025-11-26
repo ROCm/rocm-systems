@@ -78,6 +78,7 @@
 
 .set TRAP_ID_ABORT                             , 2
 .set TRAP_ID_DEBUGTRAP                         , 3
+.set TTMP1_SCHED_MODE_MASK                     , 0xC000000
 .set TTMP6_SAVED_STATUS_HALT_MASK              , (1 << TTMP6_SAVED_STATUS_HALT_SHIFT)
 .set TTMP6_SAVED_STATUS_HALT_SHIFT             , 29
 .set TTMP6_SAVED_TRAP_ID_BFE                   , (TTMP6_SAVED_TRAP_ID_SHIFT | (TTMP6_SAVED_TRAP_ID_SIZE << 16))
@@ -87,6 +88,10 @@
 .set TTMP6_WAVE_STOPPED_SHIFT                  , 30
 .set TTMP8_DEBUG_FLAG_SHIFT                    , 31
 .set TTMP11_DEBUG_ENABLED_SHIFT                , 23
+.set TTMP11_SCHED_MODE_SHIFT                   , 26
+.set TTMP11_SCHED_MODE_SIZE                    , 2
+.set TTMP11_SCHED_MODE_MASK                    , 0xC000000
+.set TTMP11_SCHED_MODE_BFE                     , (TTMP11_SCHED_MODE_SHIFT | (TTMP11_SCHED_MODE_SIZE << 16))
 .set TTMP_PC_HI_SHIFT                          , 7
 
 .set TTMP13_HT_FLAG_BIT                        , 22           // TTMP13 bit for host‑trap
@@ -200,14 +205,17 @@
 
 // ABI (Application Binary Interface) between first and second-level trap handler:
 //   ttmp0: PC_LO[31:0] (Program Counter Low)
-//   ttmp1: PC_HI[15:0] (Program Counter High, bits 0-15), TrapID[3:0] (in bits 28-31 of original PC_HI)
-//   ttmp11: 0[7:0], DebugEnabled[0], 0[15:0], NoScratch[0], 0[5:0]
+//   ttmp1: TrapID[3:0], SCHED_MODE[1:0], 0[9:0], PC_HI[15:0]
+//   ttmp11: ?[7:0], DebugEnabled[0], PRESERVED[15:0], ?[6:0]
 //   ttmp12: SQ_WAVE_STATE_PRIV (Private wave state register value).
 //   ttmp14: TMA[31:0] - TMA_LO (Trap Memory Argument Low - base address for trap handler data, low 32 bits).
 //   ttmp15: TTMA[63:32] - TMA_HI (Trap Memory Argument High - base address for trap handler data, high 32 bits).
 //   For PC Sampling, this points to pcs_hosttrap_data_ or pcs_stochastic_data_
  trap_entry:
-
+  // Save SCHED_MODE from ttmp1[27:26] into ttmp11[27:26]. We will restore it on exit
+  s_andn2_b32       ttmp11, ttmp11, TTMP11_SCHED_MODE_MASK
+  s_and_b32         ttmp2,  ttmp1, TTMP1_SCHED_MODE_MASK
+  s_or_b32          ttmp11, ttmp2, TTMP1_SCHED_MODE_MASK
   s_mov_b32         ttmp3, 0
 
 .check_hosttrap:
@@ -840,6 +848,10 @@
   s_mov_b64         exec, ttmp[10:11]                       // restore exec mask
 
 .exit_trap:
+  // Restore ttmp11[27:26] into SCHED_MODE[0:1]
+  s_bfe_u32         ttmp2, ttmp11, TTMP11_SCHED_MODE_BFE
+  s_setreg_b32 hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), ttmp2
+
   // Restore SQ_WAVE_STATUS.
   s_and_b64         exec, exec, exec                        // Restore STATUS.EXECZ, not writable by s_setreg_b32
   s_and_b64         vcc, vcc, vcc                           // Restore STATUS.VCCZ, not writable by s_setreg_b32
