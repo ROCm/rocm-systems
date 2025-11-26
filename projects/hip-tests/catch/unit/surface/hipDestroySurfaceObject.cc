@@ -39,7 +39,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipDestroySurfaceObject_Negative_Parameters") {
+TEST_CASE("Unit_hipDestroySurfaceObject_Negative_Parameters", "[texture]") {
   CHECK_IMAGE_SUPPORT
 
   SECTION("surfObject is NULL") {

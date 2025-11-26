@@ -34,7 +34,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive") {
+TEST_CASE("Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive", "[texture]") {
   CHECK_IMAGE_SUPPORT
 
   int deviceCount = 0;
@@ -68,7 +68,7 @@ TEST_CASE("Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipDeviceGetTexture1DLinearMaxWidth_Negative") {
+TEST_CASE("Unit_hipDeviceGetTexture1DLinearMaxWidth_Negative", "[texture]") {
   CHECK_IMAGE_SUPPORT
 
   int deviceCount = 0;
