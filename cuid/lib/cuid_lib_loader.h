@@ -46,7 +46,7 @@ template<typename T> amdcuid_status_t CuidLibLoader::load_function(
             dlsym(libHandler_, func_name);
     if (func_handler == nullptr) {
         char* error = dlerror();
-        std::cout << "CuidLibLoader: Fail to load the symbol "
+        std::cerr << "CuidLibLoader: Fail to load the symbol "
                     << func_name << ": " << error << std::endl;
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
@@ -71,7 +71,7 @@ template<typename T> amdcuid_status_t CuidLibLoader::load_object(
             reinterpret_cast<T *>(dlsym(libHandler_, obj_name));
     if (obj_handler == nullptr) {
         char* error = dlerror();
-        std::cout << "CuidLibLoader: Fail to load the symbol "
+        std::cerr << "CuidLibLoader: Fail to load the symbol "
                     << obj_name << ": " << error << std::endl;
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }

@@ -14,8 +14,7 @@ public:
     static amdcuid_status_t get_product_info(std::string &name, std::string &family);
 private:
     static constexpr const char* DMI_PATH = "/sys/class/dmi/id/";
-    static amdcuid_status_t read_sysfs_file(const std::string &path, std::string &output);
-    static std::string trim(const std::string &str);
+    static constexpr const char* DMI_TABLES_PATH = "/sys/firmware/dmi/tables/";
 };
 
 #endif // SMBIOS_UTIL_H

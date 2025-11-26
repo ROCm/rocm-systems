@@ -9,6 +9,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <unistd.h>
 
 // Endianness conversion functions
 uint16_t PciUtil::le16_to_be16(uint16_t value) {
@@ -35,6 +36,9 @@ uint64_t PciUtil::le64_to_be64(uint64_t value) {
 
 // function should only work with PCI devices, which so far includes GPUs and NICs. May later incude NPU and storage.
 amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf, uint8_t *buffer, size_t buffer_size, uint16_t offset) {
+    if (geteuid() != 0){
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
     if (bdf.empty() || !buffer || buffer_size == 0) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
     std::string pci_config_path = "/sys/bus/pci/devices/" + bdf + "/config";
@@ -42,7 +46,6 @@ amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf, uint8_t *buffer
     // Read the PCI config space
     std::ifstream config_file(pci_config_path, std::ios::binary);
     if (!config_file){
-        std::cout << "Error opening PCI config space from " << pci_config_path << std::endl;
         config_file.close();
         return AMDCUID_STATUS_FILE_NOT_FOUND;
     }
@@ -50,19 +53,14 @@ amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf, uint8_t *buffer
     config_file.seekg(0, std::ios::end);
     int length = config_file.tellg();
     config_file.seekg(0, std::ios::beg);
-    std::cout << "length of config space is: " << length << std::endl;
 
-    // TODO: need to determine where precisely serial ID is located in PCI config space to get
     config_file.seekg(offset, std::ios::beg);
     config_file.read(reinterpret_cast<char*>(buffer), buffer_size);
     int err = errno;
     if (config_file.bad())
     {
-        std::cout << "Error reading PCI config space from " << pci_config_path << " errno: " << err << std::endl;
-        std::cout << "bytes read: " << config_file.gcount() << std::endl;
-        std::cout << "file size: " << length << std::endl;
         config_file.close();
-        return AMDCUID_STATUS_INSUFFICIENT_SIZE; // give this error for now and figure out real error later
+        return AMDCUID_STATUS_PCI_READ_FAILED;
     }
     return AMDCUID_STATUS_SUCCESS;
 }
@@ -82,16 +80,15 @@ amdcuid_status_t PciUtil::get_pci_bdf_from_handle(amdcuid_handle handle, std::st
             bdf = info.bdf;
             return AMDCUID_STATUS_SUCCESS;
         }
-        // will add this back once NIC is defined
-        // case AMDCUID_DEVICE_TYPE_NIC: {
-        //     const amdcuid_nic_info& info = static_cast<AmdCuidNic*>(dev)->get_info();
-        //     if (info.bdf.empty()) {
-        //         bdf.clear();
-        //         return AMDCUID_STATUS_UNSUPPORTED;
-        //     }
-        //     bdf = info.bdf;
-        //     return AMDCUID_STATUS_SUCCESS;
-        // }
+        case AMDCUID_DEVICE_TYPE_NIC: {
+            const amdcuid_nic_info& info = static_cast<AmdCuidNic*>(dev)->get_info();
+            if (info.bdf.empty()) {
+                bdf.clear();
+                return AMDCUID_STATUS_UNSUPPORTED;
+            }
+            bdf = info.bdf;
+            return AMDCUID_STATUS_SUCCESS;
+        }
         default:
             bdf.clear();
             return AMDCUID_STATUS_UNSUPPORTED;
@@ -101,6 +98,9 @@ amdcuid_status_t PciUtil::get_pci_bdf_from_handle(amdcuid_handle handle, std::st
 // iterate capabilities list to find the relevant capability
 amdcuid_status_t PciUtil::get_pci_cap_offset(std::string bdf, uint32_t cap_id, uint16_t &offset)
 {
+    if (geteuid() != 0){
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
     if (bdf.empty()) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
     // Get the whole PCI config space header
@@ -108,22 +108,15 @@ amdcuid_status_t PciUtil::get_pci_cap_offset(std::string bdf, uint32_t cap_id, u
     amdcuid_status_t status = read_pci_config_space(bdf, config_space, 4096, 0);
     if (status != AMDCUID_STATUS_SUCCESS)
     {
-        std::cout << "read_pci_config_space failed on " << bdf << std::endl;
         return status;
     }
-
-    std::cout << "read_pci_config_space succeeded on " << bdf << std::endl;
-    std::cout << "bytes read: " << sizeof(config_space) << std::endl;
 
     // check the 4th bit in the status register first to determine if the capabilities list exists
     uint8_t status_reg = config_space[0x06];
     if ((status_reg & 0b10000) == 0)
     {
-        std::cout << "No capabilities list found in PCI config space." << std::endl;
-        return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+        return AMDCUID_STATUS_UNSUPPORTED;
     }
-
-    std::cout << "Capabilities list indicator found, continuing." << std::endl;
 
     // Get the capabilities pointer from the PCI config space
     // Device Serial Number is a PCIE Extended Capability, so we need to look in the extended capabilities list
@@ -136,7 +129,6 @@ amdcuid_status_t PciUtil::get_pci_cap_offset(std::string bdf, uint32_t cap_id, u
         if (cap_id_local == cap_id) {
             // Found the capability, set the offset to the capability's data
             offset = cap_ptr + 4;
-            std::cout << "Found capability " << cap_id << " at offset " << offset << std::endl;
             return AMDCUID_STATUS_SUCCESS;
         }
 
@@ -145,6 +137,5 @@ amdcuid_status_t PciUtil::get_pci_cap_offset(std::string bdf, uint32_t cap_id, u
         cap_id_local = config_space[cap_ptr];
     }
 
-    std::cout << "Capability not found." << std::endl;
     return AMDCUID_STATUS_UNSUPPORTED;
 }

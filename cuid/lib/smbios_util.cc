@@ -6,82 +6,44 @@
 #include <cstring>
 #include <sys/stat.h>
 #include "cuid_util.h"
-
-std::string SmbiosUtil::trim(const std::string &str) {
-    size_t first = str.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return "";
-    size_t last = str.find_last_not_of(" \t\r\n");
-    return str.substr(first, last - first + 1);
-}
-
-// Read a single sysfs file
-amdcuid_status_t SmbiosUtil::read_sysfs_file(const std::string &path, std::string &content) {
-    std::ifstream file(path);
-
-    if (!file.is_open()) {
-        // Check if file exists
-        struct stat buffer;
-        if (stat(path.c_str(), &buffer) != 0) {
-            if (errno == ENOENT) {
-                return AMDCUID_STATUS_FILE_NOT_FOUND;
-            } else if (errno == EACCES) {
-                return AMDCUID_STATUS_PERMISSION_DENIED;
-            }
-            return AMDCUID_STATUS_FILE_NOT_FOUND;
-        }
-        return AMDCUID_STATUS_PERMISSION_DENIED;
-    }
-
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    content = trim(buffer.str());
-    
-    file.close();
-    
-    if (content.empty()) {
-        return AMDCUID_STATUS_FILE_NOT_FOUND;
-    }
-    
-    return AMDCUID_STATUS_SUCCESS;
-}
+#include <unistd.h>
 
 amdcuid_status_t SmbiosUtil::get_uuid(uint8_t* uuid) {
     if (!uuid) {
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
 
+    if (geteuid() != 0){
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+
     // attempt to read UUID from sysfs first
-    std::string uuid_str;
-    amdcuid_status_t status_vendor = read_sysfs_file(
-        std::string(DMI_PATH) + "product_uuid", uuid_str);
-    if (status_vendor == AMDCUID_STATUS_SUCCESS) {
-        std::cout << "UUID from sysfs: " << uuid_str << std::endl;
-        
+    std::string uuid_str = AmdCuidUtilities::read_sysfs_file(std::string(DMI_PATH) + "product_uuid");
+    if (!uuid_str.empty()) {
         // Convert the UUID string to uint8_t array
         amdcuid_status_t status = AmdCuidUtilities::uuid_string_to_uint8(uuid_str, uuid);
         if (status != AMDCUID_STATUS_SUCCESS) {
             return status;
         }
-        return AMDCUID_STATUS_SUCCESS;
     } else {
         // try and get UUID from SMBIOS table
         amdcuid_status_t status = SmbiosUtil::get_uuid_from_smbios_table(uuid);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-            // Parse the SMBIOS table to extract the UUID
-            // For now, just print a message
-            std::cout << "UUID from SMBIOS table" << std::endl;
-            // Free the SMBIOS table if allocated
-            return AMDCUID_STATUS_SUCCESS;
-        } else {
-            return AMDCUID_STATUS_FILE_NOT_FOUND;
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            return status;
         }
     }
+
+    return AMDCUID_STATUS_SUCCESS;
 }
 
 amdcuid_status_t SmbiosUtil::get_uuid_from_smbios_table(uint8_t* uuid) {
 
-    const std::string smbios_path = "/sys/firmware/dmi/tables/DMI";
-    const std::string smbios_entry_path = "/sys/firmware/dmi/tables/smbios_entry_point";
+    const std::string smbios_path = std::string(DMI_TABLES_PATH) + "DMI";
+    const std::string smbios_entry_path = std::string(DMI_TABLES_PATH) + "smbios_entry_point";
+
+    if (geteuid() != 0){
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
 
     // validate the SMBIOS entry point and version. If version is < 2.1, then there won't be a UUID and we should quit there
     std::ifstream validate_version(smbios_entry_path);
@@ -98,7 +60,7 @@ amdcuid_status_t SmbiosUtil::get_uuid_from_smbios_table(uint8_t* uuid) {
             validate_version.read(&version_minor, 1);
             // Check if version is less than 2.1
             if (version_major < 2 || (version_major == 2 && version_minor < 1)) {
-                return AMDCUID_STATUS_FILE_NOT_FOUND;
+                return AMDCUID_STATUS_UNSUPPORTED;
             }
         }
         else if (std::string(anchor, 4) == "_SM3") {
@@ -110,12 +72,12 @@ amdcuid_status_t SmbiosUtil::get_uuid_from_smbios_table(uint8_t* uuid) {
             validate_version.read(&version_minor, 1);
             // Check if version is less than 3.0
             if (version_major < 3) {
-                return AMDCUID_STATUS_FILE_NOT_FOUND;
+                return AMDCUID_STATUS_UNSUPPORTED;
             }
         }
         else {
             // file is corrupted/malformed so
-            return AMDCUID_STATUS_FILE_NOT_FOUND;
+            return AMDCUID_STATUS_SMBIOS_ERROR;
         }
     }
     else {
@@ -139,12 +101,11 @@ amdcuid_status_t SmbiosUtil::get_uuid_from_smbios_table(uint8_t* uuid) {
     struct_table.read(reinterpret_cast<char*>(smbios_header), 4);
     type = smbios_header[0];
     // iterate through the table to find the System Header and then the UUID
-    while (type != TYPE_SYSTEM_INFO)
+    while (type != TYPE_SYSTEM_INFO && !struct_table.eof())
     {
         // move to the next structure and get past the strings section
         struct_offset += smbios_header[1];
         struct_table.seekg(struct_offset, std::ios::beg);
-        std::cout << "Current struct offset after finding end of header: " << struct_offset << std::endl;
 
         bool peek1, peek2;
         peek1 = peek2 = false;
@@ -156,15 +117,17 @@ amdcuid_status_t SmbiosUtil::get_uuid_from_smbios_table(uint8_t* uuid) {
         }
         struct_table.ignore(1); // Skip the double null terminator
         struct_offset++;
-        std::cout << "Current struct offset after finding double null terminator: " << struct_offset << std::endl;
         struct_table.read(reinterpret_cast<char*>(smbios_header), 4);
         type = smbios_header[0];
+    }
+
+    if (type != TYPE_SYSTEM_INFO) {
+        return AMDCUID_STATUS_SMBIOS_ERROR;
     }
 
     // now at the System Info structure, read the UUID at offset 0x8
     uint8_t raw_bytes[16] = {0};
     const uint8_t UUID_OFFSET = 0x8;
-    std::cout << "Final struct offset: " << struct_offset << std::endl;
     struct_table.seekg(struct_offset + UUID_OFFSET, std::ios::beg);
     struct_table.read(reinterpret_cast<char*>(raw_bytes), 16);
 
@@ -191,6 +154,11 @@ amdcuid_status_t SmbiosUtil::get_uuid_from_smbios_table(uint8_t* uuid) {
 
 // Get system serial number
 amdcuid_status_t SmbiosUtil::get_system_serial(std::string &serial) {
+
+    if (geteuid() != 0){
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+
     // Try multiple sources in order of preference
     const char* serial_files[] = {
         "product_serial",
@@ -200,9 +168,9 @@ amdcuid_status_t SmbiosUtil::get_system_serial(std::string &serial) {
     
     for (const char* filename : serial_files) {
         std::string path = std::string(DMI_PATH) + filename;
-        amdcuid_status_t status = read_sysfs_file(path, serial);
+        serial = AmdCuidUtilities::read_sysfs_file(path);
         
-        if (status == AMDCUID_STATUS_SUCCESS) {
+        if (!serial.empty()) {
             return AMDCUID_STATUS_SUCCESS;
         }
     }
@@ -214,17 +182,14 @@ amdcuid_status_t SmbiosUtil::get_system_serial(std::string &serial) {
 amdcuid_status_t SmbiosUtil::get_board_info(std::string &vendor, 
                                           std::string &name, 
                                           std::string &version) {
-    amdcuid_status_t status_vendor = read_sysfs_file(
-        std::string(DMI_PATH) + "board_vendor", vendor);
-    amdcuid_status_t status_name = read_sysfs_file(
-        std::string(DMI_PATH) + "board_name", name);
-    amdcuid_status_t status_version = read_sysfs_file(
-        std::string(DMI_PATH) + "board_version", version);
+    vendor = AmdCuidUtilities::read_sysfs_file(std::string(DMI_PATH) + "board_vendor");
+    name = AmdCuidUtilities::read_sysfs_file(std::string(DMI_PATH) + "board_name");
+    version = AmdCuidUtilities::read_sysfs_file(std::string(DMI_PATH) + "board_version");
     
     // Consider success if at least one field is available
-    if (status_vendor == AMDCUID_STATUS_SUCCESS || 
-        status_name == AMDCUID_STATUS_SUCCESS ||
-        status_version == AMDCUID_STATUS_SUCCESS) {
+    if (!vendor.empty() || 
+        !name.empty() ||
+        !version.empty()) {
         return AMDCUID_STATUS_SUCCESS;
     }
     
@@ -235,17 +200,14 @@ amdcuid_status_t SmbiosUtil::get_board_info(std::string &vendor,
 amdcuid_status_t SmbiosUtil::get_bios_info(std::string &vendor,
                                          std::string &version,
                                          std::string &date) {
-    amdcuid_status_t status_vendor = read_sysfs_file(
-        std::string(DMI_PATH) + "bios_vendor", vendor);
-    amdcuid_status_t status_version = read_sysfs_file(
-        std::string(DMI_PATH) + "bios_version", version);
-    amdcuid_status_t status_date = read_sysfs_file(
-        std::string(DMI_PATH) + "bios_date", date);
+    vendor = AmdCuidUtilities::read_sysfs_file(std::string(DMI_PATH) + "bios_vendor");
+    version = AmdCuidUtilities::read_sysfs_file(std::string(DMI_PATH) + "bios_version");
+    date = AmdCuidUtilities::read_sysfs_file(std::string(DMI_PATH) + "bios_date");
     
     // Consider success if at least one field is available
-    if (status_vendor == AMDCUID_STATUS_SUCCESS || 
-        status_version == AMDCUID_STATUS_SUCCESS ||
-        status_date == AMDCUID_STATUS_SUCCESS) {
+    if (!vendor.empty() || 
+        !version.empty() ||
+        !date.empty()) {
         return AMDCUID_STATUS_SUCCESS;
     }
     
@@ -255,14 +217,12 @@ amdcuid_status_t SmbiosUtil::get_bios_info(std::string &vendor,
 // Get product information
 amdcuid_status_t SmbiosUtil::get_product_info(std::string &name,
                                             std::string &family) {
-    amdcuid_status_t status_name = read_sysfs_file(
-        std::string(DMI_PATH) + "product_name", name);
-    amdcuid_status_t status_family = read_sysfs_file(
-        std::string(DMI_PATH) + "product_family", family);
+    name = AmdCuidUtilities::read_sysfs_file(std::string(DMI_PATH) + "product_name");
+    family = AmdCuidUtilities::read_sysfs_file(std::string(DMI_PATH) + "product_family");
     
     // Consider success if at least one field is available
-    if (status_name == AMDCUID_STATUS_SUCCESS || 
-        status_family == AMDCUID_STATUS_SUCCESS) {
+    if (!name.empty() || 
+        !family.empty()) {
         return AMDCUID_STATUS_SUCCESS;
     }
     

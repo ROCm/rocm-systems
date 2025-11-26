@@ -78,7 +78,9 @@ typedef enum {
     AMDCUID_STATUS_HMAC_ERROR = 12,                         ///< HMAC computation failed
     AMDCUID_STATUS_FILE_ERROR = 13,                         ///< File I/O error
     AMDCUID_STATUS_BUFFER_TOO_SMALL = 14,                   ///< Buffer size insufficient for operation
-    AMDCUID_STATUS_INVALID_FORMAT = 15                      ///< Data format is invalid or malformed
+    AMDCUID_STATUS_INVALID_FORMAT = 15,                      ///< Data format is invalid or malformed
+    AMDCUID_STATUS_PCI_READ_FAILED = 16,                     ///< PCI config read operation failed
+    AMDCUID_STATUS_SMBIOS_ERROR = 17                     ///< SMBIOS table could not be accessed or parsed
 } amdcuid_status_t;
 
 
