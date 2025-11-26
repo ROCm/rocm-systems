@@ -34,18 +34,34 @@ from utils.logger import (
     console_warning,
 )
 
-sys.path.insert(0, os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi")
+_amdsmi_module = None
 
-try:
-    import amdsmi
-except ImportError as e:
-    console_warning(f"Unhandled import error: {e}")
-    console_error("Failed to import the amdsmi Python library.")
+
+def import_amdsmi_module() -> None:
+    """
+    Dynamically import the amdsmi module because we only
+    want profile time dependency on amdsmi.
+    Uses global cache to avoid repeated imports.
+    """
+    global _amdsmi_module
+
+    if not _amdsmi_module:
+        sys.path.insert(0, os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi")
+        try:
+            import amdsmi
+
+            _amdsmi_module = amdsmi
+        except ImportError as e:
+            console_warning(f"Unhandled import error: {e}")
+            console_error("Failed to import the amdsmi Python library.")
+
+    return _amdsmi_module
 
 
 @contextmanager
 def amdsmi_ctx() -> Iterator[None]:
     """Context manager to initialize and shutdown amdsmi."""
+    amdsmi = import_amdsmi_module()
     try:
         amdsmi.amdsmi_init()
         yield
@@ -58,8 +74,10 @@ def amdsmi_ctx() -> Iterator[None]:
             console_warning(f"amd-smi shutdown failed: {e}")
 
 
-def get_device_handle() -> "amdsmi.ProcessorHandle | None":
+# Ignore undefined name amdsmi since it's dynamically imported
+def get_device_handle() -> "amdsmi.ProcessorHandle | None":  # noqa: F821
     """Get the first AMD device handle."""
+    amdsmi = import_amdsmi_module()
     try:
         devices = amdsmi.amdsmi_get_processor_handles()
         if len(devices) == 0:
@@ -74,6 +92,7 @@ def get_device_handle() -> "amdsmi.ProcessorHandle | None":
 
 def get_mem_max_clock() -> float:
     """Get the maximum memory clock of the device."""
+    amdsmi = import_amdsmi_module()
     try:
         return amdsmi.amdsmi_get_clock_info(
             get_device_handle(), amdsmi.AmdSmiClkType.GFX
@@ -85,6 +104,7 @@ def get_mem_max_clock() -> float:
 
 def get_gpu_model() -> str:
     """Get the GPU model name."""
+    amdsmi = import_amdsmi_module()
     try:
         gpu_model_info = (
             # board -> product_name
@@ -103,6 +123,7 @@ def get_gpu_model() -> str:
 
 def get_gpu_vbios_part_number() -> str:
     """Get the GPU VBIOS part number."""
+    amdsmi = import_amdsmi_module()
     try:
         vbios_part_number = amdsmi.amdsmi_get_gpu_vbios_info(get_device_handle())[
             "part_number"
@@ -116,6 +137,7 @@ def get_gpu_vbios_part_number() -> str:
 
 def get_gpu_compute_partition() -> str:
     """Get the GPU compute partition."""
+    amdsmi = import_amdsmi_module()
     try:
         compute_partition = amdsmi.amdsmi_get_gpu_compute_partition(get_device_handle())
         console_debug(f"GPU Compute Partition: {compute_partition}")
@@ -127,6 +149,7 @@ def get_gpu_compute_partition() -> str:
 
 def get_gpu_memory_partition() -> str:
     """Get the GPU memory partition."""
+    amdsmi = import_amdsmi_module()
     try:
         memory_partition = amdsmi.amdsmi_get_gpu_memory_partition(get_device_handle())
         console_debug(f"GPU Memory Partition: {memory_partition}")
@@ -138,6 +161,7 @@ def get_gpu_memory_partition() -> str:
 
 def get_amdgpu_driver_version() -> str:
     """Get the AMDGPU driver version."""
+    amdsmi = import_amdsmi_module()
     try:
         driver_info = amdsmi.amdsmi_get_gpu_driver_info(get_device_handle())
         driver_version = driver_info["driver_version"]
@@ -150,6 +174,7 @@ def get_amdgpu_driver_version() -> str:
 
 def get_gpu_vram_size() -> int:
     """Get the GPU VRAM size in MB."""
+    amdsmi = import_amdsmi_module()
     try:
         vram_info = amdsmi.amdsmi_get_gpu_vram_info(get_device_handle())
         vram_size = str(int(vram_info["vram_size"]) * 1024)  # MB -> KB
