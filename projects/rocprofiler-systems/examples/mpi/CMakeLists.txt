@@ -27,7 +27,7 @@ if(GFORTRAN_EXECUTABLE)
         set(GFORTRAN_VERSION ${CMAKE_MATCH_1})
         rocprofiler_systems_message(STATUS "Detected gfortran version: ${GFORTRAN_VERSION}")
     else()
-        rocprofiler_systems_message(FATAL_ERROR "Failed to get gfortran version: ${GFORTRAN_EXECUTABLE}")
+        rocprofiler_systems_message(FATAL_ERROR "Failed to get gfortran version from ${GFORTRAN_EXECUTABLE}: ${GFORTRAN_VERSION_ERROR}")
     endif()
 else()
     set(ENABLE_FORTRAN_MPI_CTESTS
@@ -100,7 +100,7 @@ target_link_libraries(mpi-allreduce PRIVATE mpi-c-interface-library m)
 
 if(ENABLE_FORTRAN_MPI_CTESTS)
     if(NOT MPI_Fortran_FOUND)
-        rocprofiler_systems_message(FATAL_ERROR "MPI Fortran support not found")
+        rocprofiler_systems_message(FATAL_ERROR "MPI Fortran support not found. Ensure MPI was configured with Fortran support.")
     endif()
     add_library(mpi-fortran-interface-library INTERFACE)
     target_link_libraries(
