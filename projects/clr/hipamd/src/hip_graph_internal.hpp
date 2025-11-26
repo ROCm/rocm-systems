@@ -494,7 +494,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t kernargSegmentAlignment_ = 256;  //!< Kernel arg segment alignment
   int dev_id_;  //!< Device Id when node is created(dev id from capture stream/current device
                 //!< when explicitly added)
-  bool wait_;                
+  bool wait_ = false;                
 };
 
 class GraphEventWaitNode : public GraphNode {
