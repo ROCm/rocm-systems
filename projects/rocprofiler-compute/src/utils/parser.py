@@ -166,7 +166,7 @@ def to_avg(
         else:
             return float(a)
     elif isinstance(a, str):
-        if not a:
+        if not a or a == "N/A":
             return np.nan
         return float(a)
     else:
@@ -315,33 +315,13 @@ class MetricEvaluator:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
-        self._prepare_df_cache()
-
-    def _prepare_df_cache(self) -> None:
-        """Prepare cached dataframe access for performance."""
-        if isinstance(self.raw_pmc_df, dict):
-            self.df_cache = {
-                f"raw_pmc_df_{key}": self.raw_pmc_df[key]
-                for key in self.raw_pmc_df.keys()
-            }
-        elif isinstance(self.raw_pmc_df, pd.DataFrame):
-            raw_pmc_df_keys = set(self.raw_pmc_df.columns.get_level_values(0))
-            self.df_cache = {
-                f"raw_pmc_df_{key}": self.raw_pmc_df[key] for key in raw_pmc_df_keys
-            }
-        else:
-            raise ValueError(f'Unknown `raw_pmc_df` type: "{type(self.raw_pmc_df)}".')
 
     def eval_expression(self, expr: str) -> Union[str, float, int]:
         """Evaluate a single expression with proper local context."""
         try:
-            # Optimize dataframe access by replacing dict notation with dir_path
-            # variable access
-            opt_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", expr)
-
             # Create comprehensive local context
             local_expr_context = {}
-            local_expr_context.update(self.df_cache)
+            local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
 
@@ -361,31 +341,37 @@ class MetricEvaluator:
             })
 
             eval_result = eval(
-                compile(opt_expr, "<string>", "eval"),
+                compile(expr, "<string>", "eval"),
                 {},
                 local_expr_context,
             )
 
-            if np.isnan(eval_result):
-                return ""
+            if eval_result is None or np.isnan(eval_result).any():
+                return "N/A"
             else:
                 return eval_result
 
         except (TypeError, NameError, KeyError) as exception:
             if "empirical_peak" in str(exception):
-                console_warning(
-                    f"Missing empirical peak data: {exception}. Using empty value."
-                )
-                return ""
+                console_warning(f"Missing empirical peak data: {exception}.")
+                return "N/A"
             else:
-                return ""
+                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+                return "N/A"
 
         except AttributeError as attribute_error:
             if str(attribute_error) == "'NoneType' object has no attribute 'get'":
-                return ""
+                console_warning(
+                    f"Failed to evaluate expression '{expr}': {attribute_error}."
+                )
+                return "N/A"
             else:
                 console_error("analysis", str(attribute_error))
-                return ""
+                return "N/A"
+
+        except pd.errors.IntCastingNaNError as exception:
+            console_warning(f"Missing data: {exception}. Using empty value.")
+            return ""
 
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
@@ -477,8 +463,17 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
             equation_string,
         )
     else:
+        # Use pmc_perf.csv for all counters
         equation_string = re.sub(
-            r"raw_pmc_df", f"raw_pmc_df['{coll_level}']", equation_string
+            r"raw_pmc_df",
+            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
+            equation_string,
+        )
+        # Use coll_level csv for SQ_ACCUM_PREV_HIRES counter only
+        equation_string = re.sub(
+            rf"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']['SQ_ACCUM_PREV_HIRES']",
+            f"raw_pmc_df['{coll_level}']['SQ_ACCUM_PREV_HIRES']",
+            equation_string,
         )
     return equation_string
 
@@ -911,7 +906,9 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, Union[int, float]]:
 
 
 def calc_builtin_vars(
-    raw_pmc_df: Union[pd.DataFrame, dict], config: dict
+    raw_pmc_df: Union[pd.DataFrame, dict],
+    config: dict,
+    sys_vars: dict[str, Union[int, float]],
 ) -> dict[str, Optional[Union[str, float, int]]]:
     """Calculate built-in variables"""
     # TODO: fix all $normUnit in Unit column or title
@@ -929,7 +926,8 @@ def calc_builtin_vars(
         )
         try:
             # Create temporary evaluator for this calculation
-            temporary_evaluator = MetricEvaluator(raw_pmc_df, {}, {})
+            # Pass sys_vars so that $num_xcd and other system variables are available
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
@@ -944,9 +942,9 @@ def calc_builtin_vars(
             variable_value, schema.PMC_PERF_FILE_PREFIX, config
         )
         try:
-            temporary_evaluator = MetricEvaluator(
-                raw_pmc_df, builtin_vars_collection, {}
-            )
+            # Merge sys_vars with builtin_vars_collection for second pass
+            combined_vars = {**sys_vars, **builtin_vars_collection}
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
@@ -981,7 +979,7 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(raw_pmc_df, config)
+    builtin_vars = calc_builtin_vars(raw_pmc_df, config, sys_vars)
     sys_vars.update(builtin_vars)
 
     # Create metric evaluator
@@ -1323,7 +1321,7 @@ def search_pc_sampling_record(
         console_warning("PC sampling: no pc sampling record found!")
         return None
 
-    # Prepare sorted output list
+    # Convert to sorted list of tuples:
     sorted_counts = sorted(
         [
             (

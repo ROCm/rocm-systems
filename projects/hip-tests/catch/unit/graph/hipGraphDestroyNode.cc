@@ -83,6 +83,7 @@ TEST_CASE("Unit_hipGraphDestroyNode_BasicFunctionality") {
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
   REQUIRE(hipGraphDestroyNode(memsetNode) == hipSuccess);
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipFree(pOutBuff_d));
 }
 
@@ -201,7 +202,6 @@ TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph") {
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphCreate(&clonedgraph, 0));
   // Create graph with no dependencies
   for (int i = 0; i < NUM_OF_DUMMY_NODES; i++) {
     void* kernelArgs[] = {nullptr};

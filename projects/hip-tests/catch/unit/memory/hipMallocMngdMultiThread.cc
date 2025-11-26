@@ -297,7 +297,7 @@ static void AllocateHmmMemory(int flag, int device) {
   }
 }
 
-TEST_CASE("Unit_hipMallocManaged_MultiThread") {
+TEST_CASE("Unit_hipMallocManaged_MultiThread", "[multigpu]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -351,7 +351,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiThread") {
 
 // The following test checks what happens when same Hmm memory is used to
 // launch multiple threads over multiple gpus
-TEST_CASE("Unit_hipMallocManaged_MGpuMThread") {
+TEST_CASE("Unit_hipMallocManaged_MGpuMThread", "[multigpu]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");

@@ -8,6 +8,7 @@ on:
     branches:
       - develop
     paths:
+      - '.github/workflows/rocprofiler-compute-rhel-8.yml'
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'
       - '!projects/rocprofiler-compute/.github/**/*.md'
@@ -15,6 +16,7 @@ on:
       - '!projects/rocprofiler-compute/docker/**'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-compute-rhel-8.yml'
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'
       - '!projects/rocprofiler-compute/.github/**/*.md'
@@ -32,26 +34,46 @@ concurrency:
 jobs:
   build:
     # The type of runner that the job will run on
+    # Using rocprofiler-systems images and later installing rocm, the official rocm images for al8 red hat variant are too large- this is a workaround.
     runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.os-release }}
     strategy:
       fail-fast: false
       matrix:
-        os-release: [ '8.10', '9.3']
+        os-release: [ '8.10', '9.4' ]
         build-type: ['Release']
     # Steps represent a sequence of tasks that will be executed as part of the job
+    # Note- RHEL8 references python3.9 as python39, whereas RHEL9 default version is already 3.9, so we only need to call it as python3
     steps:
       - name: Install baseline OS dependencies
         run: |
           yum clean all
           yum makecache
           yum -y install git
-          yum -y install python39
-          yum -y install python39-devel
+          if [ ${{ matrix.os-release }} == "8.10" ]; then
+            yum -y install python39
+            yum -y install python39-devel
+          else
+            yum -y install python3-devel
+          fi
           yum -y install cmake3
           yum -y install which
           yum -y install glibc-langpack-en
+      - name: Install ROCm Packages
+        timeout-minutes: 30
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 30
+          timeout_minutes: 30
+          max_attempts: 3
+          command: |
+            if [ ${{ matrix.os-release }} == "8.10" ]; then
+              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/8.10/amdgpu-install-7.1.70100-1.el8.noarch.rpm
+            else
+              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/9.4/amdgpu-install-7.1.70100-1.el9.noarch.rpm
+            fi
+            yum install -y rocm-dev
       - name: Checkout
         uses: actions/checkout@v4
         with:

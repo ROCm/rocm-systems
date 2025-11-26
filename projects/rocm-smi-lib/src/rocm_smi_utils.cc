@@ -49,6 +49,7 @@
 #include <dirent.h>
 #include <glob.h>
 #include <sys/utsname.h>
+#include <sys/ioctl.h>
 #include <dlfcn.h>
 
 #include <algorithm>
@@ -64,6 +65,7 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <fcntl.h>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -71,6 +73,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include <libdrm/amdgpu_drm.h>
 
 namespace amd {
 namespace smi {
@@ -1315,6 +1318,89 @@ uint64_t get_multiplier_from_char(char units_char) {
       throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
   }
   return multiplier;
+}
+
+rsmi_status_t check_runtime_pm_status(uint32_t dv_ind, bool *is_suspended) {
+  GET_DEV_FROM_INDX
+
+  std::string runtime_status = "/sys/class/drm/card" +
+                std::to_string(dev->index()) + "/device/power/runtime_status";
+  std::string runtime_enabled = "/sys/class/drm/card" +
+                std::to_string(dev->index()) + "/device/power/runtime_enabled";
+
+  std::string status;
+  std::string enabled;
+
+  int ret = amd::smi::ReadSysfsStr(runtime_enabled, &enabled);
+  if (ret != 0) {
+    *is_suspended = false;
+    return RSMI_STATUS_SUCCESS;
+  }
+  if (enabled.find("disabled") != std::string::npos ||
+      enabled.find("forbidden") != std::string::npos) {
+    *is_suspended = false;
+    return RSMI_STATUS_SUCCESS;
+  }
+
+  ret = amd::smi::ReadSysfsStr(runtime_status, &status);
+  if (ret != 0) {
+    *is_suspended = false;
+    return RSMI_STATUS_SUCCESS;
+  }
+  *is_suspended = (status.find("suspended") != std::string::npos);
+
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | device index: " << dv_ind
+     << " | runtime_enabled: " << enabled
+     << " | runtime_status: " << status
+     << " | is_suspended: " << *is_suspended;
+  LOG_DEBUG(ss);
+
+  return RSMI_STATUS_SUCCESS;
+}
+
+// Wake device from runtime suspend using DRM ioctl
+rsmi_status_t wake_device(uint32_t dv_ind) {
+  GET_DEV_FROM_INDX
+
+  std::ostringstream ss;
+
+  const std::string regex("renderD([0-9]+)");
+  const std::string renderD_folder = "/sys/class/drm/card" +
+                                      std::to_string(dev->index()) + "/../";
+  std::string render_name = amd::smi::find_file_in_folder(renderD_folder, regex);
+  if (render_name.empty()) {
+    ss << __PRETTY_FUNCTION__ << " | Failed to find renderD device for card" << dev->index();
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_FOUND;
+  }
+  std::string render_path = "/dev/dri/" + render_name;
+
+  // Open the DRM device node
+  int fd = open(render_path.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    ss << __PRETTY_FUNCTION__ << " | Failed to open DRM device: " << render_path
+       << " | error: " << std::strerror(errno);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_FILE_ERROR;
+  }
+
+  struct drm_amdgpu_info request = {};
+  // ioctl to wake the device from runtime suspend
+  int ret = ioctl(fd, DRM_IOCTL_AMDGPU_INFO, &request);
+  close(fd);
+
+  if (ret < 0 && errno != EINVAL) {
+    ss << __PRETTY_FUNCTION__ << " | ioctl failed | device index: " << dv_ind
+       << " | error: " << std::strerror(errno);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_FILE_ERROR;
+  }
+  ss << __PRETTY_FUNCTION__ << " | Successfully woke device using DRM ioctl"
+     << " | device index: " << dv_ind;
+  LOG_INFO(ss);
+
+  return RSMI_STATUS_SUCCESS;
 }
 
 }  // namespace smi

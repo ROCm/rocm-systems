@@ -73,12 +73,35 @@ add_custom_target(coopKernel.code
                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt
+                   COMMAND ${CMAKE_COMMAND} -E copy
+                   ${CMAKE_CURRENT_SOURCE_DIR}/not_a_module.txt
+                   ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/not_a_module.txt)
+add_custom_target(not_a_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt)
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt
+                   COMMAND ${CMAKE_COMMAND} -E copy
+                   ${CMAKE_CURRENT_SOURCE_DIR}/empty_file.txt
+                   ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/empty_file.txt)
+add_custom_target(empty_file ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt)
+
+add_custom_target(empty_module
+                  COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
+                  ${CMAKE_CURRENT_SOURCE_DIR}/empty_module.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
+  ${CMAKE_CURRENT_BINARY_DIR}/not_a_module.txt
+  ${CMAKE_CURRENT_BINARY_DIR}/empty_file.txt
+  ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
 )
 # Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900  --offload-arch=gfx906"
 # having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
@@ -95,13 +118,6 @@ if(BUILD_SHARED_LIBS)
       ${TEST_SRC}
       hipGetProcAddressModuleApis.cc)
 endif()
-
-add_custom_target(empty_module.code
-                  COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
-                  ${CMAKE_CURRENT_SOURCE_DIR}/empty_module.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/empty_module.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(copyKernel.code
                   COMMAND ${CMAKE_CXX_COMPILER} -mcode-object-version=5 --genco ${OFFLOAD_ARCH_STR}
@@ -160,7 +176,6 @@ add_custom_target(copyKernelGenericTargetCompressed.code
                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
-  ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
   ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
@@ -260,9 +275,11 @@ add_dependencies(ModuleTest get_function_module)
 add_dependencies(ModuleTest launch_kernel_module)
 add_dependencies(ModuleTest get_global_test_module)
 add_dependencies(ModuleTest get_tex_ref_module)
+add_dependencies(ModuleTest not_a_module)
+add_dependencies(ModuleTest empty_file)
+add_dependencies(ModuleTest empty_module)
 
 if(HIP_PLATFORM MATCHES "amd")
-add_dependencies(build_tests empty_module.code)
 add_dependencies(build_tests copyKernel.code copyKernel.s)
 add_dependencies(build_tests addKernel.code)
 add_dependencies(build_tests addKernel.spv)

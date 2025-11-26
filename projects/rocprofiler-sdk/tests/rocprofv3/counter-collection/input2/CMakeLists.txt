@@ -10,41 +10,35 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
-                                                          input.txt)
-
-# pmc2
-add_test(
-    NAME rocprofv3-test-counter-collection-txt-pmc2-execute
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.txt --output-format CSV JSON -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o out -- $<TARGET_FILE:simple-transpose>)
-
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(cc-env-pmc2 "${PRELOAD_ENV}")
-
-set_tests_properties(
-    rocprofv3-test-counter-collection-txt-pmc2-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc2}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-add_test(
-    NAME rocprofv3-test-counter-collection-txt-pmc2-execute-validate
+# pmc2
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-counter-collection-txt-pmc2
     COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_agent_info.csv
-        --counter-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_counter_collection.csv
-        --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_agent_info.csv
-        --counter-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_counter_collection.csv)
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.txt
+        --output-format CSV JSON -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o out --
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-counter-collection-txt-pmc2)
 
-set_tests_properties(
-    rocprofv3-test-counter-collection-txt-pmc2-execute-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-counter-collection-pmc2-execute" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-counter-collection-txt-pmc2
+    TEST_PATHS validate.py
+    COPY conftest.py input.txt
+    CONFIG pytest.ini
+    ARGS --agent-input
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_agent_info.csv
+         --counter-input
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_counter_collection.csv
+         --agent-input
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_agent_info.csv
+         --counter-input
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_counter_collection.csv
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-txt-pmc2)

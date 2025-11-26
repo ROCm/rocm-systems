@@ -223,7 +223,7 @@ endif()
 
 set(OMPVV_OPENMP_VERSION 5.0)
 set(OMPVV_TDIR "tests/${OMPVV_OPENMP_VERSION}")
-set(OMPVV_NUM_THREADS_HOST ${ROCPROFSYS_THREAD_COUNT})
+set(OMPVV_NUM_THREADS_HOST 128) # Smallest possible value of ROCPROFSYS_THREAD_COUNT. Avoids very long test times
 set(OMPVV_NUM_TEAMS_DEVICE 8) # default used by ompvv
 set(OMPVV_NUM_THREADS_DEVICE 8) # default used by ompvv
 

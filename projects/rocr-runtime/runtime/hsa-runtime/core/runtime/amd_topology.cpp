@@ -289,7 +289,9 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
         core::g_use_interrupt_wait = false;
 
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+        core::Runtime::runtime_singleton_->flag().disable_image(true);
 #if defined(_WIN32)
+        core::Runtime::runtime_singleton_->flag().disable_image(false);
         if (node_prop.Capability2.ui32.AqlEmulationPm4_)
 #endif
         {
@@ -297,7 +299,6 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
           core::Runtime::runtime_singleton_->flag().disable_scratch();
         }
         core::Runtime::runtime_singleton_->flag().set_sdma(false, false);
-        core::Runtime::runtime_singleton_->flag().disable_image(true);
         core::Runtime::runtime_singleton_->flag().disable_xnack();
         core::Runtime::runtime_singleton_->flag().disable_fine_grain_pcie();
         core::Runtime::runtime_singleton_->flag().set_ipc_mode_legacy(false);

@@ -85,6 +85,7 @@ THE SOFTWARE.
 
 // Driver Entry Point API
 #define hipGetDriverEntryPoint __HIP_API_SPT(hipGetDriverEntryPoint)
+#define hipGetProcAddress __HIP_API_SPT(hipGetProcAddress)
 #endif
 
 #ifdef __cplusplus
@@ -197,6 +198,8 @@ hipError_t hipStreamGetCaptureInfo_v2_spt(hipStream_t stream,
 hipError_t hipLaunchHostFunc_spt(hipStream_t stream, hipHostFn_t fn, void* userData);
 hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsigned long long flags,
                                       hipDriverEntryPointQueryResult* status);
+hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                                 hipDriverProcAddressQueryResult* symbolStatus);
 
 
 #ifdef __cplusplus

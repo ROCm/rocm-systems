@@ -108,6 +108,27 @@ The following example attaches the profiler to a process with PID "12345", colle
 
    rocprofv3 --pid 12345 --pmc SQ_WAVES GRBM_COUNT --output-format csv
 
+Reattaching to the same process
+--------------------------------
+
+The dynamic process attachment functionality supports reattachment, which can be used to attach multiple times to the same PID over a process's lifetime. Give the same PID to ``rocprofv3`` to reattach.
+
+There are some restrictions on what options can change when reattaching.  Typically, tracing, PC sampling, ATT, counter collection, and other options that change what data will be collected cannot be changed. ``rocprofv3`` will throw a ``RuntimeError`` if it detects a configuration change that is not supported.
+
+.. class:: details
+
+Full list of options that must not change 
+  - ALL options ending with ``trace``
+  - ALL options starting with ``pc_sampling``
+  - ALL options starting with ``att``
+  - ``pmc``
+  - ``pmc_groups``
+  - ``output_config``
+  - ``extra_counters``
+  - ``kernel_include_regex``
+  - ``kernel_exclude_regex``
+  - ``kernel_iteration_range``
+
 Key considerations
 -------------------
 

@@ -170,15 +170,15 @@ Panel Config:
     Active CUs: Total number of active compute units (CUs) on the accelerator during
       the kernel execution.
     Num CUs: Total number of compute units (CUs) on the accelerator.
-    VGPR: |-
+    VGPR: >-
       The number of architected vector general-purpose registers allocated
       for the kernel, see VALU. Note: this may not exactly match the number of VGPRs
       requested by the compiler due to allocation granularity.
-    SGPR: |-
+    SGPR: >-
       The number of scalar general-purpose registers allocated for the kernel,
       see SALU. Note: this may not exactly match the number of SGPRs requested by
       the compiler due to allocation granularity.
-    LDS Allocation: |-
+    LDS Allocation: >-
       The number of bytes of LDS memory (or, shared memory) allocated for
       this kernel. Note: This may also be larger than what was requested at compile
       time due to both allocation granularity and dynamic per-dispatch LDS allocations.
@@ -266,7 +266,7 @@ Panel Config:
       or data (atomic with return value) was returned to the L2.
     HBM Rd: The total number of L2 requests to Infinity Fabric to read 32B or 64B
       of data from the accelerator's local HBM, per normalization unit.
-    HBM Wr: |-
+    HBM Wr: >-
       The total number of L2 requests to Infinity Fabric to write or atomically
       update 32B or 64B of data in the accelerator's local HBM, per normalization
       unit.

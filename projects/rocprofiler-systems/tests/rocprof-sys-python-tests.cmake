@@ -319,5 +319,12 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-builtin-rules.json"
     )
 
+    list(GET ROCPROFSYS_PYTHON_ROOT_DIRS ${_INDEX} Python3_ROOT_DIR)
+    rocprofiler_systems_python_console_script(
+        "${BINARY_NAME_PREFIX}-python" "rocprofsys"
+        VERSION ${_VERSION}
+        ROOT_DIR "${Python3_ROOT_DIR}"
+    )
+
     math(EXPR _INDEX "${_INDEX} + 1")
 endforeach()

@@ -25,6 +25,7 @@
 import csv
 import json
 import pytest
+import os
 
 
 def pytest_addoption(parser):
@@ -34,6 +35,7 @@ def pytest_addoption(parser):
     )
     parser.addoption("--hsa-input", action="store", help="HSA API trace input")
     parser.addoption("--agent-input", action="store", help="Agent info input")
+    parser.addoption("--skip-if", action="store", help="Skip test if file exists")
 
 
 def get_data(request, field, section_name):
@@ -218,19 +220,27 @@ def get_csv_data(file_path):
 
 @pytest.fixture
 def kernel_input_data(request):
+    if os.path.exists(request.config.getoption("--skip-if")):
+        pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
     return get_data(request, "--kernel-input", "kernel_dispatch")
 
 
 @pytest.fixture
 def memory_copy_input_data(request):
+    if os.path.exists(request.config.getoption("--skip-if")):
+        pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
     return get_data(request, "--memory-copy-input", "memory_copy")
 
 
 @pytest.fixture
 def hsa_input_data(request):
+    if os.path.exists(request.config.getoption("--skip-if")):
+        pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
     return get_data(request, "--hsa-input", "hsa_api")
 
 
 @pytest.fixture
 def agent_info_input_data(request):
+    if os.path.exists(request.config.getoption("--skip-if")):
+        pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
     return get_data(request, "--agent-input", "agent_info")

@@ -1012,8 +1012,8 @@ bool adjustMask(uint32_t *pAdjMask, uint32_t *pMask, mask_config_t maskConfig) {
     int totalBits = maskConfig.numBits;
     bool nonZero = false;
 
-    uint32_t tempInactiveMask[maskConfig.numDwords] = { 0 };
-    uint32_t tempAdjustMask[maskConfig.numDwords] = { 0 };
+    uint32_t *tempInactiveMask = new uint32_t[maskConfig.numDwords]{};
+    uint32_t *tempAdjustMask = new uint32_t[maskConfig.numDwords]{};
 
     /*
      * KFD encodes all the active WGP at the lowest bits in MQD registers.
@@ -1104,6 +1104,9 @@ bool adjustMask(uint32_t *pAdjMask, uint32_t *pMask, mask_config_t maskConfig) {
     printMask("     adjusted: ", pAdjMask, maskConfig.numDwords);
     printf("\n");
 #endif //CUMASK_DEBUG
+
+    delete[] tempInactiveMask;
+    delete[] tempAdjustMask;
 
     return nonZero;
 }

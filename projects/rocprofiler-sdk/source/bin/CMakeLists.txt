@@ -24,11 +24,11 @@ install(
                 WORLD_EXECUTE
     COMPONENT tools)
 
-configure_file(rocprofv3-attach.py
-               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3-attach COPYONLY)
+configure_file(rocprof-attach.py
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-attach COPYONLY)
 
 install(
-    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3-attach
+    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-attach
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
                 WORLD_EXECUTE

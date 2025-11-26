@@ -95,7 +95,7 @@ TEST_CASE("Unit_hipMemAddressFree_Capture") {
 
   size_t reserved_size = ((granularity + buffer_size - 1) / granularity) * granularity;
 
-  hipDeviceptr_t reserved_ptr = nullptr;
+  void* reserved_ptr = nullptr;
   HIP_CHECK(hipMemAddressReserve(&reserved_ptr, reserved_size, 0, nullptr, 0));
 
   hipStream_t stream = nullptr;

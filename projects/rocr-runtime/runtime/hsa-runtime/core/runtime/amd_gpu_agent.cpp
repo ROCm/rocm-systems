@@ -496,6 +496,9 @@ void GpuAgent::InitScratchPool() {
 
   if (!core::Runtime::runtime_singleton_->flag().enable_scratch()) {
     scratch_pool_. ~SmallHeap();
+
+    // Reconstruct the object as default to allow ~GpuAgent to destruct the member variable
+    new (&scratch_pool_) SmallHeap();
     return;
   }
 
@@ -1707,6 +1710,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       }
       return HSA_STATUS_ERROR;
     }
+    case HSA_AMD_AGENT_INFO_PM4_EMULATION:
+      *((bool*)value) = properties_.Capability2.ui32.AqlEmulationPm4_;
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
