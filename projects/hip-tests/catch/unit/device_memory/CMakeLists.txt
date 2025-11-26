@@ -31,20 +31,13 @@ elseif(HIP_PLATFORM MATCHES "amd")
   set(LINKER_LIBS hiprtc::hiprtc)
 endif()
 
-if(HIP_PLATFORM MATCHES "amd")
-  hip_add_exe_to_target(NAME DeviceMemoryTest
+hip_add_exe_to_target(NAME DeviceMemoryTest
                     TEST_SRC ${TEST_SRC}
                     TEST_TARGET_NAME build_tests
                     LINKER_LIBS ${LINKER_LIBS}
                     PROPERTY CXX_STANDARD 17)
-elseif (HIP_PLATFORM MATCHES "nvidia")
-  hip_add_exe_to_target(NAME DeviceMemoryTest
-                    TEST_SRC ${TEST_SRC}
-                    TEST_TARGET_NAME build_tests
-                    LINKER_LIBS ${LINKER_LIBS})
-  set_target_properties(DeviceMemoryTest PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(DeviceMemoryTest cuda)
-endif()
+set_target_properties(DeviceMemoryTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(DeviceMemoryTest ${GPGPU_LINKER_LIBRARIES})
 
 if(UNIX)
   file(GLOB NEGATIVE_TEST_SRC

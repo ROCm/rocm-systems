@@ -6,10 +6,8 @@ set(TEST_SRC
 hip_add_exe_to_target(NAME CompilerTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-if (HIP_PLATFORM MATCHES "nvidia")
-  set_target_properties(CompilerTest PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(CompilerTest cuda)
-endif()
+set_target_properties(CompilerTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(CompilerTest ${GPGPU_LINKER_LIBRARIES})
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
@@ -22,7 +20,7 @@ if(HIP_PLATFORM MATCHES "amd")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-  set(OFFLOAD_ARCH_GENERIC_STR 
+  set(OFFLOAD_ARCH_GENERIC_STR
     --offload-arch=gfx9-generic
     --offload-arch=gfx9-4-generic:sramecc+:xnack-
     --offload-arch=gfx9-4-generic:sramecc-:xnack-
@@ -99,12 +97,6 @@ if(HIP_PLATFORM MATCHES "amd")
   if(BUILD_SHARED_LIBS)
     add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnly)
     add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnlyCompressed)
-  endif()
-  if (HIP_PLATFORM MATCHES "nvidia")
-    set_target_properties(hipSquareGenericTarget PROPERTIES LINKER_LANGUAGE CUDA)
-    target_link_libraries(hipSquareGenericTarget cuda)
-    set_target_properties(hipSquareGenericTargetCompressed PROPERTIES LINKER_LANGUAGE CUDA)
-    target_link_libraries(hipSquareGenericTargetCompressed cuda)
   endif()
 
   # SWDEV-548807 skip building hipSpirvTest

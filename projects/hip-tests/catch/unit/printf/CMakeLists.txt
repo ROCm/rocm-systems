@@ -34,20 +34,13 @@ if(HIP_PLATFORM MATCHES "amd")
   set_source_files_properties(printfNonHost.cc PROPERTIES COMPILE_OPTIONS "-mprintf-kind=buffered")
 endif()
 
-if(HIP_PLATFORM MATCHES "amd")
-  hip_add_exe_to_target(NAME PrintfTest
+hip_add_exe_to_target(NAME PrintfTest
                     TEST_SRC ${TEST_SRC}
                     TEST_TARGET_NAME build_tests
                     LINKER_LIBS ${LINKER_LIBS}
                     PROPERTY CXX_STANDARD 17)
-elseif (HIP_PLATFORM MATCHES "nvidia")
-  hip_add_exe_to_target(NAME PrintfTest
-                    TEST_SRC ${TEST_SRC}
-                    TEST_TARGET_NAME build_tests
-                    LINKER_LIBS ${LINKER_LIBS})
-  set_target_properties(PrintfTest PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(PrintfTest cuda)
-endif()
+set_target_properties(PrintfTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(PrintfTest ${GPGPU_LINKER_LIBRARIES})
 
 if(UNIX)
   file(GLOB NEGATIVE_TEST_SRC
@@ -79,23 +72,11 @@ set_target_properties(printfLength_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUA
 set_target_properties(printfSpecifiers_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 set_target_properties(printfFlagsNonHost_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 set_target_properties(printfSpecifiersNonHost_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(printfFlags_exe hip::host hip::device)
-target_link_libraries(printfLength_exe hip::host hip::device)
-target_link_libraries(printfSpecifiers_exe hip::host hip::device)
-target_link_libraries(printfFlagsNonHost_exe hip::host hip::device)
-target_link_libraries(printfSpecifiersNonHost_exe hip::host hip::device)
-if (HIP_PLATFORM MATCHES "nvidia")
-  set_target_properties(printfFlags_exe PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(printfFlags_exe cuda)
-  set_target_properties(printfLength_exe PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(printfLength_exe cuda)
-  set_target_properties(printfSpecifiers_exe PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(printfSpecifiers_exe cuda)
-  set_target_properties(printfFlagsNonHost_exe PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(printfFlagsNonHost_exe cuda)
-  set_target_properties(printfSpecifiersNonHost_exe PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(printfSpecifiersNonHost_exe cuda)
-endif()
+target_link_libraries(printfFlags_exe ${GPGPU_LINKER_LIBRARIES})
+target_link_libraries(printfLength_exe ${GPGPU_LINKER_LIBRARIES})
+target_link_libraries(printfSpecifiers_exe ${GPGPU_LINKER_LIBRARIES})
+target_link_libraries(printfFlagsNonHost_exe ${GPGPU_LINKER_LIBRARIES})
+target_link_libraries(printfSpecifiersNonHost_exe ${GPGPU_LINKER_LIBRARIES})
 
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
              printfFlags_exe

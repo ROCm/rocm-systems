@@ -104,10 +104,8 @@ endif()
 hip_add_exe_to_target(NAME GraphsTest1
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-if (HIP_PLATFORM MATCHES "nvidia")
-  set_target_properties(GraphsTest1 PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(GraphsTest1 cuda)
-endif()
+set_target_properties(GraphsTest1 PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(GraphsTest1 ${GPGPU_LINKER_LIBRARIES})
 
 set(TEST_SRC
   hipStreamGetCaptureInfo.cc
@@ -197,10 +195,8 @@ hip_add_exe_to_target(NAME GraphsTest2
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-if (HIP_PLATFORM MATCHES "nvidia")
-  set_target_properties(GraphsTest2 PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(GraphsTest2 cuda)
-endif()
+set_target_properties(GraphsTest2 PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(GraphsTest2 ${GPGPU_LINKER_LIBRARIES})
 
 if(HIP_PLATFORM MATCHES "amd")
   add_custom_target(hipMatMul COMMAND ${CMAKE_HIP_COMPILER}
