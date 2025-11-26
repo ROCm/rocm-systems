@@ -265,5 +265,81 @@ discover_llvm_libdir_for_ompt(bool verbose = false)
     return {};
 }
 
+enum update_mode : uint8_t
+{
+    UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
+    UPD_PREPEND = 1 << 0,  // 0x01
+    UPD_APPEND  = 1 << 1,  // 0x02
+    UPD_WEAK    = 1 << 2,  // 0x04
+};
+
+template <typename Tp>
+inline void
+update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
+           update_mode _mode, std::string_view _join_delim,
+           std::unordered_set<std::string_view>&  _updated_envs,
+           const std::unordered_set<std::string>& _original_envs)
+{
+    _updated_envs.emplace(_env_var);
+
+    auto _prepend  = (_mode & UPD_PREPEND) != 0;
+    auto _append   = (_mode & UPD_APPEND) != 0;
+    auto _weak_upd = (_mode & UPD_WEAK) != 0;
+
+    // if both flags are set, prefer append
+    if(_prepend && _append) _prepend = false;
+
+    auto _env_val_str = [&]() -> std::string {
+        if constexpr(std::is_same_v<std::decay_t<Tp>, std::string> ||
+                     std::is_same_v<std::decay_t<Tp>, const char*>)
+            return std::string{ _env_val };
+        else if constexpr(std::is_same_v<std::decay_t<Tp>, bool>)
+            return _env_val ? "true" : "false";
+        else
+            return std::to_string(_env_val);
+    }();
+
+    auto _key = join("", _env_var, "=");
+    for(auto& itr : _environ)
+    {
+        if(!itr) continue;
+        if(std::string_view{ itr }.find(_key) == 0)
+        {
+            if(_weak_upd)
+            {
+                // if the value has changed, do not update but allow overriding the value
+                // inherited from the initial env
+                if(_original_envs.find(std::string{ itr }) == _original_envs.end())
+                    return;
+            }
+
+            if(_prepend || _append)
+            {
+                if(std::string_view{ itr }.find(join("", _env_val_str)) ==
+                   std::string_view::npos)
+                {
+                    auto _val = std::string{ itr }.substr(_key.length());
+                    free(itr);
+                    if(_prepend)
+                        itr = strdup(
+                            join('=', _env_var, join(_join_delim, _env_val_str, _val))
+                                .c_str());
+                    else
+                        itr = strdup(
+                            join('=', _env_var, join(_join_delim, _val, _env_val_str))
+                                .c_str());
+                }
+            }
+            else
+            {
+                free(itr);
+                itr = strdup(join('=', _env_var, _env_val_str).c_str());
+            }
+            return;
+        }
+    }
+    _environ.emplace_back(strdup(join('=', _env_var, _env_val_str).c_str()));
+}
+
 }  // namespace common
 }  // namespace rocprofsys
