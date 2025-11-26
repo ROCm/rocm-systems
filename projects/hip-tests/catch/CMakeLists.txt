@@ -4,14 +4,16 @@ if (HIP_PLATFORM MATCHES "nvidia")
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES 75)
   endif()
-  set(GPGPU_LANGUAGE "CUDA")
-  set(CMAKE_HIP_COMPILER /usr/local/cuda-12.9/bin/nvcc)
+  find_package(CUDAToolkit REQUIRED)
+  set(GPGPU_LANGUAGE CUDA)
+  set(GPGPU_LINKER_LIBRARIES hip::host hip::device cuda)
+  set(CMAKE_HIP_COMPILER ${CUDAToolkit_NVCC_EXECUTABLE})
 elseif (HIP_PLATFORM MATCHES "amd")
-  set(GPGPU_LANGUAGE "HIP")
+  set(GPGPU_LANGUAGE HIP)
+  set(GPGPU_LINKER_LIBRARIES hip::host hip::device)
 endif()
 enable_language(${GPGPU_LANGUAGE})
-message(STATUS "USING GPGPU_LANGUAGE ${GPGPU_LANGUAGE}")
-project(hiptests LANGUAGES C CXX ${GPGPU_LANGUAGE})                                         
+project(hiptests LANGUAGES C CXX ${GPGPU_LANGUAGE})
 
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
@@ -36,23 +38,23 @@ find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
 if (HIP_PLATFORM MATCHES "nvidia" )
-set(CMAKE_HIP_LINK_EXECUTABLE
+  set(CMAKE_HIP_LINK_EXECUTABLE
   "<CMAKE_HIP_HOST_LINK_LAUNCHER> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>${__IMPLICIT_LINKS}")
 endif()
 # hip root dir is 3 levels down the hip-config.cmake file path
 set(HIP_PATH ${hip_DIR}/../../../)
 if(NOT DEFINED ROCM_PATH)
-    set(ROCM_PATH "/opt/rocm")
-    if(NOT EXISTS "${ROCM_PATH}")
-        set(ROCM_PATH ${HIP_PATH})
-    endif()
+  set(ROCM_PATH "/opt/rocm")
+  if(NOT EXISTS "${ROCM_PATH}")
+    set(ROCM_PATH ${HIP_PATH})
+  endif()
 endif()
 if(UNIX)
-    find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
-    find_program(GCC_EXEC gcc)
-    find_program(GXX_EXEC g++)
+  find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
+  find_program(GCC_EXEC gcc)
+  find_program(GXX_EXEC g++)
 else() # Win32
-    find_program(LLVM_RC_EXEC NAMES llvm-rc llvm-rc.exe
+  find_program(LLVM_RC_EXEC NAMES llvm-rc llvm-rc.exe
                  PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
 endif()
 find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
@@ -63,19 +65,19 @@ message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
 set(HIP_PATH_OPT "--hip-path=${HIP_PATH}")
 
 if(TEST_CLOCK_CYCLE)
-    add_definitions(-DTEST_CLOCK_CYCLE)
+  add_definitions(-DTEST_CLOCK_CYCLE)
 endif()
 
 # flag to generate standalone exe per src file.
 message(STATUS "STANDALONE_TESTS : ${STANDALONE_TESTS}")
 
 if(NOT WIN32)
-    set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
+  set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
 endif()
 
 # Check if platform is set
 if(NOT HIP_PLATFORM STREQUAL "amd" AND NOT HIP_PLATFORM STREQUAL "nvidia")
-    message(FATAL_ERROR "Unexpected HIP_PLATFORM: " ${HIP_PLATFORM})
+  message(FATAL_ERROR "Unexpected HIP_PLATFORM: " ${HIP_PLATFORM})
 endif()
 
 execute_process(COMMAND ${HIPCONFIG_EXEC} --version
@@ -100,10 +102,10 @@ endif() # end win32
 
 # Address sanitizer options
 if(ENABLE_ADDRESS_SANITIZER)
-    message(STATUS "Building catch tests with Address Sanitizer options")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan")
+  message(STATUS "Building catch tests with Address Sanitizer options")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan")
 endif()
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
@@ -115,30 +117,30 @@ list(GET VERSION_LIST 0 HIP_VERSION_PATCH)
 list(GET VERSION_LIST 1 HIP_VERSION_GITHASH)
 
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-   set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
+  set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
 else()
-   set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
+  set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
 endif()
 
 find_package(Catch2 3.8.1 QUIET)
 if(Catch2_FOUND)
-    message(STATUS "Catch2 v3.8.1 found: ${Catch2_DIR}")
-    # for packaging
-    set(CATCH_ADD_TESTS_SCRIPT ${Catch2_DIR}/CatchAddTests.cmake)
-    file(GLOB CATCH_LIBS "${Catch2_DIR}/../../*Catch2*")
+  message(STATUS "Catch2 v3.8.1 found: ${Catch2_DIR}")
+  # for packaging
+  set(CATCH_ADD_TESTS_SCRIPT ${Catch2_DIR}/CatchAddTests.cmake)
+  file(GLOB CATCH_LIBS "${Catch2_DIR}/../../*Catch2*")
 else()
-    # Setup catch2 manually
-    include(FetchContent)
-    FetchContent_Declare(
+  # Setup catch2 manually
+  include(FetchContent)
+  FetchContent_Declare(
         Catch2
         DOWNLOAD_EXTRACT_TIMESTAMP OFF
         URL "https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/Catch2-3.8.1.tar.gz"
         URL_HASH SHA256=18b3f70ac80fccc340d8c6ff0f339b2ae64944782f8d2fca2bd705cf47cadb79
     )
-    FetchContent_MakeAvailable(Catch2)
-    # for packaging
-    set(CATCH_ADD_TESTS_SCRIPT ${Catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
-    set(CATCH_LIBS $<TARGET_FILE:Catch2>)
+  FetchContent_MakeAvailable(Catch2)
+  # for packaging
+  set(CATCH_ADD_TESTS_SCRIPT ${Catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
+  set(CATCH_LIBS $<TARGET_FILE:Catch2>)
 endif()
 
 include(cmake/hip-tests.cmake)
@@ -152,7 +154,7 @@ include_directories(
 
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 if (RTC_TESTING)
-    add_definitions(-DRTC_TESTING=ON)
+  add_definitions(-DRTC_TESTING=ON)
 endif()
 add_definitions(-DKERNELS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/kernels/")
 
@@ -161,7 +163,7 @@ set(HIP_TEST_CONFIG_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/co
 file(MAKE_DIRECTORY ${HIP_TEST_CONFIG_BINARY_DIR})
 file(GLOB JSON_FILES "./hipTestMain/config/*.json")
 foreach(json IN LISTS JSON_FILES)
-    file(COPY ${json}
+  file(COPY ${json}
          DESTINATION ${HIP_TEST_CONFIG_BINARY_DIR})
 endforeach()
 
@@ -181,15 +183,15 @@ if (WIN32)
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
-    if(WIN32)
-        set(win_disable_warnings -Wno-ignored-attributes -Wno-microsoft-cast)
-    endif()
-    add_compile_options(${HIP_PATH_OPT} -std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings}) # -Werror)
+  if(WIN32)
+    set(win_disable_warnings -Wno-ignored-attributes -Wno-microsoft-cast)
+  endif()
+  add_compile_options(${HIP_PATH_OPT} -std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings}) # -Werror)
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.21.0)
-    set(CMAKE_HIP_ARCHITECTURES OFF)
+  set(CMAKE_HIP_ARCHITECTURES OFF)
 endif()
 message(STATUS "CMAKE HIP ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 
@@ -203,31 +205,31 @@ message(STATUS "CMAKE HIP ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 # OFFLOAD_ARCH_STR
 # rocm_agent_enumerator
 if(DEFINED OFFLOAD_ARCH_STR)
-    string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
+  string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
 elseif(DEFINED GPU_TARGETS)
-    foreach(_hip_gpu_arch ${GPU_TARGETS})
-        set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
-    endforeach()
+  foreach(_hip_gpu_arch ${GPU_TARGETS})
+    set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
+  endforeach()
 elseif(NOT DEFINED OFFLOAD_ARCH_STR
    AND EXISTS "${ROCM_AGENT_ENUMERATOR_EXEC}"
    AND HIP_PLATFORM STREQUAL "amd" AND UNIX)
-    execute_process(COMMAND "${ROCM_PATH}/bin/rocm_agent_enumerator"
+  execute_process(COMMAND "${ROCM_PATH}/bin/rocm_agent_enumerator"
          OUTPUT_VARIABLE HIP_GPU_ARCH
          RESULT_VARIABLE ROCM_AGENT_ENUM_RESULT
          OUTPUT_STRIP_TRAILING_WHITESPACE)
-    # Trim out gfx000
-    string(REPLACE "gfx000\n" "" HIP_GPU_ARCH ${HIP_GPU_ARCH})
-    if (NOT HIP_GPU_ARCH STREQUAL "")
-        string(REGEX REPLACE "\n" ";" HIP_GPU_ARCH_LIST "${HIP_GPU_ARCH}")
-        list(REMOVE_DUPLICATES  HIP_GPU_ARCH_LIST)
-        list(LENGTH HIP_GPU_ARCH_LIST HIP_GPU_ARCH_LEN)
-        set(OFFLOAD_ARCH_STR "")
-        foreach(_hip_gpu_arch ${HIP_GPU_ARCH_LIST})
-            set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
-        endforeach()
-    else()
-        message(STATUS "ROCm Agent Enumerator found no valid architectures")
-    endif()
+  # Trim out gfx000
+  string(REPLACE "gfx000\n" "" HIP_GPU_ARCH ${HIP_GPU_ARCH})
+  if (NOT HIP_GPU_ARCH STREQUAL "")
+    string(REGEX REPLACE "\n" ";" HIP_GPU_ARCH_LIST "${HIP_GPU_ARCH}")
+    list(REMOVE_DUPLICATES  HIP_GPU_ARCH_LIST)
+    list(LENGTH HIP_GPU_ARCH_LIST HIP_GPU_ARCH_LEN)
+    set(OFFLOAD_ARCH_STR "")
+    foreach(_hip_gpu_arch ${HIP_GPU_ARCH_LIST})
+      set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
+    endforeach()
+  else()
+    message(STATUS "ROCm Agent Enumerator found no valid architectures")
+  endif()
 endif()
 
 # Trim any trailing spaces, this trips up the cxx function call
@@ -235,7 +237,7 @@ string(STRIP "${OFFLOAD_ARCH_STR}" OFFLOAD_ARCH_STR)
 
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
 if(DEFINED OFFLOAD_ARCH_STR)
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR}")
+  set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR}")
 endif()
 
 # get hip-tests commit short hash
@@ -253,34 +255,34 @@ separate_arguments(OFFLOAD_ARCH_LIST)
 list(REMOVE_DUPLICATES  OFFLOAD_ARCH_LIST)
 set(hip_gpu_arch_list "")
 foreach(__offload_arch ${OFFLOAD_ARCH_LIST})
-    string(REPLACE "--offload-arch=" "" targetid ${__offload_arch})
-    string(REPLACE ":" ";" target_id_list ${targetid})
-    list(GET target_id_list 0 arch)
-    string(APPEND hip_gpu_arch_list "${arch};")
-    list(REMOVE_DUPLICATES  hip_gpu_arch_list)
+  string(REPLACE "--offload-arch=" "" targetid ${__offload_arch})
+  string(REPLACE ":" ";" target_id_list ${targetid})
+  list(GET target_id_list 0 arch)
+  string(APPEND hip_gpu_arch_list "${arch};")
+  list(REMOVE_DUPLICATES  hip_gpu_arch_list)
 endforeach()
 
 if(WIN32)
-    set(configToUse "config_amd_windows")
-    set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
-    set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
+  set(configToUse "config_amd_windows")
+  set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
+  set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
 
-    set(cmd "${CLANG_CPP_EXEC} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
-    message(${cmd})
-    execute_process(COMMAND cmd.exe /C ${cmd}
+  set(cmd "${CLANG_CPP_EXEC} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
+  message(${cmd})
+  execute_process(COMMAND cmd.exe /C ${cmd}
     RESULT_VARIABLE json_result)
-    message(STATUS "${configToUse}.json file generation result: ${json_result}")
+  message(STATUS "${configToUse}.json file generation result: ${json_result}")
 else()
-    set(configToUse "config_amd_linux")
-    foreach(arch ${hip_gpu_arch_list})
-        set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
-        set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
-        set(cmd "${CLANG_CPP_EXEC} -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
-        message(${cmd})
-        execute_process(COMMAND bash -c ${cmd}
+  set(configToUse "config_amd_linux")
+  foreach(arch ${hip_gpu_arch_list})
+    set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
+    set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
+    set(cmd "${CLANG_CPP_EXEC} -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
+    message(${cmd})
+    execute_process(COMMAND bash -c ${cmd}
         RESULT_VARIABLE json_result)
-        message(STATUS "${configToUse}_${arch}.json file generation result: ${json_result}")
-    endforeach()
+    message(STATUS "${configToUse}_${arch}.json file generation result: ${json_result}")
+  endforeach()
 endif()
 # prints the catch info to a file
 string(TIMESTAMP _timestamp UTC)
@@ -314,7 +316,7 @@ file(COPY ./include/hip_test_context.hh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/
 
 # Enable device lambda on nvidia platforms
 if(HIP_PLATFORM STREQUAL "nvidia")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --extended-lambda")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --extended-lambda")
 endif()
 
 # Disable CXX extensions (gnu++11 etc)
@@ -324,25 +326,25 @@ add_custom_target(build_tests ALL)
 
 # Tests folder
 if(BUILD_UNIT_TESTS)
-    add_subdirectory(unit ${CATCH_BUILD_DIR}/unit)
-    add_subdirectory(ABM ${CATCH_BUILD_DIR}/ABM)
-    add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
-    add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
-    add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
-    if(UNIX)
-      add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
-    endif()
+  add_subdirectory(unit ${CATCH_BUILD_DIR}/unit)
+  add_subdirectory(ABM ${CATCH_BUILD_DIR}/ABM)
+  add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
+  add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
+  add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
+  if(UNIX)
+    add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
+  endif()
 endif()
 if(BUILD_PERF_TESTS)
-    add_subdirectory(perftests ${CATCH_BUILD_DIR}/perftests)
-    add_subdirectory(performance ${CATCH_BUILD_DIR}/performance)
+  add_subdirectory(perftests ${CATCH_BUILD_DIR}/perftests)
+  add_subdirectory(performance ${CATCH_BUILD_DIR}/performance)
 endif()
 if(BUILD_STRESS_TESTS)
-    add_subdirectory(stress ${CATCH_BUILD_DIR}/stress)
+  add_subdirectory(stress ${CATCH_BUILD_DIR}/stress)
 endif()
 
 if(GENERATE_COVERATE)
-    add_custom_target(gen_coverage
+  add_custom_target(gen_coverage
                   COMMAND ${CMAKE_COMMAND} -B build/
                   COMMAND ${CMAKE_COMMAND} --build build/
                   COMMAND ./build/generateHipAPICoverage ${HIP_PATH}/include
@@ -357,16 +359,16 @@ add_subdirectory(packaging)
 # check if doxygen is installed
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
-    # Configure Doxyfile with proper paths
-    set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/DoxyfileTests)
-    set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/DoxyfileTests.out)
-    configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+  # Configure Doxyfile with proper paths
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/DoxyfileTests)
+  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/DoxyfileTests.out)
+  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
 
-    add_custom_target(build_docs
+  add_custom_target(build_docs
         COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
         COMMENT "Generating test plan documentation with Doxygen")
 else()
-    message(STATUS "Doxygen was not found. Building test plan documentation will not be available")
+  message(STATUS "Doxygen was not found. Building test plan documentation will not be available")
 endif()
 
 
