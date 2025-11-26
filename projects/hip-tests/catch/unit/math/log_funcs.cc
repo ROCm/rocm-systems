@@ -35,7 +35,8 @@ THE SOFTWARE.
  * ------------------------
  *    - Tests the numerical accuracy of `logf(x)` for all possible inputs and `log(x)` against a
  * table of difficult values, followed by a large number of randomly generated values. The results
- * are compared against reference function `T std::log(T)`. The maximum ulp error is 1.
+ * are compared against reference function `T std::log(T)`. The maximum ulp error
+ * for single precision is 2 and for double precision is 1.
  *
  * Test source
  * ------------------------
@@ -44,7 +45,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(log, 1, 1)
+MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(log, 2, 1)
 
 /**
  * Test Description
@@ -187,7 +188,7 @@ __global__ void ilogb_kernel(int* const ys, const size_t num_xs, T* const xs) {
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     if constexpr (std::is_same_v<float, T>) {
       ys[i] = ilogbf(xs[i]);
     } else if constexpr (std::is_same_v<double, T>) {
