@@ -51,6 +51,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     DFCSTATE:
         DFCSTATECTRL_STATUS: 0
  ```
+ 
 - **Added the following C API's to amdsmi_interface.py**.  
   - amdsmi_get_cpu_handle()
   - amdsmi_get_esmi_err_msg()
