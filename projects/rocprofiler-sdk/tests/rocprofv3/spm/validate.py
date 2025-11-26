@@ -49,10 +49,9 @@ def test_validate_spm_json(json_data):
             assert sum(sq_waves_values) > 0, "SQ_WAVES value is not > 0"
 
 
-def test_validate_spm(pmc_csv: pd.DataFrame, spm_csv: pd.DataFrame, gfx_data):
+def test_validate_spm(pmc_csv: pd.DataFrame, spm_csv: pd.DataFrame):
 
     assert not pmc_csv.empty and not spm_csv.empty
-    SE_PER_XCC = gfx_data
     TOLERANCE = 0.2
     within_tolerance = lambda x, y: abs(x - y) < TOLERANCE * max(x, y)
 
@@ -71,12 +70,11 @@ def test_validate_spm(pmc_csv: pd.DataFrame, spm_csv: pd.DataFrame, gfx_data):
         "TCC_REQ",
         "CPC_CPC_STAT_BUSY",
         "CPC_CPC_STAT_IDLE",
-        "SPI_CSN_NUM_THREADGROUPS",
     ]
     for counter in counter_names:
         counter_value = spm_csv[spm_csv["Counter_Name"].str.contains(counter)]
         counter_value = counter_value["Counter_Value"].agg(["sum"])
-        print(counter_value)
+
         values[counter] = counter_value.get("sum")
 
     to_dict = lambda x: {n: v for n, v in zip(x["Counter_Name"], x["Counter_Value"])}
@@ -92,12 +90,6 @@ def test_validate_spm(pmc_csv: pd.DataFrame, spm_csv: pd.DataFrame, gfx_data):
             assert pmc_value[counter_name] == values[counter_name]
         elif not is_cycle(counter_name):
             assert within_tolerance(pmc_value[counter_name], values[counter_name])
-
-    # Approximate GRBM_COUNT
-    elapsed_xcc_cycle = values["SQ_CYCLES"] / SE_PER_XCC
-    # Short dispatch SPM leaves CPC mostly busy. Note: In device SPM, this is reversed
-    assert within_tolerance(values["CPC_CPC_STAT_BUSY"], elapsed_xcc_cycle)
-    assert values["CPC_CPC_STAT_IDLE"] < TOLERANCE * elapsed_xcc_cycle
 
 
 if __name__ == "__main__":

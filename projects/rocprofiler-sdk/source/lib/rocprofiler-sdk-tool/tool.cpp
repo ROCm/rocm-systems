@@ -1599,7 +1599,7 @@ get_spm_config(rocprofiler_agent_id_t agent_id)
     {
         for(auto desired_counter : rocprofiler::tool::get_config().spm_counters)
         {
-            if(std::string_view{desired_counter} == std::string_view{citr.name})
+            if(std::string_view{desired_counter} == std::string_view{citr.name} && citr.spm_support)
                 expected_counters.emplace_back(citr.id);
         }
     }

@@ -292,8 +292,9 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
     };
 
     auto spm_info = [&](auto& out_struct) {
-        const auto* metric_ptr = common::get_val(id_map, counter_id.handle);
-        out_struct.spm_support = metric_ptr->spm();
+        if(const auto* metric_ptr = common::get_val(id_map, static_cast<uint64_t>(base_metric_id)))
+            out_struct.spm_support = metric_ptr->spm();
+        return false;
     };
     switch(version)
     {
