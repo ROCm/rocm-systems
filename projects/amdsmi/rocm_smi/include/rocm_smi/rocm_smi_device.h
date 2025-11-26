@@ -187,6 +187,11 @@ enum DevInfoTypes {
    * Possible xcp config resources end
    */
 
+  // PTL
+  kDevPtlSupported,
+  kDevPtlStatus,
+  kDevPtlFormat,
+
   // The information read from pci core sysfs
   kDevPCieTypeStart = 1000,
   kDevPCieVendorID = kDevPCieTypeStart,
