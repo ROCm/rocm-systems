@@ -64,6 +64,7 @@ ctest
 
 For manual testing, you can find the executable at `install/bin/rocprof-compute`
 
+
 ## Standalone binary
 
 To create a standalone binary, run the following commands:
