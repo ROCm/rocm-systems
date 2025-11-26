@@ -59,37 +59,41 @@ add_custom_target(get_function_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/ge
 if (NOT WIN32)
   if (HIP_PLATFORM MATCHES "amd")
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
-        COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
-        -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
-       -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-        -o launch_kernel_module.code
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
+                     COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                     -o launch_kernel_module.code
+                     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
+    #target_link_libraries(launch_kernel_module.code hip::host hip::device)
+    add_custom_target(launch_kernel_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
 
     add_custom_target(coopKernel.code
-       COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
-       -x hip ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
-       -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/coopKernel.code
-       -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-       -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/coopKernel.code
+                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+    #target_link_libraries(coopKernel.code hip::host hip::device)
   else()
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
-        COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
-        -x cu ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
-       -I${HIP_INCLUDE_DIR}
-        -o launch_kernel_module.code
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
+                     COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                     -x cu ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                     -I${HIP_INCLUDE_DIR}
+                     -o launch_kernel_module.code
+                     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
+    #target_link_libraries(launch_kernel_module.code hip::host hip::device)
+    add_custom_target(launch_kernel_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
 
     add_custom_target(coopKernel.code
-       COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
-       -x cu ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
-       -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/coopKernel.code
-       -I${HIP_INCLUDE_DIR}
-       -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+                    COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                    -x cu ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/coopKernel.code
+                    -I${HIP_INCLUDE_DIR}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   endif()
-  add_custom_target(launch_kernel_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
-   ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
-   ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
+  ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
+  ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
 endif()
 
 
@@ -397,11 +401,8 @@ endif()
 add_executable(hipGetFuncBySymbol_exe EXCLUDE_FROM_ALL hipGetFuncBySymbol_exe.cc)
 set_source_files_properties(hipGetFuncBySymbol_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 set_target_properties(hipGetFuncBySymbol_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-if (HIP_PLATFORM MATCHES "nvidia")
-  target_link_libraries(hipGetFuncBySymbol_exe cuda)
-endif()
+target_link_libraries(hipGetFuncBySymbol_exe ${GPGPU_LINKER_LIBRARIES})
 add_dependencies(build_tests hipGetFuncBySymbol_exe)
-target_link_libraries(hipGetFuncBySymbol_exe hip::host hip::device)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetFuncBySymbol_exe)
 
 # Common Tests - Test independent of all platforms
@@ -425,10 +426,8 @@ endif()
 hip_add_exe_to_target(NAME module
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-if (HIP_PLATFORM MATCHES "nvidia")
-  set_target_properties(module PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-  target_link_libraries(module cuda)
-endif()
+set_target_properties(module PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(module ${GPGPU_LINKER_LIBRARIES})
 
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_target(managed_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
@@ -520,11 +519,8 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
 add_executable(testhipModuleLoadUnloadFunc_exe EXCLUDE_FROM_ALL testhipModuleLoadUnloadFunc_exe.cc)
 set_source_files_properties(testhipModuleLoadUnloadFunc_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 set_target_properties(testhipModuleLoadUnloadFunc_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-if (HIP_PLATFORM MATCHES "nvidia")
-  target_link_libraries(testhipModuleLoadUnloadFunc_exe cuda)
-endif()
+target_link_libraries(testhipModuleLoadUnloadFunc_exe ${GPGPU_LINKER_LIBRARIES})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS testhipModuleLoadUnloadFunc_exe)
-target_link_libraries(testhipModuleLoadUnloadFunc_exe hip::host hip::device)
 
 add_dependencies(module managed_kernel.code vcpy_kernel.code matmul.code kernel_composite_test.code
 testhipModuleLoadUnloadFunc_exe)

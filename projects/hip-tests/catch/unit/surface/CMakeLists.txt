@@ -31,7 +31,7 @@ set(TEST_SRC
 )
 
 if(HIP_PLATFORM MATCHES "nvidia") # Disabled on AMD due to defect EXSWHTEC-377
-set(TEST_SRC
+  set(TEST_SRC
     ${TEST_SRC}
     surfCubemapLayered.cc)
 endif()
@@ -39,7 +39,5 @@ endif()
 hip_add_exe_to_target(NAME SurfaceTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-if (HIP_PLATFORM MATCHES "nvidia")
-	set_target_properties(SurfaceTest PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(SurfaceTest cuda)
-endif()
+set_target_properties(SurfaceTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(SurfaceTest ${GPGPU_LINKER_LIBRARIES})

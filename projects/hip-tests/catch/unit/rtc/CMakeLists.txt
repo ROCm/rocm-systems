@@ -42,7 +42,7 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_HEADER_FILES ${INSTALL_HEADER_FILE
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/saxpy.h)
 
 if(UNIX)
-   set(AMD_TEST_SRC ${AMD_TEST_SRC}
+  set(AMD_TEST_SRC ${AMD_TEST_SRC}
        RtcFunctions.cpp
        RtcUtility.cpp
        hiprtcComplrOptnTesting.cc)
@@ -53,8 +53,8 @@ if(HIP_PLATFORM MATCHES "nvidia")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS nvrtc)
-                    set_target_properties(RTC PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-                    target_link_libraries(RTC cuda)
+  set_target_properties(RTC PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(RTC ${GPGPU_LINKER_LIBRARIES})
 elseif(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
   hip_add_exe_to_target(NAME RTC
@@ -63,16 +63,10 @@ elseif(HIP_PLATFORM MATCHES "amd")
                       LINKER_LIBS hiprtc::hiprtc)
 endif()
 
-if (HIP_PLATFORM MATCHES "nvidia")
-  set_source_files_properties(ChkPtrdiff_t_Exe.cc PROPERTIES LANGUAGE CUDA)
-  add_executable(ChkPtrdiff_t_Exe EXCLUDE_FROM_ALL ChkPtrdiff_t_Exe.cc)
-  set_target_properties(ChkPtrdiff_t_Exe PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(ChkPtrdiff_t_Exe cuda)
-elseif( HIP_PLATFORM MATCHES "amd")
-  set_source_files_properties(ChkPtrdiff_t_Exe.cc PROPERTIES LANGUAGE HIP)
-  add_executable(ChkPtrdiff_t_Exe EXCLUDE_FROM_ALL ChkPtrdiff_t_Exe.cc)
-  set_target_properties(ChkPtrdiff_t_Exe PROPERTIES LINKER_LANGUAGE HIP)
-endif()
+set_source_files_properties(ChkPtrdiff_t_Exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+add_executable(ChkPtrdiff_t_Exe EXCLUDE_FROM_ALL ChkPtrdiff_t_Exe.cc)
+set_target_properties(ChkPtrdiff_t_Exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(ChkPtrdiff_t_Exe ${GPGPU_LINKER_LIBRARIES})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ChkPtrdiff_t_Exe)
 
 if(HIP_PLATFORM MATCHES "nvidia")

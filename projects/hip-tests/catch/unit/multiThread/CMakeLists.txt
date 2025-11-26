@@ -9,7 +9,5 @@ set(TEST_SRC
 hip_add_exe_to_target(NAME MultiThreadTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-if (HIP_PLATFORM MATCHES "nvidia")
-	set_target_properties(MultiThreadTest PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(MultiThreadTest cuda)
-endif()
+set_target_properties(MultiThreadTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(MultiThreadTest ${GPGPU_LINKER_LIBRARIES})
