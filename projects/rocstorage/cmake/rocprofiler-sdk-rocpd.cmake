@@ -37,7 +37,10 @@ function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES SCHEMA_DIR SCHEMA_BINARY_DIR)
 
     foreach(SCHEMA_FILE ${SCHEMA_FILES})
         if(NOT EXISTS "${SCHEMA_DIR}/${SCHEMA_FILE}")
-            message(FATAL_ERROR "Schema file ${SCHEMA_FILE} not found in ${SCHEMA_DIR}")
+            message(
+                FATAL_ERROR
+                "Schema file ${SCHEMA_FILE} not found in ${SCHEMA_DIR}"
+            )
         endif()
     endforeach()
 
@@ -81,7 +84,9 @@ if(rocprofiler-sdk-rocpd_FOUND)
     set(ROCPD_HAS_SQL_H FALSE)
 
     if(rocprofiler-sdk-rocpd_INCLUDE_DIR)
-        set(_INCLUDE_PATH "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd")
+        set(_INCLUDE_PATH
+            "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd"
+        )
         message(STATUS "${_INCLUDE_PATH}/sql.h")
         if(EXISTS "${_INCLUDE_PATH}/sql.h")
             set(ROCPD_HAS_SQL_H TRUE)

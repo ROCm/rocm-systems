@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -20,34 +20,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
-
 #include <rocstorage/reader.hpp>
-#include <rocstorage/writer.hpp>
 
-#include <memory>
-#include <string>
+#include "data_storage/database.hpp"
 
-namespace rocm
-{
+#include <stdexcept>
 
-class storage
-{
-public:
-    explicit storage(std::string database_path, std::string uuid);
-    virtual ~storage();
+namespace rocstorage {
 
-    storage(const storage&)            = delete;
-    storage(storage&&)                 = delete;
-    storage& operator=(const storage&) = delete;
-    storage& operator=(storage&&)      = delete;
+struct reader::impl {
+  explicit impl(std::shared_ptr<data_storage::database> database,
+                std::string uuid)
+      : m_database(std::move(database)), m_uuid(std::move(uuid)) {
+    if (!m_database) {
+      throw std::invalid_argument(
+          "Provided pointer to a non-existing database!");
+    }
+  }
 
-    std::shared_ptr<rocstorage::writer> get_writer() const;
-    std::shared_ptr<rocstorage::reader> get_reader() const;
-
-private:
-    struct impl;
-    std::unique_ptr<impl> m_impl;
+  std::shared_ptr<data_storage::database> m_database;
+  std::string m_uuid;
 };
 
-}  // namespace rocm
+reader::reader(std::shared_ptr<data_storage::database> database,
+               std::string uuid)
+    : m_impl(std::make_unique<impl>(std::move(database), std::move(uuid))) {}
+
+reader::~reader() = default;
+
+} // namespace rocstorage

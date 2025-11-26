@@ -56,7 +56,10 @@ else()
 
     FetchContent_GetProperties(sqlite3_source)
     if(NOT sqlite3_source_POPULATED)
-        message(STATUS "[rocstorage] Fetching SQLite3 version ${SQLITE3_VERSION}...")
+        message(
+            STATUS
+            "[rocstorage] Fetching SQLite3 version ${SQLITE3_VERSION}..."
+        )
         FetchContent_Populate(sqlite3_source)
     endif()
 
@@ -68,9 +71,10 @@ else()
         PREFIX ${PROJECT_BINARY_DIR}/external/sqlite/build
         BUILD_IN_SOURCE 0
         CONFIGURE_COMMAND
-            ${sqlite3_source_SOURCE_DIR}/configure --prefix=${SQLITE3_INSTALL_DIR}
-            --libdir=${SQLITE3_INSTALL_DIR}/lib --disable-shared --enable-static
-            --with-tempstore=yes --enable-all --disable-tcl CFLAGS=-O3\ -g1\ -fPIC
+            ${sqlite3_source_SOURCE_DIR}/configure
+            --prefix=${SQLITE3_INSTALL_DIR} --libdir=${SQLITE3_INSTALL_DIR}/lib
+            --disable-shared --enable-static --with-tempstore=yes --enable-all
+            --disable-tcl CFLAGS=-O3\ -g1\ -fPIC
         BUILD_COMMAND ${MAKE_COMMAND} -j${CMAKE_BUILD_PARALLEL_LEVEL}
         INSTALL_COMMAND ${MAKE_COMMAND} install
         BUILD_BYPRODUCTS ${SQLITE3_LIB_FILE}
@@ -101,5 +105,8 @@ else()
         INTERFACE $<BUILD_INTERFACE:${SQLITE3_INCLUDE_DIR}>
     )
 
-    message(STATUS "[rocstorage] SQLite3 will be installed to: ${SQLITE3_INSTALL_DIR}")
+    message(
+        STATUS
+        "[rocstorage] SQLite3 will be installed to: ${SQLITE3_INSTALL_DIR}"
+    )
 endif()

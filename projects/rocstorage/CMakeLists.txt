@@ -53,7 +53,12 @@ set(rocstorage_public_headers
 )
 
 foreach(HEADER_FILE ${rocstorage_public_headers})
-    file(RELATIVE_PATH HEADER_REL ${CMAKE_CURRENT_SOURCE_DIR}/include ${HEADER_FILE})
+    file(
+        RELATIVE_PATH
+        HEADER_REL
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${HEADER_FILE}
+    )
     configure_file(
         ${HEADER_FILE}
         ${CMAKE_BINARY_DIR}/include/rocstorage/${HEADER_REL}
@@ -92,18 +97,23 @@ include(rocm)
 include(rocprofiler-sdk-rocpd)
 
 if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    target_link_libraries(rocstorage PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd)
+    target_link_libraries(
+        rocstorage
+        PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
+    )
 
     target_compile_definitions(
         rocstorage
-        PRIVATE $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
+        PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
     )
 else()
     target_include_directories(rocstorage PRIVATE ${SQL_SCHEMA_BINARY_DIR})
 
     target_compile_definitions(
         rocstorage
-        PRIVATE $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
+        PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
     )
 endif()
 

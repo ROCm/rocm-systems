@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -22,34 +22,30 @@
 
 #pragma once
 
-#include "insert_query_builders.hpp"
+#include <rocstorage/reader.hpp>
+#include <rocstorage/writer.hpp>
 
-namespace rocstorage
-{
-namespace data_storage
-{
-namespace queries
-{
+#include <memory>
+#include <string>
 
-struct table_insert_query
-{
-    table_insert_query()
-    : _query_columns_builder{ _ss }
-    {}
+namespace rocm {
 
-    inline query_builders::query_columns_builder& set_table_name(
-        const std::string& tableName)
-    {
-        _ss.str("");
-        _ss << "INSERT INTO " << tableName << " ";
-        return _query_columns_builder;
-    }
+class storage {
+public:
+  explicit storage(std::string database_path, std::string uuid);
+  virtual ~storage();
+
+  storage(const storage &) = delete;
+  storage(storage &&) = delete;
+  storage &operator=(const storage &) = delete;
+  storage &operator=(storage &&) = delete;
+
+  std::shared_ptr<rocstorage::writer> get_writer() const;
+  std::shared_ptr<rocstorage::reader> get_reader() const;
 
 private:
-    std::stringstream                     _ss;
-    query_builders::query_columns_builder _query_columns_builder;
+  struct impl;
+  std::unique_ptr<impl> m_impl;
 };
 
-}  // namespace queries
-}  // namespace data_storage
-}  // namespace rocstorage
+} // namespace rocm

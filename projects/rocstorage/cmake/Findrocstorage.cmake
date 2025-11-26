@@ -54,7 +54,11 @@ if(TARGET rocstorage)
     endif()
 
     # Get properties from existing target
-    get_target_property(rocstorage_INCLUDE_DIRS rocstorage INTERFACE_INCLUDE_DIRECTORIES)
+    get_target_property(
+        rocstorage_INCLUDE_DIRS
+        rocstorage
+        INTERFACE_INCLUDE_DIRECTORIES
+    )
     set(rocstorage_LIBRARIES rocstorage)
 
     return()

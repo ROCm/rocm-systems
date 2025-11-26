@@ -10,8 +10,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -26,59 +26,39 @@
 #include <string>
 #include <type_traits>
 
-namespace rocstorage
-{
-namespace common
-{
-namespace traits
-{
+namespace rocstorage {
+namespace common {
+namespace traits {
 
-namespace
-{
-template <typename T>
-struct is_string_literal_impl : std::false_type
-{};
+namespace {
+template <typename T> struct is_string_literal_impl : std::false_type {};
 
-template <>
-struct is_string_literal_impl<std::string_view> : std::true_type
-{};
+template <> struct is_string_literal_impl<std::string_view> : std::true_type {};
 
-template <>
-struct is_string_literal_impl<const char*> : std::true_type
-{};
+template <> struct is_string_literal_impl<const char *> : std::true_type {};
 
-template <>
-struct is_string_literal_impl<char*> : std::true_type
-{};
+template <> struct is_string_literal_impl<char *> : std::true_type {};
 
-template <>
-struct is_string_literal_impl<std::string> : std::true_type
-{};
+template <> struct is_string_literal_impl<std::string> : std::true_type {};
 
 template <typename T>
-inline constexpr bool is_string_literal_impl_v = is_string_literal_impl<T>::value;
+inline constexpr bool is_string_literal_impl_v =
+    is_string_literal_impl<T>::value;
 
-}  // namespace
+} // namespace
 
-template <typename T>
-constexpr bool
-is_string_literal()
-{
-    using Tp = std::decay_t<T>;
-    return is_string_literal_impl_v<Tp>;
+template <typename T> constexpr bool is_string_literal() {
+  using Tp = std::decay_t<T>;
+  return is_string_literal_impl_v<Tp>;
 }
 
-template <typename T>
-struct is_optional : std::false_type
-{};
+template <typename T> struct is_optional : std::false_type {};
 
-template <typename T>
-struct is_optional<std::optional<T>> : std::true_type
-{};
+template <typename T> struct is_optional<std::optional<T>> : std::true_type {};
 
 template <typename T>
 inline constexpr bool is_optional_v = is_optional<T>::value;
 
-}  // namespace traits
-}  // namespace common
-}  // namespace rocstorage
+} // namespace traits
+} // namespace common
+} // namespace rocstorage

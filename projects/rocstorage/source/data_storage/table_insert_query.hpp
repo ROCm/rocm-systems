@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -20,35 +20,29 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocstorage/reader.hpp>
+#pragma once
 
-#include "data_storage/database.hpp"
+#include "insert_query_builders.hpp"
 
-#include <stdexcept>
+namespace rocstorage {
+namespace data_storage {
+namespace queries {
 
-namespace rocstorage
-{
+struct table_insert_query {
+  table_insert_query() : _query_columns_builder{_ss} {}
 
-struct reader::impl
-{
-    explicit impl(std::shared_ptr<data_storage::database> database, std::string uuid)
-    : m_database(std::move(database))
-    , m_uuid(std::move(uuid))
-    {
-        if(!m_database)
-        {
-            throw std::invalid_argument("Provided pointer to a non-existing database!");
-        }
-    }
+  inline query_builders::query_columns_builder &
+  set_table_name(const std::string &tableName) {
+    _ss.str("");
+    _ss << "INSERT INTO " << tableName << " ";
+    return _query_columns_builder;
+  }
 
-    std::shared_ptr<data_storage::database> m_database;
-    std::string                             m_uuid;
+private:
+  std::stringstream _ss;
+  query_builders::query_columns_builder _query_columns_builder;
 };
 
-reader::reader(std::shared_ptr<data_storage::database> database, std::string uuid)
-: m_impl(std::make_unique<impl>(std::move(database), std::move(uuid)))
-{}
-
-reader::~reader() = default;
-
-}  // namespace rocstorage
+} // namespace queries
+} // namespace data_storage
+} // namespace rocstorage
