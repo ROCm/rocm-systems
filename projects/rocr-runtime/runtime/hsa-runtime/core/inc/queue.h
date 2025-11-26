@@ -173,12 +173,12 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
 
   Queue(SharedQueue* shared_queue, uint64_t queue_flags, bool pcie_write_ordering, core::Agent* agent)
       : amd_queue_(shared_queue->amd_queue),
+        use_count(0),
+        is_counted_queue(false),
         shared_queue_(shared_queue),
         agent_(agent),
         flags_(queue_flags),
-        pcie_write_ordering_(pcie_write_ordering), 
-        use_count(0), 
-        is_counted_queue(false) {
+        pcie_write_ordering_(pcie_write_ordering) {
     public_handle_ = Convert(this);
     shared_queue->core_queue = this;
   }

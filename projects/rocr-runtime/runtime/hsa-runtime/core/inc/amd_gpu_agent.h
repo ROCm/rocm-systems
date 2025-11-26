@@ -659,6 +659,9 @@ class GpuAgent : public GpuAgentInt {
   // @brief HSA profile.
   hsa_profile_t profile_;
 
+  // @brief Pool of shared queues owned by this agent
+  rocr::core::CountedQueuePoolManager queue_pool_;
+
   void* trap_code_buf_;
 
   size_t trap_code_buf_size_;
@@ -748,9 +751,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief list of AQL queues owned by this agent. Indexed by queue pointer
   std::vector<core::Queue*> aql_queues_;
-
-  // @brief Pool of shared queues owned by this agent
-  rocr::core::CountedQueuePoolManager queue_pool_;
 
   // Sets and Tracks pending SDMA status check or request counts
   void SetCopyRequestRefCount(bool set);

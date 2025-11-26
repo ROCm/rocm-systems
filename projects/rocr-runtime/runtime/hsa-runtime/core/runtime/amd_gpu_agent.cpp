@@ -781,7 +781,7 @@ void GpuAgent::InitDma() {
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Internal queue creation failed.");
 
-    if (priority != HSA_QUEUE_PRIORITY_NORMAL)
+    if (priority != HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL)
       if (queue->SetPriority(priority) != HSA_STATUS_SUCCESS)
         throw AMD::hsa_exception(HSA_STATUS_ERROR,
                                 "Failed to increase queue priority for PC Sampling");
