@@ -3,42 +3,9 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-if(NOT CMAKE_HIP_COMPILER)
-    find_program(
-        amdclangpp_EXECUTABLE
-        NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
-    mark_as_advanced(amdclangpp_EXECUTABLE)
-
-    if(amdclangpp_EXECUTABLE)
-        set(CMAKE_HIP_COMPILER "${amdclangpp_EXECUTABLE}")
-    endif()
-endif()
-
-project(rocprofiler-sdk-tests-code-object-multi-threaded LANGUAGES CXX HIP)
-
-foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
-    if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
-        set(CMAKE_HIP_FLAGS_${_TYPE} "${CMAKE_CXX_FLAGS_${_TYPE}}")
-    endif()
-endforeach()
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_HIP_STANDARD 17)
-set(CMAKE_HIP_EXTENSIONS OFF)
-set(CMAKE_HIP_STANDARD_REQUIRED ON)
+project(rocprofiler-sdk-tests-code-object-multi-threaded LANGUAGES CXX)
 
 find_package(rocprofiler-sdk REQUIRED)
-
-# Find hiprtc for runtime compilation
-find_library(
-    HIPRTC_LIBRARY
-    NAMES hiprtc
-    HINTS ${ROCM_PATH}/lib ENV ROCM_PATH /opt/rocm/lib)
 
 # Build the client tool library
 add_library(code-object-multithread-client SHARED)
@@ -46,28 +13,26 @@ target_sources(code-object-multithread-client PRIVATE client.cpp)
 target_link_libraries(code-object-multithread-client
                       PRIVATE rocprofiler-sdk::rocprofiler-sdk)
 
-set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
-
-add_executable(code-object-multithread-testapp)
-target_sources(code-object-multithread-testapp PRIVATE main.cpp)
-target_compile_options(code-object-multithread-testapp PRIVATE -W -Wall -Wextra)
-
-find_package(Threads REQUIRED)
-target_link_libraries(code-object-multithread-testapp PRIVATE Threads::Threads)
-
-# Link hiprtc if found, otherwise test will fall back to static kernels
-if(HIPRTC_LIBRARY)
-    target_link_libraries(code-object-multithread-testapp PRIVATE ${HIPRTC_LIBRARY})
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
+    set(PRELOAD_ENV
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:code-object-multithread-client>"
+        )
+else()
+    set(PRELOAD_ENV "$<TARGET_FILE:code-object-multithread-client>")
 endif()
 
-# Setup environment to preload the client library
-set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:code-object-multithread-client>")
-
 # Register the test with CTest
-add_test(NAME code-object-multithread
-         COMMAND $<TARGET_FILE:code-object-multithread-testapp>)
-
-set_tests_properties(
-    code-object-multithread
-    PROPERTIES TIMEOUT 120 LABELS "integration;multi-threaded;code-object" ENVIRONMENT
-               "${PRELOAD_ENV}")
+rocprofiler_add_integration_execute_test(
+    test-code-object-multithread
+    COMMAND $<TARGET_FILE:code-object-multithread-testapp>
+    DEPENDS code-object-multithread-client
+    TIMEOUT 120
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    PASS_REGULAR_EXPRESSION
+        "Test PASSED: Successfully traced multi-threaded code object loading!"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|SEGFAULT|Failed to \.*|Context is not valid|ERROR: \.*"
+    )

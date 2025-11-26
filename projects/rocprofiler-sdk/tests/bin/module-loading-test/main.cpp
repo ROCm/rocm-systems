@@ -223,18 +223,20 @@ main()
 
     std::cout << "Found " << num_gpus << " GPU(s)\n";
 
-    int num_threads = num_gpus * 4;  // More threads than GPUs to increase contention
+    int num_threads =
+        std::thread::hardware_concurrency();  // More threads than GPUs to increase contention
+    int threads_per_gpu = num_threads / num_gpus;
     std::cout << "Launching " << num_threads << " threads\n";
 
     constexpr int iterations = 3;
 
-    // Create worker threads - four per GPU
+    // Create worker threads
     auto threads = std::vector<std::thread>{};
     threads.reserve(num_threads);
 
     for(int gpu_id = 0; gpu_id < num_gpus; ++gpu_id)
     {
-        for(int thread_id = 0; thread_id < (num_threads / num_gpus); ++thread_id)
+        for(int thread_id = 0; thread_id < threads_per_gpu; ++thread_id)
         {
             threads.emplace_back(gpu_worker, gpu_id, iterations);
         }
