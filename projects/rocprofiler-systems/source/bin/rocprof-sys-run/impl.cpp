@@ -24,7 +24,6 @@
 
 #include "common/defines.h"
 #include "common/environment.hpp"
-#include "common/join.hpp"
 #include "common/path.hpp"
 #include "core/argparse.hpp"
 #include "core/timemory.hpp"

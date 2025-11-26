@@ -23,7 +23,6 @@
 #include "rocprof-sys-sample.hpp"
 
 #include "common/environment.hpp"
-#include "common/join.hpp"
 #include "common/path.hpp"
 
 #include <timemory/environment.hpp>
