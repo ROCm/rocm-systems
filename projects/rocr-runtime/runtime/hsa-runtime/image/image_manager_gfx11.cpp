@@ -641,6 +641,7 @@ uint32_t ImageManagerGfx11::GetAddrlibSurfaceInfoNv(
   in.width = width;
   in.height = height;
   in.numSlices = num_slice;
+  in.numMipLevels = num_mipmap_levels;
 
   switch (desc.geometry) {
     case HSA_EXT_IMAGE_GEOMETRY_1D:
@@ -865,10 +866,16 @@ hsa_status_t ImageManagerGfx11::PopulateMipmapSrd(MipmappedArray& mipmap) const 
     SQ_IMG_RSRC_WORD5 word7;
 
     ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
+
+    // Allocate persistent memory for mip info (freed in MipmappedArray destructor)
+    out.pMipInfo = new ADDR2_MIP_INFO[mipmap.num_levels];
+    memset(out.pMipInfo, 0, sizeof(ADDR2_MIP_INFO) * mipmap.num_levels);
+
     uint32_t swizzleMode = GetAddrlibSurfaceInfoNv(
                         mipmap.component, mipmap.desc, mipmap.num_levels,
                         mipmap.tile_mode, mipmap.row_pitch, mipmap.slice_pitch, out);
     if (swizzleMode == (uint32_t)(-1)) {
+      delete[] out.pMipInfo;
       return HSA_STATUS_ERROR;
     }
     mipmap.addr_output.addr2 = out;

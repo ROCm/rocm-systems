@@ -222,15 +222,18 @@ hsa_status_t ImageManagerGfx12::CalculateImageSizeAndAlignment(
     hsa_ext_image_data_info_t& image_info) const {
 
   ADDR3_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
-  std::vector<ADDR3_MIP_INFO> mip_info_storage;
-  mip_info_storage.resize(num_mipmap_levels);
 
-  // Assign pointer to allocated memory
-  out.pMipInfo = mip_info_storage.empty() ? nullptr : mip_info_storage.data();
+  // Allocate persistent memory for mip info on the heap
+  ADDR3_MIP_INFO* mip_info_storage = new ADDR3_MIP_INFO[num_mipmap_levels];
+  memset(mip_info_storage, 0, sizeof(ADDR3_MIP_INFO) * num_mipmap_levels);
+  out.pMipInfo = mip_info_storage;
 
   hsa_profile_t profile;
   hsa_status_t status = HSA::hsa_agent_get_info(component, HSA_AGENT_INFO_PROFILE, &profile);
-  if (status != HSA_STATUS_SUCCESS) return status;
+  if (status != HSA_STATUS_SUCCESS) {
+    delete[] mip_info_storage;
+    return status;
+  }
 
   Image::TileMode tileMode = Image::TileMode::LINEAR;
   if (image_data_layout == HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE) {
@@ -240,6 +243,7 @@ hsa_status_t ImageManagerGfx12::CalculateImageSizeAndAlignment(
   }
   if (GetAddrlibSurfaceInfoNv(component, desc, num_mipmap_levels, tileMode,
       image_data_row_pitch, image_data_slice_pitch, out) == (uint32_t)(-1)) {
+    delete[] mip_info_storage;
     return HSA_STATUS_ERROR;
   }
 
@@ -249,6 +253,7 @@ hsa_status_t ImageManagerGfx12::CalculateImageSizeAndAlignment(
       image_data_layout == HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR &&
       ((image_data_row_pitch && (rowPitch != image_data_row_pitch)) ||
        (image_data_slice_pitch && (slicePitch != image_data_slice_pitch)))) {
+    delete[] mip_info_storage;
     return static_cast<hsa_status_t>(
                                 HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED);
   }
@@ -257,6 +262,9 @@ hsa_status_t ImageManagerGfx12::CalculateImageSizeAndAlignment(
   assert(image_info.size != 0);
   image_info.alignment = out.baseAlign;
   assert(image_info.alignment != 0);
+
+  // Clean up temporary mip info storage
+  delete[] mip_info_storage;
 
   return HSA_STATUS_SUCCESS;
 }
@@ -796,9 +804,11 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
 
       if (swOut.validModes.value & (1 << i)) {
         ADDR3_COMPUTE_SURFACE_INFO_OUTPUT localOut = {0};
-        std::vector<ADDR3_MIP_INFO> mip_info_storage;
-        mip_info_storage.resize(num_mipmap_levels);
-        localOut.pMipInfo = mip_info_storage.empty() ? nullptr : mip_info_storage.data();
+
+        // Allocate temporary memory for mip info (freed after use)
+        localOut.pMipInfo = new ADDR3_MIP_INFO[num_mipmap_levels];
+        memset(localOut.pMipInfo, 0, sizeof(ADDR3_MIP_INFO) * num_mipmap_levels);
+
         localOut.size = sizeof(ADDR3_COMPUTE_SURFACE_INFO_OUTPUT);
 
         in.swizzleMode = (Addr3SwizzleMode) i;
@@ -806,6 +816,7 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
         if (ADDR_OK != Addr3ComputeSurfaceInfo(addr_lib_, &in, &localOut)) {
           // Should not happen, if it does, ignore this swizzle mode.
           debug_print("Addr3ComputeSurfaceInfo failed!\n");
+          delete[] localOut.pMipInfo;
           continue;
         }
 
@@ -818,6 +829,9 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
           minSize = surfaceSize;
           bestSwizzle = (Addr3SwizzleMode) i;
         }
+
+        // Clean up temporary mip info
+        delete[] localOut.pMipInfo;
       }
     }
 
@@ -986,15 +1000,16 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
 
     // Get ADDR3 surface information
     ADDR3_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
-    std::vector<ADDR3_MIP_INFO> mip_info_storage;
-    mip_info_storage.resize(mipmap.num_levels);
 
-    // Assign pointer to allocated memory
-    out.pMipInfo = mip_info_storage.empty() ? nullptr : mip_info_storage.data();
+    // Allocate persistent memory for mip info (freed in MipmappedArray destructor)
+    out.pMipInfo = new ADDR3_MIP_INFO[mipmap.num_levels];
+    memset(out.pMipInfo, 0, sizeof(ADDR3_MIP_INFO) * mipmap.num_levels);
+
     unsigned int swizzleMode = GetAddrlibSurfaceInfoNv(mipmap.component,
                             mipmap.desc, mipmap.num_levels, mipmap.tile_mode,
                             mipmap.row_pitch, mipmap.slice_pitch, out);
     if (swizzleMode == (uint32_t)(-1)) {
+      delete[] out.pMipInfo;
       return HSA_STATUS_ERROR;
     }
     mipmap.addr_output.addr3 = out;

@@ -130,7 +130,7 @@ hsa_status_t ImageRuntime::GetMipmapArraySizeAndAlignment(
 
   ImageManager* manager = image_manager(component);
 
-  // Validate the mipmapped array dimensions.
+  // Validate the image dimension.
   manager->GetImageInfoMaxDimension(component, geometry, max_width, max_height,
                                     max_depth, max_array_size);
 
@@ -683,14 +683,32 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
   ImageManager* manager = image_manager(component);
   if (!manager) return HSA_STATUS_ERROR_INVALID_AGENT;
 
+  // Validate mipmap array size and alignment requirements
+  size_t required_size = 0;
+  size_t required_alignment = 0;
+  uint32_t max_mip_levels = 0;
+  hsa_status_t status = GetMipmapArraySizeAndAlignment(
+      component, mipmap_descriptor, num_mipmap_levels, mipmap_layout, image_data_row_pitch,
+      image_data_slice_pitch, required_size, required_alignment, max_mip_levels);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
+
+  // Verify image_data alignment
+  assert(image_data != NULL);
+  assert(IsMultipleOf(image_data, required_alignment));
+
   // Create a new mipmapped array object
   MipmappedArray* mipmap_array = MipmappedArray::Create(component);
   if (!mipmap_array) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;  
 
   // Determine the tile mode
   hsa_profile_t profile;
-  hsa_status_t status = HSA::hsa_agent_get_info(
-                        component, HSA_AGENT_INFO_PROFILE, &profile);
+  status = HSA::hsa_agent_get_info(component, HSA_AGENT_INFO_PROFILE, &profile);
+  if (status != HSA_STATUS_SUCCESS) {
+    MipmappedArray::Destroy(mipmap_array);
+    return status;
+  }
   if (mipmap_layout == HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR) {
     mipmap_array->tile_mode = Image::TileMode::LINEAR;
   } else {
@@ -720,7 +738,7 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
 
   // assert(mipmap_array->size == required_size);
   image_handle.handle = mipmap_array->Convert();
-  debug_print("output handle = %u", image_handle.handle);
+  debug_print("output handle = %lu", image_handle.handle);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -752,6 +770,11 @@ hsa_status_t ImageRuntime::GetMipmapArrayLevelHandle(
   uint32_t major_ver = MajorVerFromDevID(chip_id);
   if (major_ver < 9) {
     debug_print("ERROR: Mip level views not supported on GFX%u hardware\n", major_ver);
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Validate mip level
+  if (mip_level < 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -800,7 +823,6 @@ hsa_status_t ImageRuntime::GetMipmapArrayLevelHandle(
 
   // Return handle
   level_image_out.handle = level_view->Convert();
-  MipmappedArray::Destroy(level_view);
   return HSA_STATUS_SUCCESS;
 }
 

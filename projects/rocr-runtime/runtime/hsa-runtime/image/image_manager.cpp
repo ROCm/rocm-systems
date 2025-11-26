@@ -123,26 +123,8 @@ MipmappedArray* MipmappedArray::Create(hsa_agent_t agent) {
 
   MipmappedArray* mipmapped_array = NULL;
 
-  // Find a GPU memory pool for image data
-  hsa_status_t status = hsa_amd_agent_iterate_memory_pools(
-                        agent, [](hsa_amd_memory_pool_t p, void* data) {
-      hsa_amd_segment_t segment;
-      hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
-      if (segment == HSA_AMD_SEGMENT_GLOBAL) {
-        bool allowed = false;
-        hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &allowed);
-        if (allowed) {
-          *reinterpret_cast<hsa_amd_memory_pool_t*>(data) = p;
-          return HSA_STATUS_INFO_BREAK;
-        }
-      }
-    }, &pool);
-
-  assert(status == HSA_STATUS_INFO_BREAK);
-
-  // Allocate memory for image data
-  status = AMD::hsa_amd_memory_pool_allocate(pool, sizeof(MipmappedArray), 0,
-                reinterpret_cast<void**>(&mipmapped_array));
+  hsa_status_t status = AMD::hsa_amd_memory_pool_allocate(
+      pool, sizeof(MipmappedArray), 0, reinterpret_cast<void**>(&mipmapped_array));
   assert(status == HSA_STATUS_SUCCESS);
 
   if (status != HSA_STATUS_SUCCESS) return nullptr;

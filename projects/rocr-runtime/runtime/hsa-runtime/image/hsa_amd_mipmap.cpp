@@ -82,9 +82,6 @@ hsa_amd_mipmap_array_get_info(
     hsa_agent_t agent,
     const hsa_ext_image_descriptor_t* desc,
     uint32_t requested_levels,
-    hsa_ext_image_data_layout_t layout,
-    size_t row_pitch,
-    size_t slice_pitch,
     hsa_amd_mipmap_array_info_t* info) {
 
     if (!desc || !info) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -96,12 +93,15 @@ hsa_amd_mipmap_array_get_info(
     auto* rt = rocr::image::ImageRuntime::instance();
     if (!rt) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
+    // Mipmaps (levels > 1) always use TILED/OPAQUE layout
+    // Linear layout parameters are not needed
     size_t size_req = 0;
     size_t align_req = 0;
     uint32_t max_lvls = 0;
     hsa_status_t s = rt->GetMipmapArraySizeAndAlignment(
-        agent, *desc, requested_levels, layout,
-        row_pitch, slice_pitch,
+        agent, *desc, requested_levels,
+        HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE,  // Always tiled for mipmaps
+        0, 0,                              // row_pitch and slice_pitch not used for tiled layout
         size_req, align_req, max_lvls);
     if (s != HSA_STATUS_SUCCESS) return s;
 

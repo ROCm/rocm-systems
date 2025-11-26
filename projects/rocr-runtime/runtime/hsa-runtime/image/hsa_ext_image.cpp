@@ -388,6 +388,123 @@ hsa_status_t hsa_amd_image_create(hsa_agent_t agent,
   CATCH;
 }
 
+//---------------------------------------------------------------------------//
+//  V2 API Implementations (Unified Mipmap Support)
+//---------------------------------------------------------------------------//
+
+hsa_status_t hsa_ext_image_data_get_info_v2(hsa_agent_t agent,
+                                            const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                            hsa_access_permission_t access_permission,
+                                            hsa_ext_image_data_info_t* image_data_info) {
+  TRY;
+  if (agent.handle == 0) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  if (image_descriptor == NULL || image_data_info == NULL) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Check if this is a mipmap request
+  uint32_t mipmap_levels =
+      (image_descriptor->mipmap_levels == 0) ? 1 : image_descriptor->mipmap_levels;
+
+  if (mipmap_levels > 1) {
+    // Mipmapped array path
+    size_t size_out = 0;
+    size_t alignment_out = 0;
+    uint32_t max_levels_out = 0;
+
+    // Convert V2 descriptor to V1 for internal use
+    hsa_ext_image_descriptor_t desc_v1;
+    desc_v1.geometry = image_descriptor->geometry;
+    desc_v1.width = image_descriptor->width;
+    desc_v1.height = image_descriptor->height;
+    desc_v1.depth = image_descriptor->depth;
+    desc_v1.array_size = image_descriptor->array_size;
+    desc_v1.format = image_descriptor->format;
+
+    hsa_status_t status = ImageRuntime::instance()->GetMipmapArraySizeAndAlignment(
+        agent, desc_v1, mipmap_levels, HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE, 0, 0, size_out,
+        alignment_out, max_levels_out);
+
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
+
+    image_data_info->size = size_out;
+    image_data_info->alignment = alignment_out;
+    return HSA_STATUS_SUCCESS;
+
+  } else {
+    // Regular image path (single level)
+    hsa_ext_image_descriptor_t desc_v1;
+    desc_v1.geometry = image_descriptor->geometry;
+    desc_v1.width = image_descriptor->width;
+    desc_v1.height = image_descriptor->height;
+    desc_v1.depth = image_descriptor->depth;
+    desc_v1.array_size = image_descriptor->array_size;
+    desc_v1.format = image_descriptor->format;
+
+    return ImageRuntime::instance()->GetImageSizeAndAlignment(
+        agent, desc_v1, HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE, 0, 0, *image_data_info);
+  }
+  CATCH;
+}
+
+hsa_status_t hsa_ext_image_create_v2(hsa_agent_t agent,
+                                     const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                     const void* image_data,
+                                     hsa_access_permission_t access_permission,
+                                     hsa_ext_image_t* image) {
+  TRY;
+  if (agent.handle == 0) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  if (image_descriptor == NULL || image_data == NULL || image == NULL) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Check if this is a mipmap request
+  uint32_t mipmap_levels =
+      (image_descriptor->mipmap_levels == 0) ? 1 : image_descriptor->mipmap_levels;
+
+  // Convert V2 descriptor to V1 for internal use
+  hsa_ext_image_descriptor_t desc_v1;
+  desc_v1.geometry = image_descriptor->geometry;
+  desc_v1.width = image_descriptor->width;
+  desc_v1.height = image_descriptor->height;
+  desc_v1.depth = image_descriptor->depth;
+  desc_v1.array_size = image_descriptor->array_size;
+  desc_v1.format = image_descriptor->format;
+
+  if (mipmap_levels > 1) {
+    // Mipmapped array path
+    return ImageRuntime::instance()->CreateMipmapArrayHandle(
+        agent, desc_v1, image_data, access_permission, mipmap_levels,
+        HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE, 0, 0, *image);
+  } else {
+    // Regular image path (single level)
+    return ImageRuntime::instance()->CreateImageHandle(
+        agent, desc_v1, image_data, access_permission, HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE, 0, 0,
+        *image);
+  }
+  CATCH;
+}
+
+hsa_status_t hsa_ext_image_destroy_v2(hsa_agent_t agent, hsa_ext_image_t image) {
+  TRY;
+  if (agent.handle == 0) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  // The destroy operation is the same for both regular images and mipmaps
+  // The runtime internally determines the correct cleanup path
+  return ImageRuntime::instance()->DestroyImageHandle(image);
+  CATCH;
+}
+
 void LoadImage(core::ImageExtTableInternal* image_api,
                decltype(::hsa_amd_image_create)** interface_api) {
   image_api->hsa_ext_image_get_capability_fn = hsa_ext_image_get_capability;
@@ -419,6 +536,11 @@ void LoadImage(core::ImageExtTableInternal* image_api,
   image_api->hsa_amd_image_get_info_max_dim_fn = hsa_amd_image_get_info_max_dim;
 
   image_api->hsa_ext_sampler_create_v2_fn = hsa_ext_sampler_create_v2;
+
+  // V2 unified APIs for images and mipmaps
+  image_api->hsa_ext_image_data_get_info_v2_fn = hsa_ext_image_data_get_info_v2;
+  image_api->hsa_ext_image_create_v2_fn = hsa_ext_image_create_v2;
+  image_api->hsa_ext_image_destroy_v2_fn = hsa_ext_image_destroy_v2;
 
   *interface_api = hsa_amd_image_create;
 }

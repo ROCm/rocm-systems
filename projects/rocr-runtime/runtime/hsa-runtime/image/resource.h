@@ -223,30 +223,29 @@ private:
 ~MipmappedArray() {
   // There is no pMipInfo for ADDR in pre-GFX9 versions
   if (addr_output.addr2.pMipInfo) {
-    delete addr_output.addr2.pMipInfo;
+    delete[] addr_output.addr2.pMipInfo;
     addr_output.addr2.pMipInfo = nullptr;
   } else if (addr_output.addr3.pMipInfo) {
-    delete addr_output.addr3.pMipInfo;
+    delete[] addr_output.addr3.pMipInfo;
     addr_output.addr3.pMipInfo = nullptr;
   }
 }
 
 public:
-  /// @brief Create a MipmappedArray.
-  // expected_surf_size_bytes: total bytes of all mip levels (In AddrLib - surfSize).
-  // Only metadata is allocated
-  static MipmappedArray* Create(hsa_agent_t agent);
+ /// @brief Create a MipmappedArray.
+ /// Only internal metadata is allocated; image data must be provided by the user.
+ static MipmappedArray* Create(hsa_agent_t agent);
 
-  /// @brief Destroy a MipmappedArray.
-  static void Destroy(const MipmappedArray* array);
+ /// @brief Destroy a MipmappedArray.
+ static void Destroy(const MipmappedArray* array);
 
-  /// @brief Convert from vendor representation to HSA handle.
-  uint64_t Convert() const { return reinterpret_cast<uint64_t>(srd); }
+ /// @brief Convert from vendor representation to HSA handle.
+ uint64_t Convert() const { return reinterpret_cast<uint64_t>(srd); }
 
-  /// @brief Convert from HSA handle to vendor representation.
-  static MipmappedArray* Convert(uint64_t handle) {
-    return reinterpret_cast<MipmappedArray*>(handle - offsetof(MipmappedArray, srd));
-  }
+ /// @brief Convert from HSA handle to vendor representation.
+ static MipmappedArray* Convert(uint64_t handle) {
+   return reinterpret_cast<MipmappedArray*>(handle - offsetof(MipmappedArray, srd));
+ }
 
   // Total size of the allocated memory.
   size_t size;

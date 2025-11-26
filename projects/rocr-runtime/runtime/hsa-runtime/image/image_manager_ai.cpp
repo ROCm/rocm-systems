@@ -673,10 +673,16 @@ hsa_status_t ImageManagerAi::PopulateMipmapSrd(MipmappedArray& mipmap) const {
     sq_img_rsrc_word7_u word7;
 
     ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
+
+    // Allocate persistent memory for mip info (freed in MipmappedArray destructor)
+    out.pMipInfo = new ADDR2_MIP_INFO[mipmap.num_levels];
+    memset(out.pMipInfo, 0, sizeof(ADDR2_MIP_INFO) * mipmap.num_levels);
+
     uint32_t swizzleMode = GetAddrlibSurfaceInfoAi(
                         mipmap.component, mipmap.desc, mipmap.num_levels,
                         mipmap.tile_mode, mipmap.row_pitch, mipmap.slice_pitch, out);
     if (swizzleMode == (uint32_t)(-1)) {
+      delete[] out.pMipInfo;
       return HSA_STATUS_ERROR;
     }
     mipmap.addr_output.addr2 = out;

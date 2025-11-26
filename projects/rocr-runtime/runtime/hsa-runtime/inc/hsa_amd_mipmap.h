@@ -75,9 +75,6 @@ typedef struct hsa_amd_mipmap_array_info_s {
  * @param[in] agent               : GPU agent
  * @param[in] desc                : Image descriptor for the base level
  * @param[in] requested_levels    : Number of mip levels requested
- * @param[in] layout              : Layout of the backing image data
- * @param[in] row_pitch           : Row pitch of the backing image data (bytes)
- * @param[in] slice_pitch         : Slice pitch of the backing image data (bytes)
  * @param[out] info               : Output info structure (see returns)
  *
  * @details On success, populates the info structure as follows:
@@ -86,24 +83,28 @@ typedef struct hsa_amd_mipmap_array_info_s {
  *   info->max_levels   : Maximum legal mip levels for descriptor (independent of request)
  *   info->levels_used  : Echo of requested_levels (no clamping on success path)
  *
+ * @note Mipmapped arrays (levels > 1) always use TILED layout. Linear layout is only
+ * supported for single-level images (levels = 1), which don't require this API.
+ *
  * @remark This call is optional: hsa_amd_mipmap_array_create re-validates and
  * recomputes authoritative size and alignment. Applications may use the query to
  * size their backing allocation before calling create.
+ *
+ * @deprecated Consider using hsa_ext_image_data_get_info_v2 with a V2 descriptor
+ * that has mipmap_levels set, which provides a unified API for both images and mipmaps.
  *
  * @retval HSA_STATUS_SUCCESS
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT              (null pointers, zero levels, levels > max)
  * @retval HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED  (unsupported format/geometry)
  * @retval HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED    (dimensions exceed hardware limits)
- * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES              (AddrLib failure / internal allocation issues)
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES              (AddrLib failure / internal allocation
+ * issues)
  */
 hsa_status_t HSA_API
 hsa_amd_mipmap_array_get_info(
   hsa_agent_t agent,
   const hsa_ext_image_descriptor_t* desc,
   uint32_t requested_levels,
-  hsa_ext_image_data_layout_t layout,
-  size_t row_pitch,
-  size_t slice_pitch,
   hsa_amd_mipmap_array_info_t* info);
 
 /**
@@ -125,12 +126,16 @@ hsa_amd_mipmap_array_get_info(
  * @note The runtime NEVER allocates pixel storage for the mip chain; ownership of
  * image_data remains with the caller. The handle encapsulates metadata/SRD only.
  *
+ * @deprecated Consider using hsa_ext_image_create_v2 with a V2 descriptor that has
+ * mipmap_levels > 1, which provides a unified API for both images and mipmaps.
+ *
  * @retval HSA_STATUS_SUCCESS
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT              (null pointers, zero levels, levels > max)
  * @retval HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED  (unsupported format/geometry)
  * @retval HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED    (dimensions exceed hardware limits)
  * @retval HSA_STATUS_ERROR_INVALID_ALLOCATION            (insufficient size or misaligned base)
- * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES              (AddrLib failure / internal allocation issues)
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES              (AddrLib failure / internal allocation
+ * issues)
  */
 hsa_status_t HSA_API
 hsa_amd_mipmap_array_create(
@@ -143,8 +148,13 @@ hsa_amd_mipmap_array_create(
 
 /**
  * @brief Destroy a mipmapped array handle created via hsa_amd_mipmap_array_create.
- * (Does not free user pixel memory.)
- * 
+ *
+ * @details Frees only the internal metadata and handle associated with the mipmapped array.
+ * Does not free the backing image data provided by the user.
+ *
+ * @deprecated Consider using hsa_ext_image_destroy_v2, which works with both regular
+ * images and mipmapped arrays created via hsa_ext_image_create_v2.
+ *
  * @param image : Pointer to the mipmapped array handle to destroy
  */
 hsa_status_t HSA_API

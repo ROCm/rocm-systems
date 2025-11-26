@@ -64,9 +64,6 @@ hsa_amd_mipmap_array_get_info(
   hsa_agent_t agent,
   const hsa_ext_image_descriptor_t* desc,
   uint32_t requested_levels,
-  hsa_ext_image_data_layout_t layout,
-  size_t row_pitch,
-  size_t slice_pitch,
   hsa_amd_mipmap_array_info_t* info);
 
 hsa_status_t HSA_API
