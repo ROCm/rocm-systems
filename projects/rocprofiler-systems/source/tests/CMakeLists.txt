@@ -20,12 +20,37 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-add_executable(rocprof-sys-unit-tests dummy.cpp)
+set(unit_test_sources dummy.cpp)
+
+# Add AMD SMI unit tests when ROCm is enabled
+if(ROCPROFSYS_USE_ROCM)
+    list(APPEND unit_test_sources
+        ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/amd_smi/test/sampler_tests.cpp
+    )
+endif()
+
+add_executable(rocprof-sys-unit-tests ${unit_test_sources})
 
 target_link_libraries(
     rocprof-sys-unit-tests
     PRIVATE rocprofiler-systems-googletest-library
 )
+
+# Link against the main library for AMD SMI tests
+if(ROCPROFSYS_USE_ROCM)
+    target_link_libraries(
+        rocprof-sys-unit-tests
+        PRIVATE
+            rocprofiler-systems::librocprofiler-systems-static
+            rocprofiler-systems::rocprofiler-systems-interface-library
+    )
+    target_include_directories(
+        rocprof-sys-unit-tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
+            ${PROJECT_SOURCE_DIR}/source/lib
+    )
+endif()
 
 include(GoogleTest)
 gtest_discover_tests(rocprof-sys-unit-tests)

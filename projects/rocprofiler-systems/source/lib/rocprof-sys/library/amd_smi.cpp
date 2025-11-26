@@ -29,7 +29,6 @@
 #include "core/agent.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
-#include "core/trace_cache/sample_type.hpp"
 #include <amd_smi/amdsmi.h>
 #include <cstdint>
 #if defined(NDEBUG)
@@ -47,6 +46,9 @@
 #include "core/state.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/amd_smi.hpp"
+#include "library/amd_smi/driver_impl.hpp"
+#include "library/amd_smi/metrics.hpp"
+#include "library/amd_smi/sampler.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 
@@ -447,55 +449,19 @@ get_state()
     return _v;
 }
 
+// Legacy wrapper functions - delegate to metrics module for consistency
 std::vector<uint8_t>
-serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
+serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& gpu_metrics,
                       const gpu::gpu_metrics_capabilities_t& capabilities)
 {
-    // Get settings for this device
-    auto settings = get_settings(device_id);
-
-    // Convert amd_smi::settings to gpu::gpu_metrics_settings_t
-    gpu::gpu_metrics_settings_t gpu_settings;
-    gpu_settings.vcn_activity  = settings.vcn_activity;
-    gpu_settings.jpeg_activity = settings.jpeg_activity;
-    gpu_settings.xgmi          = settings.xgmi;
-    gpu_settings.pcie          = settings.pcie;
-
-    // Use the shared serialization function
-    return gpu::serialize_gpu_metrics(metrics, capabilities, gpu_settings);
+    return metrics::serialize_gpu_metrics(gpu_metrics, capabilities,
+                                          get_settings(device_id));
 }
 
 size_t
 serialize_settings(uint32_t _device_id)
 {
-    auto           settings = get_settings(_device_id);
-    std::bitset<8> settings_bits;
-    settings_bits.reset();
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::busy),
-        settings.busy);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::temp),
-        settings.temp);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::power),
-        settings.power);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::mem_usage),
-        settings.mem_usage);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::vcn_activity),
-        settings.vcn_activity);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::jpeg_activity),
-        settings.jpeg_activity);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::xgmi),
-        settings.xgmi);
-    settings_bits.set(
-        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::pcie),
-        settings.pcie);
-    return settings_bits.to_ulong();
+    return metrics::serialize_settings(get_settings(_device_id));
 }
 
 }  // namespace
@@ -508,201 +474,42 @@ std::unique_ptr<data::promise_t> data::polling_finished = {};
 
 data::data(uint32_t _dev_id) { sample(_dev_id); }
 
+namespace
+{
+// Get the shared Sampler instance for this module
+// This allows using the new testable architecture while maintaining backward
+// compatibility
+Sampler&
+get_sampler()
+{
+    // Create sampler with proper state reference to the global state
+    static auto    state_mgr = std::make_shared<StateManagerImpl>(get_state());
+    static Sampler instance(get_default_driver(), get_default_clock(),
+                            get_default_storage(), state_mgr,
+                            get_default_gpu_capabilities());
+    return instance;
+}
+
+}  // namespace
+
 void
 data::sample(uint32_t _device_id)
 {
-    if(is_child_process()) return;
+    // Use the refactored Sampler class which is fully unit testable
+    // The Sampler handles all the complexity internally with dependency injection
+    auto result = get_sampler().sample(_device_id, get_settings(_device_id));
 
-    auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
-    assert(_timestamp < std::numeric_limits<int64_t>::max());
-    amdsmi_gpu_metrics_t _gpu_metrics;
-    bool                 _gpu_metrics_needed = false;
-
-    auto _state = get_state().load();
-
-    if(_state != State::Active) return;
-
-    m_dev_id = _device_id;
-    m_ts     = _timestamp;
-
-#define ROCPROFSYS_AMDSMI_GET(OPTION, FUNCTION, ...)                                     \
-    if(OPTION)                                                                           \
-    {                                                                                    \
-        try                                                                              \
-        {                                                                                \
-            ROCPROFSYS_AMD_SMI_CALL(FUNCTION(__VA_ARGS__), &OPTION);                     \
-        } catch(std::runtime_error & _e)                                                 \
-        {                                                                                \
-            ROCPROFSYS_VERBOSE_F(                                                        \
-                0, "[%s] Exception: %s. Disabling future samples from amd-smi...\n",     \
-                #FUNCTION, _e.what());                                                   \
-            get_state().store(State::Disabled);                                          \
-        }                                                                                \
-    }
-
-    amdsmi_processor_handle sample_handle = gpu::get_handle_from_id(_device_id);
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).busy, amdsmi_get_gpu_activity,
-                          sample_handle, &m_busy_perc);
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).temp, amdsmi_get_temp_metric,
-                          sample_handle, AMDSMI_TEMPERATURE_TYPE_JUNCTION,
-                          AMDSMI_TEMP_CURRENT, &m_temp);
-#if(AMDSMI_LIB_VERSION_MAJOR == 2 && AMDSMI_LIB_VERSION_MINOR == 0) ||                   \
-    (AMDSMI_LIB_VERSION_MAJOR == 25 && AMDSMI_LIB_VERSION_MINOR == 2)
-    // This was a transient change in the AMD SMI API. It was never officially released.
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).power, amdsmi_get_power_info,
-                          sample_handle, 0, &m_power)
-#else
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).power, amdsmi_get_power_info,
-                          sample_handle, &m_power)
-#endif
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).mem_usage, amdsmi_get_gpu_memory_usage,
-                          sample_handle, AMDSMI_MEM_TYPE_VRAM, &m_mem_usage);
-
-    // Check if GPU metrics are needed for VCN, JPEG, XGMI, or PCIe
-    _gpu_metrics_needed = get_settings(m_dev_id).vcn_activity ||
-                          get_settings(m_dev_id).jpeg_activity ||
-                          get_settings(m_dev_id).xgmi || get_settings(m_dev_id).pcie;
-
-    ROCPROFSYS_AMDSMI_GET(_gpu_metrics_needed, amdsmi_get_gpu_metrics_info, sample_handle,
-                          &_gpu_metrics);
-
-    // Determine if basic metrics are enabled
-    bool _basic_metrics_enabled =
-        get_settings(m_dev_id).busy || get_settings(m_dev_id).temp ||
-        get_settings(m_dev_id).power || get_settings(m_dev_id).mem_usage;
-
-    // Process GPU metrics if needed
-    if(_gpu_metrics_needed || _basic_metrics_enabled)
+    if(result.has_value())
     {
-        gpu_metrics_t                   metrics;
-        bool                            has_data = false;
-        gpu::gpu_metrics_capabilities_t capabilities;
-
-        if(_gpu_metrics_needed)
-        {
-            capabilities.flags.vcn_is_device_level_only =
-                gpu::vcn_is_device_level_only(m_dev_id);
-            capabilities.flags.jpeg_is_device_level_only =
-                gpu::jpeg_is_device_level_only(m_dev_id);
-
-            // Helper lambda to filter max uint values (unsupported) - returns 0 if max,
-            // otherwise the value
-            auto filter_max_uint_value = [](const auto& value) {
-                using ValueType = std::decay_t<decltype(value)>;
-                return (value == std::numeric_limits<ValueType>::max()) ? ValueType{ 0 }
-                                                                        : value;
-            };
-
-            auto fill_gpu_metrics = [](auto& dest, const auto& src, auto max_val) {
-                for(const auto& val : src)
-                {
-                    if(val != max_val) dest.push_back(val);
-                }
-            };
-
-            if(get_settings(m_dev_id).vcn_activity)
-            {
-                if(capabilities.flags.vcn_is_device_level_only)
-                {
-                    fill_gpu_metrics(metrics.vcn_activity, _gpu_metrics.vcn_activity,
-                                     UINT16_MAX);
-                    if(!metrics.vcn_activity.empty()) has_data = true;
-                }
-                else
-                {
-                    for(const auto& xcp : _gpu_metrics.xcp_stats)
-                    {
-                        std::vector<uint16_t> xcp_vcn_data;
-                        fill_gpu_metrics(xcp_vcn_data, xcp.vcn_busy, UINT16_MAX);
-                        if(!xcp_vcn_data.empty())
-                        {
-                            metrics.vcn_busy.push_back(std::move(xcp_vcn_data));
-                            has_data = true;
-                        }
-                    }
-                }
-            }
-
-            if(get_settings(m_dev_id).jpeg_activity)
-            {
-                if(capabilities.flags.jpeg_is_device_level_only)
-                {
-                    fill_gpu_metrics(metrics.jpeg_activity, _gpu_metrics.jpeg_activity,
-                                     UINT16_MAX);
-                    if(!metrics.jpeg_activity.empty()) has_data = true;
-                }
-                else
-                {
-                    for(const auto& xcp : _gpu_metrics.xcp_stats)
-                    {
-                        std::vector<uint16_t> xcp_jpeg_data;
-                        fill_gpu_metrics(xcp_jpeg_data, xcp.jpeg_busy, UINT16_MAX);
-                        if(!xcp_jpeg_data.empty())
-                        {
-                            metrics.jpeg_busy.push_back(std::move(xcp_jpeg_data));
-                            has_data = true;
-                        }
-                    }
-                }
-            }
-
-            // Process XGMI metrics if enabled
-            if(get_settings(m_dev_id).xgmi)
-            {
-                // Filter scalar values - returns 0 if unsupported (max value)
-                metrics.xgmi_link_width =
-                    filter_max_uint_value(_gpu_metrics.xgmi_link_width);
-                metrics.xgmi_link_speed =
-                    filter_max_uint_value(_gpu_metrics.xgmi_link_speed);
-
-                // Vector values filtered by fill_gpu_metrics
-                fill_gpu_metrics(metrics.xgmi_read_data_acc,
-                                 _gpu_metrics.xgmi_read_data_acc, UINT64_MAX);
-                fill_gpu_metrics(metrics.xgmi_write_data_acc,
-                                 _gpu_metrics.xgmi_write_data_acc, UINT64_MAX);
-
-                if(metrics.xgmi_link_width != 0 || metrics.xgmi_link_speed != 0 ||
-                   !metrics.xgmi_read_data_acc.empty() ||
-                   !metrics.xgmi_write_data_acc.empty())
-                {
-                    has_data = true;
-                }
-            }
-
-            // Process PCIe metrics if enabled
-            if(get_settings(m_dev_id).pcie)
-            {
-                // Filter scalar values - returns 0 if unsupported (max value)
-                metrics.pcie_link_width =
-                    filter_max_uint_value(_gpu_metrics.pcie_link_width);
-                metrics.pcie_link_speed =
-                    filter_max_uint_value(_gpu_metrics.pcie_link_speed);
-                metrics.pcie_bandwidth_acc =
-                    filter_max_uint_value(_gpu_metrics.pcie_bandwidth_acc);
-                metrics.pcie_bandwidth_inst =
-                    filter_max_uint_value(_gpu_metrics.pcie_bandwidth_inst);
-
-                if(metrics.pcie_link_width != 0 || metrics.pcie_link_speed != 0 ||
-                   metrics.pcie_bandwidth_acc != 0 || metrics.pcie_bandwidth_inst != 0)
-                {
-                    has_data = true;
-                }
-            }
-        }
-
-        // Store samples if basic metrics are enabled OR if there's advanced metric data
-        if(_basic_metrics_enabled || has_data)
-        {
-            trace_cache::get_buffer_storage().store(trace_cache::amd_smi_sample{
-                serialize_settings(m_dev_id), _device_id, _timestamp,
-                m_busy_perc.gfx_activity, m_busy_perc.umc_activity,
-                m_busy_perc.mm_activity, m_power.current_socket_power, m_temp,
-                m_mem_usage, serialize_gpu_metrics(m_dev_id, metrics, capabilities) });
-
-            if(has_data) m_gpu_metrics.push_back(metrics);
-        }
+        // Copy results to this data object for backward compatibility
+        m_dev_id      = result->m_dev_id;
+        m_ts          = result->m_ts;
+        m_busy_perc   = result->m_busy_perc;
+        m_temp        = result->m_temp;
+        m_power       = result->m_power;
+        m_mem_usage   = result->m_mem_usage;
+        m_gpu_metrics = result->m_gpu_metrics;
     }
-#undef ROCPROFSYS_AMDSMI_GET
 }
 
 void
@@ -1222,7 +1029,7 @@ setup()
                 };
 
                 // Initialize all metrics to false
-                for(auto& it : supported)
+                for(const auto& it : supported)
                     it.second = false;
 
                 // Parse list of metrics enabled by the user

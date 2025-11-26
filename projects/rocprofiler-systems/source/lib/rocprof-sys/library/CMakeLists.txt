@@ -30,6 +30,19 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/tracing.hpp
 )
 
+# AMD SMI refactored components (for unit testability)
+set(amd_smi_headers
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/interfaces.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/metrics.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/driver_impl.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/sampler.hpp
+)
+
+set(amd_smi_sources
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/metrics.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/sampler.cpp
+)
+
 target_sources(
     rocprofiler-systems-object-library
     PRIVATE ${library_sources} ${library_headers}
@@ -42,6 +55,8 @@ if(ROCPROFSYS_USE_ROCM)
             ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
             ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
             ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
+            ${amd_smi_sources}
+            ${amd_smi_headers}
     )
     add_subdirectory(rocprofiler-sdk)
 endif()
@@ -56,6 +71,8 @@ set(ndebug_sources
     ${CMAKE_CURRENT_LIST_DIR}/components/backtrace_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/kokkosp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/metrics.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/sampler.cpp
 )
 
 set_source_files_properties(
