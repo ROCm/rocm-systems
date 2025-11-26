@@ -1809,7 +1809,7 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
             sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
             isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged |
                        MemoryRegion::AllocateQueueObject)
-                    : MemoryRegion::AllocateQueueObject,
+                    : (MemoryRegion::AllocateNonPaged | MemoryRegion::AllocateQueueObject),
             node_id()));
   }
 
