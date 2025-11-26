@@ -4,15 +4,19 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <unordered_map>
+#include <algorithm>
+
 #include "suites/functional/counted_queues.h"
 #include "hsa/hsa_ext_amd.h"
 #include "hsa/hsa.h"
 #include "common/base_rocr_utils.h"
 #include "gtest/gtest.h"
 #include "common/os.h"
-#include <thread>
-#include <mutex>
-#include <atomic>
+
 
 static bool VerifyResult(uint32_t* ar, size_t sz) {
   for (size_t i = 0; i < sz; ++i) {
@@ -34,19 +38,23 @@ CountedQueuesTest::CountedQueuesTest() : TestBase() {
 CountedQueuesTest::~CountedQueuesTest() {}
 
 void CountedQueuesTest::SetUp() {
-  // Set environment variable to limit max number of HW queues based on test case
+  const std::string kDefaultLimit = "2";
+  static const std::unordered_map<std::string, std::string> kQueueLimits = {
+      {"Counted_Queue_Multithreaded_Dispatch_Test", "1"},
+      {"Counted_Queue_Overflow_And_Wraparound_Test", "1"},
+      {"Counted_Queue_Same_Priority_Max_Limit_Test", "4"}};
+
   const ::testing::TestInfo* test_info = ::testing::UnitTest::GetInstance()->current_test_info();
   if (test_info) {
-    std::string test_name = test_info->name();
-    if (test_name == "Counted_Queue_Multithreaded_Dispatch_Test" ||
-        test_name == "Counted_Queue_Overflow_And_Wraparound_Test") {
-      // This test will try to create 1 CP queue with multiple threads
-      // All of the user apps will share the same queue
-      rocrtst::SetEnv("GPU_MAX_HW_QUEUES", "1");
-    } else {
-      rocrtst::SetEnv("GPU_MAX_HW_QUEUES", "2");
-    }
+    const std::string test_name = test_info->name();
+
+    // Find the current test's required limit from map and set the env var
+    // Set default HW queue limit if not found in map 
+    auto it = kQueueLimits.find(test_name);
+    const std::string& limit = (it != kQueueLimits.end()) ? it->second : kDefaultLimit;
+    rocrtst::SetEnv("GPU_MAX_HW_QUEUES", limit.c_str());
   }
+
   TestBase::SetUp();
 }
 
@@ -103,75 +111,75 @@ void CountedQueuesTest::CountedQueueBasicApiTest() {
 void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
   hsa_status_t status;
 
-  // Find all gpu agents
+  // Find all GPU agents
   std::vector<hsa_agent_t> gpus;
   ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  ASSERT_FALSE(gpus.empty());
 
-  hsa_queue_t *q1 = nullptr, *q2 = nullptr, *q3 = nullptr, *q4 = nullptr;
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
-      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &q1));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
-      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &q2));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
-      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &q3));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(
-      gpus[0], HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0, &q4));
+  const int NUM_QUEUES = 50;
+  const int MAX_HW_QUEUES = std::stoi(rocrtst::GetEnv("GPU_MAX_HW_QUEUES"));
 
-  // Get HW queue ids of all queues
-  uint32_t hwid1 = 0, hwid2 = 0, hwid3 = 0, hwid4 = 0;
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(q1, HSA_QUEUE_INFO_HW_ID, &hwid1));
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(q3, HSA_QUEUE_INFO_HW_ID, &hwid3));
+  std::vector<hsa_queue_t*> queues(NUM_QUEUES, nullptr);
+  std::vector<uint32_t> hw_ids(NUM_QUEUES, 0);
 
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(q2, HSA_QUEUE_INFO_HW_ID, &hwid2));
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(q4, HSA_QUEUE_INFO_HW_ID, &hwid4));
+  // Acquire NUM_QUEUES counted queues
+  for (int i = 0; i < NUM_QUEUES; i++) {
+    ASSERT_SUCCESS(hsa_amd_counted_queue_acquire(gpus[0], HSA_QUEUE_TYPE_MULTI,
+                                                 HSA_AMD_QUEUE_PRIORITY_LOW, nullptr, nullptr, 0,
+                                                 &queues[i]));
+    ASSERT_NE(queues[i], nullptr);
+  }
 
-  // Third queue should reuse first HW queue
-  EXPECT_EQ(hwid1, hwid3);
-  EXPECT_NE(q1, q3);  // unique handles for the same HW queue
+  // Query HW IDs
+  for (int i = 0; i < NUM_QUEUES; i++) {
+    ASSERT_SUCCESS(hsa_amd_queue_get_info(queues[i], HSA_QUEUE_INFO_HW_ID, &hw_ids[i]));
+  }
 
-  // Fourth queue should get 2nd HW queue (least used at this point)
-  EXPECT_EQ(hwid2, hwid4);
-  EXPECT_NE(q2, q4);
+  // Deduplicate HW IDs
+  std::sort(hw_ids.begin(), hw_ids.end());
+  auto it = std::unique(hw_ids.begin(), hw_ids.end());
+  hw_ids.resize(std::distance(hw_ids.begin(), it));
 
-  // Check how many times the first and second queues have been shared
-  uint32_t use_count1 = 0, use_count2 = 0;
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(q1, HSA_QUEUE_INFO_USE_COUNT, &use_count1));
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(q2, HSA_QUEUE_INFO_USE_COUNT, &use_count2));
+  // Ensure hardware queue count matches MAX_HW_QUEUES
+  ASSERT_EQ(hw_ids.size(), MAX_HW_QUEUES);
 
-  EXPECT_EQ(use_count1, 2);
-  EXPECT_EQ(use_count2, 2);
+  // Verify even distribution of logical queues over HW queues
+  // Map HW ID -> use count
+  std::unordered_map<uint32_t, uint32_t> use_counts;
 
-  // Release the third and fourth queues
-  ASSERT_SUCCESS(hsa_amd_counted_queue_release(q3));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_release(q4));
+  for (auto* q : queues) {
+    uint32_t hwid = 0, count = 0;
+    ASSERT_SUCCESS(hsa_amd_queue_get_info(q, HSA_QUEUE_INFO_HW_ID, &hwid));
+    ASSERT_SUCCESS(hsa_amd_queue_get_info(q, HSA_QUEUE_INFO_USE_COUNT, &count));
+    use_counts[hwid] = count;  // overwrites but counts are per-hw, same across queues
+  }
 
-  // Check the use counts and hwids of remaining queues; should be two different HW queues with ref
-  // counts of 1 for each
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(q1, HSA_QUEUE_INFO_USE_COUNT, &use_count1));
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(q2, HSA_QUEUE_INFO_USE_COUNT, &use_count2));
+  // Gather all use-counts for fairness check
+  std::vector<uint32_t> dist;
+  for (auto& kv : use_counts) {
+    dist.push_back(kv.second);
+  }
 
-  EXPECT_EQ(use_count1, 1);
-  EXPECT_EQ(use_count2, 1);
+  ASSERT_EQ(dist.size(), MAX_HW_QUEUES);
 
-  uint32_t id1 = 0, id2 = 0;
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(q1, HSA_QUEUE_INFO_HW_ID, &id1));
-  ASSERT_SUCCESS(hsa_amd_queue_get_info(q2, HSA_QUEUE_INFO_HW_ID, &id2));
-  EXPECT_NE(id1, id2);  // should be two different hw ids now
+  auto [min_it, max_it] = std::minmax_element(dist.begin(), dist.end());
+  uint32_t min_use = *min_it;
+  uint32_t max_use = *max_it;
 
-  // Release the two queues
-  ASSERT_SUCCESS(hsa_amd_counted_queue_release(q1));
-  ASSERT_SUCCESS(hsa_amd_counted_queue_release(q2));
+  // Fair distribution: difference should not exceed 1
+  EXPECT_LE(max_use - min_use, 1);
 
-  // Now all queues have been released; getting use count should return invalid arg error
-  int32_t c1 = UINT32_MAX, c2 = UINT32_MAX, c3 = UINT32_MAX, c4 = UINT32_MAX;
-  EXPECT_EQ(hsa_amd_queue_get_info(q1, HSA_QUEUE_INFO_USE_COUNT, &c1),
-            HSA_STATUS_ERROR_INVALID_ARGUMENT);
-  EXPECT_EQ(hsa_amd_queue_get_info(q2, HSA_QUEUE_INFO_USE_COUNT, &c2),
-            HSA_STATUS_ERROR_INVALID_ARGUMENT);
-  EXPECT_EQ(hsa_amd_queue_get_info(q3, HSA_QUEUE_INFO_USE_COUNT, &c3),
-            HSA_STATUS_ERROR_INVALID_ARGUMENT);
-  EXPECT_EQ(hsa_amd_queue_get_info(q4, HSA_QUEUE_INFO_USE_COUNT, &c4),
-            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  // Release queues
+  for (auto* q : queues) {
+    ASSERT_SUCCESS(hsa_amd_counted_queue_release(q));
+  }
+
+  // After release, querying use-count should return invalid argument
+  for (auto* q : queues) {
+    uint32_t tmp = 0;
+    EXPECT_EQ(hsa_amd_queue_get_info(q, HSA_QUEUE_INFO_USE_COUNT, &tmp),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  }
 }
 
 void CountedQueuesTest::InvalidArgsTest() {
@@ -376,8 +384,7 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
 
   // Allocate source buffer
   void* src_buffer = nullptr;
-  ASSERT_SUCCESS(
-      hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &src_buffer));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &src_buffer));
   ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, src_buffer));
 
   // Initialize source data
@@ -387,8 +394,7 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
 
   // Allocate destination buffer
   void* dst_buffer = nullptr;
-  ASSERT_SUCCESS(
-      hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &dst_buffer));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(cpu_pool(), 256 * sizeof(uint32_t), 0, &dst_buffer));
   ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, dst_buffer));
 
   // Create completion signal
@@ -449,8 +455,8 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
     uint64_t index = hsa_queue_add_write_index_relaxed(queue, 1);
 
     // Get pointer to the reserved packet slot
-    hsa_kernel_dispatch_packet_t* queue_aql_packet = &(
-        reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address))[index & queue_mask];
+    hsa_kernel_dispatch_packet_t* queue_aql_packet =
+        &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address))[index & queue_mask];
 
     // Fill packet fields
     queue_aql_packet->setup = 1;
@@ -478,7 +484,8 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
 
     // Wait for completion signal
     while (hsa_signal_wait_scacquire(completion_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                     HSA_WAIT_STATE_ACTIVE)) {}
+                                     HSA_WAIT_STATE_ACTIVE)) {
+    }
 
     // Reset signal for next iteration
     hsa_signal_store_screlease(completion_signal, 1);
