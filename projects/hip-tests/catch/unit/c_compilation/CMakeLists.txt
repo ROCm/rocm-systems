@@ -39,17 +39,17 @@ add_custom_target(devprop_c_custom
     BYPRODUCTS hipGetDeviceProp.o
 )
 
-#add_library(devprop_c OBJECT IMPORTED)
-#set_property(TARGET devprop_c PROPERTY IMPORTED_OBJECTS "${CMAKE_CURRENT_BINARY_DIR}/hipGetDeviceProp.o")
+add_library(devprop_c OBJECT IMPORTED)
+set_property(TARGET devprop_c PROPERTY IMPORTED_OBJECTS "${CMAKE_CURRENT_BINARY_DIR}/hipGetDeviceProp.o")
 
-#hip_add_exe_to_target(NAME CTests
-#                      TEST_SRC ${TEST_SRC}
-#                      TEST_TARGET_NAME build_tests
-#		      LINKER_LIBS ${LINKER_LIBS})
-#                      LINKER_LIBS devprop_c)
-#if (HIP_PLATFORM MATCHES "nvidia")
-#	set_target_properties(CTests PROPERTIES LINKER_LANGUAGE CUDA)
-#  target_link_libraries(CTests cuda)
-#endif()
+hip_add_exe_to_target(NAME CTests
+                      TEST_SRC ${TEST_SRC}
+		      TEST_TARGET_NAME build_tests
+		      #		      LINKER_LIBS ${LINKER_LIBS})
+	      	      LINKER_LIBS devprop_c)
+if (HIP_PLATFORM MATCHES "nvidia")
+	set_target_properties(CTests PROPERTIES LINKER_LANGUAGE CUDA)
+      	target_link_libraries(CTests cuda)
+endif()
 
-#add_dependencies(CTests devprop_c_custom)
+add_dependencies(CTests devprop_c_custom)

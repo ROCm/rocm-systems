@@ -21,9 +21,10 @@
 // SOFTWARE.
 
 #include "argparse.hpp"
+#include "common/environment.hpp"
 #include "common/join.hpp"
+#include "common/path.hpp"
 #include "config.hpp"
-#include "defines.hpp"
 #include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
@@ -39,8 +40,9 @@ namespace argparse
 namespace
 {
 namespace filepath   = ::tim::filepath;
+namespace path       = rocprofsys::common::path;
 using array_config_t = ::timemory::join::array_config;
-using ::tim::get_env;
+using rocprofsys::common::remove_env;
 using ::timemory::join::join;
 
 auto
@@ -77,12 +79,6 @@ get_clock_id_choices()
 #undef ROCPROFSYS_CLOCK_IDENTIFIER
 
     return std::make_pair(_choices, _aliases);
-}
-
-auto
-get_realpath(const std::string& _path)
-{
-    return filepath::realpath(_path, nullptr, false);
 }
 
 enum update_mode : int
@@ -152,54 +148,6 @@ update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
         strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
 }
 
-void
-remove_env(parser_data& _data, std::string_view _env_var)
-{
-    auto _key   = join("", _env_var, "=");
-    auto _match = [&_key](auto itr) { return std::string_view{ itr }.find(_key) == 0; };
-
-    auto& _environ = _data.current;
-    _environ.erase(std::remove_if(_environ.begin(), _environ.end(), _match),
-                   _environ.end());
-
-    auto& _initial = _data.initial;
-    for(const auto& itr : _initial)
-    {
-        if(std::string_view{ itr }.find(_key) == 0)
-            _environ.emplace_back(strdup(itr.c_str()));
-    }
-}
-
-std::string
-get_rocprofsys_root(void)
-{
-    char*       _tmp = realpath("/proc/self/exe", nullptr);
-    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
-
-    if(_tmp) free(_tmp);
-
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-
-    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
-
-    return rocprofsys::common::join("/", _dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
-}
-
 }  // namespace
 
 bool
@@ -245,13 +193,15 @@ init_parser(parser_data& _data)
         }
     }
 
-    _data.dl_libpath = get_realpath(get_internal_libpath("librocprof-sys-dl.so").c_str());
-    _data.omni_libpath = get_realpath(get_internal_libpath("librocprof-sys.so").c_str());
+    _data.dl_libpath =
+        path::realpath(path::get_internal_libpath("librocprof-sys-dl.so").c_str());
+    _data.omni_libpath =
+        path::realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
 
-    auto _libexecpath = get_realpath(get_internal_script_path());
+    auto _libexecpath = path::realpath(path::get_internal_script_path());
     update_env(_data, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
 
-    auto _rootpath = get_realpath(get_rocprofsys_root());
+    auto _rootpath = path::realpath(path::get_rocprofsys_root());
     update_env(_data, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
 
     return _data;
@@ -663,7 +613,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                    remove_env(_data, "KOKKOS_TOOLS_LIBS");
+                    remove_env(_data.current, "KOKKOS_TOOLS_LIBS", _data.initial);
             });
 
         _data.processed_environs.emplace("exclude");

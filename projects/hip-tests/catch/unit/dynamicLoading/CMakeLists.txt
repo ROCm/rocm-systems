@@ -61,7 +61,6 @@ if(UNIX AND BUILD_SHARED_LIBS)
                         TEST_TARGET_NAME build_tests
                         LINKER_LIBS ${CMAKE_DL_LIBS})
   endif()
-  #add_dependencies(build_tests bit_extract_kernel.code libLazyLoad.so vecadd.cc)
 endif()
 if (HIP_PLATFORM MATCHES "nvidia")
   set_target_properties(dynamicLoading PROPERTIES LINKER_LANGUAGE CUDA)

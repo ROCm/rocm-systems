@@ -98,12 +98,21 @@ function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
   endforeach()   # OFFLOAD_ARCH_LIST
 endfunction()  # CheckAcceptedArchs
 
+if (HIP_PLATFORM MATCHES "amd")
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    -o tex_ref_get_module.code
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
+else()
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                   -x cu ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
+                   -I${HIP_INCLUDE_DIR} 
+                   -o tex_ref_get_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
+endif()
 add_custom_target(tex_ref_get_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
 
@@ -160,4 +169,4 @@ if (HIP_PLATFORM MATCHES "nvidia")
   target_link_libraries(TextureTest cuda)
 endif()
 
-#add_dependencies(TextureTest tex_ref_get_module)
+add_dependencies(TextureTest tex_ref_get_module)

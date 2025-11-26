@@ -101,7 +101,7 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
     ],  # Unsupported:
 }
 
-PEAK_OPS_DATATYPES = ["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"]
+PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]
 MFMA_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
 CACHE_HIERARCHY = ["HBM", "L2", "L1", "LDS"]
 
@@ -412,13 +412,13 @@ def calc_ai_analyze(
                 metric = row.get("Metric", "")
                 value = row.get("Value", 0)
                 if metric == "AI HBM":
-                    ai_hbm = value if value and value != "" else 0
+                    ai_hbm = value if value and value not in ("", "N/A") else 0
                 elif metric == "AI L2":
-                    ai_l2 = value if value and value != "" else 0
+                    ai_l2 = value if value and value not in ("", "N/A") else 0
                 elif metric == "AI L1":
-                    ai_l1 = value if value and value != "" else 0
+                    ai_l1 = value if value and value not in ("", "N/A") else 0
                 elif metric == "Performance (GFLOPs)":
-                    performance = value if value and value != "" else 0
+                    performance = value if value and value not in ("", "N/A") else 0
 
         console_debug(
             "roofline",

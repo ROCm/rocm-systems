@@ -85,6 +85,7 @@ set(AMD_TEST_SRC
     AtomicsWithRandomActiveLanesInWavefront.cc
     fp16_ops.cc
     fp8_host.cc
+    #fp8_e8m0.cc
     fp6_ocp.cc
     fp4_ocp.cc
 )
@@ -131,7 +132,7 @@ if (0)
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevWriteMultCO.code
                   -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  add_custom_target(kerDevFreeMultCO.code
+add_custom_target(kerDevFreeMultCO.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevFreeMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevFreeMultCO.code

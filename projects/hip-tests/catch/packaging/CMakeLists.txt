@@ -114,21 +114,18 @@ if(NOT WIN32)
   endif()
 
   execute_process( COMMAND rpm --eval %{?dist}
-                 RESULT_VARIABLE PROC_RESULT
-                 OUTPUT_VARIABLE EVAL_RESULT
-                 OUTPUT_STRIP_TRAILING_WHITESPACE )
+                  RESULT_VARIABLE PROC_RESULT
+                  OUTPUT_VARIABLE EVAL_RESULT
+                  OUTPUT_STRIP_TRAILING_WHITESPACE )
   # Add os distribution tag to rpm package name . For deb package its set from build env
   if ( PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "" )
     string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
   endif()
-
   set(CPACK_SOURCE_GENERATOR "TGZ")
   # Install license file
-
   set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/../LICENSE.md" )
   install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${INSTALL_DIR})
   set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-
 else()
   # windows packaging
   set(INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
@@ -138,8 +135,13 @@ else()
   set(CPACK_TEST_ZIP "ON")
   set(CPACK_ZIP_TEST_PACKAGE_NAME "catch")
   set(CPACK_PKG_DIRS
-    ${CMAKE_BINARY_DIR}/_CPack_Packages/${CPACK_GENERATOR}/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME})
-  #set(INSTALL_DIR ${CPACK_PKG_DIRS})
+      ${CMAKE_BINARY_DIR}/_CPack_Packages/${CPACK_GENERATOR}/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME})
+  set(CPACK_INSTALL_PREFIX ${CPACK_PKG_DIRS})
+  if(${CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT})
+    set(INSTALL_DIR ${CPACK_PKG_DIRS})
+  else()
+    set(INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
+  endif()
 endif()
 
 set(INSTALL_DIR_TESTS ${INSTALL_DIR}/${CATCH_BUILD_DIR})
@@ -193,7 +195,7 @@ install(DIRECTORY
         DESTINATION ${INSTALL_DIR_TESTS})
 # workaround to make the built test binaries portable
 # CPACK_GENERATOR executes this packaging/CMakeLists.txt multiple times
-# there is no way to check which generator is being used.
+# there is no way to check which generator is being used. 
 # So had to be written in a config file for each generator to replace and execute
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/catch_package.cmake.in
                ${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake @ONLY)
