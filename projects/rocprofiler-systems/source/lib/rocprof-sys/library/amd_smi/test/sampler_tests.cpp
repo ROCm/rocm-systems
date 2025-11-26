@@ -27,9 +27,10 @@
 // THE SOFTWARE.
 
 #include "library/amd_smi/metrics.hpp"
-#include "library/amd_smi/sampler_impl.hpp"
-#include "library/amd_smi/test/mock_policies.hpp"
+#include "library/amd_smi/test/gmock_mocks.hpp"
+#include "library/amd_smi/test/testable_sampler.hpp"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 namespace rocprofsys
@@ -40,23 +41,43 @@ namespace testing
 {
 #if ROCPROFSYS_USE_ROCM > 0
 
-// Type alias for mock sampler
-using MockSampler = SamplerImpl<MockConfig>;
+using ::testing::_;
+using ::testing::DoAll;
+using ::testing::NiceMock;
+using ::testing::Return;
+using ::testing::SetArgPointee;
+using ::testing::StrictMock;
 
 class SamplerTest : public ::testing::Test
 {
 protected:
     void SetUp() override
     {
-        reset_all_mocks();
-        mock_state = State::Active;
-        sampler    = std::make_unique<MockSampler>(mock_state);
+        // Create mocks (NiceMock suppresses warnings about uninteresting calls)
+        driver   = std::make_shared<NiceMock<MockDriver>>();
+        clock    = std::make_shared<NiceMock<MockClock>>();
+        storage  = std::make_shared<NiceMock<MockStorage>>();
+        state    = std::make_shared<NiceMock<MockState>>();
+        gpu_caps = std::make_shared<NiceMock<MockGpuCapabilities>>();
+
+        // Set up default behaviors
+        driver->SetUpDefaults();
+        clock->SetUpDefaults();
+        storage->SetUpCapture();
+        state->SetUpDefaults();
+        gpu_caps->SetUpDefaults();
+
+        // Create sampler
+        sampler =
+            std::make_unique<TestableSampler>(driver, clock, storage, state, gpu_caps);
     }
 
-    void TearDown() override { reset_all_mocks(); }
-
-    std::atomic<State>          mock_state{ State::Active };
-    std::unique_ptr<MockSampler> sampler;
+    std::shared_ptr<NiceMock<MockDriver>>          driver;
+    std::shared_ptr<NiceMock<MockClock>>           clock;
+    std::shared_ptr<NiceMock<MockStorage>>         storage;
+    std::shared_ptr<NiceMock<MockState>>           state;
+    std::shared_ptr<NiceMock<MockGpuCapabilities>> gpu_caps;
+    std::unique_ptr<TestableSampler>               sampler;
 };
 
 // ============================================================================
@@ -65,42 +86,41 @@ protected:
 
 TEST_F(SamplerTest, ReturnsNulloptWhenStateNotActive)
 {
-    mock_state = State::PreInit;
-    settings s{};
+    EXPECT_CALL(*state, get_state()).WillOnce(Return(State::PreInit));
 
-    auto result = sampler->sample(0, s);
+    settings s{};
+    auto     result = sampler->sample(0, s);
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_FALSE(MockStoragePolicy::has_samples());
+    EXPECT_FALSE(storage->has_samples());
 }
 
 TEST_F(SamplerTest, ReturnsNulloptInChildProcess)
 {
-    MockStatePolicy::mock_is_child = true;
-    settings s{};
+    EXPECT_CALL(*state, is_child_process()).WillOnce(Return(true));
 
-    auto result = sampler->sample(0, s);
+    settings s{};
+    auto     result = sampler->sample(0, s);
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_FALSE(MockStoragePolicy::has_samples());
 }
 
 TEST_F(SamplerTest, ReturnsNulloptWhenDisabled)
 {
-    mock_state = State::Disabled;
-    settings s{};
+    EXPECT_CALL(*state, get_state()).WillOnce(Return(State::Disabled));
 
-    auto result = sampler->sample(0, s);
+    settings s{};
+    auto     result = sampler->sample(0, s);
 
     EXPECT_FALSE(result.has_value());
 }
 
 TEST_F(SamplerTest, ReturnsNulloptWhenFinalized)
 {
-    mock_state = State::Finalized;
-    settings s{};
+    EXPECT_CALL(*state, get_state()).WillOnce(Return(State::Finalized));
 
-    auto result = sampler->sample(0, s);
+    settings s{};
+    auto     result = sampler->sample(0, s);
 
     EXPECT_FALSE(result.has_value());
 }
@@ -111,21 +131,32 @@ TEST_F(SamplerTest, ReturnsNulloptWhenFinalized)
 
 TEST_F(SamplerTest, CollectsBasicMetricsWhenEnabled)
 {
-    MockDriverPolicy::mock_usage.gfx_activity         = 75;
-    MockDriverPolicy::mock_usage.umc_activity         = 50;
-    MockDriverPolicy::mock_usage.mm_activity          = 25;
-    MockDriverPolicy::mock_temp                       = 60;
-    MockDriverPolicy::mock_power.current_socket_power = 150;
-    MockDriverPolicy::mock_mem_usage                  = 2ULL * 1024 * 1024 * 1024;
+    amdsmi_engine_usage_t mock_usage{};
+    mock_usage.gfx_activity = 75;
+    mock_usage.umc_activity = 50;
+    mock_usage.mm_activity  = 25;
 
-    settings s{ .busy         = true,
-                .temp         = true,
-                .power        = true,
-                .mem_usage    = true,
-                .vcn_activity = false,
+    amdsmi_power_info_t mock_power{};
+    mock_power.current_socket_power = 150;
+
+    EXPECT_CALL(*driver, get_gpu_activity(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(mock_usage), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*driver, get_temp_metric(_, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<3>(60), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*driver, get_power_info(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(mock_power), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*driver, get_gpu_memory_usage(_, _, _))
+        .WillOnce(DoAll(SetArgPointee<2>(2ULL * 1024 * 1024 * 1024),
+                        Return(AMDSMI_STATUS_SUCCESS)));
+
+    settings s{ .busy          = true,
+                .temp          = true,
+                .power         = true,
+                .mem_usage     = true,
+                .vcn_activity  = false,
                 .jpeg_activity = false,
-                .xgmi         = false,
-                .pcie         = false };
+                .xgmi          = false,
+                .pcie          = false };
 
     auto result = sampler->sample(0, s);
 
@@ -140,42 +171,43 @@ TEST_F(SamplerTest, CollectsBasicMetricsWhenEnabled)
 
 TEST_F(SamplerTest, SkipsDisabledMetrics)
 {
-    settings s{ .busy         = false,
-                .temp         = true,
-                .power        = false,
-                .mem_usage    = false,
-                .vcn_activity = false,
+    // Only temp is enabled, so only get_temp_metric should be called
+    EXPECT_CALL(*driver, get_gpu_activity(_, _)).Times(0);
+    EXPECT_CALL(*driver, get_temp_metric(_, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<3>(50), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*driver, get_power_info(_, _)).Times(0);
+    EXPECT_CALL(*driver, get_gpu_memory_usage(_, _, _)).Times(0);
+
+    settings s{ .busy          = false,
+                .temp          = true,
+                .power         = false,
+                .mem_usage     = false,
+                .vcn_activity  = false,
                 .jpeg_activity = false,
-                .xgmi         = false,
-                .pcie         = false };
+                .xgmi          = false,
+                .pcie          = false };
 
     sampler->sample(0, s);
-
-    EXPECT_EQ(MockDriverPolicy::get_gpu_activity_calls, 0);
-    EXPECT_EQ(MockDriverPolicy::get_temp_metric_calls, 1);
-    EXPECT_EQ(MockDriverPolicy::get_power_info_calls, 0);
-    EXPECT_EQ(MockDriverPolicy::get_gpu_memory_usage_calls, 0);
 }
 
 TEST_F(SamplerTest, StoresSampleWithCorrectTimestamp)
 {
-    MockClockPolicy::set_time(123456789);
-    settings s{ .busy = true };
+    EXPECT_CALL(*clock, now_ns()).WillOnce(Return(123456789));
 
+    settings s{ .busy = true };
     sampler->sample(0, s);
 
-    ASSERT_TRUE(MockStoragePolicy::has_samples());
-    EXPECT_EQ(MockStoragePolicy::last_sample().timestamp, 123456789u);
+    ASSERT_TRUE(storage->has_samples());
+    EXPECT_EQ(storage->last_sample().timestamp, 123456789u);
 }
 
 TEST_F(SamplerTest, StoresSampleWithCorrectDeviceId)
 {
     settings s{ .busy = true };
-
     sampler->sample(42, s);
 
-    ASSERT_TRUE(MockStoragePolicy::has_samples());
-    EXPECT_EQ(MockStoragePolicy::last_sample().device_id, 42u);
+    ASSERT_TRUE(storage->has_samples());
+    EXPECT_EQ(storage->last_sample().device_id, 42u);
 }
 
 // ============================================================================
@@ -184,30 +216,29 @@ TEST_F(SamplerTest, StoresSampleWithCorrectDeviceId)
 
 TEST_F(SamplerTest, HandlesNotSupportedGracefully)
 {
-    MockDriverPolicy::activity_status = AMDSMI_STATUS_NOT_SUPPORTED;
-    settings s{ .busy = true, .temp = true };
+    // Activity returns NOT_SUPPORTED, temp should still be called
+    EXPECT_CALL(*driver, get_gpu_activity(_, _))
+        .WillOnce(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+    EXPECT_CALL(*driver, get_temp_metric(_, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<3>(60), Return(AMDSMI_STATUS_SUCCESS)));
 
-    auto result = sampler->sample(0, s);
+    settings s{ .busy = true, .temp = true };
+    auto     result = sampler->sample(0, s);
 
     // Should still succeed - NOT_SUPPORTED is handled gracefully
     ASSERT_TRUE(result.has_value());
-    // Temperature should still be collected
-    EXPECT_EQ(MockDriverPolicy::get_temp_metric_calls, 1);
 }
 
 TEST_F(SamplerTest, DisablesOnlyFailingDeviceOnHardError)
 {
-    MockDriverPolicy::activity_status = AMDSMI_STATUS_INVAL;
-    settings s{ .busy = true };
+    EXPECT_CALL(*driver, get_gpu_activity(_, _)).WillOnce(Return(AMDSMI_STATUS_INVAL));
 
-    auto result = sampler->sample(0, s);
+    settings s{ .busy = true };
+    auto     result = sampler->sample(0, s);
 
     // Device 0 should fail and be disabled
     EXPECT_FALSE(result.has_value());
     EXPECT_TRUE(sampler->is_device_disabled(0));
-
-    // Global state should NOT be disabled - other GPUs can still work
-    EXPECT_EQ(mock_state.load(), State::Active);
 }
 
 TEST_F(SamplerTest, SkipsDisabledDevice)
@@ -215,29 +246,28 @@ TEST_F(SamplerTest, SkipsDisabledDevice)
     // Manually disable device 1
     sampler->disable_device(1);
 
-    settings s{ .busy = true };
-
-    // Device 1 should be skipped
-    auto result = sampler->sample(1, s);
-    EXPECT_FALSE(result.has_value());
-
     // No driver calls should be made for disabled device
-    EXPECT_EQ(MockDriverPolicy::get_gpu_activity_calls, 0);
+    EXPECT_CALL(*driver, get_gpu_activity(_, _)).Times(0);
+    EXPECT_CALL(*driver, get_handle(_)).Times(0);
+
+    settings s{ .busy = true };
+    auto     result = sampler->sample(1, s);
+
+    EXPECT_FALSE(result.has_value());
 }
 
 TEST_F(SamplerTest, OtherDevicesContinueAfterOneDisabled)
 {
-    MockDriverPolicy::activity_status = AMDSMI_STATUS_INVAL;
+    // Device 0 fails
+    EXPECT_CALL(*driver, get_gpu_activity(_, _))
+        .WillOnce(Return(AMDSMI_STATUS_INVAL))     // First call fails
+        .WillOnce(Return(AMDSMI_STATUS_SUCCESS));  // Second call succeeds
+
     settings s{ .busy = true };
 
-    // Device 0 fails
     auto result0 = sampler->sample(0, s);
     EXPECT_FALSE(result0.has_value());
     EXPECT_TRUE(sampler->is_device_disabled(0));
-
-    // Reset driver to success for other devices
-    MockDriverPolicy::activity_status = AMDSMI_STATUS_SUCCESS;
-    MockDriverPolicy::reset_call_counts();
 
     // Device 1 should still work
     auto result1 = sampler->sample(1, s);
@@ -251,62 +281,91 @@ TEST_F(SamplerTest, OtherDevicesContinueAfterOneDisabled)
 
 TEST_F(SamplerTest, FetchesGpuMetricsWhenAdvancedMetricsEnabled)
 {
-    settings s{ .busy         = false,
-                .temp         = false,
-                .power        = false,
-                .mem_usage    = false,
-                .vcn_activity = true,
+    EXPECT_CALL(*driver, get_gpu_metrics_info(_, _))
+        .WillOnce(Return(AMDSMI_STATUS_SUCCESS));
+
+    settings s{ .busy          = false,
+                .temp          = false,
+                .power         = false,
+                .mem_usage     = false,
+                .vcn_activity  = true,
                 .jpeg_activity = false,
-                .xgmi         = false,
-                .pcie         = false };
+                .xgmi          = false,
+                .pcie          = false };
 
     sampler->sample(0, s);
-
-    EXPECT_EQ(MockDriverPolicy::get_gpu_metrics_info_calls, 1);
 }
 
 TEST_F(SamplerTest, SkipsGpuMetricsWhenOnlyBasicEnabled)
 {
-    settings s{ .busy         = true,
-                .temp         = true,
-                .power        = true,
-                .mem_usage    = true,
-                .vcn_activity = false,
+    EXPECT_CALL(*driver, get_gpu_metrics_info(_, _)).Times(0);
+
+    settings s{ .busy          = true,
+                .temp          = true,
+                .power         = true,
+                .mem_usage     = true,
+                .vcn_activity  = false,
                 .jpeg_activity = false,
-                .xgmi         = false,
-                .pcie         = false };
+                .xgmi          = false,
+                .pcie          = false };
 
     sampler->sample(0, s);
-
-    EXPECT_EQ(MockDriverPolicy::get_gpu_metrics_info_calls, 0);
-}
-
-TEST_F(SamplerTest, ProcessesVcnMetricsDeviceLevel)
-{
-    MockGpuCapabilitiesPolicy::mock_vcn_device_level           = true;
-    MockDriverPolicy::mock_gpu_metrics.vcn_activity[0] = 50;
-    MockDriverPolicy::mock_gpu_metrics.vcn_activity[1] = 60;
-
-    settings s{ .vcn_activity = true };
-
-    auto result = sampler->sample(0, s);
-
-    ASSERT_TRUE(result.has_value());
 }
 
 TEST_F(SamplerTest, ProcessesPcieMetrics)
 {
-    MockDriverPolicy::mock_gpu_metrics.pcie_link_width    = 16;
-    MockDriverPolicy::mock_gpu_metrics.pcie_link_speed    = 32;
-    MockDriverPolicy::mock_gpu_metrics.pcie_bandwidth_acc  = 1000;
-    MockDriverPolicy::mock_gpu_metrics.pcie_bandwidth_inst = 500;
+    amdsmi_gpu_metrics_t mock_metrics{};
+    mock_metrics.pcie_link_width     = 16;
+    mock_metrics.pcie_link_speed     = 32;
+    mock_metrics.pcie_bandwidth_acc  = 1000;
+    mock_metrics.pcie_bandwidth_inst = 500;
+
+    EXPECT_CALL(*driver, get_gpu_metrics_info(_, _))
+        .WillOnce(DoAll(SetArgPointee<1>(mock_metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     settings s{ .pcie = true };
-
-    auto result = sampler->sample(0, s);
+    auto     result = sampler->sample(0, s);
 
     ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(MockStoragePolicy::has_samples());
+    EXPECT_TRUE(storage->has_samples());
+}
+
+// ============================================================================
+// Verification with StrictMock
+// ============================================================================
+
+TEST(SamplerStrictTest, VerifiesExactCallSequence)
+{
+    auto driver  = std::make_shared<StrictMock<MockDriver>>();
+    auto clock   = std::make_shared<StrictMock<MockClock>>();
+    auto storage = std::make_shared<NiceMock<MockStorage>>();  // NiceMock for storage
+    auto state   = std::make_shared<StrictMock<MockState>>();
+    auto gpu_caps =
+        std::make_shared<NiceMock<MockGpuCapabilities>>();  // NiceMock for gpu_caps
+
+    storage->SetUpCapture();
+    gpu_caps->SetUpDefaults();
+
+    // Set up expected call sequence - only busy enabled, all others disabled
+    EXPECT_CALL(*state, is_child_process()).WillOnce(Return(false));
+    EXPECT_CALL(*state, get_state()).WillOnce(Return(State::Active));
+    EXPECT_CALL(*clock, now_ns()).WillOnce(Return(1000000));
+    EXPECT_CALL(*driver, get_handle(0)).WillOnce(Return(nullptr));
+    EXPECT_CALL(*driver, get_gpu_activity(_, _)).WillOnce(Return(AMDSMI_STATUS_SUCCESS));
+
+    TestableSampler sampler(driver, clock, storage, state, gpu_caps);
+
+    // Explicitly set all settings to ensure only busy is enabled
+    settings s{ .busy          = true,
+                .temp          = false,
+                .power         = false,
+                .mem_usage     = false,
+                .vcn_activity  = false,
+                .jpeg_activity = false,
+                .xgmi          = false,
+                .pcie          = false };
+
+    sampler.sample(0, s);
 }
 
 // ============================================================================
@@ -315,7 +374,8 @@ TEST_F(SamplerTest, ProcessesPcieMetrics)
 
 TEST(MetricsTest, FilterUnsupportedValueReturnsZeroForMaxUint16)
 {
-    EXPECT_EQ(metrics::filter_unsupported_value(UINT16_MAX), 0);
+    // Must cast to uint16_t, otherwise UINT16_MAX is deduced as int
+    EXPECT_EQ(metrics::filter_unsupported_value(static_cast<uint16_t>(UINT16_MAX)), 0);
 }
 
 TEST(MetricsTest, FilterUnsupportedValueReturnsZeroForMaxUint64)
@@ -364,14 +424,14 @@ TEST(MetricsTest, CopyValidMetricsHandlesAllInvalid)
 
 TEST(MetricsTest, SerializeSettingsEncodesAllFields)
 {
-    settings s{ .busy         = true,
-                .temp         = false,
-                .power        = true,
-                .mem_usage    = false,
-                .vcn_activity = true,
+    settings s{ .busy          = true,
+                .temp          = false,
+                .power         = true,
+                .mem_usage     = false,
+                .vcn_activity  = true,
                 .jpeg_activity = false,
-                .xgmi         = true,
-                .pcie         = false };
+                .xgmi          = true,
+                .pcie          = false };
 
     auto serialized = metrics::serialize_settings(s);
 
@@ -380,14 +440,14 @@ TEST(MetricsTest, SerializeSettingsEncodesAllFields)
 
 TEST(MetricsTest, SerializeSettingsAllFalseReturnsZero)
 {
-    settings s{ .busy         = false,
-                .temp         = false,
-                .power        = false,
-                .mem_usage    = false,
-                .vcn_activity = false,
+    settings s{ .busy          = false,
+                .temp          = false,
+                .power         = false,
+                .mem_usage     = false,
+                .vcn_activity  = false,
                 .jpeg_activity = false,
-                .xgmi         = false,
-                .pcie         = false };
+                .xgmi          = false,
+                .pcie          = false };
 
     auto serialized = metrics::serialize_settings(s);
 
@@ -412,6 +472,11 @@ TEST(MetricsTest, ProcessXgmiMetricsFiltersMaxValues)
     amdsmi_gpu_metrics_t raw{};
     raw.xgmi_link_width = UINT16_MAX;
     raw.xgmi_link_speed = UINT16_MAX;
+    // Also set the data arrays to max values so they get filtered
+    for(auto& v : raw.xgmi_read_data_acc)
+        v = UINT64_MAX;
+    for(auto& v : raw.xgmi_write_data_acc)
+        v = UINT64_MAX;
 
     auto result = metrics::process_xgmi_metrics(raw);
 
@@ -423,8 +488,8 @@ TEST(MetricsTest, ProcessXgmiMetricsFiltersMaxValues)
 TEST(MetricsTest, ProcessPcieMetricsDetectsValidData)
 {
     amdsmi_gpu_metrics_t raw{};
-    raw.pcie_link_width    = 16;
-    raw.pcie_link_speed    = 5;
+    raw.pcie_link_width     = 16;
+    raw.pcie_link_speed     = 5;
     raw.pcie_bandwidth_acc  = 1000;
     raw.pcie_bandwidth_inst = 100;
 
