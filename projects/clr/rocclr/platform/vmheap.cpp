@@ -51,7 +51,7 @@ bool VmHeap::ReleaseAddressRange(void* addr) {
 // ================================================================================================
 bool VmHeap::CommitMemory(void* addr, size_t size) {
   const auto& dev_info = device_->info();
-  size_t granularity = dev_info.virtualMemAllocGranularity_;
+  size_t granularity = dev_info.virtualMemAllocGranularityRecommended_;
   auto padded_size = alignUp(size, granularity);
 
   // Allocate physical memory

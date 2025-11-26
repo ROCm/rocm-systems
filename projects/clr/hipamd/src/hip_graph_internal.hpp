@@ -719,10 +719,10 @@ class Graph {
     void* ptr;
     const auto& dev_info = g_devices[0]->devices()[0]->info();
 
-    size = amd::alignUp(size, dev_info.virtualMemAllocGranularity_);
+    size = amd::alignUp(size, dev_info.virtualMemAllocGranularityRecommended_);
     // Single virtual alloc would reserve for all devices.
     ptr = g_devices[0]->devices()[0]->virtualAlloc(startAddress, size,
-                                                   dev_info.virtualMemAllocGranularity_);
+                                                   dev_info.virtualMemAllocGranularityRecommended_);
     if (ptr == nullptr) {
       LogError("Failed to reserve Virtual Address");
     }
@@ -2412,7 +2412,7 @@ class GraphMemAllocNode final : public GraphNode {
       }
       // Allocate real memory for mapping
       const auto& dev_info = queue()->device().info();
-      auto aligned_size = amd::alignUp(size_, dev_info.virtualMemAllocGranularity_);
+      auto aligned_size = amd::alignUp(size_, dev_info.virtualMemAllocGranularityRecommended_);
       auto dptr = graph_->AllocateMemory(aligned_size, static_cast<hip::Stream*>(queue()), nullptr);
       if (dptr == nullptr) {
         setStatus(CL_INVALID_OPERATION);
@@ -2609,7 +2609,7 @@ class GraphMemFreeNode : public GraphNode {
         // Unmap virtual address from memory
         amd::Command* cmd = new VirtualMemFreeNode(
             graph, stream->DeviceId(), *stream, amd::Command::EventWaitList{}, device_ptr_,
-            amd::alignUp(va->getSize(), dev_info.virtualMemAllocGranularity_), nullptr);
+            amd::alignUp(va->getSize(), dev_info.virtualMemAllocGranularityRecommended_), nullptr);
         commands_.push_back(cmd);
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph FreeMem create: %p", device_ptr_);
       }
