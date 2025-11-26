@@ -4,6 +4,16 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
+## rocm_smi_lib for ROCm 7.2.0
+
+### Added
+
+- **Added runtime power management detection and device wake support**.  
+  - Implemented DRM ioctl-based device wake mechanism to handle GPUs in BACO state.
+  - Added `check_runtime_pm_status()` to detect runtime PM suspended devices.
+  - Added `wake_device()` to wake devices using DRM ioctl.
+  - Modified frequency and power tests to automatically wake suspended devices before reading sysfs files to prevent test failures caused by reading from devices in low-power states.
+
 ## rocm_smi_lib for ROCm 7.0.0
 
 ### Added

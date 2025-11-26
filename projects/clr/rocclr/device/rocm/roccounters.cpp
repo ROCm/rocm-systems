@@ -579,7 +579,7 @@ hsa_ext_amd_aql_pm4_packet_t* PerfCounterProfile::createStartPacket() {
 
   // set up the profile aql packets for capturing performance counter
   if (api_.hsa_ven_amd_aqlprofile_start(&profile_, &prePacket_) != HSA_STATUS_SUCCESS) {
-    DevLogError("Cannot Start AQL Profile \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL, "Cannot Start AQL Profile \n");
     return nullptr;
   }
 
@@ -593,7 +593,7 @@ hsa_ext_amd_aql_pm4_packet_t* PerfCounterProfile::createStopPacket() {
   // set up the profile aql packets for post-capturing performance counter
   // and create the completion signal
   if (api_.hsa_ven_amd_aqlprofile_stop(&profile_, &postPacket_) != HSA_STATUS_SUCCESS) {
-    DevLogError("Cannot Stop AQL Profile \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL, "Cannot Stop AQL Profile \n");
     return nullptr;
   }
 
