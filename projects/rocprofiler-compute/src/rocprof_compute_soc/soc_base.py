@@ -200,7 +200,6 @@ class OmniSoC_Base:
         with amdsmi_ctx():
             gpu_model = "N/A"
             for model in mi_gpu_specs.get_all_gpu_models():
-                print("amdsmi get_gpu_model")
                 for amdsmi_gpu_model in get_gpu_model():
                     if model.lower() in amdsmi_gpu_model.lower():
                         gpu_model = model
