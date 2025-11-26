@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - develop
-      - release/therock-*
   pull_request:
     types:
       - opened
