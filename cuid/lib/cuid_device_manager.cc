@@ -10,6 +10,16 @@
 amdcuid_status_t AmdCuidDeviceManager::init(amdcuid_device_type_set_t device_types) {
     devices_.clear();
     initialized_ = false;
+    if (device_types & AMDCUID_DEVICE_TYPE_SET_PLATFORM) {
+        std::vector<DevicePtr> platforms;
+        amdcuid_status_t status = AmdCuidPlatform::discover(platforms);
+        if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_UNSUPPORTED) {
+            return status;
+        }
+        if (status == AMDCUID_STATUS_SUCCESS) {
+            devices_.insert(devices_.end(), platforms.begin(), platforms.end());
+        }
+    }
     if (device_types & AMDCUID_DEVICE_TYPE_SET_GPU) {
         std::vector<DevicePtr> gpus;
         amdcuid_status_t status = AmdCuidGpu::discover(gpus);

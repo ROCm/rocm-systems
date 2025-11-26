@@ -20,14 +20,14 @@ typedef struct {
 } amdcuid;
 
 typedef struct {
-    uint16_t vendor_id;
-    uint16_t family;
-    uint16_t model;
-    uint16_t device_id;
-    uint8_t revision_id;
-    uint16_t unit_id;
-    uint16_t core;
-    uint16_t physical_id;
+    uint16_t vendor_id;      ///< CPU Vendor ID (from CPUID EAX=0)
+    uint16_t family;         ///< CPU Family (from CPUID EAX=1)
+    uint16_t model;          ///< CPU Model (from CPUID EAX=1)
+    uint16_t device_id;      ///< DeviceID = Family & Model combined
+    uint8_t revision_id;     ///< CPU Stepping/RevisionID (from CPUID EAX=1)
+    uint16_t unit_id;        ///< UnitID from APIC ID (from ACPI MADT)
+    uint16_t core;           ///< Core number within package
+    uint16_t physical_id;    ///< Physical package/socket ID
 } amdcuid_cuid_fields_cpu;
 
 typedef struct {
@@ -75,7 +75,10 @@ typedef enum {
     AMDCUID_STATUS_HW_FINGERPRINT_FORMAT_ERROR = 9, ///< Hardware fingerprint format is incorrect
     AMDCUID_STATUS_HW_FINGERPRINT_PERMISSION_DENIED = 10, ///< Not permitted to access hardware fingerprint
     AMDCUID_STATUS_KEY_ERROR = 11,                          ///< Error reading key file or key file does not exist
-    AMDCUID_STATUS_HMAC_ERROR = 12                          ///< HMAC computation failed
+    AMDCUID_STATUS_HMAC_ERROR = 12,                         ///< HMAC computation failed
+    AMDCUID_STATUS_FILE_ERROR = 13,                         ///< File I/O error
+    AMDCUID_STATUS_BUFFER_TOO_SMALL = 14,                   ///< Buffer size insufficient for operation
+    AMDCUID_STATUS_INVALID_FORMAT = 15                      ///< Data format is invalid or malformed
 } amdcuid_status_t;
 
 

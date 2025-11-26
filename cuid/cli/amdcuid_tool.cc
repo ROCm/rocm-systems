@@ -147,8 +147,13 @@ int list_devices(bool show_primary, const std::string* filter_type = nullptr) {
         const std::vector<std::shared_ptr<AmdCuidDevice>>& device_list = kv.second;
         std::string type_str = device_type_to_string(type);
         
-        if (filter_type && *filter_type != type_str) {
-            continue;
+        // Case-insensitive type filter comparison
+        if (filter_type) {
+            std::string filter_upper = *filter_type;
+            for (auto& c : filter_upper) c = toupper(c);
+            if (filter_upper != type_str) {
+                continue;
+            }
         }
         
         std::cout << "---- " << type_str << " Devices ----" << std::endl;
