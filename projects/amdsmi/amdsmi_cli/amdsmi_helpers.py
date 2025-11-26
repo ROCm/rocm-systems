@@ -1647,23 +1647,6 @@ class AMDSMIHelpers():
                     return f"{value}".rstrip()
             return f"{value}"
 
-    def unit_unformat(self, logger, formatted_value):
-        """
-        This function will unformat output with unit based on the logger output format
-        params:
-            logger (AMDSMILogger) - Logger to print out output
-            formatted_value - the value to be unformatted
-        return:
-            str or dict : unformatted output
-        """
-        if logger.is_json_format():
-            if isinstance(formatted_value, dict):
-                return formatted_value['value']
-            return formatted_value
-        if logger.is_human_readable_format():
-            return formatted_value.split()[0]
-        return formatted_value
-
 
     class SI_Unit(float, Enum):
         GIGA = 1000000000  # 10^9
@@ -2525,6 +2508,85 @@ class AMDSMIHelpers():
                         continue
             ret = {f"xcp_{i}": violation_status[key][i] for i in range(num_partition)}
         return ret
+
+    @lru_cache(maxsize=1)
+    def _get_socket_and_processor_info(self):
+        """
+        Discover and cache basic topology information for sockets and GPU processors.
+
+        This helper queries AMDSMI for all socket and processor handles and derives:
+            - total_socket_count: total number of sockets (CPU + GPU) reported
+            - total_processor_count: total number of GPU processors reported
+            - num_gpu_sockets: number of GPU sockets (identified by BDF‐style strings, e.g. '0000:08:00')
+            - num_cpus_sockets: number of CPU sockets (non‑BDF style, e.g. '0', '1', ...)
+
+        The result is cached per AMDSMIHelpers instance (LRU maxsize=1). If system
+        topology changes (e.g. GPUs added/removed), callers must explicitly clear
+        the cache via `self._get_socket_and_processor_info.cache_clear()`.
+
+        Returns:
+            tuple[int, int, int, int]:
+                (total_socket_count,
+                 total_processor_count,
+                 num_gpu_sockets,
+                 num_cpus_sockets)
+        """
+        total_processor_count = 0
+        total_socket_count = 0
+        num_gpu_sockets = 0
+        num_cpus_sockets = 0
+
+        try:
+            sockets = amdsmi_interface.amdsmi_get_socket_handles()
+            for socket in sockets:
+                total_socket_count += 1
+                try:
+                    socket_info = amdsmi_interface.amdsmi_get_socket_info(socket)
+                    # Check if it contains this format: 0000:08:00 -> GPU socket
+                    # CPU socket: 0, 1, etc. (does not contain ':')
+                    if str(socket_info).count(":") == 2:
+                        num_gpu_sockets += 1
+                    else:
+                        num_cpus_sockets += 1
+                    logging.debug(f"Socket info: {socket_info}")
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug(f"Failed to get socket info: {e}")
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug(f"Failed to get number of GPU sockets: {e}")
+
+        try:
+            processors = amdsmi_interface.amdsmi_get_processor_handles()
+            for _ in processors:
+                total_processor_count += 1
+
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug(f"Failed to get number of GPU processors: {e}")
+        out = (total_socket_count, total_processor_count, num_gpu_sockets, num_cpus_sockets)
+        return out
+
+    @staticmethod
+    def fmt(val, width, align="left"):
+        """
+        Format a value as a fixed‑width string with configurable alignment.
+
+        Args:
+            val: Any value to be converted to string and formatted.
+            width (int): Field width to pad or truncate to.
+            align (str, optional): Text alignment within the field:
+                - "left"   -> left‑justify (default, uses str.ljust)
+                - "right"  -> right‑justify (uses str.rjust)
+                - "center" -> center within the field (uses str.center)
+
+        Returns:
+            str: The formatted string representation of `val` with the requested
+                 width and alignment applied.
+        """
+        s = str(val)
+        if align == "left":
+            return s.ljust(width)
+        if align == "center":
+            return s.center(width)
+        return s.rjust(width)
 
     @staticmethod
     def average_flattened_ints(data, context="data"):
