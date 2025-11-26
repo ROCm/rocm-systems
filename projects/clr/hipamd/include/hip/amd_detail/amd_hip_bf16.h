@@ -111,8 +111,6 @@
 #if !defined(__HIPCC_RTC__)
 #include <hip/amd_detail/amd_hip_common.h>
 #include "amd_hip_vector_types.h"  // float2 etc
-#include "device_library_decls.h"  // ocml conversion functions
-#include "math_fwd.h"              // ocml device functions
 #if defined(__clang__) && defined(__HIP__)
 #include <hip/amd_detail/amd_warp_functions.h>       // define warpSize
 #include <hip/amd_detail/amd_warp_sync_functions.h>  // Sync functions
@@ -1652,7 +1650,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hceil(const __hip_bfloat16 h) {
  * \brief Calculate cosine of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hcos(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_cos_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_cosf(__bfloat162float(h)));
 }
 
 /**
@@ -1660,7 +1658,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hcos(const __hip_bfloat16 h) {
  * \brief Calculate exponential of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_exp_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_expf(__bfloat162float(h)));
 }
 
 /**
@@ -1668,7 +1666,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp(const __hip_bfloat16 h) {
  * \brief Calculate exponential 10 of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp10(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_exp10_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_exp10f(__bfloat162float(h)));
 }
 
 /**
@@ -1676,7 +1674,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp10(const __hip_bfloat16 h) {
  * \brief Calculate exponential 2 of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp2(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_exp2_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_exp2f(__bfloat162float(h)));
 }
 
 /**
@@ -1732,7 +1730,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hrint(const __hip_bfloat16 h) {
  * \brief Reciprocal square root
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hrsqrt(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_rsqrt_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_amdgcn_rsqf(__bfloat162float(h)));
 }
 
 /**
@@ -1740,7 +1738,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hrsqrt(const __hip_bfloat16 h) {
  * \brief Calculate sin of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hsin(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_sin_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_sinf(__bfloat162float(h)));
 }
 
 /**

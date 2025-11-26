@@ -953,19 +953,19 @@ inline __device__ __half hrint(__half x) {
   return __half_raw{__builtin_elementwise_rint(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hsin(__half x) {
-  return __half_raw{__ocml_sin_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_sinf16(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hcos(__half x) {
-  return __half_raw{__ocml_cos_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_cosf16(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hexp(__half x) {
-  return __half_raw{__ocml_exp_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_expf16(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hexp2(__half x) {
-  return __half_raw{__ocml_exp2_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_exp2f16(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hexp10(__half x) {
-  return __half_raw{__ocml_exp10_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_exp10f16(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hlog2(__half x) {
   return __half_raw{__builtin_elementwise_log2(static_cast<__half_raw>(x).data)};
@@ -1006,11 +1006,21 @@ inline __device__ __half2 h2floor(__half2 x) {
 inline __device__ __half2 h2rint(__half2 x) {
   return __half2{__builtin_elementwise_rint(static_cast<__half2_raw>(x).data)};
 }
-inline __device__ __half2 h2sin(__half2 x) { return __half2{__ocml_sin_2f16(x)}; }
-inline __device__ __half2 h2cos(__half2 x) { return __half2{__ocml_cos_2f16(x)}; }
-inline __device__ __half2 h2exp(__half2 x) { return __half2{__ocml_exp_2f16(x)}; }
-inline __device__ __half2 h2exp2(__half2 x) { return __half2{__ocml_exp2_2f16(x)}; }
-inline __device__ __half2 h2exp10(__half2 x) { return __half2{__ocml_exp10_2f16(x)}; }
+inline __device__ __half2 h2sin(__half2 x) {
+  return __half2{__builtin_elementwise_sin(static_cast<__half2_raw>(x).data)};
+}
+inline __device__ __half2 h2cos(__half2 x) {
+  return __half2{__builtin_elementwise_cos(static_cast<__half2_raw>(x).data)};
+}
+inline __device__ __half2 h2exp(__half2 x) {
+  return __half2{__builtin_elementwise_exp(static_cast<__half2_raw>(x).data)};
+}
+inline __device__ __half2 h2exp2(__half2 x) {
+  return __half2{__builtin_elementwise_exp2(static_cast<__half2_raw>(x).data)};
+}
+inline __device__ __half2 h2exp10(__half2 x) {
+  return __half2{__builtin_elementwise_exp10(static_cast<__half2_raw>(x).data)};
+}
 inline __device__ __half2 h2log2(__half2 x) {
   return __half2{__builtin_elementwise_log2(static_cast<__half2_raw>(x).data)};
 }
