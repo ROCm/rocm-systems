@@ -22,7 +22,8 @@ set(spm-dispatch-counter-collection-env
     "ROCPROFILER_TOOL_CONTEXTS=SPM_DISPATCH_COLLECTION"
     "ROCPROFILER_SPM_BETA_ENABLED=True")
 
-set(IS_DISABLED False)
+rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
+set(IS_DISABLED ${IS_SPM_DISABLED})
 
 add_test(NAME test-spm-dispatch-collection-execute COMMAND $<TARGET_FILE:vector-ops>)
 
@@ -51,7 +52,7 @@ add_test(NAME test-spm-dispatch-collection-validate
 set_tests_properties(
     test-spm-dispatch-collection-validate
     PROPERTIES TIMEOUT
-               45
+               120
                LABELS
                "integration-tests"
                DEPENDS

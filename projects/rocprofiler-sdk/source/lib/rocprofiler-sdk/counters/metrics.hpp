@@ -25,14 +25,6 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include <cstdint>
-#include <optional>
-#include <set>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
-
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>

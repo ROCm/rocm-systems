@@ -687,10 +687,12 @@ spm_dispatch_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_
     for(auto& counter : gpu_counters)
     {
         auto info = rocprofiler_counter_info_v0_t{};
+
         ROCPROFILER_CALL(
             rocprofiler_query_counter_info(
                 counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&info)),
             "Could not query counter_id");
+
         counter_info.emplace_back(info);
     }
 
