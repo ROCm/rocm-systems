@@ -524,19 +524,21 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_arbiter_state_
 
 /**
  * @brief Get field value from arbiter state
- * @param hw_version The hardware version from pcs_hw_version field
- * @param arbiter_state The 32-bit arbiter state value
+ * @param record Pointer to the PC sampling record
  * @param field_id The field ID to extract
  * @return The field value if successful, -1 if field is not supported for the given hardware version
  *
  * NOTE: Internal LLM generated this code, so it could probably be done better.
  */
 static inline int
-rocprofiler_pc_sampling_get_arbiter_state_field(rocprofiler_pc_sampling_hardware_version_t hw_version,
-                                                uint32_t arbiter_state,
+rocprofiler_pc_sampling_get_arbiter_state_field(const rocprofiler_pc_sampling_record_t* record,
                                                 rocprofiler_pc_sampling_arbiter_state_field_id_t field_id) {
+    // Extract hardware version from hw_id (lower 6 bits)
+    rocprofiler_pc_sampling_hardware_version_t hw_version =
+        (rocprofiler_pc_sampling_hardware_version_t)(record->hw_id.value & 0x3F);
+
     // arbiter_state contains all 32 bits of field data (no version bits)
-    uint32_t field_data = arbiter_state;
+    uint32_t field_data = record->snapshot_information.arbiter_state;
 
     int offset = -1;
     int width = -1;
@@ -694,16 +696,19 @@ rocprofiler_pc_sampling_get_arbiter_state_field(rocprofiler_pc_sampling_hardware
 
 /**
  * @brief Get field value from hw_id
- * @param hw_id The 64-bit hw_id value
+ * @param record Pointer to the PC sampling record
  * @param field_id The field ID to extract
  * @return The field value if successful, -1 if field is not supported in hw_id version
  * encoded inside hw_id.
  */
 static inline int
 rocprofiler_pc_sampling_get_hw_id_field(
-    uint64_t                                 hw_id,
+    const rocprofiler_pc_sampling_record_t*  record,
     rocprofiler_pc_sampling_hw_id_field_id_t field_id)
 {
+    // Extract hw_id value from record
+    uint64_t hw_id = record->hw_id.value;
+
     // Extract hardware version from lower 6 bits (bits 0-5)
     rocprofiler_pc_sampling_hardware_version_t hw_version =
         (rocprofiler_pc_sampling_hardware_version_t)(hw_id & 0x3F);
