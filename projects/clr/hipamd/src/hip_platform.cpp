@@ -365,9 +365,12 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     int* maxBlocksPerCU, int* numBlocksPerGrid, int* bestBlockSize, const amd::Device& device,
     hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz) {
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-  const amd::Kernel& kernel = *function->kernel();
+  const amd::Kernel* kernel = function->kernel();
 
-  const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel.getDeviceKernel(device)->workGroupInfo();
+  if (kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+  const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
   if (bCalcPotentialBlkSz == false) {
     if (inputBlockSize <= 0) {
       return hipErrorInvalidValue;
@@ -490,6 +493,10 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
   if (function == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
+  }
+
+  if (function->kernel() == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
   hipDeviceProp_t prop = {0};
@@ -702,15 +709,18 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   hipError_t hip_error =
       PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
 
-  // Handle Invalid Image
-  if(hip_error == hipErrorInvalidImage) {
+  switch (hip_error) {
+  case hipErrorInvalidImage:
     return hip_error;
-  }
-
-  if ((hip_error != hipSuccess) || (func == nullptr)) {
-    // assume its hip function type if we did not get a valid output from static
-    // func lookup
-    func = reinterpret_cast<hipFunction_t>(const_cast<void *>(hostFunction));
+  case hipErrorInvalidKernelFile:
+    return hipErrorInvalidDeviceFunction;
+  case hipSuccess:
+    if (func)
+      break;
+  default:
+      // assume its hip function type if we did not get a valid output from static
+      // func lookup
+      func = reinterpret_cast<hipFunction_t>(const_cast<void *>(hostFunction));
   }
 
   constexpr auto gridDimYZmax = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;

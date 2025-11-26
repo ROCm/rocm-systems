@@ -184,6 +184,11 @@ hipError_t Function::getStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
   const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
 
   amd::Kernel* kernel = dFunc_[deviceId]->kernel();
+
+  if (kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
   auto* device_handle = devices[deviceId];
   const device::Kernel::WorkGroupInfo* wginfo =
       kernel->getDeviceKernel(*device_handle)->workGroupInfo();
