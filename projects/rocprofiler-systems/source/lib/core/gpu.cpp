@@ -97,7 +97,7 @@ amdsmi_init()
         {
             // Currently, AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_AINIC are supported.
             uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
-#if USE_AINIC
+#if(defined ROCPROFSYS_USE_AINIC)
             init_flags |= AMDSMI_INIT_AMD_AINIC;
 #endif
             ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(init_flags));

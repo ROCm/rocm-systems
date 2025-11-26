@@ -1037,6 +1037,13 @@ target_compile_definitions(
     INTERFACE ROCPROFSYS_MAX_THREADS=${ROCPROFSYS_MAX_THREADS}
 )
 
+if(ROCPROFSYS_USE_AINIC)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_USE_AINIC
+    )
+endif()
+
 foreach(_LIB ${ROCPROFSYS_EXTENSION_LIBRARIES})
     get_target_property(_COMPILE_DEFS ${_LIB} INTERFACE_COMPILE_DEFINITIONS)
     if(_COMPILE_DEFS)

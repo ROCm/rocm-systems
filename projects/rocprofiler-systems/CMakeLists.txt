@@ -191,7 +191,7 @@ rocprofiler_systems_add_option(ROCPROFSYS_USE_AMD_SMI
                                "Use amd-smi" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
-                               "Use amd-smi AI NIC API" ON
+                               "Use amd-smi AI NIC API" OFF
 )
 
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
