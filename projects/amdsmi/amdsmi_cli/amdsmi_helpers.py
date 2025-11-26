@@ -781,6 +781,10 @@ class AMDSMIHelpers():
         perf_levels_int = list(set(clock.value for clock in amdsmi_interface.AmdSmiDevPerfLevel))
         return perf_levels_str, perf_levels_int
 
+    def get_ptl_values(self):
+        ptl_values_str = [ptl.name for ptl in amdsmi_interface.AmdSmiPtlData]
+        ptl_values_int = list(set(ptl.name for ptl in amdsmi_interface.AmdSmiPtlData))
+        return ptl_values_str,ptl_values_int
 
     def get_accelerator_partition_profile_config(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()

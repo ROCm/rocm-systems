@@ -649,6 +649,59 @@ class AMDSMIParser(argparse.ArgumentParser):
                     raise argparse.ArgumentError(self, f"Invalid argument: '{values}' needs to be 0-20 or 0-20%")
         return _ValidateOverdrivePercent
 
+    def _validate_ptl_format(self):
+        """Validate and normalize --ptl-format FRMT1,FRMT2."""
+        valid_names = [name for name in amdsmi_interface.AmdSmiPtlData.__members__ if name != 'INVALID']
+
+        class _ValidatePtlFormat(argparse.Action):
+            def __call__(self, parser, args, values, option_string=None):
+                if not isinstance(values, str):
+                    raise argparse.ArgumentError(
+                        self,
+                        f"Invalid argument for {option_string}: '{values}' "
+                        f"(expected string like I8,F32)"
+                    )
+
+                parts = values.split(',')
+                if len(parts) != 2:
+                    raise argparse.ArgumentError(
+                        self,
+                        f"{option_string} expects exactly two comma-separated formats, "
+                        f"e.g. I8,F32 (got '{values}')"
+                    )
+
+                enums = []
+                for raw in parts:
+                    token = raw.strip().upper()
+                    if token == '':
+                        raise argparse.ArgumentError(
+                            self,
+                            f"Empty PTL format in '{values}'. Expected formats like I8,F32."
+                        )
+                    try:
+                        enum_val = amdsmi_interface.AmdSmiPtlData[token]
+                    except KeyError:
+                        raise argparse.ArgumentError(
+                            self,
+                            f"Invalid PTL format '{raw}'. Valid formats are: "
+                            + ", ".join(valid_names)
+                        )
+                    if enum_val == amdsmi_interface.AmdSmiPtlData.INVALID:
+                        raise argparse.ArgumentError(
+                            self,
+                            f"INVALID is not a usable PTL format."
+                        )
+                    enums.append(enum_val)
+
+                if enums[0] == enums[1]:
+                    raise argparse.ArgumentError(
+                        self,
+                        f"PTL formats must be different (got '{values}')."
+                    )
+
+                setattr(args, self.dest, (enums[0], enums[1]))
+
+        return _ValidatePtlFormat
 
 ### Building parsers ###
     def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
@@ -1263,6 +1316,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                 xgmi_plpd_help_info = ", ".join(self.helpers.get_xgmi_plpd_policies())
                 set_xgmi_plpd_help = f"Set the GPU XGMI per-link power down policy using policy id, an integer. Valid id's include:\n\t{xgmi_plpd_help_info}"
                 set_clock_freq_help = "Set one or more sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency levels.\n\tUse `amd-smi static --clock` to find acceptable levels.\n\tUse `amd-smi static --bus` to find acceptable pcie levels."
+                set_ptl_status_help = "Enable or disable the PTL on a GPU processor:\n    0 for disable and 1 for enable."
+                ptl_format_help_choices_str = ", ".join(self.helpers.get_ptl_values()[0][0:-1])
+                set_ptl_format_help = f"Set the PTL format on a GPU processor. For example, --ptl-format I8,F32\n\tSet to one of the following PTL formats: {ptl_format_help_choices_str}"
             ppt0_power_cap_min, ppt0_power_cap_max, ppt1_power_cap_min, ppt1_power_cap_max = self.helpers.get_power_caps()
             set_power_cap_help = f"Set either PPT0 or PPT1 power capacity limit:\n\tEx: `amd-smi set -o ppt0 1300`\n\tPPT0 min cap: {ppt0_power_cap_min}, PPT0 max cap: {ppt0_power_cap_max}\n\tPPT1 min cap: {ppt1_power_cap_min}, PPT1 max cap: {ppt1_power_cap_max}"
             set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk) (min | max) value"
@@ -1308,6 +1364,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_value_exclusive_group.add_argument('-p', '--soc-pstate', action='store', required=False, type=lambda value: self._not_negative_int(value, '--soc-pstate'), help=set_soc_pstate_help, metavar='POLICY_ID')
                 set_value_exclusive_group.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=lambda value: self._not_negative_int(value, '--xgmi-plpd'), help=set_xgmi_plpd_help, metavar='POLICY_ID')
                 set_value_exclusive_group.add_argument('-c', '--clk-level', action=self._level_select(), nargs='+', required=False, help=set_clock_freq_help, metavar=('CLK_TYPE', 'PERF_LEVELS'))
+                set_value_exclusive_group.add_argument('-S', '--ptl-status', action='store', choices=[0,1], type=lambda value: self._not_negative_int(value, '--ptl-status'), required=False, help=set_ptl_status_help, metavar=('STATUS'))
+                set_value_exclusive_group.add_argument('-F', '--ptl-format', action=self._validate_ptl_format(), required=False, help=set_ptl_format_help, metavar=('FRMT1,FRMT2'))
 
             set_value_exclusive_group.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
             set_value_exclusive_group.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=lambda value: self._not_negative_int(value, '--process-isolation'), required=False, help=set_process_isolation_help, metavar='STATUS')
