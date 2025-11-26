@@ -82,7 +82,7 @@ static void CpuCallback(void* args) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
+TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode", "[graph]") {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t cpuGraphNode;
@@ -139,7 +139,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
+TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween", "[graph]") {
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
   hipStream_t stream;
@@ -485,7 +485,7 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
+TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later", "[graph]") {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
@@ -783,7 +783,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
+TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later", "[graph]") {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyH2D_A, memcpyH2D_B, memcpyD2H_AC, memcpyH2D_C;
@@ -851,7 +851,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
+TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode", "[graph]") {
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
   hipStream_t stream;

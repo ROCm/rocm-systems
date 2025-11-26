@@ -129,8 +129,7 @@ TEMPLATE_TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic", "", ui
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters",
-          "[multigpu]") {
+TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters", "[multigpu][graph]") {
   // FIXME: this test tests 1D/2D/3D stuff in one single go, need to decouple it so that it can run
   // on devices with no image support
   CHECK_IMAGE_SUPPORT
@@ -192,7 +191,7 @@ TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters",
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node") {
+TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node", "[graph]") {
   CHECK_IMAGE_SUPPORT
 
   hipGraph_t graph = nullptr;

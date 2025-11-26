@@ -31,7 +31,7 @@ Testcase Scenarios :
 /**
  * Functional Test for adding dependencies in graph and verifying execution.
  */
-TEST_CASE("Unit_hipGraphAddDependencies_Functional") {
+TEST_CASE("Unit_hipGraphAddDependencies_Functional", "[graph]") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -125,7 +125,7 @@ TEST_CASE("Unit_hipGraphAddDependencies_Functional") {
 /**
  * Negative Tests for hipGraphAddDependencies.
  */
-TEST_CASE("Unit_hipGraphAddDependencies_NegTest") {
+TEST_CASE("Unit_hipGraphAddDependencies_NegTest", "[graph]") {
   // Initialize
   constexpr size_t Nbytes = 1024;
   hipGraph_t graph;

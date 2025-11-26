@@ -59,7 +59,7 @@ __global__ void CpyToConstSymbolKernel(int* B_d) {
 
 /* This testcase verifies negative scenarios of
    hipGraphMemcpyNodeSetParamsToSymbol API */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative") {
+TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative", "[graph]") {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   int *A_d{nullptr}, *B_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
@@ -217,7 +217,7 @@ static void hipGraphMemcpyNodeSetParamsToSymbol_GlobalMem(bool useConstDeviceVar
    2) Allocate const symbol memory, add node to the graph.
       Set/Update the new values to the node. Make sure they are taking effect.
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsToSymbol_Functional") {
+TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsToSymbol_Functional", "[graph]") {
   SECTION("Check and update with Global Device Symbol Memory") {
     hipGraphMemcpyNodeSetParamsToSymbol_GlobalMem(false);
   }

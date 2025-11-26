@@ -62,7 +62,7 @@ created stream. Do some operatoins. End the capture on the created stream. Execu
 verify the output from the operations.
 */
 
-TEST_CASE("Unit_hipStreamIsCapturing_Negative") {
+TEST_CASE("Unit_hipStreamIsCapturing_Negative", "[graph]") {
   hipError_t ret;
   hipStream_t stream{};
 
@@ -78,7 +78,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_Negative") {
   }
 }
 
-TEST_CASE("Unit_hipStreamIsCapturing_Functional_Basic") {
+TEST_CASE("Unit_hipStreamIsCapturing_Functional_Basic", "[graph]") {
   hipStreamCaptureStatus cStatus;
 
   SECTION("Check capture status with null stream.") {
@@ -101,7 +101,7 @@ Testcase Scenarios :
      status is returned as hipStreamCaptureStatusNone.
 */
 
-TEST_CASE("Unit_hipStreamIsCapturing_Functional") {
+TEST_CASE("Unit_hipStreamIsCapturing_Functional", "[graph]") {
   float *A_d, *C_d;
   float *A_h, *C_h;
   hipStream_t stream{nullptr};
@@ -170,7 +170,7 @@ Testcase Scenarios :
      status is returned as hipStreamCaptureStatusNone.
 */
 
-TEST_CASE("Unit_hipStreamIsCapturing_hipStreamPerThread") {
+TEST_CASE("Unit_hipStreamIsCapturing_hipStreamPerThread", "[graph]") {
   float *A_d, *C_d;
   float *A_h, *C_h;
   hipGraph_t graph{nullptr};
@@ -233,7 +233,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_hipStreamPerThread") {
  * Invoke hipStreamIsCapturing on both streams. Verify that the capture info(status)
  * of both s1 and s2 are identical.
  */
-TEST_CASE("Unit_hipStreamIsCapturing_ParentAndForkedStream") {
+TEST_CASE("Unit_hipStreamIsCapturing_ParentAndForkedStream", "[graph]") {
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t event2{nullptr}, forkStreamEvent{nullptr};
   hipGraph_t graph{nullptr};
@@ -336,7 +336,7 @@ static void thread_func(hipStream_t stream) {
   REQUIRE(captureStatus == hipStreamCaptureStatusActive);
 }
 
-TEST_CASE("Unit_hipStreamIsCapturing_CheckCaptureStatus_FromThread") {
+TEST_CASE("Unit_hipStreamIsCapturing_CheckCaptureStatus_FromThread", "[graph]") {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
 
@@ -364,7 +364,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_CheckCaptureStatus_FromThread") {
  * operatoins. End the capture on the created stream. Execute the graph and verify the output from
  * the operations.
  */
-TEST_CASE("Unit_hipStreamIsCapturing_ChkNullStrmStatus") {
+TEST_CASE("Unit_hipStreamIsCapturing_ChkNullStrmStatus", "[graph]") {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipError_t ret;
