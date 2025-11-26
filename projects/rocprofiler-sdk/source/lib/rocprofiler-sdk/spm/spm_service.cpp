@@ -30,6 +30,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
@@ -81,9 +82,10 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
 
     for(size_t i = 0; i < counters_count; i++)
     {
-        auto& counter_id = counters_list[i];
+        auto& counter_id       = counters_list[i];
+        auto  base_metric_id   = rocprofiler::counters::get_base_metric_from_counter_id(counter_id);
+        const auto* metric_ptr = rocprofiler::common::get_val(id_map, base_metric_id);
 
-        const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
         if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
         // Don't add duplicates
         if(!already_added.emplace(metric_ptr->id()).second) continue;
@@ -189,13 +191,21 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t              a
     auto agent = rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
-    auto       metrics_map = rocprofiler::counters::loadMetrics()->arch_to_metric;
-    const auto metrics     = metrics_map.at(agent->name);
+    auto metrics = rocprofiler::counters::getMetricsForAgent(agent);
 
     auto ids = std::vector<rocprofiler_counter_id_t>{};
-    for(auto m : metrics)
-        if(m.spm()) ids.push_back({.handle = m.id()});
 
+    for(auto m : metrics)
+    {
+        if(m.spm())
+        {
+            // Create agent-encoded counter ID using the agent's logical_node_id
+            rocprofiler_counter_id_t counter_id{.handle = 0};
+            rocprofiler::counters::set_base_metric_in_counter_id(counter_id, m.id());
+            rocprofiler::counters::set_agent_in_counter_id(counter_id, agent->logical_node_id);
+            ids.push_back(counter_id);
+        }
+    }
     if(ids.empty()) return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
 
     return cb(agent_id, ids.data(), ids.size(), user_data);

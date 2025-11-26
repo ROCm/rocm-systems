@@ -1,14 +1,15 @@
 {
     "jobs": [
         {
-            "kernel_include_regex": "copyD",
+            "kernel_include_regex": "subtract_kernel",
+            "kernel_iteration_range": "[1]",
             "kernel_exclude_regex": "",
             "truncate_kernels": true,
             "spm_beta_enabled": true,
             "spm_frequency": 50000,
-            "spm_timeout": 10,
-            "spm_buffer_size": "4096",
-            "spm": "SQ_WAVES"
+            "spm_timeout": 50,
+            "spm_buffer_size": "0x30000",
+            "spm": ["SQ_WAVES"]
         }
     ]
 }

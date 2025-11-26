@@ -130,6 +130,12 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
                 counters::set_dim_in_rec(
                     instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_XCC, buffer_id);
                 counters::set_counter_in_rec(instance_id, event.id);
+                counters::set_dim_in_rec(
+                    instance_id,
+                    counters::ROCPROFILER_DIMENSION_AGENT,
+                    (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))
+                            ->logical_node_id +
+                        counters::AGENT_ENCODING_OFFSET);
                 for(size_t it = 0; it < size; it++)
                 {
                     records.emplace_back(rocprofiler_spm_counter_record_t{
@@ -152,6 +158,12 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
                                          rocprofiler::counters::ROCPROFILER_DIMENSION_INSTANCE,
                                          event.instance);
                 counters::set_counter_in_rec(instance_id, event.id);
+                counters::set_dim_in_rec(
+                    instance_id,
+                    counters::ROCPROFILER_DIMENSION_AGENT,
+                    (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))
+                            ->logical_node_id +
+                        counters::AGENT_ENCODING_OFFSET);
                 for(size_t it = 0; it < size; it++)
                 {
                     records.emplace_back(rocprofiler_spm_counter_record_t{

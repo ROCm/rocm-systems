@@ -22,10 +22,10 @@ set(COUNTER_LIST
     TCC_MISS
     TCC_REQ
     CPC_CPC_STAT_BUSY
-    CPC_CPC_STAT_IDLE
-    SPI_CSN_NUM_THREADGROUPS)
+    CPC_CPC_STAT_IDLE)
 
-set(IS_DISABLED FALSE)
+rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
+set(IS_DISABLED ${IS_SPM_DISABLED})
 
 list(GET rocprofiler-sdk-tests-gfx-info 0 spm-gpu-0-gfx-info)
 
@@ -80,8 +80,7 @@ add_test(
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --pmc
         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_counter_collection.csv --spm
         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_streaming_performance_monitor.csv
-        --spm-json ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json --gfx-info
-        ${spm-gpu-0-gfx-info})
+        --spm-json ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json)
 
 set_tests_properties(
     rocprofv3-test-spm-validate

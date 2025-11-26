@@ -619,7 +619,7 @@ TEST(spm_core, public_api_iterate_agents)
     auto agents = hsa::get_queue_controller()->get_supported_agents();
     for(const auto& [_, agent] : agents)
     {
-        std::set<uint64_t> from_api;
+        std::set<uint64_t> from_api{};
 
         // Iterate through the agents and get the counters available on that agent
         ROCPROFILER_CALL(rocprofiler_iterate_spm_supported_counters(
@@ -642,9 +642,20 @@ TEST(spm_core, public_api_iterate_agents)
         auto expected = findSPMDeviceMetrics(agent, {});
         for(const auto& x : expected)
         {
-            ASSERT_GT(from_api.count(x.id()), 0);
-            from_api.erase(x.id());
+            bool found = false;
+            for(auto it = from_api.begin(); it != from_api.end(); ++it)
+            {
+                rocprofiler_counter_id_t counter_id = {.handle = *it};
+                if(counters::get_base_metric_from_counter_id(counter_id) == x.id())
+                {
+                    from_api.erase(it);
+                    found = true;
+                    break;
+                }
+            }
+            ASSERT_TRUE(found) << "Expected counter ID " << x.id() << " not found in API results";
         }
+
         EXPECT_TRUE(from_api.empty());
     }
     registration::set_init_status(1);
