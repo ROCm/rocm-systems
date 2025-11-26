@@ -345,7 +345,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Create a pool of shared queues for multiple user applications within a max limit 
   hsa_status_t AcquireCountedQueue(hsa_queue_type_t type,
-                                   hsa_amd_queue_priority_t priority,
+                                   HSA::hsa_amd_queue_priority_internal_t priority,
                                    void (*callback)(hsa_status_t, hsa_queue_t*, void*),
                                    void* data, uint64_t flags,
                                    hsa_queue_t** out_queue);

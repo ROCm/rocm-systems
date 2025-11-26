@@ -77,7 +77,7 @@ class QueueWrapper : public Queue {
   }
 
   hsa_status_t Inactivate() override { return wrapped->Inactivate(); }
-  hsa_status_t SetPriority(HSA_QUEUE_PRIORITY priority) override {
+  hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override {
     return wrapped->SetPriority(priority);
   }
   uint64_t LoadReadIndexAcquire() override { return wrapped->LoadReadIndexAcquire(); }

@@ -37,7 +37,7 @@ class CountedQueuePoolManager {
   ~CountedQueuePoolManager();
 
   // Acquire a queue (either reuse or create new)
-  hsa_status_t AcquireQueue(hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
+  hsa_status_t AcquireQueue(hsa_queue_type_t type, HSA::hsa_amd_queue_priority_internal_t priority,
                             void (*callback)(hsa_status_t, hsa_queue_t*, void*), void* data,
                             uint64_t flags, hsa_queue_t** out_queue);
 
@@ -52,7 +52,7 @@ class CountedQueuePoolManager {
   void Cleanup();
 
  private:
-  core::Queue* FindOrCreateHardwareQueue(hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
+  core::Queue* FindOrCreateHardwareQueue(hsa_queue_type_t type, HSA::hsa_amd_queue_priority_internal_t priority,
                                            void (*callback)(hsa_status_t, hsa_queue_t*, void*),
                                            void* data, uint64_t flags);
   
@@ -61,7 +61,7 @@ class CountedQueuePoolManager {
   std::mutex mutex_;
 
   // Pool of hw queues by priority on the agent
-  std::map<hsa_amd_queue_priority_t, std::vector<core::Queue*>> hw_queue_pools_;
+  std::map<HSA::hsa_amd_queue_priority_internal_t, std::vector<core::Queue*>> hw_queue_pools_;
 
   // Map from unique handle to CountedQueue (hw queue, metadata per acquire request)
   std::map<hsa_queue_t*, CountedQueue*> counted_queues_;

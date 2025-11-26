@@ -216,7 +216,7 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   virtual hsa_status_t Inactivate() = 0;
 
   /// @brief Change the scheduling priority of the queue
-  virtual hsa_status_t SetPriority(HSA_QUEUE_PRIORITY priority) = 0;
+  virtual hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) = 0;
 
   /// @brief Reads the Read Index of Queue using Acquire semantics
   ///

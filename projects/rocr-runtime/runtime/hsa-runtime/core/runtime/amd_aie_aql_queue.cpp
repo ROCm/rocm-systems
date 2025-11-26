@@ -104,7 +104,7 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
 
   HsaQueueResource queue_resource = {};
   hsa_status_t status =
-      agent_.driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 0, HSA_QUEUE_PRIORITY_NORMAL, 0,
+      agent_.driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 0, rocr::HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL, 0,
                                   nullptr, queue_size_bytes_, nullptr, queue_resource);
   if (status != HSA_STATUS_SUCCESS) {
     throw AMD::hsa_exception(status, "Failed to create a hardware context for an AIE queue.");
@@ -135,7 +135,7 @@ hsa_status_t AieAqlQueue::Inactivate() {
   return status;
 }
 
-hsa_status_t AieAqlQueue::SetPriority(HSA_QUEUE_PRIORITY priority) {
+hsa_status_t AieAqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
   return HSA_STATUS_SUCCESS;
 }
 

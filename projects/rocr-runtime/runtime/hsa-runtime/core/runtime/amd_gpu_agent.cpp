@@ -775,7 +775,7 @@ core::Blit* GpuAgent::CreateBlitKernel(core::Queue* queue) {
 
 void GpuAgent::InitDma() {
   // Setup lazy init pointers on queues and blits.
-  auto queue_lambda = [this](HSA_QUEUE_PRIORITY priority = HSA_QUEUE_PRIORITY_NORMAL) {
+  auto queue_lambda = [this](HSA::hsa_amd_queue_priority_internal_t priority = HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL) {
     auto queue = CreateInterceptibleQueue();
     if (queue == nullptr)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
@@ -796,7 +796,7 @@ void GpuAgent::InitDma() {
   // Dedicated compute queue for PC Sampling CP-DMA commands. We need a dedicated queue that runs at
   // highest priority because we do not want the CP-DMA commands to be delayed/blocked due to
   // other dispatches/barriers that could be in the other AQL queues.
-  queues_[QueuePCSampling].reset([queue_lambda]() { return queue_lambda(HSA_QUEUE_PRIORITY_MAXIMUM); });
+  queues_[QueuePCSampling].reset([queue_lambda]() { return queue_lambda(HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM); });
 
   // Decide which engine to use for blits.
   auto blit_lambda = [this](bool use_xgmi, lazy_ptr<core::Queue>& queue, bool isHostToDev, uint32_t rec_eng) {
@@ -3517,7 +3517,7 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
 }
 
 hsa_status_t GpuAgent::AcquireCountedQueue(hsa_queue_type_t type,
-                                           hsa_amd_queue_priority_t priority,
+                                           HSA::hsa_amd_queue_priority_internal_t priority,
                                            void (*callback)(hsa_status_t, hsa_queue_t*, void*),
                                            void* data, uint64_t flags,
                                            hsa_queue_t** out_queue) {

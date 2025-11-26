@@ -14,19 +14,13 @@ namespace core {
 
 constexpr size_t DEFAULT_QUEUE_SIZE = 16384;
 
-static std::map<hsa_amd_queue_priority_t, HSA_QUEUE_PRIORITY> priomap = {
-    {HSA_AMD_QUEUE_PRIORITY_LOW, HSA_QUEUE_PRIORITY_MINIMUM},
-    {HSA_AMD_QUEUE_PRIORITY_NORMAL, HSA_QUEUE_PRIORITY_NORMAL},
-    {HSA_AMD_QUEUE_PRIORITY_HIGH, HSA_QUEUE_PRIORITY_HIGH},
-};
-
 CountedQueuePoolManager::CountedQueuePoolManager(core::Agent* agent) : agent_(agent) {
   // Read in GPU_MAX_HW_QUEUES flag value
   max_hw_queues_ = core::Runtime::runtime_singleton_->flag().cp_queues_limit();
 }
 
 hsa_status_t CountedQueuePoolManager::AcquireQueue(
-    hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
+    hsa_queue_type_t type, HSA::hsa_amd_queue_priority_internal_t priority,
     void (*callback)(hsa_status_t, hsa_queue_t*, void*), void* data, uint64_t flags,
     hsa_queue_t** out_queue) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -64,7 +58,7 @@ hsa_status_t CountedQueuePoolManager::AcquireQueue(
 }
 
 core::Queue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
-    hsa_queue_type_t type, hsa_amd_queue_priority_t priority,
+    hsa_queue_type_t type, HSA::hsa_amd_queue_priority_internal_t priority,
     void (*callback)(hsa_status_t, hsa_queue_t*, void*), void* data, uint64_t flags) {
   auto& pool = hw_queue_pools_[priority];
 
@@ -88,7 +82,7 @@ core::Queue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
       agent_->QueueCreate(DEFAULT_QUEUE_SIZE, type, 0, callback, data, 0, 0, &cmd_queue);
   if (status != HSA_STATUS_SUCCESS) return nullptr;
 
-  status = cmd_queue->SetPriority(priomap[priority]);
+  status = cmd_queue->SetPriority(priority);
   if (status != HSA_STATUS_SUCCESS) return nullptr;
 
   cmd_queue->SetProfiling(true);

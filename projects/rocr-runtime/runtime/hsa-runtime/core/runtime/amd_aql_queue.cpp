@@ -97,7 +97,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       dynamicScratchState(0),
       exceptionState(0),
       suspended_(false),
-      priority_(HSA_QUEUE_PRIORITY_NORMAL),
+      priority_(HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL),
       exception_signal_(nullptr) {
 
   // Queue size is a function of several restrictions.
@@ -631,7 +631,7 @@ hsa_status_t AqlQueue::Inactivate() {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AqlQueue::SetPriority(HSA_QUEUE_PRIORITY priority) {
+hsa_status_t AqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
   if (suspended_) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }

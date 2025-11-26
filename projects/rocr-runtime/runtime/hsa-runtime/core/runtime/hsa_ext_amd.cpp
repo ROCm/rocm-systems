@@ -1191,22 +1191,10 @@ hsa_status_t hsa_amd_queue_set_priority(hsa_queue_t* queue,
   // Check if this a counted queue; NACK if it is                                                
   if (cmd_queue->is_counted_queue) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
-  // Highest queue priority allowed for HSA user is HSA_QUEUE_PRIORITY_HIGH
-  // HSA_QUEUE_PRIORITY_MAXIMUM is reserved for PC Sampling and can only be allocated internally
-  // in ROCR
-  static std::map<hsa_amd_queue_priority_t, HSA_QUEUE_PRIORITY> ext_kmt_priomap = {
-      {HSA_AMD_QUEUE_PRIORITY_LOW, HSA_QUEUE_PRIORITY_MINIMUM},
-      {HSA_AMD_QUEUE_PRIORITY_NORMAL, HSA_QUEUE_PRIORITY_NORMAL},
-      {HSA_AMD_QUEUE_PRIORITY_HIGH, HSA_QUEUE_PRIORITY_HIGH},
-  };
-
-  auto priority_it = ext_kmt_priomap.find(priority);
-
-  if (priority_it == ext_kmt_priomap.end()) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  return cmd_queue->SetPriority(priority_it->second);
+  // Convert to ROCR internal priority type
+  HSA::hsa_amd_queue_priority_internal_t priority_ = static_cast<HSA::hsa_amd_queue_priority_internal_t>(priority);
+  
+  return cmd_queue->SetPriority(priority_);
   CATCH;
 }
 
@@ -1633,8 +1621,11 @@ hsa_amd_counted_queue_acquire(hsa_agent_t agent,
   }
   AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
 
+  // Convert to ROCR internal priority type 
+  HSA::hsa_amd_queue_priority_internal_t priority_ = static_cast<HSA::hsa_amd_queue_priority_internal_t>(priority);
+  
   // Call the queue pool manager
-  return gpu_agent->AcquireCountedQueue(type, priority, callback, data, flags, queue);
+  return gpu_agent->AcquireCountedQueue(type, priority_, callback, data, flags, queue);
   CATCH;
 }
 
