@@ -183,7 +183,7 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel", "", int, unsigned in
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicExch_Negative_Parameters_RTC") {
+TEST_CASE("Unit_atomicExch_Negative_Parameters_RTC", "[atomic]") {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicExchInt, kAtomicExchUnsignedInt, kAtomicExchULL,

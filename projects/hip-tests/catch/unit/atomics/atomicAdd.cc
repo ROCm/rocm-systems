@@ -136,7 +136,7 @@ TEMPLATE_TEST_CASE("Unit_atomicAdd_Positive_Multi_Kernel", "", int, unsigned int
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicAdd_Negative_Parameters_RTC") {
+TEST_CASE("Unit_atomicAdd_Negative_Parameters_RTC", "[atomic]") {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicAdd_int, kAtomicAdd_uint, kAtomicAdd_ulong,

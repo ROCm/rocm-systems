@@ -96,7 +96,7 @@ template <bool out_of_bounds> void LaunchBoundsWrapper(const int threads_per_blo
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Kernel_Launch_bounds_Positive_Basic") {
+TEST_CASE("Unit_Kernel_Launch_bounds_Positive_Basic", "[kernel]") {
   auto threads_per_block = GENERATE(1, kMaxThreadsPerBlock / 2, kMaxThreadsPerBlock);
   LaunchBoundsWrapper<false>(threads_per_block);
 }
@@ -116,7 +116,7 @@ TEST_CASE("Unit_Kernel_Launch_bounds_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Kernel_Launch_bounds_Negative_OutOfBounds") {
+TEST_CASE("Unit_Kernel_Launch_bounds_Negative_OutOfBounds", "[kernel]") {
   auto threads_per_block =
       GENERATE(-1 * kMaxThreadsPerBlock, -1, kMaxThreadsPerBlock + 1, 2 * kMaxThreadsPerBlock);
   LaunchBoundsWrapper<true>(threads_per_block);
@@ -141,7 +141,7 @@ TEST_CASE("Unit_Kernel_Launch_bounds_Negative_OutOfBounds") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Kernel_Launch_bounds_Negative_Parameters_RTC") {
+TEST_CASE("Unit_Kernel_Launch_bounds_Negative_Parameters_RTC", "[kernel]") {
   hiprtcProgram program{};
 
 #if HT_AMD
