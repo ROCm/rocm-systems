@@ -48,8 +48,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-TEST_CASE("Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic",
-          "[multigpu]") {
+TEST_CASE("Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic", "[multigpu][module]") {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");

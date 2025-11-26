@@ -24,14 +24,14 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 
-TEST_CASE("Unit_hipModuleGetFunction_Positive_Basic") {
+TEST_CASE("Unit_hipModuleGetFunction_Positive_Basic", "[module]") {
   auto mg = ModuleGuard::InitModule("get_function_module.code");
   hipFunction_t kernel = nullptr;
   HIP_CHECK(hipModuleGetFunction(&kernel, mg.module(), "GlobalKernel"));
   REQUIRE(kernel != nullptr);
 }
 
-TEST_CASE("Unit_hipModuleGetFunction_Negative_Parameters") {
+TEST_CASE("Unit_hipModuleGetFunction_Negative_Parameters", "[module]") {
   auto mg = ModuleGuard::InitModule("get_function_module.code");
   hipFunction_t kernel = nullptr;
 
@@ -71,7 +71,7 @@ TEST_CASE("Unit_hipModuleGetFunction_Negative_Parameters") {
 
 // Test description: Loading kernel function from different device than the one on which the module
 // is loaded
-TEST_CASE("Unit_hipModuleGetFunction_DiffDevice", "[multigpu]") {
+TEST_CASE("Unit_hipModuleGetFunction_DiffDevice", "[multigpu][module]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {

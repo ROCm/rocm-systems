@@ -217,7 +217,7 @@ a combination of HIPRTC supported compiler options which a retrieved from
 RtcConfig.jason file.
 */
 
-TEST_CASE("Unit_hiprtcCombiComplrOptnTst") {
+TEST_CASE("Unit_hiprtcCombiComplrOptnTst", "[compiler]") {
   // COMBINATION COMPILER OPTIONS
   std::vector<std::string> CombiCompOptions = get_combi_string_vec();
   int TotalCombos = CombiCompOptions.size();

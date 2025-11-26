@@ -20,13 +20,13 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 #include <hip/hip_runtime_api.h>
 
-TEST_CASE("Unit_hipModuleUnload_Negative_Module_Is_Nullptr") {
+TEST_CASE("Unit_hipModuleUnload_Negative_Module_Is_Nullptr", "[module]") {
   HIP_CHECK(hipFree(nullptr));
 
   HIP_CHECK_ERROR(hipModuleUnload(nullptr), hipErrorInvalidResourceHandle);
 }
 
-TEST_CASE("Unit_hipModuleUnload_Negative_Double_Unload") {
+TEST_CASE("Unit_hipModuleUnload_Negative_Double_Unload", "[module]") {
   HIP_CHECK(hipFree(nullptr));
 
   hipModule_t module = nullptr;
@@ -57,7 +57,7 @@ TEST_CASE("Unit_hipModuleUnload_Negative_Double_Unload") {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipModuleLoad_basic") {
+TEST_CASE("Unit_hipModuleLoad_basic", "[module]") {
   CTX_CREATE();
   constexpr auto fileName = "vcpy_kernel.code";
   hipModule_t module;

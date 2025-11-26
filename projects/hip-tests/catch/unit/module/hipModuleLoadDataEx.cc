@@ -25,7 +25,7 @@ THE SOFTWARE.
 #include <hip/hip_runtime_api.h>
 
 
-TEST_CASE("Unit_hipModuleLoadDataEx_Positive_Basic") {
+TEST_CASE("Unit_hipModuleLoadDataEx_Positive_Basic", "[module]") {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module = nullptr;
 
@@ -44,7 +44,7 @@ TEST_CASE("Unit_hipModuleLoadDataEx_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipModuleLoadDataEx_Negative_Parameters") {
+TEST_CASE("Unit_hipModuleLoadDataEx_Negative_Parameters", "[module]") {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module = nullptr;
 
@@ -61,7 +61,7 @@ TEST_CASE("Unit_hipModuleLoadDataEx_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipModuleLoadDataEx_Negative_Image_Is_An_Empty_String") {
+TEST_CASE("Unit_hipModuleLoadDataEx_Negative_Image_Is_An_Empty_String", "[module]") {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module;
 

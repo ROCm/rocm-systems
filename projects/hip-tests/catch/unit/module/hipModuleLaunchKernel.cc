@@ -32,17 +32,17 @@ static hipError_t hipModuleLaunchKernelWrapper(hipFunction_t f, uint32_t gridX, 
                                hStream, kernelParams, extra);
 }
 
-TEST_CASE("Unit_hipModuleLaunchKernel_Positive_Basic") {
+TEST_CASE("Unit_hipModuleLaunchKernel_Positive_Basic", "[module]") {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelPositiveBasic<hipModuleLaunchKernelWrapper>();
 }
 
-TEST_CASE("Unit_hipModuleLaunchKernel_Positive_Parameters") {
+TEST_CASE("Unit_hipModuleLaunchKernel_Positive_Parameters", "[module]") {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelPositiveParameters<hipModuleLaunchKernelWrapper>();
 }
 
-TEST_CASE("Unit_hipModuleLaunchKernel_Negative_Parameters", "[multigpu]") {
+TEST_CASE("Unit_hipModuleLaunchKernel_Negative_Parameters", "[multigpu][module]") {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelNegativeParameters<hipModuleLaunchKernelWrapper>();
 }
@@ -303,7 +303,7 @@ bool Module_WorkGroup_Test() {
   return testStatus;
 }
 
-TEST_CASE("Unit_hipModuleLaunchKernel_Fntl") {
+TEST_CASE("Unit_hipModuleLaunchKernel_Fntl", "[module]") {
   bool testStatus = false;
   SECTION("Negative test scenarios") {
     testStatus = Module_Negative_tests();

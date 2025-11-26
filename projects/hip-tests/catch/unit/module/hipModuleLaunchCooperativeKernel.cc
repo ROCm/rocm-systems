@@ -49,7 +49,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Positive_Basic") {
+TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Positive_Basic", "[module]") {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
@@ -89,7 +89,7 @@ TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Positive_Parameters") {
+TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Positive_Parameters", "[module]") {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
@@ -125,7 +125,7 @@ TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Positive_Parameters") {
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters") {
+TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters", "[module]") {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
