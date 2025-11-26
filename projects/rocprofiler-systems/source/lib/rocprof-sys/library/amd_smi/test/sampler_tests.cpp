@@ -26,9 +26,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#include "library/amd_smi/test/mocks.hpp"
-#include "library/amd_smi/sampler.hpp"
 #include "library/amd_smi/metrics.hpp"
+#include "library/amd_smi/sampler_impl.hpp"
+#include "library/amd_smi/test/mock_policies.hpp"
 
 #include <gtest/gtest.h>
 
@@ -40,18 +40,23 @@ namespace testing
 {
 #if ROCPROFSYS_USE_ROCM > 0
 
+// Type alias for mock sampler
+using MockSampler = SamplerImpl<MockConfig>;
+
 class SamplerTest : public ::testing::Test
 {
 protected:
     void SetUp() override
     {
-        mocks.reset_all();
-        sampler = std::make_unique<Sampler>(
-            mocks.driver, mocks.clock, mocks.storage, mocks.state, mocks.gpu_caps);
+        reset_all_mocks();
+        mock_state = State::Active;
+        sampler    = std::make_unique<MockSampler>(mock_state);
     }
 
-    MockFixture             mocks;
-    std::unique_ptr<Sampler> sampler;
+    void TearDown() override { reset_all_mocks(); }
+
+    std::atomic<State>          mock_state{ State::Active };
+    std::unique_ptr<MockSampler> sampler;
 };
 
 // ============================================================================
@@ -60,29 +65,29 @@ protected:
 
 TEST_F(SamplerTest, ReturnsNulloptWhenStateNotActive)
 {
-    mocks.state->mock_state = State::PreInit;
+    mock_state = State::PreInit;
     settings s{};
 
     auto result = sampler->sample(0, s);
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_FALSE(mocks.storage->has_samples());
+    EXPECT_FALSE(MockStoragePolicy::has_samples());
 }
 
 TEST_F(SamplerTest, ReturnsNulloptInChildProcess)
 {
-    mocks.state->mock_is_child = true;
+    MockStatePolicy::mock_is_child = true;
     settings s{};
 
     auto result = sampler->sample(0, s);
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_FALSE(mocks.storage->has_samples());
+    EXPECT_FALSE(MockStoragePolicy::has_samples());
 }
 
 TEST_F(SamplerTest, ReturnsNulloptWhenDisabled)
 {
-    mocks.state->mock_state = State::Disabled;
+    mock_state = State::Disabled;
     settings s{};
 
     auto result = sampler->sample(0, s);
@@ -92,7 +97,7 @@ TEST_F(SamplerTest, ReturnsNulloptWhenDisabled)
 
 TEST_F(SamplerTest, ReturnsNulloptWhenFinalized)
 {
-    mocks.state->mock_state = State::Finalized;
+    mock_state = State::Finalized;
     settings s{};
 
     auto result = sampler->sample(0, s);
@@ -106,17 +111,21 @@ TEST_F(SamplerTest, ReturnsNulloptWhenFinalized)
 
 TEST_F(SamplerTest, CollectsBasicMetricsWhenEnabled)
 {
-    mocks.driver->mock_usage.gfx_activity = 75;
-    mocks.driver->mock_usage.umc_activity = 50;
-    mocks.driver->mock_usage.mm_activity  = 25;
-    mocks.driver->mock_temp               = 60;
-    mocks.driver->mock_power.current_socket_power = 150;
-    mocks.driver->mock_mem_usage = 2ULL * 1024 * 1024 * 1024;
+    MockDriverPolicy::mock_usage.gfx_activity         = 75;
+    MockDriverPolicy::mock_usage.umc_activity         = 50;
+    MockDriverPolicy::mock_usage.mm_activity          = 25;
+    MockDriverPolicy::mock_temp                       = 60;
+    MockDriverPolicy::mock_power.current_socket_power = 150;
+    MockDriverPolicy::mock_mem_usage                  = 2ULL * 1024 * 1024 * 1024;
 
-    settings s{
-        .busy = true, .temp = true, .power = true, .mem_usage = true,
-        .vcn_activity = false, .jpeg_activity = false, .xgmi = false, .pcie = false
-    };
+    settings s{ .busy         = true,
+                .temp         = true,
+                .power        = true,
+                .mem_usage    = true,
+                .vcn_activity = false,
+                .jpeg_activity = false,
+                .xgmi         = false,
+                .pcie         = false };
 
     auto result = sampler->sample(0, s);
 
@@ -131,28 +140,32 @@ TEST_F(SamplerTest, CollectsBasicMetricsWhenEnabled)
 
 TEST_F(SamplerTest, SkipsDisabledMetrics)
 {
-    settings s{
-        .busy = false, .temp = true, .power = false, .mem_usage = false,
-        .vcn_activity = false, .jpeg_activity = false, .xgmi = false, .pcie = false
-    };
+    settings s{ .busy         = false,
+                .temp         = true,
+                .power        = false,
+                .mem_usage    = false,
+                .vcn_activity = false,
+                .jpeg_activity = false,
+                .xgmi         = false,
+                .pcie         = false };
 
     sampler->sample(0, s);
 
-    EXPECT_EQ(mocks.driver->get_gpu_activity_calls, 0);
-    EXPECT_EQ(mocks.driver->get_temp_metric_calls, 1);
-    EXPECT_EQ(mocks.driver->get_power_info_calls, 0);
-    EXPECT_EQ(mocks.driver->get_gpu_memory_usage_calls, 0);
+    EXPECT_EQ(MockDriverPolicy::get_gpu_activity_calls, 0);
+    EXPECT_EQ(MockDriverPolicy::get_temp_metric_calls, 1);
+    EXPECT_EQ(MockDriverPolicy::get_power_info_calls, 0);
+    EXPECT_EQ(MockDriverPolicy::get_gpu_memory_usage_calls, 0);
 }
 
 TEST_F(SamplerTest, StoresSampleWithCorrectTimestamp)
 {
-    mocks.clock->set_time(123456789);
+    MockClockPolicy::set_time(123456789);
     settings s{ .busy = true };
 
     sampler->sample(0, s);
 
-    ASSERT_TRUE(mocks.storage->has_samples());
-    EXPECT_EQ(mocks.storage->last_sample().timestamp, 123456789u);
+    ASSERT_TRUE(MockStoragePolicy::has_samples());
+    EXPECT_EQ(MockStoragePolicy::last_sample().timestamp, 123456789u);
 }
 
 TEST_F(SamplerTest, StoresSampleWithCorrectDeviceId)
@@ -161,8 +174,8 @@ TEST_F(SamplerTest, StoresSampleWithCorrectDeviceId)
 
     sampler->sample(42, s);
 
-    ASSERT_TRUE(mocks.storage->has_samples());
-    EXPECT_EQ(mocks.storage->last_sample().device_id, 42u);
+    ASSERT_TRUE(MockStoragePolicy::has_samples());
+    EXPECT_EQ(MockStoragePolicy::last_sample().device_id, 42u);
 }
 
 // ============================================================================
@@ -171,7 +184,7 @@ TEST_F(SamplerTest, StoresSampleWithCorrectDeviceId)
 
 TEST_F(SamplerTest, HandlesNotSupportedGracefully)
 {
-    mocks.driver->activity_status = AMDSMI_STATUS_NOT_SUPPORTED;
+    MockDriverPolicy::activity_status = AMDSMI_STATUS_NOT_SUPPORTED;
     settings s{ .busy = true, .temp = true };
 
     auto result = sampler->sample(0, s);
@@ -179,12 +192,12 @@ TEST_F(SamplerTest, HandlesNotSupportedGracefully)
     // Should still succeed - NOT_SUPPORTED is handled gracefully
     ASSERT_TRUE(result.has_value());
     // Temperature should still be collected
-    EXPECT_EQ(mocks.driver->get_temp_metric_calls, 1);
+    EXPECT_EQ(MockDriverPolicy::get_temp_metric_calls, 1);
 }
 
 TEST_F(SamplerTest, DisablesOnlyFailingDeviceOnHardError)
 {
-    mocks.driver->activity_status = AMDSMI_STATUS_INVAL;
+    MockDriverPolicy::activity_status = AMDSMI_STATUS_INVAL;
     settings s{ .busy = true };
 
     auto result = sampler->sample(0, s);
@@ -194,7 +207,7 @@ TEST_F(SamplerTest, DisablesOnlyFailingDeviceOnHardError)
     EXPECT_TRUE(sampler->is_device_disabled(0));
 
     // Global state should NOT be disabled - other GPUs can still work
-    EXPECT_EQ(mocks.state->mock_state, State::Active);
+    EXPECT_EQ(mock_state.load(), State::Active);
 }
 
 TEST_F(SamplerTest, SkipsDisabledDevice)
@@ -209,12 +222,12 @@ TEST_F(SamplerTest, SkipsDisabledDevice)
     EXPECT_FALSE(result.has_value());
 
     // No driver calls should be made for disabled device
-    EXPECT_EQ(mocks.driver->get_gpu_activity_calls, 0);
+    EXPECT_EQ(MockDriverPolicy::get_gpu_activity_calls, 0);
 }
 
 TEST_F(SamplerTest, OtherDevicesContinueAfterOneDisabled)
 {
-    mocks.driver->activity_status = AMDSMI_STATUS_INVAL;
+    MockDriverPolicy::activity_status = AMDSMI_STATUS_INVAL;
     settings s{ .busy = true };
 
     // Device 0 fails
@@ -223,8 +236,8 @@ TEST_F(SamplerTest, OtherDevicesContinueAfterOneDisabled)
     EXPECT_TRUE(sampler->is_device_disabled(0));
 
     // Reset driver to success for other devices
-    mocks.driver->activity_status = AMDSMI_STATUS_SUCCESS;
-    mocks.driver->reset_call_counts();
+    MockDriverPolicy::activity_status = AMDSMI_STATUS_SUCCESS;
+    MockDriverPolicy::reset_call_counts();
 
     // Device 1 should still work
     auto result1 = sampler->sample(1, s);
@@ -238,56 +251,62 @@ TEST_F(SamplerTest, OtherDevicesContinueAfterOneDisabled)
 
 TEST_F(SamplerTest, FetchesGpuMetricsWhenAdvancedMetricsEnabled)
 {
-    settings s{
-        .busy = false, .temp = false, .power = false, .mem_usage = false,
-        .vcn_activity = true, .jpeg_activity = false, .xgmi = false, .pcie = false
-    };
+    settings s{ .busy         = false,
+                .temp         = false,
+                .power        = false,
+                .mem_usage    = false,
+                .vcn_activity = true,
+                .jpeg_activity = false,
+                .xgmi         = false,
+                .pcie         = false };
 
     sampler->sample(0, s);
 
-    EXPECT_EQ(mocks.driver->get_gpu_metrics_info_calls, 1);
+    EXPECT_EQ(MockDriverPolicy::get_gpu_metrics_info_calls, 1);
 }
 
 TEST_F(SamplerTest, SkipsGpuMetricsWhenOnlyBasicEnabled)
 {
-    settings s{
-        .busy = true, .temp = true, .power = true, .mem_usage = true,
-        .vcn_activity = false, .jpeg_activity = false, .xgmi = false, .pcie = false
-    };
+    settings s{ .busy         = true,
+                .temp         = true,
+                .power        = true,
+                .mem_usage    = true,
+                .vcn_activity = false,
+                .jpeg_activity = false,
+                .xgmi         = false,
+                .pcie         = false };
 
     sampler->sample(0, s);
 
-    EXPECT_EQ(mocks.driver->get_gpu_metrics_info_calls, 0);
+    EXPECT_EQ(MockDriverPolicy::get_gpu_metrics_info_calls, 0);
 }
 
 TEST_F(SamplerTest, ProcessesVcnMetricsDeviceLevel)
 {
-    mocks.gpu_caps->mock_vcn_device_level = true;
-    mocks.driver->mock_gpu_metrics.vcn_activity[0] = 50;
-    mocks.driver->mock_gpu_metrics.vcn_activity[1] = 60;
+    MockGpuCapabilitiesPolicy::mock_vcn_device_level           = true;
+    MockDriverPolicy::mock_gpu_metrics.vcn_activity[0] = 50;
+    MockDriverPolicy::mock_gpu_metrics.vcn_activity[1] = 60;
 
     settings s{ .vcn_activity = true };
 
     auto result = sampler->sample(0, s);
 
     ASSERT_TRUE(result.has_value());
-    // VCN data should be present if properly processed
-    // Actual verification depends on ProcessedMetrics implementation
 }
 
 TEST_F(SamplerTest, ProcessesPcieMetrics)
 {
-    mocks.driver->mock_gpu_metrics.pcie_link_width    = 16;
-    mocks.driver->mock_gpu_metrics.pcie_link_speed    = 32;
-    mocks.driver->mock_gpu_metrics.pcie_bandwidth_acc  = 1000;
-    mocks.driver->mock_gpu_metrics.pcie_bandwidth_inst = 500;
+    MockDriverPolicy::mock_gpu_metrics.pcie_link_width    = 16;
+    MockDriverPolicy::mock_gpu_metrics.pcie_link_speed    = 32;
+    MockDriverPolicy::mock_gpu_metrics.pcie_bandwidth_acc  = 1000;
+    MockDriverPolicy::mock_gpu_metrics.pcie_bandwidth_inst = 500;
 
     settings s{ .pcie = true };
 
     auto result = sampler->sample(0, s);
 
     ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(mocks.storage->has_samples());
+    EXPECT_TRUE(MockStoragePolicy::has_samples());
 }
 
 // ============================================================================
@@ -345,24 +364,30 @@ TEST(MetricsTest, CopyValidMetricsHandlesAllInvalid)
 
 TEST(MetricsTest, SerializeSettingsEncodesAllFields)
 {
-    settings s{
-        .busy = true, .temp = false, .power = true, .mem_usage = false,
-        .vcn_activity = true, .jpeg_activity = false, .xgmi = true, .pcie = false
-    };
+    settings s{ .busy         = true,
+                .temp         = false,
+                .power        = true,
+                .mem_usage    = false,
+                .vcn_activity = true,
+                .jpeg_activity = false,
+                .xgmi         = true,
+                .pcie         = false };
 
     auto serialized = metrics::serialize_settings(s);
 
-    // Verify expected bits are set based on settings_positions enum
-    // This test validates the serialization format is consistent
     EXPECT_NE(serialized, 0u);
 }
 
 TEST(MetricsTest, SerializeSettingsAllFalseReturnsZero)
 {
-    settings s{
-        .busy = false, .temp = false, .power = false, .mem_usage = false,
-        .vcn_activity = false, .jpeg_activity = false, .xgmi = false, .pcie = false
-    };
+    settings s{ .busy         = false,
+                .temp         = false,
+                .power        = false,
+                .mem_usage    = false,
+                .vcn_activity = false,
+                .jpeg_activity = false,
+                .xgmi         = false,
+                .pcie         = false };
 
     auto serialized = metrics::serialize_settings(s);
 

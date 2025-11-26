@@ -46,9 +46,8 @@
 #include "core/state.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/amd_smi.hpp"
-#include "library/amd_smi/driver_impl.hpp"
 #include "library/amd_smi/metrics.hpp"
-#include "library/amd_smi/sampler.hpp"
+#include "library/amd_smi/sampler_impl.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 
@@ -477,16 +476,13 @@ data::data(uint32_t _dev_id) { sample(_dev_id); }
 namespace
 {
 // Get the shared Sampler instance for this module
-// This allows using the new testable architecture while maintaining backward
-// compatibility
+// Uses template-based policies for zero virtual function overhead
 Sampler&
 get_sampler()
 {
     // Create sampler with proper state reference to the global state
-    static auto    state_mgr = std::make_shared<StateManagerImpl>(get_state());
-    static Sampler instance(get_default_driver(), get_default_clock(),
-                            get_default_storage(), state_mgr,
-                            get_default_gpu_capabilities());
+    // All policy calls are resolved at compile time - no virtual dispatch
+    static Sampler instance(get_state());
     return instance;
 }
 
