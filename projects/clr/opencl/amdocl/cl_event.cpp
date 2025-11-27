@@ -377,11 +377,18 @@ RUNTIME_ENTRY(cl_int, clSetEventCallback,
     return CL_INVALID_VALUE;
   }
 
-  if (!as_amd(event)->setCallback(command_exec_callback_type, pfn_notify, user_data)) {
+  amd::Event* ev = as_amd(event);
+  ev->retain();
+
+  bool ok = ev->setCallback(command_exec_callback_type, pfn_notify, user_data);
+  if (!ok) {
+    ev->release();
     return CL_OUT_OF_HOST_MEMORY;
   }
-
-  as_amd(event)->notifyCmdQueue();
+  if (ev->status() > CL_COMPLETE) {
+    ev->notifyCmdQueue();
+  }
+  ev->release();
 
   return CL_SUCCESS;
 }
