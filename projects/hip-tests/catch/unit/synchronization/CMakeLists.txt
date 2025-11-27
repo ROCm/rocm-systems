@@ -2,11 +2,19 @@
 set(TEST_SRC
     copy_coherency.cc
 )
-add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
                   ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+else()
+  add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x cu ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
+                  ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco
+                  -I${HIP_INCLUDE_DIR}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+endif()
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco)
 # only for AMD
 if(HIP_PLATFORM MATCHES "amd")
@@ -24,10 +32,8 @@ hip_add_exe_to_target(NAME synchronizationTests
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS -std=c++14)
-message(STATUS "HIP PLATFORM IS ${HIP_PLATFORM}")
-if(HIP_PLATFORM MATCHES "nvidia")
-  set_target_properties(synchronizationTests PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(synchronizationTests cuda)
-endif()
-#add_dependencies(synchronizationTests memcpyInt.hsaco)
+
+set_target_properties(synchronizationTests PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(synchronizationTests ${GPGPU_LINKER_LIBRARIES})
+add_dependencies(synchronizationTests memcpyInt.hsaco)
 

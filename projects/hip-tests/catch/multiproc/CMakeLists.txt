@@ -37,7 +37,6 @@ if(HIP_PLATFORM MATCHES "nvidia")
   set_target_properties(MultiProc PROPERTIES COMPILE_FLAGS -arch=sm_70)
   set_target_properties(MultiProc PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
   target_link_libraries(MultiProc cuda)
-  # set_target_properties(MultiProc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 elseif(HIP_PLATFORM MATCHES "amd")
   hip_add_exe_to_target(NAME MultiProc
                       TEST_SRC ${TEST_SRC}
@@ -46,5 +45,5 @@ elseif(HIP_PLATFORM MATCHES "amd")
 endif()
 
 if(UNIX)
-  #  add_dependencies(build_tests dummy_kernel.code)
+  add_dependencies(build_tests dummy_kernel.code)
 endif()

@@ -119,7 +119,7 @@ set(AMD_GFX1200_SPEC_TEST_SRC
 
 # Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900  --offload-arch=gfx906"
 # having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
-if (0)
+if (HIP_PLATFORM MATCHES "amd")
   add_custom_target(kerDevAllocMultCO.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocMultCO.cc
@@ -132,7 +132,7 @@ if (0)
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevWriteMultCO.code
                   -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-add_custom_target(kerDevFreeMultCO.code
+  add_custom_target(kerDevFreeMultCO.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevFreeMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevFreeMultCO.code
@@ -144,12 +144,37 @@ add_custom_target(kerDevFreeMultCO.code
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocSingleKer.code
                   -I${HIP_INCLUDE_DIR}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocSingleKer.code)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevFreeMultCO.code)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevWriteMultCO.code)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocMultCO.code)
+else()
+  add_custom_target(kerDevAllocMultCO.code
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocMultCO.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocMultCO.code
+                  -I${HIP_INCLUDE_DIR}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+  add_custom_target(kerDevWriteMultCO.code
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevWriteMultCO.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevWriteMultCO.code
+                  -I${HIP_INCLUDE_DIR}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+  add_custom_target(kerDevFreeMultCO.code
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevFreeMultCO.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevFreeMultCO.code
+                  -I${HIP_INCLUDE_DIR}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+  add_custom_target(kerDevAllocSingleKer.code
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocSingleKer.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocSingleKer.code
+                  -I${HIP_INCLUDE_DIR}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 endif()
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocSingleKer.code)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevFreeMultCO.code)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevWriteMultCO.code)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/kerDevAllocMultCO.code)
+
 # Accepted archs to compile this cmake file
 set(ACCEPTED_OFFLOAD_ARCHS gfx90a gfx942)
 set(ACCEPTED_GFX940_ARCH gfx942)
@@ -222,4 +247,4 @@ elseif(HIP_PLATFORM MATCHES "nvidia")
   target_link_libraries(UnitDeviceTests cuda)
 endif()
 
-#add_dependencies(UnitDeviceTests kerDevAllocMultCO.code kerDevWriteMultCO.code kerDevFreeMultCO.code kerDevAllocSingleKer.code)
+add_dependencies(UnitDeviceTests kerDevAllocMultCO.code kerDevWriteMultCO.code kerDevFreeMultCO.code kerDevAllocSingleKer.code)
