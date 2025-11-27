@@ -383,7 +383,7 @@ AqlQueue::~AqlQueue() {
 
   exception_signal_->WaitingDec();
   exception_signal_->DestroySignal();
-  HSA::hsa_signal_destroy(amd_queue_.queue_inactive_signal);
+  core::Signal::Convert(amd_queue_.queue_inactive_signal)->DestroySignal();
   FreeQueueMemory();
 
   if (core::g_use_interrupt_wait) {
