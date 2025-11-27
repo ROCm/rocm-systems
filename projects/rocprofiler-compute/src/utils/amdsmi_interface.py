@@ -37,7 +37,8 @@ from utils.logger import (
 _amdsmi_module = None
 
 
-def import_amdsmi_module() -> None:
+# Ignore undefined name amdsmi since it's dynamically imported
+def import_amdsmi_module() -> "amdsmi": # noqa: F821
     """
     Dynamically import the amdsmi module because we only
     want profile time dependency on amdsmi.
