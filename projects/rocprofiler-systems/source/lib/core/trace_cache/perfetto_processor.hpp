@@ -49,7 +49,8 @@ class perfetto_processor_t : public processor_t<perfetto_processor_t>
 {
 public:
     perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
-                         const std::shared_ptr<agent_manager>& agent_mngr, int pid);
+                         const std::shared_ptr<agent_manager>& agent_mngr, int pid,
+                         int ppid);
 
     void prepare_for_processing();
     void finalize_processing();
@@ -74,6 +75,7 @@ private:
 
     metadata_registry&                          m_metadata;
     uint64_t                                    m_process_id;
+    uint64_t                                    m_parrent_pid;
     agent_manager&                              m_agent_manager;
     ::perfetto::TraceConfig                     m_session_config;
     std::shared_ptr<tmp_file>                   m_tmp_file{ nullptr };

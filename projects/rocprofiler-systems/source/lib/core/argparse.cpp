@@ -359,7 +359,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     {
         _parser
             .add_argument({ "-T", "--trace" },
-                          "Generate a detailed trace (perfetto output)")
+                          "Generate a detailed trace (perfetto output) from cached data")
             .max_count(1)
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_TRACE", p.get<bool>("trace"));
@@ -375,7 +375,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                           "Generate a detailed trace (perfetto output)")
             .max_count(1)
             .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE_LEGACY", p.get<bool>("trace"));
+                update_env(_data, "ROCPROFSYS_TRACE_LEGACY", p.get<bool>("trace-legacy"));
             });
 
         _data.processed_environs.emplace("trace");

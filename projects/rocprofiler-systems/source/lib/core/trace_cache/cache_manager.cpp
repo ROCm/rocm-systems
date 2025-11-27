@@ -330,96 +330,79 @@ clear_cache_files(const data::mapped_cache_files_t& _cache_files)
 
 void
 merge_perfetto_files(const std::vector<std::string>& perfetto_files,
-                     const std::string&              output_filename)
+                     const std::string&              _filename)
 {
     if(perfetto_files.empty())
     {
-        ROCPROFSYS_WARNING(0, "No perfetto files to merge\n");
+        ROCPROFSYS_VERBOSE(
+            0, "perfetto trace data is empty. File '%s' will not be written...\n",
+            _filename.c_str());
         return;
     }
 
-    ROCPROFSYS_VERBOSE(1, "Merging %zu perfetto files into: %s\n", perfetto_files.size(),
-                       output_filename.c_str());
-
-    std::vector<char> merged_data;
+    std::vector<char> trace_data;
     size_t            total_size = 0;
 
+    // Calculate total size for reservation
     for(const auto& file : perfetto_files)
     {
-        try
+        std::ifstream ifs(file, std::ios::binary | std::ios::ate);
+        if(ifs)
         {
-            std::ifstream ifs(file, std::ios::binary | std::ios::ate);
-            if(ifs)
-            {
-                total_size += ifs.tellg();
-                ifs.close();
-            }
-        } catch(const std::exception& e)
-        {
-            ROCPROFSYS_WARNING(0, "Failed to get size of file %s: %s\n", file.c_str(),
-                               e.what());
+            total_size += ifs.tellg();
         }
     }
 
-    merged_data.reserve(total_size);
+    trace_data.reserve(total_size);
 
     // Read and concatenate all files
     for(const auto& file : perfetto_files)
     {
-        try
+        std::ifstream ifs(file, std::ios::binary);
+        if(!ifs)
         {
-            std::ifstream ifs(file, std::ios::binary);
-            if(!ifs)
-            {
-                ROCPROFSYS_WARNING(0, "Failed to open perfetto file: %s\n", file.c_str());
-                continue;
-            }
-
-            ifs.seekg(0, std::ios::end);
-            size_t file_size = ifs.tellg();
-            ifs.seekg(0, std::ios::beg);
-
-            size_t current_size = merged_data.size();
-            merged_data.resize(current_size + file_size);
-
-            ifs.read(merged_data.data() + current_size, file_size);
-            ifs.close();
-
-            ROCPROFSYS_VERBOSE(2, "Merged file: %s (%zu bytes)\n", file.c_str(),
-                               file_size);
-        } catch(const std::exception& e)
-        {
-            ROCPROFSYS_WARNING(0, "Error reading file %s: %s\n", file.c_str(), e.what());
-        }
-    }
-
-    if(merged_data.empty())
-    {
-        ROCPROFSYS_WARNING(0, "No data collected from perfetto files\n");
-        return;
-    }
-
-    // Write merged data
-    try
-    {
-        std::ofstream ofs(output_filename, std::ios::binary);
-        if(!ofs)
-        {
-            ROCPROFSYS_WARNING(0, "Failed to create merged perfetto file: %s\n",
-                               output_filename.c_str());
-            return;
+            ROCPROFSYS_VERBOSE(-1, "Error opening '%s'...\n", file.c_str());
+            continue;
         }
 
-        ofs.write(merged_data.data(), merged_data.size());
+        ifs.seekg(0, std::ios::end);
+        size_t file_size = ifs.tellg();
+        ifs.seekg(0, std::ios::beg);
+
+        size_t current_size = trace_data.size();
+        trace_data.resize(current_size + file_size);
+
+        ifs.read(trace_data.data() + current_size, file_size);
+    }
+
+    if(!trace_data.empty())
+    {
+        operation::file_output_message<tim::project::rocprofsys> _fom{};
+        // Write the trace into a file.
+        if(config::get_verbose() >= 0)
+            _fom(_filename, std::string{ "perfetto" },
+                 " (%.2f KB / %.2f MB / %.2f GB)... ",
+                 static_cast<double>(trace_data.size()) / units::KB,
+                 static_cast<double>(trace_data.size()) / units::MB,
+                 static_cast<double>(trace_data.size()) / units::GB);
+        std::ofstream ofs{};
+        if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+        {
+            _fom.append("Error opening '%s'...", _filename.c_str());
+        }
+        else
+        {
+            // Write the trace into a file.
+            ofs.write(trace_data.data(), trace_data.size());
+            if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+        }
         ofs.close();
-
-        ROCPROFSYS_VERBOSE(0, "Successfully merged perfetto files into: %s (%.2f MB)\n",
-                           output_filename.c_str(),
-                           static_cast<double>(merged_data.size()) / units::MB);
-    } catch(const std::exception& e)
+    }
+    else
     {
-        ROCPROFSYS_WARNING(0, "Error writing merged file: %s\n", e.what());
-        return;
+        ROCPROFSYS_VERBOSE(
+            0, "perfetto trace data is empty. File '%s' will not be written...\n",
+            _filename.c_str());
     }
 }
 
@@ -444,7 +427,7 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
     {
         processor_storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _processor_config->_metadata_registry, _processor_config->_agent_manager,
-            _processor_config->_pid);
+            _processor_config->_pid, _processor_config->_ppid);
         _type_processing->add_handler(*processor_storage.perfetto_processor);
     }
     return processor_storage;
@@ -596,23 +579,27 @@ cache_manager::post_process_bulk()
 
         for(const auto& config : processor_configs)
         {
-            auto filename = config::get_perfetto_output_filename_with_suffix(
+            // Check for both naming styles: default (current process) and PID-suffixed
+            auto filename_default = config::get_perfetto_output_filename();
+            auto filename_suffix  = config::get_perfetto_output_filename_with_suffix(
                 std::to_string(config->_pid));
 
-            if(tim::filepath::exists(filename))
+            if(static_cast<pid_t>(config->_pid) == getpid() &&
+               tim::filepath::exists(filename_default))
             {
-                perfetto_files.push_back(filename);
+                perfetto_files.push_back(filename_default);
+            }
+            else if(tim::filepath::exists(filename_suffix))
+            {
+                perfetto_files.push_back(filename_suffix);
             }
         }
 
-        if(config::get_merge_perfetto_files() && perfetto_files.size() > 1)
+        if(config::get_perfetto_combined_traces() && perfetto_files.size() > 1)
         {
-            // User wants merged output
-            auto final_filename = config::get_perfetto_output_filename();
-            filesystem_utils::merge_perfetto_files(perfetto_files, final_filename);
-
-            ROCPROFSYS_VERBOSE(0, "Merged %zu perfetto traces into: %s\n",
-                               perfetto_files.size(), final_filename.c_str());
+            // Use base filename without suffix for merged output
+            auto _filename = config::get_perfetto_output_filename();
+            filesystem_utils::merge_perfetto_files(perfetto_files, _filename);
         }
         else if(perfetto_files.size() > 1)
         {

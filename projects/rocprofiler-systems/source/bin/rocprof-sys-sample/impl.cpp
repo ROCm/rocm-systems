@@ -373,7 +373,8 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             if(_v.size() > 1) update_env(_env, "ROCPROFSYS_OUTPUT_PREFIX", _v.at(1));
         });
     parser
-        .add_argument({ "-T", "--trace" }, "Generate a detailed trace (perfetto output)")
+        .add_argument({ "-T", "--trace" },
+                      "Generate a detailed trace (perfetto output) from cached data")
         .max_count(1)
         .action([&](parser_t& p) {
             update_env(_env, "ROCPROFSYS_TRACE", p.get<bool>("trace"));
@@ -383,7 +384,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                       "Generate a detailed trace (perfetto output)")
         .max_count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_TRACE_LEGACY", p.get<bool>("trace"));
+            update_env(_env, "ROCPROFSYS_TRACE_LEGACY", p.get<bool>("trace-legacy"));
         });
     parser
         .add_argument(

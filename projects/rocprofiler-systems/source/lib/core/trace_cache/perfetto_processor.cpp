@@ -243,10 +243,11 @@ dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
 
 perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
-    const std::shared_ptr<agent_manager>& agent_mngr, int pid)
+    const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid)
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
+, m_parrent_pid(ppid)
 , m_agent_manager(*agent_mngr)
 , m_tmp_file(nullptr)
 , m_tracing_session(nullptr)
@@ -382,35 +383,34 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
     auto trace_data = char_vec_t{};
     trace_data      = get_session_data();
 
-    auto _filename =
-        config::get_perfetto_output_filename_with_suffix(std::to_string(m_process_id));
+    // If processing parrent process, use default filename (respects MPI rank/USE_PID
+    // settings) Otherwise, use PID-based suffix for child process traces
+    auto _filename = (m_process_id == m_parrent_pid)
+                         ? config::get_perfetto_output_filename()
+                         : config::get_perfetto_output_filename_with_suffix(
+                               std::to_string(m_process_id));
 
     if(!trace_data.empty())
     {
-        ROCPROFSYS_VERBOSE(1, "Writing perfetto trace data (%zu bytes)...\n",
-                           trace_data.size());
-
         operation::file_output_message<tim::project::rocprofsys> _fom{};
+        // Write the trace into a file.
         if(config::get_verbose() >= 0)
             _fom(_filename, std::string{ "perfetto" },
                  " (%.2f KB / %.2f MB / %.2f GB)... ",
                  static_cast<double>(trace_data.size()) / units::KB,
                  static_cast<double>(trace_data.size()) / units::MB,
                  static_cast<double>(trace_data.size()) / units::GB);
-
         std::ofstream ofs{};
         if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
         {
-            ROCPROFSYS_VERBOSE(-1, "Error opening '%s'...", _filename.c_str());
+            _fom.append("Error opening '%s'...", _filename.c_str());
             _perfetto_output_error = true;
         }
         else
         {
+            // Write the trace into a file.
             ofs.write(trace_data.data(), trace_data.size());
             if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
-            ROCPROFSYS_VERBOSE(0, "Perfetto trace written to: %s (%.2f MB)\n",
-                               _filename.c_str(),
-                               static_cast<double>(trace_data.size()) / units::MB);
         }
         ofs.close();
     }

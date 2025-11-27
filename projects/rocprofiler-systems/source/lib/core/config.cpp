@@ -319,12 +319,6 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE",
                               "Enable perfetto with trace cache", _default_perfetto_v,
                               "backend", "perfetto_caching");
-    ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_PERFETTO_COMBINE_TRACES",
-        "Combine Perfetto traces from multiple processes/ranks into a single file. "
-        "Applies to both MPI ranks and cached multi-process traces. "
-        "If not explicitly set, defaults to the value of ROCPROFSYS_COLLAPSE_PROCESSES",
-        false, "perfetto", "data", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
                               "Enable ROCm API and kernel tracing", true, "backend",
