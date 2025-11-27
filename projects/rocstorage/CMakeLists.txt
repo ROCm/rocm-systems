@@ -25,6 +25,17 @@ project(rocstorage VERSION 0.1.0)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ------------------------------------------------------------ #
+# Build Options
+# ------------------------------------------------------------ #
+
+option(ROCSTORAGE_BUILD_TESTS "Build unit tests" ON)
+option(ROCSTORAGE_BUILD_BENCHMARKS "Build performance benchmarks" ON)
+
+if(ROCSTORAGE_BUILD_TESTS)
+    enable_testing()
+endif()
+
+# ------------------------------------------------------------ #
 # Version
 # ------------------------------------------------------------ #
 
@@ -197,3 +208,11 @@ file(
 
 set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
 export(PACKAGE ${PACKAGE_NAME})
+
+# ------------------------------------------------------------ #
+# Tests and Benchmarks
+# ------------------------------------------------------------ #
+
+if(ROCSTORAGE_BUILD_TESTS OR ROCSTORAGE_BUILD_BENCHMARKS)
+    add_subdirectory(tests)
+endif()
