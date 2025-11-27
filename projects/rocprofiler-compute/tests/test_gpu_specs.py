@@ -26,16 +26,11 @@
 import re
 import subprocess
 import tempfile
-from importlib.machinery import SourceFileLoader
 from unittest.mock import patch
 
 import pytest
 
 from src.utils.specs import generate_machine_specs
-
-rocprof_compute = SourceFileLoader(
-    "rocprof-compute", "src/rocprof-compute"
-).load_module()
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {
