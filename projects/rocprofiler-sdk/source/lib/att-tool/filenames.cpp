@@ -55,6 +55,9 @@ FilenameMgr::~FilenameMgr()
                                      {"gfxip", gfxip},
                                      {"version", TOOL_VERSION},
                                      {"counter_names", perfcounters},
+                                     {"thread_trace", advanced_thread_trace},
+                                     {"pc_sampling", pc_sampling},
+                                     {"is_pcs_stochastic", has_stochastic},
                                      {"wave_filenames", namelist}};
 
     OutputFile(filename) << metadata;

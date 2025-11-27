@@ -30,11 +30,13 @@
 #include <sstream>
 #include <unordered_set>
 
+#include <cxxabi.h>
+
 namespace rocprofiler
 {
 namespace att_wrapper
 {
-using csv_encoder = rocprofiler::tool::csv::csv_encoder<8>;
+using csv_encoder = rocprofiler::tool::csv::csv_encoder<10>;  // added Issued, Stalled
 
 // Builds a json filetree by recursively inserting "path" into the json object.
 void
@@ -56,6 +58,7 @@ CodeFile::CodeFile(Fspath _dir, std::shared_ptr<AddressTable> _table)
 
 CodeFile::~CodeFile()
 {
+    std::cout << "NUM SAMPLES: " << num_samples.load() << std::endl;
     std::vector<std::pair<pcinfo_t, std::unique_ptr<CodeLine>>> vec;
     vec.reserve(isa_map.size());
 
@@ -84,12 +87,15 @@ CodeFile::~CodeFile()
                                "Latency",
                                "Stall",
                                "Idle",
+                               "Issued",
+                               "Stalled",
                                "Source");
 
         for(auto& [pc, line] : vec)
         {
             if(kernel_names.find(pc) != kernel_names.end())
             {
+                // kernel marker row (no instruction stats)
                 csv_encoder::write_row(ofs,
                                        pc.code_object_id,
                                        pc.address,
@@ -98,6 +104,8 @@ CodeFile::~CodeFile()
                                        0,
                                        0,
                                        0,
+                                       0,  // Issued
+                                       0,  // Stalled
                                        kernel_names.at(pc).demangled);
             }
             csv_encoder::write_row(ofs,
@@ -108,6 +116,8 @@ CodeFile::~CodeFile()
                                    line->latency,
                                    line->stall,
                                    line->idle,
+                                   line->issued,
+                                   line->stalled,
                                    line->code_line->comment);
         }
 
@@ -138,7 +148,12 @@ CodeFile::~CodeFile()
             std::stringstream code;
             code << "[\"; " << kernel_names.at(line.first).name << "\",0," << (isa.line_number - 1)
                  << ",\"" << kernel_names.at(line.first).demangled << "\","
-                 << line.first.code_object_id << "," << line.first.address << ",0,0,0,0]";
+                 << line.first.code_object_id << "," << line.first.address
+                 << ",0,0,0,0,0,0";  // Hit, Latency, Stall, Idle, Issued, Stalled
+
+            code << ",[0";
+            for(size_t i = 1; i < CodeLine{}.stall_reasons.size(); ++i) code << ",0";
+            code << "]]";
             jcode.push_back(nlohmann::json::parse(code.str()));
         }
 
@@ -146,8 +161,11 @@ CodeFile::~CodeFile()
         code << "[\"" << isa.code_line->inst << "\",0," << isa.line_number << ",\""
              << isa.code_line->comment << "\"," << line.first.code_object_id << ","
              << line.first.address << "," << isa.hitcount << "," << isa.latency << "," << isa.stall
-             << "," << isa.idle << "]";
+             << "," << isa.idle << "," << isa.issued << "," << isa.stalled;
 
+        code << ",[" << isa.stall_reasons.at(0);
+        for(size_t i = 1; i < isa.stall_reasons.size(); ++i) code << ',' << isa.stall_reasons.at(i);
+        code << "]]";
         jcode.push_back(nlohmann::json::parse(code.str()));
 
         auto&  comment  = isa.code_line->comment;
@@ -173,7 +191,9 @@ CodeFile::~CodeFile()
     nlohmann::json json;
     json["code"]    = jcode;
     json["version"] = TOOL_VERSION;
-    json["header"]  = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle";
+
+    for (auto& entry : {"ISA", "_", "LineNumber", "Source", "Codeobj", "Vaddr", "Hit", "Latency", "Stall", "Idle", "PC_Issued", "PC_Stalled", "Stall_Reasons"})
+        json["header"].push_back(std::string(entry));
 
     OutputFile(dir / "code.json") << json;
 
@@ -204,6 +224,70 @@ CodeFile::~CodeFile()
     }
 
     if(num_snap != 0) OutputFile(dir / "snapshots.json") << jsnapfiletree;
+}
+
+std::string
+demangle(std::string_view line)
+{
+    int   status{0};
+    char* c_name = abi::__cxa_demangle(line.data(), nullptr, nullptr, &status);
+
+    if(c_name == nullptr) return "";
+
+    std::string str = c_name;
+    free(c_name);
+    return str;
+}
+
+CodeLine&
+CodeFile::get(pcinfo_t _pc)
+{
+    if(isa_map.find(_pc) != isa_map.end()) return *isa_map.at(_pc);
+
+    // Attempt to disassemble full kernel
+    if(_pc.code_object_id != 0u) try
+        {
+            rocprofiler::sdk::codeobj::segment::CodeobjTableTranslator symbol_table;
+            for(auto& [vaddr, symbol] : table->getSymbolMap(_pc.code_object_id))
+                symbol_table.insert({symbol.vaddr, symbol.mem_size, _pc.code_object_id});
+
+            auto addr_range = symbol_table.find_codeobj_in_range(_pc.address);
+            try
+            {
+                auto symbol = table->getSymbolMap(_pc.code_object_id).at(addr_range.addr);
+                auto pair   = KernelName{symbol.name, demangle(symbol.name)};
+                kernel_names.emplace(pcinfo_t{addr_range.addr, _pc.code_object_id}, pair);
+            } catch(...)
+            {
+                ROCP_INFO << "Missing kernelSymbol at " << _pc.code_object_id << ':'
+                          << addr_range.addr;
+            }
+
+            for(auto addr = addr_range.addr; addr < addr_range.addr + addr_range.size;)
+            {
+                pcinfo_t info{.address = addr, .code_object_id = addr_range.id};
+                auto& cline = *(isa_map.emplace(info, std::make_unique<CodeLine>()).first->second);
+
+                cline.line_number         = isa_map.size() + kernel_names.size() - 1;
+                line_numbers[info] = cline.line_number;
+
+                cline.code_line = table->get(addr_range.id, addr);
+                addr += cline.code_line->size;
+                if(cline.code_line->size == 0u) throw std::invalid_argument("Line has 0 bytes!");
+            }
+
+            if(isa_map.find(_pc) != isa_map.end()) return *isa_map.at(_pc);
+        } catch(std::exception& e)
+        {}
+
+    auto& cline = *(isa_map.emplace(_pc, std::make_unique<CodeLine>()).first->second);
+
+    cline.line_number = isa_map.size();
+    line_numbers[_pc] = cline.line_number;
+
+    cline.code_line = table->get(_pc.code_object_id, _pc.address);
+
+    return cline;
 }
 
 }  // namespace att_wrapper

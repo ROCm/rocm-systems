@@ -24,6 +24,8 @@
 
 #include "att_lib_wrapper.hpp"
 
+#include <rocprofiler-sdk/pc_sampling.h>
+
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -45,6 +47,15 @@ struct CodeLine
     size_t latency{0};
     size_t stall{0};
     size_t idle{0};
+
+    size_t  issued{0};
+    size_t  stalled{0};
+    // No need to reserve slots for ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NONE
+    // and ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_LAST, so the total number
+    // of elements in the array is ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_LAST - 2.
+    // To access the number of samples for a specific stall reason,
+    // use the index (rocprofiler_pc_sampling_instruction_not_issued_reason_t enum value - 1).
+    std::array<size_t, ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_LAST> stall_reasons{};
 };
 
 class CodeFile
@@ -56,12 +67,41 @@ public:
     CodeFile(Fspath dir, std::shared_ptr<AddressTable> table);
     ~CodeFile();
 
+    CodeLine& get(pcinfo_t _pc);
+
+    template <typename Generator, typename Record, bool isStochastic>
+    void aggregate_pc_samples(const Generator& pc_sampling_gen)
+    {
+        for(auto pitr : pc_sampling_gen)
+        {
+            for(auto itr : pc_sampling_gen.get(pitr))
+            {
+                auto  record = itr.pc_sample_record;
+                if (record.pc.code_object_id == 0) continue;
+
+                auto& cline = get(pcinfo_t{record.pc.code_object_offset, record.pc.code_object_id});
+                num_samples++;
+
+                if constexpr(isStochastic)
+                {
+                    if (!record.wave_issued)
+                    {
+                        cline.stalled++;
+                        cline.stall_reasons[record.snapshot.reason_not_issued]++;
+                        continue;
+                    }
+                }
+                cline.issued++;
+            }
+        }
+    }
+
     const Fspath                                  dir{};
     std::unordered_map<pcinfo_t, int>             line_numbers{};
     std::map<pcinfo_t, std::unique_ptr<CodeLine>> isa_map{};
     std::map<pcinfo_t, KernelName>                kernel_names{};
-
-    std::shared_ptr<AddressTable> table;
+    std::shared_ptr<AddressTable>                 table{};
+    std::atomic<size_t>                           num_samples{};
 };
 
 }  // namespace att_wrapper

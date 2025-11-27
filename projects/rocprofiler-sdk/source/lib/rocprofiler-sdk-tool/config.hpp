@@ -181,6 +181,10 @@ struct config : output_config
     {}
 
     auto get_attach_invariants() const;
+
+    bool is_instruction_profiling() const {
+        return advanced_thread_trace || pc_sampling_stochastic || pc_sampling_host_trap;
+    };
 };
 
 #define CFG_SERIALIZE_MEMBER(VAR)             ar(cereal::make_nvp(#VAR, VAR))

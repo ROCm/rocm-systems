@@ -30,7 +30,6 @@
 
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
 
-#include <cxxabi.h>
 #include <cstring>
 #include <fstream>
 
@@ -128,70 +127,7 @@ ToolData::ToolData(std::vector<char>&                    _data,
 
 ToolData::~ToolData() = default;
 
-std::string
-demangle(std::string_view line)
-{
-    int   status{0};
-    char* c_name = abi::__cxa_demangle(line.data(), nullptr, nullptr, &status);
-
-    if(c_name == nullptr) return "";
-
-    std::string str = c_name;
-    free(c_name);
-    return str;
-}
-
-CodeLine&
-ToolData::get(pcinfo_t _pc)
-{
-    auto& isa_map = cfile->isa_map;
-    if(isa_map.find(_pc) != isa_map.end()) return *isa_map.at(_pc);
-
-    // Attempt to disassemble full kernel
-    if(_pc.code_object_id != 0u) try
-        {
-            rocprofiler::sdk::codeobj::segment::CodeobjTableTranslator symbol_table;
-            for(auto& [vaddr, symbol] : cfile->table->getSymbolMap(_pc.code_object_id))
-                symbol_table.insert({symbol.vaddr, symbol.mem_size, _pc.code_object_id});
-
-            auto addr_range = symbol_table.find_codeobj_in_range(_pc.address);
-            try
-            {
-                auto symbol = cfile->table->getSymbolMap(_pc.code_object_id).at(addr_range.addr);
-                auto pair   = KernelName{symbol.name, demangle(symbol.name)};
-                cfile->kernel_names.emplace(pcinfo_t{addr_range.addr, _pc.code_object_id}, pair);
-            } catch(...)
-            {
-                ROCP_INFO << "Missing kernelSymbol at " << _pc.code_object_id << ':'
-                          << addr_range.addr;
-            }
-
-            for(auto addr = addr_range.addr; addr < addr_range.addr + addr_range.size;)
-            {
-                pcinfo_t info{.address = addr, .code_object_id = addr_range.id};
-                auto& cline = *(isa_map.emplace(info, std::make_unique<CodeLine>()).first->second);
-
-                cline.line_number         = isa_map.size() + cfile->kernel_names.size() - 1;
-                cfile->line_numbers[info] = cline.line_number;
-
-                cline.code_line = cfile->table->get(addr_range.id, addr);
-                addr += cline.code_line->size;
-                if(cline.code_line->size == 0u) throw std::invalid_argument("Line has 0 bytes!");
-            }
-
-            if(isa_map.find(_pc) != isa_map.end()) return *isa_map.at(_pc);
-        } catch(std::exception& e)
-        {}
-
-    auto& cline = *(isa_map.emplace(_pc, std::make_unique<CodeLine>()).first->second);
-
-    cline.line_number        = isa_map.size();
-    cfile->line_numbers[_pc] = cline.line_number;
-
-    cline.code_line = cfile->table->get(_pc.code_object_id, _pc.address);
-
-    return cline;
-}
+CodeLine& ToolData::get(pcinfo_t _pc) { return cfile->get(_pc); }
 
 }  // namespace att_wrapper
 }  // namespace rocprofiler

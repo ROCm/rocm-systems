@@ -29,6 +29,7 @@
 #include "stream_stack.hpp"
 
 #include "lib/att-tool/att_lib_wrapper.hpp"
+#include "lib/att-tool/code.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -841,7 +842,7 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             }
 
             if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
-               tool::get_config().advanced_thread_trace)
+               tool::get_config().is_instruction_profiling())
             {
                 const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
                 auto        filename      = fmt::format("{}_code_object_id_{}",
@@ -867,7 +868,7 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     obj_data);
             }
             else if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE &&
-                    tool::get_config().advanced_thread_trace)
+                    tool::get_config().is_instruction_profiling())
             {
                 const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
                 auto        filename      = fmt::format("{}_code_object_id_{}",
@@ -2794,7 +2795,6 @@ generate_output(cleanup_mode _cleanup_mode)
     if(tool::get_config().advanced_thread_trace)
     {
         auto decoder = rocprofiler::att_wrapper::ATTDecoder(tool::get_config().att_library_path);
-        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found!";
 
         auto codeobj     = tool_metadata->get_code_object_load_info();
         auto output_path = tool::format_path(tool::get_config().output_path);
@@ -2821,8 +2821,28 @@ generate_output(cleanup_mode _cleanup_mode)
             auto out_path = fmt::format("{}/{}", output_path, ui_name.str());
             auto in_path  = std::string(".");
 
+            ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found!";
             decoder.parse(in_path, out_path, att_filename_data.second, codeobj, perf, formats);
         }
+    }
+
+    // Aggregate PC samples and attribute to the disassembled code lines
+    if (tool::get_config().pc_sampling_stochastic || tool::get_config().pc_sampling_host_trap)
+    {
+        using stochastic_t           = rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t;
+        using stochastic_generator_t = rocprofiler::tool::generator<stochastic_t>;
+        using host_t                 = rocprofiler::tool::rocprofiler_tool_pc_sampling_host_trap_record_t;
+        using host_generator_t       = rocprofiler::tool::generator<host_t>;
+
+        auto output_path = tool::format_path(tool::get_config().output_path);
+        auto out_path    = fmt::format("{}/{}", output_path, "ui_output_pc_sampling");
+        auto load_info   = tool_metadata->get_code_object_load_info();
+
+        auto decoder = rocprofiler::att_wrapper::PCSamplingDecoder(out_path, ".", load_info);
+        if(tool::get_config().pc_sampling_stochastic)
+            decoder.codefile->aggregate_pc_samples<stochastic_generator_t, stochastic_t, true>(pc_sampling_stochastic_output.get_generator());
+        if(tool::get_config().pc_sampling_host_trap)
+            decoder.codefile->aggregate_pc_samples<host_generator_t, host_t, false>(pc_sampling_host_trap_output.get_generator());
     }
 
     run_cleanup();

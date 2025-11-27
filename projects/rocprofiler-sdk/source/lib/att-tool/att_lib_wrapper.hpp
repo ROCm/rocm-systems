@@ -47,6 +47,21 @@ struct CodeobjLoadInfo
     size_t      size{0};
 };
 
+class PCSamplingDecoder
+{
+    using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
+
+public:
+    PCSamplingDecoder(Fspath output_dir, const Fspath& input_dir, const std::vector<CodeobjLoadInfo>& codeobj_files);
+    ~PCSamplingDecoder();
+
+    const Fspath dir{};
+
+    std::unique_ptr<class CodeFile> codefile{nullptr};
+    std::shared_ptr<AddressTable>   table{nullptr};
+};
+
+
 class ATTDecoder
 {
 public:

@@ -3,8 +3,15 @@
 #
 rocprofiler_activate_clang_tidy()
 
-set(ATT_TOOL_SOURCE_FILES att_lib_wrapper.cpp code.cpp filenames.cpp occupancy.cpp
-                          perfcounter.cpp profile_interface.cpp wave.cpp wstates.cpp)
+set(ATT_TOOL_SOURCE_FILES
+    att_lib_wrapper.cpp
+    code.cpp
+    filenames.cpp
+    occupancy.cpp
+    perfcounter.cpp
+    profile_interface.cpp
+    wave.cpp
+    wstates.cpp)
 
 set(ATT_TOOL_HEADER_FILES
     att_lib_wrapper.hpp
@@ -31,6 +38,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-dw
-            rocprofiler-sdk::rocprofiler-sdk-elf)
+            rocprofiler-sdk::rocprofiler-sdk-elf
+            rocprofiler-sdk::rocprofiler-sdk-cereal)
 
 add_subdirectory(waitcnt)

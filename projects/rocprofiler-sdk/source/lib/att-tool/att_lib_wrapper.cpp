@@ -41,6 +41,41 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
+PCSamplingDecoder::PCSamplingDecoder(Fspath output_dir, const Fspath& input_dir, const std::vector<CodeobjLoadInfo>& codeobj_files)
+: dir(std::move(output_dir))
+{
+    GlobalDefs::get().output_formats = "json";
+    rocprofiler::common::filesystem::create_directories(dir);
+
+    table    = std::make_shared<AddressTable>();
+    codefile = std::make_unique<CodeFile>(dir, table);
+
+    for (auto& info : codeobj_files)
+    {
+        if(info.name.empty()) continue;
+
+        std::vector<char> buffer{};
+
+        {
+            std::ifstream file((input_dir / info.name).c_str(), std::ios::in | std::ios::binary);
+
+            if(!file.is_open()) throw std::runtime_error("Invalid file " + std::string(info.name));
+
+            file.seekg(0, file.end);
+            buffer.resize(file.tellg());
+            file.seekg(0, file.beg);
+            file.read(buffer.data(), buffer.size());
+        }
+
+        table->addDecoder(buffer.data(), buffer.size(), info.id, info.addr, info.size);
+    }
+}
+
+PCSamplingDecoder::~PCSamplingDecoder()
+{
+    FilenameMgr(dir, false, true);
+}
+
 ATTFileMgr::ATTFileMgr(Fspath                                _dir,
                        std::vector<std::string>              _counters,
                        rocprofiler_thread_trace_decoder_id_t _decoder)
@@ -50,7 +85,7 @@ ATTFileMgr::ATTFileMgr(Fspath                                _dir,
     rocprofiler::common::filesystem::create_directories(dir);
     table     = std::make_shared<AddressTable>();
     codefile  = std::make_shared<CodeFile>(dir, table);
-    filenames = std::make_shared<FilenameMgr>(dir);
+    filenames = std::make_shared<FilenameMgr>(dir, true, false);
     realtime  = std::make_shared<RealtimeTS>(dir);
 
     for(size_t i = 0; i < ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_LAST; i++)

@@ -60,16 +60,22 @@ public:
         size_t      end{0};
     };
 
-    FilenameMgr(const Fspath& _dir)
+    FilenameMgr(const Fspath& _dir, bool thread_trace, bool _pc_sampling)
     : dir(_dir)
     , filename(_dir / "filenames.json")
+    , advanced_thread_trace(thread_trace)
+    , pc_sampling(_pc_sampling)
     {}
     ~FilenameMgr();
 
     void addwave(const Fspath& file, Coord coord, size_t start, size_t end);
 
-    Fspath                    dir{};
-    Fspath                    filename{};
+    const Fspath dir;
+    const Fspath filename;
+    const bool   advanced_thread_trace;
+    const bool   pc_sampling;
+
+    bool                      has_stochastic{false};
     std::map<Coord, WaveName> streams{};
     std::vector<std::string>  perfcounters{};
     int                       gfxip = 9;
