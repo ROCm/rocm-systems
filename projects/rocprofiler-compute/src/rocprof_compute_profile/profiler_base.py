@@ -130,17 +130,22 @@ class RocProfCompute_Base:
             group_labels.append("Grid_Size")
 
         num_files = len(list(Path(args.path).glob("perfmon/*.txt")))
+        kernels_with_missing_counters = []
         for _, groups in df.groupby(group_labels):
             if groups["Dispatch_ID"].nunique() < num_files:
-                console_warning(
-                    "join_prof",
-                    (
-                        "Detected missing counter values. "
-                        "For accurate results, re-run profiling without"
-                        " iteration multiplexing"
-                    ),
-                )
-                return
+                kernel_name = groups.iloc[0]["Kernel_Name"]
+                kernels_with_missing_counters.append(kernel_name)
+
+        if kernels_with_missing_counters:
+            console_warning(
+                "join_prof",
+                (
+                    f"Insufficient number of kernel calls for kernels: "
+                    f"{', '.join(kernels_with_missing_counters)} "
+                    f"to collect all counters using iteration multiplexing. "
+                    f"Please use kernel filtering or turn off iteration multiplexing."
+                ),
+            )
 
     @demarcate
     def join_prof(self, out: Optional[str] = None) -> Optional[pd.DataFrame]:
