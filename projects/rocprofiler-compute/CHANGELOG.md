@@ -38,6 +38,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed sL1D metric values showing up as N/A in memory chart diagram
+
 ### Known issues
 
 ### Upcoming changes
