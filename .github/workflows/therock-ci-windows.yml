@@ -93,7 +93,7 @@ jobs:
 
       - name: Install external python deps
         run: |
-          pip install -r TheRock/requirements-external.txt
+          pip install -r projects/rocprofiler-compute/requirements.txt
 
       - name: Configure Projects
         env:
