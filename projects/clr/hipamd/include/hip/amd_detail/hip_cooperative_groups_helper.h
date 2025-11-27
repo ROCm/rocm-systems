@@ -219,6 +219,11 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
                                       (threadIdx.y * blockDim.x) + (threadIdx.x)));
 }
 
+__CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
+  return (static_cast<__hip_uint32_t>((blockIdx.z * gridDim.x * gridDim.y) +
+                                      (blockIdx.y * gridDim.x) + (blockIdx.x)));
+}
+
 __CG_STATIC_QUALIFIER__ bool is_valid() { return true; }
 
 __CG_STATIC_QUALIFIER__ void sync() { __syncthreads(); }
