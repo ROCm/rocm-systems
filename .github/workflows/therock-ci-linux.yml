@@ -73,6 +73,10 @@ jobs:
         run: |
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
+      - name: Install external python deps
+        run: |
+          pip install -r TheRock/requirements-external.txt
+
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}

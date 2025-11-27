@@ -91,6 +91,10 @@ jobs:
           python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
           dvc pull
 
+      - name: Install external python deps
+        run: |
+          pip install -r TheRock/requirements-external.txt
+
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
