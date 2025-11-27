@@ -651,7 +651,14 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
                 }
                 default:
                 {
-                    break;
+                    // A basic roctx marker region starts with roctxRangePushA ENTER and
+                    // ends with roctxRangePop EXIT.
+                    // Breaking instead of returning allows the roctxRangePop ENTER to be
+                    // processed, which timemory will link to the roctxRangePop EXIT. As
+                    // we do not push roctxRangePushA EXIT into timemory, it will think
+                    // that the roctxRangePushA ENTER is still active when it is in fact
+                    // not. This will cause the wall clock tree to be incorrect.
+                    return;
                 }
             }
         }
@@ -659,7 +666,7 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
 
     if(get_use_timemory())
     {
-        tracing::push_timemory(category::rocm_marker_api{}, _name);
+        tracing::push_timemory(CategoryT{}, _name);
     }
 }
 
@@ -729,7 +736,7 @@ tool_tracing_callback_stop(
 
     if(get_use_timemory())
     {
-        tracing::pop_timemory(category::rocm_marker_api{}, _name);
+        tracing::pop_timemory(CategoryT{}, _name);
     }
 
     if(get_use_perfetto())
@@ -1069,7 +1076,7 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
 
     if(get_use_timemory())
     {
-        tracing::push_timemory(category::rocm_marker_api{}, _name);
+        tracing::push_timemory(category::rocm_ompt_api{}, _name);
     }
 
     if(get_use_perfetto())
@@ -1115,7 +1122,7 @@ ompt_tracing_callback_stop(
 
     if(get_use_timemory())
     {
-        tracing::pop_timemory(category::rocm_marker_api{}, _name);
+        tracing::pop_timemory(category::rocm_ompt_api{}, _name);
     }
 
     if(get_use_perfetto())
