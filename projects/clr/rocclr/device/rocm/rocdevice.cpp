@@ -1709,37 +1709,11 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
 
 bool Device::amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
                       uint64_t* size_copied, int32_t* status) {
-  hsa_amd_ais_file_handle_t fh{};
-  hsa_status_t ret = HSA_STATUS_ERROR;
-#if defined(_WIN32)
-  fh.handle = handle;
-#else
-  fh.fd = handle;
-  ret = Hsa::ais_file_read(fh, devicePtr, size, file_offset, size_copied, status);
-#endif
-
-  if (HSA_STATUS_SUCCESS != ret) {
-    LogPrintfError("amdFileRead operation failed with err 0x%xh", ret);
-    return false;
-  }
   return true;
 }
 
 bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
                        uint64_t* size_copied, int32_t* status) {
-  hsa_amd_ais_file_handle_t fh{};
-  hsa_status_t ret = HSA_STATUS_ERROR;
-#if defined(_WIN32)
-  fh.handle = handle;
-#else
-  fh.fd = handle;
-  ret = Hsa::ais_file_write(fh, devicePtr, size, file_offset, size_copied, status);
-#endif
-
-  if (HSA_STATUS_SUCCESS != ret) {
-    LogPrintfError("amdFileWrite operation failed with err 0x%xh", ret);
-    return false;
-  }
   return true;
 }
 
@@ -2075,7 +2049,7 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
   void* deviceMemory = nullptr;
   uint32_t memFlags = 0;
   if (memSegment == kIoMemory) {
-    memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+    memFlags |= (1 << 3);
   }
 
   hsa_status_t status = Hsa::memory_lock_to_pool(
@@ -2189,7 +2163,7 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags) const 
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
   if (flags.uncached_ && isa().versionMajor() == 12) {
-    hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+    hsa_mem_flags |= (1 << 3);
   }
 
   void* ptr = nullptr;
