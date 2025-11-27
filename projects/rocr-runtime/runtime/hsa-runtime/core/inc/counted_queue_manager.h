@@ -44,10 +44,6 @@ class CountedQueuePoolManager {
   // Release a logical queue
   hsa_status_t ReleaseQueue(hsa_queue_t* queue);
 
-  // Query info (use count, hw id)
-  hsa_status_t GetQueueInfo(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
-                            void* value);
-
   // Called during hsa_shutdown to remove all user and CP queues
   void Cleanup();
 

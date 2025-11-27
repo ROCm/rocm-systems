@@ -1528,21 +1528,7 @@ hsa_status_t HSA_API hsa_amd_queue_get_info(hsa_queue_t* _queue,
 
   core::Queue* queue = core::Queue::Convert(_queue);
   IS_VALID(queue);
-
-  // Check if attributes are related to counted queues
-  if (attribute == HSA_QUEUE_INFO_USE_COUNT || attribute == HSA_QUEUE_INFO_HW_ID) {
-    core::Agent* core_agent = queue->GetAgent();
-    IS_VALID(core_agent);
-
-    if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
-      return HSA_STATUS_ERROR_INVALID_AGENT;
-    }
-
-    // Downcast to GpuAgent
-    AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
-    return gpu_agent->GetCountedQueueInfo(_queue, attribute, value);
-  }
-  // For regular AQL queue attributes
+  
   return queue->GetInfo(attribute, value);
   CATCH;
 }

@@ -277,6 +277,13 @@ hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute,
       // Hardware doorbell supports AQL semantics.
       *static_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(signal_.hardware_doorbell_ptr);
       break;
+    case HSA_QUEUE_INFO_USE_COUNT:
+      // AIE queues do not support counted queue features
+      *static_cast<uint32_t*>(value) = static_cast<uint32_t>(-1);
+      break;
+    case HSA_QUEUE_INFO_HW_ID:
+      *static_cast<uint32_t*>(value) = public_handle()->id;
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }

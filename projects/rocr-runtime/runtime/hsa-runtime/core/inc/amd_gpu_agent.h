@@ -353,9 +353,6 @@ class GpuAgent : public GpuAgentInt {
   // @brief Release a queue earlier used by application
   hsa_status_t ReleaseCountedQueue(hsa_queue_t* queue);
 
-  // @brief Get the use count or unique hardware ID of a shared queue 
-  hsa_status_t GetCountedQueueInfo(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute, void* value);
-
   // @brief Override from AMD::GpuAgentInt.
   void TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) override;
 

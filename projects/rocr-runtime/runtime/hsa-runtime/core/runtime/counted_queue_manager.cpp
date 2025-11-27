@@ -102,50 +102,12 @@ hsa_status_t CountedQueuePoolManager::ReleaseQueue(hsa_queue_t* queue) {
   // Decrement internal ref count inside core::Queue object
   if (counted_q->hw_queue->use_count > 0) {
     counted_q->hw_queue->use_count--;
+    
+    // Remove unique handle from map when it is no longer in use by an application
+    if (counted_q->hw_queue->use_count == 0) counted_queues_.erase(queue);
   }
 
   return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t CountedQueuePoolManager::GetQueueInfo(hsa_queue_t* queue,
-                                                   hsa_queue_info_attribute_t attribute,
-                                                   void* value) {
-  if (!queue || !value) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  switch (attribute) {
-    case HSA_QUEUE_INFO_USE_COUNT: {
-      std::lock_guard<std::mutex> lock(mutex_);
-      auto it = counted_queues_.find(queue);
-      if (it == counted_queues_.end()) {
-        // Queue has not been created using hsa_amd_counted_queue_acquire API
-        *static_cast<int32_t*>(value) = -1;
-      } else {
-        if (it->second->hw_queue->use_count == 0) {
-          // Queue was created using hsa_amd_counted_queue_acquire API but has been released 
-          // it is not in use anymore by any application
-          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-        }
-        *static_cast<uint32_t*>(value) = it->second->hw_queue->use_count;
-      }
-      return HSA_STATUS_SUCCESS;
-    }
-
-    case HSA_QUEUE_INFO_HW_ID: {
-      std::lock_guard<std::mutex> lock(mutex_);
-      // Check counted queues map which contains HardwareQueue*
-      auto it = counted_queues_.find(queue);
-      if (it != counted_queues_.end()) {
-        *static_cast<uint32_t*>(value) = it->second->hw_queue->public_handle()->id;
-        return HSA_STATUS_SUCCESS;
-      }
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
-    default:
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
 }
 
 void CountedQueuePoolManager::Cleanup() {

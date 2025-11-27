@@ -495,6 +495,21 @@ hsa_status_t AqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value
       *(reinterpret_cast<uint64_t*>(value)) =
           reinterpret_cast<uint64_t>(signal_.hardware_doorbell_ptr);
       break;
+    case HSA_QUEUE_INFO_USE_COUNT:
+      if (!is_counted_queue) {
+        *static_cast<uint32_t*>(value) = static_cast<uint32_t>(-1);
+      } else {
+        if (use_count == 0) {
+          // Queue was released
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        *static_cast<uint32_t*>(value) = use_count;
+      }
+      break;
+    case HSA_QUEUE_INFO_HW_ID:
+      // Return the hardware queue ID for both counted and non-counted queues
+      *static_cast<uint32_t*>(value) = public_handle()->id; 
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
