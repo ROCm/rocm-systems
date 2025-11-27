@@ -263,6 +263,13 @@ struct hsa_kfd_fmm_context
 
 	svm_t svm;
 
+	/* On APU, for memory allocated on the system memory that GPU doesn't
+	 * access via GPU driver, they are not managed by GPUVM. cpuvm_aperture
+	 * keeps track of this part of memory.
+	 * Each context has its own tracking.
+	 */
+	manageable_aperture_t cpuvm_aperture;
+
 #define DRM_FIRST_RENDER_NODE 128
 #define DRM_LAST_RENDER_NODE 255
 
@@ -303,14 +310,11 @@ struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx
 	ctx->fmm_context->svm.disable_cache = false;
 	ctx->fmm_context->svm.alignment_order = 0;
 
+	/* Initialize cpuvm_aperture */
+	ctx->fmm_context->cpuvm_aperture = init_aperture;
+
 	return ctx->fmm_context;
 }
-
-/* On APU, for memory allocated on the system memory that GPU doesn't access
- * via GPU driver, they are not managed by GPUVM. cpuvm_aperture keeps track
- * of this part of memory.
- */
-static manageable_aperture_t cpuvm_aperture = INIT_MANAGEABLE_APERTURE(0, 0);
 
 /* mem_handle_aperture is used to generate memory handles
  * for allocations that don't have a valid virtual address
@@ -996,7 +1000,7 @@ static manageable_aperture_t *fmm_get_aperture(struct hsa_kfd_fmm_context *fmm_c
 	case HSA_APERTURE_GPUVM:
 		return &fmm_ctx->gpu_mem[info.idx].gpuvm_aperture;
 	case HSA_APERTURE_CPUVM:
-		return &cpuvm_aperture;
+		return &fmm_ctx->cpuvm_aperture;
 	case HSA_APERTURE_MEMHANDLE:
 		return &mem_handle_aperture;
 	default:
@@ -1072,7 +1076,7 @@ static manageable_aperture_t *fmm_find_aperture(struct hsa_kfd_fmm_context *fmm_
 		}
 		if (!aperture) {
 			/* Not in GPUVM */
-			aperture = &cpuvm_aperture;
+			aperture = &fmm_ctx->cpuvm_aperture;
 			_info.type = HSA_APERTURE_CPUVM;
 		}
 	}
@@ -1419,7 +1423,7 @@ no_svm:
 		if (aper)
 			pthread_mutex_unlock(&aper->fmm_mutex);
 
-		aper = &cpuvm_aperture;
+		aper = &fmm_ctx->cpuvm_aperture;
 
 		pthread_mutex_lock(&aper->fmm_mutex);
 		if (range)
@@ -1939,12 +1943,13 @@ void *hsakmt_fmm_allocate_doorbell(HsaKFDContext *ctx,
 	return mem;
 }
 
-static void *fmm_allocate_host_cpu(void *address, uint64_t MemorySizeInBytes,
+static void *fmm_allocate_host_cpu(HsaKFDContext *ctx, void *address, uint64_t MemorySizeInBytes,
 				HsaMemFlags mflags)
 {
 	void *mem = NULL;
 	vm_object_t *vm_obj;
 	int mmap_prot = PROT_READ;
+	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 
 	if (address)
 		return NULL;
@@ -1964,12 +1969,12 @@ static void *fmm_allocate_host_cpu(void *address, uint64_t MemorySizeInBytes,
 	if (mem == MAP_FAILED)
 		return NULL;
 
-	pthread_mutex_lock(&cpuvm_aperture.fmm_mutex);
-	vm_obj = aperture_allocate_object(&cpuvm_aperture, mem, 0,
+	pthread_mutex_lock(&fmm_ctx->cpuvm_aperture.fmm_mutex);
+	vm_obj = aperture_allocate_object(&fmm_ctx->cpuvm_aperture, mem, 0,
 				      MemorySizeInBytes, mflags);
 	if (vm_obj)
 		vm_obj->node_id = 0; /* APU systems only have one CPU node */
-	pthread_mutex_unlock(&cpuvm_aperture.fmm_mutex);
+	pthread_mutex_unlock(&fmm_ctx->cpuvm_aperture.fmm_mutex);
 
 	return mem;
 }
@@ -2190,7 +2195,7 @@ void *hsakmt_fmm_allocate_host(HsaKFDContext *ctx,
 		return NULL;
 	}
 
-	return fmm_allocate_host_cpu(address, MemorySizeInBytes, mflags);
+	return fmm_allocate_host_cpu(ctx, address, MemorySizeInBytes, mflags);
 }
 
 static int __fmm_release(HsaKFDContext *ctx,
@@ -2258,12 +2263,12 @@ HSAKMT_STATUS hsakmt_fmm_release(HsaKFDContext *ctx, void *address)
 			HSAKMT_STATUS_SUCCESS :
 			HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
 
-	if (aperture == &cpuvm_aperture) {
+	if (aperture == &fmm_ctx->cpuvm_aperture) {
 		/* APU system memory */
 		uint64_t size = 0;
 
 		size = object->size;
-		vm_remove_object(&cpuvm_aperture, object);
+		vm_remove_object(&fmm_ctx->cpuvm_aperture, object);
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		munmap(address, size);
 	} else {
@@ -2626,12 +2631,12 @@ static void fmm_init_rbtree(struct hsa_kfd_fmm_context *fmm_ctx)
 	int i = fmm_ctx->gpu_mem_count;
 
 	if (once++ == 0) {
-		rbtree_init(&cpuvm_aperture.tree);
-		rbtree_init(&cpuvm_aperture.user_tree);
 		rbtree_init(&mem_handle_aperture.tree);
 		rbtree_init(&mem_handle_aperture.user_tree);
 	}
 
+	rbtree_init(&fmm_ctx->cpuvm_aperture.tree);
+	rbtree_init(&fmm_ctx->cpuvm_aperture.user_tree);
 	rbtree_init(&fmm_ctx->svm.apertures[SVM_DEFAULT].tree);
 	rbtree_init(&fmm_ctx->svm.apertures[SVM_DEFAULT].user_tree);
 	rbtree_init(&fmm_ctx->svm.apertures[SVM_COHERENT].tree);
@@ -3113,8 +3118,8 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		}
 	}
 
-	cpuvm_aperture.align = PAGE_SIZE;
-	cpuvm_aperture.limit = (void *)0x7FFFFFFFFFFF; /* 2^47 - 1 */
+	fmm_ctx->cpuvm_aperture.align = PAGE_SIZE;
+	fmm_ctx->cpuvm_aperture.limit = (void *)0x7FFFFFFFFFFF; /* 2^47 - 1 */
 
 	fmm_init_rbtree(fmm_ctx);
 
@@ -3548,7 +3553,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
 
-	if (aperture && (aperture == &cpuvm_aperture)) {
+	if (aperture && (aperture == &fmm_ctx->cpuvm_aperture)) {
 		/* Prefetch memory on APUs with dummy-reads */
 		fmm_check_user_memory(address, size);
 		ret = HSAKMT_STATUS_SUCCESS;
@@ -3745,7 +3750,7 @@ int hsakmt_fmm_unmap_from_gpu(HsaKFDContext *ctx, void *address)
 		return (!hsakmt_is_dgpu || hsakmt_is_svm_api_supported) ? 0 : -EINVAL;
 	/* Successful vm_find_object returns with the aperture locked */
 
-	if (aperture == &cpuvm_aperture)
+	if (aperture == &fmm_ctx->cpuvm_aperture)
 		/* On APUs GPU unmapping of system memory is a no-op */
 		ret = 0;
 	else
@@ -4321,7 +4326,7 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 			HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
 	/* Successful vm_find_object returns with aperture locked */
 
-	if (aperture == &cpuvm_aperture) {
+	if (aperture == &fmm_ctx->cpuvm_aperture) {
 		/* API-allocated system memory on APUs, deregistration
 		 * is a no-op
 		 */
@@ -4400,7 +4405,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(HsaKFDContext *ctx,
 
 	/* APU memory is not supported by this function */
 	if (aperture &&
-	   (aperture == &cpuvm_aperture || !aperture->is_cpu_accessible)) {
+	   (aperture == &fmm_ctx->cpuvm_aperture || !aperture->is_cpu_accessible)) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		return HSAKMT_STATUS_ERROR;
 	}
@@ -4693,7 +4698,7 @@ void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx)
 	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 
 	fmm_clear_aperture(&mem_handle_aperture);
-	fmm_clear_aperture(&cpuvm_aperture);
+	fmm_clear_aperture(&fmm_ctx->cpuvm_aperture);
 	fmm_clear_aperture(&fmm_ctx->svm.apertures[SVM_DEFAULT]);
 	fmm_clear_aperture(&fmm_ctx->svm.apertures[SVM_COHERENT]);
 
