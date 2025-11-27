@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 6fab5d65a552483bcfa1f6ccaaabf699c8188c1e # 2025-11-06 commit
+          ref: "e238c0269a9e54b275ef34ffb43c6c52a0cddc83" # 2025-11-26 commit
 
       - name: Install python deps
         run: |
@@ -67,7 +67,7 @@ jobs:
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
           # rm ./TheRock/patches/amd-mainline/rocm-systems/*.patch
           rm ./TheRock/patches/amd-mainline/rocm-systems/0008-Find-bundled-libelf.patch
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
 
       - name: Patch rocm-systems
