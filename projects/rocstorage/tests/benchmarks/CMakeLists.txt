@@ -66,3 +66,15 @@ rocstorage_add_benchmark(
     NAME writer
     SOURCES writer_bench.cpp
 )
+
+rocstorage_add_benchmark(
+    NAME writer_parallel
+    SOURCES writer_parallel_bench.cpp
+    LIBRARIES pthread
+)
+
+rocstorage_add_benchmark(
+    NAME writer_client
+    SOURCES writer_client_bench.cpp
+    LIBRARIES pthread
+)

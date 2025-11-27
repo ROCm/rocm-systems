@@ -505,4 +505,51 @@ BENCHMARK_REGISTER_F(writer_intensive_fixture, throughput_regions)
     ->Unit(benchmark::kSecond)
     ->Iterations(1);
 
+// ============================================================================
+// Realistic Workload Benchmark
+// ============================================================================
+
+BENCHMARK_DEFINE_F(writer_intensive_fixture, realistic_workload)
+(benchmark::State &_state) {
+  const auto total_events = static_cast<size_t>(_state.range(0));
+  const size_t region_count = total_events * 9967 / 10000;
+  const size_t kernel_count = total_events * 33 / 10000;
+
+  for (auto _ : _state) {
+    for (size_t i = 0; i < region_count; ++i) {
+      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
+      size_t start = i * 1000;
+      size_t end = start + 500;
+      m_writer->insert_region(1, 1000, m_thread_pk, start, end,
+                              m_region_name_id, event_id);
+      m_writer->insert_args(event_id, 0, "int", "level", "0");
+      m_writer->insert_args(event_id, 1, "const char*", "name", "region");
+      if (i % 2 == 0) {
+        m_writer->insert_args(event_id, 2, "size_t", "id", "12345");
+      }
+    }
+    for (size_t i = 0; i < kernel_count; ++i) {
+      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
+      size_t start = i * 10000;
+      size_t end = start + 5000;
+      m_writer->insert_kernel_dispatch(1, 1000, m_thread_pk, m_gpu_agent, 1, i,
+                                       1, 1, start, end, 0, 65536, 256, 1, 1,
+                                       1024, 1, 1, m_kernel_name_id, event_id);
+      m_writer->insert_args(event_id, 0, "void*", "ptr", "0x7fff0000");
+      m_writer->insert_args(event_id, 1, "size_t", "n", "1048576");
+      m_writer->insert_args(event_id, 2, "int", "stream", "0");
+    }
+    m_writer->flush();
+  }
+  _state.SetItemsProcessed(_state.iterations() * total_events);
+  _state.SetLabel(get_db_size_label());
+}
+BENCHMARK_REGISTER_F(writer_intensive_fixture, realistic_workload)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    ->Arg(2300000)   // ~1GB
+    ->Arg(4600000)   // ~2GB
+    ->Arg(9200000)   // ~4GB
+    ->Arg(18700000)  // ~8GB
+    ->Arg(46000000); // ~20GB
 } // namespace
