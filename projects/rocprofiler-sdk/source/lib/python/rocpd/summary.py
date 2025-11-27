@@ -374,7 +374,7 @@ def create_summary_region_queries(
                 (
                     prefix
                     for prefix in category_prefixes
-                    if category_name.startswith(prefix)
+                    if category_name.lower().startswith(prefix.lower())
                 ),
                 "",
             )
@@ -383,7 +383,7 @@ def create_summary_region_queries(
 
     category_map = {
         cat.lower(): [
-            c[0] for c in categories if c[0] == cat or c[0].startswith(cat + "_")
+            c[0] for c in categories if c[0] == cat or c[0].lower().startswith(cat.lower() + "_")
         ]
         for cat in region_categories
         if "MARKER" not in cat.upper()
