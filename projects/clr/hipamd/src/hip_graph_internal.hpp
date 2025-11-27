@@ -462,6 +462,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   }
   void SetDeviceId(int id) { dev_id_ = id; }
   int GetDeviceId() const { return dev_id_; }
+  bool GetWait() const { return wait_; }
+  void SetWait(bool wait) { wait_ = wait; }
 
  protected:
   // Declare Graph and GraphExec as friends of node for simpler access to GraphNode fields
@@ -492,6 +494,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t kernargSegmentAlignment_ = 256;  //!< Kernel arg segment alignment
   int dev_id_;  //!< Device Id when node is created(dev id from capture stream/current device
                 //!< when explicitly added)
+  bool wait_ = false;                
 };
 
 class GraphEventWaitNode : public GraphNode {
@@ -591,6 +594,9 @@ class Graph {
     }
     graphUserObj_.clear();
     memAllocNodePtrs_.clear();
+    if (instantiateDeviceId_ != -1) {
+      static_cast<amd::ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->release();
+    }
   }
 
   void AddManualNodeDuringCapture(GraphNode* node) { capturedNodes_.insert(node); }
@@ -630,6 +636,7 @@ class Graph {
   size_t GetNodeCount() const { return vertices_.size(); }
   /// returns all the nodes in the graph
   const std::vector<Node>& GetNodes() const { return vertices_; }
+  const std::vector<Node>& GetTopoOrder() const { return topoOrder_; }
   /// returns all the edges in the graph
   std::vector<std::pair<Node, Node>> GetEdges() const;
   // returns the original graph ptr if cloned
@@ -675,9 +682,7 @@ class Graph {
   void ScheduleNodes();
 
   //! Runs one node on the assigned stream
-  bool RunOneNode(Node node,  //!< Node for the execution on GPU
-                  bool wait   //!< Wait dependencies
-  );
+  bool RunOneNode(Node node);  //!< Node for the execution on GPU
 
   //! Runs all nodes from the execution graph on the assigned streams
   bool RunNodes(
@@ -716,10 +721,10 @@ class Graph {
     void* ptr;
     const auto& dev_info = g_devices[0]->devices()[0]->info();
 
-    size = amd::alignUp(size, dev_info.virtualMemAllocGranularity_);
+    size = amd::alignUp(size, dev_info.virtualMemAllocGranularityRecommended_);
     // Single virtual alloc would reserve for all devices.
     ptr = g_devices[0]->devices()[0]->virtualAlloc(startAddress, size,
-                                                   dev_info.virtualMemAllocGranularity_);
+                                                   dev_info.virtualMemAllocGranularityRecommended_);
     if (ptr == nullptr) {
       LogError("Failed to reserve Virtual Address");
     }
@@ -779,7 +784,9 @@ class Graph {
   //!< Used to track which devices are accessed by each parallel stream
   //!< during multi-device graph execution scheduling.
   std::unordered_map<int, std::set<int>> streams_dev_ids_;
-
+  int instantiateDeviceId_ = -1;
+  //! Topological order of the graph doesn't include nodes embedded as part of the child graph
+  std::vector<Node> topoOrder_;
  private:
   friend class GraphExec;
   std::vector<Node> vertices_;
@@ -836,9 +843,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
         kernArgManager_->release();
       }
     }
-    if (instantiateDeviceId_ != -1) {
-      static_cast<ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->release();
-    }
 
     packetBatches_.clear();
     nodeCaptureStatus_.clear();
@@ -893,13 +897,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   void FindStreamsReqPerDev();
 
  protected:
-  //! Topological order of the graph doesn't include nodes embedded as part of the child graph
-  std::vector<Node> topoOrder_;
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   uint64_t flags_ = 0;
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
-  int instantiateDeviceId_ = -1;
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   bool repeatLaunch_ = false;
 
@@ -2412,7 +2413,7 @@ class GraphMemAllocNode final : public GraphNode {
       }
       // Allocate real memory for mapping
       const auto& dev_info = queue()->device().info();
-      auto aligned_size = amd::alignUp(size_, dev_info.virtualMemAllocGranularity_);
+      auto aligned_size = amd::alignUp(size_, dev_info.virtualMemAllocGranularityRecommended_);
       auto dptr = graph_->AllocateMemory(aligned_size, static_cast<hip::Stream*>(queue()), nullptr);
       if (dptr == nullptr) {
         setStatus(CL_INVALID_OPERATION);
@@ -2609,7 +2610,7 @@ class GraphMemFreeNode : public GraphNode {
         // Unmap virtual address from memory
         amd::Command* cmd = new VirtualMemFreeNode(
             graph, stream->DeviceId(), *stream, amd::Command::EventWaitList{}, device_ptr_,
-            amd::alignUp(va->getSize(), dev_info.virtualMemAllocGranularity_), nullptr);
+            amd::alignUp(va->getSize(), dev_info.virtualMemAllocGranularityRecommended_), nullptr);
         commands_.push_back(cmd);
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph FreeMem create: %p", device_ptr_);
       }
@@ -2716,7 +2717,7 @@ class hipGraphExternalSemSignalNode : public GraphNode {
 
   GraphNode* clone() const override { return new hipGraphExternalSemSignalNode(*this); }
 
-  hipError_t CreateCommand(hip::Stream* stream) {
+  hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
@@ -2769,7 +2770,7 @@ class hipGraphExternalSemWaitNode : public GraphNode {
 
   GraphNode* clone() const override { return new hipGraphExternalSemWaitNode(*this); }
 
-  hipError_t CreateCommand(hip::Stream* stream) {
+  hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
@@ -2821,7 +2822,7 @@ class hipGraphBatchMemOpNode : public GraphNode {
 
   GraphNode* clone() const override { return new hipGraphBatchMemOpNode(*this); }
 
-  hipError_t CreateCommand(hip::Stream* stream) {
+  hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;

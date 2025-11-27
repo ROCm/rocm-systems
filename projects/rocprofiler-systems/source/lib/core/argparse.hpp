@@ -22,13 +22,12 @@
 
 #pragma once
 
-#include "defines.hpp"
-
 #include <timemory/settings/vsettings.hpp>
 #include <timemory/utility/argparse.hpp>
 
 #include <functional>
 #include <set>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofsys
@@ -39,7 +38,7 @@ struct parser_data;
 
 using parser_t          = ::tim::argparse::argument_parser;
 using vsetting_t        = ::tim::vsettings;
-using vsettings_set_t   = std::set<vsetting_t*>;
+using vsettings_set_t   = std::unordered_set<vsetting_t*>;
 using strset_t          = std::set<std::string>;
 using strvec_t          = std::vector<std::string>;
 using setting_filter_t  = std::function<bool(vsetting_t*, const parser_data&)>;
@@ -57,22 +56,22 @@ default_grouping_filter(std::string_view, const parser_data&);
 
 struct parser_data
 {
-    bool                       monochrome         = false;
-    bool                       debug              = false;
-    int                        verbose            = 0;
-    std::string                dl_libpath         = {};
-    std::string                omni_libpath       = {};
-    std::string                launcher           = {};
-    vsettings_set_t            processed_settings = {};
-    std::set<std::string>      processed_environs = {};
-    std::set<std::string>      processed_groups   = {};
-    std::vector<char*>         current            = {};
-    std::vector<char*>         command            = {};
-    std::set<std::string_view> updated            = {};
-    std::set<std::string>      initial            = {};
-    grouping_filter_t          grouping_filter    = default_grouping_filter;
-    setting_filter_t           setting_filter     = default_setting_filter;
-    environ_filter_t           environ_filter     = default_environ_filter;
+    bool                                 monochrome         = false;
+    bool                                 debug              = false;
+    int                                  verbose            = 0;
+    std::string                          dl_libpath         = {};
+    std::string                          omni_libpath       = {};
+    std::string                          launcher           = {};
+    vsettings_set_t                      processed_settings = {};
+    std::unordered_set<std::string>      processed_environs = {};
+    std::unordered_set<std::string>      processed_groups   = {};
+    std::vector<char*>                   current            = {};
+    std::vector<char*>                   command            = {};
+    std::unordered_set<std::string_view> updated            = {};
+    std::unordered_set<std::string>      initial            = {};
+    grouping_filter_t                    grouping_filter    = default_grouping_filter;
+    setting_filter_t                     setting_filter     = default_setting_filter;
+    environ_filter_t                     environ_filter     = default_environ_filter;
 };
 
 parser_data&

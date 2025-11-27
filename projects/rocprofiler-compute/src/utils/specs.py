@@ -43,9 +43,11 @@ import pandas as pd
 import config
 from utils.amdsmi_interface import (
     amdsmi_ctx,
+    get_amdgpu_driver_version,
     get_gpu_compute_partition,
     get_gpu_memory_partition,
     get_gpu_vbios_part_number,
+    get_gpu_vram_size,
 )
 from utils.logger import (
     console_debug,
@@ -182,25 +184,26 @@ def generate_machine_specs(
     soc_info = extract_soc_info()
 
     # Combine all specifications
-    specs = MachineSpecs(
-        version=specs_version,
-        timestamp=timestamp,
-        rocminfo_lines=soc_info["rocminfo_lines"],
-        hostname=socket.gethostname(),
-        cpu_model=machine_info["cpu_model"],
-        sbios=machine_info["sbios"],
-        linux_kernel_version=machine_info["linux_kernel_version"],
-        amd_gpu_kernel_version="",
-        cpu_memory=machine_info["cpu_memory"],
-        gpu_memory="",
-        linux_distro=machine_info["linux_distro"],
-        rocm_version=get_rocm_ver().strip(),
-        vbios=gpu_info["vbios"],
-        compute_partition=gpu_info["compute_partition"],
-        memory_partition=gpu_info["memory_partition"],
-        gpu_arch=soc_info["gpu_arch"],
-        gpu_chip_id=soc_info["gpu_chip_id"],
-    )
+    with amdsmi_ctx():
+        specs = MachineSpecs(
+            version=specs_version,
+            timestamp=timestamp,
+            rocminfo_lines=soc_info["rocminfo_lines"],
+            hostname=socket.gethostname(),
+            cpu_model=machine_info["cpu_model"],
+            sbios=machine_info["sbios"],
+            linux_kernel_version=machine_info["linux_kernel_version"],
+            amd_gpu_kernel_version=get_amdgpu_driver_version(),
+            cpu_memory=machine_info["cpu_memory"],
+            gpu_memory=get_gpu_vram_size(),
+            linux_distro=machine_info["linux_distro"],
+            rocm_version=get_rocm_ver().strip(),
+            vbios=gpu_info["vbios"],
+            compute_partition=gpu_info["compute_partition"],
+            memory_partition=gpu_info["memory_partition"],
+            gpu_arch=soc_info["gpu_arch"],
+            gpu_chip_id=soc_info["gpu_chip_id"],
+        )
 
     # Load above SoC specs via module import
     try:
@@ -436,10 +439,7 @@ class MachineSpecs:
     amd_gpu_kernel_version: Optional[str] = field(
         default=None,
         metadata={
-            "doc": (
-                "[RESERVED] The version of the AMDGPU driver installed on the machine. "
-                "Unimplemented."
-            ),
+            "doc": ("The version of the AMDGPU driver installed on the machine."),
             "name": "AMD GPU Kernel Version",
             "show_in_table": True,
         },
@@ -457,8 +457,8 @@ class MachineSpecs:
         default=None,
         metadata={
             "doc": (
-                "[RESERVED] The total amount of memory available to accelerators/GPUs "
-                "in the system. Unimplemented."
+                "The total amount of memory available to accelerators/GPUs "
+                "in the system."
             ),
             "unit": "KB",
             "name": "GPU Memory",

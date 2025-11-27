@@ -12,7 +12,6 @@ find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(rocpd-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
 
@@ -24,23 +23,24 @@ set(rocpd-env
 
 foreach(_SUBPARSER "" "-convert" "-query" "-summary")
     string(REPLACE "-" "" _CMD "${_SUBPARSER}")
-    add_test(NAME rocpd${_SUBPARSER}-help COMMAND ${Python3_EXECUTABLE} -m rocpd ${_CMD}
-                                                  --help)
 
-    set_tests_properties(
+    rocprofiler_add_integration_execute_test(
         rocpd${_SUBPARSER}-help
-        PROPERTIES TIMEOUT 120 LABELS "integration-tests;rocpd" ENVIRONMENT
-                   "${rocpd-env}" FAIL_REGULAR_EXPRESSION
-                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+        COMMAND ${Python3_EXECUTABLE} -m rocpd ${_CMD} --help
+        DEPENDS rocprofiler-sdk::rocprofv3
+        TIMEOUT 120
+        LABELS "integration-tests;rocpd"
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+        ENVIRONMENT "${rocpd-env}")
 endforeach()
 
 foreach(_MODULE "csv" "pftrace" "otf2" "query" "summary")
-    add_test(NAME rocpd-module-${_MODULE}-help COMMAND ${Python3_EXECUTABLE} -m
-                                                       rocpd.${_MODULE} --help)
-
-    set_tests_properties(
+    rocprofiler_add_integration_execute_test(
         rocpd-module-${_MODULE}-help
-        PROPERTIES TIMEOUT 120 LABELS "integration-tests;rocpd" ENVIRONMENT
-                   "${rocpd-env}" FAIL_REGULAR_EXPRESSION
-                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+        COMMAND ${Python3_EXECUTABLE} -m rocpd.${_MODULE} --help
+        DEPENDS rocprofiler-sdk::rocprofv3
+        TIMEOUT 120
+        LABELS "integration-tests;rocpd"
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+        ENVIRONMENT "${rocpd-env}")
 endforeach()
