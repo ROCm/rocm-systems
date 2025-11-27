@@ -23,17 +23,17 @@ set(TEST_SRC
     hipMemRetainAllocationHandle.cc)
 
 if(HIP_PLATFORM MATCHES "nvidia")
-set(TEST_SRC
+  set(TEST_SRC
     ${TEST_SRC}
     hipMemMapArrayAsync.cc)
 endif()
 
 if(UNIX)
-if(HIP_PLATFORM MATCHES "amd")
-  set(TEST_SRC
+  if(HIP_PLATFORM MATCHES "amd")
+    set(TEST_SRC
       ${TEST_SRC}
       hipMemGetHandleForAddressRange.cc)
-endif()
+  endif()
   set(TEST_SRC
       ${TEST_SRC}
       hipMemExportToShareableHandle.cc
@@ -60,7 +60,5 @@ set(TEST_SRC
 hip_add_exe_to_target(NAME VirtualMemoryManagementTest
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
-if(HIP_PLATFORM MATCHES "nvidia")
-	set_target_properties(VirtualMemoryManagementTest PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(VirtualMemoryManagementTest cuda)
-  endif()
+set_target_properties(VirtualMemoryManagementTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(VirtualMemoryManagementTest ${GPGPU_LINKER_LIBRARIES})

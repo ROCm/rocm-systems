@@ -20,26 +20,21 @@ if (HIP_PLATFORM MATCHES "amd")
                    -o simple_kernel.code
                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc)
-
-  add_custom_target(simple_kernel ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code)
 else()
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code
-                     COMMAND ${CMAKE_CXX_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
-                     -x cu ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc
-                     -o simple_kernel.code
-                     -I${HIP_INCLUDE_DIR}
-                     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc)
-
-  add_custom_target(simple_kernel ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code)
+                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                   -x cu ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc
+                   -o simple_kernel.code
+                   -I${HIP_INCLUDE_DIR}
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc)
 endif()
+add_custom_target(simple_kernel ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code)
 hip_add_exe_to_target(NAME OccupancyTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-if(HIP_PLATFORM MATCHES "nvidia")
-  set_target_properties(OccupancyTest PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(OccupancyTest cuda)
-endif()
+set_target_properties(OccupancyTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(OccupancyTest ${GPGPU_LINKER_LIBRARIES})
 
-# add_dependencies(OccupancyTest simple_kernel)
+add_dependencies(OccupancyTest simple_kernel)
