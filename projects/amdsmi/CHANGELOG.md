@@ -8,6 +8,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added GPU and base board temperature `amd-smi monitor` CLI support**.  
+  - Added `--gpu-board-temps` option to `amd-smi monitor` command for GPU board temperature sensors
+  - Added `--base-board-temps` option to `amd-smi monitor` command for base board temperature sensors
+
+- **Added Node Power Management (NPM) support**.  
+  - Added new Node Power Management APIs and CLI for node monitoring
+  - Added C API functions:
+    - `amdsmi_get_node_handle()`: Get handle for node devices
+    - `amdsmi_get_npm_info()`: Retrieve Node Power Management information
+  - Added Python API wrappers for new node device functions
+  - Added `amd-smi node` CLI command for Node Power Management operations
+  - Currently supported for OAM_ID 0 only.
+
 - **Added the following C API's to amdsmi_interface.py**.  
   - amdsmi_get_cpu_handle()
   - amdsmi_get_esmi_err_msg()
@@ -64,6 +77,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       - amdsmi_get_power_cap_info() 
       - amdsmi_set_power_cap()
   - See the Changed section for changes made to the `set` and `static` commands regarding support for PPT1.  
+
+- **Added PTL Support to `amd-smi static` and `amd-smi set`**
+  - `amd-smi set` now support --ptl-status 0|1 and --ptl-format FORMAT1,FORMAT2
+  - `amd-smi static -l` shows current state and format of PTL
+
+  ```console
+  $ amd-smi static -l
+  GPU: 0
+      LIMIT:
+        PTL_STATE: Enabled
+        PTL_FORMAT: I8,F64
+  ```
 
 ### Changed
 

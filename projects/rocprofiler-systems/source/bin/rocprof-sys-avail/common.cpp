@@ -26,8 +26,12 @@
 #include <timemory/settings/settings.hpp>
 #include <timemory/variadic/macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <string>
+#include <string_view>
 #include <sys/stat.h>
+#include <unordered_map>
 
 using settings = ::tim::settings;
 
@@ -307,29 +311,73 @@ process_categories(parser_t& p, const str_set_t& _category_options)
 {
     category_view = p.get<str_set_t>("categories");
     std::vector<std::function<void()>> _shorthand_patches{};
+
+    // Helper to do case-insensitive string comparison
+    auto _tolower = [](std::string_view in) {
+        std::string out(in);
+        std::transform(out.begin(), out.end(), out.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        return out;
+    };
+
+    // Cache lowercase -> original category mapping to avoid repeated string conversions
+    // Also pre-compute shorthand mappings (e.g., "wallclock" -> "component::WallClock")
+    std::unordered_map<std::string, std::string> _category_map;
+    constexpr std::array<std::string_view, 3> _prefixes = { "component::", "settings::",
+                                                            "hw_counters::" };
+
+    for(const auto& opt : _category_options)
+    {
+        auto opt_lower           = _tolower(opt);
+        _category_map[opt_lower] = opt;
+
+        // Add shorthand mappings if the option starts with a known prefix
+        for(auto prefix : _prefixes)
+        {
+            if(opt_lower.size() > prefix.size() &&
+               opt_lower.compare(0, prefix.size(), _tolower(prefix)) == 0)
+            {
+                // Map the shorthand (without prefix) to the full canonical form
+                auto shorthand           = opt_lower.substr(prefix.size());
+                _category_map[shorthand] = opt;
+                break;
+            }
+        }
+    }
+
+    // Helper to find case-insensitive match in category options
+    auto _find_category = [&_category_map,
+                           &_tolower](std::string_view input) -> std::string_view {
+        auto input_lower = _tolower(input);
+        auto it          = _category_map.find(input_lower);
+        if(it != _category_map.end()) return it->second;
+        return "";
+    };
+
+    // Process categories - now handles both full names and shorthands via the pre-built
+    // map
     for(const auto& itr : category_view)
     {
-        auto _is_shorthand = [&_shorthand_patches, &_category_options,
-                              itr](const std::string& _prefix) {
-            auto _opt = TIMEMORY_JOIN("::", _prefix, itr);
-            if(_category_options.count(_opt) > 0)
-            {
-                _shorthand_patches.emplace_back([itr, _opt]() {
-                    category_view.erase(itr);
-                    category_view.emplace(_opt);
-                });
-                return true;
-            }
-            return false;
-        };
-
-        if(_category_options.count(itr) == 0)
+        auto _matched = _find_category(itr);
+        if(!_matched.empty())
         {
-            if(!_is_shorthand("component") && !_is_shorthand("settings") &&
-               !_is_shorthand("hw_counters"))
-                throw std::runtime_error(
-                    itr + " is not a valid category. Use --list-categories to view "
-                          "valid categories");
+            // Only create patch if the matched form differs from input (normalization
+            // needed)
+            if(_matched != itr)
+            {
+                // Explicitly convert string_view to string for safe capture
+                std::string _matched_str(_matched);
+                _shorthand_patches.emplace_back([itr, _matched_str]() {
+                    category_view.erase(itr);
+                    category_view.emplace(_matched_str);
+                });
+            }
+        }
+        else
+        {
+            throw std::runtime_error(
+                itr + " is not a valid category. Use --list-categories to view "
+                      "valid categories");
         }
     }
     for(auto&& itr : _shorthand_patches)

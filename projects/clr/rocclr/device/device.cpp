@@ -362,7 +362,7 @@ void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = MemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
   if (!rval.second) {
-    DevLogPrintfError("Memobj map already has an entry for ptr: 0x%x",
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Memobj map already has an entry for ptr: 0x%x",
                       reinterpret_cast<uintptr_t>(k));
   }
 }
@@ -435,8 +435,9 @@ void MemObjMap::AddVirtualMemObj(const void* k, amd::Memory* v) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = VirtualMemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
   if (!rval.second) {
-    DevLogPrintfError("Virtual Memobj map already has an entry for ptr: 0x%x",
-                      reinterpret_cast<uintptr_t>(k));
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+            "Virtual Memobj map already has an entry for ptr: 0x%x",
+            reinterpret_cast<uintptr_t>(k));
   }
 }
 
@@ -469,7 +470,7 @@ void MemObjMap::AddIpcHandleMemObj(const IpcMemHandle& k, amd::Memory* v) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = IpcHandleMemObjMap_.insert({k, v});
   if (!rval.second) {
-    DevLogPrintfError(
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
         "Error adding entry for Memobj 0x%x in IpcHandle map. The handle already exists.", v);
   }
 }
@@ -629,7 +630,8 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
   // Create a program with all blit kernels
   program_ = new Program(*context_, kernels.c_str(), Program::OpenCL_C);
   if (program_ == nullptr) {
-    DevLogPrintfError("Program creation for Kernel: %s failed\n", kernels.c_str());
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "Program creation for Kernel: %s failed\n", kernels.c_str());
     return false;
   }
 
@@ -651,11 +653,13 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
 #endif
   if ((retval = program_->build(devices, opt.c_str(), nullptr, nullptr, GPU_DUMP_BLIT_KERNELS)) !=
       CL_SUCCESS) {
-    DevLogPrintfError("Build failed for Kernel: %s with error code %d\n", kernels.c_str(), retval);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "Build failed for Kernel: %s with error code %d\n", kernels.c_str(), retval);
     return false;
   }
   if (!program_->load()) {
-    DevLogPrintfError("Could not load the kernels: %s \n", kernels.c_str());
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "Could not load the kernels: %s \n", kernels.c_str());
     return false;
   }
 
@@ -684,7 +688,7 @@ bool Device::init() {
       // that KFD is not installed.
       // Ignore the failure and assume KFD is not installed.
       // abort();
-      DevLogError("KFD is not installed \n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_INIT, "KFD is not installed \n");
       // Disable direct dispatch if ROC initialization wasn't successful
       AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? false : AMD_DIRECT_DISPATCH;
     }
@@ -1028,7 +1032,8 @@ char* Device::getExtensionString() {
 bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* mem_offset) const {
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
-    DevLogPrintfError("Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
     return false;
   }
 
@@ -1045,8 +1050,8 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
   // Check if the dev_ptr is lesser than original dev_ptr
   if (orig_dev_ptr > dev_ptr) {
     // If this happens, then revisit FindMemObj logic
-    DevLogPrintfError("Original dev_ptr: 0x%x cannot be greater than dev_ptr: 0x%x", orig_dev_ptr,
-                      dev_ptr);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+            "Original dev_ptr: 0x%x cannot be greater than dev_ptr: 0x%x", orig_dev_ptr, dev_ptr);
     return false;
   }
 
@@ -1138,7 +1143,8 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) 
   // make sure the memory is allocated.
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
-    DevLogPrintfError("Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
     return false;
   }
 
@@ -1337,7 +1343,7 @@ bool ClBinary::createElfBinary(bool doencrypt, Program::type_t type) {
   }
 
   if (!elfOut_->dumpImage(&image, &imageSize)) {
-    DevLogError("Dump Image failed \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Dump Image failed \n");
     return false;
   }
 
@@ -1360,7 +1366,7 @@ bool ClBinary::createElfBinary(bool doencrypt, Program::type_t type) {
     delete[] image;
     if (!success) {
       delete[] outBuf;
-      DevLogError("Cannot succesfully OCL Encrypt Image");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot succesfully OCL Encrypt Image");
       return false;
     }
     image = outBuf;
@@ -1418,7 +1424,7 @@ bool ClBinary::decryptElf(const char* binaryIn, size_t size, char** decryptBin, 
     int outDataSize = 0;
     if (!amd::oclDecrypt(binaryIn, (int)size, outBuf, outBufSize, &outDataSize)) {
       delete[] outBuf;
-      DevLogError("Cannot Decrypt Image \n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot Decrypt Image \n");
       return false;
     }
 
@@ -1487,7 +1493,8 @@ bool ClBinary::loadLlvmBinary(std::string& llvmBinary,
     }
   }
 
-  DevLogPrintfError("Cannot Load LLVM Binary: %s \n", llvmBinary.c_str());
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+           "Cannot Load LLVM Binary: %s \n", llvmBinary.c_str());
   return false;
 }
 

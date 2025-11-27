@@ -183,7 +183,7 @@ __global__ void frexp_kernel(std::pair<T, int>* const ys, const size_t num_xs, T
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     if constexpr (std::is_same_v<float, T>) {
       ys[i].first = frexpf(xs[i], &ys[i].second);
     } else if constexpr (std::is_same_v<double, T>) {

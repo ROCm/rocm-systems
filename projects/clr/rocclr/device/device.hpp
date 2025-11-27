@@ -650,7 +650,8 @@ struct Info : public amd::EmbeddedObject {
   bool pcie_atomics_;  //!< Pcie atomics support flag
 
   bool virtualMemoryManagement_;       //!< Virtual memory management support
-  size_t virtualMemAllocGranularity_;  //!< virtual memory allocation size/addr granularity
+  size_t virtualMemAllocGranularityMinimum_;  //!< minimum virtual memory allocation size/addr granularity
+  size_t virtualMemAllocGranularityRecommended_;  //!< recommended virtual memory allocation size/addr granularity
 
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD

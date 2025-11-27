@@ -97,7 +97,7 @@ Addition:
     metric_descriptions:
       New Metric:
         plain: Description text
-        rst: |- # Optional
+        rst: >- # Optional
           Description with :ref:`RST markup <link>`
 
 Deletion:
@@ -231,7 +231,7 @@ Modification:
     metric_descriptions:
       Existing Metric:
         plain: Updated description
-        rst: |-
+        rst: >-
           Updated description with **RST**"
 ```
 

@@ -119,6 +119,9 @@ static const char *kDevPmMetricsFName = "pm_metrics";   // PM log
 static const char *kDevRegMetricsFName = "reg_state";   // register table
 static const char *kDevBaseBoardTempMetricsFName = "board/baseboard_temp";
 static const char *kDevGpuBoardTempMetricsFName = "board/gpuboard_temp";
+static const char *kDevPtlSupportedFName = "ptl/ptl_supported_formats"; // Only used internally for verification
+static const char *kDevPtlStatusFName = "ptl/ptl_enable";
+static const char *kDevPtlFormatFName = "ptl/ptl_format";
 
 static const char *kDevAvailableComputePartitionFName =
                   "available_compute_partition";
@@ -331,6 +334,9 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevRegMetrics, kDevRegMetricsFName},
     {kDevBaseBoardTempMetrics, kDevBaseBoardTempMetricsFName},
     {kDevGpuBoardTempMetrics, kDevGpuBoardTempMetricsFName},
+    {kDevPtlSupported, kDevPtlSupportedFName},
+    {kDevPtlStatus, kDevPtlStatusFName},
+    {kDevPtlFormat, kDevPtlFormatFName},
     {kDevGpuReset, kDevGpuResetFName},
     {kDevAvailableComputePartition, kDevAvailableComputePartitionFName},
     {kDevComputePartition, kDevComputePartitionFName},
@@ -605,6 +611,10 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_compute_partition_set",     {{kDevComputePartitionFName}, {}}},
   {"rsmi_dev_memory_partition_get",      {{kDevMemoryPartitionFName}, {}}},
   {"rsmi_dev_memory_partition_set",      {{kDevMemoryPartitionFName}, {}}},
+  {"rsmi_get_gpu_ptl_state",             {{kDevPtlStatusFName}, {}}},
+  {"rsmi_set_gpu_ptl_state",             {{kDevPtlStatusFName}, {}}},
+  {"rsmi_get_gpu_ptl_formats",           {{kDevPtlFormatFName}, {}}},
+  {"rsmi_set_gpu_ptl_formats",           {{kDevPtlFormatFName}, {}}},
 
   // These functions with variants, but no sensors/units. (May or may not
   // have mandatory dependencies.)
@@ -1035,6 +1045,7 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
     case kDevOverDriveLevel:  // integer between 0 and 20
     case kDevPowerODVoltage:
     case kDevPowerProfileMode:
+    case kDevPtlStatus:
       return writeDevInfoStr(type, std::to_string(val));
       break;
 
@@ -1066,6 +1077,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevPCIEClk:
     case kDevPowerODVoltage:
     case kDevSOCClk:
+    case kDevPtlFormat:
       return writeDevInfoStr(type, val);
     case kDevComputePartition:
     case kDevMemoryPartition:
@@ -1521,6 +1533,9 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevJpegShared:
     case kDevXccInst:
     case kDevXccShared:
+    case kDevPtlSupported:
+    case kDevPtlStatus:
+    case kDevPtlFormat:
       return readDevInfoStr(type, val);
       break;
 
