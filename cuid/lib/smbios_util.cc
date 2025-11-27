@@ -8,7 +8,7 @@
 #include "cuid_util.h"
 #include <unistd.h>
 
-amdcuid_status_t SmbiosUtil::get_uuid(uint8_t* uuid) {
+amdcuid_status_t SmbiosUtil::get_system_uuid(uint8_t* uuid) {
     if (!uuid) {
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }

@@ -46,7 +46,7 @@ typedef struct {
 } amdcuid_cuid_fields_nic;
 
 typedef struct {
-    uint8_t system_information[14]; // System Information (Type1)
+    uint16_t vendor_id;
 } amdcuid_cuid_fields_platform;
 
 typedef struct amdcuid_cuid_fields {
@@ -161,8 +161,7 @@ amdcuid_status_t amdcuid_get_primary_cuid(
 * @return        AMDCUID_STATUS_SUCCESS on success, or an appropriate error code on failure
 */
 amdcuid_status_t amdcuid_get_secondary_cuid(
-    char *device_name,
-    uint32_t *name_len,
+    amdcuid_handle handle,
     amdcuid *secondary_cuid
 );
 

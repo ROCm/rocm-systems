@@ -2,10 +2,12 @@
 #include "cuid_cpu.h"
 #include "cuid_util.h"
 #include "acpi_parser.h"
+#include "cuid_file.h"
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <unistd.h>
 
 #ifdef __x86_64__
 #include <cpuid.h>
@@ -119,7 +121,7 @@ amdcuid_status_t AmdCuidCpu::discover(std::vector<DevicePtr> &cpus) {
         info.header.fields.cpu.physical_id = 0;  // Would need NUMA/topology parsing
         
         auto cpu = std::make_shared<AmdCuidCpu>(info);
-        cpus.push_back(cpu);
+        cpus.emplace_back(cpu);
     }
     
     return AMDCUID_STATUS_SUCCESS;
@@ -164,6 +166,10 @@ static bool try_read_ppin(uint64_t& ppin) {
 }
 
 amdcuid_status_t AmdCuidCpu::get_hardware_fingerprint(uint64_t& fingerprint) const {
+    if (geteuid() != 0)
+    {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
     // Per manager feedback: Use processor _UID as fingerprint (often a UUID or serial)
     // This comes from ACPI and is stored in the core field
     fingerprint = static_cast<uint64_t>(m_info.header.fields.cpu.core) |
@@ -179,9 +185,27 @@ amdcuid_status_t AmdCuidCpu::get_hardware_fingerprint(uint64_t& fingerprint) con
 }
 
 amdcuid_status_t AmdCuidCpu::get_primary_cuid(amdcuid& id) const {
+    if (geteuid() != 0)
+    {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+
+    // attempt to read the CUID from the file first
+    std::string cuid_file_path = "/tmp/priv_cuid";
+    CuidFile primary_file(cuid_file_path, false);
+    primary_file.load();
+    std::vector<CuidFileEntry> entries = primary_file.get_entries();
+
+    CuidFileEntry entry;
+    std::string package_core_id = std::to_string(m_info.header.fields.cpu.physical_id) + ":" + std::to_string(m_info.header.fields.cpu.core);
+    amdcuid_status_t status =primary_file.find_by_package_core_id(package_core_id, entry);
+    if (status == AMDCUID_STATUS_SUCCESS) {
+        id = entry.primary_cuid;
+        return AMDCUID_STATUS_SUCCESS;
+    }
     // Get hardware fingerprint (PPIN or processor UID)
     uint64_t fingerprint = 0;
-    amdcuid_status_t status = get_hardware_fingerprint(fingerprint);
+    status = get_hardware_fingerprint(fingerprint);
     if (status != AMDCUID_STATUS_SUCCESS) {
         std::memset(id.bytes, 0, sizeof(id.bytes));
         return status;

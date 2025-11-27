@@ -2,6 +2,7 @@
 #include "cuid_gpu.h"
 #include "cuid_util.h"
 #include "pci_util.h"
+#include "cuid_file.h"
 #include <dirent.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -101,6 +102,10 @@ amdcuid_status_t AmdCuidGpu::discover(std::vector<DevicePtr> &gpus) {
 }
 
 amdcuid_status_t AmdCuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const {
+    if (geteuid() != 0)
+    {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
     // Try to read the unique_id from the device sysfs
     std::string unique_id_path = m_info.render_node + "/device/unique_id";
     std::ifstream fin(unique_id_path);
@@ -143,10 +148,28 @@ amdcuid_status_t AmdCuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) con
     return AMDCUID_STATUS_SUCCESS;
 }
 
-// need to figure out how to require privilege for this function
 amdcuid_status_t AmdCuidGpu::get_primary_cuid(amdcuid& id) const {
+    if (geteuid() != 0)
+    {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+
+    // attempt to read the CUID from the file first
+    std::string cuid_file_path = "/tmp/priv_cuid";
+    CuidFile primary_file(cuid_file_path, false);
+    primary_file.load();
+    std::vector<CuidFileEntry> entries = primary_file.get_entries();
+
+    CuidFileEntry entry;
+    amdcuid_status_t status =primary_file.find_by_device_node(m_info.render_node, entry);
+    if (status == AMDCUID_STATUS_SUCCESS) {
+        id = entry.primary_cuid;
+        return AMDCUID_STATUS_SUCCESS;
+    }
+
+    // primary CUID not found in file so generate it
     uint64_t fingerprint = 0;
-    amdcuid_status_t status = get_hardware_fingerprint(fingerprint);
+    status = get_hardware_fingerprint(fingerprint);
     if (status != AMDCUID_STATUS_SUCCESS) {
         std::memset(id.bytes, 0, sizeof(id.bytes));
         return status;

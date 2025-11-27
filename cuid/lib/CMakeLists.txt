@@ -18,7 +18,6 @@ set(CUID_SOURCES
     hmac.cc
     cuid_lib_loader.cc
     pci_util.cc
-    acpi_util.cc
     acpi_parser.cc
     smbios_util.cc
 )
@@ -36,7 +35,6 @@ set(CUID_HEADERS
     hmac.h
     cuid_lib_loader.h
     pci_util.h
-    acpi_util.h
     acpi_parser.h
     smbios_util.h
 )

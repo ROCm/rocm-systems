@@ -6,7 +6,7 @@
 
 class SmbiosUtil {
 public:
-    static amdcuid_status_t get_uuid(uint8_t* uuid);
+    static amdcuid_status_t get_system_uuid(uint8_t* uuid);
     static amdcuid_status_t get_uuid_from_smbios_table(uint8_t* uuid);
     static amdcuid_status_t get_system_serial(std::string &serial);
     static amdcuid_status_t get_board_info(std::string &vendor, std::string &name, std::string &version);

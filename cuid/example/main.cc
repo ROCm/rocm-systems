@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstdint>
 #include "cuid.h"
+#include "hmac.h"
 
 inline const char* cuid_status_to_string(amdcuid_status_t status) {
     switch (status) {
@@ -23,6 +24,9 @@ inline const char* cuid_status_to_string(amdcuid_status_t status) {
 
 int main() {
     amdcuid_status_t err;
+
+    AMDCUID_HMAC hmac = AMDCUID_HMAC("/home/gabrpham/key_file_sample");
+    hmac.set_hmac_algorithm(nullptr);
 
     uint32_t gpu_count = 0;
     uint32_t available_gpu_count = 0;
@@ -64,22 +68,22 @@ int main() {
             device_node[0] = '\0';
         }
 
-        // amdcuid secondary_id = {};
-        // err = amdcuid_get_secondary_cuid(gpu_handles[i], &secondary_id);
-        // if (err != AMDCUID_STATUS_SUCCESS) {
-        //     std::cerr << "Failed to get secondary CUID for GPU #" << i << ". Error code: " << err
-        //               << " (" << cuid_status_to_string(err) << ")" << std::endl;
-        // }
+        amdcuid secondary_id = {};
+        err = amdcuid_get_secondary_cuid(gpu_handles[i], &secondary_id);
+        if (err != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Failed to get secondary CUID for GPU #" << i << ". Error code: " << err
+                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+        }
 
-        // std::cout << "GPU #" << i
-        //           << std::dec
-        //           << " BDF: " << bdf
-        //           << " DeviceNode: " << device_node
-        //           << "  CUID: ";
-        // for (int j = 0; j < 16; ++j) {
-        //     printf("%02x", secondary_id.bytes[j]);
-        // }
-        // std::cout << std::endl;
+        std::cout << "GPU #" << i
+                  << std::dec
+                  << " BDF: " << bdf
+                  << " DeviceNode: " << device_node
+                  << "  CUID: ";
+        for (int j = 0; j < 16; ++j) {
+            printf("%02x", secondary_id.bytes[j]);
+        }
+        std::cout << std::endl;
     }
     return 0;
 }

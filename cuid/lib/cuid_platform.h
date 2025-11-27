@@ -13,7 +13,7 @@ struct amdcuid_platform_info {
 
 class AmdCuidPlatform : public AmdCuidDevice {
 public:
-    AmdCuidPlatform(const amdcuid_cuid_fields& i);
+    AmdCuidPlatform(const amdcuid_platform_info& i);
     amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_PLATFORM; }
     amdcuid_status_t get_primary_cuid(amdcuid& id) const override;
     amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;

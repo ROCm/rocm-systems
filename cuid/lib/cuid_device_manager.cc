@@ -38,6 +38,16 @@ amdcuid_status_t AmdCuidDeviceManager::init(amdcuid_device_type_set_t device_typ
             devices_.insert(devices_.end(), cpus.begin(), cpus.end());
         }
     }
+    if (device_types & AMDCUID_DEVICE_TYPE_SET_NIC) {
+        std::vector<DevicePtr> nics;
+        amdcuid_status_t status = AmdCuidNic::discover(nics);
+        if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_UNSUPPORTED) {
+            return status;
+        }
+        if (status == AMDCUID_STATUS_SUCCESS) {
+            devices_.insert(devices_.end(), nics.begin(), nics.end());
+        }
+    }
     initialized_ = true;
     return AMDCUID_STATUS_SUCCESS;
 }

@@ -1,6 +1,7 @@
 #include "cuid_nic.h"
 #include "cuid_util.h"
 #include "pci_util.h"
+#include "cuid_file.h"
 #include <cstring>
 #include <dirent.h>
 #include <sys/types.h>
@@ -99,6 +100,10 @@ amdcuid_status_t AmdCuidNic::discover(std::vector<DevicePtr> &nics) {
 }
 
 amdcuid_status_t AmdCuidNic::get_hardware_fingerprint(uint64_t& fingerprint) const {
+    if (geteuid() != 0)
+    {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
 
     uint32_t cap_id = 0x3;
     uint16_t offset = 0;
@@ -111,7 +116,6 @@ amdcuid_status_t AmdCuidNic::get_hardware_fingerprint(uint64_t& fingerprint) con
         if (status == AMDCUID_STATUS_SUCCESS)
         {
             fingerprint = PciUtil::le64_to_be64(*reinterpret_cast<uint64_t*>(fingerprint_bytes));
-            delete[] fingerprint_bytes;
             return AMDCUID_STATUS_SUCCESS;
         }
     }
@@ -133,8 +137,26 @@ amdcuid_status_t AmdCuidNic::get_hardware_fingerprint(uint64_t& fingerprint) con
 }
 
 amdcuid_status_t AmdCuidNic::get_primary_cuid(amdcuid& id) const {
+    if (geteuid() != 0)
+    {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+
+    // attempt to read the CUID from the file first
+    std::string cuid_file_path = "/tmp/priv_cuid";
+    CuidFile primary_file(cuid_file_path, false);
+    primary_file.load();
+    std::vector<CuidFileEntry> entries = primary_file.get_entries();
+
+    CuidFileEntry entry;
+    amdcuid_status_t status =primary_file.find_by_device_node(m_info.network_interface, entry);
+    if (status == AMDCUID_STATUS_SUCCESS) {
+        id = entry.primary_cuid;
+        return AMDCUID_STATUS_SUCCESS;
+    }
+
     uint64_t fingerprint = 0;
-    amdcuid_status_t status = get_hardware_fingerprint(fingerprint);
+    status = get_hardware_fingerprint(fingerprint);
     if (status != AMDCUID_STATUS_SUCCESS) {
         std::memset(id.bytes, 0, sizeof(id.bytes));
         return status;
