@@ -42,9 +42,15 @@
 
 #include <unistd.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
+#include <sys/syscall.h>
+#include <libgen.h>
+#include <limits.h>
 #include <elf.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <cstring>
+#include <ctime>
 #include <vector>
 #include <sstream>
 #include <fstream>
@@ -64,8 +70,165 @@ constexpr size_t MAX_BUFFER_SIZE = 4 * 1024 * 1024;
 namespace rocr {
 namespace amd {
 namespace coredump {
+
+namespace {
+[[nodiscard]] std::string custom_core_dump() {
+  return core::Runtime::runtime_singleton_->flag().core_dump_pattern();
+}
+}
+
 /* Implementation details */
 namespace impl {
+
+// Optional: Detect if running in a container
+namespace {
+[[nodiscard]] bool is_running_in_container() {
+  std::ifstream cgroup("/proc/1/cgroup");
+  if (!cgroup.is_open()) return false;
+
+  std::string line;
+  while (std::getline(cgroup, line)) {
+    if (line.find("docker") != std::string::npos ||
+        line.find("lxc") != std::string::npos ||
+        line.find("kubepods") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+} // anonymous namespace
+
+// Read kernel core pattern from /proc/sys/kernel/core_pattern
+static std::string read_kernel_core_pattern() {
+  std::ifstream pattern_file("/proc/sys/kernel/core_pattern");
+  if (!pattern_file.is_open()) {
+    return "";
+  }
+
+  std::string pattern;
+  std::getline(pattern_file, pattern);
+  return pattern;
+}
+
+// Substitute format specifiers in core pattern
+namespace {
+std::string substitute_core_pattern(const std::string& pattern) {
+  std::string result;
+  pid_t pid = getpid();
+  // Use gettid() if available (glibc >= 2.30), otherwise fallback to syscall
+#if defined(__GLIBC__) && \
+       (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 30))
+    pid_t tid = gettid();
+#else
+  pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
+#endif
+  time_t now = time(nullptr);
+  // Get hostname
+  std::array<char, 256> hostname{};
+  if (gethostname(hostname.data(), hostname.size()) != 0) {
+    strncpy(hostname.data(), "unknown", hostname.size() - 1);
+  }
+  hostname[hostname.size() - 1] = '\0';
+  // Get executable name
+  char exe_path[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+  std::string exe_name;
+  if (len > 0) {
+    exe_path[len] = '\0';
+    char* base = basename(exe_path);
+    exe_name = base ? std::string(base) : "unknown";
+  } else {
+    exe_name = "unknown";
+  }
+  // Parse pattern character by character
+  for (size_t i = 0; i < pattern.length(); i++) {
+    if (pattern[i] == '%' && i + 1 < pattern.length()) {
+      switch (pattern[i + 1]) {
+        case '%':
+          result += '%';
+          break;
+        case 'p':
+          result += std::to_string(pid);
+          break;
+        case 'i':
+          result += std::to_string(tid);
+          break;
+        case 'h':
+          result += hostname.data();
+          break;
+        case 'e':
+          result += exe_name;
+          break;
+        case 't':
+          result += std::to_string(now);
+          break;
+        // Unsupported specifiers are dropped (including %<NUL>)
+        default:
+          break;
+      }
+      i++;  // Skip next character
+    } else {
+      result += pattern[i];
+    }
+  }
+  return result;
+}
+}  // anonymous namespace
+
+namespace {
+[[nodiscard]] bool validate_dump_path(const std::string& filepath) {
+  // Reject pipe patterns
+  if (!filepath.empty() && filepath[0] == '|') {
+    fprintf(stderr, "GPU coredump: Pipe patterns not supported\n");
+    return false;
+  }
+  // Extract directory path
+  std::string dir;
+  size_t last_slash = filepath.find_last_of('/');
+  if (last_slash != std::string::npos) {
+    dir = filepath.substr(0, last_slash);
+  } else {
+    dir = ".";
+  }
+  // Check if directory exists and is writable
+  if (access(dir.c_str(), W_OK) != 0) {
+    fprintf(stderr, "GPU coredump: Directory %s not writable or does not exist\n", dir.c_str());
+    return false;
+  }
+  return true;
+}
+} // anonymous namespace
+
+// Parse command line for pipe handler
+namespace {
+[[nodiscard]] std::vector<std::string> parse_command_line(const std::string& cmd) {
+  std::vector<std::string> args;
+  std::string current;
+  bool in_quotes = false;
+  bool escaped = false;
+  for (char c : cmd) {
+    if (escaped) {
+      current += c;
+      escaped = false;
+    } else if (c == '\\') {
+      escaped = true;
+    } else if (c == '"') {
+      in_quotes = !in_quotes;
+    } else if (c == ' ' && !in_quotes) {
+      if (!current.empty()) {
+        args.push_back(current);
+        current.clear();
+      }
+    } else {
+      current += c;
+    }
+  }
+  if (!current.empty()) {
+    args.push_back(current);
+  }
+  return args;
+}
+}  // anonymous namespace
 class PackageBuilder {
  public:
   PackageBuilder() : st_(std::stringstream::out | std::stringstream::binary) {}
@@ -293,9 +456,13 @@ struct LoadSegmentBuilder : public SegmentBuilder {
   int fd_ = -1;
 };
 
-hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& segments, size_t size_limit) {
-  std::unique_ptr<unsigned char[]> copy_buffer(new unsigned char[MAX_BUFFER_SIZE]);
+// Write core dump to a file descriptor (for pipe handler)
+namespace {
+// Use size_limit of -1 for no limit (e.g, for pipes)
+hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
+                                          size_t size_limit, bool show_progress) {
   if (!segments.size()) return HSA_STATUS_SUCCESS;
+  auto copy_buffer = std::make_unique<unsigned char[]>(MAX_BUFFER_SIZE);
   SegmentInfo front = segments.front();
   off_t offset = sizeof(Elf64_Ehdr) + segments.size() * sizeof(Elf64_Phdr);
 
@@ -304,11 +471,14 @@ hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& se
     return HSA_STATUS_SUCCESS;
   }
 
-  int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
-  if (fd == -1) {
-    perror("Failed to create GPU coredump");
-    return HSA_STATUS_ERROR;
+  // Use posix_fallocate for regular files
+  struct stat fd_stat;
+  bool is_reg_file = false;
+  if (fstat(fd, &fd_stat) == 0 && S_ISREG(fd_stat.st_mode)) {
+    is_reg_file = true;
   }
+
+  // Write ELF header
   Elf64_Ehdr ehdr{};
   ehdr.e_ident[EI_MAG0] = ELFMAG0;
   ehdr.e_ident[EI_MAG1] = ELFMAG1;
@@ -333,21 +503,23 @@ hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& se
   ehdr.e_shnum = 0;
   ehdr.e_shstrndx = 0;
 
-  if (write(fd, &ehdr, sizeof(ehdr)) == -1) {
-    perror("Failed to write ELF header");
-    close(fd);
+  if (write(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) {
+    perror("Failed to write ELF header to pipe");
     return HSA_STATUS_ERROR;
   }
 
-  /* Make sure that the underlying file has enough space for the file headers. */
-  int error = posix_fallocate(fd, sizeof(Elf64_Ehdr), segments.size() * sizeof(Elf64_Phdr));
-  if (error != 0) {
-    fprintf(stderr, "Failed to allocate file: %s\n", strerror(error));
-    close(fd);
-    return HSA_STATUS_ERROR;
+  if (is_reg_file) {
+    int error = posix_fallocate(fd, sizeof(Elf64_Ehdr), segments.size() * sizeof(Elf64_Phdr));
+    if (error != 0) {
+      fprintf(stderr, "Failed to allocate file: %s\n", strerror(error));
+      return HSA_STATUS_ERROR;
+    }
   }
-  size_t idx = 0;
-  for (SegmentInfo seg : segments) {
+
+  // Write program headers
+  std::vector<Elf64_Phdr> phdrs;
+  phdrs.reserve(segments.size());
+  for (const SegmentInfo& seg : segments) {
     Elf64_Phdr phdr{};
     phdr.p_type = [](SegmentType s) {
       switch (s) {
@@ -375,72 +547,187 @@ hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& se
           assert(false);
           return (uint32_t)0;
       }
-    }(seg.stype);
+    } (seg.stype);
     if (size_limit != -1 && (offset + seg.size > size_limit)) {
-      printf("Core limit file reached. GPU core dump created: %s\n", filename.c_str());
-      close(fd);
+      if (show_progress) {
+        printf("Core limit file reached during pipe write\n");
+      }
       return HSA_STATUS_SUCCESS;
     }
     phdr.p_offset = alignUp(offset, (uint64_t)1 << phdr.p_align);
-    if (pwrite(fd, &phdr, sizeof(phdr), sizeof(Elf64_Ehdr) + idx * sizeof(Elf64_Phdr)) == -1) {
-      perror("Failed to write ELF header");
-      close(fd);
+    phdrs.push_back(phdr);
+    offset += phdr.p_filesz;
+  }
+
+  // Write all program headers
+  for (const auto& phdr : phdrs) {
+    if (write(fd, &phdr, sizeof(phdr)) != sizeof(phdr)) {
+      perror("Failed to write program header to pipe");
       return HSA_STATUS_ERROR;
     }
-    /* Allocate stace for the segment on the file, and write the segment
-       content.  */
-    error = posix_fallocate(fd, phdr.p_offset, phdr.p_filesz);
-    if (error != 0) {
-      fprintf(stderr, "Failed to allocate file: %s\n", strerror(error));
-      close(fd);
-      return HSA_STATUS_ERROR;
+  }
+
+  // Write segment data
+  for (size_t idx = 0; idx < segments.size(); idx++) {
+    const SegmentInfo& seg = segments[idx];
+    const Elf64_Phdr& phdr = phdrs[idx];
+
+    if (is_reg_file) {
+      int error = posix_fallocate(fd, phdr.p_offset, phdr.p_filesz);
+      if (error != 0) {
+        fprintf(stderr, "Failed to allocate file: %s\n", strerror(error));
+        return HSA_STATUS_ERROR;
+      }
     }
+
     size_t remaining = phdr.p_filesz;
     while (remaining > 0) {
       size_t curr_chunk = std::min(remaining, MAX_BUFFER_SIZE);
-      try {
-        hsa_status_t st = seg.builder->Read(copy_buffer.get(), curr_chunk,
-                                                    phdr.p_vaddr + phdr.p_filesz - remaining);
-        if (st != HSA_STATUS_SUCCESS) {
-          close(fd);
-          return st;
-        }
-        if (pwrite(fd, copy_buffer.get(), curr_chunk, phdr.p_offset + phdr.p_filesz - remaining) ==
-            -1) {
-          perror("Failed to white core dump");
-          close(fd);
-          return HSA_STATUS_ERROR;
-        }
-      } catch (...) {
-        close(fd);
+      hsa_status_t st = seg.builder->Read(copy_buffer.get(), curr_chunk,
+                                          phdr.p_vaddr + phdr.p_filesz - remaining);
+      if (st != HSA_STATUS_SUCCESS) {
+        return st;
+      }
+      if (write(fd, copy_buffer.get(), curr_chunk) != (ssize_t)curr_chunk) {
+        perror("Failed to write segment data to pipe");
         return HSA_STATUS_ERROR;
       }
       remaining -= curr_chunk;
     }
-    offset += phdr.p_filesz;
-    idx++;
   }
-  printf("GPU core dump created: %s\n", filename.c_str());
-  close(fd);
 
   return HSA_STATUS_SUCCESS;
+
+}
+} // anonymous namespace
+
+static hsa_status_t
+build_core_dump(const std::string& filename, const SegmentsInfo& segments,
+                                        size_t size_limit, bool show_progress);
+// Handle pipe pattern - fork/exec handler and pipe dump to it
+namespace {
+hsa_status_t write_to_pipe_handler(const std::string& pattern,
+                                          const SegmentsInfo& segments,
+                                          size_t size_limit,
+                                          bool show_progress) {
+  // Check if we're in a container
+  if (is_running_in_container() && custom_core_dump().empty()) {
+    fprintf(stderr,
+      "GPU coredump: System pipe patterns not supported in containers.\n"
+      "Falling back to file-based dump. Use custom pattern (HSA_COREDUMP_FILE)"
+      " to override.\n");
+    // Fall back to file-based dump
+    std::string filename = PREFIX_FILE_NAME + "." + std::to_string(getpid()) + ".gpu";
+    return build_core_dump(filename, segments, size_limit, show_progress);
+  }
+
+  // Extract program and arguments (remove leading '|')
+  std::string command = pattern.substr(1);
+  std::string substituted = substitute_core_pattern(command);
+  // Parse into program and args
+  std::vector<std::string> args = parse_command_line(substituted);
+  if (args.empty()) {
+    fprintf(stderr, "GPU coredump: Invalid pipe pattern\n");
+    return HSA_STATUS_ERROR;
+  }
+  // Create pipe for communication
+  int pipefd[2];
+  if (pipe(pipefd) == -1) {
+    perror("GPU coredump: pipe creation failed");
+    return HSA_STATUS_ERROR;
+  }
+  pid_t pid = fork();
+  if (pid == -1) {
+    perror("GPU coredump: fork failed");
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return HSA_STATUS_ERROR;
+  }
+  if (pid == 0) {
+    // Child process - execute handler
+    close(pipefd[1]);  // Close write end
+    // Redirect stdin to read end of pipe
+    if (dup2(pipefd[0], STDIN_FILENO) == -1) {
+      perror("GPU coredump: dup2 failed");
+      _exit(1);
+    }
+    close(pipefd[0]);
+    // Convert args to char* array for execvp
+    std::vector<char*> argv;
+    for (auto& arg : args) {
+      argv.push_back(const_cast<char*>(arg.c_str()));
+    }
+    argv.push_back(nullptr);
+    // Execute handler
+    execvp(argv[0], argv.data());
+    // If we get here, exec failed
+    perror("GPU coredump: execvp failed");
+    _exit(1);
+  } else {
+    hsa_status_t status;
+    // Parent process - write core dump to pipe
+    close(pipefd[0]);  // Close read end
+    // Write core dump data to pipe
+    status = write_core_dump_to_fd(pipefd[1], segments, -1, show_progress);
+    close(pipefd[1]);
+    // Wait for child to finish
+    int child_status;
+    if (waitpid(pid, &child_status, 0) == -1) {
+      perror("GPU coredump: waitpid failed");
+      return HSA_STATUS_ERROR;
+    }
+    if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0) {
+      fprintf(stderr, "GPU coredump: handler exited with error (status: %d)\n",
+                     WIFEXITED(child_status) ? WEXITSTATUS(child_status) : -1);
+      return HSA_STATUS_ERROR;
+    }
+    if (show_progress && status == HSA_STATUS_SUCCESS) {
+      printf("GPU core dump sent to pipe handler\n");
+    }
+      return status;
+  }
+}
+}  // anonymous namespace
+
+static hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& segments,
+                                    size_t size_limit, bool show_progress) {
+  int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+  if (fd == -1) {
+    perror("Failed to create GPU coredump");
+    return HSA_STATUS_ERROR;
+  }
+
+  hsa_status_t result = write_core_dump_to_fd(fd, segments, size_limit, show_progress);
+  close(fd);
+
+  if (show_progress && result == HSA_STATUS_SUCCESS) {
+    printf("GPU core dump created: %s\n", filename.c_str());
+  }
+
+  return result;
 }
 }   //  namespace impl
 
 hsa_status_t dump_gpu_core() {
-  impl::NoteSegmentBuilder nbuilder;
-  impl::LoadSegmentBuilder lbuilder;
-  impl::SegmentsInfo segments;
-  struct rlimit rlimit;
+  if (core::Runtime::runtime_singleton_->flag().core_dump_disable()) {
+    return HSA_STATUS_SUCCESS;
+  }
 
+  // Check ulimit -c
+  struct rlimit rlimit;
   if (getrlimit(RLIMIT_CORE, &rlimit)) {
-    perror("Could not get core file size\n");
+    perror("Could not get core file size");
     return HSA_STATUS_ERROR;
   }
   debug_print("core file size: %ld\n", rlimit.rlim_cur);
 
-  if (rlimit.rlim_cur == 0)
+  if (rlimit.rlim_cur == 0) {
     return HSA_STATUS_SUCCESS;
+  }
+
+  impl::NoteSegmentBuilder nbuilder;
+  impl::LoadSegmentBuilder lbuilder;
+  impl::SegmentsInfo segments;
 
   hsa_status_t status = nbuilder.Collect(segments);
   if (status != HSA_STATUS_SUCCESS) return status;
@@ -448,10 +735,46 @@ hsa_status_t dump_gpu_core() {
   status = lbuilder.Collect(segments);
   if (status != HSA_STATUS_SUCCESS) return status;
 
-  std::stringstream st;
-  st << PREFIX_FILE_NAME << "." << getpid();
+  // Determine output pattern
+  std::string pattern;
+  bool kernel_pattern = false;
+  bool use_custom_pattern = !custom_core_dump().empty();
+  if (use_custom_pattern) {
+    pattern = custom_core_dump();
+  } else {
+    // Fallback to kernel core pattern
+    pattern = impl::read_kernel_core_pattern();
+    if (pattern.empty()) {
+      // If we can't read kernel pattern, use default
+      pattern = PREFIX_FILE_NAME + ".%p";
+    } else {
+      kernel_pattern = true;
+    }
+  }
 
-  return build_core_dump(st.str(), segments, rlimit.rlim_cur);
+  bool show_progress = core::Runtime::runtime_singleton_->flag().enable_core_dump_progress();
+
+  if (!pattern.empty() && pattern[0] == '|') {
+    if (show_progress) {
+      fprintf(stderr, "Generating GPU core dump via pipe handler\n");
+    }
+    return impl::write_to_pipe_handler(pattern, segments, rlimit.rlim_cur, show_progress);
+  } else {
+    // Regular file output
+    std::string filename = impl::substitute_core_pattern(pattern);
+
+    if (kernel_pattern && !use_custom_pattern) {
+      filename += ".gpu";
+    }
+
+    if (!impl::validate_dump_path(filename)) {
+      return HSA_STATUS_ERROR;
+    }
+    if (show_progress) {
+      fprintf(stderr, "Generating GPU core dump to: %s\n", filename.c_str());
+    }
+    return impl::build_core_dump(filename, segments, rlimit.rlim_cur, show_progress);
+  }
 }
 }   //  namespace coredump
 }   //  namespace amd

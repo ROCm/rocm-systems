@@ -32,7 +32,7 @@ namespace cg = cooperative_groups;
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       if constexpr (std::is_same_v<float, T>) {                                                    \
         ys[i] = func_name##f(n[i], xs[i]);                                                         \
       } else if constexpr (std::is_same_v<double, T>) {                                            \
@@ -96,6 +96,7 @@ void BesselSinglePrecisionRangeTest(kernel_bessel_n_sig<float> kernel,
                                     const ValidatorBuilder& validator_builder, int n_input,
                                     const float a, const float b) {
   const auto [grid_size, block_size] = GetOccupancyMaxPotentialBlockSize(kernel);
+  const auto reduction_factor = GetTestReductionFactor();
   const auto max_batch_size = GetMaxAllowedDeviceMemoryUsage() / (sizeof(float) * 2 + sizeof(int));
   LinearAllocGuard<int> x1s{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(int)};
   LinearAllocGuard<float> x2s{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(float)};
@@ -103,15 +104,11 @@ void BesselSinglePrecisionRangeTest(kernel_bessel_n_sig<float> kernel,
   MathTest math_test(kernel, max_batch_size);
   std::fill_n(x1s.ptr(), max_batch_size, n_input);
 
-  size_t inserted = 0u;
-  for (float v = a; v != b; v = std::nextafter(v, b)) {
-    x2s.ptr()[inserted++] = v;
-    if (inserted < max_batch_size) continue;
+  const auto run = [&, gs = grid_size, bs = block_size](size_t inserted) {
+    math_test.Run(validator_builder, gs, bs, ref_func, inserted, x1s.ptr(), x2s.ptr());
+  };
 
-    math_test.Run(validator_builder, grid_size, block_size, ref_func, inserted, x1s.ptr(),
-                  x2s.ptr());
-    inserted = 0u;
-  }
+  SinglePrecisionReducedRun(run, x2s, a, b, reduction_factor, max_batch_size);
 }
 
 template <typename T, typename F, typename ValidatorBuilder>

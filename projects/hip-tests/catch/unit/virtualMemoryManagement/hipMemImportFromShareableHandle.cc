@@ -58,7 +58,7 @@ static __global__ void square_kernel(int* Buff) {
  *    - HIP_VERSION >= 6.1
  */
 TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
-  CTX_DESTROY();
+  CTX_CREATE();
 
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -85,6 +85,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
             hipMemHandleTypePosixFileDescriptor));
   HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemRelease(imported_handle));
+
   CTX_DESTROY();
 }
 
@@ -168,6 +169,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
   if (pid == 0) {  // child
     REQUIRE(close(fd[1]) == 0);
     REQUIRE(close(fdSig[0]) == 0);
+    CTX_CREATE();
     // Wait for parent process to create the socket.
     size_t size_mem = 0;
     REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
@@ -185,7 +187,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
               reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
               hipMemHandleTypePosixFileDescriptor));
     // Allocate virtual address range
-    hipDeviceptr_t ptrA;
+    void* ptrA;
     HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
     // Set access
@@ -201,11 +203,11 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
       A_h[idx] = idx;
       C_h[idx] = idx * idx;
     }
-    HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
+    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
     // Invoke kernel
     hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
                        reinterpret_cast<int*>(ptrA));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
     HIP_CHECK(hipDeviceSynchronize());
     // validate
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
@@ -213,6 +215,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     // free resources
     HIP_CHECK(hipMemUnmap(ptrA, size_mem));
     HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+    CTX_DESTROY();
     checkSysCallErrors(sockObj.closeThisSock());
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
@@ -220,6 +223,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
+    CTX_CREATE();
 
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
@@ -257,6 +261,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     // Free all resources
     checkSysCallErrors(sockObj.closeThisSock());
     HIP_CHECK(hipMemRelease(handle));
+    CTX_DESTROY();
     REQUIRE(close(fd[1]) == 0);
     REQUIRE(close(fdSig[0]) == 0);
   }
@@ -297,6 +302,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
   if (pid == 0) {  // child
     REQUIRE(close(fd[1]) == 0);
     REQUIRE(close(fdSig[0]) == 0);
+    CTX_CREATE();
     // Wait for parent process to create the socket.
     size_t size_mem = 0;
     REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
@@ -318,7 +324,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
               reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
               hipMemHandleTypePosixFileDescriptor));
     // Allocate virtual address range
-    hipDeviceptr_t ptrA;
+    void* ptrA;
     HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
     // Set access
@@ -328,7 +334,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     accessDesc.flags = hipMemAccessFlagsProtReadWrite;
     // Make the address accessible to GPU 0
     HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-    HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
+    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
     // Invoke kernel
     hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
                        reinterpret_cast<int*>(ptrA));
@@ -340,10 +346,12 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     checkSysCallErrors(sockObj.closeThisSock());
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
+    CTX_DESTROY();
     exit(0);
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
+    CTX_CREATE();
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
     checkVMMSupported(device);
@@ -367,7 +375,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
                                             hipMemHandleTypePosixFileDescriptor, 0));
 
     // Allocate virtual address range
-    hipDeviceptr_t ptrA;
+    void* ptrA;
     HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
     // Set access
@@ -392,7 +400,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     REQUIRE(status == 0);
 
     // Check results of Vmm data processing in child
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
     // validate
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
 
@@ -401,6 +409,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
     HIP_CHECK(hipMemRelease(handle));
     checkSysCallErrors(sockObj.closeThisSock());
+    CTX_DESTROY();
     REQUIRE(close(fd[1]) == 0);
     REQUIRE(close(fdSig[0]) == 0);
   }
@@ -438,6 +447,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
       // Wait for parent process to create the socket.
       size_t size_mem = 0;
       REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
+      CTX_CREATE();
 
       // Open Socket as client
       ipcSocketCom sockObj(false);
@@ -456,7 +466,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
                 reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
                 hipMemHandleTypePosixFileDescriptor));
       // Allocate virtual address range
-      hipDeviceptr_t ptrA;
+      void* ptrA;
       HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
       HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
       // Set access
@@ -472,11 +482,11 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
         A_h[idx] = idx;
         C_h[idx] = idx * idx;
       }
-      HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
+      HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
       // Invoke kernel
       hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
                          reinterpret_cast<int*>(ptrA));
-      HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+      HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
       HIP_CHECK(hipDeviceSynchronize());
       // validate
       REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
@@ -484,6 +494,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
       // free resources
       HIP_CHECK(hipMemUnmap(ptrA, size_mem));
       HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+      CTX_DESTROY();
       checkSysCallErrors(sockObj.closeThisSock());
       REQUIRE(close(fd[0]) == 0);
       REQUIRE(close(fdSig[1]) == 0);
@@ -503,7 +514,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
     REQUIRE(close(fdpid[1]) == 0);
     int pid_grChld = 0;
     REQUIRE(read(fdpid[0], &pid_grChld, sizeof(pid_grChld)) >= 0);
-
+    CTX_CREATE();
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
     checkVMMSupported(device);
@@ -541,6 +552,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
 
     // Free all resources
     HIP_CHECK(hipMemRelease(handle));
+    CTX_DESTROY();
     checkSysCallErrors(sockObj.closeThisSock());
     REQUIRE(close(fd[1]) == 0);
     REQUIRE(close(fdSig[0]) == 0);

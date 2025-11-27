@@ -813,6 +813,9 @@ void PlatformState::init() {
   for (auto& it : statCO_.functions_) {
     it.second->resize_dFunc(g_devices.size());
   }
+  amd::RuntimeTearDown::RegisterTearDownCallback("PlatformState static fatbin cleanup", [this]() {
+    statCO_.RemoveAllFatBinaries();
+  });
 }
 
 hipError_t PlatformState::loadModule(hipModule_t* module, const char* fname, const void* image) {
@@ -1093,7 +1096,8 @@ void* PlatformState::getDynamicLibraryHandle() {
 #ifdef _WIN32
   const char* libName = "amdhip64.dll";
 #else
-  const char* libName = "libamdhip64.so";
+  std::string so_name = std::string("libamdhip64.so." + std::to_string(HIP_VERSION_MAJOR));
+  const char* libName = so_name.c_str();
 #endif
 
   dynamicLibraryHandle_ = amd::Os::loadLibrary(libName);

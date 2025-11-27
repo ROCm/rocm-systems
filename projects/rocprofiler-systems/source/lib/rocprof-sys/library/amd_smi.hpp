@@ -71,6 +71,14 @@ post_process();
 
 void set_state(State);
 
+// Fork handling - cleanup AMD SMI state in child process
+void
+postfork_child_cleanup();
+
+// Fork handling - reinitialize AMD SMI state in parent process
+void
+postfork_parent_reinit();
+
 struct settings
 {
     bool busy          = true;
@@ -133,6 +141,7 @@ private:
     friend void rocprofsys::amd_smi::sample();
     friend void rocprofsys::amd_smi::shutdown();
     friend void rocprofsys::amd_smi::post_process();
+    friend void rocprofsys::amd_smi::postfork_child_cleanup();
 
     static size_t                        device_count;
     static std::set<uint32_t>            device_list;
@@ -167,6 +176,14 @@ post_process()
 
 inline void
 set_state(State)
+{}
+
+inline void
+postfork_child_cleanup()
+{}
+
+inline void
+postfork_parent_reinit()
 {}
 #endif
 }  // namespace amd_smi
