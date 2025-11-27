@@ -228,29 +228,6 @@ if(HIP_PLATFORM MATCHES "amd")
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-    #target_link_libraries(addKernel.spv hip::host hip::device)
-
-    add_custom_target(addKernel-bundle.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
-                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
-                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-    #target_link_libraries(addKernel-bundle.spv hip::host hip::device)
-    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
-    ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
-    ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
-  endif()
-
-  # TODO - Rock build failure from clang
-  if(NOT WIN32)
-    add_custom_target(addKernel.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
-                    --no-gpu-bundle-output
-                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
-                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
     add_custom_target(addKernel-bundle.spv
                     COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
