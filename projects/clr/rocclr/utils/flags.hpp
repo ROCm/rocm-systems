@@ -118,7 +118,7 @@ release(bool, DISABLE_DEFERRED_ALLOC, false,                                  \
         "Disables deferred memory allocation on device")                      \
 release(int, AMD_GPU_FORCE_SINGLE_FP_DENORM, -1,                              \
         "Force denorm for single precision: -1 - don't force, 0 - disable, 1 - enable") \
-release(uint, OCL_SET_SVM_SIZE, 4*16384,                                      \
+release(uint, OCL_SET_SVM_SIZE, 256*1024,                                     \
         "set SVM space size for discrete GPU")                                \
 release(uint, GPU_WAVES_PER_SIMD, 0,                                          \
         "Force the number of waves per SIMD (1-10)")                          \

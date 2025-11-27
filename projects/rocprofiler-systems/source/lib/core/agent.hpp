@@ -53,8 +53,13 @@ struct agent
     std::string vendor_name;
     std::string product_name;
 
-    size_t device_type_index{ 0 };
-    size_t base_id{ 0 };
+    size_t device_type_index{
+        0
+    };  // Per-type ID (GPU, CPU) of the agent as they are stored in the agent_manager
+    size_t base_id{ 0 };  // Database entry index of the agent
+
+    std::string
+        agent_info;  // JSON formatted serialization of the available agent information
 };
 
 }  // namespace rocprofsys
