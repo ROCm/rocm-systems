@@ -471,7 +471,7 @@ uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
         core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-    HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_));
+    HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
   } else {
     // Hardware doorbell supports AQL semantics.
     _mm_sfence();
