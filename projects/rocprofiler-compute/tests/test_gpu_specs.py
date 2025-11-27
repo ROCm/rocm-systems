@@ -157,12 +157,20 @@ def test_num_xcds_cli_output():
     num_xcds = get_num_xcds()
 
     # 2. Run rocprof-compute -s and grab rocprof-compute num_xcd
-    proc = subprocess.run(
-        ["src/rocprof-compute", "-s"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["src/rocprof-compute", "-s"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception:
+        proc = subprocess.run(
+            ["rocprof-compute", "-s"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
     assert proc.returncode == 0, (
         f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
     )
