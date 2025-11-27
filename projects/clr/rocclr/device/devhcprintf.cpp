@@ -256,17 +256,28 @@ void handlePrintf(uint64_t* output, const uint64_t* input, uint64_t len) {
 // delimited by character ','.
 bool populateFormatStringHashMap(const std::vector<device::PrintfInfo>& printfInfo,
                                  std::map<uint64_t, std::string>& strMap) {
-  for (auto it : printfInfo) {
-    auto Delim = it.fmtString_.find_first_of(',');
-    auto HashStr = it.fmtString_.substr(0, Delim);
+  static_assert(sizeof(long long) == sizeof(uint64_t), "unexpected long long type width");
 
-    static_assert(sizeof(long long) == sizeof(uint64_t), "unexpected long long type width");
-    auto HashVal = std::strtoull(HashStr.c_str(), NULL, 16);
-    if (strMap.find(HashVal) != strMap.end()) {
+  for (const auto& info : printfInfo) {
+    auto Delim = info.fmtString_.find(',');
+    if (Delim == std::string::npos) {
+      LogError("Missing delimiter in printf metadata");
+      return false;
+    }
+
+    const char* HashStr = info.fmtString_.c_str();
+    char* ParseEnd = nullptr;
+    auto HashVal = std::strtoull(HashStr, &ParseEnd, 16);
+    if (ParseEnd != HashStr + Delim) {
+      LogError("Failed to parse printf hash");
+      return false;
+    }
+
+    auto InsertResult = strMap.emplace(HashVal, info.fmtString_.substr(Delim + 1));
+    if (!InsertResult.second) {
       LogError("Hash value collision detected, printf buffer ill formed");
       return false;
     }
-    strMap[HashVal] = it.fmtString_.substr(Delim + 1, it.fmtString_.size());
   }
 
   return true;

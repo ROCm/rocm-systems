@@ -2325,11 +2325,13 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
         phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
         phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
-
-    // Calculate the offset from the original pointer.
-    vaddr_offset = (reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
-                    reinterpret_cast<address>(vaddr_base_obj->getSvmPtr()));
+  } else {
+    vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
   }
+
+  // Calculate the offset from the original pointer.
+  vaddr_offset = (reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
+                  reinterpret_cast<address>(vaddr_base_obj->getSvmPtr()));
 
   // The imem() in the backend is shared between base and sub/view object.
   pal::Memory* vaddr_pal_mem = dev().getGpuMemory(vaddr_base_obj);

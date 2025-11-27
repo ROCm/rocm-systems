@@ -27,7 +27,7 @@
 #include "core/debug.hpp"
 #include "core/perfetto.hpp"
 #include "core/trace_cache/cache_manager.hpp"
-#include "core/trace_cache/cache_utility.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/components/ensure_storage.hpp"
 #include "library/ptl.hpp"
@@ -261,11 +261,10 @@ cache_backtrace_metrics_events(const uint32_t device_id, uint64_t timestamp_ns,
     const auto* line_info       = "";
 
     auto insert_event_and_sample = [&](const char* _track_name, double _value) {
-        trace_cache::get_buffer_storage().store(
-            trace_cache::entry_type::pmc_event_with_sample, _track_name, timestamp_ns,
-            event_metadata, stack_id, parent_stack_id, correlation_id, call_stack,
-            line_info, device_id, static_cast<uint8_t>(agent_type::CPU), _track_name,
-            _value);
+        trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+            _track_name, timestamp_ns, event_metadata, stack_id, parent_stack_id,
+            correlation_id, call_stack, line_info, device_id,
+            static_cast<uint8_t>(agent_type::CPU), _track_name, _value });
     };
 
     if constexpr(std::is_same_v<Category, category::thread_hardware_counter>)

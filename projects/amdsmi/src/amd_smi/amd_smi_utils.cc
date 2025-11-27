@@ -793,6 +793,25 @@ std::string smi_amdgpu_split_string(std::string str, char delim) {
   return "";
 }
 
+// Split string at delimiter and return strings in vector
+std::vector<std::string> split_string(const std::string& line, char delim) {
+  std::vector<std::string> out;
+  std::size_t start = 0;
+
+  while (start < line.size()) {
+    auto pos = line.find(delim, start);
+    if (pos == std::string::npos) {
+        pos = line.size();
+    }
+    std::string token = trim(line.substr(start, pos - start));
+    if (!token.empty()) {
+        out.push_back(token);
+    }
+    start = pos + 1;
+  }
+  return out;
+}
+
 // wrapper to return string expression of a rsmi_status_t return
 // rsmi_status_t ret - return value of RSMI API function
 // bool fullStatus - defaults to true, set to false to chop off description

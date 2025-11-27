@@ -196,9 +196,7 @@ void Graph::ScheduleOneNode(Node node, int stream_id) {
       auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
       child->ScheduleNodes();
       max_streams_ = std::max(max_streams_, child->max_streams_);
-      if (child->max_streams_ == 1) {
-        reinterpret_cast<hip::ChildGraphNode*>(node)->GraphExec::TopologicalOrder();
-      }
+      reinterpret_cast<hip::ChildGraphNode*>(node)->GraphExec::TopologicalOrder();
     }
     for (auto edge : node->GetEdges()) {
       ScheduleOneNode(edge, stream_id);
@@ -910,92 +908,114 @@ void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
 
 
 // ================================================================================================
-bool Graph::RunOneNode(Node node, bool wait) {
-  if (node->launch_id_ == -1) {
-    // Clear the storage of the wait nodes
-    memset(&wait_order_[0], 0, sizeof(Node) * wait_order_.size());
-    amd::Command::EventWaitList waitList;
-    // Walk through dependencies and find the last launches on each parallel stream
-    for (auto depNode : node->GetDependencies()) {
-      // Process only the nodes that have been submitted
-      if (depNode->launch_id_ != -1) {
-        // If it's the same stream then skip the signal, since it's in order
-        if (depNode->stream_id_ != node->stream_id_) {
-          // If there is no wait node on the stream, then assign one
-          if ((wait_order_[depNode->stream_id_] == nullptr) ||
-              // If another node executed on the same stream, then use the latest launch only,
-              // since the same stream has in-order run
-              (wait_order_[depNode->stream_id_]->launch_id_ < depNode->launch_id_)) {
-            wait_order_[depNode->stream_id_] = depNode;
-          }
+bool Graph::RunOneNode(Node node) {
+  // Clear the storage of the wait nodes
+  memset(&wait_order_[0], 0, sizeof(Node) * wait_order_.size());
+  amd::Command::EventWaitList waitList;
+  // Walk through dependencies and find the last launches on each parallel stream
+  for (auto depNode : node->GetDependencies()) {
+    // Process only the nodes that have been submitted
+    if (depNode->launch_id_ != -1) {
+      // If it's the same stream then skip the signal, since it's in order
+      if (depNode->stream_id_ != node->stream_id_) {
+        // If there is no wait node on the stream, then assign one
+        if ((wait_order_[depNode->stream_id_] == nullptr) ||
+            // If another node executed on the same stream, then use the latest launch only,
+            // since the same stream has in-order run
+            (wait_order_[depNode->stream_id_]->launch_id_ < depNode->launch_id_)) {
+          wait_order_[depNode->stream_id_] = depNode;
         }
       } else {
-        // It should be a safe return,
-        // since the last edge to this dependency has to submit the command
-        return true;
+        // Release nodes that were enqueued on the same stream, since they are not included in the
+        // wait list. Their references were retained for all outgoing edges.
+        for (auto command : depNode->GetCommands()) {
+          command->release();
+        }
       }
+    } else {
+      node->SetWait(false);
+      // It should be a safe return,
+      // since the last edge to this dependency has to submit the command
+      return true;
     }
+  }
 
-    // Create a wait list from the last launches of all dependencies
-    for (auto dep : wait_order_) {
-      if (dep != nullptr) {
-        // Add all commands in the wait list
-        if (dep->GetType() != hipGraphNodeTypeGraph) {
-          for (auto command : dep->GetCommands()) {
-            waitList.push_back(command);
-          }
+  // Create a wait list from the last launches of all dependencies
+  for (auto dep : wait_order_) {
+    if (dep != nullptr) {
+      // Add all commands in the wait list
+      if (dep->GetType() != hipGraphNodeTypeGraph) {
+        for (auto command : dep->GetCommands()) {
+          waitList.push_back(command);
         }
       }
     }
-    if (node->GetType() == hipGraphNodeTypeGraph) {
-      // Process child graph separately, since, there is no connection
-      auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
-      if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
-        child->RunNodes(node->stream_id_, &streams_, &waitList);
+  }
+  if (node->GetType() == hipGraphNodeTypeGraph) {
+    // Process child graph separately, since, there is no connection
+    auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
+    if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
+      child->RunNodes(node->stream_id_, &streams_, &waitList);
+    }
+  } else {
+    // Assing a stream to the current node
+    node->SetStream(streams_);
+    // Create the execution commands on the assigned stream
+    auto status = node->CreateCommand(node->GetQueue());
+    if (status != hipSuccess) {
+      LogPrintfError("Command creation for node id(%d) failed!", current_id_ + 1);
+      return false;
+    }
+    // If a wait was requested, then process the list
+    if (node->GetWait() && !waitList.empty()) {
+      node->UpdateEventWaitLists(waitList);
+    }
+    // Start the execution
+    node->EnqueueCommands(node->GetQueue());
+  }
+  // Release commands of dependency nodes that were included in the wait list after enqueue
+  for (auto dep : wait_order_) {
+    if (dep != nullptr) {
+      // Add all commands in the wait list
+      if (dep->GetType() != hipGraphNodeTypeGraph) {
+        for (auto command : dep->GetCommands()) {
+          command->release();
+        }
       }
-    } else {
-      // Assing a stream to the current node
-      node->SetStream(streams_);
-      // Create the execution commands on the assigned stream
-      auto status = node->CreateCommand(node->GetQueue());
-      if (status != hipSuccess) {
-        LogPrintfError("Command creation for node id(%d) failed!", current_id_ + 1);
-        return false;
-      }
-      // Retain all commands, since potentially the command can finish before a wait signal
+    }
+  }
+  // Assign the launch ID of the submmitted node
+  // This is also applied to childGraphs to prevent them from being reprocessed
+  node->launch_id_ = current_id_++;
+  uint32_t i = 0;
+  // Execute the nodes in the edges list
+  for (auto edge : node->GetEdges()) {
+    // Don't wait in the nodes, executed on the same streams and if it has just one dependency
+    bool wait =
+        ((i < DEBUG_HIP_FORCE_GRAPH_QUEUES) || (edge->GetDependencies().size() > 1)) ? true : false;
+    edge->SetWait(wait);
+    i++;
+    // Retain the current node for all its outgoing edges.
+    // Each edge will include this node in its waitlist and release it after their commands are
+    // enqueued.
+    for (auto command : node->GetCommands()) {
+      command->retain();
+    }
+  }
+  if (node->GetEdges().size() == 0) {
+    // Add a leaf node into the list for a wait.
+    // Always use the last node, since it's the latest for the particular queue
+    leafs_[node->stream_id_] = node;
+    // An extra retain is needed for the leaves in order to be able to later enqueue a marker
+    // on the app stream that has these commands in the waitlist.
+    if (node->GetType() != hipGraphNodeTypeGraph) {
       for (auto command : node->GetCommands()) {
         command->retain();
       }
-
-      // If a wait was requested, then process the list
-      if (wait && !waitList.empty()) {
-        node->UpdateEventWaitLists(waitList);
-      }
-      // Start the execution
-      node->EnqueueCommands(node->GetQueue());
-    }
-    // Assign the launch ID of the submmitted node
-    // This is also applied to childGraphs to prevent them from being reprocessed
-    node->launch_id_ = current_id_++;
-    uint32_t i = 0;
-    // Execute the nodes in the edges list
-    for (auto edge : node->GetEdges()) {
-      // Don't wait in the nodes, executed on the same streams and if it has just one dependency
-      bool wait = ((i < DEBUG_HIP_FORCE_GRAPH_QUEUES) || (edge->GetDependencies().size() > 1))
-                      ? true
-                      : false;
-      // Execute the edge node
-      if (!RunOneNode(edge, wait)) {
-        return false;
-      }
-      i++;
-    }
-    if (i == 0) {
-      // Add a leaf node into the list for a wait.
-      // Always use the last node, since it's the latest for the particular queue
-      leafs_[node->stream_id_] = node;
     }
   }
+
+  node->SetWait(false);
   return true;
 }
 
@@ -1039,21 +1059,22 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
   }
 
   // Run all commands in the graph
-  for (auto node : vertices_) {
-    if (node->launch_id_ == -1) {
-      if (!RunOneNode(node, true)) {
-        return false;
-      }
+  for (auto node : GetTopoOrder()) {
+    node->launch_id_ = -1;
+    if (!RunOneNode(node)) {
+      return false;
     }
   }
   wait_list.clear();
   // Check if the graph has multiple leaf nodes
   for (uint32_t i = 0; i < DEBUG_HIP_FORCE_GRAPH_QUEUES; ++i) {
-    if ((base_stream != i) && (leafs_[i] != nullptr)) {
+    if ((leafs_[i] != nullptr) && (leafs_[i]->GetType() != hipGraphNodeTypeGraph)) {
       // Add all commands in the wait list
-      if (leafs_[i]->GetType() != hipGraphNodeTypeGraph) {
-        for (auto command : leafs_[i]->GetCommands()) {
+      for (auto command : leafs_[i]->GetCommands()) {
+        if (base_stream != i) {
           wait_list.push_back(command);
+        } else {
+          command->release();
         }
       }
     }
@@ -1065,16 +1086,11 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
       end_marker->enqueue();
       end_marker->release();
     }
-  }
-  // Release commands after execution
-  for (auto& node : vertices_) {
-    node->launch_id_ = -1;
-    if (node->GetType() != hipGraphNodeTypeGraph) {
-      for (auto command : node->GetCommands()) {
-        command->release();
-      }
+    for (auto command : wait_list) {
+      command->release();
     }
   }
+
   return true;
 }
 
