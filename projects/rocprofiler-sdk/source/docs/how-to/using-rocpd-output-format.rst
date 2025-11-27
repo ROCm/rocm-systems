@@ -116,71 +116,71 @@ Options
 
 **Required Arguments:**
 
-- ``-i INPUT [INPUT ...]``, ``--input INPUT [INPUT ...]``  
+- ``-i INPUT [INPUT ...]``, ``--input INPUT [INPUT ...]``
   Specifies input database file paths. Accepts multiple SQLite3 database files separated by whitespace for batch processing operations.
 
-- ``-f {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]``, ``--output-format {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]``  
+- ``-f {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]``, ``--output-format {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]``
   Defines target output format(s). Supports concurrent conversion to multiple formats: ``csv`` (Comma-Separated Values), ``pftrace`` (Perfetto Protocol Buffers), ``otf2`` (Open Trace Format 2).
 
 **I/O Configuration:**
 
-- ``-o OUTPUT_FILE``, ``--output-file OUTPUT_FILE``  
+- ``-o OUTPUT_FILE``, ``--output-file OUTPUT_FILE``
   Configures the base filename for generated output files (default: ``out``).
 
-- ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH``  
+- ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH``
   Specifies the target directory for output file generation (default: ``./rocpd-output-data``).
 
 **Kernel Identification Options:**
 
-- ``--kernel-rename``  
+- ``--kernel-rename``
   Substitutes kernel function names with corresponding ROCTx marker annotations for enhanced semantic context.
 
 **Device Identification Configuration:**
 
-- ``--agent-index-value {absolute,relative,type-relative}``  
+- ``--agent-index-value {absolute,relative,type-relative}``
   Controls device identification methodology in converted output:
-  
+
   - ``absolute``: Utilizes hardware node identifiers (e.g., Agent-0, Agent-2, Agent-4), bypassing container group abstractions.
   - ``relative``: Employs logical node identifiers (e.g., Agent-0, Agent-1, Agent-2), incorporating container group context. *(Default)*
   - ``type-relative``: Applies device-type-specific logical identifiers (e.g., CPU-0, GPU-0, GPU-1), with independent numbering sequences per device class.
 
 **Perfetto Trace Configuration:**
 
-- ``--perfetto-backend {inprocess,system}``  
+- ``--perfetto-backend {inprocess,system}``
   Configures Perfetto data collection architecture. The ``system`` backend requires active ``traced`` and ``perfetto`` daemon processes, while ``inprocess`` operates autonomously (default: ``inprocess``).
 
-- ``--perfetto-buffer-fill-policy {discard,ring_buffer}``  
+- ``--perfetto-buffer-fill-policy {discard,ring_buffer}``
   Defines buffer overflow handling strategy: ``discard`` drops new records when capacity is exceeded, ``ring_buffer`` overwrites oldest records (default: ``discard``).
 
-- ``--perfetto-buffer-size KB``  
+- ``--perfetto-buffer-size KB``
   Sets the trace buffer capacity in kilobytes for Perfetto output generation (default: 1,048,576 KB / 1 GB).
 
-- ``--perfetto-shmem-size-hint KB``  
+- ``--perfetto-shmem-size-hint KB``
   Specifies shared memory allocation hint for Perfetto inter-process communication in kilobytes (default: 64 KB).
 
-- ``--group-by-queue``  
+- ``--group-by-queue``
    Displays the HSA queues to which these kernel and memory operations were submitted. By default, ``rocprofv3`` shows the HIP streams to which the kernel and memory copy operations were submitted
 
 **Temporal Filtering Configuration:**
 
-- ``--start START``  
+- ``--start START``
   Defines trace window start boundary using percentage notation (e.g., ``50%``) or absolute nanosecond timestamps (e.g., ``781470909013049``).
 
-- ``--start-marker START_MARKER``  
+- ``--start-marker START_MARKER``
   Specifies named marker event identifier to establish trace window start boundary.
 
-- ``--end END``  
+- ``--end END``
   Defines trace window end boundary using percentage notation (e.g., ``75%``) or absolute nanosecond timestamps (e.g., ``3543724246381057``).
 
-- ``--end-marker END_MARKER``  
+- ``--end-marker END_MARKER``
   Specifies named marker event identifier to establish trace window end boundary.
 
-- ``--inclusive INCLUSIVE``  
+- ``--inclusive INCLUSIVE``
   Controls event inclusion criteria: ``True`` includes events with either start or end timestamps within the specified window; ``False`` requires both timestamps within the window (default: ``True``).
 
 **Command-Line Help:**
 
-- ``-h``, ``--help``  
+- ``-h``, ``--help``
   Displays comprehensive command syntax, parameter descriptions, and usage examples.
 
 Examples
@@ -300,7 +300,14 @@ rocpd2otf2 - Open Trace Format 2 Export
 rocpd2pftrace - Perfetto Trace Export
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Purpose:** Converts rocpd databases to Perfetto protocol buffer format for interactive visualization using the Perfetto UI (ui.perfetto.dev).
+- ``trace.def``: Trace definition file with metadata.
+
+- Supporting files for multistream trace data.
+
+rocpd2pftrace - Perfetto trace export
+++++++++++++++++++++++++++++++++++++++
+
+**Purpose:** To convert ``rocpd`` databases to Perfetto protocol buffer format for interactive visualization using the `Perfetto UI <https://ui.perfetto.dev/>`_.
 
 **Location:** ``/opt/rocm/bin/rocpd2pftrace``
 
@@ -423,7 +430,7 @@ rocpd2summary - Statistical Analysis Tool
 **Report Content:**
 - **Kernel Statistics:** Execution time distributions, call frequencies, grid/block sizes
 - **API Timing:** HIP/HSA function call durations and frequencies
-- **Memory Analysis:** Transfer patterns, bandwidth utilization, allocation statistics  
+- **Memory Analysis:** Transfer patterns, bandwidth utilization, allocation statistics
 - **Device Utilization:** GPU occupancy patterns and idle time analysis
 - **Synchronization Overhead:** Barrier and synchronization point analysis
 
@@ -468,10 +475,10 @@ The ``rocpd summary`` command excels at aggregating multiple database files, pro
 
    # Aggregate multiple databases into single comprehensive summary
    rocpd summary -i session1.db session2.db session3.db --format html -o unified_summary
-   
+
    # Combine all MPI rank databases for overall application analysis
    rocpd summary -i rank_*.db --format csv -o mpi_application_summary
-   
+
    # Time-series aggregation across multiple profiling runs
    rocpd summary -i daily_profile_*.db --format json -o weekly_performance_trends
 
@@ -483,10 +490,10 @@ The ``--summary-by-rank`` option enables detailed comparative analysis, allowing
 
    # Compare performance across MPI ranks
    rocpd summary -i rank_0.db rank_1.db rank_2.db rank_3.db --summary-by-rank --format html -o rank_comparison
-   
+
    # Analyze multi-node performance characteristics
    rocpd summary -i node_*.db --summary-by-rank --format csv -o node_performance_analysis
-   
+
    # Compare GPU device performance in multi-GPU applications
    rocpd summary -i gpu_0.db gpu_1.db gpu_2.db gpu_3.db --summary-by-rank --format json -o gpu_scaling_analysis
 
@@ -498,10 +505,10 @@ The ``--summary-by-rank`` option enables detailed comparative analysis, allowing
 
    # Profile distributed MPI application
    mpirun -np 8 rocprofv3 --hip-trace --output-format rocpd -- mpi_simulation
-   
+
    # Generate unified summary for overall application performance
    rocpd summary -i results_rank_*.db --format html -o application_overview
-   
+
    # Identify load balancing issues with rank-by-rank comparison
    rocpd summary -i results_rank_*.db --summary-by-rank --format csv -o load_balance_analysis
 
@@ -513,10 +520,10 @@ The ``--summary-by-rank`` option enables detailed comparative analysis, allowing
    for gpus in 1 2 4; do
        rocprofv3 --hip-trace --device 0:$((gpus-1)) --output-format rocpd -o "scaling_${gpus}gpu.db" -- gpu_benchmark
    done
-   
+
    # Aggregate scaling analysis
    rocpd summary -i scaling_*gpu.db --format html -o gpu_scaling_summary
-   
+
    # Compare efficiency across different GPU counts
    rocpd summary -i scaling_*gpu.db --summary-by-rank --format json -o scaling_efficiency
 
@@ -527,7 +534,7 @@ The ``--summary-by-rank`` option enables detailed comparative analysis, allowing
    # Profile baseline and optimized versions
    rocprofv3 --hip-trace --output-format rocpd -o baseline.db -- application_v1
    rocprofv3 --hip-trace --output-format rocpd -o optimized.db -- application_v2
-   
+
    # Generate unified performance comparison
    rocpd summary -i baseline.db optimized.db --summary-by-rank --format html -o regression_analysis
 
@@ -538,7 +545,7 @@ The ``--summary-by-rank`` option enables detailed comparative analysis, allowing
    # Profile on different hardware platforms
    rocprofv3 --hip-trace --output-format rocpd -o platform_A.db -- benchmark
    rocprofv3 --hip-trace --output-format rocpd -o platform_B.db -- benchmark
-   
+
    # Compare platform performance characteristics
    rocpd summary -i platform_*.db --summary-by-rank --format csv -o platform_comparison
 
@@ -548,10 +555,10 @@ The ``--summary-by-rank`` option enables detailed comparative analysis, allowing
 
    # Cross-rank summary for MPI applications with domain focus
    rocpd summary -i rank_*.db --summary-by-rank --region-categories KERNEL HIP --format html
-   
+
    # Time-windowed multi-database analysis
    rocpd summary -i profile_*.db --start 25% --end 75% --summary-by-rank
-   
+
    # Domain-specific comparative analysis
    rocpd summary -i node_*.db --domain-summary --summary-by-rank --region-categories HIP ROCR
 
@@ -581,10 +588,10 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
    # Aggregate analysis across multiple profiling sessions
    rocpd query -i session1.db session2.db session3.db \
                --query "SELECT name, AVG(duration) FROM kernels GROUP BY name"
-   
+
    # Cross-rank performance comparison for MPI applications
    rocpd summary -i rank_0.db rank_1.db rank_2.db rank_3.db --summary-by-rank
-   
+
    # Multi-node scaling analysis
    rocpd query -i node_*.db \
                --query "SELECT COUNT(*) as total_kernels, SUM(duration) as total_time FROM kernels"
@@ -597,10 +604,10 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
 
    # Profile MPI application across multiple ranks
    mpirun -np 4 rocprofv3 --hip-trace --output-format rocpd -- mpi_application
-   
+
    # Generate aggregated performance summary
    rocpd summary -i results_rank_*.db --summary-by-rank --format html -o mpi_performance_report
-   
+
    # Analyze load balancing across ranks
    rocpd query -i results_rank_*.db \
                --query "SELECT pid, COUNT(*) as kernel_count, AVG(duration) as avg_duration FROM kernels GROUP BY pid"
@@ -611,11 +618,11 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
 
    # Profile application with multiple GPU devices
    rocprofv3 --hip-trace --device 0,1,2,3 --output-format rocpd -- multi_gpu_app
-   
+
    # Aggregate device utilization analysis
    rocpd query -i multi_gpu_results.db \
                --query "SELECT agent_abs_index as device_id, COUNT(*) as operations, SUM(duration) as total_time FROM kernels GROUP BY device_id"
-   
+
    # Cross-device performance comparison
    rocpd summary -i multi_gpu_results.db --domain-summary
 
@@ -629,7 +636,7 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
    for hour in {1..24}; do
        rocprofv3 --hip-trace --output-format rocpd -o "profile_hour_$hour.db" -- application
    done
-   
+
    # Analyze performance trends over time
    rocpd query -i profile_hour_*.db \
                --query "SELECT AVG(duration) as avg_kernel_time, COUNT(*) as kernel_count FROM kernels" \
@@ -642,7 +649,7 @@ Unlike the Perfetto output format used in earlier versions, ``rocpd`` databases 
    # Compare baseline vs optimized performance
    rocpd query -i baseline.db optimized.db \
                --query "SELECT kernel, AVG(duration) as avg_time FROM kernels GROUP BY name ORDER BY avg_time DESC"
-   
+
    # Generate comparative summary reports
    rocpd summary -i baseline.db optimized.db --format html -o comparison_report
 
@@ -674,19 +681,19 @@ Tool Integration and Workflow Examples
 
    #!/bin/bash
    # Performance analysis automation script
-   
+
    PROFILE_DB="$1"
    OUTPUT_DIR="analysis_$(date +%Y%m%d_%H%M%S)"
-   
+
    mkdir -p "$OUTPUT_DIR"
-   
+
    # Generate CSV data for automated analysis
    rocpd2csv -i "$PROFILE_DB" -d "$OUTPUT_DIR" -o raw_data
-   
+
    # Create summary reports
    rocpd2summary -i "$PROFILE_DB" --format csv html \
                  -d "$OUTPUT_DIR" -o performance_summary
-   
+
    # Generate interactive trace for detailed investigation
    rocpd2pftrace -i "$PROFILE_DB" -d "$OUTPUT_DIR" -o interactive_trace
 
@@ -730,26 +737,26 @@ rocpd databases provide comprehensive views for analysis.  In general, any queri
    -- System and hardware information
    SELECT * FROM rocpd_info_agents;
    SELECT * FROM rocpd_info_node;
-   
+
    -- Kernel execution data
    SELECT * FROM kernels;
    SELECT * FROM top_kernels;
-   
+
    -- API trace information
    SELECT * FROM regions_and_samples WHERE category LIKE 'HIP_%';
    SELECT * FROM regions_and_samples WHERE category LIKE 'RCCL_%;
-   
+
    -- Performance counters
    SELECT * FROM counters_collection;
-   
+
    -- Memory operations
    SELECT * FROM memory_copies;
    SELECT * FROM memory_allocations;
-   
+
    -- Process and thread information
    SELECT * FROM processes;
    SELECT * FROM threads;
-   
+
    -- Marker and region data
    SELECT * FROM regions;
    SELECT * FROM regions_and_samples WHERE category LIKE 'MARKERS_%';
@@ -760,7 +767,7 @@ rocpd databases provide comprehensive views for analysis.  In general, any queri
 
    -- Top performing kernels by execution time
    SELECT * FROM top_kernels LIMIT 10;
-   
+
    -- Top Analysis
    SELECT * FROM top;
 
@@ -776,10 +783,10 @@ Basic Query Examples
 
    # List available GPU agents
    rocpd query -i profile.db --query "SELECT * FROM rocpd_info_agents"
-   
+
    # Show top 10 longest-running kernels
    rocpd query -i profile.db --query "SELECT name, duration FROM kernels ORDER BY duration DESC LIMIT 10"
-   
+
    # Count total number of kernel dispatches
    rocpd query -i profile.db --query "SELECT COUNT(*) as total_kernels FROM kernels"
 
@@ -790,7 +797,7 @@ Basic Query Examples
    # Combine data from multiple profiling sessions
    rocpd query -i session1.db session2.db session3.db \
                --query "SELECT pid, COUNT(*) as kernel_count FROM kernels GROUP BY pid"
-   
+
    # Cross-session performance comparison
    rocpd query -i baseline.db optimized.db \
                --query "SELECT name as kernel_name, AVG(duration) as avg_duration FROM kernels GROUP BY kernel_name"
@@ -801,14 +808,14 @@ Basic Query Examples
 
    # Kernel performance analysis with statistics
    rocpd query -i profile.db --query "
-   SELECT 
+   SELECT
        name as kernel_name,
        COUNT(*) as dispatch_count,
        MIN(duration) as min_duration,
        AVG(duration) as avg_duration,
        MAX(duration) as max_duration,
        SUM(duration) as total_duration
-   FROM kernels 
+   FROM kernels
    GROUP BY kernel_name
    ORDER BY total_duration DESC"
 
@@ -818,7 +825,7 @@ Basic Query Examples
 
    # Memory copy analysis by direction
    rocpd query -i profile.db --query "
-   SELECT 
+   SELECT
        name as kernel_name,
        src_agent_type,
        src_agent_abs_index,
@@ -827,8 +834,8 @@ Basic Query Examples
        COUNT(*) as transfer_count,
        SUM(size) as total_bytes,
        SUM(duration) as total_duration
-   FROM memory_copies 
-   GROUP BY src_agent_abs_index 
+   FROM memory_copies
+   GROUP BY src_agent_abs_index
    ORDER BY total_bytes DESC"
 
 Output Format Options
@@ -864,7 +871,7 @@ Output Format Options
 
    # Create interactive HTML dashboard
    rocpd query -i profile.db --query "SELECT * FROM device_utilization" --format dashboard -o utilization_dashboard
-   
+
    # Use custom dashboard template
    rocpd query -i profile.db --query "SELECT * FROM kernels" --format dashboard \
                --template-path ~/templates/custom_dashboard.html -o custom_report
@@ -894,12 +901,12 @@ Execute complex SQL scripts with view definitions and custom analysis logic:
 
    -- Create temporary views for complex analysis
    CREATE TEMP VIEW kernel_stats AS
-   SELECT 
+   SELECT
        name as kernel_name,
        COUNT(*) as dispatch_count,
        AVG(duration) as avg_duration,
        STDDEV(duration) as duration_stddev
-   FROM kernels 
+   FROM kernels
    GROUP BY kernel_name;
 
    CREATE TEMP VIEW performance_outliers AS
@@ -926,11 +933,11 @@ Apply temporal filtering before query execution:
    # Query only middle 50% of execution timeline
    rocpd query -i profile.db --start 25% --end 75% \
                --query "SELECT COUNT(*) as kernel_count FROM kernels"
-   
+
    # Use marker-based time windows
    rocpd query -i profile.db --start-marker "computation_begin" --end-marker "computation_end" \
                --query "SELECT * FROM kernels ORDER BY start_time"
-   
+
    # Absolute timestamp filtering
    rocpd query -i profile.db --start 1000000000 --end 2000000000 \
                --query "SELECT * FROM kernels WHERE start_time BETWEEN 1000000000 AND 2000000000"
@@ -980,17 +987,17 @@ Integration Workflows
 
    #!/bin/bash
    # Automated reporting script
-   
+
    DB_FILE="$1"
    REPORT_DATE=$(date +%Y-%m-%d)
-   
+
    # Generate multiple analysis reports
    rocpd query -i "$DB_FILE" --query "SELECT * FROM top_kernels LIMIT 20" \
                --format html -o "top_kernels_$REPORT_DATE"
-   
+
    rocpd query -i "$DB_FILE" --query "SELECT * FROM memory_copy_summary" \
                --format csv -o "memory_analysis_$REPORT_DATE"
-   
+
    rocpd query -i "$DB_FILE" --query "SELECT * FROM device_utilization" \
                --format dashboard -o "utilization_dashboard_$REPORT_DATE" \
                --email-to team@company.com --email-from automation@company.com
@@ -1014,11 +1021,11 @@ rocpd databases support custom SQL functions for advanced analysis:
 
    # Use built-in rocpd functions
    rocpd query -i profile.db --query "
-   SELECT 
+   SELECT
        name,
        rocpd_get_string(name_id, 0, nid, pid) as full_kernel_name,
        duration
-   FROM kernels 
+   FROM kernels
    WHERE rocpd_get_string(name_id, 0, nid, pid) LIKE '%gemm%'"
 
 rocpd query Command-Line Reference
