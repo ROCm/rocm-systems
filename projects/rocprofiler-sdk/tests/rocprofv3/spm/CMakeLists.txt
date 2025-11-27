@@ -10,9 +10,6 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY spm_input.json validate.py
-                                                          conftest.py)
-
 set(COUNTER_LIST
     SQ_CYCLES
     SQ_WAVES
@@ -30,88 +27,59 @@ set(IS_DISABLED ${IS_SPM_DISABLED})
 list(GET rocprofiler-sdk-tests-gfx-info 0 spm-gpu-0-gfx-info)
 
 # SPM
-add_test(
-    NAME rocprofv3-test-spm-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-spm-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled=on --spm
         ${COUNTER_LIST} --kernel-trace -d ${CMAKE_CURRENT_BINARY_DIR}/out_spm
-        --output-format CSV JSON -o spm -- $<TARGET_FILE:simple-transpose>)
+        --output-format CSV JSON -o spm -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 120
+    LABELS "integration-tests"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_DISABLED})
 
 # PMC
-add_test(
-    NAME rocprofv3-test-spm-compare-to-pmc
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-spm-compare-to-pmc
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc ${COUNTER_LIST} -d
         ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format CSV -o pmc --
-        $<TARGET_FILE:simple-transpose>)
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    LABELS "integration-tests"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_DISABLED})
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set_tests_properties(
-    rocprofv3-test-spm-execute
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${PRELOAD_ENV}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${IS_DISABLED})
-
-set_tests_properties(
-    rocprofv3-test-spm-compare-to-pmc
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${PRELOAD_ENV}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${IS_DISABLED})
-
-add_test(
-    NAME rocprofv3-test-spm-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --pmc
-        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_counter_collection.csv --spm
-        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_streaming_performance_monitor.csv
-        --spm-json ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json)
-
-set_tests_properties(
+rocprofiler_add_integration_validate_test(
     rocprofv3-test-spm-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               "rocprofv3-test-spm-execute;rocprofv3-test-spm-compare-to-pmc"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${IS_DISABLED})
+    TEST_PATHS validate.py
+    ARGS --pmc ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_counter_collection.csv --spm
+         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_streaming_performance_monitor.csv
+         --spm-json ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json
+    CONFIG pytest.ini
+    COPY spm_input.json conftest.py
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED "rocprofv3-test-spm-execute;rocprofv3-test-spm-compare-to-pmc"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_DISABLED})
 
 # Multi-gpu + multiqueue
-add_test(
-    NAME rocprofv3-test-spm-multigpu
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-spm-multigpu
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i spm_input.json -d
         ${CMAKE_CURRENT_BINARY_DIR}/out_multi --output-format CSV -o multi --
-        $<TARGET_FILE:vector-ops>)
-
-set_tests_properties(
-    rocprofv3-test-spm-multigpu
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${PRELOAD_ENV}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${IS_DISABLED})
+        $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 120
+    LABELS "integration-tests"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_DISABLED})
