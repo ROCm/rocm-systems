@@ -460,9 +460,10 @@ bool IsHtoHMemcpyValid(void* dst, const void* src, hipMemcpyKind kind) {
 }
 
 // ================================================================================================
-hipError_t ihipMemcpy_validate_memory(amd::Memory* memObj, size_t sizeBytes, size_t offset) {
+hipError_t ihipMemcpy_validate_memory(amd::Memory* memObj, size_t sizeBytes, size_t offset,
+                                      bool read_write) {
   // Validate Mem Access in case of VMM Memory
-  if (!memObj->ValidateMemAccess(*hip::getCurrentDevice()->devices()[0], false)) {
+  if (!memObj->ValidateMemAccess(*hip::getCurrentDevice()->devices()[0], read_write)) {
     return hipErrorUnknown;
   }
 
@@ -484,9 +485,9 @@ hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, s
                                 size_t dstOffset, size_t srcOffset) {
   hipError_t status;
 
-  status = ihipMemcpy_validate_memory(srcMemory, sizeBytes, srcOffset);
+  status = ihipMemcpy_validate_memory(srcMemory, sizeBytes, srcOffset, /*read_write*/ false);
   if (status != hipSuccess) return status;
-  status = ihipMemcpy_validate_memory(dstMemory, sizeBytes, dstOffset);
+  status = ihipMemcpy_validate_memory(dstMemory, sizeBytes, dstOffset, /*read_write*/ true);
   if (status != hipSuccess) return status;
 
   return hipSuccess;
@@ -696,14 +697,15 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
     // wait at top level except for MT path
     isHostAsync &= AMD_DIRECT_DISPATCH ? true : false;
     if (dstDeviceMemory != nullptr) {
-      status = ihipMemcpy_validate_memory(dstDeviceMemory, sizeBytes, dOffset);
+      status = ihipMemcpy_validate_memory(dstDeviceMemory, sizeBytes, dOffset, /*read_write*/ true);
       if (status != hipSuccess) {
         return status;
       }
       status =
           ihipMemcpyCommand(command, dstDeviceMemory, src, sizeBytes, kind, stream, dOffset, isHostAsync);
     } else {
-      status = ihipMemcpy_validate_memory(srcDeviceMemory, sizeBytes, sOffset);
+      status =
+          ihipMemcpy_validate_memory(srcDeviceMemory, sizeBytes, sOffset, /*read_write*/ false);
       if (status != hipSuccess) {
         return status;
       }

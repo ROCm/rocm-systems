@@ -90,13 +90,13 @@ hipError_t GraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t 
   }
 
   if (srcMemory != nullptr) {
-    hipError_t status = ihipMemcpy_validate_memory(srcMemory, count, kind);
+    hipError_t status = ihipMemcpy_validate_memory(srcMemory, count, sOffset, /*read_write*/ false);
     if (status != hipSuccess) {
       return status;
     }
   }
   if (dstMemory != nullptr) {
-    hipError_t status = ihipMemcpy_validate_memory(dstMemory, count, kind);
+    hipError_t status = ihipMemcpy_validate_memory(dstMemory, count, dOffset, /*read_write*/ true);
     if (status != hipSuccess) {
       return status;
     }
