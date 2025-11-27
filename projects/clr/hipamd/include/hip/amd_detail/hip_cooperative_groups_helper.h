@@ -182,6 +182,11 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
   return (num_threads_till_current_workgroup + local_thread_rank);
 }
 
+__CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
+  return static_cast<__hip_uint32_t>((blockIdx.z * gridDim.y * gridDim.x) +
+                                     (blockIdx.y * gridDim.x) + (blockIdx.x));
+}
+
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_grid_is_valid()); }
 
 __CG_STATIC_QUALIFIER__ void sync() { __ockl_grid_sync(); }

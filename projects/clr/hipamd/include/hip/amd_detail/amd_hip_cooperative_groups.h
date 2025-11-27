@@ -96,7 +96,7 @@ class thread_group {
   __CG_QUALIFIER__ unsigned int cg_type() const { return _type; }
   //! Rank of the calling thread within [0, \link num_threads() num_threads() \endlink).
   __CG_QUALIFIER__ __hip_uint32_t thread_rank() const;
-  //! Rank of the calling block within [0, \link num_threads() num_threads() \endlink).
+  //! Rank of the block in calling thread within [0, \link num_threads() num_threads() \endlink).
   __CG_QUALIFIER__ __hip_uint32_t block_rank() const;
   //! Returns true if the group has not violated any API constraints.
   __CG_QUALIFIER__ bool is_valid() const;
@@ -158,10 +158,6 @@ class multi_grid_group : public thread_group {
   //! @copydoc thread_group::thread_rank
   __CG_QUALIFIER__ __hip_uint32_t thread_rank() const {
     return internal::multi_grid::thread_rank();
-  }
-  //! @copydoc thread_group::block_rank
-  __CG_QUALIFIER__ __hip_uint32_t block_rank() {
-    return internal::workgroup::block_rank();
   }
   //! @copydoc thread_group::is_valid
   __CG_QUALIFIER__ bool is_valid() const { return internal::multi_grid::is_valid(); }
@@ -365,7 +361,6 @@ class tiled_group : public thread_group {
   __CG_QUALIFIER__ unsigned int thread_rank() const {
     return (internal::workgroup::thread_rank() & (coalesced_info.tiled_info.num_threads - 1));
   }
-  
   //! @copydoc thread_group::sync
   __CG_QUALIFIER__ void sync() const { internal::tiled_group::sync(); }
 };
