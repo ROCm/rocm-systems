@@ -33,7 +33,7 @@ Panel Config:
           value: ROUND(AVG((SQ_INSTS_GDS / $denom)), 0)
         BR:
           value: ROUND(AVG((SQ_INSTS_BRANCH / $denom)), 0)
-        Active CUs:
+        Active CUs (deprecated):
           value: $numActiveCUs
         Num CUs:
           value: $cu_per_gpu
@@ -167,8 +167,8 @@ Panel Config:
     GWS: Total number of GDS (global data sync) instructions issued per normalization
       unit.
     BR: Total number of BRANCH instructions issued per normalization unit.
-    Active CUs: Total number of active compute units (CUs) on the accelerator during
-      the kernel execution.
+    Active CUs (deprecated): Total number of active compute units (CUs) on the accelerator during
+      the kernel execution. (Deprecated - See CU Utilization instead)
     Num CUs: Total number of compute units (CUs) on the accelerator.
     VGPR: >-
       The number of architected vector general-purpose registers allocated

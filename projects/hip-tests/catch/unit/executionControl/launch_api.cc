@@ -67,3 +67,23 @@ TEST_CASE("Unit___hipPushCallConfiguration_Positive_Basic") {
   REQUIRE(shmem == 1024);
   REQUIRE(stream == stream_guard.stream());
 }
+
+TEST_CASE("Unit_hipLaunchByPtr_Verify_Capture") {
+  LinearAllocGuard<int> alloc(LinearAllocs::hipMallocManaged, 4);
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+
+  HIP_CHECK(hipConfigureCall(dim3{1}, dim3{1}, 0, stream));
+  int* arg = alloc.ptr();
+  HIP_CHECK(hipSetupArgument(&arg, sizeof(int*), 0));
+  HIP_CHECK(hipLaunchByPtr(reinterpret_cast<void*>(kernel_42)));
+
+  END_CAPTURE(stream);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipStreamDestroy(stream));
+
+  REQUIRE(alloc.ptr()[0] == 42);
+}

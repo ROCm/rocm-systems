@@ -462,6 +462,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   }
   void SetDeviceId(int id) { dev_id_ = id; }
   int GetDeviceId() const { return dev_id_; }
+  bool GetWait() const { return wait_; }
+  void SetWait(bool wait) { wait_ = wait; }
 
  protected:
   // Declare Graph and GraphExec as friends of node for simpler access to GraphNode fields
@@ -492,6 +494,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t kernargSegmentAlignment_ = 256;  //!< Kernel arg segment alignment
   int dev_id_;  //!< Device Id when node is created(dev id from capture stream/current device
                 //!< when explicitly added)
+  bool wait_ = false;                
 };
 
 class GraphEventWaitNode : public GraphNode {
@@ -633,6 +636,7 @@ class Graph {
   size_t GetNodeCount() const { return vertices_.size(); }
   /// returns all the nodes in the graph
   const std::vector<Node>& GetNodes() const { return vertices_; }
+  const std::vector<Node>& GetTopoOrder() const { return topoOrder_; }
   /// returns all the edges in the graph
   std::vector<std::pair<Node, Node>> GetEdges() const;
   // returns the original graph ptr if cloned
@@ -678,9 +682,7 @@ class Graph {
   void ScheduleNodes();
 
   //! Runs one node on the assigned stream
-  bool RunOneNode(Node node,  //!< Node for the execution on GPU
-                  bool wait   //!< Wait dependencies
-  );
+  bool RunOneNode(Node node);  //!< Node for the execution on GPU
 
   //! Runs all nodes from the execution graph on the assigned streams
   bool RunNodes(
@@ -783,7 +785,8 @@ class Graph {
   //!< during multi-device graph execution scheduling.
   std::unordered_map<int, std::set<int>> streams_dev_ids_;
   int instantiateDeviceId_ = -1;
-
+  //! Topological order of the graph doesn't include nodes embedded as part of the child graph
+  std::vector<Node> topoOrder_;
  private:
   friend class GraphExec;
   std::vector<Node> vertices_;
@@ -894,8 +897,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   void FindStreamsReqPerDev();
 
  protected:
-  //! Topological order of the graph doesn't include nodes embedded as part of the child graph
-  std::vector<Node> topoOrder_;
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   uint64_t flags_ = 0;
