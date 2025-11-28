@@ -103,6 +103,8 @@ amdgpu_device_get_fd;
 amdgpu_bo_cpu_map;
 amdgpu_bo_free;
 amdgpu_bo_export;
+amdgpu_bo_query_info;
+amdgpu_bo_set_metadata;
 drmCommandWriteRead;
 
 local: *;
