@@ -143,7 +143,7 @@ def to_max(*args: Any) -> Union[float, np.ndarray, None]:
 def to_avg(
     a: Union[pd.Series, np.ndarray, list, int, float, str, np.number, None],
 ) -> Union[float, np.floating, None]:
-    if a is None:
+    if np.isscalar(a) and pd.isna(a):
         return np.nan
     elif isinstance(a, pd.Series):
         if a.empty:
@@ -194,12 +194,13 @@ def to_std(a: pd.Series) -> float:
 def to_int(
     a: Union[int, float, str, np.integer, pd.Series, None],
 ) -> Union[int, pd.Series, None]:
-    if a is None:
-        return None
+    if np.isscalar(a) and pd.isna(a):
+        return np.nan
     elif isinstance(a, (int, float, np.integer)):
         return int(a)
     elif isinstance(a, pd.Series):
-        return a.astype(int)
+        # "Int64" handles null values
+        return a.astype("Int64")
     elif isinstance(a, str):
         return int(a)
     else:
@@ -346,7 +347,24 @@ class MetricEvaluator:
                 local_expr_context,
             )
 
-            if eval_result is None or np.isnan(eval_result).any():
+            # eval_result can be None if expression has None explicitly specified
+            # Do not give warning for this case and simply return "N/A"
+            if eval_result is None or "None" in expr:
+                return "N/A"
+
+            # Only return "N/A" for scalar NA values
+            # For vectors/Series, return as-is to preserve shape for
+            # downstream operations
+            # Note: pd.NA is not detected as scalar by np.isscalar()
+            is_scalar_na = eval_result is pd.NA or (
+                np.isscalar(eval_result) and pd.isna(eval_result)
+            )
+
+            if is_scalar_na:
+                console_warning(
+                    f"Could not evaluate expression '{expr}' - likely due to missing "
+                    "counter data."
+                )
                 return "N/A"
             else:
                 return eval_result
@@ -360,18 +378,18 @@ class MetricEvaluator:
                 return "N/A"
 
         except AttributeError as attribute_error:
-            if str(attribute_error) == "'NoneType' object has no attribute 'get'":
-                console_warning(
-                    f"Failed to evaluate expression '{expr}': {attribute_error}."
-                )
-                return "N/A"
-            else:
-                console_error("analysis", str(attribute_error))
-                return "N/A"
+            console_warning(
+                f"Failed to evaluate expression '{expr}': {attribute_error}."
+            )
+            return "N/A"
 
         except pd.errors.IntCastingNaNError as exception:
-            console_warning(f"Missing data: {exception}. Using empty value.")
-            return ""
+            console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+            return "N/A"
+
+        except ValueError as value_error:
+            console_warning(f"Failed to evaluate expression '{expr}': {value_error}.")
+            return "N/A"
 
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
@@ -929,9 +947,12 @@ def calc_builtin_vars(
             # Pass sys_vars so that $num_xcd and other system variables are available
             temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     # Second pass: calculate remaining variables that depend on per-XCD values
     for variable_key, variable_value in BUILD_IN_VARS.items():
@@ -946,9 +967,12 @@ def calc_builtin_vars(
             combined_vars = {**sys_vars, **builtin_vars_collection}
             temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     return builtin_vars_collection
 

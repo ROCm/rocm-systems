@@ -1384,10 +1384,6 @@ def merge_counters_iteration_multiplex(
         "Kernel_ID",
     ]
 
-    expired_column_index = [
-        "Dispatch_ID",
-    ]
-
     result_dfs: list[pd.DataFrame] = []
 
     # TODO: will need to optimize to avoid this conversion to single index format
@@ -1419,16 +1415,15 @@ def merge_counters_iteration_multiplex(
 
         pd.set_option("display.max_columns", None)
 
+        # Reset Dispatch_ID
+        dispatch_id_counter = 0
+
         for name, group in unique_occurences:
             # Create a dictionary to store the merged row for the current group
             merged_row: dict[str, Any] = {}
 
             # Process non-counter columns
-            for col in [
-                col
-                for col in non_counter_column_index
-                if col not in expired_column_index
-            ]:
+            for col in non_counter_column_index:
                 if col == "End_Timestamp":
                     # For End_Timestamp, calculate the median delta time
                     delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
@@ -1436,6 +1431,10 @@ def merge_counters_iteration_multiplex(
                     merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
                     merged_row["Median_Time"] = median_delta_time
                     merged_row["Mean_Time"] = delta_time.mean()
+                if col == "Dispatch_ID":
+                    # Assign new Dispatch_ID
+                    merged_row[col] = dispatch_id_counter
+                    dispatch_id_counter += 1
                 elif pd.api.types.is_numeric_dtype(group[col]):
                     # For other non-counter numeric columns, take the median value
                     merged_row[col] = group[col].median()
