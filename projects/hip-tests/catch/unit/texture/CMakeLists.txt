@@ -126,7 +126,6 @@ else()
 endif()
 
 # Mipmap APIs are not supported on Linux
-if(0)
 set(TEST_SRC
     ${TEST_SRC}
     hipBindTextureToMipmappedArray.cc
@@ -149,8 +148,6 @@ set(TEST_SRC
     hipTexRefSetGetMipmapLevelClamp.cc
     hipTexRefSetGetMipmappedArray.cc
 )
-endif()
-
 
 hip_add_exe_to_target(NAME TextureTest
                       TEST_SRC ${TEST_SRC}
