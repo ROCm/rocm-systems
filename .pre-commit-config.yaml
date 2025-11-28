@@ -19,6 +19,8 @@ repos:
     hooks:
       - id: black
         language_version: python3
+        exclude: |
+          projects/rocprofiler-compute
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v18.1.4
