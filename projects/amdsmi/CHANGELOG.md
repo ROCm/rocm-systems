@@ -385,7 +385,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed a CPER component not being redirected to output file issue when using `amd-smi ras --cper --folder <folder_name> --file --follow`**.
+- **Fixed CPER component not being redirected to output file issue when using `amd-smi ras --cper --folder <folder_name> --file <file_name> --follow`**.
   - Utlized the AMDSMILogger to redirect to output file when --file option is used
 
 - **Fixed a CPER record count mismatch issue when using the `amd-smi ras --cper --file-limit`**.  
