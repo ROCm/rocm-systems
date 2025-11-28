@@ -109,7 +109,6 @@ set(_base_environment
     "ROCPROFSYS_USE_PROCESS_SAMPLING=ON"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_FILE_OUTPUT=ON"
-    "ROCPROFSYS_PERFETTO_FILE=perfetto-trace.proto"
     "${_test_openmp_env}"
     "${_test_library_path}"
 )

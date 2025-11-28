@@ -293,21 +293,20 @@ configure_settings(bool _init)
         get_env<size_t>("ROCPROFSYS_NUM_THREADS", 1), "threading", "performance",
         "sampling", "parallelism", "advanced");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_LEGACY", "Enable perfetto backend",
-                              false, "backend", "perfetto");
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE", "Enable perfetto backend",
+                              _default_perfetto_v, "backend", "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_PERFETTO",
-                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE_LEGACY", false,
-                              "backend", "perfetto", "deprecated");
+                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE",
+                              _default_perfetto_v, "backend", "perfetto", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_PROFILE", "Enable timemory backend",
-                              !_config->get<bool>("ROCPROFSYS_TRACE_LEGACY"), "backend",
+                              !_config->get<bool>("ROCPROFSYS_TRACE"), "backend",
                               "timemory");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_TIMEMORY",
-                              "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
-                              !_config->get<bool>("ROCPROFSYS_TRACE_LEGACY"), "backend",
-                              "timemory", "deprecated");
+    ROCPROFSYS_CONFIG_SETTING(
+        bool, "ROCPROFSYS_USE_TIMEMORY", "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
+        !_config->get<bool>("ROCPROFSYS_TRACE"), "backend", "timemory", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_CAUSAL",
                               "Enable causal profiling analysis", false, "backend",
@@ -316,9 +315,9 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE",
-                              "Enable perfetto with trace cache", _default_perfetto_v,
-                              "backend", "perfetto_caching");
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_CACHED",
+                              "Enable perfetto with trace cache", false, "backend",
+                              "perfetto_caching");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
                               "Enable ROCm API and kernel tracing", true, "backend",
@@ -1055,7 +1054,7 @@ configure_settings(bool _init)
     handle_deprecated_setting("ROCPROFSYS_USE_THREAD_SAMPLING",
                               "ROCPROFSYS_USE_PROCESS_SAMPLING");
     handle_deprecated_setting("ROCPROFSYS_OUTPUT_FILE", "ROCPROFSYS_PERFETTO_FILE");
-    handle_deprecated_setting("ROCPROFSYS_USE_PERFETTO", "ROCPROFSYS_TRACE_LEGACY");
+    handle_deprecated_setting("ROCPROFSYS_USE_PERFETTO", "ROCPROFSYS_TRACE");
     handle_deprecated_setting("ROCPROFSYS_USE_TIMEMORY", "ROCPROFSYS_PROFILE");
 
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
@@ -1135,7 +1134,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     else if(get_mode() == Mode::Causal)
     {
         _set("ROCPROFSYS_USE_CAUSAL", true);
-        _set("ROCPROFSYS_TRACE_LEGACY", false);
+        _set("ROCPROFSYS_TRACE", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_SAMPLING", false);
         _set("ROCPROFSYS_USE_PROCESS_SAMPLING", false);
@@ -1831,7 +1830,7 @@ get_verbose()
 bool&
 get_use_perfetto()
 {
-    static auto _v = get_config()->at("ROCPROFSYS_TRACE_LEGACY");
+    static auto _v = get_config()->at("ROCPROFSYS_TRACE");
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 
@@ -2470,7 +2469,7 @@ get_use_rocpd()
 bool&
 get_caching_perfetto()
 {
-    static auto _v = get_config()->at("ROCPROFSYS_TRACE");
+    static auto _v = get_config()->at("ROCPROFSYS_TRACE_CACHED");
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 
