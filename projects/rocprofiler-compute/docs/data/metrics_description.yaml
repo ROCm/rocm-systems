@@ -1423,9 +1423,9 @@ Command processor packet processor (CPC):
       manager <desc-spi>`.
     unit: Percent
 System Speed-of-Light:
-  Active CUs:
+  Active CUs (deprecated):
     rst: Total number of active compute units (CUs) on the accelerator during the
-      kernel execution.
+      kernel execution. (Deprecated - See CU Utilization instead)
     unit: Number
   Branch Utilization:
     rst: Indicates what percent of the kernel's duration the :ref:`branch <desc-branch>`
@@ -1617,4 +1617,10 @@ System Speed-of-Light:
   vL1D Cache Hit Rate:
     rst: The ratio of the number of vL1D cache line requests that hit in vL1D cache
       over the total number of cache line requests to the :ref:`vL1D cache RAM <desc-tc>`.
+    unit: Percent
+  CU Utilization:
+    rst: The percent of :ref:`total SIMD cycles <total-simd-cycles>` in the kernel
+      where any :ref:`SIMD <desc-valu>` on a CU was actively doing any work, summed
+      over all CUs. Low values (less than 100%) indicate that the accelerator was
+      not fully saturated by the kernel, or a potential load-imbalance issue.
     unit: Percent
