@@ -66,12 +66,15 @@ jobs:
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
           # rm ./TheRock/patches/amd-mainline/rocm-systems/*.patch
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
 
-
-      - name: Patch rocm-systems
+      - name: Patch rocm-systems manually (Option B)
         run: |
-          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
+          echo "Applying rocm-systems patches manually..."
+          cd sources/rocm-systems
+          git -c user.name="therockbot" \
+              -c user.email="therockbot@amd.com" \
+              am --whitespace=nowarn ../../TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Install external python deps
         run: |
@@ -113,7 +116,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           aws-region: us-east-2
-          role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
+          role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external 
 
       - name: Post Build Upload
         if: always()
