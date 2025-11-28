@@ -22,59 +22,38 @@
 
 include(gtest)
 
-# ------------------------------------------------------------ #
-# Helper function to add unit tests
-# ------------------------------------------------------------ #
-
-function(rocstorage_add_unit_test)
-    cmake_parse_arguments(ARG "" "NAME" "SOURCES;LIBRARIES" ${ARGN})
-
-    if(NOT ARG_NAME)
-        message(FATAL_ERROR "rocstorage_add_unit_test: NAME is required")
-    endif()
-
-    if(NOT ARG_SOURCES)
-        message(FATAL_ERROR "rocstorage_add_unit_test: SOURCES is required")
-    endif()
-
-    set(TEST_TARGET "rocstorage_test_${ARG_NAME}")
-
-    add_executable(${TEST_TARGET} ${ARG_SOURCES})
-
-    target_link_libraries(
-        ${TEST_TARGET}
-        PRIVATE
-            rocstorage
-            GTest::gtest
-            GTest::gtest_main
-            GTest::gmock
-            ${ARG_LIBRARIES}
-    )
-
-    target_compile_features(${TEST_TARGET} PRIVATE cxx_std_17)
-
-    gtest_discover_tests(
-        ${TEST_TARGET}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        PROPERTIES LABELS "unit"
-    )
-endfunction()
-
-# ------------------------------------------------------------ #
-# Unit Tests
-# ------------------------------------------------------------ #
-
-rocstorage_add_unit_test(
-    NAME storage
-    SOURCES storage_test.cpp
+set(UNIT_TEST_SOURCES
+    storage_test.cpp
+    writer_test.cpp
+    reader_test.cpp
+    insert_query_builders_test.cpp
+    table_insert_query_test.cpp
+    database_test.cpp
 )
 
-rocstorage_add_unit_test(
-    NAME writer
-    SOURCES writer_test.cpp
+add_executable(rocstorage_unit_tests ${UNIT_TEST_SOURCES})
+
+target_link_libraries(
+    rocstorage_unit_tests
+    PRIVATE
+        rocstorage
+        GTest::gtest
+        GTest::gtest_main
+        GTest::gmock
+        rocstorage-sqlite3
+        fmt::fmt
+        spdlog::spdlog
 )
 
-rocstorage_add_unit_test(
-    NAME reader
-    SOURCES reader_test.cpp
+target_include_directories(
+    rocstorage_unit_tests
+    PRIVATE ${CMAKE_SOURCE_DIR}/source ${CMAKE_SOURCE_DIR}/source/common
+)
+
+target_compile_features(rocstorage_unit_tests PRIVATE cxx_std_17)
+
+gtest_discover_tests(
+    rocstorage_unit_tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    PROPERTIES LABELS "unit"
 )

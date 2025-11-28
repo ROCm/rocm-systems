@@ -22,59 +22,34 @@
 
 include(benchmark)
 
-# ------------------------------------------------------------ #
-# Helper function to add benchmarks
-# ------------------------------------------------------------ #
-
-function(rocstorage_add_benchmark)
-    cmake_parse_arguments(ARG "" "NAME" "SOURCES;LIBRARIES" ${ARGN})
-
-    if(NOT ARG_NAME)
-        message(FATAL_ERROR "rocstorage_add_benchmark: NAME is required")
-    endif()
-
-    if(NOT ARG_SOURCES)
-        message(FATAL_ERROR "rocstorage_add_benchmark: SOURCES is required")
-    endif()
-
-    set(BENCH_TARGET "rocstorage_bench_${ARG_NAME}")
-
-    add_executable(${BENCH_TARGET} ${ARG_SOURCES})
-
-    target_link_libraries(
-        ${BENCH_TARGET}
-        PRIVATE
-            rocstorage
-            benchmark::benchmark
-            benchmark::benchmark_main
-            ${ARG_LIBRARIES}
-    )
-
-    target_compile_features(${BENCH_TARGET} PRIVATE cxx_std_17)
-
-    set_target_properties(
-        ${BENCH_TARGET}
-        PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/benchmarks
-    )
-endfunction()
-
-# ------------------------------------------------------------ #
-# Benchmarks
-# ------------------------------------------------------------ #
-
-rocstorage_add_benchmark(
-    NAME writer
-    SOURCES writer_bench.cpp
+set(BENCHMARK_SOURCES
+    writer_bench.cpp
+    writer_parallel_bench.cpp
+    writer_client_bench.cpp
 )
 
-rocstorage_add_benchmark(
-    NAME writer_parallel
-    SOURCES writer_parallel_bench.cpp
-    LIBRARIES pthread
+add_executable(rocstorage_benchmarks ${BENCHMARK_SOURCES})
+
+target_link_libraries(
+    rocstorage_benchmarks
+    PRIVATE
+        rocstorage
+        benchmark::benchmark
+        benchmark::benchmark_main
+        pthread
+        fmt::fmt
+        spdlog::spdlog
+        rocstorage-sqlite3
 )
 
-rocstorage_add_benchmark(
-    NAME writer_client
-    SOURCES writer_client_bench.cpp
-    LIBRARIES pthread
+target_include_directories(
+    rocstorage_benchmarks
+    PRIVATE ${CMAKE_SOURCE_DIR}/source ${CMAKE_SOURCE_DIR}/source/common
+)
+
+target_compile_features(rocstorage_benchmarks PRIVATE cxx_std_17)
+
+set_target_properties(
+    rocstorage_benchmarks
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/benchmarks
 )
