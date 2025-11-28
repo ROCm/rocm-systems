@@ -589,40 +589,23 @@ add_custom_target(
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
 )
 
-# Standalone binary creation
+# Standalone binary creation using PyOxidizer
 add_custom_target(
     standalonebinary
-    # Change working directory to src
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/src
-    # Check nuitka
-    COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i nuitka > /dev/null 2>&1
-    # Check patchelf
-    COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i patchelf > /dev/null 2>&1
+    # Change working directory to project root
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    # Check if pyoxidizer is installed
+    COMMAND which pyoxidizer > /dev/null 2>&1 || (echo "ERROR: PyOxidizer not found. Install with: pip install pyoxidizer" && exit 1)
     # Create VERSION.sha file
-    COMMAND git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD > VERSION.sha
-    # Build standalone binary
-    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution
-    # and fork
-    # bombs as explained in
-    # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
-    COMMAND
-        ${Python3_EXECUTABLE} -m nuitka --mode=onefile --no-deployment-flag=self-execution
-        --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
-        --include-package=dash_svg --include-package-data=dash_svg
-        --include-package=dash_bootstrap_components
-        --include-package-data=dash_bootstrap_components --include-package=plotly
-        --include-package-data=plotly --include-package=kaleido
-        --include-package-data=kaleido --include-package=rocprof_compute_analyze
-        --include-package-data=rocprof_compute_analyze
-        --include-package=rocprof_compute_profile
-        --include-package-data=rocprof_compute_profile
-        --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
-        --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
-        --include-package=utils --include-package-data=utils rocprof-compute
-    # Remove library rpath from executable
-    COMMAND patchelf --remove-rpath rocprof-compute.bin
-    # Move to build directory
-    COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR}
+    COMMAND git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD > ${PROJECT_SOURCE_DIR}/VERSION.sha || echo "unknown" > ${PROJECT_SOURCE_DIR}/VERSION.sha
+    # Build standalone binary with PyOxidizer
+    # PyOxidizer will read the pyoxidizer.bzl configuration file
+    COMMAND pyoxidizer build --release
+    # Copy the built binary to the build directory
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different 
+        ${PROJECT_SOURCE_DIR}/build/x86_64-unknown-linux-gnu/release/install/rocprof-compute
+        ${CMAKE_BINARY_DIR}/rocprof-compute.bin
+    COMMENT "Building standalone binary with PyOxidizer..."
 )
 
 install(
