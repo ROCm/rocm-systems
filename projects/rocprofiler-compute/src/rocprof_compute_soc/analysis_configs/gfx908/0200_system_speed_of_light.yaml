@@ -48,7 +48,7 @@ Panel Config:
           unit: GIOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 1024) / 1000)
           pop: None
-        Active CUs:
+        Active CUs (deprecated):
           value: $numActiveCUs
           unit: CUs
           peak: $cu_per_gpu
@@ -199,6 +199,11 @@ Panel Config:
           peak: None
           pop: None
           coll_level: SQ_IFETCH_LEVEL
+        CU Utilization:
+          value: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          unit: Pct
+          peak: 100
+          pop: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
   metrics_description:
     VALU FLOPs: >-
       The total floating-point operations executed per second on the VALU.
@@ -235,8 +240,8 @@ Panel Config:
       Note: this does not include any 8-bit integer operations from VALU instructions.
       This is also presented as a percent of the peak theoretical INT8 MFMA operations
       achievable on the specific accelerator.
-    Active CUs: Total number of active compute units (CUs) on the accelerator during
-      the kernel execution.
+    Active CUs (deprecated): Total number of active compute units (CUs) on the accelerator during
+      the kernel execution. (Deprecated - See CU Utilization instead)
     SALU Utilization: Indicates what percent of the kernel's duration the SALU was
       busy executing instructions. Computed as the ratio of the total number of cycles
       spent by the scheduler issuing SALU or SMEM instructions over the total CU cycles.
@@ -321,3 +326,7 @@ Panel Config:
       of all L1I requests.
     L1I Fetch Latency: The average number of cycles spent to fetch instructions to
       a CU.
+    CU Utilization: The percent of total SIMD cycles in the kernel
+      where any SIMD on a CU was actively doing any work, summed
+      over all CUs. Low values (less than 100%) indicate that the accelerator was
+      not fully saturated by the kernel, or a potential load-imbalance issue.
