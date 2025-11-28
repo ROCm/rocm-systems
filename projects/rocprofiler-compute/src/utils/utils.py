@@ -1267,64 +1267,6 @@ def gen_sysinfo(
     df.to_csv(workload_dir + "/" + "sysinfo.csv", index=False)
 
 
-def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
-    from utils import specs
-
-    rocm_ver = int(mspec.rocm_version[:1])
-
-    target_binary: dict[str, Any] = {
-        "rocm_ver": rocm_ver,
-        "distro": "override",
-        "path": None,
-    }
-
-    # Create distro ID list based off of ID (a string, containing a single distro)
-    # and ID_LIKE (a string, listing at least one distro, separated by a single space)
-    # from the system /etc/os-release file
-    os_release = Path("/etc/os-release").read_text()
-    id_list = specs.search(r'^ID_LIKE="?(.*?)"?$', os_release) or ""
-    id = specs.search(r'^ID="?(.*?)"?$', os_release) or ""
-    id_list = id_list.split() + [id]
-
-    if "ROOFLINE_BIN" in os.environ.keys():
-        rooflineBinary = os.environ["ROOFLINE_BIN"]
-        if Path(rooflineBinary).exists():
-            console_warning(
-                "roofline",
-                f"Detected user-supplied binary --> ROOFLINE_BIN = {rooflineBinary}\n",
-            )
-            # distro stays marked as override and path value is substituted in
-            target_binary["path"] = rooflineBinary
-            return target_binary
-        else:
-            console_error(
-                "roofline",
-                "user-supplied path to binary not accessible --> "
-                f"ROOFLINE_BIN = {rooflineBinary}\n",
-            )
-
-    # check that the system OS is based off of one of the following distributions
-    elif "azurelinux" in id_list:
-        distro = "azurelinux"
-
-    elif "debian" in id_list:
-        distro = "22.04"
-
-    elif ("fedora" in id_list) or ("tencentos" in id_list):
-        distro = "platform:el8"
-
-    elif "suse" in id_list:
-        distro = "15.6"
-
-    else:
-        console_error(
-            "roofline", "Cannot find a valid binary for your operating system"
-        )
-
-    # distro gets assigned, to follow default roofline bin location and nomenclature
-    target_binary["distro"] = distro
-    return target_binary
-
 def get_submodules(package_name: str) -> list[str]:
     """List all submodules for a target package"""
     import importlib
