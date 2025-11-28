@@ -32,10 +32,8 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 import pandas as pd
