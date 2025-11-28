@@ -421,7 +421,8 @@ hipError_t StatCO::registerStatFunction(const void* hostFunction, Function* func
   amd::ScopedLock lock(sclock_);
 
   if (functions_.find(hostFunction) != functions_.end()) {
-    DevLogPrintfError("hostFunctionPtr: 0x%x already exists", hostFunction);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
+             "hostFunctionPtr: 0x%x already exists", hostFunction);
     delete func;
   } else {
     functions_.insert(std::make_pair(hostFunction, func));

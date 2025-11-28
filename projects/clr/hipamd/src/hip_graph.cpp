@@ -891,6 +891,12 @@ hipError_t capturehipMemsetAsync(hipStream_t& stream, void*& dst, int& value, si
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;
   }
+
+  // No work should be done
+  if (sizeBytes == 0) {
+    return hipSuccess;
+  }
+
   hipMemsetParams memsetParams = {0};
   memsetParams.dst = dst;
   memsetParams.value = value;

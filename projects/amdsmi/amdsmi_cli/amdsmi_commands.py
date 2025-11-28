@@ -721,6 +721,26 @@ class AMDSMICommands():
                     shutdown_temp_vram_limit = "N/A"
                     logging.debug("Failed to get vram temperature shutdown metrics for gpu %s | %s", gpu_id, e.get_error_info())
 
+                # PTL
+                try:
+                    ptl_state = amdsmi_interface.amdsmi_get_gpu_ptl_state(args.gpu)
+                    ptl_state = "Enabled" if ptl_state else "Disabled"
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    ptl_state = "N/A"
+                    logging.debug("Failed to get PTL state for gpu %s | %s", gpu_id, e.get_error_info())
+
+                try:
+                    ptl_format1, ptl_format2 = amdsmi_interface.amdsmi_get_gpu_ptl_formats(args.gpu)
+                    fmt1_name = amdsmi_interface.amdsmi_wrapper.amdsmi_ptl_data_format_t__enumvalues.get(ptl_format1)
+                    fmt2_name = amdsmi_interface.amdsmi_wrapper.amdsmi_ptl_data_format_t__enumvalues.get(ptl_format2)
+
+                    fmt1_short = fmt1_name.replace("AMDSMI_PTL_DATA_FORMAT_", "") if fmt1_name else "UNKNOWN"
+                    fmt2_short = fmt2_name.replace("AMDSMI_PTL_DATA_FORMAT_", "") if fmt2_name else "UNKNOWN"
+
+                    ptl_format = f"{fmt1_short},{fmt2_short}"
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    ptl_format = "N/A"
+                    logging.debug("Failed to get PTL state for gpu %s | %s", gpu_id, e.get_error_info())
 
                 # Assign units
                 power_unit = 'W'
@@ -773,6 +793,11 @@ class AMDSMICommands():
                 limit_info['shutdown_edge_temperature'] = shutdown_temp_edge_limit
                 limit_info['shutdown_hotspot_temperature'] = shutdown_temp_hotspot_limit
                 limit_info['shutdown_vram_temperature'] = shutdown_temp_vram_limit
+
+                # PTL
+                limit_info['ptl_state'] = ptl_state
+                limit_info['ptl_format'] = ptl_format
+
                 static_dict['limit'] = limit_info
         if args.driver:
             driver_info_dict = {"name" : "N/A",
@@ -4499,7 +4524,7 @@ class AMDSMICommands():
     def set_gpu(self, args, multiple_devices=False, gpu=None, fan=None, perf_level=None,
                   profile=None, perf_determinism=None, compute_partition=None,
                   memory_partition=None, power_cap=None, soc_pstate=None, xgmi_plpd = None,
-                  process_isolation=None, clk_limit=None, clk_level=None):
+                  process_isolation=None, clk_limit=None, clk_level=None, ptl_status=None, ptl_format=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -4516,6 +4541,8 @@ class AMDSMICommands():
             soc_pstate (int, optional): Value override for args.soc_pstate. Defaults to None.
             xgmi_plpd (int, optional): Value override for args.xgmi_plpd. Defaults to None.
             process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
+            ptl_status (int, optional): Value override for args.ptl_status. Defaults to None.
+            ptl_format(string, optional): Value override for args.ptl_format. Defaults to None.
         Raises:
             ValueError: Value error if no gpu value is provided
             IndexError: Index error if gpu list is empty
@@ -4550,6 +4577,10 @@ class AMDSMICommands():
             args.clk_limit = clk_limit
         if clk_level:
             args.clk_level = clk_level
+        if ptl_status:
+            args.ptl_status = ptl_status
+        if ptl_format:
+            args.ptl_format = ptl_format
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -4579,6 +4610,8 @@ class AMDSMICommands():
                         args.xgmi_plpd is not None,
                         args.clk_level is not None,
                         args.clk_limit is not None,
+                        args.ptl_status is not None,
+                        args.ptl_format is not None,
                         args.process_isolation is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
@@ -4898,6 +4931,55 @@ class AMDSMICommands():
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
+            if isinstance(args.ptl_status, int):
+                status_string = "Enabled" if args.ptl_status else "Disabled"
+                result = f"Requested PTL status to {status_string}" # This should not print out
+                try:
+                    current_state = amdsmi_interface.amdsmi_get_gpu_ptl_state(args.gpu)
+                    if current_state == args.ptl_status:
+                        result = f"PTL state is already {status_string}"
+                    else:
+                        amdsmi_interface.amdsmi_set_gpu_ptl_state(args.gpu, args.ptl_status)
+                        result = f"Successfully set PTL state to {status_string}"
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Command requires elevation') from e
+                    self.logger.store_output(args.gpu, 'ptlstatus', f"[{e.get_error_info(detailed=False)}] Unable to set ptl status to {args.ptl_status}")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+                self.logger.store_output(args.gpu, 'ptlstatus', result)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+            if isinstance(args.ptl_format, tuple):
+                requested_fmt1_enum, requested_fmt2_enum = args.ptl_format
+                requested_str = f"{requested_fmt1_enum.name},{requested_fmt2_enum.name}"
+
+                result = f"Requested PTL status to {requested_str}" # This should not print out
+                try:
+                    # Get current formats as ints
+                    cur1_code, cur2_code = amdsmi_interface.amdsmi_get_gpu_ptl_formats(args.gpu)
+                    cur1_enum = amdsmi_interface.AmdSmiPtlData(cur1_code)
+                    cur2_enum = amdsmi_interface.AmdSmiPtlData(cur2_code)
+                    current_str = f"{cur1_enum.name},{cur2_enum.name}"
+                    if (cur1_enum, cur2_enum) == (requested_fmt1_enum, requested_fmt2_enum):
+                        result = f"PTL format is already {current_str}"
+                    else:
+                        amdsmi_interface.amdsmi_set_gpu_ptl_formats(args.gpu, requested_fmt1_enum, requested_fmt2_enum)
+                        result = f"Successfully set PTL format to {requested_str}"
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Command requires elevation') from e
+                    self.logger.store_output(args.gpu, 'ptlformat', f"[{e.get_error_info(detailed=False)}] Unable to set PTL format to {requested_str}")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+                self.logger.store_output(args.gpu, 'ptlformat', result)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
         # Universal args
         if isinstance(args.power_cap, tuple):
             pwr_type = args.power_cap.pwr_type
@@ -5053,7 +5135,7 @@ class AMDSMICommands():
                   cpu_pwr_eff_mode=None, cpu_gmi3_link_width=None, cpu_pcie_link_rate=None,
                   cpu_df_pstate_range=None, cpu_enable_apb=None, cpu_disable_apb=None,
                   soc_boost_limit=None, core=None, core_boost_limit=None, soc_pstate=None, xgmi_plpd=None,
-                  process_isolation=None, clk_limit=None, clk_level=None):
+                  process_isolation=None, clk_limit=None, clk_level=None, ptl_status=None, ptl_format=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -5105,7 +5187,7 @@ class AMDSMICommands():
         gpu_args_enabled = False
         gpu_attributes = ["fan", "perf_level", "profile", "perf_determinism", "compute_partition",
                           "memory_partition", "power_cap", "soc_pstate", "xgmi_plpd",
-                          "process_isolation", "clk_limit", "clk_level"]
+                          "process_isolation", "clk_limit", "clk_level", "ptl_status", "ptl_format"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr) is not None:
@@ -5150,6 +5232,8 @@ class AMDSMICommands():
                             args.xgmi_plpd is not None,
                             args.clk_limit is not None,
                             args.clk_level is not None,
+                            args.ptl_status is not None,
+                            args.ptl_format is not None,
                             args.process_isolation is not None
                             ])
             except AttributeError:
@@ -5232,7 +5316,7 @@ class AMDSMICommands():
                 self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                                 profile, perf_determinism, compute_partition,
                                 memory_partition, power_cap, soc_pstate, xgmi_plpd,
-                                process_isolation, clk_limit, clk_level)
+                                process_isolation, clk_limit, clk_level, ptl_status, ptl_format)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None and args.core == None:
                 raise ValueError('No CPU or CORE provided, specific target(s) are needed')
@@ -5252,7 +5336,7 @@ class AMDSMICommands():
             self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                             profile, perf_determinism, compute_partition,
                             memory_partition, power_cap, soc_pstate, xgmi_plpd,
-                            process_isolation, clk_limit, clk_level)
+                            process_isolation, clk_limit, clk_level, ptl_status, ptl_format)
 
 
     def reset(self, args, multiple_devices=False, gpu=None, gpureset=None,

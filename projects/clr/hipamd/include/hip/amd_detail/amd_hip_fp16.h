@@ -1021,10 +1021,13 @@ inline __device__ __half2 h2rsqrt(__half2 x) { return __ocml_rsqrt_2f16(x); }
 inline __device__ __half2 h2sqrt(__half2 x) {
   return __half2{__builtin_elementwise_sqrt(static_cast<__half2_raw>(x).data)};
 }
+
 inline __device__ __half2 __hisinf2(__half2 x) {
-  auto r = __ocml_isinf_2f16(x);
-  return __half2{_Float16_2{static_cast<_Float16>(r.x), static_cast<_Float16>(r.y)}};
+  return __half2{
+      _Float16_2{static_cast<_Float16>(__builtin_isinf(static_cast<__half2_raw>(x).data.x)),
+                 static_cast<_Float16>(__builtin_isinf(static_cast<__half2_raw>(x).data.y))}};
 }
+
 inline __HOST_DEVICE__ __half2 __hisnan2(__half2 x) {
   return __half2{_Float16_2{static_cast<_Float16>(__hisnan(x.x) ? 1.0f : 0.0f),
                             static_cast<_Float16>(__hisnan(x.y) ? 1.0f : 0.0f)}};
