@@ -43,8 +43,8 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o out --output-format rocpd json
         --runtime-trace --kernel-rename --output-config --pmc SQ_WAVES --
-        $<TARGET_FILE:reproducible-dispatch-count> 500 2
-    DEPENDS reproducible-dispatch-count
+        $<TARGET_FILE:transpose> 1 500 10
+    DEPENDS transpose
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     PRELOAD "${PRELOAD_ENV}"
@@ -57,8 +57,8 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc -o out_mp_%rank%
         --output-format rocpd json --runtime-trace --kernel-rename --output-config --pmc
-        SQ_WAVES -- $<TARGET_FILE:reproducible-dispatch-count> 200 1
-    DEPENDS reproducible-dispatch-count
+        SQ_WAVES -- $<TARGET_FILE:transpose> 1 200 10
+    DEPENDS transpose
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     PRELOAD "${PRELOAD_ENV}"
@@ -73,8 +73,8 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o out2 --output-format rocpd
         --runtime-trace --kernel-rename --pmc SQ_WAVES --
-        $<TARGET_FILE:reproducible-dispatch-count> 500 2
-    DEPENDS reproducible-dispatch-count
+        $<TARGET_FILE:transpose> 1 500 2
+    DEPENDS transpose
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
