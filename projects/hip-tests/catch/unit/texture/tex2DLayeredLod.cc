@@ -161,7 +161,7 @@ TEMPLATE_TEST_CASE("Unit_tex2DLayeredLod_Positive_ReadModeNormalizedFloat", "", 
       y = GetCoordinate(y, params.NumItersY(), params.Height(), params.num_subdivisions,
                         params.tex_desc.normalizedCoords);
       auto ref_val = fixture.tex_h.Tex2DLayered(x, y, layer, params.tex_desc);
-      if (!fixture.Verify(fixture.out_alloc_h[i], ref_val) {
+      if (!fixture.Verify(fixture.out_alloc_h[i], ref_val)) {
         INFO("Layer: " << layer);
         INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
         INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
