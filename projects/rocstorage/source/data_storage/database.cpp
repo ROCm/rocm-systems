@@ -24,7 +24,6 @@
 
 #include "directory.hpp"
 
-#include <iostream>
 #include <regex>
 #include <string>
 
@@ -61,7 +60,7 @@ void create_directory_for_database_file(const std::string &db_file) {
     rocstorage::common::makedir(_db_dirname);
   }
 }
-
+#if !defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
 std::string process_schema_template(std::string_view schema_content,
                                     const std::string &upid) {
   std::string query = std::string(schema_content);
@@ -76,6 +75,7 @@ std::string process_schema_template(std::string_view schema_content,
 
   return query;
 }
+#endif
 
 #if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                          \
     USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
@@ -84,12 +84,12 @@ void load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t,
                     const rocpd_sql_schema_jinja_variables_t *, const char *,
                     const char *schema_content, void *user_data) {
   if (user_data == nullptr || schema_content == nullptr) {
-    std::cerr << "Invalid user data or schema content pointer" << std::endl;
+    spdlog::error("Invalid user data or schema content pointer");
     return;
   }
   auto *query = static_cast<std::string *>(user_data);
   if (query == nullptr) {
-    std::cerr << "Invalid query pointer" << std::endl;
+    spdlog::error("Invalid query pointer");
     return;
   }
   *query = std::string(schema_content);
@@ -109,8 +109,8 @@ std::string get_schema_query(rocpd_sql_schema_kind_t schema_kind,
                                       ROCPD_SQL_OPTIONS_NONE, &info,
                                       load_schema_cb, nullptr, 0, &query);
   if (status != ROCPD_STATUS_SUCCESS) {
-    std::cerr << "Unable to load rocpd schema. Error code: " << status
-              << std::endl;
+    spdlog::error("Unable to load rocpd schema (error code: {})",
+                  static_cast<int>(status));
   }
   return query;
 #else
@@ -148,8 +148,8 @@ namespace data_storage {
 database::database(std::string db_path, std::string uuid)
     : m_db_path{std::move(db_path)}, m_uuid{std::move(uuid)} {
   create_directory_for_database_file(m_db_path);
-  std::cout << "<rocstorage> db uuid: " << m_uuid << ", path: " << m_db_path
-            << std::endl;
+  spdlog::info("rocstorage database initialized (uuid: {}, path: {})", m_uuid,
+               m_db_path);
 
   validate_sqlite3_result(sqlite3_open(":memory:", &m_sqlite3_inmemory), "",
                           "database open failed!");
@@ -173,8 +173,8 @@ void database::initialize_schema() {
     const std::string query = get_schema_query(schema_kind, m_uuid);
 
     if (query.empty()) {
-      std::cerr << "Failed to get schema query for schema kind: " << schema_kind
-                << std::endl;
+      spdlog::error("Failed to get schema query for schema kind: {}",
+                    static_cast<int>(schema_kind));
       continue;
     }
 

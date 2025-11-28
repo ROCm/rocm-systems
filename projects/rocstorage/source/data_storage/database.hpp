@@ -24,6 +24,7 @@
 
 #include "traits.hpp"
 
+#include <spdlog/spdlog.h>
 #include <sqlite3.h>
 
 #include <memory>
@@ -121,6 +122,7 @@ private:
     ss << " [Sqlite3 error: " << error_message;
     ss << " (Extended error message: " << sqlite3_errmsg(m_sqlite3_inmemory)
        << ")]";
+    spdlog::error("{}", ss.str());
     throw std::runtime_error(ss.str());
   }
 

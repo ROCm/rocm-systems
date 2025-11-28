@@ -26,7 +26,8 @@
 #include "data_storage/insert_statements.hpp"
 #include "data_storage/table_insert_query.hpp"
 
-#include <iostream>
+#include <spdlog/spdlog.h>
+
 #include <stdexcept>
 #include <unordered_map>
 
@@ -178,7 +179,7 @@ struct writer::impl {
                     std::optional<size_t> thread_id, const char *extdata) {
     if (m_data_identifiers->m_tracks.find(track_name) !=
         m_data_identifiers->m_tracks.end()) {
-      std::cerr << "Fail to add track " << track_name << " already exist!\n";
+      spdlog::error("Failed to add track '{}': already exists", track_name);
       return;
     }
 
@@ -213,10 +214,9 @@ struct writer::impl {
     auto it = m_data_identifiers->m_pmc_descriptor_map.find(
         {agent_id, pmc_descriptor});
     if (it == m_data_identifiers->m_pmc_descriptor_map.end()) {
-      std::cerr
-          << "Insert PMC event failed! Error: non-existing PMC description "
-          << "agent id: " << agent_id << ", pmc name: " << pmc_descriptor
-          << "!\n";
+      spdlog::error("Insert PMC event failed: non-existing PMC description "
+                    "(agent_id: {}, pmc_name: {})",
+                    agent_id, pmc_descriptor);
       return;
     }
 
@@ -234,9 +234,9 @@ struct writer::impl {
       uint32_t is_constant, uint32_t is_derived, const char *extdata) {
     auto it = m_data_identifiers->m_pmc_descriptor_map.find({agent_id, name});
     if (it != m_data_identifiers->m_pmc_descriptor_map.end()) {
-      std::cerr << "Insert PMC description failed! Error: PMC descriptor "
-                << "(name:" << name << ") (ID:" << agent_id
-                << ") already exist!\n";
+      spdlog::error("Insert PMC description failed: PMC descriptor already "
+                    "exists (name: {}, agent_id: {})",
+                    name, agent_id);
       return;
     }
     data_storage::queries::table_insert_query query_builder;
@@ -264,8 +264,7 @@ struct writer::impl {
                      const char *extdata) {
     auto it = m_data_identifiers->m_tracks.find(track);
     if (it == m_data_identifiers->m_tracks.end()) {
-      std::cerr << "Insert sample failed! Error: Unexisting track " << track
-                << "!\n";
+      spdlog::error("Insert sample failed: track '{}' does not exist", track);
       return;
     }
     auto track_info = it->second;
