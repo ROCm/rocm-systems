@@ -21,37 +21,56 @@
 # SOFTWARE.
 
 include_guard(DIRECTORY)
-include(FetchContent)
+
+option(
+    ROCSTORAGE_USE_SYSTEM_GTEST
+    "Use system-installed GoogleTest if available"
+    ON
+)
 
 set(GTEST_VERSION "1.14.0" CACHE STRING "Google Test version")
 
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v${GTEST_VERSION}
-    GIT_SHALLOW TRUE
-)
-
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-set(BUILD_GMOCK ON CACHE BOOL "" FORCE)
-set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-
-FetchContent_MakeAvailable(googletest)
-
-if(NOT TARGET GTest::gtest)
-    add_library(GTest::gtest ALIAS gtest)
+if(ROCSTORAGE_USE_SYSTEM_GTEST)
+    find_package(GTest ${GTEST_VERSION} QUIET)
 endif()
 
-if(NOT TARGET GTest::gtest_main)
-    add_library(GTest::gtest_main ALIAS gtest_main)
-endif()
+if(GTest_FOUND)
+    message(STATUS "Using system GoogleTest (version ${GTest_VERSION})")
+else()
+    message(
+        STATUS
+        "System GoogleTest not found, fetching version ${GTEST_VERSION}"
+    )
+    include(FetchContent)
 
-if(NOT TARGET GTest::gmock)
-    add_library(GTest::gmock ALIAS gmock)
-endif()
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v${GTEST_VERSION}
+        GIT_SHALLOW TRUE
+    )
 
-if(NOT TARGET GTest::gmock_main)
-    add_library(GTest::gmock_main ALIAS gmock_main)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    set(BUILD_GMOCK ON CACHE BOOL "" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+
+    FetchContent_MakeAvailable(googletest)
+
+    if(NOT TARGET GTest::gtest)
+        add_library(GTest::gtest ALIAS gtest)
+    endif()
+
+    if(NOT TARGET GTest::gtest_main)
+        add_library(GTest::gtest_main ALIAS gtest_main)
+    endif()
+
+    if(NOT TARGET GTest::gmock)
+        add_library(GTest::gmock ALIAS gmock)
+    endif()
+
+    if(NOT TARGET GTest::gmock_main)
+        add_library(GTest::gmock_main ALIAS gmock_main)
+    endif()
 endif()
 
 include(GoogleTest)

@@ -25,46 +25,15 @@
 
 #include <benchmark/benchmark.h>
 
-#include <sys/stat.h>
+#include "utility.hpp"
 
 #include <cstdio>
 #include <memory>
 #include <string>
-#include <vector>
 
 namespace {
 
-constexpr size_t k_1m = 1000000;
-constexpr size_t k_5m = 5000000;
-constexpr size_t k_10m = 10000000;
-
-std::string format_file_size(size_t _bytes) {
-  constexpr double k_kb = 1024.0;
-  constexpr double k_mb = k_kb * 1024.0;
-  constexpr double k_gb = k_mb * 1024.0;
-
-  char buffer[64];
-  if (_bytes >= k_gb) {
-    std::snprintf(buffer, sizeof(buffer), "%.2f GB", _bytes / k_gb);
-  } else if (_bytes >= k_mb) {
-    std::snprintf(buffer, sizeof(buffer), "%.2f MB", _bytes / k_mb);
-  } else if (_bytes >= k_kb) {
-    std::snprintf(buffer, sizeof(buffer), "%.2f KB", _bytes / k_kb);
-  } else {
-    std::snprintf(buffer, sizeof(buffer), "%zu B", _bytes);
-  }
-  return buffer;
-}
-
-size_t get_file_size(const std::string &_path) {
-  struct stat st;
-  if (stat(_path.c_str(), &st) == 0) {
-    return static_cast<size_t>(st.st_size);
-  }
-  return 0;
-}
-
-class writer_intensive_fixture : public benchmark::Fixture {
+class writer_fixture : public benchmark::Fixture {
 public:
   void SetUp(const benchmark::State &_state) override {
     m_database_path =
@@ -72,8 +41,7 @@ public:
     m_uuid = std::to_string(_state.thread_index());
     m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid);
     m_writer = m_storage->get_writer();
-
-    setup_base_schema();
+    setup_full_schema();
   }
 
   void TearDown(const benchmark::State &) override {
@@ -83,12 +51,12 @@ public:
   }
 
   std::string get_db_size_label() const {
-    size_t size = get_file_size(m_database_path);
-    return "DB: " + format_file_size(size);
+    size_t size = utility::get_file_size(m_database_path);
+    return "DB: " + utility::format_file_size(size);
   }
 
 protected:
-  void setup_base_schema() {
+  void setup_full_schema() {
     m_writer->insert_node_info(1, 0xDEADBEEF, "bench-machine", "Linux",
                                "benchmark-host", "6.0.0", "v1", "x86_64",
                                "local");
@@ -112,11 +80,6 @@ protected:
                                    "vectorAdd(float*,float*,float*,int)",
                                    0x1234, 256, 8, 65536, 0, 32, 64, 0);
 
-    m_category_id = m_writer->insert_string("hip_api");
-    m_kernel_name_id = m_writer->insert_string("vectorAdd");
-    m_memcpy_name_id = m_writer->insert_string("hipMemcpy");
-    m_region_name_id = m_writer->insert_string("user_region");
-
     m_writer->insert_pmc_description(1, 1000, m_gpu_agent, "GPU", 0x100, 0,
                                      "SQ_WAVES", "SQ_WAVES", "Wave count",
                                      "Number of waves", "SQ", "waves", "ACCUM",
@@ -130,7 +93,37 @@ protected:
                                      "Texture addresser busy", "TA", "cycles",
                                      "ACCUM", "TA", "", 0, 0);
 
-    m_writer->flush();
+    const char *smi_metrics[] = {
+        "gfx_busy",     "ucm_busy",     "mm_busy",         "temp",
+        "power",        "mem_usage",    "xgmi_link_width", "xgmi_link_speed",
+        "pcie_link_w",  "pcie_link_s",  "pcie_bw_acc",     "pcie_bw_inst",
+        "xgmi_read_0",  "xgmi_read_1",  "xgmi_read_2",     "xgmi_read_3",
+        "xgmi_read_4",  "xgmi_read_5",  "xgmi_read_6",     "xgmi_read_7",
+        "xgmi_write_0", "xgmi_write_1", "xgmi_write_2",    "xgmi_write_3",
+        "xgmi_write_4", "xgmi_write_5", "xgmi_write_6",    "xgmi_write_7",
+        "jpeg_0",       "jpeg_1",       "jpeg_2",          "jpeg_3",
+        "jpeg_4",       "jpeg_5",       "jpeg_6",          "jpeg_7"};
+    for (size_t i = 0; i < 36; ++i) {
+      m_writer->insert_pmc_description(1, 1000, m_gpu_agent, "GPU", 0x200 + i,
+                                       0, smi_metrics[i], smi_metrics[i],
+                                       "SMI metric", "AMD SMI metric", "SMI",
+                                       "value", "ABS", "SMI", "", 0, 0);
+    }
+
+    const char *cpu_metrics[] = {"freq", "usage",  "idle", "user",
+                                 "sys",  "iowait", "irq"};
+    for (size_t i = 0; i < 7; ++i) {
+      m_writer->insert_pmc_description(1, 1000, m_cpu_agent, "CPU", 0x300 + i,
+                                       0, cpu_metrics[i], cpu_metrics[i],
+                                       "CPU metric", "CPU frequency metric",
+                                       "CPU", "value", "ABS", "CPU", "", 0, 0);
+    }
+
+    m_writer->insert_track("gpu_kernel", 1, 1000, m_thread_pk);
+    m_writer->insert_track("gpu_memcpy", 1, 1000, m_thread_pk);
+    m_writer->insert_track("cpu_sample", 1, 1000, m_thread_pk);
+    m_writer->insert_track("amd_smi", 1, 1000, std::nullopt);
+    m_writer->insert_track("cpu_freq", 1, 1000, std::nullopt);
   }
 
   std::string m_database_path;
@@ -141,415 +134,289 @@ protected:
   size_t m_thread_pk = 0;
   size_t m_gpu_agent = 0;
   size_t m_cpu_agent = 0;
-  size_t m_category_id = 0;
-  size_t m_kernel_name_id = 0;
-  size_t m_memcpy_name_id = 0;
-  size_t m_region_name_id = 0;
 };
 
-// ============================================================================
-// Events with Args Benchmarks (1M events, varying args per event)
-// ============================================================================
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, events_with_args_1m_2args)
+BENCHMARK_DEFINE_F(writer_fixture, kernel_dispatch)
 (benchmark::State &_state) {
+  const auto count = static_cast<size_t>(_state.range(0));
+  size_t category_id = m_writer->insert_string("kernel_dispatch");
+
   for (auto _ : _state) {
-    for (size_t i = 0; i < k_1m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      m_writer->insert_args(event_id, 0, "void*", "dst", "0x7fff0000");
-      m_writer->insert_args(event_id, 1, "size_t", "size", "1024");
+    for (size_t i = 0; i < count; ++i) {
+      size_t name_id = m_writer->insert_string("vectorAdd");
+      auto event_id = m_writer->insert_event(category_id, i, 0, i);
+      m_writer->insert_kernel_dispatch(
+          1, 1000, m_thread_pk, m_gpu_agent, 1, i, 1, 1, i * 1000,
+          i * 1000 + 500, 0, 65536, 256, 1, 1, 1024, 1, 1, name_id, event_id);
     }
     m_writer->flush();
   }
-  _state.SetItemsProcessed(_state.iterations() * k_1m);
+  _state.SetItemsProcessed(_state.iterations() * count);
   _state.SetLabel(get_db_size_label());
 }
-BENCHMARK_REGISTER_F(writer_intensive_fixture, events_with_args_1m_2args)
+BENCHMARK_REGISTER_F(writer_fixture, kernel_dispatch)
     ->Unit(benchmark::kSecond)
-    ->Iterations(1);
+    ->Iterations(1)
+    ->Arg(100000)
+    ->Arg(500000);
 
-BENCHMARK_DEFINE_F(writer_intensive_fixture, events_with_args_1m_5args)
+BENCHMARK_DEFINE_F(writer_fixture, memory_copy)
 (benchmark::State &_state) {
+  const auto count = static_cast<size_t>(_state.range(0));
+  size_t category_id = m_writer->insert_string("memory_copy");
+  size_t name_id = m_writer->insert_string("hipMemcpy");
+
   for (auto _ : _state) {
-    for (size_t i = 0; i < k_1m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      m_writer->insert_args(event_id, 0, "void*", "dst", "0x7fff0000");
-      m_writer->insert_args(event_id, 1, "void*", "src", "0x7fff1000");
-      m_writer->insert_args(event_id, 2, "size_t", "size", "1024");
-      m_writer->insert_args(event_id, 3, "int", "kind", "1");
-      m_writer->insert_args(event_id, 4, "hipStream_t", "stream", "0x1234");
+    for (size_t i = 0; i < count; ++i) {
+      auto event_id = m_writer->insert_event(category_id, i, 0, i);
+      m_writer->insert_memory_copy(
+          1, 1000, m_thread_pk, i * 1000, i * 1000 + 200, name_id, m_gpu_agent,
+          0x7FFF00000000 + i * 4096, m_cpu_agent, 0x100000 + i * 4096, 4096, 1,
+          1, name_id, event_id);
     }
     m_writer->flush();
   }
-  _state.SetItemsProcessed(_state.iterations() * k_1m);
+  _state.SetItemsProcessed(_state.iterations() * count);
   _state.SetLabel(get_db_size_label());
 }
-BENCHMARK_REGISTER_F(writer_intensive_fixture, events_with_args_1m_5args)
+BENCHMARK_REGISTER_F(writer_fixture, memory_copy)
     ->Unit(benchmark::kSecond)
-    ->Iterations(1);
+    ->Iterations(1)
+    ->Arg(100000)
+    ->Arg(500000);
 
-BENCHMARK_DEFINE_F(writer_intensive_fixture, events_with_args_1m_10args)
+BENCHMARK_DEFINE_F(writer_fixture, memory_alloc)
 (benchmark::State &_state) {
+  const auto count = static_cast<size_t>(_state.range(0));
+  size_t category_id = m_writer->insert_string("memory_alloc");
+
   for (auto _ : _state) {
-    for (size_t i = 0; i < k_1m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      for (size_t arg = 0; arg < 10; ++arg) {
-        m_writer->insert_args(event_id, arg, "int", "arg", "42");
+    for (size_t i = 0; i < count; ++i) {
+      auto event_id = m_writer->insert_event(category_id, i, 0, i);
+      m_writer->insert_memory_alloc(
+          1, 1000, m_thread_pk, m_gpu_agent, "ALLOC", "REAL", i * 1000,
+          i * 1000 + 100, 0x7FFF00000000 + i * 4096, 4096, 1, 1, event_id);
+    }
+    m_writer->flush();
+  }
+  _state.SetItemsProcessed(_state.iterations() * count);
+  _state.SetLabel(get_db_size_label());
+}
+BENCHMARK_REGISTER_F(writer_fixture, memory_alloc)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    ->Arg(100000)
+    ->Arg(500000);
+
+BENCHMARK_DEFINE_F(writer_fixture, region_variable_args)
+(benchmark::State &_state) {
+  const auto count = static_cast<size_t>(_state.range(0));
+  const char *arg_types[] = {"int",    "void*",  "size_t",   "float",
+                             "double", "char*",  "uint64_t", "int32_t",
+                             "bool",   "uint8_t"};
+  const char *arg_names[] = {"arg0", "arg1", "arg2", "arg3", "arg4",
+                             "arg5", "arg6", "arg7", "arg8", "arg9"};
+  const char *arg_values[] = {"42",    "0x7fff0000", "4096", "3.14", "2.718",
+                              "hello", "12345",      "-1",   "true", "255"};
+
+  for (auto _ : _state) {
+    for (size_t i = 0; i < count; ++i) {
+      size_t name_id = m_writer->insert_string("region_name");
+      size_t category_id = m_writer->insert_string("hip_api");
+      auto event_id = m_writer->insert_event(category_id, i, 0, i);
+      size_t num_args = i % 11;
+      for (size_t arg = 0; arg < num_args; ++arg) {
+        m_writer->insert_args(event_id, arg, arg_types[arg], arg_names[arg],
+                              arg_values[arg]);
+      }
+      m_writer->insert_region(1, 1000, m_thread_pk, i * 500, i * 500 + 100,
+                              name_id, event_id);
+    }
+    m_writer->flush();
+  }
+  _state.SetItemsProcessed(_state.iterations() * count);
+  _state.SetLabel(get_db_size_label());
+}
+BENCHMARK_REGISTER_F(writer_fixture, region_variable_args)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    ->Arg(100000)
+    ->Arg(500000);
+
+BENCHMARK_DEFINE_F(writer_fixture, backtrace_region)
+(benchmark::State &_state) {
+  const auto count = static_cast<size_t>(_state.range(0));
+
+  for (auto _ : _state) {
+    for (size_t i = 0; i < count; ++i) {
+      size_t name_id = m_writer->insert_string("backtrace_region");
+      size_t category_id = m_writer->insert_string("backtrace");
+      auto event_id = m_writer->insert_event(category_id, i, 0, i);
+      m_writer->insert_region(1, 1000, m_thread_pk, i * 500, i * 500 + 100,
+                              name_id, event_id);
+      m_writer->insert_sample("cpu_sample", i * 500, event_id);
+    }
+    m_writer->flush();
+  }
+  _state.SetItemsProcessed(_state.iterations() * count);
+  _state.SetLabel(get_db_size_label());
+}
+BENCHMARK_REGISTER_F(writer_fixture, backtrace_region)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    ->Arg(100000)
+    ->Arg(500000);
+
+BENCHMARK_DEFINE_F(writer_fixture, in_time_sample)
+(benchmark::State &_state) {
+  const auto count = static_cast<size_t>(_state.range(0));
+
+  for (auto _ : _state) {
+    for (size_t i = 0; i < count; ++i) {
+      size_t track_name_id = m_writer->insert_string("in_time_track");
+      auto event_id = m_writer->insert_event(track_name_id, i, 0, i);
+      m_writer->insert_sample("cpu_sample", i * 100, event_id);
+    }
+    m_writer->flush();
+  }
+  _state.SetItemsProcessed(_state.iterations() * count);
+  _state.SetLabel(get_db_size_label());
+}
+BENCHMARK_REGISTER_F(writer_fixture, in_time_sample)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    ->Arg(100000)
+    ->Arg(500000);
+
+BENCHMARK_DEFINE_F(writer_fixture, pmc_event_with_sample)
+(benchmark::State &_state) {
+  const auto count = static_cast<size_t>(_state.range(0));
+  size_t category_id = m_writer->insert_string("pmc_event");
+
+  for (auto _ : _state) {
+    for (size_t i = 0; i < count; ++i) {
+      auto event_id = m_writer->insert_event(category_id, i, 0, i);
+      m_writer->insert_sample("gpu_kernel", i * 1000, event_id);
+      m_writer->insert_pmc_event(event_id, m_gpu_agent, "SQ_WAVES",
+                                 static_cast<double>(i * 100));
+    }
+    m_writer->flush();
+  }
+  _state.SetItemsProcessed(_state.iterations() * count);
+  _state.SetLabel(get_db_size_label());
+}
+BENCHMARK_REGISTER_F(writer_fixture, pmc_event_with_sample)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    ->Arg(100000)
+    ->Arg(500000);
+
+BENCHMARK_DEFINE_F(writer_fixture, amd_smi_sample_min)
+(benchmark::State &_state) {
+  const auto count = static_cast<size_t>(_state.range(0));
+  size_t category_id = m_writer->insert_string("amd_smi");
+  const char *min_metrics[] = {"gfx_busy", "ucm_busy", "mm_busy",
+                               "temp",     "power",    "mem_usage"};
+  constexpr size_t min_metric_count = 6;
+
+  for (auto _ : _state) {
+    for (size_t i = 0; i < count; ++i) {
+      m_writer->insert_string("amd_smi_sample");
+      auto event_id = m_writer->insert_event(category_id, i, 0, i);
+      for (size_t m = 0; m < min_metric_count; ++m) {
+        m_writer->insert_pmc_event(event_id, m_gpu_agent, min_metrics[m],
+                                   static_cast<double>(i + m));
+        m_writer->insert_sample("amd_smi", i * 1000, event_id);
       }
     }
     m_writer->flush();
   }
-  _state.SetItemsProcessed(_state.iterations() * k_1m);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, events_with_args_1m_10args)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-// ============================================================================
-// Kernel Dispatch Benchmarks (1M, 5M, 10M)
-// ============================================================================
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, kernel_dispatches_1m)
-(benchmark::State &_state) {
-  for (auto _ : _state) {
-    for (size_t i = 0; i < k_1m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 500;
-      m_writer->insert_kernel_dispatch(1, 1000, m_thread_pk, m_gpu_agent, 1, i,
-                                       1, 1, start, end, 0, 65536, 256, 1, 1,
-                                       1024, 1, 1, m_kernel_name_id, event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * k_1m);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, kernel_dispatches_1m)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, kernel_dispatches_5m)
-(benchmark::State &_state) {
-  for (auto _ : _state) {
-    for (size_t i = 0; i < k_5m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 500;
-      m_writer->insert_kernel_dispatch(1, 1000, m_thread_pk, m_gpu_agent, 1, i,
-                                       1, 1, start, end, 0, 65536, 256, 1, 1,
-                                       1024, 1, 1, m_kernel_name_id, event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * k_5m);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, kernel_dispatches_5m)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, kernel_dispatches_10m)
-(benchmark::State &_state) {
-  for (auto _ : _state) {
-    for (size_t i = 0; i < k_10m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 500;
-      m_writer->insert_kernel_dispatch(1, 1000, m_thread_pk, m_gpu_agent, 1, i,
-                                       1, 1, start, end, 0, 65536, 256, 1, 1,
-                                       1024, 1, 1, m_kernel_name_id, event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * k_10m);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, kernel_dispatches_10m)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-// ============================================================================
-// Region Benchmarks (1M, 5M, 10M)
-// ============================================================================
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, regions_1m)
-(benchmark::State &_state) {
-  for (auto _ : _state) {
-    for (size_t i = 0; i < k_1m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 500;
-      m_writer->insert_region(1, 1000, m_thread_pk, start, end,
-                              m_region_name_id, event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * k_1m);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, regions_1m)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, regions_5m)
-(benchmark::State &_state) {
-  for (auto _ : _state) {
-    for (size_t i = 0; i < k_5m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 500;
-      m_writer->insert_region(1, 1000, m_thread_pk, start, end,
-                              m_region_name_id, event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * k_5m);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, regions_5m)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, regions_10m)
-(benchmark::State &_state) {
-  for (auto _ : _state) {
-    for (size_t i = 0; i < k_10m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 500;
-      m_writer->insert_region(1, 1000, m_thread_pk, start, end,
-                              m_region_name_id, event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * k_10m);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, regions_10m)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-// ============================================================================
-// Memory Copy Benchmarks (1M, 5M)
-// ============================================================================
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, memory_copies_1m)
-(benchmark::State &_state) {
-  for (auto _ : _state) {
-    for (size_t i = 0; i < k_1m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 200;
-      m_writer->insert_memory_copy(
-          1, 1000, m_thread_pk, start, end, m_memcpy_name_id, m_gpu_agent,
-          0x7FFF00000000 + i * 4096, m_cpu_agent, 0x100000 + i * 4096, 4096, 1,
-          1, m_region_name_id, event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * k_1m);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, memory_copies_1m)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, memory_copies_5m)
-(benchmark::State &_state) {
-  for (auto _ : _state) {
-    for (size_t i = 0; i < k_5m; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 200;
-      m_writer->insert_memory_copy(
-          1, 1000, m_thread_pk, start, end, m_memcpy_name_id, m_gpu_agent,
-          0x7FFF00000000 + i * 4096, m_cpu_agent, 0x100000 + i * 4096, 4096, 1,
-          1, m_region_name_id, event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * k_5m);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, memory_copies_5m)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-// ============================================================================
-// Target DB Size Benchmark (mixed workload: kernels, memcpy, regions, PMC)
-// Args: total record count (~3.2M for 500MB, ~6.5M for 1GB, ~32M for 5GB)
-// Distribution: 40% kernel dispatch, 20% memory copy, 30% regions, 10% PMC
-// ============================================================================
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, mixed_target_size)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  const size_t kernel_count = count * 40 / 100;
-  const size_t memcpy_count = count * 20 / 100;
-  const size_t region_count = count * 30 / 100;
-  const size_t pmc_count = count * 10 / 100;
-  const char *pmc_names[] = {"SQ_WAVES", "SQ_INSTS", "TA_BUSY"};
-
-  for (auto _ : _state) {
-    for (size_t i = 0; i < kernel_count; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 500;
-      m_writer->insert_kernel_dispatch(1, 1000, m_thread_pk, m_gpu_agent, 1, i,
-                                       1, 1, start, end, 0, 65536, 256, 1, 1,
-                                       1024, 1, 1, m_kernel_name_id, event_id);
-      m_writer->insert_args(event_id, 0, "void*", "ptr", "0x7fff0000");
-      m_writer->insert_args(event_id, 1, "size_t", "n", "1048576");
-    }
-    for (size_t i = 0; i < memcpy_count; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 200;
-      m_writer->insert_memory_copy(
-          1, 1000, m_thread_pk, start, end, m_memcpy_name_id, m_gpu_agent,
-          0x2000000 + i * 4096, m_cpu_agent, 0x1000000 + i * 4096, 4096, 1, 1,
-          m_memcpy_name_id, event_id);
-    }
-    for (size_t i = 0; i < region_count; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 500;
-      size_t end = start + 100;
-      m_writer->insert_region(1, 1000, m_thread_pk, start, end,
-                              m_region_name_id, event_id);
-      m_writer->insert_args(event_id, 0, "int", "iteration", "0");
-    }
-    for (size_t i = 0; i < pmc_count; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      m_writer->insert_pmc_event(event_id, m_gpu_agent, pmc_names[i % 3],
-                                 static_cast<double>(i * 1000 + 42));
-    }
-    m_writer->flush();
-  }
   _state.SetItemsProcessed(_state.iterations() * count);
   _state.SetLabel(get_db_size_label());
 }
-BENCHMARK_REGISTER_F(writer_intensive_fixture, mixed_target_size)
+BENCHMARK_REGISTER_F(writer_fixture, amd_smi_sample_min)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(3200000)
-    ->Arg(6500000)
-    ->Arg(32000000);
+    ->Arg(100000)
+    ->Arg(500000);
 
-// ============================================================================
-// Throughput benchmarks (items per second)
-// ============================================================================
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, throughput_events_only)
+BENCHMARK_DEFINE_F(writer_fixture, amd_smi_sample_max)
 (benchmark::State &_state) {
   const auto count = static_cast<size_t>(_state.range(0));
+  size_t category_id = m_writer->insert_string("amd_smi");
+
+  const char *base_metrics[] = {
+      "gfx_busy",     "ucm_busy",     "mm_busy",         "temp",
+      "power",        "mem_usage",    "xgmi_link_width", "xgmi_link_speed",
+      "pcie_link_w",  "pcie_link_s",  "pcie_bw_acc",     "pcie_bw_inst",
+      "xgmi_read_0",  "xgmi_read_1",  "xgmi_read_2",     "xgmi_read_3",
+      "xgmi_read_4",  "xgmi_read_5",  "xgmi_read_6",     "xgmi_read_7",
+      "xgmi_write_0", "xgmi_write_1", "xgmi_write_2",    "xgmi_write_3",
+      "xgmi_write_4", "xgmi_write_5", "xgmi_write_6",    "xgmi_write_7",
+      "jpeg_0",       "jpeg_1",       "jpeg_2",          "jpeg_3",
+      "jpeg_4",       "jpeg_5",       "jpeg_6",          "jpeg_7"};
+  constexpr size_t base_count = 36;
+  constexpr size_t max_n = 386;
+
   for (auto _ : _state) {
     for (size_t i = 0; i < count; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      benchmark::DoNotOptimize(event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, throughput_events_only)
-    ->Arg(100000)
-    ->Arg(500000)
-    ->Arg(1000000)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, throughput_kernel_dispatch)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      m_writer->insert_kernel_dispatch(1, 1000, m_thread_pk, m_gpu_agent, 1, i,
-                                       1, 1, i * 1000, i * 1000 + 500, 0, 65536,
-                                       256, 1, 1, 1024, 1, 1, m_kernel_name_id,
-                                       event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, throughput_kernel_dispatch)
-    ->Arg(100000)
-    ->Arg(500000)
-    ->Arg(1000000)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, throughput_regions)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      m_writer->insert_region(1, 1000, m_thread_pk, i * 1000, i * 1000 + 500,
-                              m_region_name_id, event_id);
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_intensive_fixture, throughput_regions)
-    ->Arg(100000)
-    ->Arg(500000)
-    ->Arg(1000000)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1);
-
-// ============================================================================
-// Realistic Workload Benchmark
-// ============================================================================
-
-BENCHMARK_DEFINE_F(writer_intensive_fixture, realistic_workload)
-(benchmark::State &_state) {
-  const auto total_events = static_cast<size_t>(_state.range(0));
-  const size_t region_count = total_events * 9967 / 10000;
-  const size_t kernel_count = total_events * 33 / 10000;
-
-  for (auto _ : _state) {
-    for (size_t i = 0; i < region_count; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 1000;
-      size_t end = start + 500;
-      m_writer->insert_region(1, 1000, m_thread_pk, start, end,
-                              m_region_name_id, event_id);
-      m_writer->insert_args(event_id, 0, "int", "level", "0");
-      m_writer->insert_args(event_id, 1, "const char*", "name", "region");
-      if (i % 2 == 0) {
-        m_writer->insert_args(event_id, 2, "size_t", "id", "12345");
+      m_writer->insert_string("amd_smi_sample");
+      auto event_id = m_writer->insert_event(category_id, i, 0, i);
+      for (size_t m = 0; m < max_n; ++m) {
+        const char *metric_name = base_metrics[m % base_count];
+        m_writer->insert_pmc_event(event_id, m_gpu_agent, metric_name,
+                                   static_cast<double>(i + m));
+        m_writer->insert_sample("amd_smi", i * 1000, event_id);
       }
     }
-    for (size_t i = 0; i < kernel_count; ++i) {
-      auto event_id = m_writer->insert_event(m_category_id, i, 0, i);
-      size_t start = i * 10000;
-      size_t end = start + 5000;
-      m_writer->insert_kernel_dispatch(1, 1000, m_thread_pk, m_gpu_agent, 1, i,
-                                       1, 1, start, end, 0, 65536, 256, 1, 1,
-                                       1024, 1, 1, m_kernel_name_id, event_id);
-      m_writer->insert_args(event_id, 0, "void*", "ptr", "0x7fff0000");
-      m_writer->insert_args(event_id, 1, "size_t", "n", "1048576");
-      m_writer->insert_args(event_id, 2, "int", "stream", "0");
+    m_writer->flush();
+  }
+  _state.SetItemsProcessed(_state.iterations() * count);
+  _state.SetLabel(get_db_size_label());
+}
+BENCHMARK_REGISTER_F(writer_fixture, amd_smi_sample_max)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    ->Arg(300 * 60)       // 300 samples per second for 1 minute
+    ->Arg(1000 * 60)      // 1000 samples per second for 1 minute
+    ->Arg(300 * 60 * 5)   // 300 samples per second for 5 minute
+    ->Arg(1000 * 60 * 5); // 1000 samples per second for 5 minute
+
+BENCHMARK_DEFINE_F(writer_fixture, cpu_freq)
+(benchmark::State &_state) {
+  const auto count = static_cast<size_t>(_state.range(0));
+  const auto cpu_core_count = static_cast<size_t>(_state.range(1));
+  size_t category_id = m_writer->insert_string("cpu_freq");
+  const size_t n = 7 + cpu_core_count * 7;
+  const char *cpu_metrics[] = {"freq", "usage",  "idle", "user",
+                               "sys",  "iowait", "irq"};
+
+  for (auto _ : _state) {
+    for (size_t i = 0; i < count; ++i) {
+      auto event_id = m_writer->insert_event(category_id, i, 0, i);
+      for (size_t m = 0; m < n; ++m) {
+        m_writer->insert_pmc_event(event_id, m_cpu_agent, cpu_metrics[m % 7],
+                                   static_cast<double>(i + m));
+        m_writer->insert_sample("cpu_freq", i * 100, event_id);
+      }
     }
     m_writer->flush();
   }
-  _state.SetItemsProcessed(_state.iterations() * total_events);
+  _state.SetItemsProcessed(_state.iterations() * count);
   _state.SetLabel(get_db_size_label());
 }
-BENCHMARK_REGISTER_F(writer_intensive_fixture, realistic_workload)
+BENCHMARK_REGISTER_F(writer_fixture, cpu_freq)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(2300000)   // ~1GB
-    ->Arg(4600000)   // ~2GB
-    ->Arg(9200000)   // ~4GB
-    ->Arg(18700000)  // ~8GB
-    ->Arg(46000000); // ~20GB
+    ->Args({300 * 60, 1})
+    ->Args({300 * 60, 4})
+    ->Args({300 * 60, 8})
+    ->Args({300 * 60, 16})
+    ->Args({300 * 60, 32})
+    ->Args({1000 * 60, 1})
+    ->Args({1000 * 60, 4})
+    ->Args({1000 * 60, 8})
+    ->Args({1000 * 60, 16})
+    ->Args({1000 * 60, 32});
+
 } // namespace

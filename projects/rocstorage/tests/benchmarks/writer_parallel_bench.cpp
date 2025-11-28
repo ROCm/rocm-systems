@@ -1,39 +1,38 @@
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include <benchmark/benchmark.h>
 #include <rocstorage/storage.hpp>
 #include <rocstorage/writer.hpp>
 
-#include <atomic>
+#include "utility.hpp"
+
 #include <cstdio>
-#include <iomanip>
 #include <memory>
-#include <sstream>
 #include <string>
-#include <sys/stat.h>
 #include <thread>
 #include <vector>
 
 namespace {
-
-std::string format_file_size(size_t _bytes) {
-  std::stringstream ss;
-  ss << std::fixed << std::setprecision(2);
-  if (_bytes < 1024 * 1024) {
-    ss << static_cast<double>(_bytes) / 1024.0 << " KB";
-  } else if (_bytes < 1024ULL * 1024 * 1024) {
-    ss << static_cast<double>(_bytes) / (1024.0 * 1024.0) << " MB";
-  } else {
-    ss << static_cast<double>(_bytes) / (1024.0 * 1024.0 * 1024.0) << " GB";
-  }
-  return ss.str();
-}
-
-size_t get_file_size(const std::string &_path) {
-  struct stat st;
-  if (stat(_path.c_str(), &st) == 0) {
-    return static_cast<size_t>(st.st_size);
-  }
-  return 0;
-}
 
 struct thread_context {
   std::string database_path;
@@ -53,7 +52,7 @@ struct thread_context {
 
     database_path =
         "benchmark_writer_parallel_" + std::to_string(_thread_id) + ".db";
-    std::string uuid = "parallel_" + std::to_string(_thread_id);
+    std::string uuid = std::to_string(_thread_id);
     storage = std::make_unique<rocm::storage>(database_path, uuid);
     writer = storage->get_writer();
 
@@ -92,7 +91,7 @@ struct thread_context {
     std::remove(database_path.c_str());
   }
 
-  size_t get_db_size() const { return get_file_size(database_path); }
+  size_t get_db_size() const { return utility::get_file_size(database_path); }
 };
 
 void run_realistic_workload(thread_context &_ctx, size_t _total_events) {
@@ -139,81 +138,16 @@ public:
   void TearDown(const benchmark::State &) override {}
 };
 
-BENCHMARK_DEFINE_F(parallel_writer_fixture, parallel_databases)
-(benchmark::State &_state) {
-  const auto num_threads = static_cast<size_t>(_state.range(0));
-  const auto events_per_thread = static_cast<size_t>(_state.range(1));
-
-  for (auto _ : _state) {
-    std::vector<thread_context> contexts(num_threads);
-    std::vector<std::thread> threads;
-    std::atomic<size_t> total_events{0};
-
-    for (size_t i = 0; i < num_threads; ++i) {
-      contexts[i].setup(i);
-    }
-
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    for (size_t i = 0; i < num_threads; ++i) {
-      threads.emplace_back([&contexts, i, events_per_thread, &total_events]() {
-        run_realistic_workload(contexts[i], events_per_thread);
-        total_events += events_per_thread;
-      });
-    }
-
-    for (auto &t : threads) {
-      t.join();
-    }
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        end_time - start_time)
-                        .count();
-
-    size_t total_db_size = 0;
-    for (size_t i = 0; i < num_threads; ++i) {
-      total_db_size += contexts[i].get_db_size();
-    }
-
-    for (size_t i = 0; i < num_threads; ++i) {
-      contexts[i].teardown();
-    }
-
-    _state.SetIterationTime(static_cast<double>(duration) / 1000.0);
-    _state.counters["total_events"] = static_cast<double>(total_events);
-    _state.counters["total_db_size_mb"] =
-        static_cast<double>(total_db_size) / (1024.0 * 1024.0);
-    _state.counters["threads"] = static_cast<double>(num_threads);
-  }
-
-  _state.SetItemsProcessed(_state.iterations() * num_threads *
-                           events_per_thread);
-}
-
-// Args: {num_threads, events_per_thread}
-// ~1.15M events ≈ 500MB, ~2.3M events ≈ 1GB, ~4.6M events ≈ 2GB
-BENCHMARK_REGISTER_F(parallel_writer_fixture, parallel_databases)
-    ->Unit(benchmark::kSecond)
-    ->UseManualTime()
-    ->Iterations(1)
-    ->Args({2, 1150000})  // 2 threads × 500MB each = 1GB total
-    ->Args({2, 2300000})  // 2 threads × 1GB each = 2GB total
-    ->Args({2, 4600000})  // 2 threads × 2GB each = 4GB total
-    ->Args({4, 1150000})  // 4 threads × 500MB each = 2GB total
-    ->Args({4, 2300000})  // 4 threads × 1GB each = 4GB total
-    ->Args({8, 1150000})  // 8 threads × 500MB each = 4GB total
-    ->Args({8, 2300000}); // 8 threads × 1GB each = 8GB total
-
 // ============================================================================
-// Scaling Benchmark - Same total work, varying thread count
+// Scaling Benchmark
+// All times should be similar, this will proof that there is no dependency
+// between threads
 // ============================================================================
 
 BENCHMARK_DEFINE_F(parallel_writer_fixture, scaling_test)
 (benchmark::State &_state) {
   const auto num_threads = static_cast<size_t>(_state.range(0));
-  constexpr size_t total_events = 4600000; // ~2GB total work
-  const size_t events_per_thread = total_events / num_threads;
+  constexpr size_t total_events = 2300000;
 
   for (auto _ : _state) {
     std::vector<thread_context> contexts(num_threads);
@@ -226,8 +160,8 @@ BENCHMARK_DEFINE_F(parallel_writer_fixture, scaling_test)
     auto start_time = std::chrono::high_resolution_clock::now();
 
     for (size_t i = 0; i < num_threads; ++i) {
-      threads.emplace_back([&contexts, i, events_per_thread]() {
-        run_realistic_workload(contexts[i], events_per_thread);
+      threads.emplace_back([&contexts, i, total_events]() {
+        run_realistic_workload(contexts[i], total_events);
       });
     }
 
@@ -252,8 +186,7 @@ BENCHMARK_DEFINE_F(parallel_writer_fixture, scaling_test)
     _state.SetIterationTime(static_cast<double>(duration) / 1000.0);
     _state.counters["total_db_size_mb"] =
         static_cast<double>(total_db_size) / (1024.0 * 1024.0);
-    _state.counters["events_per_thread"] =
-        static_cast<double>(events_per_thread);
+    _state.counters["total_events"] = static_cast<double>(total_events);
   }
 
   _state.SetItemsProcessed(_state.iterations() * total_events);
@@ -263,7 +196,7 @@ BENCHMARK_REGISTER_F(parallel_writer_fixture, scaling_test)
     ->Unit(benchmark::kSecond)
     ->UseManualTime()
     ->Iterations(1)
-    ->Arg(1) // baseline single-threaded
+    ->Arg(1)
     ->Arg(2)
     ->Arg(4)
     ->Arg(8)
