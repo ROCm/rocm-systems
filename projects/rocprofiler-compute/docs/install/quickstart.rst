@@ -121,14 +121,14 @@ Analysis is the process of examining profiling data to understand GPU kernel per
 Basic Analysis Command::
 ``rocprof-compute analyze -p <workloadsdirectory>``  
 Example::  
-``rocprof-compute analyze -p workloads/vcopy/MI300X_A1``
+``rocprof-compute analyze -p workloads/vcopy/MI200/``
 
 Explanation::
 - ``rocprof-compute analyze``: Starts analysis mode to process profiling results.
-- ``-p workloads/vcopy/MI300X_A1``: Path points to the workload directory:
+- ``-p workloads/vcopy/MI200``: Path points to the workload directory:
   - ``workloads/``: Root folder for profiling runs.
   - ``vcopy/``: The name user provided during profiling run.
-  - ``MI300X_A1``: Device-specific folder profiling auto-created.
+  - ``MI200``: Device-specific folder profiling auto-created.
 
 For more details on analysis options, refer to:  
 https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute/docs/how-to/analyze
@@ -137,17 +137,17 @@ Other Analysis Examples
 ------------------------
 
 Shows a list of metrics supported for analysis::  
-``$ rocprof-compute analyze -p workloads/vcopy/MI300X_A1 --list-available-metrics | more``
+``$ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-available-metrics | more``
 
 Show System speed-of-light (2) and roofline (4) analysis::  
-``$ rocprof-compute analyze -p workloads/vcopy/MI300X_A1 -b 2 4``
+``$ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 2 4``
 
 Show memory chart (3) analysis::  
-``$ rocprof-compute analyze -p workloads/vcopy/MI300X_A1 -b 3``
+``$ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3``
 
 Compare vcopy against vcopy_optimized (you made changes to app to optimize, recompiled)::  
 ``$ rocprof-compute profile –n vcopy_optimized -- ./vcopy_optimized -n 1048576 -b 256``  
-``$ rocprof-compute analyze –p workloads/vcopy/MI300X_A1 –p workloads/vcopy_optimized/MI300X_A1``
+``$ rocprof-compute analyze –p workloads/vcopy/MI200/ –p workloads/vcopy_optimized/MI200/``
 
 For More Detail and more Option Run::  
 ``rocprof-compute analyze --help``
