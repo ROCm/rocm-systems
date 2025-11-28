@@ -1,0 +1,314 @@
+name: ABI Compliance Check 
+
+on:
+  pull_request:
+    branches:
+      - amd-staging
+      - release/rocm-rel-*
+    paths:
+      - 'include/amd_smi/amdsmi.h'
+  push:
+    branches:
+      - amd-staging
+      - release/rocm-rel-*
+    paths:
+      - 'include/amd_smi/amdsmi.h'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  major_abi_check:
+    name: Major ABI Compliance Check
+    runs-on: AMD-ROCm-Internal-dev1
+    steps:
+      - name: Setup Environment
+        run: |
+          sudo rm -rf $GITHUB_WORKSPACE/* || true
+          sudo rm -rf $GITHUB_WORKSPACE/.[!.]* || true
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq perl build-essential git universal-ctags
+          git clone https://github.com/lvc/abi-compliance-checker.git
+          cd abi-compliance-checker
+          sudo make install
+          abi-compliance-checker --version
+
+      - name: Checkout current code (new version)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Fetch base branch for PR
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Fetching base branch: ${{ github.base_ref }}"
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+          git branch -a
+
+      - name: Prepare amdsmi.h files for comparison
+        id: prepare_files
+        run: |
+          echo "Preparing amdsmi.h files..."
+          echo "abi_exit_code=1" > $GITHUB_WORKSPACE/major_abi_status.txt
+
+          if [ -f include/amd_smi/amdsmi.h ]; then
+            cp include/amd_smi/amdsmi.h amdsmi_new.h
+            echo "Copied current amdsmi.h to amdsmi_new.h"
+          else
+            echo "::error::New amdsmi.h (include/amd_smi/amdsmi.h) not found in current checkout."
+            touch amdsmi_new.h
+            exit 0
+          fi
+
+          OLD_VERSION_REF=""
+          V1_NAME_SUFFIX=""
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            OLD_VERSION_REF="${{ github.base_ref }}"
+            V1_NAME_SUFFIX="base_${{ github.base_ref }}"
+            echo "Event is Pull Request. Old version source is base branch: ${OLD_VERSION_REF}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            if [[ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
+              OLD_VERSION_REF="${{ github.event.before }}"
+              V1_NAME_SUFFIX="before_$(echo ${{ github.event.before }} | cut -c1-7)"
+              echo "Event is Push. Old version source is commit before push: ${OLD_VERSION_REF}"
+            else
+              echo "Push event is for a new branch or forced push. Cannot determine 'old' version."
+              touch amdsmi_old.h
+              echo "Created dummy amdsmi_old.h. Assuming no ABI breakage as no baseline."
+              echo "abi_exit_code=0" > $GITHUB_WORKSPACE/major_abi_status.txt
+              echo "skip_check=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          else
+            echo "::warning::Unsupported event type: ${{ github.event_name }}. Cannot determine old version."
+            touch amdsmi_old.h
+            echo "abi_exit_code=0" > $GITHUB_WORKSPACE/major_abi_status.txt
+            echo "skip_check=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Fetching amdsmi.h from ref: $OLD_VERSION_REF (as amdsmi_old.h)"
+          git show $OLD_VERSION_REF:include/amd_smi/amdsmi.h > amdsmi_old.h 2>/dev/null
+          if [ $? -ne 0 ] || [ ! -s amdsmi_old.h ]; then
+            echo "::warning::Failed to fetch 'include/amd_smi/amdsmi.h' from ref '$OLD_VERSION_REF' or file is empty/missing."
+            echo "Proceeding with an empty amdsmi_old.h. This may result in all symbols reported as 'added'."
+            echo -n "" > amdsmi_old.h
+            if [ ! -s amdsmi_new.h ]; then
+                echo "abi_exit_code=0" > $GITHUB_WORKSPACE/major_abi_status.txt
+            fi
+          else
+            echo "Successfully fetched amdsmi.h from $OLD_VERSION_REF to amdsmi_old.h"
+          fi
+          echo "v1_name_suffix=${V1_NAME_SUFFIX}" >> $GITHUB_OUTPUT
+          echo "skip_check=false" >> $GITHUB_OUTPUT
+
+      - name: Run Major ABI Compliance Check
+        if: steps.prepare_files.outputs.skip_check == 'false'
+        run: |
+          V1_NAME_SUFFIX_CLEAN=$(echo "${{ steps.prepare_files.outputs.v1_name_suffix }}" | tr '/' '-')
+          V2_NAME_CLEAN=$(echo "${{ github.ref_name || github.head_ref }}" | tr '/' '-')
+
+          echo "Comparing $V1_NAME_SUFFIX_CLEAN (old) with $V2_NAME_CLEAN (new) for Major ABI Check"
+          abi-compliance-checker -lib amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 "$V1_NAME_SUFFIX_CLEAN" -v2 "$V2_NAME_CLEAN" -report-path major-abi-report.html && echo "abi_exit_code=0" > $GITHUB_WORKSPACE/major_abi_status.txt
+        continue-on-error: true
+
+      - name: Display ABI Check Logs (Major)
+        if: always() && steps.prepare_files.outputs.skip_check == 'false'
+        run: |
+          echo "Displaying Major ABI compliance check logs (if any)"
+          find logs -type f -name "*.txt" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No .txt logs found in logs/ directory."
+
+      - name: Label PR on Major ABI Breakage
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          source $GITHUB_WORKSPACE/major_abi_status.txt
+          if [ "$abi_exit_code" -ne 0 ]; then
+            echo "Major ABI check failed, adding 'MAJOR ABI BREAKAGE' label to PR #${{ github.event.pull_request.number }}"
+            gh pr edit ${{ github.event.pull_request.number }} --add-label "MAJOR ABI BREAKAGE"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Major ABI Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-abi-report
+          path: major-abi-report.html
+          if-no-files-found: ignore
+
+      - name: Report Major ABI Check Results
+        if: always()
+        run: |
+          echo "Checking Major ABI check exit code..."
+          source $GITHUB_WORKSPACE/major_abi_status.txt
+          echo "Major ABI check exit code: $abi_exit_code"
+          if [ "$abi_exit_code" -ne 0 ]; then
+            echo "::warning::⚠️ MAJOR ABI BREAKAGE FOUND ⚠️ CHECK \"Run Major ABI Compliance Check\" LOGS OR THE major-abi-report ARTIFACT FOR DETAILS."
+          else
+            echo "✅ Major ABI check succeeded."
+          fi
+
+  minor_abi_check:
+    name: Minor ABI Compliance Check
+    runs-on: AMD-ROCm-Internal-dev1
+    steps:
+      - name: Setup Environment
+        run: |
+          sudo rm -rf $GITHUB_WORKSPACE/* || true
+          sudo rm -rf $GITHUB_WORKSPACE/.[!.]* || true
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq perl build-essential git universal-ctags
+          git clone https://github.com/lvc/abi-compliance-checker.git
+          cd abi-compliance-checker
+          sudo make install
+          abi-compliance-checker --version
+
+      - name: Checkout current code (new version)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Fetch base branch for PR
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Fetching base branch: ${{ github.base_ref }}"
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+          git branch -a
+
+      - name: Prepare amdsmi.h files for comparison
+        id: prepare_files_minor
+        run: |
+          echo "Preparing amdsmi.h files for Minor check..."
+          echo "abi_exit_code=1" > $GITHUB_WORKSPACE/minor_abi_status.txt
+
+          if [ -f include/amd_smi/amdsmi.h ]; then
+            cp include/amd_smi/amdsmi.h amdsmi_new.h
+            echo "Copied current amdsmi.h to amdsmi_new.h for Minor check"
+          else
+            echo "::error::New amdsmi.h (include/amd_smi/amdsmi.h) not found in current checkout for Minor check."
+            touch amdsmi_new.h
+            exit 0
+          fi
+
+          OLD_VERSION_REF_MINOR=""
+          V1_NAME_SUFFIX_MINOR=""
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            OLD_VERSION_REF_MINOR="${{ github.base_ref }}"
+            V1_NAME_SUFFIX_MINOR="base_${{ github.base_ref }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            if [[ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
+              OLD_VERSION_REF_MINOR="${{ github.event.before }}"
+              V1_NAME_SUFFIX_MINOR="before_$(echo ${{ github.event.before }} | cut -c1-7)"
+            else
+              echo "Push event is for a new branch (Minor check). Assuming no ABI changes as no baseline."
+              touch amdsmi_old.h
+              echo "abi_exit_code=0" > $GITHUB_WORKSPACE/minor_abi_status.txt
+              echo "skip_check_minor=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          else
+            echo "::warning::Unsupported event type for Minor ABI check: ${{ github.event_name }}."
+            touch amdsmi_old.h
+            echo "abi_exit_code=0" > $GITHUB_WORKSPACE/minor_abi_status.txt
+            echo "skip_check_minor=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Fetching amdsmi.h from ref: $OLD_VERSION_REF_MINOR (as amdsmi_old.h) for Minor check"
+          git show $OLD_VERSION_REF_MINOR:include/amd_smi/amdsmi.h > amdsmi_old.h 2>/dev/null
+          if [ $? -ne 0 ] || [ ! -s amdsmi_old.h ]; then
+            echo "::warning::Failed to fetch 'include/amd_smi/amdsmi.h' from ref '$OLD_VERSION_REF_MINOR' or file is empty/missing for Minor check."
+            echo "Proceeding with an empty amdsmi_old.h for Minor check."
+            echo -n "" > amdsmi_old.h
+            if [ ! -s amdsmi_new.h ]; then
+                echo "abi_exit_code=0" > $GITHUB_WORKSPACE/minor_abi_status.txt
+            fi
+          else
+            echo "Successfully fetched amdsmi.h from $OLD_VERSION_REF_MINOR to amdsmi_old.h for Minor check"
+          fi
+          echo "v1_name_suffix_minor=${V1_NAME_SUFFIX_MINOR}" >> $GITHUB_OUTPUT
+          echo "skip_check_minor=false" >> $GITHUB_OUTPUT
+
+      - name: Run Minor ABI Compliance Check (Strict)
+        if: steps.prepare_files_minor.outputs.skip_check_minor == 'false'
+        run: |
+          V1_NAME_SUFFIX_CLEAN=$(echo "${{ steps.prepare_files_minor.outputs.v1_name_suffix_minor }}" | tr '/' '-')
+          V2_NAME_CLEAN=$(echo "${{ github.ref_name || github.head_ref }}" | tr '/' '-')
+          COMPARE_MSG="$V1_NAME_SUFFIX_CLEAN vs $V2_NAME_CLEAN"
+
+          echo "Comparing $COMPARE_MSG for Minor ABI Check (Strict)"
+          
+          abi-compliance-checker -lib amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 "$V1_NAME_SUFFIX_CLEAN" -v2 "$V2_NAME_CLEAN" -report-path minor-abi-report.html -strict || {
+            ACC_EXIT_CODE=$?
+            echo "abi-compliance-checker -strict failed with exit code $ACC_EXIT_CODE."
+            echo "abi_exit_code=$ACC_EXIT_CODE" > $GITHUB_WORKSPACE/minor_abi_status.txt
+          }
+
+          current_abi_status=$(cat $GITHUB_WORKSPACE/minor_abi_status.txt)
+          current_exit_code=${current_abi_status#*=}
+
+          if [ "$current_exit_code" -eq 0 ] && [ -f minor-abi-report.html ]; then
+            echo "ACC strict check passed. Parsing HTML report for any changes..."
+            CHANGED=0
+            if grep -q "Added Symbols.*[1-9]" minor-abi-report.html; then CHANGED=1; echo "::warning::STRICT ABI: Found added symbols"; fi
+            if grep -q "Removed Symbols.*[1-9]" minor-abi-report.html; then CHANGED=1; echo "::warning::STRICT ABI: Found removed symbols"; fi
+            if grep -q "Problems with.*Data Types.*[1-9]" minor-abi-report.html; then CHANGED=1; echo "::warning::STRICT ABI: Found problems with data types"; fi
+            if grep -q "Problems with.*Symbols.*[1-9]" minor-abi-report.html; then CHANGED=1; echo "::warning::STRICT ABI: Found problems with symbols"; fi
+            if grep -q "Problems with.*Constants.*[1-9]" minor-abi-report.html; then CHANGED=1; echo "::warning::STRICT ABI: Found problems with constants"; fi
+            
+            if [ "$CHANGED" -eq 1 ]; then
+              echo "::error::STRICT ABI CHECK FAILED: Found changes in ABI report comparing $COMPARE_MSG"
+              echo "abi_exit_code=1" > $GITHUB_WORKSPACE/minor_abi_status.txt
+            else
+              echo "No strict ABI changes found in HTML report."
+              echo "abi_exit_code=0" > $GITHUB_WORKSPACE/minor_abi_status.txt
+            fi
+          elif [ ! -f minor-abi-report.html ] && [ "$current_exit_code" -eq 0 ]; then
+            echo "::warning::Minor ABI report (minor-abi-report.html) not found, but ACC reported success. Assuming no changes."
+            echo "abi_exit_code=0" > $GITHUB_WORKSPACE/minor_abi_status.txt
+          elif [ "$current_exit_code" -ne 0 ]; then
+             echo "ACC strict check already indicated failure (exit code $current_exit_code). HTML parsing for further changes skipped or confirmed failure."
+          fi
+        continue-on-error: true
+
+      - name: Display ABI Check Logs (Minor)
+        if: always() && steps.prepare_files_minor.outputs.skip_check_minor == 'false'
+        run: |
+          echo "Displaying Minor ABI compliance check logs (if any)"
+          find logs -type f -name "*.txt" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No .txt logs found in logs/ directory."
+
+      - name: Label PR on Minor ABI Breakage
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          source $GITHUB_WORKSPACE/minor_abi_status.txt
+          if [ "$abi_exit_code" -ne 0 ]; then
+            echo "Minor ABI check failed, adding 'MINOR ABI BREAKAGE' label to PR #${{ github.event.pull_request.number }}"
+            gh pr edit ${{ github.event.pull_request.number }} --add-label "MINOR ABI BREAKAGE"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Minor ABI Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: minor-abi-report
+          path: minor-abi-report.html
+          if-no-files-found: ignore
+
+      - name: Report Minor ABI Check Results
+        if: always()
+        run: |
+          echo "Checking Minor ABI check exit code..."
+          source $GITHUB_WORKSPACE/minor_abi_status.txt
+          echo "Minor ABI check exit code: $abi_exit_code"
+          if [ "$abi_exit_code" -ne 0 ]; then
+            echo "::warning::⚠️ MINOR ABI CHANGES FOUND (STRICT CHECK) ⚠️ CHECK \"Run Minor ABI Compliance Check (Strict)\" LOGS OR THE minor-abi-report ARTIFACT FOR DETAILS."
+          else
+            echo "✅ Minor ABI check (Strict) succeeded or found no changes."
+          fi
