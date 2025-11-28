@@ -36,6 +36,7 @@ import yaml
 
 import config
 from roofline import Roofline
+from utils import benchmark
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.logger import (
     console_debug,
@@ -55,7 +56,6 @@ from utils.utils import (
     is_tcc_channel_counter,
     parse_sets_yaml,
 )
-from utils import benchmark
 
 
 class OmniSoC_Base:
