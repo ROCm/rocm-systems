@@ -53,6 +53,12 @@ SELECT
     value as Counter_Value
 FROM counters_collection
 """
+ROCPD_PMC_EVENT_TABLE_NAME_PREFIX = "rocpd_pmc_event_"
+TABLE_NAME_PREFIX_QUERY = (
+    "SELECT name FROM sqlite_master WHERE type='table' "
+    "AND name LIKE '{table_name_prefix}%'"
+)
+INSERT_QUERY = "INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
 
 
 def convert_db_to_csv(
@@ -120,3 +126,55 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(len(df))
     return df
+
+
+def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> None:
+    """Update pmc_event table in the given rocpd database path"""
+    try:
+        with closing(sqlite3.connect(rocpd_db_path)) as conn:
+            # Get pmc_event table name
+            with closing(
+                conn.execute(
+                    TABLE_NAME_PREFIX_QUERY.format(
+                        table_name_prefix=ROCPD_PMC_EVENT_TABLE_NAME_PREFIX
+                    )
+                )
+            ) as cursor:
+                table_name = cursor.fetchone()
+            if table_name is None:
+                console_error("No pmc_event table found in the rocpd database")
+            table_name = table_name[0]
+
+            # get pmc_event table data
+            guid = table_name[len(ROCPD_PMC_EVENT_TABLE_NAME_PREFIX) :].replace(
+                "_", "-"
+            )
+            columns = ("guid", "event_id", "pmc_id", "value")
+            values = list(
+                zip(
+                    # guid
+                    [guid] * len(counter_info),
+                    # event_id
+                    counter_info["dispatch_id"],
+                    # pmc_id
+                    counter_info["counter_id"],
+                    # value
+                    counter_info["counter_value"],
+                )
+            )
+
+            # insert into pmc_event table
+            with conn:
+                placeholders = ", ".join(["?"] * len(columns))
+                conn.executemany(
+                    INSERT_QUERY.format(
+                        table_name=table_name,
+                        columns=", ".join(columns),
+                        placeholders=placeholders,
+                    ),
+                    values,
+                )
+    except OSError as e:
+        console_error(f"Database error while updating pmc_event table: {e}")
+    except Exception as e:
+        console_error(f"Unexpected error updating pmc_event table: {e}")

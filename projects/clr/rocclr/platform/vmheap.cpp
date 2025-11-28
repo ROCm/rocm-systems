@@ -51,7 +51,7 @@ bool VmHeap::ReleaseAddressRange(void* addr) {
 // ================================================================================================
 bool VmHeap::CommitMemory(void* addr, size_t size) {
   const auto& dev_info = device_->info();
-  size_t granularity = dev_info.virtualMemAllocGranularity_;
+  size_t granularity = dev_info.virtualMemAllocGranularityRecommended_;
   auto padded_size = alignUp(size, granularity);
 
   // Allocate physical memory
@@ -239,7 +239,10 @@ address VmHeap::Alloc(size_t size) {
   size_t offset = 0;
   auto hb = AllocBlock(size + block_alignment_);
   if (hb != nullptr) {
-    offset = ((hb->Offset() & ~kChunkSize) == 0) ? hb->Offset() + block_alignment_ : hb->Offset();
+    // Add 256-byte offset if virtual address matches chunk address to avoid map conflicts
+    offset = ((hb->Offset() & (kChunkSize - 1)) == 0)
+               ? hb->Offset() + block_alignment_
+               : hb->Offset();
     ptr = base_address_ + offset;
   } else {
     return nullptr;

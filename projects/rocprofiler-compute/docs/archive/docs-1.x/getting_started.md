@@ -25,7 +25,7 @@
 
     Some common filters include:
 
-    - `-k`/`--kernel` enables filtering kernels by name. `-d`/`--dispatch` enables filtering based on dispatch ID
+    - `-k`/`--kernel` enables filtering kernels by name. `-d`/`--dispatch` enables filtering based on dispatch iteration
     - `-b`/`--ipblocks` enables collects metrics for only the specified (one or more) IP Blocks.
 
     To view available metrics by IP Block you can use the `--list-metrics` argument to view a list of all available metrics organized by IP Block.

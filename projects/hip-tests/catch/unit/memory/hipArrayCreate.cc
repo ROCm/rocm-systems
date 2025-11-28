@@ -85,7 +85,7 @@ This testcase verifies the hipArrayCreate API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipArrayCreate API with small and big chunks data
 */
-TEST_CASE("Unit_hipArrayCreate_MultiThread") {
+TEST_CASE("Unit_hipArrayCreate_MultiThread", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;

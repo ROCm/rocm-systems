@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipSetDevice_BasicSetGet") {
+TEST_CASE("Unit_hipSetDevice_BasicSetGet", "[multigpu]") {
   int numDevices = 0;
   int device{};
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -73,7 +73,7 @@ TEST_CASE("Unit_hipSetDevice_BasicSetGet") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetSetDevice_MultiThreaded") {
+TEST_CASE("Unit_hipGetSetDevice_MultiThreaded", "[multigpu]") {
   auto maxThreads = std::thread::hardware_concurrency();
   auto deviceCount = HipTest::getDeviceCount();
 
@@ -126,7 +126,7 @@ TEST_CASE("Unit_hipGetSetDevice_MultiThreaded") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipSetGetDevice_Positive_Threaded_Basic") {
+TEST_CASE("Unit_hipSetGetDevice_Positive_Threaded_Basic", "[multigpu]") {
   class HipSetGetDeviceThreadedTest : public ThreadedZigZagTest<HipSetGetDeviceThreadedTest> {
    public:
     void TestPart1() { HIP_CHECK(hipSetDevice(0)); }

@@ -85,7 +85,7 @@ This testcase verifies the hipMallocMipmappedArray API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipMallocMipmappedArray API with small and big chunks data
 */
-TEST_CASE("Unit_hipMallocMipmappedArray_MultiThread") {
+TEST_CASE("Unit_hipMallocMipmappedArray_MultiThread", "[multigpu]") {
   std::vector<std::thread> threadlist;
   int devCnt = 0;
   devCnt = HipTest::getDeviceCount();

@@ -214,19 +214,18 @@ struct BarrierOperations
     {
         struct
         {
-            uint16 depthStencilExpand       : 1; ///< Decompression of depth/stencil image.
-            uint16 htileHiZRangeExpand      : 1; ///< Expansion of HTile's HiZ range.
-            uint16 depthStencilResummarize  : 1; ///< Resummarization of depth stencil.
-            uint16 dccDecompress            : 1; ///< DCC decompress BLT for color images.
-            uint16 fmaskDecompress          : 1; ///< Fmask decompression for shader readability.
-            uint16 fastClearEliminate       : 1; ///< Expand latest specified clear color into pixel data for the fast
-                                                 ///  cleared color/depth resource.
-            uint16 fmaskColorExpand         : 1; ///< Completely decompresses the specified color resource.
-            uint16 initMaskRam              : 1; ///< Memsets uninitialized memory to prepare it for use as
-                                                 ///  CMask/FMask/DCC/HTile.
-            uint16 updateDccStateMetadata   : 1; ///< DCC state metadata was updated.
-            uint16 retileGfxDccToDisplayDcc : 1; ///< Gfx dcc is retiled to display dcc.
-            uint16 reserved                 : 6; ///< Reserved for future use.
+            uint16 depthStencilExpand      : 1; ///< Decompression of depth/stencil image.
+            uint16 htileHiZRangeExpand     : 1; ///< Expansion of HTile's HiZ range.
+            uint16 depthStencilResummarize : 1; ///< Resummarization of depth stencil.
+            uint16 dccDecompress           : 1; ///< DCC decompress BLT for color images.
+            uint16 fmaskDecompress         : 1; ///< Fmask decompression for shader readability.
+            uint16 fastClearEliminate      : 1; ///< Expand latest specified clear color into pixel data for the fast
+                                                ///  cleared color/depth resource.
+            uint16 fmaskColorExpand        : 1; ///< Completely decompresses the specified color resource.
+            uint16 initMaskRam             : 1; ///< Memsets uninitialized memory to prepare it for use as
+                                                ///  CMask/FMask/DCC/HTile.
+            uint16 updateDccStateMetadata  : 1; ///< DCC state metadata was updated.
+            uint16 reserved                : 7; ///< Reserved for future use.
         };
 
         uint16 u16All; ///< Unsigned integer containing all the values.

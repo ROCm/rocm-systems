@@ -715,7 +715,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-Negative") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-D2D") {
+TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-D2D", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -747,7 +747,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-D2D") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-DiffStream") {
+TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-DiffStream", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

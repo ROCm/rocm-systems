@@ -30,7 +30,7 @@ endif()
 # Creating Custom object file
 add_custom_target(devprop_c_custom
     COMMAND ${HIP_PATH}/bin/hipcc
-            -c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
+            -c -Wno-deprecated-declarations ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
             -I${HIP_PATH}/include
             -D${PLATFORM_DEFINE}
             --hip-path=${HIP_PATH}

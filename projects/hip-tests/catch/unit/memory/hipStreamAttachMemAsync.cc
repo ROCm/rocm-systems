@@ -61,7 +61,7 @@ TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_Pageable") {
 // CUDA docs:
 // If the cudaMemAttachGlobal flag is specified, the memory can be accessed by any stream on any
 // device.
-TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_AttachGlobal") {
+TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_AttachGlobal", "[multigpu]") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory is not supported");
     return;

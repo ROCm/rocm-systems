@@ -931,7 +931,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_EndingCapturewhenCaptureInProgress") {
 
 /* Test scenario 15
  */
-TEST_CASE("Unit_hipStreamBeginCapture_MultiGPU") {
+TEST_CASE("Unit_hipStreamBeginCapture_MultiGPU", "[multigpu]") {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return

@@ -151,6 +151,22 @@ class RocProfCompute:
         ) and block:
             console_error("Cannot use --list-available-metrics with --blocks")
 
+        # fallback to csv output format, if rocpd public api not available
+        if (
+            self.__mode == "profile"
+            and self.__args.format_rocprof_output == "rocpd"
+            and not (
+                Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
+                / "librocprofiler-sdk-rocpd.so"
+            ).exists()
+        ):
+            console_warning(
+                "rocpd output format is not supported with the "
+                "current rocprofiler-sdk version. "
+                "Falling back to csv output format."
+            )
+            self.__args.format_rocprof_output = "csv"
+
     @demarcate
     def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
         """Load OmniSoC instance for RocProfCompute run"""
@@ -179,16 +195,6 @@ class RocProfCompute:
             parser, config.rocprof_compute_home, self.__supported_archs, self.__version
         )
         self.__args = parser.parse_args()
-
-        if (
-            hasattr(self.__args, "format_rocprof_output")
-            and self.__args.format_rocprof_output != "rocpd"
-        ):
-            console_warning(
-                f"The option --format-rocprof-output currently set to "
-                f"{self.__args.format_rocprof_output} will default to rocpd "
-                "in a future release."
-            )
 
         if self.__args.mode is None:
             if self.__args.specs:

@@ -23,13 +23,10 @@
 #include "rocprof-sys-run.hpp"
 
 #include "common/defines.h"
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
-#include "common/setup.hpp"
+#include "common/path.hpp"
 #include "core/argparse.hpp"
-#include "core/config.hpp"
-#include "core/state.hpp"
 #include "core/timemory.hpp"
 
 #include <timemory/environment.hpp>
@@ -43,11 +40,8 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <array>
 #include <cctype>
-#include <chrono>
 #include <cmath>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -57,7 +51,6 @@
 #include <string>
 #include <string_view>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -66,6 +59,7 @@ namespace filepath = ::tim::filepath;  // NOLINT
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace signals  = ::tim::signals;
+namespace path     = rocprofsys::common::path;
 using settings     = ::rocprofsys::settings;
 using namespace ::timemory::join;
 using ::tim::get_env;
@@ -82,7 +76,7 @@ to_string(bool _v)
 
 namespace
 {
-auto original_envs = std::set<std::string>{};
+auto original_envs = std::unordered_set<std::string>{};
 enum update_mode : int
 {
     UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
@@ -90,48 +84,6 @@ enum update_mode : int
     UPD_APPEND  = 1 << 1,  // 0x02
     UPD_WEAK    = 1 << 2,  // 0x04
 };
-
-std::string
-get_rocprofsys_root(void)
-{
-    char*       _tmp = realpath("/proc/self/exe", nullptr);
-    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
-
-    if(_tmp) free(_tmp);
-
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-
-    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
-
-    return rocprofsys::common::join("/", _dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
-}
-
-std::string
-get_realpath(const std::string& _v)
-{
-    if(auto* _tmp = realpath(_v.c_str(), nullptr))
-    {
-        std::string _ret{ _tmp };
-        free(_tmp);
-        return _ret;
-    }
-    return {};
-}
 
 template <typename Tp>
 void
@@ -217,7 +169,7 @@ get_initial_environment(parser_data_t& _data)
         }
     }
 
-    auto _libexecpath = get_realpath(get_internal_script_path());
+    auto _libexecpath = path::realpath(path::get_internal_script_path());
     if(!_libexecpath.empty())
     {
         update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
@@ -362,7 +314,7 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
     using parser_err_t = typename parser_t::result_type;
 
     auto help_check = [](parser_t& p, int _argc, char** _argv) {
-        std::set<std::string> help_args = { "-h", "--help", "-?" };
+        std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
         return (p.exists("help") || _argc == 1 ||
                 (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
     };

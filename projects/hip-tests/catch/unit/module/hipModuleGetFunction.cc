@@ -71,7 +71,7 @@ TEST_CASE("Unit_hipModuleGetFunction_Negative_Parameters") {
 
 // Test description: Loading kernel function from different device than the one on which the module
 // is loaded
-TEST_CASE("Unit_hipModuleGetFunction_DiffDevice") {
+TEST_CASE("Unit_hipModuleGetFunction_DiffDevice", "[multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {

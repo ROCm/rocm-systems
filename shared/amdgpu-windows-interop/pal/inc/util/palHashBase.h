@@ -53,11 +53,11 @@ template<typename Key,
          typename AllocFunc,
          size_t   GroupSize> class HashBase;
 
-/// Pointer hash functor.
+/// Default hash functor.
 ///
 /// Just directly returns bits 31-6 of the key's first dword.  This is a decent hash if the key is a pointer.
 template<typename Key>
-struct PointerHashFunc
+struct DefaultHashFunc
 {
     /// Shifts the key to the right and use the resulting bits as a uint hash.
     ///
@@ -74,7 +74,7 @@ struct PointerHashFunc
     void Init(uint32 minNumBits) const
     {
         PAL_ASSERT((Min(sizeof(Key), sizeof(uint32)) * 8) >= (minNumBits + ShiftNum));
-        static_assert(std::is_pointer_v<Key>, "Usage of PointerHashFunc for non-pointer types!");
+        PAL_ALERT_MSG(sizeof(Key) > sizeof(void*), "Usage of DefaultHashFunc for non-pointer types!");
     }
 };
 
@@ -146,9 +146,6 @@ struct StringEqualFunc
     /// Returns true if the strings in key1 and key2 are equal.
     bool operator()(const Key& key1, const Key& key2) const;
 };
-
-template<typename Key>
-using DefaultHashFunc = std::conditional_t<std::is_pointer_v<Key>, PointerHashFunc<Key>, JenkinsHashFunc<Key>>;
 
 /**
  ***********************************************************************************************************************
@@ -372,20 +369,6 @@ public:
     /// Empty the hash container.
     void Reset();
 
-    /// Removes an entry that matches the specified key.
-    ///
-    /// @param [in] key Key of the entry to erase.
-    ///
-    /// @returns True if the erase completed successfully, false if an entry for this key did not exist.
-    bool Erase(const Key& key);
-
-    /// Returns true if the specified key exists in the set.
-    ///
-    /// @param [in] key Key to search for.
-    ///
-    /// @returns True if the specified key exists in the set.
-    bool Contains(const Key& key) const;
-
 protected:
     /// @internal Constructor
     ///
@@ -393,7 +376,7 @@ protected:
     ///                        take (buckets * GroupSize) bytes.
     /// @param [in] pAllocator The allocator that will allocate memory if required.
     explicit HashBase(uint32 numBuckets, Allocator*const pAllocator);
-    ~HashBase() { PAL_SAFE_FREE(m_pMemory, &m_allocator); }
+    virtual ~HashBase() { PAL_SAFE_FREE(m_pMemory, &m_allocator); }
 
     /// @internal Ensures that the hash table has been allocated, then finds the bucket that matches
     /// the specified key
@@ -411,24 +394,6 @@ protected:
     ///
     /// @returns Pointer to the bucket corresponding to the specified key.
     Entry* FindBucket(const Key& key) const;
-
-    /// @internal Finds a given entry.
-    ///
-    /// @param [in] key Key to find matching bucket for.
-    ///
-    /// @returns Pointer to the entry corresponding to the specified key or nullptr.
-    Entry* FindEntry(const Key& key) const;
-
-    /// @internal Finds a given entry; if no entry was found, allocate it.
-    ///
-    /// @param [in]  key      Key to search for.
-    /// @param [out] pExisted True if an entry for the specified key existed before this call was made.  False indicates
-    ///                       that a new entry was allocated as a result of this call.
-    /// @param [out] ppValue  Readable/writeable value in the hash map corresponding to the specified key.
-    ///
-    /// @returns @ref Success if the operation completed successfully, or @ref ErrorOutOfMemory if the operation failed
-    ///          because an internal memory allocation failed.
-    Result FindAllocateEntry(const Key& key, bool* pExisted, Entry** ppValue);
 
     /// @internal Returns pointer to the next group of the specified group.
     ///
