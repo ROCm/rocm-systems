@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
@@ -29,6 +30,8 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
+
+#include <mutex>
 
 namespace rocprofiler
 {
@@ -132,6 +135,9 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
                                       rocprofiler_dispatch_counting_record_cb_t  record_callback,
                                       void* record_callback_args)
 {
+    // ensure we attempt to lock all devices only once
+    static std::once_flag flag{};
+
     auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
@@ -145,6 +151,27 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
 
     if(!ctx.counter_collection)
     {
+        std::call_once(flag, []() {
+            if(counters::counter_collection_has_device_lock())
+            {
+                /**
+                 * Note: This should retrun if the lock fails to aquire in the future. However, this
+                 * is a change in the required permissions for rocprofiler and needs to be
+                 * communicated with partners before strict enforcement. If the required permissions
+                 * are not obtained, those profilers will function as they currently do (without any
+                 * of the benefits of the IOCTL).
+                 */
+                for(const auto& agent : agent::get_agents())
+                {
+                    if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                    {
+                        counters::counter_collection_device_lock(
+                            rocprofiler::agent::get_agent(agent->id), false);
+                    }
+                }
+            }
+        });
+
         ctx.counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
     }
