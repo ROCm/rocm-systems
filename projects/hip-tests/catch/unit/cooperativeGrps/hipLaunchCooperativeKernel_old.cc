@@ -119,7 +119,8 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Basic") {
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  REQUIRE((*C_d) == (((unsigned long)(kBufferLen) * (kBufferLen - 1)) / 2));
+  REQUIRE(((unsigned long long)*C_d) ==
+          (((unsigned long long)(kBufferLen) * (kBufferLen - 1)) / 2));
 
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipHostFree(C_d));
