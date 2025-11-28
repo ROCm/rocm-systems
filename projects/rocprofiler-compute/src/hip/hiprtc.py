@@ -25,13 +25,13 @@
 
 import ctypes
 from ctypes import (
-    c_int,
-    c_char,
-    c_size_t,
-    c_char_p,
-    c_void_p,
     POINTER,
     byref,
+    c_char,
+    c_char_p,
+    c_int,
+    c_size_t,
+    c_void_p,
 )
 
 _lib = ctypes.CDLL("libhiprtc.so")
@@ -94,24 +94,24 @@ _lib.hiprtcGetLoweredName.argtypes = [c_void_p, c_char_p, POINTER(c_char_p)]
 
 
 class HIPRTCError(Exception):
-    def __init__(self, code: int):
+    def __init__(self, code: int) -> None:
         self.code = code
         self.message = f"HIP Error {self.code}"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.message
 
 
 class HIPRTCProgram:
-    def __init__(self, handle):
+    def __init__(self, handle: POINTER) -> None:
         self.handle = handle
 
-    def __del__(self):
+    def __del__(self) -> None:
         _lib.hiprtcDestroyProgram(self.handle)
 
 
 # TODO: Handle headers
-def hiprtcCreateProgram(src: str, name: str):
+def hiprtcCreateProgram(src: str, name: str) -> HIPRTCProgram:
 
     src_bytes = src.encode("utf-8")
     name_bytes = name.encode("utf-8")
@@ -127,7 +127,7 @@ def hiprtcCreateProgram(src: str, name: str):
 
 
 # TODO: Handle compile options
-def hiprtcCompileProgram(prog):
+def hiprtcCompileProgram(prog: HIPRTCProgram) -> None:
 
     res = _lib.hiprtcCompileProgram(prog.handle, 0, None)
 
@@ -135,7 +135,7 @@ def hiprtcCompileProgram(prog):
         raise HIPRTCError(res)
 
 
-def hiprtcGetProgramLogSize(prog):
+def hiprtcGetProgramLogSize(prog: HIPRTCProgram) -> int:
 
     size = c_size_t(0)
 
@@ -147,7 +147,7 @@ def hiprtcGetProgramLogSize(prog):
     return size.value
 
 
-def hiprtcGetProgramLog(prog):
+def hiprtcGetProgramLog(prog: HIPRTCProgram) -> str:
 
     size = hiprtcGetProgramLogSize(prog)
     buf = (ctypes.c_char * size)()
@@ -160,7 +160,7 @@ def hiprtcGetProgramLog(prog):
     return ctypes.string_at(buf, size).decode("utf-8", errors="ignore")
 
 
-def hiprtcGetCodeSize(prog):
+def hiprtcGetCodeSize(prog: HIPRTCProgram) -> int:
     size = c_size_t(0)
     res = _lib.hiprtcGetCodeSize(prog.handle, byref(size))
 
@@ -170,7 +170,7 @@ def hiprtcGetCodeSize(prog):
     return size.value
 
 
-def hiprtcGetCode(prog):
+def hiprtcGetCode(prog: HIPRTCProgram) -> POINTER:
 
     size = hiprtcGetCodeSize(prog)
     buf = (c_char * size)()
@@ -182,7 +182,7 @@ def hiprtcGetCode(prog):
     return buf
 
 
-def hiprtcGetLoweredName(prog, name_expression):
+def hiprtcGetLoweredName(prog: HIPRTCProgram, name_expression: str) -> str:
 
     expr_bytes = name_expression.encode("utf-8")
     name_bytes = c_char_p()
@@ -195,7 +195,7 @@ def hiprtcGetLoweredName(prog, name_expression):
     return name_bytes.value.decode("utf-8")
 
 
-def hiprtcAddNameExpression(prog, name_expression):
+def hiprtcAddNameExpression(prog: HIPRTCProgram, name_expression: str) -> None:
 
     expr_bytes = name_expression.encode("utf-8")
 

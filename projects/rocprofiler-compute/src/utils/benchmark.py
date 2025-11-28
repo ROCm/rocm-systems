@@ -23,27 +23,27 @@
 
 ##############################################################################
 
-import hip.hip as hip
-import hip.hiprtc as hiprtc
-import math
 import csv
+import math
 from collections import namedtuple
-
-
 from ctypes import (
+    POINTER,
     byref,
-    sizeof,
-    cast,
     c_double,
-    c_void_p,
-    c_short,
     c_float,
     c_int,
     c_int8,
     c_int32,
     c_int64,
+    c_short,
+    c_void_p,
+    cast,
+    sizeof,
 )
+from typing import Any
 
+import hip.hip as hip
+import hip.hiprtc as hiprtc
 
 lds_sizes = {
     "gfx908": 64 * 1024,
@@ -169,7 +169,7 @@ DEFAULT_NUM_ITERS = 10
 DEFAULT_DATASET_SIZE = 512 * 1024 * 1024
 
 
-def show_progress(pct):
+def show_progress(pct: float) -> None:
 
     bar_char = "|"
     bar_size = 60
@@ -181,7 +181,7 @@ def show_progress(pct):
 
 
 # Returns a named tuple with the mean, std deviation and confidence
-def calc_stats(samples):
+def calc_stats(samples: list) -> Stats:
 
     mean = sum(samples) / len(samples)
 
@@ -197,8 +197,7 @@ def calc_stats(samples):
 
 # Helper class for loading and compiling kerels
 class Program:
-
-    def __init__(self, src, templates=[]):
+    def __init__(self, src: str, templates: list[str] = []) -> None:
         self.prog = hiprtc.hiprtcCreateProgram(src, "prog")
 
         for t in templates:
@@ -213,7 +212,7 @@ class Program:
         self.code = hiprtc.hiprtcGetCode(self.prog)
         self.module = hip.hipModuleLoadData(self.code)
 
-    def get_kernel(self, kernel_name):
+    def get_kernel(self, kernel_name: str) -> POINTER:
 
         # TODO: Why doesn't hiprtcGetLoweredName work with non-template functions?
         if "<" in kernel_name:
@@ -223,7 +222,14 @@ class Program:
 
 
 # Helper method for launching kernel
-def launch_kernel(func, grid_size, block_size, shared_mem_size, stream, args=[]):
+def launch_kernel(
+    func: POINTER,
+    grid_size: list[int],
+    block_size: list[int],
+    shared_mem_size: int,
+    stream: POINTER,
+    args: list[Any] = [],
+) -> None:
 
     # Convert to native types
     args_converted = []
@@ -255,7 +261,7 @@ def launch_kernel(func, grid_size, block_size, shared_mem_size, stream, args=[])
 
 
 # Retrieve the gfx architecture
-def get_gfx_arch(device):
+def get_gfx_arch(device: int) -> str:
 
     arch_str = hip.hipGetDeviceProperties(device).gcnArchName
 
@@ -265,15 +271,15 @@ def get_gfx_arch(device):
 
 # Helper method to run a kernel and collect samples
 def run_get_samples(
-    count,
-    work_per_kernel,
-    func,
-    grid_size,
-    block_size,
-    shared_mem_size,
-    stream,
-    args=[],
-):
+    count: int,
+    work_per_kernel: int,
+    func: POINTER,
+    grid_size: list[int],
+    block_size: list[int],
+    shared_mem_size: int,
+    stream: POINTER,
+    args: list[Any] = [],
+) -> list[float]:
 
     event_start = hip.hipEventCreate()
     event_stop = hip.hipEventCreate()
@@ -294,7 +300,7 @@ def run_get_samples(
         show_progress(float(i + 1) / count)
         event_ms = hip.hipEventElapsedTime(event_start, event_stop)
 
-        samples.append(work_per_kernel / event_ms / 1e6)
+        samples.append(float(work_per_kernel) / event_ms / 1e6)
 
     print()
 
@@ -356,7 +362,7 @@ __global__ void HBM_bw(T *dst, const T *src)
 """
 
 
-def hbm_bw_benchmark(device):
+def hbm_bw_benchmark(device: int) -> PerfMetrics:
     num_experiments = DEFAULT_NUM_EXPERIMENTS
     hip.hipSetDevice(device)
 
@@ -406,7 +412,7 @@ def hbm_bw_benchmark(device):
     return perf_metrics
 
 
-def cache_bw_bench(device, type, iters):
+def cache_bw_bench(device: int, type: str, iters: int) -> PerfMetrics:
     hip.hipSetDevice(device)
 
     num_experiments = DEFAULT_NUM_EXPERIMENTS
@@ -463,15 +469,15 @@ def cache_bw_bench(device, type, iters):
     return perf_metrics
 
 
-def mall_bw_bench(device):
+def mall_bw_bench(device: int) -> PerfMetrics:
     return cache_bw_bench(device, "MALL", 1)
 
 
-def l1_bw_bench(device):
+def l1_bw_bench(device: int) -> PerfMetrics:
     return cache_bw_bench(device, "L1", 100)
 
 
-def l2_bw_bench(device):
+def l2_bw_bench(device: int) -> PerfMetrics:
     return cache_bw_bench(device, "L2", 10)
 
 
@@ -504,7 +510,7 @@ extern "C" __global__ void LDS_bw(int numIter, float *dummy)
 """
 
 
-def lds_bw_benchmark(device):
+def lds_bw_benchmark(device: int) -> PerfMetrics:
 
     num_experiments = DEFAULT_NUM_EXPERIMENTS
     workgroup_size = DEFAULT_WORKGROUP_SIZE
@@ -582,7 +588,7 @@ __global__ void flops_benchmark(T *buf, int nSize)
 """
 
 
-def flops_bench(device, type, unit, rate):
+def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     num_experiments = DEFAULT_NUM_EXPERIMENTS
     workgroup_size = DEFAULT_WORKGROUP_SIZE
     dataset_size = DEFAULT_DATASET_SIZE
@@ -889,7 +895,7 @@ extern "C" __global__ void mfma_f8(int iter, float *dummy)
 """
 
 
-def mfma_bench(device, type, unit, rate):
+def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     SIMDS_PER_CU = 4
     experiments = DEFAULT_NUM_EXPERIMENTS
     iters = 2000
@@ -948,72 +954,72 @@ def mfma_bench(device, type, unit, rate):
     return perf_metrics
 
 
-def mfma_f32_bench(device):
+def mfma_f32_bench(device: int) -> PerfMetrics:
 
     return mfma_bench(device, "F32", "FLOP", "GFLOPS")
 
 
-def mfma_f16_bench(device):
+def mfma_f16_bench(device: int) -> PerfMetrics:
 
     return mfma_bench(device, "F16", "FLOP", "GFLOPS")
 
 
-def mfma_bf16_bench(device):
+def mfma_bf16_bench(device: int) -> PerfMetrics:
 
     return mfma_bench(device, "BF16", "FLOP", "GFLOPS")
 
 
-def mfma_f64_bench(device):
+def mfma_f64_bench(device: int) -> PerfMetrics:
 
     return mfma_bench(device, "F64", "FLOP", "GFLOPS")
 
 
-def mfma_f8_bench(device):
+def mfma_f8_bench(device: int) -> PerfMetrics:
 
     return mfma_bench(device, "F8", "FLOP", "GFLOPS")
 
 
-def mfma_i8_bench(device):
+def mfma_i8_bench(device: int) -> PerfMetrics:
 
     return mfma_bench(device, "I8", "IOP", "GOPS")
 
 
-def mfma_f4_bench(device):
+def mfma_f4_bench(device: int) -> PerfMetrics:
 
     return mfma_bench(device, "F4", "FLOP", "GFLOPS")
 
 
-def mfma_f6_bench(device):
+def mfma_f6_bench(device: int) -> PerfMetrics:
 
     return mfma_bench(device, "F6", "FLOP", "GFLOPS")
 
 
-def fp16_benchmark(device):
+def fp16_benchmark(device: int) -> PerfMetrics:
 
     return flops_bench(device, "FP16", "FLOP", "GFLOPS")
 
 
-def fp32_benchmark(device):
+def fp32_benchmark(device: int) -> PerfMetrics:
 
     return flops_bench(device, "FP32", "FLOP", "GFLOPS")
 
 
-def fp64_benchmark(device):
+def fp64_benchmark(device: int) -> PerfMetrics:
 
     return flops_bench(device, "FP64", "FLOP", "GFLOPS")
 
 
-def int8_benchmark(device):
+def int8_benchmark(device: int) -> PerfMetrics:
 
     return flops_bench(device, "INT8", "IOP", "GOPS")
 
 
-def int32_benchmark(device):
+def int32_benchmark(device: int) -> PerfMetrics:
 
     return flops_bench(device, "INT32", "IOP", "GOPS")
 
 
-def int64_benchmark(device):
+def int64_benchmark(device: int) -> PerfMetrics:
 
     return flops_bench(device, "INT64", "IOP", "GOPS")
 
@@ -1042,7 +1048,7 @@ tests = {
 
 
 # Run the roofine tests on the specified device
-def run_benchmark(device):
+def run_benchmark(device: int) -> dict[PerfMetrics]:
 
     metrics_dict = {}
 
@@ -1066,7 +1072,7 @@ def run_benchmark(device):
 # Run the benchmark test on the specified devices
 # Returns a dictionary mapping device ID to dictionary of
 # metrics
-def run_on_devices(devices):
+def run_on_devices(devices: list[int]) -> dict[dict[PerfMetrics]]:
 
     metrics = {}
     for d in devices:
@@ -1075,7 +1081,7 @@ def run_on_devices(devices):
     return metrics
 
 
-def dump_csv(metrics, file_path):
+def dump_csv(metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
     # TODO: Better way to map CSV column names?
     csv_cols_map = {
         "HBM": "HBMBw",
@@ -1099,7 +1105,7 @@ def dump_csv(metrics, file_path):
         "MFMA-I8": "MFMAI8Ops",
     }
 
-    with open(file_path, "wt") as f:
+    with open(file_path, "w") as f:
         writer = csv.writer(f)
 
         types = csv_cols_map.keys()

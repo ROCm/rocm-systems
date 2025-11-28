@@ -25,17 +25,17 @@
 
 import ctypes
 from ctypes import (
-    c_int,
-    c_char,
-    c_uint8,
-    c_size_t,
-    c_void_p,
-    c_char_p,
-    c_uint,
-    c_float,
     POINTER,
-    byref,
     Structure,
+    byref,
+    c_char,
+    c_char_p,
+    c_float,
+    c_int,
+    c_size_t,
+    c_uint,
+    c_uint8,
+    c_void_p,
 )
 
 _lib = ctypes.CDLL("libamdhip64.so")
@@ -192,11 +192,11 @@ class HIPDeviceProperties(Structure):
 
     # Add properties as needed
     @property
-    def name(self):
+    def name(self) -> str:
         return self.name_str.decode("utf-8")
 
     @property
-    def gcnArchName(self):
+    def gcnArchName(self) -> str:
         return self.gcnArchName_str.decode("utf-8")
 
 
@@ -263,45 +263,42 @@ _lib.hipEventElapsedTime.argtypes = [POINTER(c_float), c_void_p, c_void_p]
 
 
 class HIPError(Exception):
-    def __init__(self, code: int):
+    def __init__(self, code: int) -> None:
         self.code = code
         self.message = f"HIP Error {self.code}"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.message
 
 
 class HIPDeviceMemory:
-
-    def __init__(self, ptr):
+    def __init__(self, ptr: POINTER) -> None:
         self.ptr = ptr
 
-    def __del__(self):
+    def __del__(self) -> None:
         _lib.hipFree(self.ptr)
 
 
 class HIPEvent:
-
-    def __init__(self, handle):
+    def __init__(self, handle: POINTER) -> None:
         self.handle = handle
 
-    def __del__(self):
+    def __del__(self) -> None:
         _lib.hipEventDestroy(self.handle)
 
 
 class HIPModule:
-
-    def __init__(self, handle):
+    def __init__(self, handle: POINTER) -> None:
         self.handle = handle
 
-    def __del__(self):
+    def __del__(self) -> None:
         _lib.hipModuleUnload(self.handle)
 
 
 # Implement HIP functions here
 
 
-def hipGetDeviceCount():
+def hipGetDeviceCount() -> int:
 
     device_count = c_int()
     status = _lib.hipGetDeviceCount(byref(device_count))
@@ -312,7 +309,7 @@ def hipGetDeviceCount():
     return device_count.value
 
 
-def hipGetDeviceProperties(device_id):
+def hipGetDeviceProperties(device_id: int) -> HIPDeviceProperties:
 
     props = HIPDeviceProperties()
     res = _lib.hipGetDevicePropertiesR0600(byref(props), device_id)
@@ -323,7 +320,7 @@ def hipGetDeviceProperties(device_id):
     return props
 
 
-def hipMalloc(size):
+def hipMalloc(size: int) -> HIPDeviceMemory:
 
     buf_size = c_size_t(size)
     ptr = c_void_p()
@@ -336,7 +333,7 @@ def hipMalloc(size):
     return HIPDeviceMemory(ptr)
 
 
-def hipMemcpyHtoD(dst, src, size):
+def hipMemcpyHtoD(dst: HIPDeviceMemory, src: POINTER, size: int) -> None:
 
     res = _lib.hipMemcpyHtoD(dst.ptr, src, size)
 
@@ -344,7 +341,7 @@ def hipMemcpyHtoD(dst, src, size):
         raise HIPError(res)
 
 
-def hipMemcpyDtoH(dst, src, size):
+def hipMemcpyDtoH(dst: POINTER, src: HIPDeviceMemory, size: int) -> None:
 
     res = _lib.hipMemcpyDtoH(dst, src.ptr, size)
 
@@ -352,7 +349,7 @@ def hipMemcpyDtoH(dst, src, size):
         raise HIPError(res)
 
 
-def hipSetDevice(id):
+def hipSetDevice(id: int) -> None:
 
     status = _lib.hipSetDevice(id)
 
@@ -360,7 +357,7 @@ def hipSetDevice(id):
         raise HIPError(status)
 
 
-def hipDeviceSynchronize():
+def hipDeviceSynchronize() -> None:
 
     res = _lib.hipDeviceSynchronize()
 
@@ -368,7 +365,7 @@ def hipDeviceSynchronize():
         raise HIPError(res)
 
 
-def hipModuleLoadData(code):
+def hipModuleLoadData(code: POINTER) -> HIPModule:
 
     module = c_void_p()
     res = _lib.hipModuleLoadData(byref(module), code)
@@ -379,7 +376,7 @@ def hipModuleLoadData(code):
     return HIPModule(module)
 
 
-def hipModuleGetFunction(module, name):
+def hipModuleGetFunction(module: POINTER, name: str) -> POINTER:
 
     name_bytes = name.encode("utf-8")
     func = c_void_p()
@@ -393,18 +390,18 @@ def hipModuleGetFunction(module, name):
 
 
 def hipModuleLaunchKernel(
-    func,
-    grid_dim_x,
-    grid_dim_y,
-    grid_dim_z,
-    block_dim_x,
-    block_dim_y,
-    block_dim_z,
-    shared_mem_size,
-    stream,
-    kernel_params,
-    extra=None,
-):
+    func: POINTER,
+    grid_dim_x: int,
+    grid_dim_y: int,
+    grid_dim_z: int,
+    block_dim_x: int,
+    block_dim_y: int,
+    block_dim_z: int,
+    shared_mem_size: int,
+    stream: POINTER,
+    kernel_params: POINTER,
+    extra: POINTER = None,
+) -> None:
 
     res = _lib.hipModuleLaunchKernel(
         func,
@@ -424,7 +421,7 @@ def hipModuleLaunchKernel(
         raise HIPError(res)
 
 
-def hipEventCreate():
+def hipEventCreate() -> HIPEvent:
 
     handle = c_void_p()
 
@@ -436,7 +433,7 @@ def hipEventCreate():
     return HIPEvent(handle)
 
 
-def hipEventRecord(event, stream=None):
+def hipEventRecord(event: HIPEvent, stream: POINTER = None) -> None:
 
     res = _lib.hipEventRecord(event.handle, stream)
 
@@ -444,7 +441,7 @@ def hipEventRecord(event, stream=None):
         raise HIPError(res)
 
 
-def hipEventElapsedTime(start, stop):
+def hipEventElapsedTime(start: HIPEvent, stop: HIPEvent) -> float:
 
     ms = c_float()
 
