@@ -88,15 +88,8 @@ jobs:
         timeout-minutes: 30
         run: |
           git config --global core.longpaths true
-          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
+          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
           dvc pull
-
-      - name: Patch rocm-systems manually
-        run: |
-          echo "Applying rocm-systems patches manually..."
-          git -c user.name="therockbot" \
-              -c user.email="therockbot@amd.com" \
-              am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Install external python deps
         run: |
