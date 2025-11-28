@@ -2837,7 +2837,7 @@ void Runtime::AsyncEventsControl::Shutdown() {
     os::WaitForThread(async_events_thread_);
     os::CloseThread(async_events_thread_);
     async_events_thread_ = NULL;
-    HSA::hsa_signal_destroy(wake);
+    core::Signal::Convert(wake)->DestroySignal();
   }
 }
 
